@@ -33,8 +33,12 @@ if (error) {
 }
 
 if (!result.allowed) {
+  // Denied in the request path — no cost was ever created.
   throw new Error("Denied before paid usage ran")
 }
+
+// Allowed: run the paid action. The same decision
+// explains the invoice line later.
 `,
     recordUsage: `import { Unprice } from "@unprice/api"
 
@@ -43,7 +47,8 @@ const unprice = new Unprice({
   baseUrl: "${API_BASE_URL}",
 })
 
-// Record usage for asynchronous ingestion.
+// Report evidence without blocking the request —
+// nothing is denied, everything is attributable.
 const { result, error } = await unprice.usage.record({
   idempotencyKey: crypto.randomUUID(),
   eventSlug: "tokens_used",
@@ -65,7 +70,8 @@ const unprice = new Unprice({
   baseUrl: "${API_BASE_URL}",
 })
 
-// Consume usage when the request path needs a decision.
+// Enforce in the request path: meter the usage AND
+// decide whether the paid action is allowed, in one call.
 const { result, error } = await unprice.usage.consume({
   idempotencyKey: crypto.randomUUID(),
   eventSlug: "tokens_used",
@@ -92,7 +98,9 @@ const unprice = new Unprice({
   baseUrl: "${API_BASE_URL}",
 })
 
-// Omitting planVersionId uses the latest published version of the default plan.
+// One call provisions the customer, subscription,
+// entitlements, wallet, and billing period.
+// Omitting planVersionId uses the latest published version.
 const { result, error } = await unprice.customers.signUp({
   name: "Acme Inc.",
   email: "billing@acme.test",
@@ -1270,6 +1278,7 @@ function getCodeExample(framework: Framework, currentMethod: method, params?: SD
 export function SDKDemo({
   className,
   defaultMethod,
+  methods: methodsProp,
   exampleParams,
   frameworks = DEFAULT_FRAMEWORKS,
   showBorderBeam = true,
@@ -1277,16 +1286,19 @@ export function SDKDemo({
 }: {
   className?: string
   defaultMethod?: method
+  methods?: method[]
   exampleParams?: SDKExampleParams
   frameworks?: Framework[]
   showBorderBeam?: boolean
   presentation?: "marketing" | "panel"
 }) {
   const [activeFramework, setActiveFramework] = useState<Framework>(frameworks[0] ?? "sdk")
-  const [activeMethod, setActiveMethod] = useState<method>(defaultMethod ?? "checkAccess")
+  const [activeMethod, setActiveMethod] = useState<method>(
+    defaultMethod ?? methodsProp?.[0] ?? "checkAccess"
+  )
   const isPanel = presentation === "panel"
 
-  let methods = Object.keys(codeExamples.sdk) as method[]
+  let methods = methodsProp ?? (Object.keys(codeExamples.sdk) as method[])
 
   if (defaultMethod) {
     methods = [defaultMethod]
@@ -1398,7 +1410,7 @@ export function SDKDemo({
                 className={cn(
                   "hide-scrollbar w-full",
                   isPanel
-                    ? "[&>[data-radix-scroll-area-viewport]]:h-[calc(100vh-18rem)] [&>[data-radix-scroll-area-viewport]]:max-h-[30rem] [&>[data-radix-scroll-area-viewport]]:min-h-[24rem] sm:[&>[data-radix-scroll-area-viewport]]:h-[calc(100vh-16rem)]"
+                    ? "[&>[data-radix-scroll-area-viewport]]:h-[calc(100vh-18rem)] [&>[data-radix-scroll-area-viewport]]:max-h-[37rem] [&>[data-radix-scroll-area-viewport]]:min-h-[24rem] sm:[&>[data-radix-scroll-area-viewport]]:h-[calc(100vh-16rem)]"
                     : "[&>[data-radix-scroll-area-viewport]]:h-full md:[&>[data-radix-scroll-area-viewport]]:h-[35rem]",
                   "[&>[data-radix-scroll-area-viewport]]:w-full"
                 )}

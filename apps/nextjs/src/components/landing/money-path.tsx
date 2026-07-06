@@ -48,7 +48,7 @@ const ghostStations: Station[] = [
 // same clock so titles light exactly when the dot reaches their station.
 // ---------------------------------------------------------------------------
 
-const DOT_SIZE = 7
+const DOT_SIZE = 9
 const TRAVEL_SPEED = 0.5 // px per ms along the rail
 const FADE_MS = 140
 const STATION_DWELL = 140 // pause on each station ring
@@ -56,6 +56,8 @@ const DECISION_DWELL = 260
 const HIT_LINGER = 380 // how long a title stays lit after the dot arrives
 const OUTCOME_LINGER = 1100
 const PASS_GAP = 600
+const RAIL_OFFSET_X = 8
+const CHIP_CLEARANCE_Y = 6
 
 type PassKind = "deny" | "allow"
 
@@ -75,53 +77,78 @@ function buildPass(root: HTMLElement, kind: PassKind): BuiltPass | null {
   const decision = node("decision")
   if (!trace || !request || !decision) return null
 
-  // Every station dot sits 8px inside its column (the `left-2` rail).
-  const railXOf = (el: HTMLElement) => el.getBoundingClientRect().left - rootBox.left + 8
-  const centerY = (el: HTMLElement) => {
-    const b = el.getBoundingClientRect()
-    return b.top - rootBox.top + b.height / 2
+  // Measure the rendered rail dots themselves so the moving request stays
+  // centered even when marker sizes differ between stations.
+  const railDotCenter = (el: HTMLElement) => {
+    const dot = el.querySelector<HTMLElement>("[data-mp-rail-dot]")
+    if (!dot) return null
+    const b = dot.getBoundingClientRect()
+    return {
+      x: b.left - rootBox.left + b.width / 2,
+      y: b.top - rootBox.top + b.height / 2,
+      size: b.width,
+    }
   }
+  const railPointOf = (el: HTMLElement) => {
+    const dot = railDotCenter(el)
+    if (dot) return dot
+    const b = el.getBoundingClientRect()
+    return {
+      x: b.left - rootBox.left + RAIL_OFFSET_X,
+      y: b.top - rootBox.top + b.height / 2,
+      size: DOT_SIZE,
+    }
+  }
+  const railXOf = (el: HTMLElement) =>
+    railDotCenter(el)?.x ?? el.getBoundingClientRect().left - rootBox.left + RAIL_OFFSET_X
 
-  const railX = railXOf(trace)
-  const pts: { x: number; y: number; o: number; t: number }[] = []
+  const requestPoint = railPointOf(request)
+  const railX = requestPoint.x
+  const pts: { x: number; y: number; o: number; t: number; s: number }[] = []
   const hits: BuiltPass["hits"] = []
   let t = 0
 
-  const jump = (x: number, y: number, o: number, ms: number) => {
+  const currentSize = () => pts[pts.length - 1]?.s ?? DOT_SIZE
+  const jump = (x: number, y: number, o: number, ms: number, size = currentSize()) => {
     t += ms
-    pts.push({ x, y, o, t })
+    pts.push({ x, y, o, t, s: size })
   }
-  const move = (x: number, y: number) => {
+  const move = (x: number, y: number, size = currentSize()) => {
     const p = pts[pts.length - 1]
     if (p) t += Math.hypot(x - p.x, y - p.y) / TRAVEL_SPEED
-    pts.push({ x, y, o: 1, t })
+    pts.push({ x, y, o: 1, t, s: size })
   }
   const dwell = (ms: number) => {
     const p = pts[pts.length - 1]
     if (!p) return
     t += ms
-    pts.push({ x: p.x, y: p.y, o: p.o, t })
+    pts.push({ x: p.x, y: p.y, o: p.o, t, s: p.s })
   }
   const hit = (el: HTMLElement | null, linger = HIT_LINGER) => {
     if (el) hits.push({ el, at: t, until: t + linger })
   }
+  const fadeOut = () => {
+    const p = pts[pts.length - 1]
+    if (p) jump(p.x, p.y, 0, FADE_MS)
+  }
 
   // Entry: the dot is emitted from the request station.
-  const requestY = request.getBoundingClientRect().top - rootBox.top + 10
-  pts.push({ x: railX, y: requestY, o: 0, t: 0 })
-  jump(railX, requestY, 1, FADE_MS)
+  pts.push({ x: requestPoint.x, y: requestPoint.y, o: 0, t: 0, s: requestPoint.size })
+  jump(requestPoint.x, requestPoint.y, 1, FADE_MS, requestPoint.size)
   hit(request)
   dwell(STATION_DWELL)
 
   for (const name of ["plan-version", "pricing-rule", "meter", "entitlement"]) {
     const el = node(name)
     if (!el) continue
-    move(railX, centerY(el))
+    const point = railPointOf(el)
+    move(point.x, point.y, point.size)
     hit(el)
     dwell(STATION_DWELL)
   }
 
-  move(railX, centerY(decision))
+  const decisionPoint = railPointOf(decision)
+  move(decisionPoint.x, decisionPoint.y, decisionPoint.size)
   hit(decision)
   dwell(DECISION_DWELL)
 
@@ -129,56 +156,64 @@ function buildPass(root: HTMLElement, kind: PassKind): BuiltPass | null {
     const denyChip = node("deny-chip")
     if (!denyChip) return null
     const denyX = railXOf(denyChip)
-    const denyY = centerY(denyChip)
+    const denyTop = denyChip.getBoundingClientRect().top - rootBox.top
     const connector = root.querySelector<HTMLElement>("[data-mp-connector]")
     const hasBranch = connector && getComputedStyle(connector).display !== "none"
 
     if (hasBranch) {
-      // Follow the drawn dashed branch: down, across, into the chip.
+      // Follow the drawn dashed branch: down, then across. The dot fades out
+      // before entering the chip — the chip's own highlight carries the hit.
       const branchY = connector.getBoundingClientRect().top - rootBox.top + 12
       move(railX, branchY)
       move(denyX, branchY)
-      move(denyX, denyY)
-    } else {
-      // Stacked layout has no drawn branch — the dot hops to the outcome.
-      const p = pts[pts.length - 1]
-      if (p) jump(p.x, p.y, 0, FADE_MS)
-      jump(denyX, denyY, 0, 40)
-      jump(denyX, denyY, 1, FADE_MS)
+      move(denyX, denyTop - CHIP_CLEARANCE_Y)
     }
+    // The dot never enters the chip; its highlight takes over.
+    fadeOut()
     hit(denyChip, OUTCOME_LINGER)
     dwell(320)
-    jump(denyX, denyY, 0, FADE_MS)
   } else {
     const allowChip = node("allow-chip")
     if (!allowChip) return null
-    move(railX, centerY(allowChip))
+    // Fade out above the chip (the chip highlight is the signal), then
+    // re-emerge directly on the first settle station.
+    const chipBox = allowChip.getBoundingClientRect()
+    const chipTop = chipBox.top - rootBox.top
+    move(railX, chipTop - CHIP_CLEARANCE_Y)
+    fadeOut()
     hit(allowChip, HIT_LINGER + 200)
     dwell(STATION_DWELL)
 
-    for (const name of ["wallet", "ledger"]) {
+    for (const [index, name] of ["wallet", "ledger"].entries()) {
       const el = node(name)
       if (!el) continue
-      move(railX, centerY(el))
+      const point = railPointOf(el)
+      if (index === 0) {
+        jump(point.x, point.y, 0, 40, point.size)
+        jump(point.x, point.y, 1, FADE_MS, point.size)
+      } else {
+        move(point.x, point.y, point.size)
+      }
       hit(el)
       dwell(STATION_DWELL)
     }
 
     const invoice = node("invoice")
     if (invoice) {
-      move(railX, centerY(invoice))
+      const point = railPointOf(invoice)
+      move(point.x, point.y, point.size)
       hit(invoice, OUTCOME_LINGER)
       dwell(320)
     }
-    const p = pts[pts.length - 1]
-    if (p) jump(p.x, p.y, 0, FADE_MS)
+    fadeOut()
   }
 
   const duration = t
   if (duration <= 0) return null
-  const half = DOT_SIZE / 2
   const keyframes = pts.map((p) => ({
-    transform: `translate3d(${(p.x - half).toFixed(1)}px, ${(p.y - half).toFixed(1)}px, 0)`,
+    transform: `translate3d(${(p.x - p.s / 2).toFixed(1)}px, ${(p.y - p.s / 2).toFixed(1)}px, 0)`,
+    width: `${p.s}px`,
+    height: `${p.s}px`,
     opacity: p.o,
     offset: Math.min(1, p.t / duration),
   }))
@@ -207,6 +242,7 @@ function StationRow({
     >
       <span
         aria-hidden
+        data-mp-rail-dot
         className={cn(
           "-translate-x-1/2 -translate-y-1/2 absolute top-1/2 left-2 size-[9px] rounded-full",
           variant === "default" && "border border-background-borderHover bg-background-base",
@@ -251,13 +287,6 @@ function PhaseMarker({ children }: { children: string }) {
   )
 }
 
-function SdkName({ children }: { children: string }) {
-  return (
-    <code className="rounded-sm bg-background-bg px-1 py-px font-mono text-[11px] text-background-textContrast">
-      {children}
-    </code>
-  )
-}
 
 export function MoneyPath({ className }: { className?: string }) {
   const stageRef = useRef<HTMLDivElement>(null)
@@ -369,6 +398,7 @@ export function MoneyPath({ className }: { className?: string }) {
           <div data-mp-node="request" className="group relative pb-3 pl-8">
             <span
               aria-hidden
+              data-mp-rail-dot
               className="-translate-x-1/2 absolute top-[5px] left-2 size-2.5 rounded-full bg-info ring-2 ring-info-bg"
             />
             <div className="flex items-baseline gap-2">
@@ -377,7 +407,7 @@ export function MoneyPath({ className }: { className?: string }) {
               </span>
               <Leader />
               <span className="whitespace-nowrap font-mono text-[11px] text-info-text">
-                POST /v1/workflow
+                POST /v1/consume
               </span>
             </div>
             <p className="mt-0.5 text-background-text text-xs">
@@ -396,6 +426,7 @@ export function MoneyPath({ className }: { className?: string }) {
           <div data-mp-node="decision" className="group relative mt-1 pl-8">
             <span
               aria-hidden
+              data-mp-rail-dot
               className="-translate-x-1/2 -translate-y-1/2 absolute top-1/2 left-2 block size-2.5"
             >
               <span className="mp-beacon absolute inset-0 rounded-full bg-primary-text" />
@@ -515,14 +546,13 @@ export function MoneyPath({ className }: { className?: string }) {
         <span
           aria-hidden
           data-mp-dot
-          className="pointer-events-none absolute top-0 left-0 size-[7px] rounded-full bg-info opacity-0 will-change-transform"
+          className="pointer-events-none absolute top-0 left-0 size-[9px] rounded-full bg-info opacity-0 will-change-transform"
         />
       </div>
 
       <p className="mt-5 border-background-border border-t pt-3 text-background-text text-xs leading-6">
-        <SdkName>access.check</SdkName> is safe to run in shadow. <SdkName>usage.consume</SdkName>{" "}
-        enforces in the request path. <SdkName>runs.*</SdkName> reserves budget before multi-step
-        work. <SdkName>usage.record</SdkName> reports evidence without blocking.
+        Every step in this path is a method in the public SDK. Drop one call beside the logic you
+        already run — TypeScript, REST, or curl.
       </p>
     </figure>
   )

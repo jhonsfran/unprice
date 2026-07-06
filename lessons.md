@@ -24,6 +24,7 @@ patterns. Keep it cheap to load and useful.
   `ProjectService.deleteProjectRecord` can fail after child rows exist.
 - Before adding a helper, utility, or repeated row shape, search the repo for an established
   pattern first; reuse or extract the canonical path instead of duplicating logic.
+- Before running the app, always check if it's already running on locahost:3000 for landing or app.locaholst:300 for dashboard.
 - Whenever you are gonna work with the front end, please load the shadcn skill. And keep and follow the patterns for empty states, components, etc.
 
 ## CI And GitHub Actions
@@ -514,7 +515,7 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   posting a zero-amount ledger transfer.
 
 ## UI And Dashboard
-
+- Tailwind v3 + Radix var tokens: opacity modifiers like bg-success-bg/40 don't reliably apply alpha (tokens are var(--…) strings). For emphasis ramps use Radix steps: bg → bgHover → bgActive.
 - 2026-06-13: `@unprice/ui/checkbox` wraps Radix Checkbox and renders a button; do not nest it
   inside another button in filter rows or table actions, because React/Next will hydration-fail on
   invalid button descendants.

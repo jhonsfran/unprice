@@ -1,124 +1,76 @@
-"use client"
-import { DOCS_DOMAIN } from "@unprice/config"
-import { Badge } from "@unprice/ui/badge"
-import { buttonVariants } from "@unprice/ui/button"
-import { m, useInView } from "framer-motion"
-import { BarChart, Check, ChevronRight, Code, Settings } from "lucide-react"
-import { Link } from "next-view-transitions"
-import { useRef } from "react"
 import { SDKDemo } from "./sdk-examples"
+import { LedgerRow, SectionShell } from "./station"
+import { StationHeader } from "./station-header"
 
-const features = [
-  {
-    name: "Configure",
-    description: "Create and manage your plans, features, and tiers from the Dashboard.",
-    icon: Settings,
-  },
-  {
-    name: "Use SDK",
-    description: "Use our SDK in your project. Start incrementally.",
-    icon: Code,
-  },
-  {
-    name: "Verify and report",
-    description: "Check entitlements, report usage, and budget expensive runs before they execute.",
-    icon: Check,
-  },
-  {
-    name: "Usage evidence",
-    description: "Trace every charge back to rated usage events and ledger captures.",
-    icon: BarChart,
-  },
+// Developer proof: the real SDK surface, not a mock terminal. The ladder on
+// the right is the escalation path — every call is public API today.
+
+const callLadder = [
+  { label: "access.check", fact: "shadow · read-only" },
+  { label: "usage.record", fact: "evidence · non-blocking" },
+  { label: "usage.consume", fact: "enforcement · in-flight" },
+  { label: "runs.start / consume / end", fact: "budget envelopes" },
 ]
 
 export default function CodeExample() {
-  const sectionRef = useRef(null)
-  const isInView = useInView(sectionRef, { once: true, margin: "-100px" })
-
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    visible: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.2,
-        delayChildren: 0.3,
-      },
-    },
-  }
-
-  const itemVariants = {
-    hidden: { opacity: 0, y: 20 },
-    visible: {
-      opacity: 1,
-      y: 0,
-      transition: {
-        duration: 0.3,
-        ease: "easeOut",
-      },
-    },
-  }
-
   return (
-    <m.section
-      ref={sectionRef}
-      initial="hidden"
-      animate={isInView ? "visible" : "hidden"}
-      variants={containerVariants}
-      aria-labelledby="code-example-title"
-      className="mx-auto w-full max-w-6xl px-6 py-16"
-    >
-      <m.div variants={itemVariants}>
-        <Badge variant="outline" className="w-fit">
-          First integration
-        </Badge>
-      </m.div>
-      <m.h2
-        variants={itemVariants}
-        id="developers-title"
-        className="mt-4 inline-block bg-clip-text py-2 font-bold text-4xl text-background-textContrast tracking-tighter sm:text-6xl md:text-6xl"
-      >
-        The first request path is deliberately small.
-      </m.h2>
-      <m.div variants={itemVariants} className="mt-6 text-justify text-lg">
-        Define one plan version, provision or map one customer, then run `access.check` next to the
-        code you already trust. Nothing has to block production traffic on day one.
-        <br />
-        <br />
-        Once the decision matches the evidence, switch to `usage.consume` for synchronous
-        enforcement or `runs.*` for budgeted workflows. The same path that denies over-budget work
-        keeps the invoice explanation.
-        <br />
-        <br />
-        <div className="flex justify-end">
-          <Link
-            href={`${DOCS_DOMAIN}`}
-            target="_blank"
-            className={buttonVariants({ variant: "primary" })}
+    <SectionShell labelledBy="code-example-title">
+      <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,24rem)] lg:gap-16">
+        <div className="flex flex-col items-start">
+          <StationHeader label="First integration" fact="access.check · one call" />
+          <h2
+            id="code-example-title"
+            className="mt-6 max-w-xl font-primary font-semibold text-3xl text-background-textContrast tracking-tight sm:text-4xl"
           >
-            Explore the SDK
-            <ChevronRight data-icon="inline-end" />
-          </Link>
+            The first request path is deliberately small.
+          </h2>
+          <p className="mt-5 max-w-xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
+            Define one plan version, provision or map one customer, then run{" "}
+            <code className="rounded-sm bg-background-bg px-1 py-px font-mono text-[13px] text-background-textContrast">
+              access.check
+            </code>{" "}
+            next to the code you already trust. Nothing has to block production traffic on day one.
+          </p>
+          <p className="mt-4 max-w-xl text-background-text text-sm leading-6">
+            Once the decision matches the evidence, switch to synchronous enforcement or budgeted
+            workflows. The same path that denies over-budget work keeps the invoice explanation.
+          </p>
         </div>
-      </m.div>
 
-      <m.div variants={itemVariants}>
-        <SDKDemo />
-      </m.div>
-      <m.dl variants={containerVariants} className="mt-24 grid grid-cols-4 gap-10">
-        {features.map((item) => (
-          <m.div
-            key={item.name}
-            variants={itemVariants}
-            className="col-span-full sm:col-span-2 lg:col-span-1"
-          >
-            <div className="flex items-center gap-2 align-middle text-primary-text">
-              <item.icon aria-hidden="true" className="size-6" />
-              <dt className="font-semibold">{item.name}</dt>
-            </div>
-            <dd className="mt-2 text-background-text leading-7">{item.description}</dd>
-          </m.div>
-        ))}
-      </m.dl>
-    </m.section>
+        <div className="flex h-fit flex-col lg:mt-2">
+          <div className="flex items-baseline justify-between gap-4 border-background-border border-b pb-3">
+            <span className="font-mono text-background-text text-xs uppercase tracking-widest">
+              The escalation path
+            </span>
+            <span className="font-mono text-[10px] text-background-text">public SDK · today</span>
+          </div>
+          <div className="mt-3 flex flex-col">
+            {callLadder.map((row) => (
+              <LedgerRow
+                key={row.label}
+                label={<span className="font-mono text-xs">{row.label}</span>}
+                fact={row.fact}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-12">
+        <SDKDemo
+          presentation="panel"
+          showBorderBeam={false}
+          className="mx-0 mt-0 max-w-none"
+          methods={[
+            "checkAccess",
+            "signUpCustomer",
+            "recordUsage",
+            "consumeUsage",
+            "startBudgetedRun",
+            "explainCharge",
+          ]}
+        />
+      </div>
+    </SectionShell>
   )
 }

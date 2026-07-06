@@ -15,7 +15,6 @@ import {
   RotateCcw,
   Settings,
   ShieldCheck,
-  X,
 } from "lucide-react"
 import type React from "react"
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -264,7 +263,7 @@ function ParticleEffect({ particles }: { particles: Particle[] }) {
       {particles.map((particle) => (
         <div
           key={particle.id}
-          className="absolute h-2.5 w-2.5 animate-particle rounded-full bg-primary"
+          className="absolute h-2.5 w-2.5 animate-particle rounded-full bg-info"
           style={
             {
               left: particle.x,
@@ -289,7 +288,6 @@ interface DashboardPanelProps {
   onAddFeature: (feature: Omit<Feature, "id" | "usage" | "config">) => void
   onGenerateInvoice: () => void
   isOpen: boolean
-  onClose: () => void
   disabled?: boolean
 }
 
@@ -299,7 +297,6 @@ function DashboardPanel({
   onAddFeature,
   onGenerateInvoice,
   isOpen,
-  onClose,
   disabled,
 }: DashboardPanelProps) {
   const [isAdding, setIsAdding] = useState(false)
@@ -317,58 +314,39 @@ function DashboardPanel({
   return (
     <div
       className={cn(
-        "flex h-full flex-col rounded-lg border border-background-border bg-background-base p-4 font-mono text-xs",
+        "flex h-full flex-col rounded-lg border border-background-border bg-background-base p-4",
         "transition-all duration-200",
         disabled && "pointer-events-none opacity-40"
       )}
     >
-      <div className="mb-3 flex shrink-0 items-center justify-between border-background-line border-b pb-2">
-        <div className="flex items-center gap-1.5">
-          <Settings className="h-3 w-3 text-background-text" />
-          <span className="font-bold text-[10px] text-background-textContrast uppercase tracking-widest">
-            Plan guardrails
-          </span>
-        </div>
+      <div className="mb-1 flex shrink-0 items-baseline justify-between gap-4 border-background-line border-b pb-2.5">
+        <span className="font-mono text-[10px] text-background-textContrast uppercase tracking-widest">
+          Plan guardrails
+        </span>
         <button
           type="button"
-          onClick={onClose}
-          className="rounded-full p-1 text-background-text transition-colors hover:bg-background-bgHover hover:text-background-textContrast"
-          aria-label="Close dashboard"
+          onClick={() => setIsAdding(!isAdding)}
+          className="font-mono text-[10px] text-primary-text transition-colors hover:text-primary-textContrast"
         >
-          <X className="h-3.5 w-3.5" />
+          {isAdding ? "cancel" : "+ add feature"}
         </button>
       </div>
+      <p className="mb-3 font-mono text-[10px] text-background-text">
+        hard denies with 429 · soft allows and warns
+      </p>
 
       {/* Main Content Area: Scrollable features */}
       <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto pr-1">
-        <div className="mb-2 flex items-center justify-between px-0.5">
-          <h3 className="font-bold text-[9px] text-background-text uppercase tracking-widest">
-            Money path rules
-          </h3>
-          <button
-            type="button"
-            onClick={() => setIsAdding(!isAdding)}
-            className={cn(
-              "rounded px-2 py-0.5 font-bold text-[9px] transition-all",
-              isAdding
-                ? "bg-background-bgHover text-background-text"
-                : "bg-primary-bg text-primary-text hover:bg-primary-bgHover"
-            )}
-          >
-            {isAdding ? "Cancel" : "+ Add Feature"}
-          </button>
-        </div>
-
         {isAdding && (
-          <div className="mb-4 space-y-2 rounded-md border border-primary-border bg-primary-bg/5 p-2 shadow-inner">
+          <div className="mb-3 space-y-2 border-background-line border-b pb-3">
             <div className="grid grid-cols-2 gap-2">
               <div className="flex flex-col gap-1">
-                <span className="ml-1 font-bold text-[8px] text-background-text uppercase tracking-tighter">
+                <span className="font-mono text-[9px] text-background-text uppercase tracking-widest">
                   Name
                 </span>
                 <input
                   placeholder="e.g. storage"
-                  className="rounded border border-background-border bg-background-bg px-2 py-1 text-[10px] focus:border-primary-border focus:outline-none"
+                  className="rounded-sm border border-background-border bg-background-bg px-2 py-1 text-[11px] focus:border-background-borderHover focus:outline-none"
                   value={newFeature.displayName}
                   onChange={(e) =>
                     setNewFeature({
@@ -380,11 +358,11 @@ function DashboardPanel({
                 />
               </div>
               <div className="flex flex-col gap-1">
-                <span className="ml-1 font-bold text-[8px] text-background-text uppercase tracking-tighter">
+                <span className="font-mono text-[9px] text-background-text uppercase tracking-widest">
                   Type
                 </span>
                 <select
-                  className="rounded border border-background-border bg-background-bg px-2 py-1 text-[10px] focus:border-primary-border focus:outline-none"
+                  className="rounded-sm border border-background-border bg-background-bg px-2 py-1 text-[11px] focus:border-background-borderHover focus:outline-none"
                   value={newFeature.type}
                   onChange={(e) =>
                     setNewFeature({ ...newFeature, type: e.target.value as FeatureType })
@@ -398,13 +376,13 @@ function DashboardPanel({
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div className="flex flex-col gap-1">
-                <span className="ml-1 font-bold text-[8px] text-background-text uppercase tracking-tighter">
+                <span className="font-mono text-[9px] text-background-text uppercase tracking-widest">
                   Rate ($)
                 </span>
                 <input
                   type="number"
                   placeholder="0.00"
-                  className="w-full rounded border border-background-border bg-background-bg px-2 py-1 text-[10px] focus:border-primary-border focus:outline-none"
+                  className="w-full rounded-sm border border-background-border bg-background-bg px-2 py-1 font-mono text-[11px] focus:border-background-borderHover focus:outline-none"
                   value={newFeature.rate}
                   onChange={(e) =>
                     setNewFeature({ ...newFeature, rate: Number.parseFloat(e.target.value) || 0 })
@@ -412,12 +390,12 @@ function DashboardPanel({
                 />
               </div>
               <div className="flex flex-col gap-1">
-                <span className="ml-1 font-bold text-[8px] text-background-text uppercase tracking-tighter">
+                <span className="font-mono text-[9px] text-background-text uppercase tracking-widest">
                   Unit
                 </span>
                 <input
                   placeholder="e.g. GB"
-                  className="rounded border border-background-border bg-background-bg px-2 py-1 text-[10px] focus:border-primary-border focus:outline-none"
+                  className="rounded-sm border border-background-border bg-background-bg px-2 py-1 text-[11px] focus:border-background-borderHover focus:outline-none"
                   value={newFeature.unit}
                   onChange={(e) => setNewFeature({ ...newFeature, unit: e.target.value })}
                 />
@@ -438,85 +416,72 @@ function DashboardPanel({
                   tag: "NEW",
                 })
               }}
-              className="w-full rounded bg-primary py-1.5 font-bold text-[10px] text-primary-foreground shadow-sm transition-opacity hover:opacity-90"
+              className="w-full rounded-sm bg-primary py-1.5 font-medium font-mono text-[11px] text-primary-foreground transition-opacity hover:opacity-90"
             >
-              Add Feature
+              Add feature
             </button>
           </div>
         )}
 
-        <div className="space-y-2">
+        <div className="flex flex-col">
           {features.map((feature) => (
             <div
               key={feature.id}
-              className="rounded-md border border-background-border bg-background-bgSubtle p-2 transition-colors hover:border-background-borderHover"
+              className="flex items-center gap-2 border-background-line border-b py-2 last:border-0"
             >
-              <div className="mb-1.5 flex items-center justify-between">
-                <span className="max-w-[120px] truncate font-semibold text-[11px] text-background-textContrast">
-                  {feature.displayName}
-                </span>
-                <span
+              <span className="min-w-0 flex-1 truncate text-background-textContrast text-xs">
+                {feature.displayName}
+              </span>
+
+              <div className="flex shrink-0 items-center rounded-sm border border-background-border p-px">
+                <button
+                  type="button"
+                  onClick={() => onFeatureConfigChange(feature.id, { limitType: "hard" })}
+                  disabled={disabled}
+                  aria-pressed={feature.config.limitType === "hard"}
                   className={cn(
-                    "rounded-full px-1.5 py-0.5 font-bold text-[8px] uppercase tracking-tighter",
+                    "rounded-[3px] px-1.5 py-0.5 font-mono text-[10px] transition-colors",
                     feature.config.limitType === "hard"
-                      ? "bg-danger-bg text-danger-text"
-                      : "bg-warning-bg text-warning-text"
+                      ? "bg-danger-solid text-white"
+                      : "text-background-text hover:text-background-textContrast"
                   )}
                 >
-                  {feature.config.limitType}
-                </span>
+                  hard
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onFeatureConfigChange(feature.id, { limitType: "soft" })}
+                  disabled={disabled}
+                  aria-pressed={feature.config.limitType === "soft"}
+                  className={cn(
+                    "rounded-[3px] px-1.5 py-0.5 font-mono text-[10px] transition-colors",
+                    feature.config.limitType === "soft"
+                      ? "bg-warning-solid text-white"
+                      : "text-background-text hover:text-background-textContrast"
+                  )}
+                >
+                  soft
+                </button>
               </div>
 
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-0.5 rounded-md border border-background-border bg-background-bg p-0.5">
-                  <button
-                    type="button"
-                    onClick={() => onFeatureConfigChange(feature.id, { limitType: "hard" })}
-                    disabled={disabled}
-                    className={cn(
-                      "rounded px-1.5 py-0.5 font-medium text-[9px] transition-all",
-                      feature.config.limitType === "hard"
-                        ? "bg-danger-solid text-white shadow-sm"
-                        : "text-background-text hover:bg-background-bgSubtle hover:text-background-textContrast"
-                    )}
-                  >
-                    hard
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onFeatureConfigChange(feature.id, { limitType: "soft" })}
-                    disabled={disabled}
-                    className={cn(
-                      "rounded px-1.5 py-0.5 font-medium text-[9px] transition-all",
-                      feature.config.limitType === "soft"
-                        ? "bg-warning-solid text-white shadow-sm"
-                        : "text-background-text hover:bg-background-bgSubtle hover:text-background-textContrast"
-                    )}
-                  >
-                    soft
-                  </button>
-                </div>
-
-                <div className="flex min-w-0 items-center gap-1.5">
-                  <input
-                    type="number"
-                    value={feature.config.limit}
-                    onChange={(e) => {
-                      const val = Number.parseFloat(e.target.value)
-                      if (!Number.isNaN(val) && val >= 0) {
-                        onFeatureConfigChange(feature.id, { limit: val })
-                      }
-                    }}
-                    min="0"
-                    step="1"
-                    disabled={disabled || feature.isBase}
-                    className="w-12 shrink-0 rounded border-background-border bg-background-bg px-1 py-0.5 text-right text-[10px] text-background-textContrast focus:border-primary-borderHover focus:outline-none disabled:cursor-not-allowed"
-                  />
-                  <span className="truncate font-mono text-[9px] text-background-text">
-                    {feature.unit}
-                  </span>
-                </div>
-              </div>
+              <input
+                type="number"
+                value={feature.config.limit}
+                onChange={(e) => {
+                  const val = Number.parseFloat(e.target.value)
+                  if (!Number.isNaN(val) && val >= 0) {
+                    onFeatureConfigChange(feature.id, { limit: val })
+                  }
+                }}
+                min="0"
+                step="1"
+                disabled={disabled || feature.isBase}
+                aria-label={`${feature.displayName} limit`}
+                className="w-14 shrink-0 rounded-sm border border-background-border bg-background-bg px-1.5 py-0.5 text-right font-mono text-[11px] text-background-textContrast focus:border-background-borderHover focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+              />
+              <span className="w-14 shrink-0 truncate font-mono text-[10px] text-background-text">
+                {feature.unit}
+              </span>
             </div>
           ))}
         </div>
@@ -528,7 +493,7 @@ function DashboardPanel({
           type="button"
           onClick={onGenerateInvoice}
           disabled={disabled}
-          className="flex w-full items-center justify-center gap-2 rounded-md bg-primary py-2 font-bold font-mono text-[11px] text-primary-foreground shadow-sm transition-all hover:opacity-90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex w-full items-center justify-center gap-2 rounded-md bg-primary py-2 font-medium font-mono text-[11px] text-primary-foreground transition-all hover:opacity-90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Receipt className="h-3.5 w-3.5" />
           Preview invoice evidence
@@ -549,7 +514,6 @@ interface LiveResponseProps {
   discountPercentage: number
   limitedFeature: Feature | null
   isOpen: boolean
-  onClose: () => void
   flashError: boolean
 }
 
@@ -562,16 +526,9 @@ interface InvoicePanelProps {
   discountActive: boolean
   discountPercentage: number
   isOpen: boolean
-  onClose: () => void
 }
 
-function InvoicePanel({
-  features,
-  discountActive,
-  discountPercentage,
-  isOpen,
-  onClose,
-}: InvoicePanelProps) {
+function InvoicePanel({ features, discountActive, discountPercentage, isOpen }: InvoicePanelProps) {
   const totalBill = features.reduce(
     (sum, f) => sum + calculateFeatureCost(f, discountActive, discountPercentage),
     0
@@ -599,14 +556,6 @@ function InvoicePanel({
           </div>
           <p className="font-mono text-[10px] text-background-text">INV-2024-001</p>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="text-background-text hover:text-background-textContrast"
-          aria-label="Close"
-        >
-          <X className="h-4 w-4" />
-        </button>
       </div>
 
       <div className="mb-6 flex justify-between font-mono text-[10px]">
@@ -654,8 +603,8 @@ function InvoicePanel({
       <div className="mt-auto space-y-2 border-background-line border-t pt-4">
         {discountActive && (
           <div className="flex justify-between font-mono text-[10px]">
-            <span className="text-success-text">Volume Discount ({discountPercentage}%)</span>
-            <span className="text-success-text">
+            <span className="text-background-text">Volume discount ({discountPercentage}%)</span>
+            <span className="text-background-text">
               -$
               {((totalBill / (1 - discountPercentage / 100)) * (discountPercentage / 100)).toFixed(
                 2
@@ -670,7 +619,7 @@ function InvoicePanel({
       </div>
 
       <div className="mt-6">
-        <div className="rounded border border-success-border/50 bg-success-bg/30 p-2 text-center">
+        <div className="rounded border border-success-border bg-success-bg p-2 text-center">
           <span className="font-bold font-mono text-[9px] text-success-text uppercase tracking-wider">
             Status: Paid
           </span>
@@ -687,26 +636,17 @@ function InvoicePanel({
 interface PricingPanelProps {
   features: Feature[]
   isOpen: boolean
-  onClose: () => void
 }
 
-function PricingPanel({ features, isOpen, onClose }: PricingPanelProps) {
+function PricingPanel({ features, isOpen }: PricingPanelProps) {
   if (!isOpen) return null
 
   return (
     <div className="flex h-full flex-col rounded-lg border border-background-border bg-background-base p-6 shadow-sm">
       <div className="mb-4 flex items-center justify-between">
-        <span className="rounded-full bg-primary/10 px-2.5 py-0.5 font-semibold text-[10px] text-primary uppercase tracking-wider">
+        <span className="rounded-full bg-primary-bg px-2.5 py-0.5 font-semibold text-[10px] text-primary-text uppercase tracking-wider">
           Pro Plan
         </span>
-        <button
-          type="button"
-          onClick={onClose}
-          className="text-background-text hover:text-background-textContrast"
-          aria-label="Close"
-        >
-          <X className="h-4 w-4" />
-        </button>
       </div>
 
       <div className="mb-6">
@@ -722,9 +662,7 @@ function PricingPanel({ features, isOpen, onClose }: PricingPanelProps) {
       <div className="custom-scrollbar mb-8 flex-1 space-y-3 overflow-y-auto pr-2">
         {features.map((feature) => (
           <div key={feature.id} className="flex items-start gap-2.5">
-            <div className="mt-0.5 rounded-full bg-success-bg p-0.5 text-success-text">
-              <Check className="h-3 w-3" />
-            </div>
+            <Check className="mt-0.5 size-3.5 shrink-0 text-background-text" aria-hidden />
             <div className="flex flex-col">
               <span className="font-medium text-background-textContrast text-xs leading-tight">
                 {feature.displayName}
@@ -762,7 +700,6 @@ function LiveResponse({
   discountPercentage,
   limitedFeature,
   isOpen,
-  onClose,
   flashError,
 }: LiveResponseProps) {
   const activeFeature = features.find((f) => f.id === activeFeatureId)
@@ -829,14 +766,6 @@ function LiveResponse({
             {decision}
           </span>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded p-1 text-background-text transition-colors hover:bg-background-bgHover hover:text-background-textContrast"
-          aria-label="Close decision trail"
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
@@ -948,7 +877,7 @@ function LiveResponse({
                 key={item}
                 className="flex items-start gap-3 rounded-md border border-background-border bg-background-bgSubtle p-3"
               >
-                <Check className="mt-0.5 size-4 shrink-0 text-success-text" aria-hidden />
+                <Check className="mt-0.5 size-4 shrink-0 text-background-text" aria-hidden />
                 <p className="text-background-text text-sm leading-6">{item}</p>
               </div>
             ))}
@@ -995,8 +924,7 @@ function FeatureRow({
         !feature.isBase &&
           "hover:border-background-borderHover hover:bg-background-bgHover active:scale-[0.98]",
         feature.isBase && "cursor-default",
-        isActive &&
-          "border-primary-border bg-background-bgHover shadow-[0_0_20px_rgba(var(--primary-9),0.12)]",
+        isActive && "border-info-border bg-background-bgHover",
         isPressed && !feature.isBase && "scale-[0.98] bg-background-bg",
         isLimited &&
           feature.config.limitType === "soft" &&
@@ -1008,45 +936,41 @@ function FeatureRow({
           className={cn(
             "rounded border px-1.5 py-0.5 font-mono text-[10px]",
             feature.isBase
-              ? "border-success-border bg-success-bg text-success-text"
+              ? "border-background-border bg-background-bgSubtle text-background-text"
               : isLimited && feature.config.limitType === "hard"
                 ? "border-danger-border bg-danger-bg text-danger-text"
                 : isLimited && feature.config.limitType === "soft"
                   ? "border-warning-border bg-warning-bg text-warning-text"
                   : isActive
-                    ? "border-primary-border bg-primary-bg text-primary-text"
+                    ? "border-info-border bg-info-bg text-info-text"
                     : "border-background-border bg-background-bgSubtle text-background-text"
           )}
         >
           [{feature.tag}]
         </span>
         <div className="text-left">
-          <div className="font-medium text-foreground text-sm">{feature.displayName}</div>
-          <div className="font-mono text-[10px] text-muted-foreground">
+          <div className="font-medium text-background-textContrast text-sm">
+            {feature.displayName}
+          </div>
+          <div className="font-mono text-[10px] text-background-text">
             {feature.isBase ? (
-              <span className="text-success-text">Always included</span>
+              <span>Always included</span>
             ) : (
               <>
                 {feature.type === "usage" && (
                   <>
-                    <span className={discountActive ? "text-success-text" : "text-background-text"}>
-                      ${feature.rate.toFixed(2)}
-                    </span>
+                    <span className="text-background-text">${feature.rate.toFixed(2)}</span>
                     <span className="text-background-text">/{feature.unit}</span>
                   </>
                 )}
                 {feature.type === "flat" && (
-                  <span className={discountActive ? "text-success-text" : "text-background-text"}>
-                    ${feature.rate.toFixed(2)} fixed
-                  </span>
+                  <span className="text-background-text">${feature.rate.toFixed(2)} fixed</span>
                 )}
                 {feature.type === "tiered" && (
-                  <span className={discountActive ? "text-success-text" : "text-background-text"}>
-                    Tiered pricing
-                  </span>
+                  <span className="text-background-text">Tiered pricing</span>
                 )}
                 {discountActive && (
-                  <span className="ml-1 text-success-text">(-{discountPercentage}%)</span>
+                  <span className="ml-1 text-primary-text">(-{discountPercentage}%)</span>
                 )}
               </>
             )}
@@ -1065,7 +989,7 @@ function FeatureRow({
                       ? feature.config.limitType === "hard"
                         ? "bg-danger-solidHover"
                         : "bg-warning-solidHover"
-                      : "bg-primary-solid"
+                      : "bg-background-borderHover"
                 )}
                 style={{ width: `${Math.min(spendProgress, 100)}%` }}
               />
@@ -1074,7 +998,7 @@ function FeatureRow({
         </div>
       </div>
       <div className="text-right">
-        <div className="font-mono font-semibold text-foreground text-lg tabular-nums">
+        <div className="font-mono font-semibold text-background-textContrast text-lg tabular-nums">
           {feature.isBase ? (
             <span>
               $<AnimatedCounter value={feature.rate} decimals={2} />
@@ -1083,7 +1007,7 @@ function FeatureRow({
             <AnimatedCounter value={feature.usage} />
           )}
         </div>
-        <div className="font-mono text-[10px] text-muted-foreground">
+        <div className="font-mono text-[10px] text-background-text">
           {feature.isBase ? "per month" : feature.unit}
         </div>
         <div
@@ -1130,7 +1054,7 @@ export function PricingHero({
   const [shake, setShake] = useState(false)
   const [flashError, setFlashError] = useState(false)
   type ActivePanel = "dashboard" | "response" | "invoice" | "pricing"
-  const [activePanel, setActivePanel] = useState<ActivePanel | null>("response")
+  const [activePanel, setActivePanel] = useState<ActivePanel>("response")
   const containerRef = useRef<HTMLDivElement>(null)
   const responseRef = useRef<HTMLDivElement>(null)
   const particleId = useRef(0)
@@ -1327,8 +1251,6 @@ export function PricingHero({
 
   const accentStyle = accentColor ? ({ "--accent-custom": accentColor } as React.CSSProperties) : {}
 
-  const showSidePanel = !!activePanel
-
   return (
     <m.section
       variants={heroImageVariants}
@@ -1401,12 +1323,12 @@ export function PricingHero({
             <div className="border-background-border border-b p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="font-semibold text-foreground text-lg">Pro Plan</h2>
+                  <h2 className="font-semibold text-background-textContrast text-lg">Pro Plan</h2>
                   <p className="font-mono text-[10px] text-background-text">Usage-based billing</p>
                 </div>
                 {discountActive && (
-                  <span className="rounded border border-success-border bg-success-bg px-2 py-1 font-mono text-[10px] text-success-text">
-                    {discountPercentage}% discount
+                  <span className="rounded border border-primary-border bg-primary-bg px-2 py-1 font-mono text-[10px] text-primary-text">
+                    {discountPercentage}% volume pricing
                   </span>
                 )}
               </div>
@@ -1471,7 +1393,9 @@ export function PricingHero({
             <div className="border-background-border border-t p-4">
               <div className="mb-2 flex items-center justify-between">
                 <div>
-                  <h3 className="font-semibold text-foreground text-sm">Accepted spend</h3>
+                  <h3 className="font-semibold text-background-textContrast text-sm">
+                    Accepted spend
+                  </h3>
                   <p className="font-mono text-[10px] text-background-text">
                     {totalClicks} paid actions accepted
                   </p>
@@ -1479,8 +1403,8 @@ export function PricingHero({
                 <div className="text-right">
                   <div
                     className={cn(
-                      "font-bold font-mono text-2xl tabular-nums transition-colors",
-                      discountActive ? "text-success-text" : "text-foreground"
+                      "font-bold font-mono text-2xl tabular-nums",
+                      "text-background-textContrast"
                     )}
                   >
                     <AnimatedCounter value={currentSpend} prefix="$" decimals={2} />
@@ -1490,7 +1414,7 @@ export function PricingHero({
 
               {/* Discount status */}
               <div className="flex items-center justify-between font-mono text-[10px] text-background-text">
-                <span className={discountActive ? "text-success-text" : ""}>
+                <span className={discountActive ? "text-primary-text" : ""}>
                   {discountActive
                     ? `${discountPercentage}% volume pricing rule active`
                     : `${Math.max(0, discountThreshold - totalClicks)} accepted actions until volume pricing`}
@@ -1502,11 +1426,11 @@ export function PricingHero({
             <div className="flex shrink-0 items-center justify-center gap-2 border-background-border border-t p-3">
               <button
                 type="button"
-                onClick={() => setActivePanel(activePanel === "dashboard" ? null : "dashboard")}
+                onClick={() => setActivePanel("dashboard")}
                 className={cn(
                   "rounded-lg border p-2 transition-colors",
                   activePanel === "dashboard"
-                    ? "border-primary-border bg-primary-bg text-primary-text"
+                    ? "border-background-borderHover bg-background-bgActive text-background-textContrast"
                     : "border-background-border bg-background-bg text-background-text hover:border-background-borderHover hover:text-background-textContrast"
                 )}
                 aria-label="Toggle dashboard"
@@ -1516,11 +1440,11 @@ export function PricingHero({
               </button>
               <button
                 type="button"
-                onClick={() => setActivePanel(activePanel === "response" ? null : "response")}
+                onClick={() => setActivePanel("response")}
                 className={cn(
                   "rounded-lg border p-2 transition-colors",
                   activePanel === "response"
-                    ? "border-primary-border bg-primary-bg text-primary-text"
+                    ? "border-background-borderHover bg-background-bgActive text-background-textContrast"
                     : "border-background-border bg-background-bg text-background-text hover:border-background-borderHover hover:text-background-textContrast"
                 )}
                 aria-label="Toggle decision trail"
@@ -1530,11 +1454,11 @@ export function PricingHero({
               </button>
               <button
                 type="button"
-                onClick={() => setActivePanel(activePanel === "invoice" ? null : "invoice")}
+                onClick={() => setActivePanel("invoice")}
                 className={cn(
                   "rounded-lg border p-2 transition-colors",
                   activePanel === "invoice"
-                    ? "border-primary-border bg-primary-bg text-primary-text"
+                    ? "border-background-borderHover bg-background-bgActive text-background-textContrast"
                     : "border-background-border bg-background-bg text-background-text hover:border-background-borderHover hover:text-background-textContrast"
                 )}
                 aria-label="Toggle invoice"
@@ -1544,11 +1468,11 @@ export function PricingHero({
               </button>
               <button
                 type="button"
-                onClick={() => setActivePanel(activePanel === "pricing" ? null : "pricing")}
+                onClick={() => setActivePanel("pricing")}
                 className={cn(
                   "rounded-lg border p-2 transition-colors",
                   activePanel === "pricing"
-                    ? "border-primary-border bg-primary-bg text-primary-text"
+                    ? "border-background-borderHover bg-background-bgActive text-background-textContrast"
                     : "border-background-border bg-background-bg text-background-text hover:border-background-borderHover hover:text-background-textContrast"
                 )}
                 aria-label="Toggle pricing"
@@ -1560,10 +1484,7 @@ export function PricingHero({
           </div>
 
           {/* Side Panel (Dashboard or Response) - Right on desktop, below on mobile */}
-          <div
-            ref={responseRef}
-            className={cn("flex-1 transition-all duration-300", !showSidePanel && "lg:hidden")}
-          >
+          <div ref={responseRef} className="flex-1 transition-all duration-300">
             {activePanel === "dashboard" && (
               <DashboardPanel
                 features={features}
@@ -1571,7 +1492,6 @@ export function PricingHero({
                 onAddFeature={handleAddFeature}
                 onGenerateInvoice={handleGenerateInvoice}
                 isOpen={true}
-                onClose={() => setActivePanel(null)}
                 disabled={false}
               />
             )}
@@ -1583,7 +1503,6 @@ export function PricingHero({
                 discountPercentage={discountPercentage}
                 limitedFeature={currentLimitedFeature}
                 isOpen={true}
-                onClose={() => setActivePanel(null)}
                 flashError={flashError}
               />
             )}
@@ -1593,16 +1512,9 @@ export function PricingHero({
                 discountActive={discountActive}
                 discountPercentage={discountPercentage}
                 isOpen={true}
-                onClose={() => setActivePanel(null)}
               />
             )}
-            {activePanel === "pricing" && (
-              <PricingPanel
-                features={features}
-                isOpen={true}
-                onClose={() => setActivePanel(null)}
-              />
-            )}
+            {activePanel === "pricing" && <PricingPanel features={features} isOpen={true} />}
           </div>
         </div>
       </div>
