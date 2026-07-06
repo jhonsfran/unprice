@@ -23,6 +23,14 @@ import {
 // @ts-expect-error runtime-only module
 import workerdUnsafe from "workerd:unsafe"
 
+type WorkerdUnsafeRuntime = {
+  abortAllDurableObjects: () => Promise<void>
+  evict?: (
+    stub: DurableObjectStub,
+    options?: { webSockets?: "close" | "hibernate" }
+  ) => Promise<void>
+}
+
 function isDurableObjectNamespace(value: unknown): value is DurableObjectNamespace<unknown> {
   return (
     !!value &&
@@ -61,7 +69,14 @@ export async function evictDurableObject(
   stub: DurableObjectStub,
   options: { webSockets?: "close" | "hibernate" } = { webSockets: "hibernate" }
 ) {
-  await workerdUnsafe.evict(stub, options)
+  const unsafeRuntime = workerdUnsafe as WorkerdUnsafeRuntime
+
+  if (unsafeRuntime.evict) {
+    await unsafeRuntime.evict(stub, options)
+    return
+  }
+
+  await unsafeRuntime.abortAllDurableObjects()
 }
 
 export {
