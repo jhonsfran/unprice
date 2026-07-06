@@ -3,6 +3,7 @@ import { type Dinero, dinero } from "dinero.js"
 import { USD } from "dinero.js/currencies"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { z } from "zod"
+import { createDeferred } from "../test-fixtures/race"
 
 // Real Dinero<number> at the requested scale; the production pricing path
 // calls transformScale/toSnapshot on it, so plain objects won't do.
@@ -7800,17 +7801,6 @@ function createEnv(overrides: Record<string, unknown> = {}) {
     TINYBIRD_URL: "https://example.com",
     ...overrides,
   }
-}
-
-function createDeferred<T>() {
-  let resolve!: (value: T | PromiseLike<T>) => void
-  let reject!: (reason?: unknown) => void
-  const promise = new Promise<T>((innerResolve, innerReject) => {
-    resolve = innerResolve
-    reject = innerReject
-  })
-
-  return { promise, reject, resolve }
 }
 
 function createGrantSnapshot(overrides: Record<string, unknown> = {}) {
