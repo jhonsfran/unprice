@@ -48,6 +48,72 @@ afterEach(async () => {
 })
 
 describe("EntitlementWindowDO workers runtime invariants", () => {
+  it("lazy-resets entitlement usage when the reset period changes", async () => {
+    const now = Date.now()
+    const currentDate = new Date(now)
+    const currentDayStart = Date.UTC(
+      currentDate.getUTCFullYear(),
+      currentDate.getUTCMonth(),
+      currentDate.getUTCDate()
+    )
+    const previousDayStart = currentDayStart - 24 * 60 * 60 * 1000
+    const nextDayStart = currentDayStart + 24 * 60 * 60 * 1000
+    const previousEventAt = currentDayStart - 1
+    const currentEventAt = Math.max(currentDayStart, now - 1_000)
+    const stub = entitlementStub({ customerEntitlementId: "ce_lazy_reset" })
+    const baseInput = createWorkersApplyInput({
+      creditLinePolicy: "uncapped",
+      customerEntitlementId: "ce_lazy_reset",
+      enforceLimit: true,
+      limit: 2,
+      now: previousEventAt,
+      periodStartAt: previousDayStart,
+      periodEndAt: nextDayStart,
+      resetConfig: {
+        name: "daily",
+        planType: "recurring",
+        resetAnchor: 1,
+        resetInterval: "day",
+        resetIntervalCount: 1,
+      },
+    })
+
+    const previousPeriod = await stub.apply({
+      ...baseInput,
+      event: {
+        ...baseInput.event,
+        id: "evt_lazy_reset_previous",
+        properties: { amount: 2 },
+        timestamp: previousEventAt,
+      },
+      idempotencyKey: "idem_lazy_reset_previous",
+      now: previousEventAt,
+    })
+    const currentPeriod = await stub.apply({
+      ...baseInput,
+      event: {
+        ...baseInput.event,
+        id: "evt_lazy_reset_current",
+        properties: { amount: 1 },
+        timestamp: currentEventAt,
+      },
+      idempotencyKey: "idem_lazy_reset_current",
+      now: currentEventAt,
+    })
+
+    expect(previousPeriod).toMatchObject({ allowed: true })
+    expect(currentPeriod).toMatchObject({ allowed: true })
+    expect(previousPeriod.meterFacts?.[0]?.period_key).toBe(`day:${previousDayStart}`)
+    expect(currentPeriod.meterFacts?.[0]?.period_key).toBe(`day:${currentDayStart}`)
+    await expect(
+      stub.getEnforcementState({
+        entitlement: baseInput.entitlement,
+        grants: baseInput.grants,
+        now: currentEventAt,
+      })
+    ).resolves.toMatchObject({ isLimitReached: false, limit: 2, usage: 1 })
+  })
+
   it("preserves persisted state across eviction and alarm execution", async () => {
     const stub = entitlementStub({ customerEntitlementId: "ce_alarm" })
     const input = createWorkersApplyInput({

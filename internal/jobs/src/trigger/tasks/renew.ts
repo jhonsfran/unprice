@@ -3,6 +3,11 @@ import { createContext } from "./context"
 
 export const renewTask = task({
   id: "subscription.renew.task",
+  // Schedules provide a per-subscription concurrencyKey, creating one
+  // single-run queue per subscription instead of serializing all renewals.
+  queue: {
+    concurrencyLimit: 1,
+  },
   retry: {
     maxAttempts: 3,
   },

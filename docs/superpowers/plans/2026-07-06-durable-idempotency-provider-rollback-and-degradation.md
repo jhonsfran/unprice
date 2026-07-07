@@ -23,3 +23,5 @@
 - [ ] Add `/health` and `/ready` routes in `apps/api/src/routes/health` as Hono adapters over the service health/readiness contracts.
 - [ ] Add fail-open/fail-closed matrix documentation under `docs/architecture`.
 - [ ] Add infra degradation tests under `apps/api/src/routes/health`.
+- [ ] Add k6 nightly coverage for the idempotent money-moving API paths once the durable idempotency store is wired.
+- [ ] Add wallet breakdown assertions for billing and collection flows so degradation tests prove balance, credit, reservation, and ledger-line consistency.

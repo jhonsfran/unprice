@@ -3,6 +3,11 @@ import { createContext } from "./context"
 
 export const billingTask = task({
   id: "invoice.billing.task",
+  // Schedules provide a per-subscription concurrencyKey, creating one
+  // single-run queue per subscription instead of serializing all billing.
+  queue: {
+    concurrencyLimit: 1,
+  },
   retry: {
     maxAttempts: 1,
   },

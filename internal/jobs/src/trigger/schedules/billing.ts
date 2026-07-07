@@ -37,6 +37,10 @@ export const billingSchedule = schedules.task({
           projectId: i.projectId,
           now,
         },
+        options: {
+          concurrencyKey: `${i.projectId}:${i.subscriptionId}`,
+          idempotencyKey: `invoice.billing:${i.projectId}:${i.id}`,
+        },
       }))
     )
 

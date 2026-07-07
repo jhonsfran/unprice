@@ -41,6 +41,10 @@ export const renewSchedule = schedules.task({
           projectId: s.projectId,
           now,
         },
+        options: {
+          concurrencyKey: `${s.projectId}:${s.id}`,
+          idempotencyKey: `subscription.renew:${s.projectId}:${s.id}`,
+        },
       }))
     )
 
