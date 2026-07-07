@@ -9,5 +9,3 @@ declare global {
 declare module "cloudflare:test" {
   interface ProvidedEnv extends RuntimeEnv {}
 }
-
-export {}
