@@ -27,6 +27,12 @@ import {
   walletReservationTable,
 } from "./db/schema"
 import type { MeterStateDraft } from "./meter-state-adapter"
+import type {
+  EnsureWalletReservationParams,
+  EntitlementWindowStateOps,
+  EntitlementWindowStateStore,
+  WalletReservationPatch,
+} from "./ports"
 import { unique } from "./utils"
 
 // ---------------------------------------------------------------------------
@@ -76,31 +82,96 @@ export function replaceGrantConsumptionState(
   states.push(state)
 }
 
+export function selectGrantStatesForActiveGrants(
+  grants: ActiveGrantInput[],
+  states: GrantConsumptionState[],
+  timestamp: number
+): GrantConsumptionState[] {
+  const activeBucketKeys = new Set(
+    grants
+      .map((grant) => computeGrantPeriodBucket(grant, timestamp)?.bucketKey)
+      .filter((key): key is string => typeof key === "string" && key.length > 0)
+  )
+
+  return states.filter((state) => activeBucketKeys.has(state.bucketKey))
+}
+
 // ---------------------------------------------------------------------------
 // Durable SQLite store
+//
+// SQLite (Durable Object) implementation of EntitlementWindowStateStore. The
+// Durable Object gives us single-writer serialization; `atomically` maps to a
+// synchronous SQLite transaction on the same handle, and direct port methods
+// run as individually atomic statements.
 // ---------------------------------------------------------------------------
 
-export class EntitlementWindowStore {
+type SqliteHandle = DrizzleSqliteDODatabase<typeof schema>
+
+export class EntitlementWindowStore implements EntitlementWindowStateStore {
   private batchIdempotencyResults: Map<string, BatchIdempotencyEntry> | null = null
 
   constructor(
-    private readonly db: DrizzleSqliteDODatabase<typeof schema>,
+    private readonly db: SqliteHandle,
     private readonly logger: WarningLogger,
     private readonly onStateChanged: () => void
   ) {}
 
   // -------------------------------------------------------------------
+  // Atomic command boundary
+  // -------------------------------------------------------------------
+
+  atomically<T>(fn: (tx: EntitlementWindowStateOps) => T): T {
+    return this.db.transaction((tx) => fn(this.bindOps(tx)))
+  }
+
+  private bindOps(handle: SqliteHandle): EntitlementWindowStateOps {
+    return {
+      ensureMeterState: (params) => this.ensureMeterStateIn(handle, params),
+      readMeterStateDraft: (meterKey, createdAt) =>
+        this.readMeterStateDraftIn(handle, meterKey, createdAt),
+      writeMeterState: (params) => this.writeMeterStateIn(handle, params),
+      readGrantStatesForActiveGrants: (grants, timestamp) =>
+        this.readGrantStatesForActiveGrantsIn(handle, grants, timestamp),
+      readGrantStatesForBatch: (grants, timestamps) =>
+        this.readGrantStatesForBatchIn(handle, grants, timestamps),
+      writeGrantConsumptions: (states) => this.writeGrantConsumptionsIn(handle, states),
+      lookupCachedIdempotencyResult: (eventId) => this.lookupCachedIdempotencyResult(eventId),
+      lookupCachedIdempotencyResults: (eventIds) => this.lookupCachedIdempotencyResults(eventIds),
+      writeBatchIdempotencyResults: (entries) =>
+        this.writeBatchIdempotencyResultsIn(handle, entries),
+      readWalletReservation: () => this.readWalletReservationIn(handle),
+      ensureWalletReservation: (params) => this.ensureWalletReservationIn(handle, params),
+      updateWalletReservation: (patch) => this.updateWalletReservationIn(handle, patch),
+    }
+  }
+
+  // -------------------------------------------------------------------
   // Meter state
   // -------------------------------------------------------------------
 
-  ensureMeterState(
-    tx: DrizzleSqliteDODatabase<typeof schema>,
-    params: {
-      meterKey: string
-      createdAt: number
-    }
+  ensureMeterState(params: { meterKey: string; createdAt: number }): void {
+    this.ensureMeterStateIn(this.db, params)
+  }
+
+  readMeterStateDraft(meterKey: string, createdAt: number): MeterStateDraft {
+    return this.readMeterStateDraftIn(this.db, meterKey, createdAt)
+  }
+
+  writeMeterState(params: {
+    meterKey: string
+    createdAt: number
+    usage: number
+    updatedAt: number | null
+  }): void {
+    this.writeMeterStateIn(this.db, params)
+  }
+
+  private ensureMeterStateIn(
+    handle: SqliteHandle,
+    params: { meterKey: string; createdAt: number }
   ): void {
-    tx.insert(meterStateTable)
+    handle
+      .insert(meterStateTable)
       .values({
         meterKey: params.meterKey,
         usage: 0,
@@ -111,162 +182,12 @@ export class EntitlementWindowStore {
       .run()
   }
 
-  // -------------------------------------------------------------------
-  // Wallet reservation
-  // -------------------------------------------------------------------
-
-  ensureWalletReservation(
-    tx: DrizzleSqliteDODatabase<typeof schema>,
-    params: {
-      projectId: string
-      customerId: string
-      currency: string
-      reservationEndAt: number
-      billingPeriodId?: string | null
-      cycleEndAt?: number | null
-      cycleStartAt?: number | null
-      featurePlanVersionItemId?: string | null
-      featureSlug?: string | null
-      statementKey?: string | null
-    }
-  ): void {
-    tx.insert(walletReservationTable)
-      .values({
-        id: WALLET_RESERVATION_ROW_ID,
-        projectId: params.projectId,
-        customerId: params.customerId,
-        currency: params.currency,
-        reservationEndAt: params.reservationEndAt,
-        billingPeriodId: params.billingPeriodId ?? null,
-        cycleEndAt: params.cycleEndAt ?? null,
-        cycleStartAt: params.cycleStartAt ?? null,
-        featurePlanVersionItemId: params.featurePlanVersionItemId ?? null,
-        featureSlug: params.featureSlug ?? null,
-        statementKey: params.statementKey ?? null,
-      })
-      .onConflictDoNothing({ target: walletReservationTable.id })
-      .run()
-
-    tx.update(walletReservationTable)
-      .set({
-        projectId: params.projectId,
-        customerId: params.customerId,
-        currency: params.currency,
-        reservationEndAt: params.reservationEndAt,
-        billingPeriodId: params.billingPeriodId ?? null,
-        cycleEndAt: params.cycleEndAt ?? null,
-        cycleStartAt: params.cycleStartAt ?? null,
-        featurePlanVersionItemId: params.featurePlanVersionItemId ?? null,
-        featureSlug: params.featureSlug ?? null,
-        statementKey: params.statementKey ?? null,
-      })
-      .run()
-  }
-
-  // -------------------------------------------------------------------
-  // Grant states
-  // -------------------------------------------------------------------
-
-  readGrantStatesForActiveGrants(
-    tx: DrizzleSqliteDODatabase<typeof schema>,
-    grants: ActiveGrantInput[],
-    timestamp: number
-  ): GrantConsumptionState[] {
-    const buckets = grants
-      .map((grant) => computeGrantPeriodBucket(grant, timestamp))
-      .filter((bucket): bucket is NonNullable<typeof bucket> => bucket !== null)
-    const bucketKeys = new Set(buckets.map((bucket) => bucket.bucketKey))
-    const periodKeys = unique(buckets.map((bucket) => bucket.periodKey))
-
-    if (bucketKeys.size === 0 || periodKeys.length === 0) {
-      return []
-    }
-
-    return this.readGrantStatesForPeriodKeys(tx, periodKeys).filter((state) =>
-      bucketKeys.has(state.bucketKey)
-    )
-  }
-
-  readGrantStatesForBatch(
-    tx: DrizzleSqliteDODatabase<typeof schema>,
-    grants: ActiveGrantInput[],
-    timestamps: number[]
-  ): GrantConsumptionState[] {
-    const buckets = timestamps.flatMap((timestamp) =>
-      grants
-        .map((grant) => computeGrantPeriodBucket(grant, timestamp))
-        .filter((bucket): bucket is NonNullable<typeof bucket> => bucket !== null)
-    )
-    const bucketKeys = new Set(buckets.map((bucket) => bucket.bucketKey))
-    const periodKeys = unique(buckets.map((bucket) => bucket.periodKey))
-
-    if (bucketKeys.size === 0 || periodKeys.length === 0) {
-      return []
-    }
-
-    return this.readGrantStatesForPeriodKeys(tx, periodKeys).filter((state) =>
-      bucketKeys.has(state.bucketKey)
-    )
-  }
-
-  readGrantStatesForPeriodKeys(
-    tx: DrizzleSqliteDODatabase<typeof schema>,
-    periodKeys: string[]
-  ): GrantConsumptionState[] {
-    const states: GrantConsumptionState[] = []
-
-    for (let i = 0; i < periodKeys.length; i += APPLY_BATCH_SIZE_LIMIT) {
-      const rows = tx
-        .select({
-          grantStatesJson: entitlementPeriodUsageTable.grantStatesJson,
-        })
-        .from(entitlementPeriodUsageTable)
-        .where(
-          inArray(
-            entitlementPeriodUsageTable.periodKey,
-            periodKeys.slice(i, i + APPLY_BATCH_SIZE_LIMIT)
-          )
-        )
-        .all()
-
-      for (const row of rows) {
-        states.push(
-          ...parseCompactGrantStates(
-            row.grantStatesJson,
-            compactGrantConsumptionStateListSchema,
-            this.logger
-          )
-        )
-      }
-    }
-
-    return states
-  }
-
-  selectGrantStatesForActiveGrants(
-    grants: ActiveGrantInput[],
-    states: GrantConsumptionState[],
-    timestamp: number
-  ): GrantConsumptionState[] {
-    const activeBucketKeys = new Set(
-      grants
-        .map((grant) => computeGrantPeriodBucket(grant, timestamp)?.bucketKey)
-        .filter((key): key is string => typeof key === "string" && key.length > 0)
-    )
-
-    return states.filter((state) => activeBucketKeys.has(state.bucketKey))
-  }
-
-  // -------------------------------------------------------------------
-  // Meter state draft
-  // -------------------------------------------------------------------
-
-  readMeterStateDraft(
-    tx: DrizzleSqliteDODatabase<typeof schema>,
+  private readMeterStateDraftIn(
+    handle: SqliteHandle,
     meterKey: string,
     createdAt: number
   ): MeterStateDraft {
-    const row = tx
+    const row = handle
       .select({
         usage: meterStateTable.usage,
         updatedAt: meterStateTable.updatedAt,
@@ -285,112 +206,84 @@ export class EntitlementWindowStore {
     }
   }
 
-  // -------------------------------------------------------------------
-  // Grant consumptions
-  // -------------------------------------------------------------------
-
-  writeGrantConsumptions(
-    tx: DrizzleSqliteDODatabase<typeof schema>,
-    states: Iterable<GrantConsumptionState>
-  ): number {
-    const statesByPeriod = new Map<string, GrantConsumptionState[]>()
-    for (const state of states) {
-      const existing = statesByPeriod.get(state.periodKey)
-      if (existing) {
-        existing.push(state)
-      } else {
-        statesByPeriod.set(state.periodKey, [state])
-      }
-    }
-
-    if (statesByPeriod.size === 0) {
-      return 0
-    }
-
-    const updatedAt = Date.now()
-    for (const [periodKey, periodStates] of statesByPeriod.entries()) {
-      const existing = tx
-        .select({
-          grantStatesJson: entitlementPeriodUsageTable.grantStatesJson,
-        })
-        .from(entitlementPeriodUsageTable)
-        .where(eq(entitlementPeriodUsageTable.periodKey, periodKey))
-        .get()
-
-      const mergedStates = existing
-        ? parseCompactGrantStates(
-            existing.grantStatesJson,
-            compactGrantConsumptionStateListSchema,
-            this.logger
-          )
-        : []
-      for (const state of periodStates) {
-        replaceGrantConsumptionState(mergedStates, state)
-      }
-
-      const sortedStates = mergedStates.sort((left, right) =>
-        left.bucketKey.localeCompare(right.bucketKey)
-      )
-      const grantStatesJson = JSON.stringify(sortedStates)
-      const periodStartAt = Math.min(...sortedStates.map((candidate) => candidate.periodStartAt))
-      const periodEndAt = Math.max(...sortedStates.map((candidate) => candidate.periodEndAt))
-
-      if (existing) {
-        tx.update(entitlementPeriodUsageTable)
-          .set({
-            periodStartAt,
-            periodEndAt,
-            grantStatesJson,
-            updatedAt,
-          })
-          .where(eq(entitlementPeriodUsageTable.periodKey, periodKey))
-          .run()
-      } else {
-        tx.insert(entitlementPeriodUsageTable)
-          .values({
-            periodKey,
-            periodStartAt,
-            periodEndAt,
-            grantStatesJson,
-            updatedAt,
-          })
-          .run()
-      }
-    }
-
-    this.onStateChanged()
-    return statesByPeriod.size
+  private writeMeterStateIn(
+    handle: SqliteHandle,
+    params: { meterKey: string; createdAt: number; usage: number; updatedAt: number | null }
+  ): void {
+    this.ensureMeterStateIn(handle, { meterKey: params.meterKey, createdAt: params.createdAt })
+    handle
+      .update(meterStateTable)
+      .set({
+        usage: params.usage,
+        updatedAt: params.updatedAt,
+      })
+      .where(eq(meterStateTable.meterKey, params.meterKey))
+      .run()
   }
 
   // -------------------------------------------------------------------
-  // Lifecycle
+  // Wallet reservation
   // -------------------------------------------------------------------
 
-  readLifecycleEndAt(): number | null {
-    const latestPeriodUsage = this.db
-      .select({ periodEndAt: entitlementPeriodUsageTable.periodEndAt })
-      .from(entitlementPeriodUsageTable)
-      .orderBy(desc(entitlementPeriodUsageTable.periodEndAt))
-      .limit(1)
-      .get()
-
-    const lifecycleEnds: number[] = []
-    if (
-      typeof latestPeriodUsage?.periodEndAt === "number" &&
-      Number.isFinite(latestPeriodUsage.periodEndAt)
-    ) {
-      lifecycleEnds.push(latestPeriodUsage.periodEndAt)
-    }
-    const reservationEndAt = this.readWalletReservation(this.db)?.reservationEndAt
-    if (typeof reservationEndAt === "number" && Number.isFinite(reservationEndAt)) {
-      lifecycleEnds.push(reservationEndAt)
-    }
-
-    return lifecycleEnds.length > 0 ? Math.max(...lifecycleEnds) : null
+  readWalletReservation(): WalletReservationSnapshot {
+    return this.readWalletReservationIn(this.db)
   }
 
-  readWalletReservation(tx: DrizzleSqliteDODatabase<typeof schema>): WalletReservationSnapshot {
-    const row = tx
+  ensureWalletReservation(params: EnsureWalletReservationParams): void {
+    this.ensureWalletReservationIn(this.db, params)
+  }
+
+  updateWalletReservation(patch: WalletReservationPatch): void {
+    this.updateWalletReservationIn(this.db, patch)
+  }
+
+  private ensureWalletReservationIn(
+    handle: SqliteHandle,
+    params: EnsureWalletReservationParams
+  ): void {
+    handle
+      .insert(walletReservationTable)
+      .values({
+        id: WALLET_RESERVATION_ROW_ID,
+        projectId: params.projectId,
+        customerId: params.customerId,
+        currency: params.currency,
+        reservationEndAt: params.reservationEndAt,
+        billingPeriodId: params.billingPeriodId ?? null,
+        cycleEndAt: params.cycleEndAt ?? null,
+        cycleStartAt: params.cycleStartAt ?? null,
+        featurePlanVersionItemId: params.featurePlanVersionItemId ?? null,
+        featureSlug: params.featureSlug ?? null,
+        statementKey: params.statementKey ?? null,
+      })
+      .onConflictDoNothing({ target: walletReservationTable.id })
+      .run()
+
+    handle
+      .update(walletReservationTable)
+      .set({
+        projectId: params.projectId,
+        customerId: params.customerId,
+        currency: params.currency,
+        reservationEndAt: params.reservationEndAt,
+        billingPeriodId: params.billingPeriodId ?? null,
+        cycleEndAt: params.cycleEndAt ?? null,
+        cycleStartAt: params.cycleStartAt ?? null,
+        featurePlanVersionItemId: params.featurePlanVersionItemId ?? null,
+        featureSlug: params.featureSlug ?? null,
+        statementKey: params.statementKey ?? null,
+      })
+      .run()
+  }
+
+  // The singleton row is the only row in the table, so updates never need a
+  // WHERE clause. Patches come straight from the processor's staged state.
+  private updateWalletReservationIn(handle: SqliteHandle, patch: WalletReservationPatch): void {
+    handle.update(walletReservationTable).set(patch).run()
+  }
+
+  private readWalletReservationIn(handle: SqliteHandle): WalletReservationSnapshot {
+    const row = handle
       .select({
         projectId: walletReservationTable.projectId,
         customerId: walletReservationTable.customerId,
@@ -475,6 +368,194 @@ export class EntitlementWindowStore {
   }
 
   // -------------------------------------------------------------------
+  // Grant states
+  // -------------------------------------------------------------------
+
+  readGrantStatesForActiveGrants(
+    grants: ActiveGrantInput[],
+    timestamp: number
+  ): GrantConsumptionState[] {
+    return this.readGrantStatesForActiveGrantsIn(this.db, grants, timestamp)
+  }
+
+  readGrantStatesForBatch(
+    grants: ActiveGrantInput[],
+    timestamps: number[]
+  ): GrantConsumptionState[] {
+    return this.readGrantStatesForBatchIn(this.db, grants, timestamps)
+  }
+
+  writeGrantConsumptions(states: Iterable<GrantConsumptionState>): number {
+    return this.writeGrantConsumptionsIn(this.db, states)
+  }
+
+  private readGrantStatesForActiveGrantsIn(
+    handle: SqliteHandle,
+    grants: ActiveGrantInput[],
+    timestamp: number
+  ): GrantConsumptionState[] {
+    return this.readGrantStatesForBatchIn(handle, grants, [timestamp])
+  }
+
+  private readGrantStatesForBatchIn(
+    handle: SqliteHandle,
+    grants: ActiveGrantInput[],
+    timestamps: number[]
+  ): GrantConsumptionState[] {
+    const buckets = timestamps.flatMap((timestamp) =>
+      grants
+        .map((grant) => computeGrantPeriodBucket(grant, timestamp))
+        .filter((bucket): bucket is NonNullable<typeof bucket> => bucket !== null)
+    )
+    const bucketKeys = new Set(buckets.map((bucket) => bucket.bucketKey))
+    const periodKeys = unique(buckets.map((bucket) => bucket.periodKey))
+
+    if (bucketKeys.size === 0 || periodKeys.length === 0) {
+      return []
+    }
+
+    return this.readGrantStatesForPeriodKeys(handle, periodKeys).filter((state) =>
+      bucketKeys.has(state.bucketKey)
+    )
+  }
+
+  private readGrantStatesForPeriodKeys(
+    handle: SqliteHandle,
+    periodKeys: string[]
+  ): GrantConsumptionState[] {
+    const states: GrantConsumptionState[] = []
+
+    for (let i = 0; i < periodKeys.length; i += APPLY_BATCH_SIZE_LIMIT) {
+      const rows = handle
+        .select({
+          grantStatesJson: entitlementPeriodUsageTable.grantStatesJson,
+        })
+        .from(entitlementPeriodUsageTable)
+        .where(
+          inArray(
+            entitlementPeriodUsageTable.periodKey,
+            periodKeys.slice(i, i + APPLY_BATCH_SIZE_LIMIT)
+          )
+        )
+        .all()
+
+      for (const row of rows) {
+        states.push(
+          ...parseCompactGrantStates(
+            row.grantStatesJson,
+            compactGrantConsumptionStateListSchema,
+            this.logger
+          )
+        )
+      }
+    }
+
+    return states
+  }
+
+  private writeGrantConsumptionsIn(
+    handle: SqliteHandle,
+    states: Iterable<GrantConsumptionState>
+  ): number {
+    const statesByPeriod = new Map<string, GrantConsumptionState[]>()
+    for (const state of states) {
+      const existing = statesByPeriod.get(state.periodKey)
+      if (existing) {
+        existing.push(state)
+      } else {
+        statesByPeriod.set(state.periodKey, [state])
+      }
+    }
+
+    if (statesByPeriod.size === 0) {
+      return 0
+    }
+
+    const updatedAt = Date.now()
+    for (const [periodKey, periodStates] of statesByPeriod.entries()) {
+      const existing = handle
+        .select({
+          grantStatesJson: entitlementPeriodUsageTable.grantStatesJson,
+        })
+        .from(entitlementPeriodUsageTable)
+        .where(eq(entitlementPeriodUsageTable.periodKey, periodKey))
+        .get()
+
+      const mergedStates = existing
+        ? parseCompactGrantStates(
+            existing.grantStatesJson,
+            compactGrantConsumptionStateListSchema,
+            this.logger
+          )
+        : []
+      for (const state of periodStates) {
+        replaceGrantConsumptionState(mergedStates, state)
+      }
+
+      const sortedStates = mergedStates.sort((left, right) =>
+        left.bucketKey.localeCompare(right.bucketKey)
+      )
+      const grantStatesJson = JSON.stringify(sortedStates)
+      const periodStartAt = Math.min(...sortedStates.map((candidate) => candidate.periodStartAt))
+      const periodEndAt = Math.max(...sortedStates.map((candidate) => candidate.periodEndAt))
+
+      if (existing) {
+        handle
+          .update(entitlementPeriodUsageTable)
+          .set({
+            periodStartAt,
+            periodEndAt,
+            grantStatesJson,
+            updatedAt,
+          })
+          .where(eq(entitlementPeriodUsageTable.periodKey, periodKey))
+          .run()
+      } else {
+        handle
+          .insert(entitlementPeriodUsageTable)
+          .values({
+            periodKey,
+            periodStartAt,
+            periodEndAt,
+            grantStatesJson,
+            updatedAt,
+          })
+          .run()
+      }
+    }
+
+    this.onStateChanged()
+    return statesByPeriod.size
+  }
+
+  // -------------------------------------------------------------------
+  // Lifecycle
+  // -------------------------------------------------------------------
+
+  readLifecycleEndAt(): number | null {
+    const latestPeriodUsage = this.db
+      .select({ periodEndAt: entitlementPeriodUsageTable.periodEndAt })
+      .from(entitlementPeriodUsageTable)
+      .orderBy(desc(entitlementPeriodUsageTable.periodEndAt))
+      .limit(1)
+      .get()
+
+    const lifecycleEnds: number[] = []
+    if (
+      typeof latestPeriodUsage?.periodEndAt === "number" &&
+      Number.isFinite(latestPeriodUsage.periodEndAt)
+    ) {
+      lifecycleEnds.push(latestPeriodUsage.periodEndAt)
+    }
+    const reservationEndAt = this.readWalletReservation()?.reservationEndAt
+    if (typeof reservationEndAt === "number" && Number.isFinite(reservationEndAt)) {
+      lifecycleEnds.push(reservationEndAt)
+    }
+
+    return lifecycleEnds.length > 0 ? Math.max(...lifecycleEnds) : null
+  }
+
+  // -------------------------------------------------------------------
   // Idempotency
   // -------------------------------------------------------------------
 
@@ -508,7 +589,7 @@ export class EntitlementWindowStore {
     return this.batchIdempotencyResults!
   }
 
-  hydrateBatchIdempotencyResults(): void {
+  private hydrateBatchIdempotencyResults(): void {
     const results = new Map<string, BatchIdempotencyEntry>()
     const rows = this.db
       .select({
@@ -555,15 +636,20 @@ export class EntitlementWindowStore {
     }
   }
 
-  writeBatchIdempotencyResults(
-    tx: DrizzleSqliteDODatabase<typeof schema>,
+  writeBatchIdempotencyResults(entries: BatchIdempotencyEntry[]): void {
+    this.writeBatchIdempotencyResultsIn(this.db, entries)
+  }
+
+  private writeBatchIdempotencyResultsIn(
+    handle: SqliteHandle,
     entries: BatchIdempotencyEntry[]
   ): void {
     if (entries.length === 0) {
       return
     }
 
-    tx.insert(idempotencyKeyBatchesTable)
+    handle
+      .insert(idempotencyKeyBatchesTable)
       .values({
         createdAt: entries[0]?.createdAt ?? Date.now(),
         entries: JSON.stringify(entries),
@@ -591,7 +677,12 @@ export class EntitlementWindowStore {
           )
         )
         .run()
-      this.batchIdempotencyResults = null
+      // Refresh a warm cache here, in the background alarm, so the next
+      // customer request does not pay the full rehydrate. A cold cache stays
+      // lazy — dormant windows woken only by alarms never scan the table.
+      if (this.batchIdempotencyResults !== null) {
+        this.hydrateBatchIdempotencyResults()
+      }
     }
 
     return staleBatchRows.length

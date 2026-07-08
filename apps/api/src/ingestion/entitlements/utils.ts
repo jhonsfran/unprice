@@ -12,32 +12,6 @@ export function inactivityThresholdMs(env: Pick<Env, "NODE_ENV">): number {
     : DEFAULT_INACTIVITY_THRESHOLD_MS
 }
 
-export function minNullableExpiry(left: number | null, right: number | null): number | null {
-  if (left === null) return right
-  if (right === null) return left
-  return Math.min(left, right)
-}
-
-export function jsonEquals(left: unknown, right: unknown): boolean {
-  return JSON.stringify(stableJson(left ?? null)) === JSON.stringify(stableJson(right ?? null))
-}
-
-function stableJson(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(stableJson)
-  }
-
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value)
-        .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
-        .map(([key, nestedValue]) => [key, stableJson(nestedValue)])
-    )
-  }
-
-  return value
-}
-
 export function unique<T>(values: T[]): T[] {
   return [...new Set(values)]
 }
