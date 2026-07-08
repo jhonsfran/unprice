@@ -30,11 +30,12 @@ export default function Hero() {
           >
             <Balancer>Authorize customer spend before paid work runs.</Balancer>
           </h1>
+          {/* Compression rule (positioning-and-messaging.md): one loss-framed
+              sentence plus the category frame. The enumeration lives below the
+              fold as state — the problem trace and the money-path stations. */}
           <p className="mt-5 max-w-xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
             Sell credits and usage-based plans without eating over-budget customer work. Unprice is
-            the open-source customer money path for usage-based SaaS: plans stay versioned,
-            entitlements separate, customer budgets in the request path, and invoice evidence tied
-            to the same decision that allowed or denied the work.
+            the open-source customer money path for usage-based SaaS.
           </p>
 
           <div className="mt-8 flex flex-wrap items-center gap-3">

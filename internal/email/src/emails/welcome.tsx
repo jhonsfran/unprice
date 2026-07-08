@@ -45,14 +45,14 @@ const WelcomeEmail = ({
 
               <Text className="mb-[24px] text-[#ffffff] text-[16px] leading-[24px]">
                 Unprice is the open-source customer money path for usage-based SaaS: authorize
-                customer spend before paid work runs, then explain every charge, credit, denial,
-                and invoice line from the same evidence trail.
+                customer spend before paid work runs, then explain every charge, credit, denial, and
+                invoice line from the same evidence trail.
               </Text>
 
               <Text className="mb-[32px] text-[#ffffff] text-[16px] leading-[24px]">
                 Start with one paid action. Define a plan version, install the TypeScript SDK, and
-                run the decision in shadow on the built-in Sandbox—nothing blocks your traffic
-                until the evidence convinces you.
+                run the decision in shadow on the built-in Sandbox—nothing blocks your traffic until
+                the evidence convinces you.
               </Text>
 
               <Text className="mb-[24px] text-[#ffffff] text-[16px] leading-[24px]">

@@ -1,6 +1,6 @@
 # Positioning And Messaging
 
-Date: 2026-07-03
+Date: 2026-07-06
 
 Status: pre-validation refresh. Updated after the July 2026 market audit (processor consolidation,
 Stigg's AI-runtime pivot, agent-billing white space). The wedge remains a hypothesis until the
@@ -40,8 +40,10 @@ Consequences for Unprice:
    out from under its buyers. Lago runs this play for the billing-engine layer; nobody runs it for
    the request-path authorization layer.
 2. Stigg repositioned onto the wedge ("Every AI request is a spend decision. Make it in
-   milliseconds," with per-agent budget caps and credits, sold up-market). Authorization alone is
-   now a contested claim; the open, forkable authorization runtime is not. Contrast accordingly.
+   milliseconds," with per-agent budget caps and credits, sold up-market). Autumn contests the same
+   claim at the Seed tier with an atomic request-path deduction and a reserve/finalize lock
+   primitive (code audit, 2026-07-06). Authorization alone is now a contested claim at both tiers;
+   the ledger-backed, processor-independent money path is not. Contrast accordingly.
 3. The Seed-to-Series-A tier Metronome and Orb served before going enterprise is under-served —
    exactly Unprice's ICP.
 4. Public buyer language validates the mechanism: complaints that Stripe Billing has "no way to
@@ -67,7 +69,7 @@ processors, AI gateways that cap provider cost, closed usage runtimes that canno
 forked, and open-source billing engines that do not authorize in the request path,
 
 Unprice keeps the customer spend decision, the double-entry ledger, and the invoice explanation in
-one open money path you can read, self-host, and fork: the same path that authorizes paid usage
+one open money path you can read, fork, and run in your own account: the same path that authorizes paid usage
 before cost is created also proves why the charge came out that way — and the layer that guards
 your margin cannot be acquired out from under you.
 
@@ -111,6 +113,12 @@ or denied the work.
 The subheadline leads with the loss-framed one-liner (the dream outcome in the buyer's money terms)
 and keeps the canonical enumeration second.
 
+Compression rule (2026-07-06): on the hero surface itself, the subheadline may stop after the
+loss-framed sentence plus the category frame. The four-part enumeration ("plans stay versioned,
+entitlements separate...") belongs in the first scroll section, not the first breath — a
+subheadline that needs a second clause is carrying body-copy weight. Autumn's hero wins on parse
+speed; Unprice must win on parse speed and precision, in that order.
+
 Supporting capability line (secondary, not the hero): meter events, enforce entitlements, reserve
 customer credits, cap customer and workload spend, price flat, tiered, package, and usage features,
 preserve invoice evidence, and ship pricing experiments without hardcoding revenue logic into your
@@ -138,6 +146,24 @@ one money path.
 
 Claim discipline: say "Stripe-first today, provider-extensible by design." Do not claim live
 Paddle/Lemon Squeezy/Square integrations until they ship.
+
+## Hosting Boundary
+
+"Run it yourself" means deploying the open-source runtime to your own Cloudflare account. The
+request-path runtime is built on Cloudflare primitives — Workers, Durable Objects (entitlement
+windows, run budgets, project state), Queues, and Pipelines — because the authorization decision
+needs per-customer, single-writer state where requests run. Usage analytics additionally run on
+Tinybird. State the substrate plainly and frame it as the mechanism, not a caveat: the budget check
+lives where the request is.
+
+What survives unconditionally: the code is open and forkable (AGPL-3.0), schemas and the
+double-entry ledger are inspectable, data and keys stay in the buyer's own accounts, and Unprice
+never sits in the funds flow.
+
+Claim discipline: say "run it in your own Cloudflare account" or "deploy to your own Cloudflare
+account." Do not say unqualified "self-host," "runs anywhere," "docker-compose up," or "VPS-ready"
+until a portable runtime ships. The independence claim is about the logic layer (open, forkable,
+cannot be acquired out from under you), not infrastructure-agnosticism — do not conflate the two.
 
 ## Primary Beachhead
 
@@ -235,6 +261,10 @@ flowchart LR
 - Enterprise revenue recognition suite.
 - Guaranteed throughput or latency numbers.
 - AI agent platform.
+- Infrastructure-agnostic self-hosting (VPS, docker-compose, Kubernetes). The runtime deploys to
+  the buyer's own Cloudflare account today (Workers, Durable Objects, Queues, Pipelines) and uses
+  Tinybird for usage analytics; say "run it in your own Cloudflare account," not unqualified
+  "self-host."
 
 ## Competitor Contrast
 
@@ -250,19 +280,47 @@ flowchart LR
 - Stigg: now leads with "Every AI request is a spend decision. Make it in milliseconds" — a closed
   usage runtime with request-path credits, per-agent budget caps, governance, BYOC, and invoicing,
   sold up-market (Miro, Webflow, PagerDuty). It validates the category and directly contests the
-  authorization claim. Contrast on inspectable, forkable, self-hostable open-source ownership of
-  the request-to-invoice money path and on the under-served Seed-to-Series-A tier — not on a claim
-  that Stigg cannot enforce runtime usage.
+  authorization claim. Contrast on inspectable, forkable open-source ownership of the
+  request-to-invoice money path and on the under-served Seed-to-Series-A tier — not on a claim
+  that Stigg cannot enforce runtime usage, and not on hosting (Stigg sells BYOC; Unprice runs in
+  the buyer's own Cloudflare account).
 - Lago and OpenMeter/Kong-style open billing/metering: strong open-source or self-hostable
   metering, billing, and monetization infrastructure. Post-consolidation, Lago also claims the
   "independent, forkable billing" position. Unprice contrasts on the single path from request-time
   customer budget/credit authorization to invoice evidence: an open billing engine rates and
   invoices; it does not authorize in the request path.
-- The 2024-2026 cohort — Autumn ("billing infrastructure for AI startups," open source over
-  Stripe), Flowglad (open-source zero-webhook payments), Paid.ai (outcome-based billing for teams
-  selling agents): validation that the generational wedge is AI monetization. None owns the
-  wallet + entitlement + budget runtime for products whose customers burn credits. Watch Autumn
-  most closely; it sells to the same builder at the same stage.
+- Autumn — primary named competitor (source-code audit of useautumn/autumn, 2026-07-06; re-verify
+  before each external use, their code moves fast). Apache-2.0 open source over Stripe, YC-backed,
+  "One API for plans, usage and AI credits," free tier then $375/month, real traction (named
+  logos, ~2.6k stars, published pricing). It sells to the same builder at the same stage. Do not
+  strawman it: its enforcement core is an atomic per-customer deduction (Redis Lua,
+  reject-before-write), with spend limits enforced in the request path, a reserve/finalize lock
+  primitive with auto-expiry, first-class product versioning with customers pinned to the version
+  they attached, and real concurrency test coverage. Claims Autumn already holds — never lead with
+  these against them: "check before work runs," "reserve credits before the call," "change pricing
+  without breaking existing customers." The code-verified contrast is what the decision writes
+  down and where the money truth lives:
+  1. Accounting vs counters. Autumn's balance is a mutable value: Redis is the source of truth,
+     Postgres follows on sub-second write-behind, and the event log sits beside the balance —
+     balances are not derivable from it. Unprice posts every reserve, capture, refund, and
+     settlement as paired entries on an append-only double-entry ledger.
+  2. Stored explanation vs reconstruction. Autumn invoice lines link to product, price,
+     entitlement, and period — not to usage events or allow/deny decisions; explaining a charge is
+     a forensic join. Unprice invoice lines are ledger projections, and charge explanation chains
+     invoice, ledger line, billing period, plan version, and rated meter facts.
+  3. Processor independence. Autumn cannot persist an invoice without a Stripe id
+     (invoices.stripe_id is NOT NULL); Stripe types live inside its core plan object and execution
+     is hardcoded to Stripe. Unprice runs a provider interface with Stripe as one adapter —
+     Stripe-first today, provider-extensible by design.
+  4. Workload budgets vs per-call locks. Autumn's lock reserves a fixed amount for one call and is
+     unsupported for its allocated features. Unprice budgeted runs are first-class workload
+     objects metered across many consume calls with run-level budget rejection.
+  Same buyer, different promise: Autumn sells "Stripe made easy"; Unprice sells the money path
+  that can testify. Both gates say no; only a ledger proves why.
+- The rest of the 2024-2026 cohort — Flowglad (open-source zero-webhook payments), Paid.ai
+  (outcome-based billing for teams selling agents): validation that the generational wedge is AI
+  monetization. None owns the ledger-backed wallet + entitlement + budget runtime for products
+  whose customers burn credits.
 - Workflow and AI infrastructure: runs jobs, agents, model calls, and automations. It owns
   execution, not the full customer money path.
 - The DIY stack: Stripe for invoices, custom usage tables, Redis or database counters, cron
@@ -361,6 +419,9 @@ invoice evidence from the same money path."
 - How to explain a usage invoice from event evidence.
 - How to launch usage pricing without rewriting product code.
 - Your Redis counter is not a budget (the DIY-stack teardown; strongest launch candidate).
+- Both gates say no; only a ledger proves why (the gate-vs-ledger teardown: counters, event logs,
+  and double-entry evidence; respectful to Autumn, grounded in public code, dated).
+- A balance that syncs to the database is a counter (write-behind billing state vs ledger-first).
 - Your billing layer just got acquired. Now what? (the 2026 consolidation piece; dated — verify
   facts at publish time.)
 
@@ -375,11 +436,12 @@ pricing page as its best demo of explainable, usage-aware pricing.
 - Define the commercial/hosted offering and its pricing tiers, then make the public pricing page an
   exemplar of the product. Market anchors from the July 2026 audit: Stripe Billing charges 0.7% of
   billing volume (price flat or credit-based against the percentage), Lago gates needed features
-  behind roughly $1,500/month (price under that cliff), Autumn is free for builders (open-core
-  cloud convenience is the answer). Even "early access, starts at $X" beats silence — a pricing
+  behind roughly $1,500/month (price under that cliff), Autumn prices free to $8K of the buyer's monthly
+  revenue, then $375/month to $50K, then custom (2026-07-06; it meters its fee on the buyer's
+  revenue, not on events — note the pattern). Even "early access, starts at $X" beats silence — a pricing
   company with no public pricing undermines its own authority. Interim answer shipped on the
-  homepage (2026-07): self-host free under AGPL-3.0, cloud free during early access with no card
-  at signup, commercial license by contact. Replace with real tiers when they are defined; every
+  homepage (2026-07): run it yourself free under AGPL-3.0 (your own Cloudflare account), cloud
+  free during early access with no card at signup, commercial license by contact. Replace with real tiers when they are defined; every
   claim there must stay code-backed.
 - Validate the lead phrase ("authorize customer spend", "prove every charge", or "budget the paid
   action") with real customer interviews before scaling spend. Recruit with the buyer's own words

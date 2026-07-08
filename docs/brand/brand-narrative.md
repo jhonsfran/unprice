@@ -1,6 +1,6 @@
 # Brand Narrative
 
-Date: 2026-07-03
+Date: 2026-07-06
 
 Status: pre-validation refresh (July 2026 market audit). Lock after the customer interviews in
 `jobs-to-be-done.md`.
@@ -240,6 +240,11 @@ The demo should end with:
 - The billing layer you rent can be acquired. The money path you own cannot. (Consolidation angle;
   verify dated market facts before external use.)
 - Read the code that guards your money — or have your agent read it.
+- Both gates say no. Only a ledger proves why.
+- Counters gate. Ledgers testify.
+- A balance that syncs to the database is a counter. A ledger is the database.
+- An invoice line should be a ledger projection, not a description pushed to your payment
+  provider.
 
 ## Proof Points
 
@@ -282,6 +287,10 @@ Do not:
 - Use exact latency or throughput claims without benchmarks.
 - Present Unprice as an AI agent platform.
 - Hide the product behind vague words like growth, effortless, magical, or all-in-one.
+- Claim a competitor lacks request-path checks, credit reservation, spend limits, or plan pinning
+  without a dated code audit. Autumn has all four (2026-07-06 audit); contrast on the ledger,
+  stored invoice explanation, processor independence, and workload budgets instead — see the
+  discipline note in `brand-identity.md`.
 
 ## Copy Test
 

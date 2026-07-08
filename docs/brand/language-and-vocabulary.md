@@ -114,6 +114,7 @@ economic actor that holds subscriptions, budgets, wallets, and invoices.
 | `invoice evidence` | `analytics` when evidence is meant | Evidence explains charges and denials. |
 | `Sandbox` | `sandbox` when naming the provider | Capitalize the built-in payment provider mode. |
 | `Stripe-first today` | `Stripe replacement` | Payment provider boundary. |
+| `run it in your own Cloudflare account` | unqualified `self-host`, `runs anywhere` | Hosting boundary: the runtime deploys to the buyer's own Cloudflare account (Workers, Durable Objects, Queues). |
 | `AGPL-3.0` | `AGPL` only | Use full license name on first mention. |
 | `SDK`, `API`, `OpenAPI` | `Sdk`, `api` in headings | Keep developer acronyms uppercase. |
 
@@ -570,6 +571,7 @@ Allowed:
 - "Budgeted runs for agents, workflows, jobs, tools, and custom workloads."
 - "Plan versions keep customers on the pricing they bought while new pricing experiments ship."
 - "Stripe-first today, provider-extensible by design."
+- "The money path is yours to read, fork, and run in your own Cloudflare account."
 - "Designed for request-path usage enforcement."
 - "AI gateways cap provider spend; Unprice governs customer spend and invoice evidence."
 
@@ -578,6 +580,8 @@ Avoid until proven:
 - Exact latency claims such as "<100ms".
 - Exact throughput claims such as "100k+ events/sec".
 - Live Paddle, Lemon Squeezy, or Square integrations.
+- Infrastructure-agnostic self-hosting ("runs anywhere," VPS, docker-compose, Kubernetes) — the
+  runtime requires the buyer's own Cloudflare account today.
 - Enterprise revenue recognition, tax, or accounting replacement.
 - "AI agent platform."
 - Customer quotes, case-study numbers, or ROI claims without evidence.
@@ -597,8 +601,8 @@ Use this before publishing app copy, marketing copy, docs, examples, or emails.
 - Are business denials separated from system failures?
 - Is every CTA a verb plus a specific object?
 - Does every claim have product evidence or a canonical source?
-- Does the copy avoid `growth`, `magic`, `effortless`, `all-in-one`, `no-code`, and `Stripe
-  replacement`?
+- Does the copy avoid `growth`, `magic`, `effortless`, `all-in-one`, `no-code`, `Stripe
+  replacement`, and unqualified `self-host`?
 - If the surface is cold, does it lead with the customer money path before introducing `PriceOps`?
 
 ## Governance

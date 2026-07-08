@@ -1,7 +1,7 @@
 "use client"
 
 import { cn } from "@unprice/ui/utils"
-import { domAnimation, LazyMotion, m } from "framer-motion"
+import { LazyMotion, domAnimation, m } from "framer-motion"
 import type React from "react"
 import Balancer from "react-wrap-balancer"
 import { MarketingPricingCard, type MarketingPricingPlan } from "./marketing-pricing-card"

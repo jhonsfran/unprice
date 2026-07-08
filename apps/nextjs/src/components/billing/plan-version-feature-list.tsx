@@ -132,7 +132,7 @@ export function PlanVersionFeatureListItem({
         : feature.feature.title
       calculatorParams.max = feature.config?.units! * 10
       break
-  }
+    }
   }
 
   return (
@@ -277,8 +277,8 @@ const PriceCalculator = ({
 }) => {
   return (
     <div className="my-2 flex items-center">
-                    <Slider
-                      max={max}
+      <Slider
+        max={max}
         min={min}
         step={step}
         size="sm"

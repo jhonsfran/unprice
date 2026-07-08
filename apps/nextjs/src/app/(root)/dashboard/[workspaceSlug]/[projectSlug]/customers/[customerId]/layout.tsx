@@ -24,10 +24,7 @@ export default async function CustomerDetailLayout({
   }
 
   return (
-    <CustomerDetailShell
-      customer={customer}
-      baseUrl={baseUrl}
-    >
+    <CustomerDetailShell customer={customer} baseUrl={baseUrl}>
       {children}
     </CustomerDetailShell>
   )

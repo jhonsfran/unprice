@@ -1,11 +1,11 @@
 "use client"
 
+import type { RouterOutputs } from "@unprice/trpc/routes"
 import { useSelectedLayoutSegments } from "next/navigation"
 import type { ReactNode } from "react"
+import { DashboardShell } from "~/components/layout/dashboard-shell"
 import { CustomerEconomicHeader } from "./customer-economic-header"
 import { CustomerTabs } from "./customer-tabs"
-import { DashboardShell } from "~/components/layout/dashboard-shell"
-import type { RouterOutputs } from "@unprice/trpc/routes"
 
 type Customer = RouterOutputs["customers"]["getSubscriptions"]["customer"]
 

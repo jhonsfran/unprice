@@ -22,6 +22,7 @@ const ownershipFacts = [
   { label: "wallet ledger", fact: "double-entry · always balances" },
   { label: "schemas", fact: "plans · versions · meters · entitlements" },
   { label: "SDK", fact: "generated from OpenAPI contracts" },
+  { label: "runtime", fact: "Cloudflare Workers + DOs · your account" },
   { label: "payments", fact: "Stripe-first · provider-extensible" },
   { label: "funds flow", fact: "yours — unprice never sits in it" },
 ]
@@ -31,7 +32,7 @@ export default function ManifestoOwnership() {
     <SectionShell labelledBy="ownership-title" className="bg-background-bgSubtle">
       <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,28rem)] lg:gap-16">
         <div className="flex flex-col items-start">
-          <StationHeader label="Ownership" fact="forkable · self-hostable" />
+          <StationHeader label="Ownership" fact="forkable · runs in your account" />
           <h2
             id="ownership-title"
             className="mt-6 max-w-xl font-primary font-semibold text-3xl text-background-textContrast tracking-tight sm:text-4xl"
@@ -46,8 +47,9 @@ export default function ManifestoOwnership() {
           </p>
           <p className="mt-4 max-w-xl text-background-text text-sm leading-6">
             Unprice keeps the customer spend decision, the double-entry ledger, and the invoice
-            explanation in one open money path you can read, self-host, and fork. Read the code that
-            guards your money — or have your agent read it — before you trust it.
+            explanation in one open money path you can read, fork, and run in your own Cloudflare
+            account. Read the code that guards your money — or have your agent read it — before you
+            trust it.
           </p>
           <div className="mt-8">
             <Link

@@ -519,8 +519,14 @@ export function MoneyPath({ className }: { className?: string }) {
           <span className="absolute top-3 right-[calc(50%-20px)] bottom-0 left-2 rounded-tr-[10px] border-background-border border-t border-r border-dashed" />
         </div>
 
+        {/* fork connector (stacked): keep the rail continuous so the fork
+            reads as a consequence of the decision, not a new diagram */}
+        <div aria-hidden className="relative h-7 sm:hidden">
+          <span className="-translate-x-1/2 absolute top-0 bottom-0 left-2 w-0 border-background-border border-l border-dashed" />
+        </div>
+
         {/* the two futures of the same request */}
-        <div className="mt-4 grid grid-cols-1 gap-x-6 gap-y-6 sm:mt-0 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-x-6 gap-y-6 sm:grid-cols-2">
           <div>
             <div
               data-mp-node="allow-chip"
@@ -549,9 +555,25 @@ export function MoneyPath({ className }: { className?: string }) {
                 />
               ))}
             </div>
-            <p className="mt-1 pl-8 text-background-text text-xs leading-5">
-              the invoice line is explained by the same decision that allowed it
-            </p>
+            {/* Terminal receipt rule (design-system-guidelines.md): the allow
+                pass ends in a literal invoice line with its explain chain, not
+                a sentence claiming one exists. */}
+            <div className="mt-2 ml-8 rounded-sm border border-background-border bg-background-base px-3 py-2">
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="font-mono text-[10px] text-background-text uppercase tracking-widest">
+                  invoice line · explain
+                </span>
+                <span className="font-medium font-mono text-[11px] text-background-textContrast">
+                  $0.002
+                </span>
+              </div>
+              <p className="mt-1 font-mono text-[10px] text-background-text leading-4">
+                pro@v3 · $0.002/token
+              </p>
+              <p className="font-mono text-[10px] text-background-text leading-4">
+                reserve → capture · balanced
+              </p>
+            </div>
           </div>
 
           <div>
@@ -578,9 +600,18 @@ export function MoneyPath({ className }: { className?: string }) {
                 <StationRow key={station.label} {...station} variant="ghost" />
               ))}
             </div>
-            <p className="mt-1 pl-8 text-background-text text-xs leading-5">
-              denied in the request path — no cost was ever created
-            </p>
+            {/* The deny receipt is the same receipt, empty: absence as proof. */}
+            <div className="mt-2 ml-8 rounded-sm border border-background-border border-dashed px-3 py-2 opacity-80">
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="font-mono text-[10px] text-background-text uppercase tracking-widest">
+                  invoice line
+                </span>
+                <span className="font-mono text-[11px] text-background-text">—</span>
+              </div>
+              <p className="mt-1 font-mono text-[10px] text-background-text leading-4">
+                no cost created · nothing to explain
+              </p>
+            </div>
           </div>
         </div>
 

@@ -12,11 +12,11 @@ import { StationHeader } from "./station-header"
 
 const offers = [
   {
-    title: "Self-host",
-    body: "The full money path — plans, versions, entitlements, wallets, ledger, invoices — on your own infrastructure. Read every line before you trust it.",
+    title: "Run it yourself",
+    body: "The full money path — plans, versions, entitlements, wallets, ledger, invoices — deployed to your own Cloudflare account. Read every line before you trust it.",
     facts: [
       { label: "license", fact: "AGPL-3.0 · free" },
-      { label: "runs on", fact: "your infra" },
+      { label: "runs on", fact: "your Cloudflare account" },
       { label: "lock-in", fact: "none · fork it" },
     ],
   },
@@ -52,13 +52,13 @@ export function OfferSection() {
           The pricing is as explainable as yours will be.
         </h2>
         <p className="mt-5 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-          The core is AGPL-3.0 and free to self-host. The hosted cloud is free during early access,
-          with no card at signup. Payments settle to your own Stripe account either way — Unprice
-          never sits in your funds flow.
+          The core is AGPL-3.0 and free to run in your own Cloudflare account. The hosted cloud is
+          free during early access, with no card at signup. Payments settle to your own Stripe
+          account either way — Unprice never sits in your funds flow.
         </p>
         <p className="mt-4 max-w-2xl text-background-text text-sm leading-6">
-          The money path is yours to read, self-host, and fork — it cannot be acquired out from
-          under you. The full argument is in{" "}
+          The money path is yours to read, fork, and run in your own account — it cannot be acquired
+          out from under you. The full argument is in{" "}
           <Link
             href="/manifesto"
             className="font-medium text-background-textContrast underline decoration-background-borderHover underline-offset-4 hover:decoration-background-textContrast"

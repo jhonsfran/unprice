@@ -6,6 +6,9 @@ import { PricingHero } from "~/components/landing/pricing-hero"
 const ProblemSection = dynamic(() =>
   import("~/components/landing/problem").then((mod) => mod.ProblemSection)
 )
+const SystemMap = dynamic(() =>
+  import("~/components/landing/system-map").then((mod) => mod.SystemMap)
+)
 const CodeExample = dynamic(() => import("~/components/landing/code-example"))
 const AdoptionSection = dynamic(() =>
   import("~/components/landing/adoption").then((mod) => mod.AdoptionSection)
@@ -21,6 +24,7 @@ export default function Home() {
       <main className="flex flex-col overflow-hidden">
         <Hero />
         <ProblemSection />
+        <SystemMap />
         <div className="w-full border-background-border border-t">
           <PricingHero
             headline="Watch paid work stop before it creates cost."

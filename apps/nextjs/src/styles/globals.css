@@ -7,7 +7,7 @@
 
 @layer base {
   :root {
-    --radius: 0.5rem;
+    --radius: 0.4rem;
 
     /* chart colors */
     --chart-1: hsl(206 100% 50%);
@@ -19,7 +19,7 @@
   }
 
   .dark {
-    --radius: 0.5rem;
+    --radius: 0.4rem;
 
     /* chart colors */
     --chart-1: hsl(206 100% 50%);

@@ -136,8 +136,8 @@ Use:
 - "Stripe-first today, provider-extensible by design."
 - "Designed for request-path usage enforcement."
 - "Wallet credits ride a double-entry ledger."
-- "The money path is yours to read, self-host, and fork — it cannot be acquired out from under
-  you."
+- "The money path is yours to read, fork, and run in your own Cloudflare account — it cannot be
+  acquired out from under you."
 
 Avoid until proven:
 
@@ -147,6 +147,9 @@ Avoid until proven:
   but Stripe is the only supported provider today).
 - Enterprise revenue recognition, tax, or accounting replacement.
 - "AI agent platform" or ownership of prompts, tools, memory, traces, or deployments.
+- Infrastructure-agnostic self-hosting (VPS, docker-compose, Kubernetes) — the runtime deploys to
+  the buyer's own Cloudflare account today (Workers, Durable Objects, Queues, Pipelines) and uses
+  Tinybird for usage analytics.
 
 ## Payments And Business Model
 
@@ -157,6 +160,10 @@ This is a deliberate boundary: bring your own payments, keep one money path.
 
 Unprice is open-core: an AGPL-3.0 open-source core plus a Commercial License for teams that cannot
 open-source their modifications or want dedicated support.
+
+Hosting boundary: the runtime deploys to the buyer's own Cloudflare account (Workers, Durable
+Objects, Queues, Pipelines); usage analytics run on Tinybird. Say "run it in your own Cloudflare
+account," not unqualified "self-host," until a portable runtime ships.
 
 ## Brand Personality
 

@@ -168,18 +168,18 @@ export function CustomerMetricsPanel({ customerId, currentAccess }: CustomerMetr
   })
 
   return (
-      <UsageDashboardView
-        data={data}
-        intervalLabel={intervalFilter.label}
-        dateFormat={intervalFilter.dateFormat}
-        mode="customer"
-        isFetching={isFetching}
-        usageExampleParams={buildCustomerUsageExampleParams(customerId, currentAccess)}
-        display={{
-          showCustomerSummary: false,
-          showHeaderControls: false,
-        }}
-      />
+    <UsageDashboardView
+      data={data}
+      intervalLabel={intervalFilter.label}
+      dateFormat={intervalFilter.dateFormat}
+      mode="customer"
+      isFetching={isFetching}
+      usageExampleParams={buildCustomerUsageExampleParams(customerId, currentAccess)}
+      display={{
+        showCustomerSummary: false,
+        showHeaderControls: false,
+      }}
+    />
   )
 }
 

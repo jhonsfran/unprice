@@ -1,12 +1,15 @@
-import { LedgerRow, SectionShell, StationDot } from "./station"
+import { Leader, LedgerRow, SectionShell, StationDot } from "./station"
 import { StationHeader } from "./station-header"
 
 // The status quo, rendered as state: a trace of the DIY stack (Stripe + a
 // usage table + a Redis counter + cron) where the paid work runs first and
 // the evidence never exists. The ghost grammar from the money path — absence
-// as proof — applied to the buyer's current system.
+// as proof — applied to the buyer's current system. The dispute moment is a
+// literal artifact (a support ticket assigned to engineering), not a label:
+// render the pain as artifacts (design-system-guidelines.md).
 
 const traceEvents = [
+  { time: "03:00:07", event: "cron reset-usage", fact: "last success · 3d ago" },
   { time: "09:41:02", event: "POST /v1/run", fact: "200 · work executed" },
   { time: "09:41:02", event: "INCR usage:acme-corp", fact: "4,101 → 4,102" },
   { time: "09:41:03", event: "provider cost", fact: "$0.48 · already spent" },
@@ -40,13 +43,13 @@ export function ProblemSection() {
           </p>
           <p className="mt-4 max-w-xl text-background-text text-sm leading-6">
             Your Redis counter is not a budget: it can say usage is high, but it cannot prove which
-            plan version applied, which credits were reserved, or why a request was denied.
-            Sharpest where customers buy credits for AI, API, and workflow actions.
+            plan version applied, which credits were reserved, or why a request was denied. Sharpest
+            where customers buy credits for AI, API, and workflow actions.
           </p>
         </div>
 
         <figure
-          aria-label="A trace of the DIY stack: the paid work executes and creates cost, but when the customer disputes the invoice, the plan version is unknown, no entitlement or budget check ever ran, no credits were reserved, and there is no ledger entry — the evidence has to be reconstructed from logs by hand."
+          aria-label="A trace of the DIY stack: the usage-reset cron last succeeded three days ago, the paid work executes and creates cost, and thirty days later the invoice bills $1,204. The customer opens a support ticket disputing the charge against their $500 budget and it is assigned to engineering — but the plan version is unknown, no entitlement or budget check ever ran, no credits were reserved, and there is no ledger entry. The evidence has to be reconstructed from logs by hand."
           className="h-fit rounded-lg border border-background-border bg-background-bgSubtle p-4 sm:p-5"
         >
           <figcaption className="mb-4 flex items-baseline justify-between gap-4 border-background-border border-b pb-3">
@@ -78,10 +81,34 @@ export function ProblemSection() {
             ))}
           </div>
 
-          <div aria-hidden className="relative my-3 py-1.5">
+          <div className="mt-3 border-background-border border-t pt-2">
+            <LedgerRow label="30 days later · invoice line" fact="$1,204.00" />
+          </div>
+
+          {/* the dispute, as the artifact it actually arrives as */}
+          <div className="my-3 rounded-sm border border-background-border bg-background-base px-3 py-2.5">
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="font-mono text-[10px] text-background-text uppercase tracking-widest">
+                support · ticket #4812
+              </span>
+              <span className="font-mono text-[10px] text-background-text">reply due · 24h</span>
+            </div>
+            <p className="mt-1.5 text-background-textContrast text-sm leading-6">
+              “Why were we charged $1,204? We set a $500 budget.”
+            </p>
+            <div className="mt-1 flex items-baseline gap-2">
+              <span className="font-mono text-[10px] text-background-text uppercase tracking-widest">
+                assigned
+              </span>
+              <Leader />
+              <span className="font-mono text-[10px] text-danger-text">engineering</span>
+            </div>
+          </div>
+
+          <div aria-hidden className="relative py-1.5">
             <span className="-translate-y-1/2 absolute top-1/2 left-0 h-px w-3 bg-background-border" />
             <span className="pl-6 font-mono text-[10px] text-background-text uppercase tracking-widest">
-              the customer disputes the invoice
+              what engineering can pull up
             </span>
           </div>
 
@@ -101,12 +128,11 @@ export function ProblemSection() {
             ))}
           </div>
 
-          <div className="mt-4 border-background-border border-t pt-3">
-            <LedgerRow label="30 days later · invoice line" fact="$1,204.00" />
+          <div className="mt-3 border-background-border border-t pt-3">
             <LedgerRow
               label="evidence"
               variant="ghost"
-              fact="reconstructed from logs · by hand"
+              fact="reconstructed by hand"
               factClassName="text-danger-text"
             />
           </div>

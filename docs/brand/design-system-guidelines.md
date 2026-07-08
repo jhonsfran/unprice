@@ -1,6 +1,6 @@
 # Design System Guidelines
 
-Date: 2026-06-30
+Date: 2026-07-06
 
 ## Design Objective
 
@@ -180,6 +180,42 @@ two alternating passes (denied first, then allowed through to the invoice), ligh
 title it touches in the live-request `info` color; it starts only in view and is removed under
 `prefers-reduced-motion`. Reuse this component rather than re-drawing the path; extend it for docs
 and empty states.
+
+Companion visual — the system map (2026-07-06): where the money path answers "what happens?",
+the system map answers "where does Unprice sit?" in one glance. Implemented as
+[`apps/nextjs/src/components/landing/system-map.tsx`](/Users/jhonsfran/repos/unprice/apps/nextjs/src/components/landing/system-map.tsx)
+(`SystemMap`): your application → Unprice (the center panel carries the logo's bracket corners in
+`primary`, with the wedge — "Spend authorization · in the request path" — as the emphasized top
+row) → payment provider, joined by dashed connectors labeled with what crosses each boundary
+(request/decision, invoice/capture). Provider pluggability renders as a ghost row ("Next provider
+· extensible by design") — never as named unshipped providers. Boundary caption states the
+funds-flow rule. Static by design; reuse it in docs and onboarding rather than re-drawing boxes.
+
+Terminal moment rule (2026-07-06): every money-path render should end in a receipt. The allow pass
+terminates in an invoice line with an explain affordance (plan version, pricing rule, ledger
+capture); the deny pass terminates in a denial receipt — the same stations shown untouched: no
+wallet movement, no ledger entry, no invoice line. The receipt is the proof-in-hero moment; a path
+that ends in a checkmark is decoration.
+
+Problem sections: render the pain as artifacts. Show the DIY stack as literal, recognizable
+artifacts — a support ticket asking "why was I charged?", a Slack thread pulling an engineer into
+invoice forensics, a cron route like `/api/cron/reset-usage`, a Redis counter snippet — then show
+the money path replacing them. This is the render-state-literally principle applied to the
+problem, not just the product. Keep artifacts plausible and calm; no fear adjectives.
+
+Hero copy compression: the subheadline is one loss-framed sentence plus the category frame. Noun
+enumerations (versioned plans, separate entitlements, budgets, evidence) belong in the first
+scroll section, not the hero. If the subheadline needs a second sentence, it is carrying body-copy
+weight. Canonical rule lives in `positioning-and-messaging.md`.
+
+Utility pages are brand surfaces: 404, 500, and empty states should carry the money-path motif —
+for example a denial receipt ("This page was not authorized. No ledger entry was written."). A
+default 404 breaks the operational-infrastructure feel exactly where trust is cheapest to keep.
+
+Differentiation guard (2026-07-06): do not adopt code-comment section labels ("// THE PROBLEM"),
+pixel-dither textures, or purple-dark panels — that is Autumn's visual territory (see
+`brand-identity.md` Visual Direction). Unprice section markers come from the receipt/ledger
+vocabulary: monospace facts, numbered stations, ruled dividers, version markers.
 
 Recommended hero concept:
 

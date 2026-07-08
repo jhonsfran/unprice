@@ -17,7 +17,9 @@ use the strategy doc for the full reasoning.
 **Claims guardrails:** no exact latency/throughput numbers, no "Stripe replacement," no
 tax/accounting/revenue-recognition, not an "AI agent platform." Payments: Stripe-first today (Stripe
 Connect to the buyer's own account, or bring-your-own-key) plus the built-in **Sandbox** test
-provider; do not claim Square (unimplemented) or live Paddle/Lemon Squeezy. Lead competitive copy
+provider; do not claim Square (unimplemented) or live Paddle/Lemon Squeezy. Hosting: say "run it in
+your own Cloudflare account," not unqualified "self-host" — the runtime requires the buyer's own
+Cloudflare account (Workers, Durable Objects, Queues). Lead competitive copy
 against the DIY stack (counter + cron) first, then distinguish Unprice from AI gateways and closed
 usage runtimes. Voice is **calm urgency** — mechanism, not fear.
 
@@ -220,7 +222,7 @@ Validate with zero exposure. Flip the switch only on the evidence. Keep full cus
   ledger evidence.
 - **Subscriptions** — provisioned by `signUp`; cancel, pause, resume with a simple API.
 
-**Tiers (keep):** FREE (AGPL, self-host) · PRO (commercial license + support) · ENTERPRISE
+**Tiers (keep):** FREE (AGPL, run it in your own Cloudflare account) · PRO (commercial license + support) · ENTERPRISE
 (dedicated support for teams that can't open-source their changes).
 
 ---
@@ -263,7 +265,7 @@ money path while it's small.
 | --- | --- |
 | "Why not just Stripe?" | Stripe captures payment and issues invoices. Unprice owns the customer money path before and around that invoice: plan versions, pricing rules, entitlements, usage, budgets, credits, ledger captures, and evidence. Keep Stripe; put customer spend authorization in front of paid usage. |
 | "Why not an AI gateway?" | Gateways cap provider spend, route models, and manage virtual keys. Unprice governs what your customer is allowed to spend and connects that decision to plan versions, credits, and invoice evidence. |
-| "Why not Stigg?" | Stigg is a strong closed usage runtime. Use Unprice when you want the request-to-invoice money path in open source: inspect it, self-host it, adapt it, and keep the budget check, credit reservation, and invoice evidence together. |
+| "Why not Stigg?" | Stigg is a strong closed usage runtime. Use Unprice when you want the request-to-invoice money path in open source: inspect it, fork it, run it in your own account, and keep the budget check, credit reservation, and invoice evidence together. |
 | "Why not a Redis counter?" | A counter can drift from spend, credits, and invoice evidence, and races let over-budget work through. Unprice keeps the budget check, credit reservation, and invoice explanation on one path. |
 | "Will switching disrupt my current logic?" | No — adopt it in shadow. `access.check` is read-only and `usage.record` is non-blocking, so you run Unprice's decisions beside your stack and only cut over to enforcement when you trust it. |
 | "Do I have to move my payments / will you touch my money?" | No. Start on Sandbox (no processor), then connect your **own** Stripe via Connect or your own key. Charges and payouts run on your account; Unprice never sits in your funds flow. |

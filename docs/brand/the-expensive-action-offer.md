@@ -13,7 +13,9 @@ pitch.
 no tax/accounting/revenue-recognition coverage, not an "AI agent platform." Payments: Stripe-first
 today (via Stripe Connect to the buyer's own account, or bring-your-own-key) plus the built-in
 **Sandbox** test provider; do not claim Square (an unimplemented placeholder) or live
-Paddle/Lemon Squeezy. Lead with the customer money path, not cold category language.
+Paddle/Lemon Squeezy. Hosting: say "run it in your own Cloudflare account," not unqualified
+"self-host" — the runtime requires the buyer's own Cloudflare account (Workers, Durable Objects,
+Queues). Lead with the customer money path, not cold category language.
 
 ---
 
@@ -219,14 +221,15 @@ shippable from the existing product surface.
 
 ## The Guarantee (Layered Risk Reversal)
 
-For this buyer the real fear is **not** the price — the core is open source and free to self-host.
+For this buyer the real fear is **not** the price — the core is open source and free to run in
+your own Cloudflare account.
 The real fear is *architectural*: "Will I put money logic somewhere I'll regret?" So the guarantee
 reverses **implementation risk**, not purchase risk. Two layers:
 
 ### 1. The Inspectable-Core Guarantee (anti-black-box)
 
 > The code that guards your money is open. Read the exact money-path logic before you trust it — or
-> have your agent read it — run it on your own infrastructure under AGPL-3.0, and keep your own
+> have your agent read it — run it in your own Cloudflare account under AGPL-3.0, and keep your own
 > data. No hidden pricing logic, no vendor lock-in, no black box between your product and your
 > margin — and no acquisition risk: a forkable money path cannot be bought out from under you.
 
@@ -292,7 +295,7 @@ No countdown timers. Urgency comes from the buyer's own traffic and from genuine
 | --- | --- |
 | "Why not just Stripe?" | Stripe captures the payment and issues the invoice. Unprice owns the customer money path before and around that invoice: plan version, entitlement, usage, budget, credit, and evidence. Keep Stripe; put customer spend authorization in front of paid usage. |
 | "Why not an AI gateway?" | Gateways cap provider spend, route models, and manage virtual keys. Unprice governs what your customer is allowed to spend and connects that decision to plan versions, credits, and invoice evidence. |
-| "Why not Stigg?" | Stigg is a strong closed usage runtime. Use Unprice when you want the request-to-invoice money path in open source: inspect it, self-host it, adapt it, and keep the budget check, credit reservation, and invoice evidence together. |
+| "Why not Stigg?" | Stigg is a strong closed usage runtime. Use Unprice when you want the request-to-invoice money path in open source: inspect it, fork it, run it in your own account, and keep the budget check, credit reservation, and invoice evidence together. |
 | "Why not a Redis counter?" | **Your Redis counter is not a budget.** A counter can say "usage is high." It cannot reliably explain which budget was checked, which credits were reserved, why a request was denied, and how accepted usage became an invoice line — correctly, under concurrency. Unprice keeps all of that on one money path. |
 | "Will this replace my billing stack?" | No. Stripe-first today, provider-extensible by design. Unprice sits between product usage and invoice evidence; it does not replace your payment processor, tax, or accounting. |
 | "Do I have to move my payments to you? Will you touch my money?" | No. Start on the built-in Sandbox provider (no real processor) to test behavior, then connect **your own** Stripe account via Stripe Connect or your own API key. Charges and payouts run on your account; Unprice never sits in your funds flow. |

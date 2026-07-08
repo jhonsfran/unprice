@@ -52,6 +52,11 @@ const objections = [
     answer:
       "Do not adopt it all at once. Read the source, run one request path in shadow, prove it on Sandbox, then enforce only when the evidence matches.",
   },
+  {
+    question: "Do I need Cloudflare?",
+    answer:
+      "Today, yes. The runtime deploys to your own Cloudflare account — Workers, Durable Objects, Queues — because the spend decision needs fast per-customer state where requests run. Your account, your data, your keys.",
+  },
 ]
 
 export function AdoptionSection() {
@@ -114,7 +119,7 @@ export function AdoptionSection() {
         </ol>
       </div>
 
-      <div className="mt-14 grid gap-x-8 border-background-border border-t md:grid-cols-3">
+      <div className="mt-14 grid gap-x-8 border-background-border border-t md:grid-cols-2">
         {objections.map((item) => (
           <div key={item.question} className="border-background-border py-6 md:border-t-0">
             <h3 className="font-medium text-background-textContrast text-sm">{item.question}</h3>

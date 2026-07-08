@@ -1,6 +1,6 @@
 # Unprice Brand Identity
 
-Date: 2026-07-03
+Date: 2026-07-06
 
 Status: pre-validation refresh (July 2026 market audit). Lock after the customer interviews in
 `jobs-to-be-done.md`.
@@ -60,7 +60,7 @@ Unlike billing platforms that rate and invoice after usage and are consolidating
 processors, AI gateways that cap provider cost, closed usage runtimes that cannot be inspected or
 forked, and open-source billing engines that do not authorize in the request path, Unprice keeps
 the customer spend decision, the double-entry ledger, and the invoice explanation in one open money
-path you can read, self-host, and fork.
+path you can read, fork, and run in your own account.
 
 ## Brand Promise
 
@@ -187,8 +187,8 @@ sunset (see the market context in `positioning-and-messaging.md`).
 
 Proof points:
 
-- Open-source codebase (AGPL-3.0 core plus a commercial license) you can read, self-host, and
-  fork — or have your agent read — before you trust it.
+- Open-source codebase (AGPL-3.0 core plus a commercial license) you can read, fork, and run in
+  your own Cloudflare account — or have your agent read — before you trust it.
 - Double-entry wallet ledger.
 - Explicit schemas for plans, plan versions, features, meters, entitlements, wallets, and runs.
 - Generated SDK surface from OpenAPI contracts.
@@ -242,9 +242,15 @@ Allowed now:
 - "Designed for request-path usage enforcement."
 - "AI gateways cap provider spend; Unprice governs customer spend and invoice evidence."
 - "Wallet credits ride a double-entry ledger."
-- "The money path is yours to read, self-host, and fork — it cannot be acquired out from under
-  you."
+- "The money path is yours to read, fork, and run in your own Cloudflare account — it cannot be
+  acquired out from under you."
 - "Read the code that guards your money — or have your agent read it."
+- "Every reserve, capture, refund, and settlement is a paired entry on an append-only,
+  double-entry ledger."
+- "Invoice lines are ledger projections — explain a charge from stored evidence, not a
+  reconstruction."
+- "Both gates say no; only a ledger proves why." (competitor contrast; see the Autumn discipline
+  note below)
 
 Avoid until proven:
 
@@ -254,6 +260,22 @@ Avoid until proven:
   but Stripe is the only supported provider today).
 - Enterprise revenue recognition, tax, or accounting replacement.
 - "AI agent platform" or ownership of prompts, tools, memory, traces, or deployments.
+- "Balances are never stored" or "balances are recomputed from entries on every read" — the
+  ledger is append-only and entries pair by construction, but account balances are materialized
+  running totals. Claim "append-only double-entry ledger," nothing stronger.
+- Live Square support. The provider interface and capability table include Square scaffolding, but
+  no adapter exists; shipped adapters are Stripe and the sandbox test double.
+
+### Competitor Claim Discipline: Autumn (2026-07-06 Code Audit)
+
+Autumn (useautumn/autumn) was source-code audited on 2026-07-06. Never claim it lacks:
+request-path checks, atomic deduction, credit reservation (its lock/finalize primitive), spend
+limits, plan versioning with pinned customers, or concurrency testing — the code shows all of
+them, and a strawman burns trust with the exact engineer Unprice sells to. Contrast only on the
+four code-verified differences owned by `positioning-and-messaging.md`: double-entry accounting vs
+mutable balances, stored invoice explanation vs reconstruct-by-join, processor independence vs
+Stripe-required persistence, and budgeted workload runs vs per-call locks. Re-verify all four
+before each external use; their code moves fast.
 
 ## Vocabulary
 
@@ -316,6 +338,13 @@ Avoid:
 - Overly dark cyberpunk visuals.
 - Purple-dominant AI styling.
 - Illustrations that hide product state instead of explaining it.
+
+The avoid list is also a competitive moat (2026-07-06): Autumn — the closest competitor — brands
+in dark cyberpunk purple, pixel-dither texture, and code-comment section labels. Every purple
+gradient or dithered panel now reads as "another Autumn." The counter-position is receipt-grade
+legibility: neutral surfaces, monospace money facts, semantic status color, and the money path
+rendered literally. Look like financial infrastructure, not an AI-era dev tool — the aesthetic is
+the trust argument.
 
 ## Brand Experience Rules
 
