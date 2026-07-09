@@ -1,7 +1,7 @@
 import dynamic from "next/dynamic"
+import { DecisionDemo } from "~/components/landing/decision-demo"
 import Hero from "~/components/landing/hero"
 import { LazyMotionWrapper } from "~/components/landing/lazy-motion-wrapper"
-import { PricingHero } from "~/components/landing/pricing-hero"
 
 const ProblemSection = dynamic(() =>
   import("~/components/landing/problem").then((mod) => mod.ProblemSection)
@@ -25,13 +25,7 @@ export default function Home() {
         <Hero />
         <ProblemSection />
         <SystemMap />
-        <div className="w-full border-background-border border-t">
-          <PricingHero
-            headline="Watch paid work stop before it creates cost."
-            description="Click a paid action against the plan. The model shows the allow/deny decision, remaining budget, and invoice evidence from the same money path."
-            docsLinkText="Read the Docs"
-          />
-        </div>
+        <DecisionDemo />
         <CodeExample />
         <AdoptionSection />
         {/* <OfferSection /> */}

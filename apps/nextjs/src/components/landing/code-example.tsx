@@ -9,7 +9,7 @@ export default function CodeExample() {
   return (
     <SectionShell labelledBy="code-example-title">
       <div className="flex flex-col items-start">
-        <StationHeader index="03" label="First integration" fact="access.check · one call" />
+        <StationHeader index="04" label="First integration" fact="access.check · one call" />
         <h2
           id="code-example-title"
           className="mt-6 max-w-xl font-primary text-background-textContrast text-display-3"
