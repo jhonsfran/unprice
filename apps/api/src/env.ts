@@ -52,6 +52,41 @@ export function resolveRealtimeTicketSecret(env: {
   return env.REALTIME_TICKET_SECRET
 }
 
+type AxiomConfigurationEnv = {
+  APP_ENV: "development" | "preview" | "production"
+  AXIOM_API_TOKEN?: string | undefined
+  AXIOM_DATASET?: string | undefined
+}
+
+export function warnIfAxiomUnconfigured(
+  env: AxiomConfigurationEnv,
+  warn: (message: string) => void = (message) => console.error(message)
+): void {
+  if (env.APP_ENV === "development") return
+
+  const missingBindings = [
+    env.AXIOM_API_TOKEN ? undefined : "AXIOM_API_TOKEN",
+    env.AXIOM_DATASET ? undefined : "AXIOM_DATASET",
+  ].filter((binding): binding is string => binding !== undefined)
+
+  if (missingBindings.length === 0) return
+
+  warn(
+    `Axiom log drain is not configured for APP_ENV=${env.APP_ENV}; missing bindings: ${missingBindings.join(", ")}; wide events and DO diagnostics will not be exported`
+  )
+}
+
+let hasWarnedIfAxiomUnconfigured = false
+
+function warnIfAxiomUnconfiguredOnce(env: AxiomConfigurationEnv): void {
+  if (hasWarnedIfAxiomUnconfigured) return
+
+  warnIfAxiomUnconfigured(env, (message) => {
+    hasWarnedIfAxiomUnconfigured = true
+    console.error(message)
+  })
+}
+
 // This function should be called at the start of each request.
 export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
   const parsedEnv = createEnv({
@@ -103,6 +138,8 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
   if (parsedEnv.APP_ENV !== "development" && !parsedEnv.PIPELINE_EVENTS) {
     throw new Error("PIPELINE_EVENTS binding is required outside development")
   }
+
+  warnIfAxiomUnconfiguredOnce(parsedEnv)
 
   return {
     ...parsedEnv,
