@@ -83,6 +83,7 @@ export type CustomerGrantContextReader = {
   prepareCustomerGrantContext(
     params: CustomerGrantContextWindow & {
       customerId: string
+      includeBillingPeriods?: boolean
       projectId: string
     }
   ): Promise<PreparedCustomerGrantContext>
@@ -162,9 +163,11 @@ export class IngestionEntitlementContextLoader {
   public async prepareCustomerGrantContext(params: {
     customerId: string
     endAt: number
+    includeBillingPeriods?: boolean
     projectId: string
     startAt: number
   }): Promise<PreparedCustomerGrantContext> {
+    const includeBillingPeriods = params.includeBillingPeriods ?? true
     const bucket = Math.floor(params.endAt / GRANT_CONTEXT_CACHE_BUCKET_MS)
     const cacheKey = `${params.projectId}:${params.customerId}:${bucket}`
 
@@ -193,13 +196,13 @@ export class IngestionEntitlementContextLoader {
         error: cachedResult.err.message,
       })
 
-      return this.withFreshBillingPeriodContexts(
-        await this.loadCustomerEntitlementContext(params),
-        params
-      )
+      const direct = await this.loadCustomerEntitlementContext(params)
+      return includeBillingPeriods ? this.withFreshBillingPeriodContexts(direct, params) : direct
     }
 
-    return this.withFreshBillingPeriodContexts(cachedResult.val, params)
+    return includeBillingPeriods
+      ? this.withFreshBillingPeriodContexts(cachedResult.val, params)
+      : cachedResult.val
   }
 
   private async loadCustomerEntitlementContext(params: {

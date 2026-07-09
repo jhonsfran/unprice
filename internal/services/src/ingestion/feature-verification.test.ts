@@ -22,6 +22,28 @@ function createIngestionGrant(
 }
 
 describe("IngestionFeatureVerifier", () => {
+  it("requests the grant context without billing periods", async () => {
+    const prepareCustomerGrantContext = vi.fn().mockResolvedValue({
+      candidateEntitlements: [],
+    })
+    const verifier = new IngestionFeatureVerifier({
+      entitlementContext: { prepareCustomerGrantContext },
+      entitlementWindowClient: { getEntitlementWindowStub: vi.fn() },
+      logger: { error: vi.fn() },
+    } as never)
+
+    await verifier.verifyFeatureStatus({
+      customerId: "cus_123",
+      featureSlug: "api_calls",
+      projectId: "proj_123",
+      timestamp: TEST_NOW,
+    })
+
+    expect(prepareCustomerGrantContext).toHaveBeenCalledWith(
+      expect.objectContaining({ includeBillingPeriods: false })
+    )
+  })
+
   it("returns prepared context rejections that are not feature misses", async () => {
     const verifier = createVerifier({
       preparedContext: {

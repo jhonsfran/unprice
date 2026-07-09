@@ -43,6 +43,7 @@ export class IngestionFeatureVerifier {
     const { customerId, featureSlug, projectId, timestamp } = params
     const preparedContext = await this.entitlementContext.prepareCustomerGrantContext({
       customerId,
+      includeBillingPeriods: false,
       projectId,
       ...resolveCustomerGrantContextWindow({
         earliestTimestamp: timestamp,
