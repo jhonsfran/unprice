@@ -50,6 +50,7 @@ import {
 import { timing } from "hono/timing"
 import { verifyRealtimeTicket } from "~/auth/ticket"
 import { serializeError } from "~/errors/log"
+import { dispatchIngestionQueueBatch } from "~/ingestion/queue-routing"
 import { consumeIngestionReportingQueueBatch } from "~/ingestion/reporting/consumer"
 import { consumeIngestionBatch } from "~/ingestion/service"
 import { knownRoute } from "~/middleware/known-route"
@@ -245,7 +246,27 @@ const handler = {
   ) => {
     try {
       const parsedEnv = createRuntimeEnv(env as unknown as Record<string, unknown>)
-      await dispatchIngestionQueueBatch(batch, parsedEnv, executionCtx)
+      await dispatchIngestionQueueBatch(batch, {
+        consumeRaw: (parsedBatch) =>
+          consumeIngestionBatch(parsedBatch, parsedEnv, executionCtx, apiDrain ?? undefined),
+        consumeReporting: (parsedBatch) =>
+          consumeIngestionReportingQueueBatch(
+            parsedBatch,
+            parsedEnv,
+            executionCtx,
+            apiDrain ?? undefined
+          ),
+        onMalformed: ({ queue, errors }) => {
+          log.error({
+            code: "MALFORMED_INGESTION_QUEUE_MESSAGE",
+            message: "dropping malformed ingestion queue message",
+            queue,
+            errors,
+          })
+        },
+        rawSchema: ingestionQueueMessageSchema,
+        reportingSchema: ingestionReportingEnvelopeSchema,
+      })
     } catch (error) {
       const serializedError = serializeError(error)
 
@@ -263,77 +284,5 @@ const handler = {
     }
   },
 } satisfies ExportedHandler<Env, IngestionQueueMessage | IngestionReportingEnvelope>
-
-async function dispatchIngestionQueueBatch(
-  batch: MessageBatch<IngestionQueueMessage | IngestionReportingEnvelope>,
-  env: Env,
-  executionCtx: ExecutionContext
-): Promise<void> {
-  const rawMessages: Message<IngestionQueueMessage>[] = []
-  const reportingMessages: Message<IngestionReportingEnvelope>[] = []
-
-  for (const message of batch.messages) {
-    const reportingMessage = ingestionReportingEnvelopeSchema.safeParse(message.body)
-    if (reportingMessage.success) {
-      reportingMessages.push(withParsedBody(message, reportingMessage.data))
-      continue
-    }
-
-    const rawMessage = ingestionQueueMessageSchema.safeParse(message.body)
-    if (rawMessage.success) {
-      rawMessages.push(withParsedBody(message, rawMessage.data))
-      continue
-    }
-
-    log.error({
-      code: "MALFORMED_INGESTION_QUEUE_MESSAGE",
-      message: "dropping malformed ingestion queue message",
-      queue: batch.queue,
-      reporting_errors: reportingMessage.error.issues,
-      raw_errors: rawMessage.error.issues,
-    })
-    message.ack()
-  }
-
-  if (rawMessages.length > 0) {
-    await consumeIngestionBatch(
-      withMessages(batch, rawMessages),
-      env,
-      executionCtx,
-      apiDrain ?? undefined
-    )
-  }
-
-  if (reportingMessages.length > 0) {
-    await consumeIngestionReportingQueueBatch(
-      withMessages(batch, reportingMessages),
-      env,
-      executionCtx,
-      apiDrain ?? undefined
-    )
-  }
-}
-
-function withParsedBody<T>(
-  message: Message<IngestionQueueMessage | IngestionReportingEnvelope>,
-  body: T
-): Message<T> {
-  return {
-    ...message,
-    ack: message.ack.bind(message),
-    body,
-    retry: message.retry.bind(message),
-  } as Message<T>
-}
-
-function withMessages<T>(
-  batch: MessageBatch<IngestionQueueMessage | IngestionReportingEnvelope>,
-  messages: Message<T>[]
-): MessageBatch<T> {
-  return {
-    ...batch,
-    messages,
-  } as MessageBatch<T>
-}
 
 export default handler
