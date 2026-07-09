@@ -24,8 +24,6 @@ import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
 const tags = ["usage"]
-const SAFE_QUEUE_SEND_RETRIES = 3
-const SAFE_QUEUE_SEND_BASE_DELAY_MS = 100
 export const RAW_EVENT_MAX_BODY_BYTES = 128 * 1024
 export const RAW_EVENT_MAX_PROPERTIES_BYTES = 64 * 1024
 export const RAW_EVENT_MAX_PROPERTY_KEYS = 128
@@ -251,10 +249,6 @@ export const registerIngestEventsV1 = (app: App) => {
     const timestamp = body.timestamp ?? receivedAt
     const logger = c.get("logger")
 
-    // we shard the load in 2 queues for now, more than enough as we scale we add more
-    // const availableQueues = [c.env.QUEUE_SHARD_0, c.env.QUEUE_SHARD_1]
-    const availableQueues = [c.env.QUEUE_SHARD_0] // only one queue for now
-
     // 1. auth for the request
     const key = await keyAuth(c)
     const customer = resolveCustomerIdForApiKey({
@@ -337,80 +331,17 @@ export const registerIngestEventsV1 = (app: App) => {
       workspaceId: key.project.workspaceId,
     })
 
-    // shard by customerid to make sure the messages of specific customer go to the same queue
-    // this way we can group them together in background
-    const selectedQueue =
-      availableQueues[selectQueueShardIndex(customerId, availableQueues.length)]!
-
-    await safeSendToQueue({
-      queue: selectedQueue,
-      message,
-      logger,
-    })
+    try {
+      await c.get("rawIngestionQueue").send(message)
+    } catch {
+      throw new UnpriceApiError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Failed to enqueue ingestion event",
+      })
+    }
 
     return c.json({ accepted: true as const }, HttpStatusCodes.ACCEPTED)
   })
-}
-
-/**
- * simple hash algo to shared queues
- * @param customerId
- * @param shardCount
- * @returns
- */
-export function selectQueueShardIndex(customerId: string, shardCount = 2): number {
-  let hash = 0
-
-  for (let index = 0; index < customerId.length; index++) {
-    hash = (hash * 31 + customerId.charCodeAt(index)) >>> 0
-  }
-
-  return hash % shardCount
-}
-
-export async function safeSendToQueue(params: {
-  logger: Logger
-  queue: Queue<IngestionQueueMessage>
-  message: IngestionQueueMessage
-}): Promise<{ accepted: true }> {
-  const { logger, queue, message } = params
-
-  for (let attempt = 0; attempt < SAFE_QUEUE_SEND_RETRIES; attempt++) {
-    try {
-      await queue.send(message)
-      return { accepted: true }
-    } catch (error) {
-      logger.warn("raw ingestion queue send failed", {
-        attempt: attempt + 1,
-        maxAttempts: SAFE_QUEUE_SEND_RETRIES,
-        projectId: message.projectId,
-        customerId: message.customerId,
-        eventId: message.id,
-        idempotencyKey: message.idempotencyKey,
-        error,
-      })
-
-      if (attempt < SAFE_QUEUE_SEND_RETRIES - 1) {
-        await sleep(SAFE_QUEUE_SEND_BASE_DELAY_MS * 2 ** attempt)
-      }
-    }
-  }
-
-  logger.error("raw ingestion queue send failed permanently", {
-    projectId: message.projectId,
-    customerId: message.customerId,
-    eventId: message.id,
-    idempotencyKey: message.idempotencyKey,
-  })
-
-  throw new UnpriceApiError({
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Failed to enqueue ingestion event",
-  })
-}
-
-async function sleep(ms: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 export function generateEventId(now = Date.now()): string {

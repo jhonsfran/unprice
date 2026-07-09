@@ -6,11 +6,13 @@ import { shouldEmitMetrics } from "@unprice/observability/env"
 import { ApiKeysService } from "@unprice/services/apikey"
 import { CacheService } from "@unprice/services/cache"
 import { createServiceContext } from "@unprice/services/context"
+import type { IngestionQueueMessage } from "@unprice/services/ingestion"
 import { LogdrainMetrics, NoopMetrics } from "@unprice/services/metrics"
 import type { MiddlewareHandler } from "hono"
 import type { HonoEnv } from "~/hono/env"
 import { apiMetricsLogger, createApiLogger } from "~/observability"
 
+import { CloudflareRawIngestionQueueClient } from "~/ingestion/raw-queue-client"
 import { createIngestionService } from "~/ingestion/service"
 
 /**
@@ -204,6 +206,13 @@ export function init(): MiddlewareHandler<HonoEnv> {
     c.set("logger", logger)
     c.set("metrics", metrics)
     c.set("analytics", analytics)
+    c.set(
+      "rawIngestionQueue",
+      new CloudflareRawIngestionQueueClient({
+        logger,
+        queues: [c.env.QUEUE_SHARD_0 as Queue<IngestionQueueMessage>],
+      })
+    )
     c.set("db", db)
     c.set("waitUntil", waitUntil)
 

@@ -1,6 +1,6 @@
 import { OpenAPIHono } from "@hono/zod-openapi"
 import { INGESTION_MAX_EVENT_AGE_MS } from "@unprice/services/entitlements"
-import type { IngestionQueueMessage } from "@unprice/services/ingestion"
+import type { IngestionQueueMessage, RawIngestionQueueClient } from "@unprice/services/ingestion"
 import { timing } from "hono/timing"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { UnpriceApiError } from "~/errors"
@@ -36,8 +36,6 @@ import {
   generateEventId,
   registerIngestEventsV1,
   resolveIngestionMessageRequestId,
-  safeSendToQueue,
-  selectQueueShardIndex,
 } from "./ingestEventsV1"
 
 const requestBody = {
@@ -79,53 +77,8 @@ afterEach(() => {
 })
 
 describe("ingestEventsV1 helpers", () => {
-  it("selects the same shard for the same customer", () => {
-    expect(selectQueueShardIndex("cus_123")).toBe(selectQueueShardIndex("cus_123"))
-  })
-
   it("generates a stable ulid-like event id shape", () => {
     expect(generateEventId(requestBody.timestamp)).toBe("evt_01ARYZ6S41TSV4RRFFQ69G5FAV")
-  })
-
-  it("retries queue send and throws when all attempts fail", async () => {
-    const queue: Pick<Queue<IngestionQueueMessage>, "send"> = {
-      send: vi.fn().mockRejectedValue(new Error("queue down")),
-    }
-    const logger: Pick<Logger, "error" | "warn"> = {
-      error: vi.fn(),
-      warn: vi.fn(),
-    }
-
-    await expect(
-      safeSendToQueue({
-        logger,
-        queue: queue as Queue<IngestionQueueMessage>,
-        message: {
-          version: 1,
-          workspaceId: "ws_123",
-          projectId: "proj_123",
-          customerId: "cus_123",
-          requestId: "req_123",
-          receivedAt: Date.now(),
-          idempotencyKey: "idem_123",
-          id: "evt_123",
-          slug: "tokens_used",
-          timestamp: Date.now(),
-          properties: {},
-          source: {
-            environment: "development",
-            apiKeyId: "key_123",
-            sourceType: "api_key",
-            sourceId: "key_123",
-            sourceName: null,
-          },
-        },
-      })
-    ).rejects.toBeInstanceOf(UnpriceApiError)
-
-    expect(queue.send).toHaveBeenCalledTimes(3)
-    expect(logger.warn).toHaveBeenCalledTimes(3)
-    expect(logger.error).toHaveBeenCalledTimes(1)
   })
 
   it("marks non-production failure-test request ids", () => {
@@ -150,11 +103,11 @@ describe("ingestEventsV1 helpers", () => {
 })
 
 describe("ingestEventsV1 route", () => {
-  it("returns 202 and enqueues on the selected shard when allowed", async () => {
+  it("returns 202 and enqueues when allowed", async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(requestBody.timestamp))
 
-    const { app, env, executionCtx } = createTestApp()
+    const { app, env, executionCtx, sentMessages } = createTestApp()
 
     const response = await app.fetch(
       buildRequest({
@@ -166,12 +119,8 @@ describe("ingestEventsV1 route", () => {
     )
     expect(response.status).toBe(202)
 
-    const selectedQueue =
-      selectQueueShardIndex(requestBody.customerId) === 0 ? env.QUEUE_SHARD_0 : env.QUEUE_SHARD_1
-    const otherQueue = selectedQueue === env.QUEUE_SHARD_0 ? env.QUEUE_SHARD_1 : env.QUEUE_SHARD_0
-
-    expect(selectedQueue.send).toHaveBeenCalledTimes(1)
-    expect(selectedQueue.send).toHaveBeenCalledWith(
+    expect(sentMessages).toHaveLength(1)
+    expect(sentMessages[0]).toEqual(
       expect.objectContaining({
         idempotencyKey: requestBody.idempotencyKey,
         projectId: "proj_123",
@@ -187,14 +136,13 @@ describe("ingestEventsV1 route", () => {
         },
       })
     )
-    expect(otherQueue.send).not.toHaveBeenCalled()
   })
 
   it("marks accepted non-production messages for raw processing failure tests", async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(requestBody.timestamp))
 
-    const { app, env, executionCtx } = createTestApp()
+    const { app, env, executionCtx, sentMessages } = createTestApp()
 
     const response = await app.fetch(
       buildRequest(
@@ -211,10 +159,7 @@ describe("ingestEventsV1 route", () => {
     )
     expect(response.status).toBe(202)
 
-    const selectedQueue =
-      selectQueueShardIndex(requestBody.customerId) === 0 ? env.QUEUE_SHARD_0 : env.QUEUE_SHARD_1
-
-    expect(selectedQueue.send).toHaveBeenCalledWith(
+    expect(sentMessages[0]).toEqual(
       expect.objectContaining({
         requestId: "test:raw_ingestion_queue_processing_failed:req_123",
       })
@@ -225,7 +170,7 @@ describe("ingestEventsV1 route", () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(requestBody.timestamp))
 
-    const { app, env, executionCtx } = createTestApp()
+    const { app, env, executionCtx, sentMessages } = createTestApp()
 
     const response = await app.fetch(
       buildRequest({
@@ -237,10 +182,7 @@ describe("ingestEventsV1 route", () => {
     )
     expect(response.status).toBe(202)
 
-    const selectedQueue =
-      selectQueueShardIndex(requestBody.customerId) === 0 ? env.QUEUE_SHARD_0 : env.QUEUE_SHARD_1
-
-    expect(selectedQueue.send).toHaveBeenCalledWith(
+    expect(sentMessages[0]).toEqual(
       expect.objectContaining({
         timestamp: requestBody.timestamp,
       })
@@ -441,7 +383,7 @@ describe("ingestEventsV1 route", () => {
     vi.setSystemTime(new Date(requestBody.timestamp))
     authMocks.resolveContextProjectId.mockResolvedValue("proj_resolved_456")
 
-    const { app, env, executionCtx } = createTestApp()
+    const { app, env, executionCtx, sentMessages } = createTestApp()
 
     const response = await app.fetch(
       buildRequest({
@@ -453,10 +395,7 @@ describe("ingestEventsV1 route", () => {
     )
     expect(response.status).toBe(202)
 
-    const selectedQueue =
-      selectQueueShardIndex(requestBody.customerId) === 0 ? env.QUEUE_SHARD_0 : env.QUEUE_SHARD_1
-
-    expect(selectedQueue.send).toHaveBeenCalledWith(
+    expect(sentMessages[0]).toEqual(
       expect.objectContaining({
         projectId: "proj_resolved_456",
       })
@@ -467,7 +406,7 @@ describe("ingestEventsV1 route", () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(requestBody.timestamp))
 
-    const { app, env, executionCtx } = createTestApp()
+    const { app, env, executionCtx, sentMessages } = createTestApp()
 
     const response = await app.fetch(
       buildRequest({
@@ -479,10 +418,7 @@ describe("ingestEventsV1 route", () => {
     )
     expect(response.status).toBe(202)
 
-    const selectedQueue =
-      selectQueueShardIndex(requestBody.customerId) === 0 ? env.QUEUE_SHARD_0 : env.QUEUE_SHARD_1
-
-    expect(selectedQueue.send).toHaveBeenCalledWith(
+    expect(sentMessages[0]).toEqual(
       expect.objectContaining({
         idempotencyKey: requestBody.idempotencyKey,
         id: "evt_01ARYZ6S41TSV4RRFFQ69G5FAV",
@@ -494,7 +430,7 @@ describe("ingestEventsV1 route", () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(requestBody.timestamp))
 
-    const { app, env, executionCtx } = createTestApp()
+    const { app, env, executionCtx, sentMessages } = createTestApp()
 
     const response = await app.fetch(
       buildRequest({
@@ -506,12 +442,7 @@ describe("ingestEventsV1 route", () => {
     )
     expect(response.status).toBe(202)
 
-    const selectedQueue =
-      selectQueueShardIndex(verifiedKey.defaultCustomerId) === 0
-        ? env.QUEUE_SHARD_0
-        : env.QUEUE_SHARD_1
-
-    expect(selectedQueue.send).toHaveBeenCalledWith(
+    expect(sentMessages[0]).toEqual(
       expect.objectContaining({
         customerId: verifiedKey.defaultCustomerId,
       })
@@ -570,9 +501,8 @@ describe("ingestEventsV1 route", () => {
   })
 
   it("does not return 202 when queue send fails permanently after retries", async () => {
-    const { app, env, executionCtx } = createTestApp()
-    env.QUEUE_SHARD_0.send = vi.fn().mockRejectedValue(new Error("queue down"))
-    env.QUEUE_SHARD_1.send = vi.fn().mockRejectedValue(new Error("queue down"))
+    const { app, env, executionCtx, rawIngestionQueue } = createTestApp()
+    rawIngestionQueue.send.mockRejectedValue(new Error("queue down"))
 
     const response = await app.fetch(
       buildRequest({
@@ -590,9 +520,7 @@ describe("ingestEventsV1 route", () => {
       })
     )
 
-    const selectedQueue =
-      selectQueueShardIndex(requestBody.customerId) === 0 ? env.QUEUE_SHARD_0 : env.QUEUE_SHARD_1
-    expect(selectedQueue.send).toHaveBeenCalledTimes(3)
+    expect(rawIngestionQueue.send).toHaveBeenCalledOnce()
   })
 })
 
@@ -600,6 +528,12 @@ function createTestApp() {
   const app = new OpenAPIHono<HonoEnv>()
   const waitUntilPromises: Promise<unknown>[] = []
   const logger = createRouteLogger()
+  const sentMessages: IngestionQueueMessage[] = []
+  const rawIngestionQueue = {
+    send: vi.fn<RawIngestionQueueClient["send"]>(async (message) => {
+      sentMessages.push(message)
+    }),
+  }
 
   app.use(timing())
 
@@ -615,6 +549,7 @@ function createTestApp() {
     c.set("requestId", "req_123")
     c.set("requestStartedAt", Date.now())
     c.set("logger", logger as Logger)
+    c.set("rawIngestionQueue", rawIngestionQueue)
     c.set("services", {
       logger,
     })
@@ -628,12 +563,6 @@ function createTestApp() {
     APP_ENV: "development",
     NODE_ENV: "test",
     MAIN_PROJECT_ID: undefined,
-    QUEUE_SHARD_0: {
-      send: vi.fn().mockResolvedValue(undefined),
-    },
-    QUEUE_SHARD_1: {
-      send: vi.fn().mockResolvedValue(undefined),
-    },
   }
 
   const executionCtx = {
@@ -643,7 +572,7 @@ function createTestApp() {
     },
   } as unknown as ExecutionContext
 
-  return { app, env, executionCtx, logger, waitUntilPromises }
+  return { app, env, executionCtx, logger, rawIngestionQueue, sentMessages, waitUntilPromises }
 }
 
 function buildRequest(

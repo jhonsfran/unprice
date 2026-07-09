@@ -1,7 +1,7 @@
 import { OpenAPIHono } from "@hono/zod-openapi"
 import type { Analytics } from "@unprice/analytics"
 import type { Logger } from "@unprice/logs"
-import type { IngestionQueueMessage } from "@unprice/services/ingestion"
+import type { IngestionQueueMessage, RawIngestionQueueClient } from "@unprice/services/ingestion"
 import type { ExecutionContext } from "hono"
 import { timing } from "hono/timing"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -59,7 +59,7 @@ describe("replayIngestionEventsV1 route", () => {
         }),
       }),
     ]
-    const { app, analytics, env, executionCtx } = createTestApp(rows)
+    const { app, analytics, env, executionCtx, sentMessages } = createTestApp(rows)
 
     const response = await app.fetch(
       buildRequest({ canonical_audit_ids: ["audit_1", "audit_2"] }),
@@ -73,9 +73,8 @@ describe("replayIngestionEventsV1 route", () => {
       project_id: "proj_123",
       canonical_audit_ids: "audit_1,audit_2",
     })
-    expect(env.QUEUE_SHARD_0.send).toHaveBeenCalledTimes(2)
-    expect(env.QUEUE_SHARD_0.send).toHaveBeenNthCalledWith(
-      1,
+    expect(sentMessages).toHaveLength(2)
+    expect(sentMessages[0]).toEqual(
       expect.objectContaining({
         id: "evt_123",
         idempotencyKey: "idem_123",
@@ -83,8 +82,7 @@ describe("replayIngestionEventsV1 route", () => {
         requestId: "req_123",
       })
     )
-    expect(env.QUEUE_SHARD_0.send).toHaveBeenNthCalledWith(
-      2,
+    expect(sentMessages[1]).toEqual(
       expect.objectContaining({
         id: "evt_456",
         idempotencyKey: "idem_456",
@@ -95,7 +93,7 @@ describe("replayIngestionEventsV1 route", () => {
   })
 
   it("skips canonical ids that are no longer failed or replayable", async () => {
-    const { app, env, executionCtx } = createTestApp([
+    const { app, env, executionCtx, sentMessages } = createTestApp([
       createReplayRow({ canonical_audit_id: "audit_1", payload_json: createPayloadJson() }),
     ])
 
@@ -107,11 +105,11 @@ describe("replayIngestionEventsV1 route", () => {
 
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toEqual({ replayed: 1, skipped: 1 })
-    expect(env.QUEUE_SHARD_0.send).toHaveBeenCalledTimes(1)
+    expect(sentMessages).toHaveLength(1)
   })
 
   it("dedupes canonical ids before querying Tinybird", async () => {
-    const { app, analytics, env, executionCtx } = createTestApp([])
+    const { app, analytics, env, executionCtx, sentMessages } = createTestApp([])
 
     const response = await app.fetch(
       buildRequest({ canonical_audit_ids: ["audit_1", "audit_1"] }),
@@ -125,7 +123,7 @@ describe("replayIngestionEventsV1 route", () => {
       project_id: "proj_123",
       canonical_audit_ids: "audit_1",
     })
-    expect(env.QUEUE_SHARD_0.send).not.toHaveBeenCalled()
+    expect(sentMessages).toHaveLength(0)
   })
 
   it("allows a main API key to replay a requested project", async () => {
@@ -140,7 +138,7 @@ describe("replayIngestionEventsV1 route", () => {
         },
       },
     })
-    const { app, analytics, env, executionCtx } = createTestApp([
+    const { app, analytics, env, executionCtx, sentMessages } = createTestApp([
       createReplayRow({
         canonical_audit_id: "audit_1",
         payload_json: createPayloadJson({ projectId: "proj_dashboard" }),
@@ -163,7 +161,7 @@ describe("replayIngestionEventsV1 route", () => {
       project_id: "proj_dashboard",
       canonical_audit_ids: "audit_1",
     })
-    expect(env.QUEUE_SHARD_0.send).toHaveBeenCalledWith(
+    expect(sentMessages[0]).toEqual(
       expect.objectContaining({
         projectId: "proj_dashboard",
         requestId: "req_123",
@@ -172,7 +170,7 @@ describe("replayIngestionEventsV1 route", () => {
   })
 
   it("rejects project override when the API key is not main", async () => {
-    const { app, analytics, env, executionCtx } = createTestApp([
+    const { app, analytics, env, executionCtx, sentMessages } = createTestApp([
       createReplayRow({ canonical_audit_id: "audit_1", payload_json: createPayloadJson() }),
     ])
 
@@ -191,11 +189,11 @@ describe("replayIngestionEventsV1 route", () => {
       message: "You are not allowed to access a different project.",
     })
     expect(analytics.getIngestionReplayPayloads).not.toHaveBeenCalled()
-    expect(env.QUEUE_SHARD_0.send).not.toHaveBeenCalled()
+    expect(sentMessages).toHaveLength(0)
   })
 
   it("does not enqueue any messages when a later payload belongs to a different project", async () => {
-    const { app, env, executionCtx } = createTestApp([
+    const { app, env, executionCtx, sentMessages } = createTestApp([
       createReplayRow({
         canonical_audit_id: "audit_1",
         payload_json: createPayloadJson(),
@@ -217,11 +215,11 @@ describe("replayIngestionEventsV1 route", () => {
       code: "BAD_REQUEST",
       message: "Replay payload project does not match request project",
     })
-    expect(env.QUEUE_SHARD_0.send).not.toHaveBeenCalled()
+    expect(sentMessages).toHaveLength(0)
   })
 
   it("does not enqueue any messages when a later payload is invalid", async () => {
-    const { app, env, executionCtx } = createTestApp([
+    const { app, env, executionCtx, sentMessages } = createTestApp([
       createReplayRow({
         canonical_audit_id: "audit_1",
         payload_json: createPayloadJson(),
@@ -243,11 +241,11 @@ describe("replayIngestionEventsV1 route", () => {
       code: "BAD_REQUEST",
       message: "Replay payload is not a valid ingestion queue message",
     })
-    expect(env.QUEUE_SHARD_0.send).not.toHaveBeenCalled()
+    expect(sentMessages).toHaveLength(0)
   })
 
   it("maps malformed payload_json to an error without queue sends", async () => {
-    const { app, env, executionCtx } = createTestApp([
+    const { app, env, executionCtx, sentMessages } = createTestApp([
       createReplayRow({
         canonical_audit_id: "audit_1",
         payload_json: "{not-json",
@@ -265,32 +263,27 @@ describe("replayIngestionEventsV1 route", () => {
       code: "BAD_REQUEST",
       message: "Replay payload is not valid JSON",
     })
-    expect(env.QUEUE_SHARD_0.send).not.toHaveBeenCalled()
+    expect(sentMessages).toHaveLength(0)
   })
 
-  it("retries and logs queue send failures consistently with raw ingest", async () => {
-    vi.useFakeTimers()
-    const { app, env, executionCtx, logger } = createTestApp([
+  it("maps a queue send failure to an internal server error", async () => {
+    const { app, env, executionCtx, rawIngestionQueue } = createTestApp([
       createReplayRow({ canonical_audit_id: "audit_1", payload_json: createPayloadJson() }),
     ])
-    env.QUEUE_SHARD_0.send.mockRejectedValue(new Error("queue down"))
+    rawIngestionQueue.send.mockRejectedValue(new Error("queue down"))
 
-    const responsePromise = app.fetch(
+    const response = await app.fetch(
       buildRequest({ canonical_audit_ids: ["audit_1"] }),
       env,
       executionCtx
     )
-    await vi.runAllTimersAsync()
-    const response = await responsePromise
 
     expect(response.status).toBe(500)
     await expect(response.json()).resolves.toEqual({
       code: "INTERNAL_SERVER_ERROR",
       message: "Failed to enqueue ingestion event",
     })
-    expect(env.QUEUE_SHARD_0.send).toHaveBeenCalledTimes(3)
-    expect(logger.warn).toHaveBeenCalledTimes(3)
-    expect(logger.error).toHaveBeenCalledTimes(1)
+    expect(rawIngestionQueue.send).toHaveBeenCalledOnce()
   })
 })
 
@@ -299,6 +292,12 @@ function createTestApp(rows: ReplayPayloadRow[]) {
   const logger = createRouteLogger()
   const analytics = {
     getIngestionReplayPayloads: vi.fn().mockResolvedValue({ data: rows }),
+  }
+  const sentMessages: IngestionQueueMessage[] = []
+  const rawIngestionQueue = {
+    send: vi.fn<RawIngestionQueueClient["send"]>(async (message) => {
+      sentMessages.push(message)
+    }),
   }
 
   app.use(timing())
@@ -316,24 +315,21 @@ function createTestApp(rows: ReplayPayloadRow[]) {
     c.set("requestStartedAt", Date.now())
     c.set("logger", logger as Logger)
     c.set("analytics", analytics as unknown as Analytics)
+    c.set("rawIngestionQueue", rawIngestionQueue)
 
     await next()
   })
 
   registerReplayIngestionEventsV1(app)
 
-  const env = {
-    QUEUE_SHARD_0: {
-      send: vi.fn().mockResolvedValue(undefined),
-    },
-  }
+  const env = {}
 
   const executionCtx = {
     passThroughOnException: vi.fn(),
     waitUntil: vi.fn(),
   } as unknown as ExecutionContext
 
-  return { app, analytics, env, executionCtx, logger }
+  return { app, analytics, env, executionCtx, logger, rawIngestionQueue, sentMessages }
 }
 
 function buildRequest(

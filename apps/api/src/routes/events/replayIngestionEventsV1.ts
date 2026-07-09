@@ -10,7 +10,6 @@ import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
-import { safeSendToQueue } from "./ingestEventsV1"
 
 const replayRequestSchema = z.object({
   canonical_audit_ids: z.array(z.string()).min(1).max(50),
@@ -76,11 +75,14 @@ export const registerReplayIngestionEventsV1 = (app: App) =>
 
     let replayed = 0
     for (const message of messages) {
-      await safeSendToQueue({
-        queue: c.env.QUEUE_SHARD_0,
-        message,
-        logger: c.get("logger"),
-      })
+      try {
+        await c.get("rawIngestionQueue").send(message)
+      } catch {
+        throw new UnpriceApiError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to enqueue ingestion event",
+        })
+      }
       replayed++
     }
 

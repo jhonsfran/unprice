@@ -8,6 +8,7 @@ import type { BudgetRunService } from "@unprice/services/budget-runs"
 import type { Cache } from "@unprice/services/cache"
 import type { CustomerService } from "@unprice/services/customers"
 import type { EntitlementService } from "@unprice/services/entitlements"
+import type { RawIngestionQueueClient } from "@unprice/services/ingestion"
 import type { LedgerGateway } from "@unprice/services/ledger"
 import type { Metrics } from "@unprice/services/metrics"
 import type { PlanService } from "@unprice/services/plans"
@@ -59,6 +60,7 @@ export type HonoEnv = EvlogVariables & {
     logger: Logger
     metrics: Metrics
     analytics: Analytics
+    rawIngestionQueue: RawIngestionQueueClient
     // biome-ignore lint/suspicious/noExplicitAny: platform-specific promise handler
     waitUntil: (promise: Promise<any>) => void
     services: ServiceContext
