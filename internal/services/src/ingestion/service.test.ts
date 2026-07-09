@@ -1706,6 +1706,7 @@ function createReportingEnvelope(
     createdAt: SERVICE_NOW,
     projectId: "proj_123",
     customerId: "cus_123",
+    redriveCount: 0,
     auditRecords: [],
     meterFacts: [],
     ...overrides,

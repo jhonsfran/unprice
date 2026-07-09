@@ -12,6 +12,7 @@ type IngestionQueueDispatchOptions<TRaw, TReporting> = {
   consumeRaw: (batch: MessageBatch<TRaw>) => Promise<void>
   consumeRawDlq: (batch: MessageBatch<TRaw>) => Promise<void>
   consumeReporting: (batch: MessageBatch<TReporting>) => Promise<void>
+  consumeReportingDlq: (batch: MessageBatch<TReporting>) => Promise<void>
   onMalformed: MalformedQueueMessageHandler
   rawSchema: QueueBodySchema<TRaw>
   reportingSchema: QueueBodySchema<TReporting>
@@ -56,8 +57,11 @@ export async function dispatchIngestionQueueBatch<TRaw, TReporting>(
       return
     }
     case "reporting_dlq": {
-      // Reporting DLQ consumption lands in its dedicated operability task.
-      throw new Error(`No consumer wired for ingestion queue kind: ${kind} (${batch.queue})`)
+      const messages = parseBatchBodies(batch, options.reportingSchema, options.onMalformed)
+      if (messages.length > 0) {
+        await options.consumeReportingDlq(withMessages(batch, messages))
+      }
+      return
     }
   }
 

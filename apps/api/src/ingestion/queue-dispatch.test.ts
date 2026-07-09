@@ -18,6 +18,7 @@ describe("dispatchIngestionQueueBatch", () => {
     expect(options.consumeRaw).toHaveBeenCalledOnce()
     expect(options.consumeRawDlq).not.toHaveBeenCalled()
     expect(options.consumeReporting).not.toHaveBeenCalled()
+    expect(options.consumeReportingDlq).not.toHaveBeenCalled()
   })
 
   it("uses only the reporting schema and consumer for a reporting queue", async () => {
@@ -33,6 +34,7 @@ describe("dispatchIngestionQueueBatch", () => {
     expect(options.consumeRaw).not.toHaveBeenCalled()
     expect(options.consumeRawDlq).not.toHaveBeenCalled()
     expect(options.consumeReporting).toHaveBeenCalledOnce()
+    expect(options.consumeReportingDlq).not.toHaveBeenCalled()
   })
 
   it("uses the raw schema and DLQ consumer for a raw DLQ", async () => {
@@ -48,6 +50,7 @@ describe("dispatchIngestionQueueBatch", () => {
     expect(options.consumeRaw).not.toHaveBeenCalled()
     expect(options.consumeRawDlq).toHaveBeenCalledOnce()
     expect(options.consumeReporting).not.toHaveBeenCalled()
+    expect(options.consumeReportingDlq).not.toHaveBeenCalled()
   })
 
   it("acks each malformed message once and delivers valid messages", async () => {
@@ -87,6 +90,7 @@ describe("dispatchIngestionQueueBatch", () => {
     expect(options.consumeRaw).not.toHaveBeenCalled()
     expect(options.consumeRawDlq).not.toHaveBeenCalled()
     expect(options.consumeReporting).not.toHaveBeenCalled()
+    expect(options.consumeReportingDlq).not.toHaveBeenCalled()
   })
 
   it("preserves queue and message metadata with bound ack and retry methods", async () => {
@@ -114,16 +118,38 @@ describe("dispatchIngestionQueueBatch", () => {
     expect(original.getRetryReceiver()).toBe(original.message)
   })
 
-  it("rejects the reporting_dlq queue kind with a loud error", async () => {
+  it("uses the reporting schema and DLQ consumer for a reporting DLQ", async () => {
     const options = createOptions()
     const queue = "unprice-api-ingestion-reporting-dlq-prod"
+    const message = createMessage({ kind: "reporting", value: "report-1" })
 
-    await expect(dispatchIngestionQueueBatch(createBatch(queue, []), options)).rejects.toThrow(
-      `No consumer wired for ingestion queue kind: reporting_dlq (${queue})`
-    )
+    await dispatchIngestionQueueBatch(createBatch(queue, [message.message]), options)
+
+    expect(options.rawSchema.safeParse).not.toHaveBeenCalled()
+    expect(options.reportingSchema.safeParse).toHaveBeenCalledOnce()
     expect(options.consumeRaw).not.toHaveBeenCalled()
     expect(options.consumeRawDlq).not.toHaveBeenCalled()
     expect(options.consumeReporting).not.toHaveBeenCalled()
+    expect(options.consumeReportingDlq).toHaveBeenCalledOnce()
+    expect(options.consumeReportingDlq.mock.calls[0]?.[0].messages[0]?.body).toEqual({
+      kind: "reporting",
+      value: "report-1",
+    })
+  })
+
+  it("acks malformed reporting DLQ messages without calling its consumer", async () => {
+    const options = createOptions()
+    const malformed = createMessage({ kind: "invalid" })
+    const queue = "unprice-api-ingestion-reporting-dlq-preview"
+
+    await dispatchIngestionQueueBatch(createBatch(queue, [malformed.message]), options)
+
+    expect(malformed.ack).toHaveBeenCalledOnce()
+    expect(options.onMalformed).toHaveBeenCalledWith({
+      queue,
+      errors: ["invalid reporting message"],
+    })
+    expect(options.consumeReportingDlq).not.toHaveBeenCalled()
   })
 })
 
@@ -149,6 +175,7 @@ function createOptions() {
     consumeRaw: vi.fn(async (_batch: MessageBatch<RawBody>) => {}),
     consumeRawDlq: vi.fn(async (_batch: MessageBatch<RawBody>) => {}),
     consumeReporting: vi.fn(async (_batch: MessageBatch<ReportingBody>) => {}),
+    consumeReportingDlq: vi.fn(async (_batch: MessageBatch<ReportingBody>) => {}),
     onMalformed: vi.fn(),
     rawSchema,
     reportingSchema,

@@ -51,7 +51,10 @@ import { timing } from "hono/timing"
 import { verifyRealtimeTicket } from "~/auth/ticket"
 import { serializeError } from "~/errors/log"
 import { dispatchIngestionQueueBatch } from "~/ingestion/queue-routing"
-import { consumeIngestionReportingQueueBatch } from "~/ingestion/reporting/consumer"
+import {
+  consumeIngestionReportingDlqBatch,
+  consumeIngestionReportingQueueBatch,
+} from "~/ingestion/reporting/consumer"
 import { consumeIngestionBatch, consumeIngestionDlqBatch } from "~/ingestion/service"
 import { knownRoute } from "~/middleware/known-route"
 import { obs } from "~/middleware/obs"
@@ -253,6 +256,13 @@ const handler = {
           consumeIngestionDlqBatch(parsedBatch, parsedEnv, executionCtx, apiDrain ?? undefined),
         consumeReporting: (parsedBatch) =>
           consumeIngestionReportingQueueBatch(
+            parsedBatch,
+            parsedEnv,
+            executionCtx,
+            apiDrain ?? undefined
+          ),
+        consumeReportingDlq: (parsedBatch) =>
+          consumeIngestionReportingDlqBatch(
             parsedBatch,
             parsedEnv,
             executionCtx,

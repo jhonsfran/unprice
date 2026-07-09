@@ -1,6 +1,7 @@
 import type { AnalyticsEntitlementMeterFact } from "@unprice/analytics"
 import { describe, expect, it } from "vitest"
 import { type IngestionQueueMessage, ingestionQueueMessageSchema } from "./message"
+import { ingestionReportingEnvelopeSchema } from "./reporting"
 import {
   buildIngestionReportingAuditRecord,
   buildIngestionReportingEnvelope,
@@ -10,6 +11,20 @@ const TEST_NOW = Date.UTC(2026, 2, 20, 12, 0, 0)
 const HANDLED_AT = TEST_NOW + 123
 
 describe("ingestion reporting envelope builder", () => {
+  it("defaults redriveCount to 0 for envelopes built before the field existed", () => {
+    const legacy = ingestionReportingEnvelopeSchema.parse({
+      kind: "ingestion.reporting.v1",
+      envelopeId: "env_1",
+      createdAt: 1,
+      projectId: "proj_1",
+      customerId: "cus_1",
+      auditRecords: [],
+      meterFacts: [],
+    })
+
+    expect(legacy.redriveCount).toBe(0)
+  })
+
   it("builds deterministic audit and envelope identities for the same outcomes", async () => {
     const message = createMessage()
     const outcome = { state: "processed" as const }
@@ -300,6 +315,7 @@ describe("ingestion reporting envelope builder", () => {
       createdAt: HANDLED_AT,
       customerId: message.customerId,
       projectId: message.projectId,
+      redriveCount: 0,
     })
     expect(envelope.auditRecords).toHaveLength(1)
     expect(envelope.meterFacts).toEqual([fact])

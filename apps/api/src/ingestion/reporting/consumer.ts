@@ -3,6 +3,7 @@ import type { Logger } from "@unprice/logs"
 import { createStandaloneRequestLogger } from "@unprice/observability"
 import {
   type IngestionReportingEnvelope,
+  ReportingDlqConsumer,
   ingestionReportingEnvelopeSchema,
 } from "@unprice/services/ingestion"
 import { z } from "zod"
@@ -159,6 +160,61 @@ export async function consumeIngestionReportingQueueBatch(
       reporting_envelope_count: batch.messages.length,
       reporting_retry_count: batch.messages.length,
     })
+    logger.error(error instanceof Error ? error : new Error(String(error)))
+    throw error
+  } finally {
+    const duration = Math.max(0, Date.now() - startedAt)
+    const status = thrown ? 500 : 200
+
+    requestLogger.set({ status, duration, request: { status, duration } })
+    requestLogger.emit({ status, duration, request: { status, duration } })
+
+    if (drain) {
+      executionCtx.waitUntil(drain.flush())
+    }
+  }
+}
+
+export async function consumeIngestionReportingDlqBatch(
+  batch: IngestionReportingQueueBatch,
+  env: Env,
+  executionCtx: ExecutionContext,
+  drain?: { flush: () => Promise<void> }
+): Promise<void> {
+  const batchRequestId = `reporting-dlq:${Date.now()}`
+  const startedAt = Date.now()
+  const { logger, requestLogger } = createStandaloneRequestLogger(
+    { requestId: batchRequestId },
+    { flush: drain?.flush }
+  )
+
+  logger.set({
+    service: "ingestion_reporting_dlq",
+    request: {
+      id: batchRequestId,
+      timestamp: new Date(startedAt).toISOString(),
+      path: "/queues/ingestion-reporting-dlq/consume",
+    },
+    cloud: { platform: "cloudflare" },
+    business: { operation: "consume_reporting_dlq_batch" },
+  })
+
+  const consumer = new ReportingDlqConsumer({
+    logger,
+    redrive: async (envelope, options) => {
+      await (env.INGESTION_REPORTING_QUEUE as Queue<IngestionReportingEnvelope>).send(
+        envelope,
+        options
+      )
+    },
+  })
+
+  let thrown: unknown
+
+  try {
+    await consumer.consumeBatch(batch)
+  } catch (error) {
+    thrown = error
     logger.error(error instanceof Error ? error : new Error(String(error)))
     throw error
   } finally {

@@ -5,6 +5,7 @@ import {
   IngestionReportingConsumer,
   chunkIngestionEventsForTinybird,
   chunkMeterFactsForTinybird,
+  consumeIngestionReportingDlqBatch,
 } from "./consumer"
 
 const TEST_NOW = Date.UTC(2026, 2, 20, 12, 0, 0)
@@ -588,6 +589,33 @@ describe("IngestionReportingConsumer", () => {
   })
 })
 
+describe("consumeIngestionReportingDlqBatch", () => {
+  it("re-drives through the reporting queue before acknowledging and schedules drain flush", async () => {
+    const envelope = createEnvelope({ redriveCount: 1 })
+    const send = vi.fn().mockResolvedValue(undefined)
+    const ack = vi.fn()
+    const retry = vi.fn()
+    const flush = vi.fn().mockResolvedValue(undefined)
+    const waitUntil = vi.fn()
+
+    await consumeIngestionReportingDlqBatch(
+      { messages: [{ ack, body: envelope, retry }] },
+      { INGESTION_REPORTING_QUEUE: { send } } as never,
+      { waitUntil } as never,
+      { flush }
+    )
+
+    expect(send).toHaveBeenCalledWith(createEnvelope({ redriveCount: 2 }), {
+      delaySeconds: 120,
+    })
+    expect(send.mock.invocationCallOrder[0]).toBeLessThan(ack.mock.invocationCallOrder[0] ?? 0)
+    expect(ack).toHaveBeenCalledOnce()
+    expect(retry).not.toHaveBeenCalled()
+    expect(flush).toHaveBeenCalledOnce()
+    expect(waitUntil).toHaveBeenCalledWith(expect.any(Promise))
+  })
+})
+
 function createEnvelope(
   overrides: Partial<IngestionReportingEnvelope> = {}
 ): IngestionReportingEnvelope {
@@ -597,6 +625,7 @@ function createEnvelope(
     createdAt: TEST_NOW,
     projectId: "proj_123",
     customerId: "cus_123",
+    redriveCount: 0,
     auditRecords: [],
     meterFacts: [],
     ...overrides,

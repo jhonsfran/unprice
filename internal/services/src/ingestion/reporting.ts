@@ -49,6 +49,8 @@ export const ingestionReportingEnvelopeSchema = z.object({
   createdAt: z.number().int(),
   projectId: z.string(),
   customerId: z.string(),
+  /** Times this envelope has been re-driven from the reporting DLQ. */
+  redriveCount: z.number().int().min(0).optional().default(0),
   auditRecords: z.array(ingestionReportingAuditRecordSchema),
   meterFacts: z.array(entitlementMeterFactSchemaV1),
 })

@@ -43,6 +43,7 @@ export async function buildIngestionReportingEnvelope(params: {
     createdAt: now(),
     projectId,
     customerId,
+    redriveCount: 0,
     auditRecords,
     meterFacts: outcomes.flatMap((outcome) => outcome.meterFacts ?? []),
   }
