@@ -1,11 +1,11 @@
 import { createRoute, z } from "@hono/zod-openapi"
 import {
-  type IngestionQueueMessage,
-  ingestionQueueMessageSchema,
-} from "@unprice/services/ingestion"
+  replayIngestionEvents,
+  replayIngestionEventsOutputSchema,
+} from "@unprice/services/use-cases"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { keyAuth, validateIsAllowedToAccessProject } from "~/auth/key"
-import { UnpriceApiError } from "~/errors"
+import { toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
@@ -14,11 +14,6 @@ import * as HttpStatusCodes from "~/util/http-status-codes"
 const replayRequestSchema = z.object({
   canonical_audit_ids: z.array(z.string()).min(1).max(50),
   project_id: z.string().optional(),
-})
-
-const replayResponseSchema = z.object({
-  replayed: z.number().int(),
-  skipped: z.number().int(),
 })
 
 export const route = createRoute(
@@ -33,7 +28,7 @@ export const route = createRoute(
         body: jsonContentRequired(replayRequestSchema, "Replay failed ingestion events"),
       },
       responses: {
-        [HttpStatusCodes.OK]: jsonContent(replayResponseSchema, "Replay result"),
+        [HttpStatusCodes.OK]: jsonContent(replayIngestionEventsOutputSchema, "Replay result"),
         ...openApiErrorResponses,
       },
     },
@@ -59,76 +54,21 @@ export const registerReplayIngestionEventsV1 = (app: App) =>
       key,
       requestedProjectId: body.project_id ?? key.projectId,
     })
-    const canonicalAuditIds = Array.from(new Set(body.canonical_audit_ids))
-    const response = await c.get("analytics").getIngestionReplayPayloads({
-      project_id: projectId,
-      canonical_audit_ids: canonicalAuditIds.join(","),
-    })
-    const rows = response.data ?? []
-    const messages = rows.map((row) =>
-      parseReplayQueueMessage({
-        payloadJson: row.payload_json,
+    const result = await replayIngestionEvents(
+      {
+        analytics: c.get("analytics"),
+        rawIngestionQueue: c.get("rawIngestionQueue"),
+      },
+      {
+        canonicalAuditIds: body.canonical_audit_ids,
         projectId,
         requestId: c.get("requestId"),
-      })
+      }
     )
 
-    let replayed = 0
-    for (const message of messages) {
-      try {
-        await c.get("rawIngestionQueue").send(message)
-      } catch {
-        throw new UnpriceApiError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: "Failed to enqueue ingestion event",
-        })
-      }
-      replayed++
+    if (result.err) {
+      throw toUnpriceApiError(result.err)
     }
 
-    return c.json(
-      {
-        replayed,
-        skipped: canonicalAuditIds.length - replayed,
-      },
-      HttpStatusCodes.OK
-    )
+    return c.json(result.val, HttpStatusCodes.OK)
   })
-
-function parseReplayQueueMessage(params: {
-  payloadJson: string
-  projectId: string
-  requestId: string
-}): IngestionQueueMessage {
-  const { payloadJson, projectId, requestId } = params
-  let parsedPayload: unknown
-
-  try {
-    parsedPayload = JSON.parse(payloadJson)
-  } catch {
-    throw new UnpriceApiError({
-      code: "BAD_REQUEST",
-      message: "Replay payload is not valid JSON",
-    })
-  }
-
-  const parsedMessage = ingestionQueueMessageSchema.safeParse(parsedPayload)
-  if (!parsedMessage.success) {
-    throw new UnpriceApiError({
-      code: "BAD_REQUEST",
-      message: "Replay payload is not a valid ingestion queue message",
-    })
-  }
-
-  if (parsedMessage.data.projectId !== projectId) {
-    throw new UnpriceApiError({
-      code: "BAD_REQUEST",
-      message: "Replay payload project does not match request project",
-    })
-  }
-
-  return {
-    ...parsedMessage.data,
-    requestId,
-  }
-}
