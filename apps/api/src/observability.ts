@@ -57,6 +57,48 @@ export function createApiLogger(
  */
 export const apiMetricsLogger: Logger = createMetricsLogger(apiDrain)
 
+const DEFAULT_DO_LOG_SAMPLE_RATE = 0.1
+
+export function resolveDoLogSampleRate(raw: string | undefined): number {
+  const normalized = raw?.trim()
+  if (!normalized) return DEFAULT_DO_LOG_SAMPLE_RATE
+
+  const parsed = Number(normalized)
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+    return DEFAULT_DO_LOG_SAMPLE_RATE
+  }
+  return parsed
+}
+
+/**
+ * DO diagnostics that must never be sampled away: errors, business denials,
+ * batches containing denials, and operator-recovery states. Everything else
+ * is throughput telemetry and is safe to sample (multiply counts by
+ * 1/sample_rate in Axiom).
+ */
+export function shouldAlwaysKeepDoLogEvent(fields: Record<string, unknown> | undefined): boolean {
+  if (!fields) return false
+  if (fields.outcome === "error") return true
+  if (fields.error !== undefined && fields.error !== null) return true
+  if (typeof fields.error_message === "string" && fields.error_message.length > 0) return true
+  if (fields.allowed === false) return true
+  if (typeof fields.denied_reason === "string" && fields.denied_reason.length > 0) return true
+  if (typeof fields.denied_count === "number" && fields.denied_count > 0) return true
+  if (fields.recovery_required === true) return true
+  return false
+}
+
+const doLogSampleRate = resolveDoLogSampleRate(
+  (env as unknown as Record<string, unknown>).DO_LOG_SAMPLE_RATE as string | undefined
+)
+
+function shouldEmitDoInfoEvent(fields: Record<string, unknown> | undefined): boolean {
+  if (shouldAlwaysKeepDoLogEvent(fields)) return true
+  if (doLogSampleRate >= 1) return true
+  if (doLogSampleRate <= 0) return false
+  return Math.random() < doLogSampleRate
+}
+
 export function createDoLogger(requestId: string): Logger {
   let context: Record<string, unknown> = {
     requestId,
@@ -72,10 +114,21 @@ export function createDoLogger(requestId: string): Logger {
       context = mergeLogFields(context, fields)
     },
     debug(message, fields) {
-      apiMetricsLogger.info(message, { ...buildDoLogFields(context, fields), level: "debug" })
+      const event = {
+        ...buildDoLogFields(context, fields),
+        level: "debug",
+        sample_rate: doLogSampleRate,
+      }
+      if (!shouldEmitDoInfoEvent(event)) return
+      apiMetricsLogger.info(message, event)
     },
     info(message, fields) {
-      apiMetricsLogger.info(message, buildDoLogFields(context, fields))
+      const event = {
+        ...buildDoLogFields(context, fields),
+        sample_rate: doLogSampleRate,
+      }
+      if (!shouldEmitDoInfoEvent(event)) return
+      apiMetricsLogger.info(message, event)
     },
     warn(message, fields) {
       apiMetricsLogger.warn(message, buildDoLogFields(context, fields))
