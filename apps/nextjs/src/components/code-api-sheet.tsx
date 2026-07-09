@@ -15,7 +15,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@unprice/ui/sheet"
-import { AnimatePresence, LazyMotion, domAnimation, m, useReducedMotion } from "framer-motion"
+import { LazyMotion, domAnimation, m, useReducedMotion } from "framer-motion"
 import { Code, FileCode2, KeyRound } from "lucide-react"
 import Link from "next/link"
 import { SDKDemo, type SDKExampleParams, type method } from "~/components/landing/sdk-examples"
@@ -25,10 +25,13 @@ import { useTRPC } from "~/trpc/client"
 export function CodeApiSheet({
   children,
   defaultMethod,
+  methods,
   exampleParams,
 }: {
   children?: React.ReactNode
   defaultMethod?: method
+  // offer several methods in the sheet (defaultMethod picks the active tab)
+  methods?: method[]
   exampleParams?: SDKExampleParams
 }) {
   const trpc = useTRPC()
@@ -84,42 +87,30 @@ export function CodeApiSheet({
           </div>
         </SheetHeader>
         <LazyMotion features={domAnimation} strict>
-          <AnimatePresence initial={false}>
-            {!apiToken && (
-              <m.div
-                key="sdk-example-token-notice"
-                initial={shouldReduceMotion ? { opacity: 1 } : { height: 0, opacity: 0, y: -4 }}
-                animate={shouldReduceMotion ? { opacity: 1 } : { height: "auto", opacity: 1, y: 0 }}
-                exit={shouldReduceMotion ? { opacity: 0 } : { height: 0, opacity: 0, y: -4 }}
-                transition={{
-                  duration: shouldReduceMotion ? 0.01 : 0.18,
-                  ease: [0.25, 1, 0.5, 1],
-                }}
-                className="overflow-hidden"
+          {/* no height choreography here: the animated overflow-hidden
+              container could clip the roll button mid-transition */}
+          {!apiToken && (
+            <div className="flex flex-col items-start gap-3 px-1 py-1">
+              <p className="w-full text-muted-foreground text-sm leading-6">
+                <span className="font-medium text-foreground">Runnable token.</span> Roll the
+                reusable example key. It expires tonight and stays masked on screen.
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 shrink-0 gap-2 px-2.5"
+                disabled={rollDefaultKey.isPending}
+                onClick={() => rollDefaultKey.mutate()}
               >
-                <div className="flex flex-col items-start gap-3 px-1 py-1">
-                  <p className="w-full text-muted-foreground text-sm leading-6">
-                    <span className="font-medium text-foreground">Runnable token.</span> Roll the
-                    reusable example key. It expires tonight and stays masked on screen.
-                  </p>
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="h-8 shrink-0 gap-2 px-2.5"
-                    disabled={rollDefaultKey.isPending}
-                    onClick={() => rollDefaultKey.mutate()}
-                  >
-                    {rollDefaultKey.isPending ? (
-                      <LoadingAnimation />
-                    ) : (
-                      <KeyRound className="h-3.5 w-3.5" />
-                    )}
-                    Roll example key
-                  </Button>
-                </div>
-              </m.div>
-            )}
-          </AnimatePresence>
+                {rollDefaultKey.isPending ? (
+                  <LoadingAnimation />
+                ) : (
+                  <KeyRound className="h-3.5 w-3.5" />
+                )}
+                Roll example key
+              </Button>
+            </div>
+          )}
           <m.div
             layout={!shouldReduceMotion}
             transition={{
@@ -129,6 +120,7 @@ export function CodeApiSheet({
           >
             <SDKDemo
               defaultMethod={defaultMethod}
+              methods={methods}
               exampleParams={resolvedExampleParams}
               frameworks={["sdk", "fetch", "curl"]}
             />

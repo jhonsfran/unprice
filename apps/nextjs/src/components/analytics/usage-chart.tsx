@@ -36,7 +36,7 @@ export const UsageChartSkeleton = ({
           <BarChart4 className="h-8 w-8" />
         </EmptyPlaceholder.Icon>
         <EmptyPlaceholder.Title>
-          {error ? "Ups, something went wrong" : "No usage evidence yet"}
+          {error ? "Oops, something went wrong" : "No usage evidence yet"}
         </EmptyPlaceholder.Title>
         <EmptyPlaceholder.Description>
           {error
@@ -45,20 +45,12 @@ export const UsageChartSkeleton = ({
         </EmptyPlaceholder.Description>
         {!error && (
           <EmptyPlaceholder.Action>
-            <div className="flex flex-col items-center justify-center gap-2 sm:flex-row">
-              <CodeApiSheet defaultMethod="consumeUsage">
-                <Button size="sm" variant="primary" disabled={isLoading}>
-                  <Code className="mr-2 h-4 w-4" />
-                  Report usage synchronously
-                </Button>
-              </CodeApiSheet>
-              <CodeApiSheet defaultMethod="recordUsage">
-                <Button size="sm" variant="default" disabled={isLoading}>
-                  <Code className="mr-2 h-4 w-4" />
-                  Report asynchronously
-                </Button>
-              </CodeApiSheet>
-            </div>
+            <CodeApiSheet defaultMethod="consumeUsage" methods={["consumeUsage", "recordUsage"]}>
+              <Button size="sm" variant="primary" disabled={isLoading}>
+                <Code className="mr-2 h-4 w-4" />
+                Send a test event
+              </Button>
+            </CodeApiSheet>
           </EmptyPlaceholder.Action>
         )}
       </EmptyPlaceholder>

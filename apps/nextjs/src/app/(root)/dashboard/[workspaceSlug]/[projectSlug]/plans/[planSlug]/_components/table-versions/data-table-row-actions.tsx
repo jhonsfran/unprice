@@ -77,16 +77,16 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
               planVersionId={version.id}
             />
           </DropdownMenuItem>
+          <DropdownMenuItem>
+            <SuperLink href={`${pathname}/${version.id}`}>Configure features</SuperLink>
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           <DropdownMenuItem asChild>
             <PlanVersionDeactivate
               onConfirmAction={() => setIsOpen(false)}
-              classNames="w-full relative flex cursor-pointer justify-start select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-background-bgHover hover:text-background-textContrast font-normal"
+              classNames="w-full relative flex cursor-pointer justify-start select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 text-danger-text focus:bg-danger-solid focus:text-danger-foreground font-normal hover:bg-danger-solid hover:text-danger-foreground"
               planVersionId={version.id}
             />
-          </DropdownMenuItem>
-
-          <DropdownMenuItem>
-            <SuperLink href={`${pathname}/${version.id}`}>Configure features</SuperLink>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

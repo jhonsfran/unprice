@@ -120,7 +120,8 @@ const FormDescription = React.forwardRef<
     <p
       ref={ref}
       id={formDescriptionId}
-      className={cn("text-muted-foreground text-sm", className)}
+      // field explainers are secondary voice: quiet, one size below the label
+      className={cn("text-muted-foreground text-xs", className)}
       {...props}
     />
   )

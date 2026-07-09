@@ -1,3 +1,4 @@
+import { Lock } from "lucide-react"
 import { Fragment } from "react"
 import { entitlementFlag } from "~/lib/flags"
 import type { DashboardRoute, Shortcut } from "~/types"
@@ -46,7 +47,9 @@ export async function Sidebar({
 
       const isActive = await entitlementFlag(route.featureSlug)
 
-      return isActive ? route : null // Return the route if active, otherwise null
+      // gated features stay discoverable: the route renders locked and the
+      // page behind it explains the upgrade path
+      return isActive ? route : { ...route, locked: true }
     })
   )
 
@@ -84,6 +87,12 @@ export async function Sidebar({
                   >
                     <item.icon className="size-4 shrink-0" aria-hidden="true" />
                     {item.name}
+                    {item.locked && (
+                      <Lock
+                        className="ml-auto size-3 shrink-0 text-muted-foreground"
+                        aria-label="Requires a plan upgrade"
+                      />
+                    )}
                   </Tab>
 
                   {item?.sidebar && (
@@ -144,6 +153,12 @@ export async function Sidebar({
                     >
                       <item.icon className="size-4 shrink-0" aria-hidden="true" />
                       {item.name}
+                      {item.locked && (
+                        <Lock
+                          className="ml-auto size-3 shrink-0 text-muted-foreground"
+                          aria-label="Requires a plan upgrade"
+                        />
+                      )}
                     </Tab>
 
                     {item?.sidebar && (

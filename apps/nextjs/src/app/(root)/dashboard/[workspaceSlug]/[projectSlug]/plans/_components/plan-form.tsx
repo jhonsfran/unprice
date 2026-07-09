@@ -142,7 +142,7 @@ export function PlanForm({
   return (
     <Form {...form}>
       <form className="space-y-6">
-        <div className="space-y-8">
+        <div className="space-y-5">
           <FormField
             control={form.control}
             name="title"
@@ -242,7 +242,7 @@ export function PlanForm({
           />
         </div>
 
-        <div className="mt-8 flex justify-end space-x-4">
+        <div className="flex justify-end space-x-4">
           {editMode && (
             <ConfirmAction
               confirmAction={() => {

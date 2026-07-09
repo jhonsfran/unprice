@@ -5,9 +5,53 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Elevation + material tokens. Deliberately unlayered so the .dark overrides
+ * below beat the unlayered Radix imports above (layered rules always lose to
+ * unlayered ones, so these cannot live in @layer base). */
+:root {
+  /* surface tiers: page < panel < raised */
+  --surface-page: var(--sand-2);
+  --surface-panel: var(--sand-1);
+  --surface-raised: #ffffff;
+
+  /* ledger paper: dot grid + the rails framing the content column */
+  --ledger-dot: rgb(33 32 28 / 0.08);
+  --rail: var(--sand-4);
+
+  /* shadows: paper lies flat — tight contact shadows, nothing floaty */
+  --shadow-ambient: 0 1px 2px rgb(33 32 28 / 0.05), 0 3px 8px rgb(33 32 28 / 0.05);
+  --shadow-raised: 0 1px 2px rgb(33 32 28 / 0.06), 0 6px 12px rgb(33 32 28 / 0.07);
+  --shadow-keycap: inset 0 1px 0 rgb(255 255 255 / 0.35), 0 1px 1px rgb(33 32 28 / 0.16), 0 2px 4px
+    rgb(33 32 28 / 0.1);
+  --shadow-keycap-press: inset 0 1px 0 rgb(255 255 255 / 0.25), 0 1px 1px rgb(33 32 28 / 0.1);
+}
+
+.dark {
+  --surface-page: #0e0e0d;
+  --surface-panel: var(--sand-2);
+  --surface-raised: var(--sand-3);
+
+  --ledger-dot: rgb(255 255 255 / 0.05);
+  --rail: rgb(255 255 255 / 0.05);
+
+  /* dark shadows are invisible on near-black: a lit top edge does the lifting */
+  --shadow-ambient: inset 0 1px 0 rgb(255 255 255 / 0.04);
+  --shadow-raised: inset 0 1px 0 rgb(255 255 255 / 0.06);
+  --shadow-keycap: inset 0 1px 0 rgb(255 255 255 / 0.35), 0 1px 1px rgb(0 0 0 / 0.5), 0 2px 4px
+    rgb(0 0 0 / 0.35);
+  --shadow-keycap-press: inset 0 1px 0 rgb(255 255 255 / 0.25), 0 1px 1px rgb(0 0 0 / 0.4);
+
+  /* Dark hairlines read as light on the surface, not gray paint: the neutral
+   * border steps go translucent white (Linear runs its whole dark UI on
+   * white-alpha borders). Steps 6/7/8 are Radix's border tiers. */
+  --sand-6: rgb(255 255 255 / 0.07);
+  --sand-7: rgb(255 255 255 / 0.1);
+  --sand-8: rgb(255 255 255 / 0.16);
+}
+
 @layer base {
   :root {
-    --radius: 0.4rem;
+    --radius: 0.5rem;
 
     /* chart colors */
     --chart-1: hsl(206 100% 50%);
@@ -19,7 +63,7 @@
   }
 
   .dark {
-    --radius: 0.4rem;
+    --radius: 0.5rem;
 
     /* chart colors */
     --chart-1: hsl(206 100% 50%);
@@ -139,8 +183,11 @@
     @apply info hover:border-info-borderHover hover:bg-info-solid hover:text-info-foreground active:bg-info-bgActive;
   }
 
+  /* The page's amber dot: solid signal, ink text, key-cap depth, 0.5px press.
+   * Amber stays scarce — one solid primary per viewport; everything else
+   * demotes to outline/ghost. */
   .button-primary {
-    @apply primary hover:border-primary-borderHover hover:bg-primary-solid hover:text-primary-foreground active:bg-primary-bgActive;
+    @apply border border-primary-borderHover bg-primary-solid text-primary-foreground shadow-keycap transition-[background-color,border-color,box-shadow,transform] duration-quick ease-out-quad hover:bg-primary-solidHover active:translate-y-[0.5px] active:shadow-keycap-press;
   }
 
   .button-success {
@@ -193,6 +240,81 @@
 
   .animate-title {
     animation: 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) 0.2s both content;
+  }
+
+  /* Ledger paper: a faint dot grid behind a section, fading out downward.
+   * Painted on ::before so the mask never touches the content. Matches the
+   * dotted ground the OG image already uses. */
+  .ledger-dots {
+    position: relative;
+    isolation: isolate;
+  }
+  .ledger-dots::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image: radial-gradient(circle, var(--ledger-dot) 1px, transparent 1.5px);
+    background-size: 24px 24px;
+    -webkit-mask-image: linear-gradient(to bottom, black 30%, transparent 95%);
+    mask-image: linear-gradient(to bottom, black 30%, transparent 95%);
+  }
+}
+
+/* Entrance grammar: rows written into the ledger. Content is visible by
+ * default — SSR, no-JS, reduced-motion, and above-the-fold all render the
+ * final state; reveal.tsx only arms elements that start below the fold. */
+[data-reveal="out"] {
+  opacity: 0;
+  transform: translateY(8px);
+}
+[data-reveal="in"] {
+  opacity: 1;
+  transform: none;
+  transition: opacity 0.4s cubic-bezier(0.215, 0.61, 0.355, 1), transform 0.4s
+    cubic-bezier(0.215, 0.61, 0.355, 1);
+}
+/* staggered variant: the container stays put, its direct children enter in
+ * ledger order */
+[data-reveal-stagger][data-reveal="out"] {
+  opacity: 1;
+  transform: none;
+}
+[data-reveal-stagger][data-reveal="out"] > * {
+  opacity: 0;
+  transform: translateY(7px);
+}
+[data-reveal-stagger][data-reveal="in"] > * {
+  opacity: 1;
+  transform: none;
+  transition: opacity 0.36s cubic-bezier(0.215, 0.61, 0.355, 1), transform 0.36s
+    cubic-bezier(0.215, 0.61, 0.355, 1);
+}
+[data-reveal-stagger][data-reveal="in"] > :nth-child(2) {
+  transition-delay: 45ms;
+}
+[data-reveal-stagger][data-reveal="in"] > :nth-child(3) {
+  transition-delay: 90ms;
+}
+[data-reveal-stagger][data-reveal="in"] > :nth-child(4) {
+  transition-delay: 135ms;
+}
+[data-reveal-stagger][data-reveal="in"] > :nth-child(5) {
+  transition-delay: 180ms;
+}
+[data-reveal-stagger][data-reveal="in"] > :nth-child(6) {
+  transition-delay: 225ms;
+}
+[data-reveal-stagger][data-reveal="in"] > :nth-child(n + 7) {
+  transition-delay: 270ms;
+}
+@media screen and (prefers-reduced-motion: reduce) {
+  [data-reveal],
+  [data-reveal] > * {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
   }
 }
 

@@ -81,16 +81,16 @@ export function WorkspaceSwitcher({
           </Avatar>
           <span className="truncate font-semibold">
             {activeWorkspace.name}
-            <Badge
-              className={cn("ml-2 font-mono font-normal", {
-                "border-destructive": activeWorkspace.isMain,
-              })}
-              variant={activeWorkspace.isMain ? "destructive" : "outline"}
-            >
-              {activeWorkspace.isInternal
-                ? `${activePlanSlug.toUpperCase()} - INTER.`
-                : activePlanSlug.toUpperCase()}
+            {/* the plan chip stays quiet; internal state is a small marker,
+                not a red box shouting on every screen */}
+            <Badge className="ml-2 font-mono font-normal" variant="outline">
+              {activePlanSlug.toUpperCase()}
             </Badge>
+            {activeWorkspace.isInternal && (
+              <span className="ml-1.5 font-mono font-normal text-[10px] text-danger-text uppercase">
+                internal
+              </span>
+            )}
           </span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>

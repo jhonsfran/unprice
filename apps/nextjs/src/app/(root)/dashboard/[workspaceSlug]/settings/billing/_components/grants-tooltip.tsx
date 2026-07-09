@@ -87,7 +87,8 @@ export function GrantsTooltip({ data, unit = "" }: GrantsTooltipProps) {
                         <div className="h-2 w-2 rounded-full bg-primary-borderHover" />
                         <span className="text-muted-foreground">{grant.name}</span>
                       </div>
-                      <div className="font-medium text-foreground">
+                      <div className="font-medium font-mono text-foreground tabular-nums">
+                        {" "}
                         {nFormatter(grant.amount, { digits: 1 })}
                         {unit ? ` ${unit}` : ""}
                       </div>
@@ -112,7 +113,8 @@ export function GrantsTooltip({ data, unit = "" }: GrantsTooltipProps) {
                           )}
                         </span>
                       </div>
-                      <div className="font-medium text-success">
+                      <div className="font-medium font-mono text-success tabular-nums">
+                        {" "}
                         {nFormatter(grant.amount, { digits: 1 })}
                         {unit ? ` ${unit}` : ""}
                         <span className="ml-1 font-normal text-muted-foreground">(free)</span>
@@ -125,7 +127,7 @@ export function GrantsTooltip({ data, unit = "" }: GrantsTooltipProps) {
 
             <div className="flex justify-between border-border border-t pt-2 text-xs">
               <span className="text-muted-foreground">Total from grants</span>
-              <span className="font-medium text-foreground">
+              <span className="font-medium font-mono text-foreground tabular-nums">
                 {nFormatter(totalFromGrants, { digits: 1 })}
                 {unit ? ` ${unit}` : ""}
               </span>

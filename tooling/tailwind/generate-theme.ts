@@ -150,6 +150,15 @@ export const generateTheme = (
         DEFAULT: `var(--${grayscale}-2)`,
         foreground: `var(--${grayscale}-11)`,
       },
+      // Elevation tiers: page sits under panel, panel under raised. The
+      // per-mode values live in globals.css because the tiers invert
+      // differently in light (lighter = lifted) and dark (lighter = lifted,
+      // but the page drops below step 1).
+      surface: {
+        page: "var(--surface-page)",
+        panel: "var(--surface-panel)",
+        raised: "var(--surface-raised)",
+      },
     },
     borderColor: {
       DEFAULT: `var(--${grayscale}-6)`,

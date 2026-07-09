@@ -25,12 +25,14 @@ type AffectsKey = "lead" | "small" | "muted" | "removePaddingMargin" | "contrast
 const typographyVariants = cva("", {
   variants: {
     variant: {
-      h1: "text-4xl font-primary font-extrabold text-foreground tracking-tight lg:text-5xl",
-      h2: "pb-2 text-3xl font-primary font-semibold text-foreground tracking-tight first:mt-0",
-      h3: "text-2xl font-primary font-semibold text-foreground tracking-tight",
-      h4: "text-xl font-secondary font-semibold text-foreground tracking-tight",
-      h5: "font-secondary font-semibold text-base text-foreground leading-none tracking-tight",
-      h6: "font-secondary tracking-tight text-foreground leading-none text-md",
+      // headings carry the page's key message: ink (step 12), not the
+      // low-contrast text step the body runs on
+      h1: "text-4xl font-primary font-extrabold text-background-textContrast tracking-tight lg:text-5xl",
+      h2: "pb-2 text-3xl font-primary font-semibold text-background-textContrast tracking-tight first:mt-0",
+      h3: "text-2xl font-primary font-semibold text-background-textContrast tracking-tight",
+      h4: "text-xl font-secondary font-semibold text-background-textContrast tracking-tight",
+      h5: "font-secondary font-semibold text-base text-background-textContrast leading-none tracking-tight",
+      h6: "font-secondary tracking-tight text-background-textContrast leading-none text-md",
       p: "font-secondary leading-5 text-muted-foreground text-sm [&:not(:first-child)]:mt-6",
 
       blockquote: "mt-6 border-l-2 pl-6 italic",

@@ -123,7 +123,7 @@ export const InviteMemberForm = ({
           <SubmitButton
             isDisabled={form.formState.isSubmitting}
             isSubmitting={form.formState.isSubmitting}
-            label="Invite"
+            label="Invite Member"
           />
         </div>
       </form>

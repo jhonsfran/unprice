@@ -62,10 +62,10 @@ export function MechanismSection() {
         </div>
 
         <div className="flex flex-col items-start">
-          <StationHeader label="The mechanism" fact="deny · before cost" />
+          <StationHeader index="01" label="The mechanism" fact="deny · before cost" />
           <h2
             id="mechanism-title"
-            className="mt-6 max-w-xl font-primary font-semibold text-3xl text-background-textContrast tracking-tight sm:text-4xl"
+            className="mt-6 max-w-xl font-primary text-background-textContrast text-display-3"
           >
             Customer spend authorization runs in the request path.
           </h2>

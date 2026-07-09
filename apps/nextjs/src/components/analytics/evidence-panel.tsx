@@ -162,7 +162,10 @@ export function EvidenceMetricTile({
         ) : null}
       </div>
       <div
-        className={cn("mt-2 font-semibold text-foreground text-xl tabular-nums", valueClassName)}
+        className={cn(
+          "mt-2 font-mono font-semibold text-foreground text-xl tabular-nums",
+          valueClassName
+        )}
       >
         {value}
       </div>

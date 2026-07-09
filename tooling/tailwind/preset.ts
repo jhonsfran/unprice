@@ -52,6 +52,40 @@ export const unPriceTailwindPreset: Config = {
         "4xl": ["2rem", { lineHeight: "2.5rem" }],
         "5xl": ["2.5rem", { lineHeight: "3rem" }],
         "6xl": ["3rem", { lineHeight: "3.5rem" }],
+        // Display scale: marketing-size type. Geist is a variable font, so
+        // the weights are tuned numbers (bigger and lighter, never heavier).
+        "display-1": [
+          "clamp(2.75rem, 2rem + 2.5vw, 3.5rem)",
+          { lineHeight: "1.04", letterSpacing: "-0.022em", fontWeight: "540" },
+        ],
+        "display-2": [
+          "clamp(2.25rem, 1.75rem + 1.9vw, 3rem)",
+          { lineHeight: "1.08", letterSpacing: "-0.02em", fontWeight: "550" },
+        ],
+        "display-3": [
+          "clamp(1.75rem, 1.55rem + 0.9vw, 2.25rem)",
+          { lineHeight: "1.12", letterSpacing: "-0.018em", fontWeight: "560" },
+        ],
+      },
+      // Elevation tokens; per-mode values live in globals.css. Dark mode
+      // replaces drop shadows with a lit top edge — black-on-black shadows
+      // are invisible, a 1px highlight is what "lifted" looks like there.
+      boxShadow: {
+        ambient: "var(--shadow-ambient)",
+        raised: "var(--shadow-raised)",
+        keycap: "var(--shadow-keycap)",
+        "keycap-press": "var(--shadow-keycap-press)",
+      },
+      // Motion tokens: one vocabulary for every hover, entrance, and panel.
+      transitionDuration: {
+        quick: "160ms",
+        regular: "260ms",
+        deliberate: "400ms",
+      },
+      transitionTimingFunction: {
+        "out-quad": "cubic-bezier(0.25, 0.46, 0.45, 0.94)",
+        "out-cubic": "cubic-bezier(0.215, 0.61, 0.355, 1)",
+        "out-expo": "cubic-bezier(0.19, 1, 0.22, 1)",
       },
       keyframes: {
         "fade-up": {

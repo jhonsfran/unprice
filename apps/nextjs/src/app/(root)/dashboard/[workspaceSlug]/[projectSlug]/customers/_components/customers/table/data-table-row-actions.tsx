@@ -58,7 +58,7 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
           </DialogTrigger>
         </DropdownMenuContent>
       </DropdownMenu>
-      <DialogContent className="max-h-[95vh] md:max-w-screen-md">
+      <DialogContent className="md:max-w-xl">
         <DialogHeader>
           <DialogTitle>Customer details</DialogTitle>
           <DialogDescription>

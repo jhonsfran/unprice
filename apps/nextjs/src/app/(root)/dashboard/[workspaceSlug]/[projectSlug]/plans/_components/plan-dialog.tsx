@@ -28,7 +28,7 @@ export function PlanDialog({
   return (
     <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
       <DialogTrigger asChild>{children}</DialogTrigger>
-      <DialogContent className="max-h-screen overflow-y-scroll">
+      <DialogContent>
         <DialogHeader>
           <DialogTitle>{isEdit ? "Edit plan" : "Create plan"}</DialogTitle>
 

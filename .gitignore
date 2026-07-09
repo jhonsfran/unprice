@@ -104,3 +104,5 @@ internal/lakehouse/lakenv/*
 .claude/worktrees
 tmp/
 docs/plans/**
+.impeccable
+docs/superpowers/

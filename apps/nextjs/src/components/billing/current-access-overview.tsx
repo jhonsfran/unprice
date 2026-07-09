@@ -155,12 +155,12 @@ export function CurrentAccessOverview({
                     <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
                       <p className="truncate font-semibold text-lg">{activePlan.planSlug}</p>
                       {activePhase && (
-                        <p className="shrink-0 text-muted-foreground text-xs">
+                        <p className="shrink-0 font-mono text-muted-foreground text-xs tabular-nums">
                           v{activePhase.planVersion.version}
                         </p>
                       )}
                     </div>
-                    <p className="text-muted-foreground text-sm">
+                    <p className="font-mono text-muted-foreground text-xs tabular-nums">
                       {formatPeriod(activePlan.currentCycleStartAt, activePlan.currentCycleEndAt, {
                         billingConfig: activePhase?.planVersion.billingConfig,
                         dateFormatters,
@@ -354,7 +354,15 @@ function PlanFact({
   return (
     <div className="flex items-center justify-between gap-3">
       <dt className="text-muted-foreground">{label}</dt>
-      <dd className={cn("min-w-0 truncate text-right font-medium", valueClassName)}>{value}</dd>
+      {/* the fact column is mono: the receipt-row rule */}
+      <dd
+        className={cn(
+          "min-w-0 truncate text-right font-medium font-mono text-xs tabular-nums",
+          valueClassName
+        )}
+      >
+        {value}
+      </dd>
     </div>
   )
 }

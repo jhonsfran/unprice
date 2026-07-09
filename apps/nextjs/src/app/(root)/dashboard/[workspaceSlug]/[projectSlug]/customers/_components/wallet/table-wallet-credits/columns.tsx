@@ -37,14 +37,12 @@ function formatWalletDate(date: WalletCredit["expiresAt"] | WalletCredit["create
 export const columns: ColumnDef<WalletCredit>[] = [
   {
     accessorKey: "id",
-    header: ({ column }) => (
-      <DataTableColumnHeader column={column} title="Wallet credit" className="pl-4" />
-    ),
+    header: ({ column }) => <DataTableColumnHeader column={column} title="Wallet credit" />,
     cell: ({ row }) => (
       <Typography
         variant="p"
         affects="removePaddingMargin"
-        className="whitespace-nowrap pl-3 font-mono text-sm"
+        className="whitespace-nowrap font-mono text-sm"
       >
         {row.original.id}
       </Typography>
@@ -58,7 +56,11 @@ export const columns: ColumnDef<WalletCredit>[] = [
   {
     accessorKey: "source",
     header: ({ column }) => <DataTableColumnHeader column={column} title="Source" />,
-    cell: ({ row }) => <Badge variant="outline">{row.original.source}</Badge>,
+    cell: ({ row }) => (
+      <span className="whitespace-nowrap font-mono text-muted-foreground text-xs">
+        {row.original.source}
+      </span>
+    ),
     size: 28,
     filterFn: (row, _id, value) => {
       return Array.isArray(value) && value.includes(row.original.source)
@@ -78,8 +80,11 @@ export const columns: ColumnDef<WalletCredit>[] = [
   {
     accessorKey: "issuedAmount",
     header: ({ column }) => <DataTableColumnHeader column={column} title="Issued" />,
+    // money is tabular text, not a chip
     cell: ({ row }) => (
-      <Badge>{formatWalletMoney(row.original.issuedAmount, row.original.currency)}</Badge>
+      <span className="whitespace-nowrap font-mono text-xs tabular-nums">
+        {formatWalletMoney(row.original.issuedAmount, row.original.currency)}
+      </span>
     ),
     size: 28,
   },
@@ -87,9 +92,9 @@ export const columns: ColumnDef<WalletCredit>[] = [
     accessorKey: "consumedAmount",
     header: ({ column }) => <DataTableColumnHeader column={column} title="Consumed" />,
     cell: ({ row }) => (
-      <Badge variant="outline">
+      <span className="whitespace-nowrap font-mono text-xs tabular-nums">
         {formatWalletMoney(row.original.consumedAmount, row.original.currency)}
-      </Badge>
+      </span>
     ),
     size: 28,
   },
@@ -97,9 +102,9 @@ export const columns: ColumnDef<WalletCredit>[] = [
     accessorKey: "usableAmount",
     header: ({ column }) => <DataTableColumnHeader column={column} title="Available" />,
     cell: ({ row }) => (
-      <Badge variant={row.original.status === "active" ? "secondary" : "outline"}>
+      <span className="whitespace-nowrap font-mono text-xs tabular-nums">
         {formatWalletMoney(row.original.usableAmount, row.original.currency)}
-      </Badge>
+      </span>
     ),
     size: 28,
   },

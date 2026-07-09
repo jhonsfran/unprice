@@ -66,7 +66,11 @@ export default function CustomerFormField({
               <CopyButton value={selectedCustomer.id ?? ""} className="size-3" />
             )}
           </FormLabel>
-          <FormDescription>Select the customer to create the subscription</FormDescription>
+          <FormDescription>
+            {isDisabled
+              ? "The customer on an existing subscription cannot be changed"
+              : "Select the customer for this subscription"}
+          </FormDescription>
           <Popover
             modal={true}
             open={switcherCustomerOpen}

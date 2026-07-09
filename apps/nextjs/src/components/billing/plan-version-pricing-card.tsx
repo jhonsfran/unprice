@@ -14,6 +14,7 @@ import {
 } from "@unprice/ui/card"
 import { Separator } from "@unprice/ui/separator"
 import { cn } from "@unprice/ui/utils"
+import { formatBillingLabel } from "~/components/billing/format-billing-label"
 import { PlanVersionFeatureListItem } from "~/components/billing/plan-version-feature-list"
 
 export type PlanVersionPricingCardAction =
@@ -56,7 +57,7 @@ export function PlanVersionPricingCard({
     billingInterval: planVersion.billingConfig.billingInterval,
     units: trialUnits,
   })
-  const billingLabel = planVersion.billingConfig.name
+  const billingLabel = formatBillingLabel(planVersion.billingConfig)
   const actionElement = renderAction?.(action) ?? <PricingCardAction action={action} />
   const visibleFeatures = [...planVersion.planFeatures]
     .toSorted((a, b) => (a.order ?? 0) - (b.order ?? 0))

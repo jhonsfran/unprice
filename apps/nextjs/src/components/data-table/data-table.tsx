@@ -24,6 +24,8 @@ import { DataTableToolbar } from "./data-table-toolbar"
 
 export interface FilterOptionDataTable {
   filterBy?: string
+  // human label for the search input; falls back to the column id
+  filterPlaceholder?: string
   filterDateRange?: boolean
   filterColumns?: boolean
   filterServerSide?: boolean
@@ -54,6 +56,8 @@ interface DataTableProps<TData, TValue> {
   error?: string
   emptyState?: DataTableEmptyState
   hidePaginationWhenEmpty?: boolean
+  // low-signal columns ship hidden; the View menu opts them back in
+  initialColumnVisibility?: VisibilityState
 }
 
 export function DataTable<TData, TValue>({
@@ -65,9 +69,12 @@ export function DataTable<TData, TValue>({
   error,
   emptyState,
   hidePaginationWhenEmpty,
+  initialColumnVisibility,
 }: DataTableProps<TData, TValue>) {
   const [rowSelection, setRowSelection] = React.useState({})
-  const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({})
+  const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>(
+    initialColumnVisibility ?? {}
+  )
 
   // if pageCount is provided, we assume server-side pagination
   // otherwise, we assume client-side pagination done by the library

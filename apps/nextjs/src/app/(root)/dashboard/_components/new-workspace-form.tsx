@@ -79,7 +79,7 @@ export default function NewWorkspaceForm({
             onClick={() => form.handleSubmit(onSubmitForm)()}
             isSubmitting={form.formState.isSubmitting}
             isDisabled={form.formState.isSubmitting}
-            label="Create"
+            label="Create Workspace"
           />
         </div>
       </form>

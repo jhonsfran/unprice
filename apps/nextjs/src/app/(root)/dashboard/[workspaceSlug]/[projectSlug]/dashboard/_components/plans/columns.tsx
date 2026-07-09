@@ -28,14 +28,6 @@ type PlanConversion = Awaited<ReturnType<typeof analytics.getPlansConversion>>["
 
 export const columns: ColumnDef<PlanConversion>[] = [
   {
-    id: "select",
-    size: 5,
-    header: () => <div className="w-4" />,
-    cell: () => <div className="w-4" />,
-    enableSorting: false,
-    enableHiding: false,
-  },
-  {
     accessorKey: "page_id",
     header: ({ column }) => <DataTableColumnHeader column={column} title="Page" />,
     cell: ({ row }) => <TableCellPage pageId={row.original.page_id} />,
@@ -63,7 +55,7 @@ export const columns: ColumnDef<PlanConversion>[] = [
     enableResizing: true,
     header: ({ column }) => <DataTableColumnHeader column={column} title="Views" />,
     cell: ({ row }) => (
-      <div className="flex items-center gap-2 whitespace-nowrap text-sm">
+      <div className="flex items-center gap-2 whitespace-nowrap font-mono text-xs tabular-nums">
         <Eye className="h-4 w-4 text-info" />
         {row.original.plan_views}
       </div>
@@ -75,7 +67,7 @@ export const columns: ColumnDef<PlanConversion>[] = [
     enableResizing: true,
     header: ({ column }) => <DataTableColumnHeader column={column} title="Clicks" />,
     cell: ({ row }) => (
-      <div className="flex items-center gap-2 whitespace-nowrap text-sm">
+      <div className="flex items-center gap-2 whitespace-nowrap font-mono text-xs tabular-nums">
         <MousePointerClick className="h-4 w-4 text-info" />
         {row.original.plan_clicks}
       </div>
@@ -86,7 +78,7 @@ export const columns: ColumnDef<PlanConversion>[] = [
     accessorKey: "plan_signups",
     header: ({ column }) => <DataTableColumnHeader column={column} title="Signups" />,
     cell: ({ row }) => (
-      <div className="flex items-center gap-2 whitespace-nowrap text-sm">
+      <div className="flex items-center gap-2 whitespace-nowrap font-mono text-xs tabular-nums">
         <UserCheck2 className="h-4 w-4 text-info" />
         {row.original.plan_signups}
       </div>
@@ -128,7 +120,7 @@ function TableCellPage({ pageId }: { pageId: string }) {
   return (
     <Drawer direction={isMobile ? "bottom" : "right"}>
       <DrawerTrigger asChild>
-        <Button variant="link" className="w-fit px-0 text-left text-foreground">
+        <Button variant="link" className="w-fit px-0 text-left font-mono text-foreground text-xs">
           {pageId}
         </Button>
       </DrawerTrigger>
@@ -163,7 +155,7 @@ function TableCellPlanVersion({ planVersionId }: { planVersionId: string }) {
   return (
     <Drawer direction={isMobile ? "bottom" : "right"}>
       <DrawerTrigger asChild>
-        <Button variant="link" className="w-fit px-0 text-left text-foreground">
+        <Button variant="link" className="w-fit px-0 text-left font-mono text-foreground text-xs">
           {planVersionId}
         </Button>
       </DrawerTrigger>

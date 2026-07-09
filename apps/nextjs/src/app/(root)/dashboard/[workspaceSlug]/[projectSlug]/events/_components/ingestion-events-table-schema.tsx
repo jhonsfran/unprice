@@ -359,7 +359,7 @@ export function buildIngestionEventsFilters({
 }): FilterDataTableFilter[] {
   const statusCounts = new Map(facets?.states.map((facet) => [facet.value, facet.count]) ?? [])
 
-  return [
+  const filters: FilterDataTableFilter[] = [
     {
       type: "checkbox",
       id: "state",
@@ -418,6 +418,16 @@ export function buildIngestionEventsFilters({
       options: toFacetOptions(facets?.customers, values.customerIds),
     },
   ]
+
+  // a facet with nothing to pick and nothing picked is dead rail space:
+  // status stays as the anchor group, the rest appear with data
+  return filters.filter(
+    (filter) =>
+      filter.type !== "checkbox" ||
+      filter.id === "state" ||
+      filter.options.length > 0 ||
+      (filter.value?.length ?? 0) > 0
+  )
 }
 
 function toFacetOptions(

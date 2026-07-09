@@ -46,22 +46,28 @@ function RunCustomerCell({ row }: { row: { original: RunRow } }) {
   return (
     <SuperLink href={`/${workspaceSlug}/${projectSlug}/customers/${row.original.customerId}`}>
       <div className="flex min-w-0 flex-col gap-1">
-        <Typography
-          variant="p"
-          affects="removePaddingMargin"
-          className="truncate font-mono text-sm"
-        >
-          {row.original.customerId}
-        </Typography>
         {customer ? (
+          <>
+            <Typography variant="p" affects="removePaddingMargin" className="truncate text-sm">
+              {customer.name}
+            </Typography>
+            <Typography
+              variant="p"
+              affects="removePaddingMargin"
+              className="truncate font-mono text-muted-foreground text-xs"
+            >
+              {customer.email}
+            </Typography>
+          </>
+        ) : (
           <Typography
             variant="p"
             affects="removePaddingMargin"
-            className="truncate text-muted-foreground text-xs"
+            className="truncate font-mono text-sm"
           >
-            {customer.email} - {customer.name}
+            {row.original.customerId}
           </Typography>
-        ) : null}
+        )}
       </div>
     </SuperLink>
   )
@@ -70,14 +76,8 @@ function RunCustomerCell({ row }: { row: { original: RunRow } }) {
 export const columns: ColumnDef<RunRow>[] = [
   {
     accessorKey: "customerId",
-    header: ({ column }) => (
-      <DataTableColumnHeader column={column} title="Customer" className="pl-4" />
-    ),
-    cell: ({ row }) => (
-      <div className="pl-3">
-        <RunCustomerCell row={row} />
-      </div>
-    ),
+    header: ({ column }) => <DataTableColumnHeader column={column} title="Customer" />,
+    cell: ({ row }) => <RunCustomerCell row={row} />,
     size: 56,
     filterFn: (row, _id, filterValue) => {
       const searchValue = String(filterValue).toLowerCase()
@@ -145,8 +145,11 @@ export const columns: ColumnDef<RunRow>[] = [
   {
     accessorKey: "budgetAmount",
     header: ({ column }) => <DataTableColumnHeader column={column} title="Budget" />,
+    // money is tabular text, not a chip
     cell: ({ row }) => (
-      <Badge>{formatRunMoney(row.original.budgetAmount, row.original.currency)}</Badge>
+      <span className="whitespace-nowrap font-mono text-xs tabular-nums">
+        {formatRunMoney(row.original.budgetAmount, row.original.currency)}
+      </span>
     ),
     size: 28,
   },
@@ -154,9 +157,9 @@ export const columns: ColumnDef<RunRow>[] = [
     accessorKey: "consumedAmount",
     header: ({ column }) => <DataTableColumnHeader column={column} title="Consumed" />,
     cell: ({ row }) => (
-      <Badge variant="outline">
+      <span className="whitespace-nowrap font-mono text-xs tabular-nums">
         {formatRunMoney(row.original.consumedAmount, row.original.currency)}
-      </Badge>
+      </span>
     ),
     size: 28,
   },
@@ -164,7 +167,11 @@ export const columns: ColumnDef<RunRow>[] = [
     accessorKey: "startedAt",
     header: ({ column }) => <DataTableColumnHeader column={column} title="Started" />,
     cell: ({ row }) => (
-      <Typography variant="p" affects="removePaddingMargin" className="whitespace-nowrap text-sm">
+      <Typography
+        variant="p"
+        affects="removePaddingMargin"
+        className="whitespace-nowrap font-mono text-xs tabular-nums"
+      >
         {formatRunDate(row.original.startedAt)}
       </Typography>
     ),
@@ -174,7 +181,11 @@ export const columns: ColumnDef<RunRow>[] = [
     accessorKey: "endedAt",
     header: ({ column }) => <DataTableColumnHeader column={column} title="Ended" />,
     cell: ({ row }) => (
-      <Typography variant="p" affects="removePaddingMargin" className="whitespace-nowrap text-sm">
+      <Typography
+        variant="p"
+        affects="removePaddingMargin"
+        className="whitespace-nowrap font-mono text-xs tabular-nums"
+      >
         {formatRunDate(row.original.endedAt)}
       </Typography>
     ),

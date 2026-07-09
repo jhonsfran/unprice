@@ -104,7 +104,7 @@ export function OfferSection() {
         </ol>
       </div>
 
-      <div className="mt-14 rounded-lg border border-background-border bg-background-bgSubtle p-5 sm:p-6">
+      <div className="mt-14 rounded-lg border border-background-border bg-surface-panel p-5 shadow-ambient sm:p-6">
         <div className="flex items-baseline justify-between gap-4 border-background-border border-b pb-3">
           <span className="font-mono text-background-text text-xs uppercase tracking-widest">
             The walk-away guarantee

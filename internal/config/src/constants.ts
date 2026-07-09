@@ -75,7 +75,7 @@ export const DOCS_DOMAIN =
     ? `https://docs.${MAIN_DOMAIN}/`
     : APP_ENV === "preview"
       ? `https://docs.${MAIN_DOMAIN}/`
-      : "http://localhost:3333/docs"
+      : "http://localhost:3333/"
 
 export const PRICING_DOMAIN =
   APP_ENV === "production"

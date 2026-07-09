@@ -275,7 +275,7 @@ function DashboardPanel({
   })
 
   return (
-    <div className="flex h-full flex-col rounded-lg border border-background-border bg-background-base p-4">
+    <div className="flex h-full flex-col rounded-lg border border-background-border bg-surface-panel p-4">
       <div className="mb-1 flex shrink-0 items-baseline justify-between gap-4 border-background-line border-b pb-2.5">
         <span className="font-mono text-[10px] text-background-textContrast uppercase tracking-widest">
           Plan guardrails
@@ -515,7 +515,7 @@ function InvoicePanel({ features, discountActive, discountPercentage }: InvoiceP
   })
 
   return (
-    <div className="h-full rounded-lg border border-background-border bg-background-base p-6 font-primary shadow-sm">
+    <div className="h-full rounded-lg border border-background-border bg-surface-panel p-6 font-primary shadow-ambient">
       <div className="mb-6 flex items-start justify-between">
         <div>
           <div className="mb-1 flex items-center gap-2">
@@ -697,7 +697,7 @@ function LiveResponse({
   return (
     <div
       className={cn(
-        "flex h-full flex-col rounded-lg border bg-background-base p-4 text-xs transition-all duration-150",
+        "flex h-full flex-col rounded-lg border bg-surface-panel p-4 text-xs transition-all duration-150",
         isDenied
           ? flashError
             ? "border-danger-solid bg-danger-bgActive"
@@ -1243,7 +1243,7 @@ export function PricingHero({
           >
             {dynamicHeadline}
           </h2>
-          <p className="mb-3 font-mono text-background-text text-sm md:text-base">
+          <p className="mb-3 text-background-text text-sm leading-6 md:text-base md:leading-7">
             {dynamicDescription}
           </p>
           <Button
@@ -1272,7 +1272,7 @@ export function PricingHero({
           {/* Pricing Card */}
           <div
             className={cn(
-              "relative flex flex-1 flex-col rounded-xl border bg-background transition-all duration-300 lg:max-w-md",
+              "relative flex flex-1 flex-col rounded-xl border bg-surface-panel shadow-raised transition-all duration-300 lg:max-w-md",
               anyLimited &&
                 currentLimitedFeature?.config.limitType === "hard" &&
                 "border-danger-border",

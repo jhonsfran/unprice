@@ -4,46 +4,26 @@ import type { ColumnDef } from "@tanstack/react-table"
 import { formatRelative } from "date-fns"
 
 import type { RouterOutputs } from "@unprice/trpc/routes"
-import { Checkbox } from "@unprice/ui/checkbox"
 
 import { DataTableColumnHeader } from "~/components/data-table/data-table-column-header"
 import { DataTableRowActions } from "./data-table-row-actions"
 
 export type Member = RouterOutputs["workspaces"]["listInvitesByActiveWorkspace"]["invites"][number]
 
+function formatRole(role: string): string {
+  return role.charAt(0).toUpperCase() + role.slice(1).toLowerCase()
+}
+
 export const columns: ColumnDef<Member>[] = [
-  {
-    id: "select",
-    header: ({ table }) => (
-      <Checkbox
-        checked={
-          table.getIsAllPageRowsSelected() || (table.getIsSomePageRowsSelected() && "indeterminate")
-        }
-        onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
-        aria-label="Select all"
-        className="translate-y-[2px]"
-      />
-    ),
-    cell: ({ row }) => (
-      <Checkbox
-        checked={row.getIsSelected()}
-        onCheckedChange={(value) => row.toggleSelected(!!value)}
-        aria-label="Select row"
-        className="translate-y-[2px]"
-      />
-    ),
-    enableSorting: false,
-    enableHiding: false,
-  },
   {
     accessorKey: "email",
     header: ({ column }) => <DataTableColumnHeader column={column} title="Email" />,
-    cell: ({ row }) => <div>{row.original.email}</div>,
+    cell: ({ row }) => <div className="font-mono text-xs">{row.original.email}</div>,
   },
   {
     accessorKey: "role",
     header: ({ column }) => <DataTableColumnHeader column={column} title="Role" />,
-    cell: ({ row }) => <div>{row.getValue("role")}</div>,
+    cell: ({ row }) => <div>{formatRole(row.getValue("role"))}</div>,
     enableSorting: false,
     enableHiding: true,
   },
@@ -51,7 +31,7 @@ export const columns: ColumnDef<Member>[] = [
     accessorKey: "createdAtM",
     header: ({ column }) => <DataTableColumnHeader column={column} title="Created at" />,
     cell: ({ row }) => (
-      <div className="text-muted-foreground text-sm">
+      <div className="font-mono text-muted-foreground text-xs">
         {formatRelative(row.getValue("createdAtM"), new Date())}
       </div>
     ),
@@ -62,7 +42,7 @@ export const columns: ColumnDef<Member>[] = [
     accessorKey: "acceptedAt",
     header: ({ column }) => <DataTableColumnHeader column={column} title="Accepted at" />,
     cell: ({ row }) => (
-      <div className="text-muted-foreground text-sm">
+      <div className="font-mono text-muted-foreground text-xs">
         {row.getValue("acceptedAt")
           ? formatRelative(row.getValue("acceptedAt"), new Date())
           : "Pending"}

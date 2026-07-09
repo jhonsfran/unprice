@@ -10,6 +10,7 @@ import { Typography } from "@unprice/ui/typography"
 import { cn } from "@unprice/ui/utils"
 import { motion } from "framer-motion"
 import { LayoutGrid } from "lucide-react"
+import { useRouter } from "next/navigation"
 import { useState } from "react"
 import { type FieldErrors, type UseFormReturn, useFieldArray } from "react-hook-form"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
@@ -66,6 +67,7 @@ export default function SubscriptionPhaseFormField({
     trialUnits: 0,
   } as SubscriptionPhaseFormValue
 
+  const router = useRouter()
   const [selectedPhase, setSelectedPhase] = useState<SubscriptionPhaseFormValue>(defaultValuesPhase)
 
   const { errors } = form.formState
@@ -95,6 +97,7 @@ export default function SubscriptionPhaseFormField({
     trpc.subscriptions.removePhase.mutationOptions({
       onSuccess: () => {
         toastAction("success")
+        router.refresh()
       },
     })
   )
@@ -280,7 +283,7 @@ export default function SubscriptionPhaseFormField({
                   canAddScheduledPhase || canAddPhaseAfterFuture ? (
                     <Button
                       size={"sm"}
-                      className="w-1/2"
+                      variant="outline"
                       onClick={(e) => {
                         e.stopPropagation()
                         e.preventDefault()
@@ -299,7 +302,8 @@ export default function SubscriptionPhaseFormField({
                       <TooltipTrigger asChild>
                         <Button
                           size={"sm"}
-                          className="w-1/2 cursor-not-allowed opacity-50"
+                          variant="outline"
+                          className="cursor-not-allowed opacity-50"
                           aria-disabled
                           tabIndex={-1}
                           onClick={(e) => {
@@ -322,7 +326,8 @@ export default function SubscriptionPhaseFormField({
                     <TooltipTrigger asChild>
                       <Button
                         size={"sm"}
-                        className="w-1/2 cursor-not-allowed opacity-50"
+                        variant="outline"
+                        className="cursor-not-allowed opacity-50"
                         aria-disabled
                         tabIndex={-1}
                         onClick={(e) => {
@@ -341,7 +346,7 @@ export default function SubscriptionPhaseFormField({
                 ) : (
                   <Button
                     size={"sm"}
-                    className="w-1/2"
+                    variant="outline"
                     onClick={(e) => {
                       e.stopPropagation()
                       e.preventDefault()
@@ -397,6 +402,7 @@ export default function SubscriptionPhaseFormField({
                 <EmptyPlaceholder.Action>
                   <Button
                     size={"sm"}
+                    variant="outline"
                     onClick={(e) => {
                       e.stopPropagation()
                       e.preventDefault()

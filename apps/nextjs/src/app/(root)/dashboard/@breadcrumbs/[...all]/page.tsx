@@ -42,12 +42,45 @@ export default async function Page(props: {
   }
 
   const breadcrumbs = await withCustomerSubscriptionBreadcrumbs(all, customerId)
+  const labels = await resolveEntityLabels(breadcrumbs)
 
   return (
-    <div className="px-4 md:px-6">
-      <BreadcrumbsApp breadcrumbs={breadcrumbs} baseUrl={baseUrl} />
+    <div className="bg-surface-page px-4 md:px-6">
+      <BreadcrumbsApp breadcrumbs={breadcrumbs} baseUrl={baseUrl} labels={labels} />
     </div>
   )
+}
+
+// Raw ids (cus_…, pv_…, sub_…) are for copying, not wayfinding: resolve the
+// segments to names while the hrefs keep the id.
+async function resolveEntityLabels(segments: string[]): Promise<Record<string, string>> {
+  const entries = await Promise.all(
+    segments.map(async (segment): Promise<[string, string] | null> => {
+      try {
+        if (segment.startsWith("cus_")) {
+          const { customer } = await api.customers.getById({ id: segment })
+          const label = customer?.name || customer?.email
+          return label ? [segment, label] : null
+        }
+
+        if (segment.startsWith("pv_")) {
+          const { planVersion } = await api.planVersions.getById({ id: segment })
+          return planVersion ? [segment, `v${planVersion.version}`] : null
+        }
+
+        if (segment.startsWith("sub_")) {
+          const { subscription } = await api.subscriptions.getById({ id: segment })
+          return subscription?.planSlug ? [segment, subscription.planSlug] : null
+        }
+      } catch {
+        // unresolvable ids fall back to the raw segment
+      }
+
+      return null
+    })
+  )
+
+  return Object.fromEntries(entries.filter((entry): entry is [string, string] => entry !== null))
 }
 
 async function withCustomerSubscriptionBreadcrumbs(

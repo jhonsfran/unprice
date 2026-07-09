@@ -1,4 +1,5 @@
 import { cn } from "@unprice/ui/utils"
+import { Reveal } from "./reveal"
 import { Leader, SectionShell } from "./station"
 import { StationHeader } from "./station-header"
 
@@ -92,17 +93,17 @@ export function SystemMap() {
   return (
     <SectionShell labelledBy="system-map-title">
       <div className="max-w-2xl">
-        <StationHeader label="Where Unprice sits" fact="request → decision → invoice" />
+        <StationHeader index="02" label="Where Unprice sits" fact="request → decision → invoice" />
         <h2
           id="system-map-title"
-          className="mt-6 font-primary font-semibold text-3xl text-background-textContrast tracking-tight sm:text-4xl"
+          className="mt-6 font-primary text-background-textContrast text-display-3"
         >
           The money path between your app and your payment provider.
         </h2>
         <p className="mt-5 text-background-text text-base leading-7 sm:text-lg sm:leading-8">
           Your app asks Unprice before paid work runs and gets an allow or deny with evidence
-          attached. Your payment provider captures the payment — Stripe first today, and the
-          provider model is designed so the money path never belongs to the processor.
+          attached. Your provider captures the payment — the money path never belongs to the
+          processor.
         </p>
       </div>
 
@@ -110,8 +111,15 @@ export function SystemMap() {
         aria-label="Where Unprice sits: your application triggers the paid action and asks Unprice before it runs. Unprice is the customer money path — spend authorization in the request path, plan versions pinned per customer, entitlements separate from plans, event-native meters, customer budgets for runs and workloads, wallet credits on a double-entry ledger, and invoice evidence that explains every line. Your payment provider captures the payment: Stripe today in your own account, extensible to your next provider by design. Funds stay with you."
         className="mt-10 sm:mt-12"
       >
-        <div className="grid grid-cols-1 items-center gap-1 lg:grid-cols-[minmax(0,1fr)_5.5rem_minmax(0,1.35fr)_5.5rem_minmax(0,1fr)] lg:gap-0">
-          <div className="h-fit rounded-lg border border-background-border bg-background-bgSubtle p-4">
+        {/* Reveal order = flow order: app, request, Unprice, invoice,
+            provider — the diagram assembles the way the request travels.
+            The center panel is the only lifted surface: Unprice is the
+            diagram's center of gravity, the endpoints stay flat. */}
+        <Reveal
+          stagger
+          className="grid grid-cols-1 items-center gap-1 lg:grid-cols-[minmax(0,1fr)_5.5rem_minmax(0,1.35fr)_5.5rem_minmax(0,1fr)] lg:gap-0"
+        >
+          <div className="h-fit rounded-lg border border-background-border p-4">
             <PanelHeader title="Your application" fact="the trigger" />
             {appRows.map((row) => (
               <MapRowLine key={row.label} row={row} />
@@ -120,7 +128,7 @@ export function SystemMap() {
 
           <FlowConnector top="request" bottom="decision" />
 
-          <div className="relative rounded-lg border border-background-borderHover bg-background-bgSubtle p-4 sm:p-5">
+          <div className="relative rounded-lg border border-background-borderHover bg-surface-panel p-4 shadow-raised sm:p-5">
             <span
               aria-hidden
               className="-top-px -left-px absolute size-3 border-primary-text border-t-2 border-l-2"
@@ -155,13 +163,13 @@ export function SystemMap() {
 
           <FlowConnector top="invoice" bottom="capture" />
 
-          <div className="h-fit rounded-lg border border-background-border bg-background-bgSubtle p-4">
+          <div className="h-fit rounded-lg border border-background-border p-4">
             <PanelHeader title="Payment provider" fact="bring your own" />
             {providerRows.map((row) => (
               <MapRowLine key={row.label} row={row} />
             ))}
           </div>
-        </div>
+        </Reveal>
 
         <figcaption className="mt-5 border-background-border border-t pt-3 text-background-text text-xs leading-6">
           Unprice owns the decision, the ledger, and the evidence. Your provider captures the

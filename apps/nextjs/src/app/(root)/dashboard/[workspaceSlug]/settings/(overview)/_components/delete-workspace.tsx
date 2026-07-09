@@ -28,8 +28,8 @@ export function DeleteWorkspace({ workspace }: { workspace: Workspace }) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
 
-  const title = "Delete"
-  const description = "This will delete the workspace and all of its data."
+  const title = "Delete Workspace"
+  const description = "This will delete the workspace and all of its projects and data."
 
   const deleteWorkspace = useMutation(
     trpc.workspaces.delete.mutationOptions({

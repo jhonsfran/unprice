@@ -4,7 +4,6 @@ import type { SearchParams } from "nuqs/server"
 import { Suspense } from "react"
 import { DataTable } from "~/components/data-table/data-table"
 import { DataTableSkeleton } from "~/components/data-table/data-table-skeleton"
-import { SectionIntro } from "~/components/layout/section-intro"
 import { dataTableParams } from "~/lib/searchParams"
 import { api } from "~/trpc/server"
 import { columns as invoicesColumns } from "../../_components/invoices/table-invoices/columns"
@@ -32,10 +31,10 @@ export default async function CustomerPage(props: {
 
   return (
     <div className="mt-4 flex flex-col gap-4">
-      <SectionIntro
-        title="Invoice evidence"
-        description="Explain invoice state from subscription, plan version, usage, wallet, and settlement evidence."
-      />
+      <p className="text-muted-foreground text-sm">
+        Explain invoice state from subscription, plan version, usage, wallet, and settlement
+        evidence.
+      </p>
       <Suspense
         fallback={
           <DataTableSkeleton
@@ -70,6 +69,7 @@ export default async function CustomerPage(props: {
           hidePaginationWhenEmpty
           filterOptions={{
             filterBy: "id",
+            filterPlaceholder: "Filter by invoice id",
             filterColumns: true,
             filterDateRange: true,
             filterServerSide: true,

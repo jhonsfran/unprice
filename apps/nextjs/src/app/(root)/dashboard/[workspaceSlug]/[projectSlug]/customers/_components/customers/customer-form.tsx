@@ -129,7 +129,7 @@ export function CustomerForm({
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmitForm)} className="space-y-6">
-        <div className="space-y-8">
+        <div className="space-y-5">
           {editMode && (
             <FormField
               control={form.control}

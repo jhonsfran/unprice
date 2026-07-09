@@ -111,20 +111,16 @@ export function IngestionEventsPanel() {
             </EmptyPlaceholder.Description>
             {!queryError && (
               <EmptyPlaceholder.Action>
-                <div className="flex flex-col items-center justify-center gap-2 sm:flex-row">
-                  <CodeApiSheet defaultMethod="consumeUsage">
-                    <Button size="sm" variant="primary">
-                      <Code className="mr-2 size-4" />
-                      Report usage synchronously
-                    </Button>
-                  </CodeApiSheet>
-                  <CodeApiSheet defaultMethod="recordUsage">
-                    <Button size="sm" variant="default">
-                      <Code className="mr-2 size-4" />
-                      Report asynchronously
-                    </Button>
-                  </CodeApiSheet>
-                </div>
+                {/* one CTA: the sheet itself offers sync and async methods */}
+                <CodeApiSheet
+                  defaultMethod="consumeUsage"
+                  methods={["consumeUsage", "recordUsage"]}
+                >
+                  <Button size="sm" variant="primary">
+                    <Code className="mr-2 size-4" />
+                    Send a test event
+                  </Button>
+                </CodeApiSheet>
               </EmptyPlaceholder.Action>
             )}
           </EmptyPlaceholder>

@@ -15,22 +15,22 @@ export default async function DangerZonePage(props: {
     notFound()
   }
 
+  // ordered by severity: transfers are recoverable, delete is not
   return (
     <Fragment>
       <TransferProjectToPersonal
         projectSlug={props.params.projectSlug}
         isMain={project.isMain ?? false}
       />
-      <DeleteProject
-        projectSlug={props.params.projectSlug}
-        workspaceSlug={props.params.workspaceSlug}
-        isMain={project.isMain ?? false}
-      />
-
       <TransferProjectToTeam
         workspacesPromise={api.workspaces.listWorkspacesByActiveUser()}
         workspaceSlug={props.params.workspaceSlug}
         projectSlug={props.params.projectSlug}
+        isMain={project.isMain ?? false}
+      />
+      <DeleteProject
+        projectSlug={props.params.projectSlug}
+        workspaceSlug={props.params.workspaceSlug}
         isMain={project.isMain ?? false}
       />
     </Fragment>

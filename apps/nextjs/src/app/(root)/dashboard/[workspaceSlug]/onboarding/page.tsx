@@ -16,13 +16,15 @@ export default async function OnboardingPage(props: {
     return redirect(`/${workspaceSlug}`)
   }
 
+  // the hero and the money-path stepper center together as one group; a
+  // stepper pinned to the bottom of an empty viewport reads as detached
   return (
-    <div className="mx-auto flex min-h-[calc(100vh-8rem)] w-full max-w-screen-lg flex-col items-center px-4">
+    <div className="mx-auto flex min-h-[calc(100vh-8rem)] w-full max-w-screen-lg flex-col items-center justify-center gap-14 px-4 py-10">
       <OnboardingWrapper>
-        <div className="flex w-full flex-1 flex-col items-center justify-center overflow-x-hidden py-10">
+        <div className="flex w-full flex-col items-center overflow-x-hidden">
           <OnboardingUI />
         </div>
-        <div className="flex w-full shrink-0 items-center justify-center pb-8">
+        <div className="flex w-full shrink-0 items-center justify-center">
           <StepNavigator />
         </div>
       </OnboardingWrapper>

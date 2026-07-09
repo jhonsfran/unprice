@@ -14,6 +14,8 @@ export function CustomerEconomicHeader({
   ).length
   const invoiceCount = customer.invoices.length
   const descriptionParts = [
+    // the name leads; the email stays close as the durable identifier
+    customer.name ? customer.email : null,
     customer.description,
     `${activeSubscriptions} active ${activeSubscriptions === 1 ? "subscription" : "subscriptions"}`,
     `${invoiceCount} ${invoiceCount === 1 ? "invoice" : "invoices"}`,
@@ -21,7 +23,7 @@ export function CustomerEconomicHeader({
 
   return (
     <HeaderTab
-      title={customer.email}
+      title={customer.name || customer.email}
       description={descriptionParts.join(" - ")}
       label={customer.active ? "active" : "inactive"}
       id={customer.id}

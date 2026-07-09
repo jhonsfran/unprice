@@ -16,11 +16,14 @@ const refusals = [
 
 export default function ManifestoBelief() {
   return (
-    <section aria-labelledby="belief-title" className="w-full border-background-border border-t">
+    <section
+      aria-labelledby="belief-title"
+      className="ledger-dots w-full border-background-border border-t"
+    >
       <div className="mx-auto flex w-full max-w-6xl flex-col items-center px-6 py-24 text-center sm:py-32">
         <h2
           id="belief-title"
-          className="max-w-3xl font-primary font-semibold text-3xl text-background-textContrast tracking-tight sm:text-4xl"
+          className="max-w-3xl font-primary text-background-textContrast text-display-2"
         >
           <Balancer>The team that owns the request path should own pricing.</Balancer>
         </h2>

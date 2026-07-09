@@ -274,16 +274,13 @@ function StripeConnectionAlert({ issue }: { issue: StripeConnectionIssue }) {
     <Alert className="mt-2" variant="warning">
       <TriangleAlert className="size-5 text-warning-text" aria-hidden="true" />
       <AlertTitle className="text-sm">{issue.title}</AlertTitle>
-      <AlertDescription className="flex flex-col gap-2 text-xs">
+      <AlertDescription className="flex flex-col gap-1 text-xs">
         <p>{issue.description}</p>
+        {/* a sentence, not a chip pile: the fields are a to-do list, not states */}
         {issue.fields.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {issue.fields.map((field) => (
-              <Badge key={field} variant="outline">
-                {field}
-              </Badge>
-            ))}
-          </div>
+          <p>
+            <span className="font-medium">Missing:</span> {issue.fields.join(", ")}.
+          </p>
         )}
       </AlertDescription>
     </Alert>
@@ -337,9 +334,9 @@ function StripeProviderConfigCard({
       status={STATUS_META[deriveStripeStatus(provider)]}
       badges={
         provider?.mode === "test" ? (
-          <Badge variant="outline" className="h-6 text-muted-foreground">
-            Test
-          </Badge>
+          <span className="flex h-6 items-center font-mono text-muted-foreground text-xs">
+            test mode
+          </span>
         ) : null
       }
       connectedAccountId={provider?.externalAccountId}

@@ -3,6 +3,8 @@ import { buttonVariants } from "@unprice/ui/button"
 import { ArrowRight } from "lucide-react"
 import { Link } from "next-view-transitions"
 import Balancer from "react-wrap-balancer"
+import { Reveal } from "./reveal"
+import { SectionShell } from "./station"
 
 // The close is Sage, not Ruler: the hero promised control, the close promises
 // understanding. The bracket corners are the logo's containment motif around
@@ -10,11 +12,15 @@ import Balancer from "react-wrap-balancer"
 
 export default function Cta() {
   return (
-    <section aria-labelledby="cta-title" className="w-full border-background-border border-t">
-      <div className="mx-auto flex w-full max-w-6xl flex-col items-center px-6 py-24 text-center sm:py-32">
+    <SectionShell
+      labelledBy="cta-title"
+      className="ledger-dots"
+      innerClassName="flex flex-col items-center py-24 text-center sm:py-32"
+    >
+      <>
         <h2
           id="cta-title"
-          className="max-w-3xl font-primary font-semibold text-3xl text-background-textContrast tracking-tight sm:text-4xl"
+          className="max-w-3xl font-primary text-background-textContrast text-display-2"
         >
           <Balancer>
             Every allow, deny, charge, and credit — explained from one money path.
@@ -57,7 +63,7 @@ export default function Cta() {
           free during early access · no card · AGPL-3.0 core
         </p>
 
-        <div className="mt-40 w-full max-w-2xl rounded-lg border border-background-border bg-background-bgSubtle p-5 text-left sm:p-6">
+        <Reveal className="mt-40 w-full max-w-2xl rounded-lg border border-background-border bg-surface-panel p-5 text-left shadow-ambient sm:p-6">
           <div className="flex items-baseline justify-between gap-4 border-background-border border-b pb-3">
             <span className="font-mono text-background-text text-xs uppercase tracking-widest">
               Map my paid action
@@ -84,8 +90,8 @@ export default function Cta() {
               Email what runs
             </a>
           </div>
-        </div>
-      </div>
-    </section>
+        </Reveal>
+      </>
+    </SectionShell>
   )
 }

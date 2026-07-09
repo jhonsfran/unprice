@@ -31,17 +31,17 @@ export default function WorkSpaceSettingsDangerLoading() {
           <Skeleton className="h-10 w-full" />
         </CardContent>
         <CardFooter className="flex justify-between">
-          <Button className="text-transparent">Save</Button>
+          <Button className="text-transparent">Save Workspace</Button>
         </CardFooter>
       </Card>
       <Card className="animate-pulse bg-muted">
         <CardHeader>
-          <CardTitle>Delete</CardTitle>
+          <CardTitle>Delete Workspace</CardTitle>
           <CardDescription>This will delete the workspace and all of its data.</CardDescription>
         </CardHeader>
         <CardFooter className="flex justify-between">
           <Button variant="destructive" className="text-transparent">
-            Delete
+            Delete Workspace
           </Button>
         </CardFooter>
       </Card>

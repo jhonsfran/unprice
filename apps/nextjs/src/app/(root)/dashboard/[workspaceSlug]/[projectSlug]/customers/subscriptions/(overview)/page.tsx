@@ -9,7 +9,6 @@ import { DataTable } from "~/components/data-table/data-table"
 import { DataTableSkeleton } from "~/components/data-table/data-table-skeleton"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
-import { SectionIntro } from "~/components/layout/section-intro"
 import { SuperLink } from "~/components/super-link"
 import { dataTableParams } from "~/lib/searchParams"
 import { api } from "~/trpc/server"
@@ -71,10 +70,6 @@ export default async function PlanSubscriptionsPage({
         </div>
       </TabNavigation>
       <div className="mt-4 flex flex-col gap-4">
-        <SectionIntro
-          title="Subscription evidence across this project"
-          description="Subscriptions connect customers to plan versions, billing periods, wallet policy, and invoice evidence."
-        />
         <Suspense
           fallback={
             <DataTableSkeleton
@@ -99,6 +94,7 @@ export default async function PlanSubscriptionsPage({
           <DataTable
             columns={columns}
             data={subscriptions}
+            initialColumnVisibility={{ timezone: false }}
             emptyState={{
               title: "No subscriptions",
               description:
@@ -115,6 +111,7 @@ export default async function PlanSubscriptionsPage({
             hidePaginationWhenEmpty
             filterOptions={{
               filterBy: "customerId",
+              filterPlaceholder: "Filter by customer or plan",
               filterColumns: true,
               filterDateRange: true,
               filterServerSide: true,

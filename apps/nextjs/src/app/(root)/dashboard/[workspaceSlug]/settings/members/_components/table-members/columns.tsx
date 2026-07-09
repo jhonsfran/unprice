@@ -5,37 +5,17 @@ import { formatRelative } from "date-fns"
 
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Avatar, AvatarFallback, AvatarImage } from "@unprice/ui/avatar"
-import { Checkbox } from "@unprice/ui/checkbox"
 
 import { DataTableColumnHeader } from "~/components/data-table/data-table-column-header"
 import { DataTableRowActions } from "./data-table-row-actions"
 
 export type Member = RouterOutputs["workspaces"]["listMembersByActiveWorkspace"]["members"][number]
 
+function formatRole(role: string): string {
+  return role.charAt(0).toUpperCase() + role.slice(1).toLowerCase()
+}
+
 export const columns: ColumnDef<Member>[] = [
-  {
-    id: "select",
-    header: ({ table }) => (
-      <Checkbox
-        checked={
-          table.getIsAllPageRowsSelected() || (table.getIsSomePageRowsSelected() && "indeterminate")
-        }
-        onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
-        aria-label="Select all"
-        className="translate-y-[2px]"
-      />
-    ),
-    cell: ({ row }) => (
-      <Checkbox
-        checked={row.getIsSelected()}
-        onCheckedChange={(value) => row.toggleSelected(!!value)}
-        aria-label="Select row"
-        className="translate-y-[2px]"
-      />
-    ),
-    enableSorting: false,
-    enableHiding: false,
-  },
   {
     accessorKey: "name",
     header: ({ column }) => <DataTableColumnHeader column={column} title="Name" />,
@@ -47,7 +27,7 @@ export const columns: ColumnDef<Member>[] = [
         </Avatar>
         <div className="flex flex-col">
           <span>{row.original.user.name}</span>
-          <span className="text-muted-foreground text-sm">{row.original.user.email}</span>
+          <span className="font-mono text-muted-foreground text-xs">{row.original.user.email}</span>
         </div>
       </div>
     ),
@@ -55,7 +35,7 @@ export const columns: ColumnDef<Member>[] = [
   {
     accessorKey: "role",
     header: ({ column }) => <DataTableColumnHeader column={column} title="Role" />,
-    cell: ({ row }) => <div>{row.getValue("role")}</div>,
+    cell: ({ row }) => <div>{formatRole(row.getValue("role"))}</div>,
     enableSorting: false,
     enableHiding: true,
   },
@@ -63,7 +43,7 @@ export const columns: ColumnDef<Member>[] = [
     accessorKey: "createdAtM",
     header: ({ column }) => <DataTableColumnHeader column={column} title="Joined at" />,
     cell: ({ row }) => (
-      <div className="text-muted-foreground text-sm">
+      <div className="font-mono text-muted-foreground text-xs">
         {formatRelative(row.getValue("createdAtM"), new Date())}
       </div>
     ),

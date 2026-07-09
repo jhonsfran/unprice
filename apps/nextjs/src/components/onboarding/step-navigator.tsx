@@ -77,7 +77,7 @@ export function StepNavigator() {
                   {isCompleted ? <CheckCircle2 className="size-3" /> : index + 1}
                 </span>
                 <span className="flex min-w-0 flex-col items-start leading-tight">
-                  <span className="max-w-24 truncate font-medium text-xs">{stepCopy.label}</span>
+                  <span className="max-w-32 truncate font-medium text-xs">{stepCopy.label}</span>
                   <span className="hidden max-w-28 truncate text-[11px] text-muted-foreground sm:block">
                     {stepCopy.detail}
                   </span>

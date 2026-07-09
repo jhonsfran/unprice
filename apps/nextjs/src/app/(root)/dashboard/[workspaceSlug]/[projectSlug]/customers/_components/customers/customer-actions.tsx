@@ -42,7 +42,7 @@ export function CustomerActions({
         <DialogTrigger asChild>
           <Button variant={"custom"}>
             <Edit className="mr-2 h-4 w-4" />
-            Customer
+            Edit customer
           </Button>
         </DialogTrigger>
 
@@ -62,7 +62,7 @@ export function CustomerActions({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      <DialogContent className="max-h-[95vh] md:max-w-screen-md">
+      <DialogContent className="md:max-w-xl">
         <DialogHeader>
           <DialogTitle>Customer details</DialogTitle>
           <DialogDescription>

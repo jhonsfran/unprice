@@ -14,7 +14,7 @@ export function SignInGithub({
       {isLastUsed && (
         <Badge
           variant="secondary"
-          className="-top-2.5 absolute right-2 z-10 h-5 whitespace-nowrap px-2 text-[10px]"
+          className="-translate-y-1/2 absolute top-1/2 right-3 z-10 h-5 whitespace-nowrap px-2 text-[10px]"
         >
           Last used
         </Badge>

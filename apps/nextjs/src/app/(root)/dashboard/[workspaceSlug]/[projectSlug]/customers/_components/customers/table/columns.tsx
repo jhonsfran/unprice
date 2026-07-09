@@ -3,41 +3,15 @@
 import type { ColumnDef } from "@tanstack/react-table"
 
 import type { Customer } from "@unprice/db/validators"
-import { Checkbox } from "@unprice/ui/checkbox"
 
 import { Badge } from "@unprice/ui/badge"
 import { Typography } from "@unprice/ui/typography"
-import { cn } from "@unprice/ui/utils"
 import { DataTableColumnHeader } from "~/components/data-table/data-table-column-header"
 import { SuperLink } from "~/components/super-link"
 import { formatDate } from "~/lib/dates"
 import { DataTableRowActions } from "./data-table-row-actions"
 
 export const columns: ColumnDef<Customer>[] = [
-  {
-    id: "select",
-    size: 40,
-    header: ({ table }) => (
-      <Checkbox
-        checked={
-          table.getIsAllPageRowsSelected() || (table.getIsSomePageRowsSelected() && "indeterminate")
-        }
-        onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
-        aria-label="Select all"
-        className="translate-y-[2px]"
-      />
-    ),
-    cell: ({ row }) => (
-      <Checkbox
-        checked={row.getIsSelected()}
-        onCheckedChange={(value) => row.toggleSelected(!!value)}
-        aria-label="Select row"
-        className="translate-y-[2px]"
-      />
-    ),
-    enableSorting: false,
-    enableHiding: false,
-  },
   {
     accessorKey: "name",
     header: ({ column }) => <DataTableColumnHeader column={column} title="Name" />,
@@ -53,7 +27,7 @@ export const columns: ColumnDef<Customer>[] = [
     header: ({ column }) => <DataTableColumnHeader column={column} title="Email" />,
     cell: ({ row }) => (
       <SuperLink href={`./customers/${row.original.id}`} scroll={false}>
-        <div className="whitespace-nowrap text-sm">{row.original.email}</div>
+        <div className="whitespace-nowrap font-mono text-xs">{row.original.email}</div>
       </SuperLink>
     ),
     enableSorting: false,
@@ -78,9 +52,9 @@ export const columns: ColumnDef<Customer>[] = [
     enableResizing: true,
     header: ({ column }) => <DataTableColumnHeader column={column} title="Currency" />,
     cell: ({ row }) => (
-      <Badge className="text-xs" variant="secondary">
+      <span className="font-mono text-muted-foreground text-xs">
         {row.original.defaultCurrency}
-      </Badge>
+      </span>
     ),
     filterFn: (row, id, value) => {
       return Array.isArray(value) && value.includes(row.getValue(id))
@@ -90,24 +64,26 @@ export const columns: ColumnDef<Customer>[] = [
   {
     accessorKey: "active",
     enableResizing: true,
-    header: ({ column }) => <DataTableColumnHeader column={column} title="Active" />,
-    cell: ({ row }) => (
-      <Badge
-        className={cn({
-          info: row.original.active,
-          danger: !row.original.active,
-        })}
-      >
-        {row.original.active ? "active" : "inactive"}
-      </Badge>
-    ),
+    header: ({ column }) => <DataTableColumnHeader column={column} title="Status" />,
+    // the healthy state stays quiet; only the exception earns a chip
+    cell: ({ row }) =>
+      row.original.active ? (
+        <span className="flex items-center gap-1.5 text-muted-foreground text-xs">
+          <span className="size-1.5 rounded-full bg-success-solid" aria-hidden="true" />
+          Active
+        </span>
+      ) : (
+        <Badge className="danger">inactive</Badge>
+      ),
     size: 20,
   },
   {
     accessorKey: "timezone",
     enableResizing: true,
     header: ({ column }) => <DataTableColumnHeader column={column} title="Timezone" />,
-    cell: ({ row }) => <Badge>{row.original.timezone}</Badge>,
+    cell: ({ row }) => (
+      <span className="font-mono text-muted-foreground text-xs">{row.original.timezone}</span>
+    ),
     size: 20,
   },
   {
@@ -115,7 +91,11 @@ export const columns: ColumnDef<Customer>[] = [
     header: ({ column }) => <DataTableColumnHeader column={column} title="Creation Date" />,
     cell: ({ row }) => (
       <div className="flex items-center space-x-1 whitespace-nowrap">
-        <Typography variant="p" affects="removePaddingMargin">
+        <Typography
+          variant="p"
+          affects="removePaddingMargin"
+          className="font-mono text-xs tabular-nums"
+        >
           {formatDate(row.original.createdAtM, row.original.timezone)}
         </Typography>
       </div>

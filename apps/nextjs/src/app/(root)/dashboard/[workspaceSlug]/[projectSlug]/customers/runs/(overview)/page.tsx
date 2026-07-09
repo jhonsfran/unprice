@@ -9,7 +9,6 @@ import { DataTable } from "~/components/data-table/data-table"
 import { DataTableSkeleton } from "~/components/data-table/data-table-skeleton"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
-import { SectionIntro } from "~/components/layout/section-intro"
 import { SuperLink } from "~/components/super-link"
 import { dataTableParams } from "~/lib/searchParams"
 import { api } from "~/trpc/server"
@@ -64,10 +63,6 @@ export default async function ProjectRunsPage({
         </div>
       </TabNavigation>
       <div className="mt-4 flex flex-col gap-4">
-        <SectionIntro
-          title="Budgeted workloads across customers"
-          description="Runs label workload spend, reserve budget, and stop over-budget work without making Unprice the workload owner."
-        />
         <Suspense
           fallback={
             <DataTableSkeleton
@@ -87,7 +82,7 @@ export default async function ProjectRunsPage({
               description: "Runs appear after your app starts a budgeted workload for a customer.",
               action: (
                 <CodeApiSheet defaultMethod="startBudgetedRun">
-                  <Button size="sm">
+                  <Button size="sm" variant="outline">
                     <Code className="mr-2 size-4" />
                     Start budgeted run
                   </Button>
@@ -97,6 +92,7 @@ export default async function ProjectRunsPage({
             hidePaginationWhenEmpty
             filterOptions={{
               filterBy: "customerId",
+              filterPlaceholder: "Filter by customer, run, or workload",
               filterColumns: true,
               filterDateRange: true,
               filterServerSide: true,

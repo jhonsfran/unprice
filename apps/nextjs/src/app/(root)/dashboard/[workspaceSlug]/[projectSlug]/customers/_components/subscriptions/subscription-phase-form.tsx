@@ -159,11 +159,14 @@ export function SubscriptionPhaseForm({
         planVersion: defaultValues.planVersion,
       } as SubscriptionPhaseFormSubmitValue)
       setDialogOpen?.(false)
+      // sync the server-rendered facts (cycle, renews) with the new phase
+      router.refresh()
     } else {
       const { phase } = await createPhase.mutateAsync(data as InsertSubscriptionPhase)
 
       onSubmit(phase as SubscriptionPhaseFormSubmitValue)
       setDialogOpen?.(false)
+      router.refresh()
     }
   }
 

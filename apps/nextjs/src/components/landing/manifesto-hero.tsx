@@ -14,16 +14,18 @@ const staticSigns = [
 
 export default function ManifestoHero() {
   return (
-    <section aria-labelledby="manifesto-title" className="w-full">
+    <section aria-labelledby="manifesto-title" className="ledger-dots w-full">
       <div className="mx-auto flex w-full max-w-6xl flex-col items-center px-6 pt-20 pb-16 text-center sm:pt-28 sm:pb-20">
         <p className="font-mono text-background-text text-xs uppercase tracking-widest">
           The Unprice manifesto
         </p>
         <h1
           id="manifesto-title"
-          className="mt-6 max-w-3xl font-primary font-semibold text-4xl text-background-textContrast leading-[1.08] tracking-tight sm:text-5xl sm:leading-[1.06]"
+          className="mt-6 max-w-3xl font-primary text-background-textContrast text-display-1"
         >
-          <Balancer>Pricing is a runtime decision.</Balancer>
+          <Balancer>
+            <span className="text-background-text">Pricing is</span> a runtime decision.
+          </Balancer>
         </h1>
         <p className="mt-6 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
           <Balancer>
@@ -43,7 +45,7 @@ export default function ManifestoHero() {
 
         <figure
           aria-label="The signs of static, after-the-fact pricing: over-budget usage cannot be stopped before it runs, packaging changes edit product code and scripts and cron jobs at once, pricing logic is hardcoded configuration instead of a decision, and disputed invoices are reconstructed from logs by hand."
-          className="mt-12 w-full max-w-xl rounded-lg border border-background-border bg-background-bgSubtle p-4 text-left sm:p-5"
+          className="mt-12 w-full max-w-xl rounded-lg border border-background-border bg-surface-panel p-4 text-left shadow-ambient sm:p-5"
         >
           <figcaption className="mb-3 flex items-baseline justify-between gap-4 border-background-border border-b pb-3">
             <span className="font-mono text-background-text text-xs uppercase tracking-widest">

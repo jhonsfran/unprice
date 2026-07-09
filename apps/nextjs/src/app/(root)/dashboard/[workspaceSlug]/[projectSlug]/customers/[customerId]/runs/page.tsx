@@ -7,7 +7,6 @@ import { Suspense } from "react"
 import { CodeApiSheet } from "~/components/code-api-sheet"
 import { DataTable } from "~/components/data-table/data-table"
 import { DataTableSkeleton } from "~/components/data-table/data-table-skeleton"
-import { SectionIntro } from "~/components/layout/section-intro"
 import { dataTableParams } from "~/lib/searchParams"
 import { api } from "~/trpc/server"
 import { columns as runsColumns } from "../../_components/runs/table-runs/columns"
@@ -37,10 +36,10 @@ export default async function CustomerRunsPage(props: {
 
   return (
     <div className="mt-4 flex flex-col gap-4">
-      <SectionIntro
-        title="Budgeted runs for this customer"
-        description="Runs label workload spend, reserve budget, and stop over-budget work before the customer creates more cost."
-      />
+      <p className="text-muted-foreground text-sm">
+        Runs label workload spend, reserve budget, and stop over-budget work before the customer
+        creates more cost.
+      </p>
       <Suspense
         fallback={
           <DataTableSkeleton
@@ -55,12 +54,14 @@ export default async function CustomerRunsPage(props: {
           pageCount={pageCount}
           columns={runsColumns}
           data={runs}
+          // scoped to one customer: the customer column is redundant here
+          initialColumnVisibility={{ customerId: false }}
           emptyState={{
             title: "No budgeted runs",
             description: "Runs appear after your app starts a budgeted workload for this customer.",
             action: (
               <CodeApiSheet defaultMethod="startBudgetedRun" exampleParams={{ customerId }}>
-                <Button size="sm">
+                <Button size="sm" variant="outline">
                   <Code className="mr-2 size-4" />
                   Start budgeted run
                 </Button>
@@ -70,6 +71,7 @@ export default async function CustomerRunsPage(props: {
           hidePaginationWhenEmpty
           filterOptions={{
             filterBy: "customerId",
+            filterPlaceholder: "Filter by run, trace, or workload",
             filterColumns: true,
             filterDateRange: true,
             filterServerSide: true,

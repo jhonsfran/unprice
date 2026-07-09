@@ -150,6 +150,9 @@ export default async function PlanPage({
           <DataTable
             columns={columns}
             data={plan.versions}
+            // provider/plan-type/currency are settings detail, not scan
+            // signal; the View menu opts them back in
+            initialColumnVisibility={{ paymentProvider: false, planType: false, currency: false }}
             emptyState={{
               title: "No versions",
               description: "Create a draft plan version before assigning customers to this plan.",
@@ -157,6 +160,7 @@ export default async function PlanPage({
             hidePaginationWhenEmpty
             filterOptions={{
               filterBy: "title",
+              filterPlaceholder: "Filter by title",
               filterColumns: true,
               filterDateRange: false,
               filterServerSide: false,

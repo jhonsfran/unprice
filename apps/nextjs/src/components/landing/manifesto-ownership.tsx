@@ -29,13 +29,13 @@ const ownershipFacts = [
 
 export default function ManifestoOwnership() {
   return (
-    <SectionShell labelledBy="ownership-title" className="bg-background-bgSubtle">
+    <SectionShell labelledBy="ownership-title" className="bg-surface-panel">
       <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,28rem)] lg:gap-16">
         <div className="flex flex-col items-start">
-          <StationHeader label="Ownership" fact="forkable · runs in your account" />
+          <StationHeader index="04" label="Ownership" fact="forkable · runs in your account" />
           <h2
             id="ownership-title"
-            className="mt-6 max-w-xl font-primary font-semibold text-3xl text-background-textContrast tracking-tight sm:text-4xl"
+            className="mt-6 max-w-xl font-primary text-background-textContrast text-display-3"
           >
             Your rent can be acquired. The money path you own cannot.
           </h2>
@@ -66,7 +66,7 @@ export default function ManifestoOwnership() {
         <div className="flex h-fit flex-col gap-6">
           <figure
             aria-label="The billing middle market, traced: Zuora taken private by Silver Lake in February 2025, OpenMeter acquired by Kong in September 2025, Metronome acquired by Stripe for about one billion dollars in January 2026, Orb acquired by Adyen for 335 million dollars in June 2026. No independent metering-first vendor remains."
-            className="rounded-lg border border-background-border bg-background-base p-4 sm:p-5"
+            className="rounded-lg border border-background-border bg-surface-raised p-4 sm:p-5"
           >
             <figcaption className="mb-4 flex items-baseline justify-between gap-4 border-background-border border-b pb-3">
               <span className="font-mono text-background-text text-xs uppercase tracking-widest">
@@ -104,7 +104,7 @@ export default function ManifestoOwnership() {
             </div>
           </figure>
 
-          <div className="rounded-lg border border-background-border bg-background-base p-4 sm:p-5">
+          <div className="rounded-lg border border-background-border bg-surface-raised p-4 sm:p-5">
             <div className="mb-3 flex items-baseline justify-between gap-4 border-background-border border-b pb-3">
               <span className="font-mono text-background-text text-xs uppercase tracking-widest">
                 What you own

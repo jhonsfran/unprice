@@ -56,7 +56,8 @@ EmptyPlaceholder.Title = function EmptyPlaceholderTitle({
   return (
     <Typography
       variant={variant}
-      className={cn("mt-4 mb-2 font-medium text-background-solid", className)}
+      // the title carries the page's key message: ink, not muted gray
+      className={cn("mt-4 mb-2 font-medium text-background-textContrast", className)}
       {...props}
     >
       {children}

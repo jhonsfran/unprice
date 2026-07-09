@@ -207,6 +207,8 @@ patterns. Keep it cheap to load and useful.
   expose plan-template creation as `planVersions.applyTemplate` and keep client calls aligned.
 - 2026-07-04: Theme-sensitive visuals should use `resolvedTheme` from `next-themes`, not
   `theme`; `theme` can be `"system"` while the rendered UI needs the actual light/dark palette.
+- 2026-07-09: `.ledger-dots` is a background utility; keep its pseudo-element isolated and behind
+  content instead of raising each child panel or text layer.
 - 2026-07-04: Workspace signup should omit `planVersionId` when no pricing/session plan is
   selected; sending an empty string blocks the customer signup default-plan resolver.
 - 2026-07-04: Dashboard header full logos should use the `Logo` size prop, not Tailwind

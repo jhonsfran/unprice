@@ -100,6 +100,116 @@ Grayscale: **sand**. Solid (step 9) values, identical in light and dark:
 Sand grayscale anchors: `background` (`sand-2`) `#f9f9f8` / `#191918`; `foreground` (`sand-11`)
 `#63635e` / `#b5b3ad`; `textContrast` (`sand-12`) `#21201c` / `#eeeeec`.
 
+## Elevation & Material Tokens
+
+Added 2026-07-08 (the "light the ledger" pass). Defined as CSS custom properties in
+[`apps/nextjs/src/styles/globals.css`](/Users/jhonsfran/repos/unprice/apps/nextjs/src/styles/globals.css)
+and duplicated in
+[`apps/nextjs/src/styles/sites.css`](/Users/jhonsfran/repos/unprice/apps/nextjs/src/styles/sites.css);
+exposed as Tailwind colors/shadows via `generate-theme.ts` and `preset.ts`.
+
+### Surface tiers — page < panel < raised
+
+The page is a desk; panels are receipts lying on it. The tiers invert differently per mode, which
+is why they are custom properties and not raw Radix steps:
+
+| Token | Tailwind | Light | Dark | Use |
+| --- | --- | --- | --- | --- |
+| `--surface-page` | `bg-surface-page` | `sand-2` `#f9f9f8` | `#0e0e0d` (below sand-1) | Marketing page ground, dashboard content well. |
+| `--surface-panel` | `bg-surface-panel` | `sand-1` `#fdfdfc` | `sand-2` `#191918` | Cards, stage panels, receipts. |
+| `--surface-raised` | `bg-surface-raised` | `#ffffff` | `sand-3` `#222221` | Artifacts on a panel (tickets, invoice lines). |
+
+Rules:
+
+- Outer stage surfaces (cards sitting on the page) use `surface-panel`. Inner wells inside a panel
+  keep the Radix tint (`bgSubtle`/`bg`) — their borders carry them in dark.
+- Trap: anything left on `bg-background-bgSubtle` while sitting directly on the page is invisible
+  in light mode (both are `sand-2`). If a panel "disappears" in light, this is why.
+- The dashboard sidebar/header chrome stays on `sand-1` (body); only the scrollable content well
+  drops to `surface-page`, so chrome reads above ground.
+
+### Shadows
+
+| Token | Tailwind | Light | Dark |
+| --- | --- | --- | --- |
+| `--shadow-ambient` | `shadow-ambient` | tight contact shadow (blur ≤ 8px) | `inset 0 1px 0 white/4` — a lit top edge |
+| `--shadow-raised` | `shadow-raised` | slightly deeper contact (blur ≤ 12px) | `inset 0 1px 0 white/6` |
+| `--shadow-keycap` | `shadow-keycap` | inner top light + 1–4px drops | same, black drops |
+| `--shadow-keycap-press` | `shadow-keycap-press` | reduced keycap | reduced keycap |
+
+Laws:
+
+- **Receipts lie flat.** Light-mode shadows are contact shadows, never floaty (no blur ≥ 16px).
+- **Dark mode has no drop shadows.** Black-on-black is invisible; "lifted" in dark is a lighter
+  surface plus a 1px lit top edge. Never port a light shadow to dark.
+- `shadow-raised` is for signature panels (money path, pricing stage, system-map center);
+  `shadow-ambient` for everything else. If everything is raised, nothing is.
+
+### Hairlines, rails, ledger paper
+
+- Dark-mode neutral borders are translucent white, not gray paint: `.dark` overrides
+  `--sand-6/7/8` to `rgb(255 255 255 / .07 / .10 / .16)`. All `border-*`, `ring`, and `input`
+  tokens inherit this automatically.
+- `--rail` (`sand-4` light / `white/5` dark): the vertical hairlines framing the marketing content
+  column (`SectionShell`), with `+` registration ticks where section rules cross them.
+- `--ledger-dot`: the faint dot-grid paper texture (`.ledger-dots` utility — painted on `::before`
+  with a masked fade so content is never masked). Same material as the OG image ground.
+
+### Sync rule (important)
+
+These tokens live in **two stylesheets that do not import each other**:
+`globals.css` (the `(root)` tree: landing, dashboard) and `sites.css` (the `(sites)` tenant
+product). Both also define `.button-primary`. Any change to the token block or the primary button
+recipe must be made in both, or tenant sites silently diverge (unresolved vars render transparent).
+
+Ops note: Tailwind does not watch `tooling/tailwind/preset.ts` through the workspace symlink —
+after editing the preset or `generate-theme.ts`, restart the dev server (a `@apply` of a new token
+errors until then). Custom-property overrides of Radix vars must be **unlayered** CSS placed after
+the theme imports; anything inside `@layer base` loses to the unlayered Radix imports.
+
+## Motion Tokens
+
+Defined in `preset.ts` (2026-07-08). One vocabulary for every hover, entrance, and panel:
+
+| Token | Value | Use |
+| --- | --- | --- |
+| `duration-quick` | 160ms | Hovers, presses, chips. |
+| `duration-regular` | 260ms | Color/state changes, station lighting. |
+| `duration-deliberate` | 400ms | Panels, reveals. |
+| `ease-out-quad` | `cubic-bezier(.25,.46,.45,.94)` | Default for hovers. |
+| `ease-out-cubic` | `cubic-bezier(.215,.61,.355,1)` | Entrances. |
+| `ease-out-expo` | `cubic-bezier(.19,1,.22,1)` | Large panel movement. |
+
+Do not hardcode `duration-300`/ad-hoc beziers in new components. The three sanctioned motion
+systems are: the money path's WAAPI choreography, the station-header IntersectionObserver
+lighting, and the `Reveal` entrance primitive
+([`apps/nextjs/src/components/landing/reveal.tsx`](/Users/jhonsfran/repos/unprice/apps/nextjs/src/components/landing/reveal.tsx)).
+Do not add a fourth.
+
+## Display Type Scale
+
+Marketing display sizes, defined in `preset.ts` `fontSize` (2026-07-08). Geist is a variable font;
+each token carries size, line-height, tracking, **and weight**:
+
+| Token | Size | Weight | Tracking | Use |
+| --- | --- | --- | --- | --- |
+| `text-display-1` | clamp 44→56px | 540 | −0.022em | Page hero (one per page). |
+| `text-display-2` | clamp 36→48px | 550 | −0.02em | Closing statement. |
+| `text-display-3` | clamp 28→36px | 560 | −0.018em | Section H2s. |
+
+Laws:
+
+- **Bigger means lighter, never heavier.** Display type is weight 540–560; `font-extrabold`
+  display headings are banned (the pre-glow-up 40px/800 hero read as a subsection). Reference:
+  Linear runs 64px at weight 510.
+- Tracking floor is −0.025em; tighter and letters touch.
+- Two-tone emphasis: the setup clause in `text-background-text` (muted), the operative clause in
+  `textContrast` (ink). Emphasis by precision, not decoration. One split per headline, max.
+- `display-1` caps at 3.5rem because the hero pairs with the money path in a ~28rem column; 4rem
+  wraps to four cramped lines.
+- Dashboards never use display sizes (see `design-system-guidelines.md`: headings proportional to
+  their container).
+
 ## Status Semantics
 
 These map the semantic tokens to the meanings in `design-system-guidelines.md`. Always pair color
@@ -128,6 +238,29 @@ why `warning` is `orange` in `sunset`, not amber.
   ledger facts.
 
 ## Decision Log
+
+### 2026-07-08/09 — Light the ledger: elevation, display type, solid primary, motion tokens
+
+Grounded in a measured teardown of linear.app, dub.co, and useautumn.com (computed styles and
+token dumps, not eyeballing). The verdict: the money-path concept was ahead of its execution —
+the page had no surface tiers, no shadow tokens, a 40px/800 hero, and a primary CTA in the Radix
+"soft" recipe that read as a secondary. All fixes were token-level, so the dashboard inherited
+them.
+
+- **`.button-primary` is now the solid signal**: `bg-primary-solid` (amber-9) + `text-primary-foreground`
+  (black-a12, mode-independent) + `shadow-keycap` + 0.5px press, 160ms `ease-out-quad`. The old
+  soft recipe (amber-2 wash, amber-11 text, amber border) visually demoted the main action.
+- **One solid amber per viewport** — the page-scale version of "the dot is the only place a
+  decision color may appear." When the hero owns the solid primary, the header CTA demotes to
+  outline. Scarcity is the signal.
+- Elevation, hairline, motion, and display-type tokens as documented above.
+- **Typeface decision: Geist stays.** The audit proved the typeface was never the weakness — the
+  same font at 56px/540 reads Linear-class (Linear itself uses Inter, differentiated purely by
+  weight discipline). Known trade-off: Autumn ships the identical Geist + Geist Mono stack, so the
+  typeface cannot differentiate; the ground (warm sand vs their black-purple), amber scarcity, and
+  receipt grammar do. Optional future upgrade, to be made deliberately and doc-first: replace
+  Geist Mono with a licensed characterful mono (e.g. Berkeley Mono) — the mono is where the brand
+  voice lives (facts, indices, invoice lines), so it is the one font purchase with real ROI.
 
 ### 2026-06-30 — Brand signal stays amber; logo reworked from tile to brackets
 

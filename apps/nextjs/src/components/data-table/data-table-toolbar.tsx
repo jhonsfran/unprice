@@ -64,7 +64,7 @@ export function DataTableToolbar<TData>({ table, filterOptions }: DataTableToolb
       <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
         {table.getColumn(filterBy) && (
           <Input
-            placeholder={`Filter by ${filterBy}`}
+            placeholder={filterOptions?.filterPlaceholder ?? `Filter by ${filterBy}`}
             value={(table.getColumn(filterBy)?.getFilterValue() as string) ?? ""}
             onChange={(event) => {
               table.getColumn(filterBy)?.setFilterValue(event.target.value)

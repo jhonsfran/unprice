@@ -90,7 +90,7 @@ export function WorkspaceName(props: {
           type="submit"
           isDisabled={form.formState.isSubmitting}
           isSubmitting={form.formState.isSubmitting}
-          label="Save"
+          label="Save Workspace"
         />
       </CardFooter>
     </Card>

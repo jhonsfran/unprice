@@ -20,15 +20,18 @@ export default function Hero() {
   return (
     <section
       aria-labelledby="hero-title"
-      className="mx-auto w-full max-w-6xl px-6 pt-12 pb-16 sm:pt-16 sm:pb-20 lg:pt-20"
+      className="ledger-dots mx-auto w-full max-w-6xl px-6 pt-12 pb-16 sm:pt-16 sm:pb-20 lg:pt-20"
     >
       <div className="grid items-center gap-10 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] lg:gap-14 xl:grid-cols-[minmax(0,28rem)_minmax(0,1fr)]">
         <div className="flex flex-col items-start">
-          <h1
-            id="hero-title"
-            className="font-primary font-semibold text-4xl text-background-textContrast leading-[1.08] tracking-tight sm:text-5xl sm:leading-[1.06]"
-          >
-            <Balancer>Authorize customer spend before paid work runs.</Balancer>
+          {/* Two-tone emphasis: the setup in text, the payoff in ink. The
+              operative clause carries the sentence — emphasis by precision,
+              not decoration. */}
+          <h1 id="hero-title" className="font-primary text-background-textContrast text-display-1">
+            <Balancer>
+              <span className="text-background-text">Authorize customer spend</span> before paid
+              work runs.
+            </Balancer>
           </h1>
           {/* Compression rule (positioning-and-messaging.md): one loss-framed
               sentence plus the category frame. The enumeration lives below the
@@ -60,7 +63,7 @@ export default function Hero() {
           </dl>
         </div>
 
-        <div className="rounded-lg border border-background-border bg-background-bgSubtle p-4 sm:p-6">
+        <div className="rounded-lg border border-background-border bg-surface-panel p-4 shadow-raised sm:p-6">
           <MoneyPath />
         </div>
       </div>

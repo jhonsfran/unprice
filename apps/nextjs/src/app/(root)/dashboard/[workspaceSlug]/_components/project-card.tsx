@@ -3,22 +3,29 @@ import { Card, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
 import { cn } from "@unprice/ui/utils"
 import { SuperLink } from "~/components/super-link"
 
-function ProjectTierIndicator(props: { tier: string; isInternal?: boolean }) {
+// Ledger-native cover: dot-grid paper with the project monogram. Replaces the
+// generated pattern covers, which fought the sand/amber palette.
+function ProjectCover({ name }: { name: string }) {
+  const monogram = name
+    .split(/\s+/)
+    .map((word) => word.charAt(0))
+    .join("")
+    .slice(0, 2)
+    .toUpperCase()
+
   return (
-    <span
-      className={cn(
-        "ml-2 whitespace-nowrap rounded-md px-2 py-1 font-mono text-xs no-underline group-hover:no-underline",
-        {
-          danger: props.isInternal,
-          "bg-blue-100 dark:bg-blue-800": props.tier.toUpperCase() === "PRO" && !props.isInternal,
-          "bg-red-100 dark:bg-red-800":
-            props.tier.toUpperCase() === "ENTERPRISE" && !props.isInternal,
-          "bg-teal-100 dark:bg-teal-600": props.tier.toUpperCase() === "FREE" && !props.isInternal,
-        }
-      )}
-    >
-      {`${props.tier.length > 4 ? `${props.tier.slice(0, 4).toUpperCase()}.` : props.tier.toUpperCase()}`}{" "}
-      {props.isInternal && " - INTER."}
+    <div className="ledger-dots relative flex h-32 items-end overflow-hidden border-b bg-background-bgSubtle px-4 pb-3">
+      <span className="select-none font-mono font-semibold text-4xl text-background-solid">
+        {monogram}
+      </span>
+    </div>
+  )
+}
+
+function InternalProjectIndicator() {
+  return (
+    <span className="danger ml-2 whitespace-nowrap rounded-md px-2 py-1 font-mono text-xs no-underline group-hover:no-underline">
+      INTERNAL
     </span>
   )
 }
@@ -31,14 +38,13 @@ export function ProjectCard(props: {
   return (
     <SuperLink href={`/${props.workspaceSlug}/${project.slug}/dashboard`}>
       <Card className="overflow-hidden">
-        <div className="h-32" style={project.styles} />
+        <ProjectCover name={project.name} />
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
             <span className="whitespace-nowrap">{project.name}</span>
-            <ProjectTierIndicator
-              tier={project.workspace.currentPlanSlug ?? "FREE"}
-              isInternal={project.isInternal}
-            />
+            {/* the workspace plan chip lives in the header switcher; the card
+                only flags project-specific state */}
+            {project.isInternal && <InternalProjectIndicator />}
           </CardTitle>
           <CardDescription>{project.url}&nbsp;</CardDescription>
         </CardHeader>
@@ -55,7 +61,6 @@ export function ProjectCardSkeleton(props: { pulse?: boolean }) {
       <CardHeader>
         <CardTitle className="flex items-center justify-between">
           <span className={cn("flex-1 bg-muted", pulse && "animate-pulse")}>&nbsp;</span>
-          <ProjectTierIndicator tier="FREE" />
         </CardTitle>
         <CardDescription className={cn("bg-muted", pulse && "animate-pulse")}>
           &nbsp;

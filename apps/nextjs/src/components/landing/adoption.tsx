@@ -1,3 +1,4 @@
+import { Reveal } from "./reveal"
 import { LedgerRow, SectionShell } from "./station"
 import { StationHeader } from "./station-header"
 
@@ -63,10 +64,10 @@ export function AdoptionSection() {
   return (
     <SectionShell labelledBy="adoption-title">
       <div className="flex flex-col items-start">
-        <StationHeader label="Adoption path" fact="shadow → sandbox → live" />
+        <StationHeader index="04" label="Adoption path" fact="shadow → sandbox → live" />
         <h2
           id="adoption-title"
-          className="mt-6 max-w-2xl font-primary font-semibold text-3xl text-background-textContrast tracking-tight sm:text-4xl"
+          className="mt-6 max-w-2xl font-primary text-background-textContrast text-display-3"
         >
           Try it without touching your current logic.
         </h2>
@@ -89,7 +90,7 @@ export function AdoptionSection() {
           aria-hidden
           className="absolute top-[4px] left-0 hidden h-px w-full bg-background-border sm:block"
         />
-        <ol className="grid gap-10 sm:grid-cols-3 sm:gap-8">
+        <Reveal as="ol" stagger className="grid gap-10 sm:grid-cols-3 sm:gap-8">
           {stages.map((stage, index) => (
             <li key={stage.title} className="relative flex flex-col sm:pt-6">
               <span
@@ -116,7 +117,7 @@ export function AdoptionSection() {
               </div>
             </li>
           ))}
-        </ol>
+        </Reveal>
       </div>
 
       <div className="mt-14 grid gap-x-8 border-background-border border-t md:grid-cols-2">

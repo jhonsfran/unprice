@@ -1,3 +1,4 @@
+import { Reveal } from "./reveal"
 import { Leader, LedgerRow, SectionShell, StationDot } from "./station"
 import { StationHeader } from "./station-header"
 
@@ -28,29 +29,27 @@ export function ProblemSection() {
     <SectionShell labelledBy="problem-title">
       <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,30rem)] lg:gap-16">
         <div className="flex flex-col items-start">
-          <StationHeader label="The status quo" fact="budget check · never ran" />
+          <StationHeader index="01" label="The status quo" fact="budget check · never ran" />
           <h2
             id="problem-title"
-            className="mt-6 max-w-xl font-primary font-semibold text-3xl text-background-textContrast tracking-tight sm:text-4xl"
+            className="mt-6 max-w-xl font-primary text-background-textContrast text-display-3"
           >
             By invoice time, the paid work already ran.
           </h2>
           <p className="mt-5 max-w-xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-            A customer triggers the expensive action — a model call, an API job, a workflow run.
-            Your counter notices later. Your invoice explains it weeks later. If the request should
-            have been blocked, that cost is margin you already spent and can never bill; if the
-            customer disputes it, engineering turns into invoice support.
+            A customer triggers the expensive action. Your counter notices later; your invoice
+            explains it weeks later. Blocked-too-late cost is margin you already spent — and when
+            the customer disputes it, engineering turns into invoice support.
           </p>
           <p className="mt-4 max-w-xl text-background-text text-sm leading-6">
-            Your Redis counter is not a budget: it can say usage is high, but it cannot prove which
-            plan version applied, which credits were reserved, or why a request was denied. Sharpest
-            where customers buy credits for AI, API, and workflow actions.
+            A Redis counter is not a budget: it cannot prove which plan version applied, which
+            credits were reserved, or why a request was denied.
           </p>
         </div>
 
         <figure
           aria-label="A trace of the DIY stack: the usage-reset cron last succeeded three days ago, the paid work executes and creates cost, and thirty days later the invoice bills $1,204. The customer opens a support ticket disputing the charge against their $500 budget and it is assigned to engineering — but the plan version is unknown, no entitlement or budget check ever ran, no credits were reserved, and there is no ledger entry. The evidence has to be reconstructed from logs by hand."
-          className="h-fit rounded-lg border border-background-border bg-background-bgSubtle p-4 sm:p-5"
+          className="h-fit rounded-lg border border-background-border bg-surface-panel p-4 shadow-ambient sm:p-5"
         >
           <figcaption className="mb-4 flex items-baseline justify-between gap-4 border-background-border border-b pb-3">
             <span className="font-mono text-background-text text-xs uppercase tracking-widest">
@@ -61,7 +60,7 @@ export function ProblemSection() {
             </span>
           </figcaption>
 
-          <div className="flex flex-col">
+          <Reveal stagger className="flex flex-col">
             {traceEvents.map((row) => (
               <div key={row.event} className="flex items-baseline gap-2 py-[5px]">
                 <span className="hidden w-16 shrink-0 font-mono text-[11px] text-background-text sm:inline">
@@ -79,14 +78,24 @@ export function ProblemSection() {
                 </span>
               </div>
             ))}
-          </div>
+            {/* the log keeps going where nobody indexed it — the ledger
+                continues off the page */}
+            <div className="flex items-baseline gap-2 py-[5px]">
+              <span className="hidden w-16 shrink-0 font-mono text-[11px] text-background-text sm:inline">
+                ⋯
+              </span>
+              <span className="font-mono text-[11px] text-background-text italic">
+                38 more log lines · unindexed
+              </span>
+            </div>
+          </Reveal>
 
           <div className="mt-3 border-background-border border-t pt-2">
             <LedgerRow label="30 days later · invoice line" fact="$1,204.00" />
           </div>
 
           {/* the dispute, as the artifact it actually arrives as */}
-          <div className="my-3 rounded-sm border border-background-border bg-background-base px-3 py-2.5">
+          <div className="my-3 rounded-sm border border-background-border bg-surface-raised px-3 py-2.5">
             <div className="flex items-baseline justify-between gap-3">
               <span className="font-mono text-[10px] text-background-text uppercase tracking-widest">
                 support · ticket #4812

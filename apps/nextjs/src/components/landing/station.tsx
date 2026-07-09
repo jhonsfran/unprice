@@ -98,7 +98,27 @@ export function SectionShell({
       aria-labelledby={labelledBy}
       className={cn("w-full border-background-border border-t", className)}
     >
-      <div className={cn("mx-auto w-full max-w-6xl px-6 py-20 sm:py-24", innerClassName)}>
+      {/* The content column carries hairline rails, so stacked sections read
+          as cells of one continuous ledger sheet. The + ticks are
+          registration marks where a section rule crosses the rails. */}
+      <div
+        className={cn(
+          "relative mx-auto w-full max-w-6xl border-[color:var(--rail)] px-6 py-20 sm:py-24 lg:border-x",
+          innerClassName
+        )}
+      >
+        <span
+          aria-hidden
+          className="-top-[7px] -left-[4.5px] absolute hidden select-none bg-surface-page font-mono text-[11px] text-background-border leading-none lg:block"
+        >
+          +
+        </span>
+        <span
+          aria-hidden
+          className="-top-[7px] -right-[4.5px] absolute hidden select-none bg-surface-page font-mono text-[11px] text-background-border leading-none lg:block"
+        >
+          +
+        </span>
         {children}
       </div>
     </section>

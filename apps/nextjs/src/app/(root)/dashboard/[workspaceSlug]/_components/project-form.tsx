@@ -171,7 +171,11 @@ export function ProjectForm(props: {
                   Default currency for all plans and features. You can override this for each plan
                   and feature.
                 </FormDescription>
-                <Select onValueChange={field.onChange} value={field.value ?? ""}>
+                <Select
+                  onValueChange={field.onChange}
+                  value={field.value ?? ""}
+                  disabled={editMode}
+                >
                   <FormControl>
                     <SelectTrigger>
                       <SelectValue placeholder="Select a currency" />
@@ -190,7 +194,7 @@ export function ProjectForm(props: {
             )}
           />
 
-          <TimeZoneFormField form={form} />
+          <TimeZoneFormField form={form} isDisabled={editMode} />
         </div>
 
         <div className="flex justify-end space-x-4 pt-8">

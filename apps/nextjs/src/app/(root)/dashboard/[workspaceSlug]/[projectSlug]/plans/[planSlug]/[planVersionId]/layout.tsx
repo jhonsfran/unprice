@@ -9,7 +9,6 @@ import { CodeApiSheet } from "~/components/code-api-sheet"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
 import { api } from "~/trpc/server"
-import { PlanVersionPublish } from "../../_components/plan-version-actions"
 import { BannerInactiveVersion, BannerPublishedVersion } from "./_components/banner"
 import { PlanVersionHeaderActions } from "./_components/plan-version-header-actions"
 import { VersionContextStrip } from "./_components/version-context-strip"
@@ -68,9 +67,6 @@ export default async function PlanVersionLayout(props: {
                     API
                   </Button>
                 </CodeApiSheet>
-                {status === "draft" && (
-                  <PlanVersionPublish planVersionId={props.params.planVersionId} />
-                )}
                 <PlanVersionHeaderActions
                   planVersionId={planVersion.id}
                   status={status}

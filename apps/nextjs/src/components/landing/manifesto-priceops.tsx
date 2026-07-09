@@ -32,10 +32,10 @@ export default function ManifestoPriceOps() {
   return (
     <SectionShell labelledBy="priceops-title">
       <div className="flex flex-col items-start">
-        <StationHeader label="The operating model" fact="PriceOps" />
+        <StationHeader index="02" label="The operating model" fact="PriceOps" />
         <h2
           id="priceops-title"
-          className="mt-6 max-w-2xl font-primary font-semibold text-3xl text-background-textContrast tracking-tight sm:text-4xl"
+          className="mt-6 max-w-2xl font-primary text-background-textContrast text-display-3"
         >
           Operate pricing like infrastructure.
         </h2>

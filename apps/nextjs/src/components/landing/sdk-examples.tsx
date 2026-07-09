@@ -1335,7 +1335,9 @@ export function SDKDemo({
 
   let methods = methodsProp ?? (Object.keys(codeExamples.sdk) as method[])
 
-  if (defaultMethod) {
+  // defaultMethod alone locks the demo to one method; passing methods keeps
+  // the switcher and only sets the starting tab
+  if (defaultMethod && !methodsProp) {
     methods = [defaultMethod]
   }
 
@@ -1346,7 +1348,7 @@ export function SDKDemo({
   return (
     <div
       className={cn(
-        "relative flex w-full flex-col overflow-hidden rounded-lg border border-background-border bg-background-base",
+        "relative flex w-full flex-col overflow-hidden rounded-lg border border-background-border bg-surface-panel shadow-ambient",
         className
       )}
     >

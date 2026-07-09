@@ -21,7 +21,7 @@ function Specimen({
   children: ReactNode
 }) {
   return (
-    <div className="h-fit rounded-lg border border-background-border bg-background-bgSubtle p-4 sm:p-5">
+    <div className="h-fit rounded-lg border border-background-border bg-surface-panel p-4 shadow-ambient sm:p-5">
       <div className="mb-3 flex items-baseline justify-between gap-4 border-background-border border-b pb-3">
         <span className="font-mono text-background-text text-xs uppercase tracking-widest">
           {caption}
@@ -149,10 +149,10 @@ export function CapabilitiesSection() {
   return (
     <SectionShell labelledBy="capabilities-title">
       <div className="flex flex-col items-start">
-        <StationHeader label="The runtime" fact="one money path" />
+        <StationHeader index="03" label="The runtime" fact="one money path" />
         <h2
           id="capabilities-title"
-          className="mt-6 max-w-2xl font-primary font-semibold text-3xl text-background-textContrast tracking-tight sm:text-4xl"
+          className="mt-6 max-w-2xl font-primary text-background-textContrast text-display-3"
         >
           One money path, shown as state.
         </h2>

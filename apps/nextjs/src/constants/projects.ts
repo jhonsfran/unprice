@@ -28,7 +28,6 @@ export const PROJECT_NAV: DashboardRoute[] = [
     icon: Layers3,
     href: "/plans",
     disabled: false,
-    isNew: true,
     featureSlug: FEATURE_SLUGS.PLANS.SLUG,
   },
   {

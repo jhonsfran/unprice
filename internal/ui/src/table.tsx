@@ -80,7 +80,9 @@ const TableHead = React.forwardRef<
   <th
     ref={ref}
     className={cn(
-      "h-12 px-2 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:text-center [&>[role=checkbox]]:translate-y-[2px]",
+      // the outer columns carry the table's gutter so content never sits
+      // flush against the frame
+      "h-12 px-2 text-left align-middle font-medium text-muted-foreground first:pl-4 last:pr-4 [&:has([role=checkbox])]:text-center [&>[role=checkbox]]:translate-y-[2px]",
       className
     )}
     {...props}
@@ -95,7 +97,7 @@ const TableCell = React.forwardRef<
   <td
     ref={ref}
     className={cn(
-      "h-12 p-2 align-middle [&:has([role=checkbox])]:text-center [&>[role=checkbox]]:translate-y-[2px]",
+      "h-12 p-2 align-middle first:pl-4 last:pr-4 [&:has([role=checkbox])]:text-center [&>[role=checkbox]]:translate-y-[2px]",
       className
     )}
     {...props}

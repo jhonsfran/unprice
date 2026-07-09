@@ -16,7 +16,7 @@ export function InvoiceDetails({
         <div className="space-y-2 text-sm">
           <div className="flex justify-between">
             <span className="text-muted-foreground">Issue Date:</span>
-            <span className="font-medium text-foreground">
+            <span className="font-medium font-mono text-foreground text-xs tabular-nums">
               {invoice.issueDate
                 ? formatDate(
                     invoice.issueDate,
@@ -28,25 +28,33 @@ export function InvoiceDetails({
           </div>
           <div className="flex justify-between">
             <span className="text-muted-foreground">Due Date:</span>
-            <span className="font-medium text-foreground">
+            <span className="font-medium font-mono text-foreground text-xs tabular-nums">
               {formatDate(invoice.dueAt, invoice.subscription.timezone, "MMMM d, yyyy hh:mm a")}
             </span>
           </div>
           <div className="flex justify-between">
             <span className="text-muted-foreground">Plan:</span>
-            <span className="font-medium text-foreground">{invoice.subscription.planSlug}</span>
+            <span className="font-medium font-mono text-foreground text-xs tabular-nums">
+              {invoice.subscription.planSlug}
+            </span>
           </div>
           <div className="flex justify-between">
             <span className="text-muted-foreground">Currency:</span>
-            <span className="font-medium text-foreground">{invoice.currency}</span>
+            <span className="font-medium font-mono text-foreground text-xs tabular-nums">
+              {invoice.currency}
+            </span>
           </div>
           <div className="flex justify-between">
             <span className="text-muted-foreground">Collection Method:</span>
-            <span className="font-medium text-foreground">{invoice.collectionMethod}</span>
+            <span className="font-medium font-mono text-foreground text-xs tabular-nums">
+              {invoice.collectionMethod}
+            </span>
           </div>
           <div className="flex justify-between">
             <span className="text-muted-foreground">Payment Provider:</span>
-            <span className="font-medium text-foreground">{invoice.paymentProvider}</span>
+            <span className="font-medium font-mono text-foreground text-xs tabular-nums">
+              {invoice.paymentProvider}
+            </span>
           </div>
         </div>
       </div>

@@ -11,7 +11,6 @@ import { DataTableSkeleton } from "~/components/data-table/data-table-skeleton"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import UpgradePlanError from "~/components/layout/error"
 import HeaderTab from "~/components/layout/header-tab"
-import { SectionIntro } from "~/components/layout/section-intro"
 import { SuperLink } from "~/components/super-link"
 import { entitlementFlag } from "~/lib/flags"
 import { dataTableParams } from "~/lib/searchParams"
@@ -76,10 +75,6 @@ export default async function ProjectUsersPage(props: {
         </div>
       </TabNavigation>
       <div className="mt-4 flex flex-col gap-4">
-        <SectionIntro
-          title="Customer money state"
-          description="Inspect which customers can be billed, which ones are active, and where to follow subscriptions, wallets, invoices, and runs."
-        />
         <Suspense
           fallback={
             <DataTableSkeleton
@@ -95,6 +90,7 @@ export default async function ProjectUsersPage(props: {
             pageCount={pageCount}
             columns={columns}
             data={customers}
+            initialColumnVisibility={{ defaultCurrency: false, timezone: false }}
             emptyState={{
               title: "No customers yet",
               description:

@@ -3,7 +3,6 @@ import { notFound } from "next/navigation"
 import { Suspense } from "react"
 import { DataTable } from "~/components/data-table/data-table"
 import { DataTableSkeleton } from "~/components/data-table/data-table-skeleton"
-import { SectionIntro } from "~/components/layout/section-intro"
 import { api } from "~/trpc/server"
 import { columns } from "../../_components/subscriptions/table-subscriptions/columns"
 
@@ -28,10 +27,10 @@ export default async function CustomerPage({
 
   return (
     <div className="mt-4 flex flex-col gap-4">
-      <SectionIntro
-        title="Subscriptions for this customer"
-        description="Subscriptions pin this customer to plan versions and create billing periods, wallet policy, and invoice evidence."
-      />
+      <p className="text-muted-foreground text-sm">
+        Subscriptions pin this customer to plan versions and create billing periods, wallet policy,
+        and invoice evidence.
+      </p>
       <Suspense
         fallback={
           <DataTableSkeleton
@@ -55,6 +54,9 @@ export default async function CustomerPage({
         <DataTable
           columns={columns}
           data={customer.subscriptions}
+          // the page is already scoped to one customer: hide the customer
+          // column and low-signal metadata by default
+          initialColumnVisibility={{ customerId: false, timezone: false }}
           emptyState={{
             title: "No subscriptions",
             description:
@@ -63,6 +65,7 @@ export default async function CustomerPage({
           hidePaginationWhenEmpty
           filterOptions={{
             filterBy: "customerId",
+            filterPlaceholder: "Filter by plan",
             filterColumns: true,
             filterDateRange: true,
             filterServerSide: false,

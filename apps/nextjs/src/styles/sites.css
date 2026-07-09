@@ -5,6 +5,42 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Elevation + material tokens — keep in sync with globals.css. Unlayered on
+ * purpose: @layer base rules lose to the unlayered Radix imports above. */
+:root {
+  --surface-page: var(--sand-2);
+  --surface-panel: var(--sand-1);
+  --surface-raised: #ffffff;
+
+  --ledger-dot: rgb(33 32 28 / 0.08);
+  --rail: var(--sand-4);
+
+  --shadow-ambient: 0 1px 2px rgb(33 32 28 / 0.05), 0 3px 8px rgb(33 32 28 / 0.05);
+  --shadow-raised: 0 1px 2px rgb(33 32 28 / 0.06), 0 6px 12px rgb(33 32 28 / 0.07);
+  --shadow-keycap: inset 0 1px 0 rgb(255 255 255 / 0.35), 0 1px 1px rgb(33 32 28 / 0.16), 0 2px 4px
+    rgb(33 32 28 / 0.1);
+  --shadow-keycap-press: inset 0 1px 0 rgb(255 255 255 / 0.25), 0 1px 1px rgb(33 32 28 / 0.1);
+}
+
+.dark {
+  --surface-page: #0e0e0d;
+  --surface-panel: var(--sand-2);
+  --surface-raised: var(--sand-3);
+
+  --ledger-dot: rgb(255 255 255 / 0.05);
+  --rail: rgb(255 255 255 / 0.05);
+
+  --shadow-ambient: inset 0 1px 0 rgb(255 255 255 / 0.04);
+  --shadow-raised: inset 0 1px 0 rgb(255 255 255 / 0.06);
+  --shadow-keycap: inset 0 1px 0 rgb(255 255 255 / 0.35), 0 1px 1px rgb(0 0 0 / 0.5), 0 2px 4px
+    rgb(0 0 0 / 0.35);
+  --shadow-keycap-press: inset 0 1px 0 rgb(255 255 255 / 0.25), 0 1px 1px rgb(0 0 0 / 0.4);
+
+  --sand-6: rgb(255 255 255 / 0.07);
+  --sand-7: rgb(255 255 255 / 0.1);
+  --sand-8: rgb(255 255 255 / 0.16);
+}
+
 @layer base {
   :root {
     --radius: 0.5rem;
@@ -137,8 +173,9 @@
     @apply info hover:border-info-borderHover hover:bg-info-solid hover:text-info-foreground active:bg-info-bgActive;
   }
 
+  /* Solid signal primary — keep in sync with globals.css */
   .button-primary {
-    @apply primary hover:border-primary-borderHover hover:bg-primary-solid hover:text-primary-foreground active:bg-primary-bgActive;
+    @apply border border-primary-borderHover bg-primary-solid text-primary-foreground shadow-keycap transition-[background-color,border-color,box-shadow,transform] duration-quick ease-out-quad hover:bg-primary-solidHover active:translate-y-[0.5px] active:shadow-keycap-press;
   }
 
   .button-success {

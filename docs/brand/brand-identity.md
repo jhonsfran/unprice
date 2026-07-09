@@ -326,8 +326,16 @@ Use:
 - Neutral surfaces and high-legibility text.
 - Semantic status colors: green for accepted, orange for warning, red for blocked or failed, blue
   for live request paths. Amber is the brand/`primary` accent, not a status color.
+- Elevation as material (2026-07-08): the page is a desk, panels are receipts lying on it — three
+  surface tiers, tight contact shadows in light, lit top edges in dark. Tokens and laws in
+  `design-tokens.md`.
+- Ledger paper: the faint dot grid, hairline rails, and `+` registration marks — the receipt
+  vocabulary at page scale.
 - Dense but calm layouts with clear groupings.
-- Monospace accents for IDs, slugs, event names, run IDs, amounts, and ledger facts.
+- Monospace accents for IDs, slugs, event names, run IDs, amounts, and ledger facts. The mono is
+  where the brand voice lives — every fact the product asserts renders in it.
+- Display type that is bigger and *lighter* (Geist variable weight ≈540), with two-tone
+  muted-to-ink emphasis. Boldness comes from the concept, never from heavier type.
 - Diagrams that connect request, pricing, entitlement, budget, wallet, and invoice.
 - Version markers when a pricing decision depends on a specific plan version.
 
@@ -345,6 +353,22 @@ gradient or dithered panel now reads as "another Autumn." The counter-position i
 legibility: neutral surfaces, monospace money facts, semantic status color, and the money path
 rendered literally. Look like financial infrastructure, not an AI-era dev tool — the aesthetic is
 the trust argument.
+
+Typeface stance (2026-07-09, from the measured Linear/Dub/Autumn teardown): Geist + Geist Mono
+stay. The 2026-07 glow-up proved the typeface was never the weakness — the same Geist reads
+world-class once the display scale runs bigger-and-lighter (weight ≈540) instead of small-and-
+extrabold. Two facts to hold together: (1) Autumn ships the *identical* Geist/Geist Mono stack,
+so the typeface cannot carry differentiation — the warm sand ground, amber scarcity, and receipt
+grammar do; (2) because the mono renders every fact the brand asserts, the mono is the voice. If
+one typographic investment is ever made, it is replacing Geist Mono with a licensed characterful
+mono (e.g. Berkeley Mono) — a deliberate, doc-first decision, not a drive-by. Never swap the sans
+by reflex; identity-preservation wins.
+
+What the references are for (2026-07-09): Linear renders *momentum*, Dub renders *growth*, Autumn
+renders *hacker energy* — Unprice renders *evidence*. Steal light from them (surface tiers, motion
+tokens, one loud button, numbered indices), never temperament (pills, blue-black neutrals, curved
+notches, icon-tile eyebrows, neon). The full teardown with measurements lives in the 2026-07-08
+decision-log entry of `design-tokens.md`.
 
 ## Brand Experience Rules
 

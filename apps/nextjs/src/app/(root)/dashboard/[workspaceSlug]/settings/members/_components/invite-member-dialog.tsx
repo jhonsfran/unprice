@@ -23,7 +23,7 @@ export const InviteMemberDialog = () => {
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Invite to workspace</DialogTitle>
+          <DialogTitle>Invite to Workspace</DialogTitle>
           <DialogDescription>Invite a member to this workspace</DialogDescription>
         </DialogHeader>
         <InviteMemberForm onSuccess={() => setOpen(false)} />

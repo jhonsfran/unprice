@@ -35,17 +35,21 @@ export function ProjectSettingsHeader({ project }: { project: Project }) {
   const segment = useSelectedLayoutSegment()
   const copy = getSettingsHeaderCopy(segment)
 
+  // the edit affordance belongs to identity settings only; on the danger
+  // page it reads as leftover header furniture
   return (
     <HeaderTab
       title={copy.title}
       description={copy.description}
       action={
-        <ProjectDialog defaultValues={project}>
-          <Button variant="link">
-            <Pencil className="mr-2 size-3.5" aria-hidden="true" />
-            Edit Project
-          </Button>
-        </ProjectDialog>
+        segment !== "danger" ? (
+          <ProjectDialog defaultValues={project}>
+            <Button variant="link">
+              <Pencil className="mr-2 size-3.5" aria-hidden="true" />
+              Edit Project
+            </Button>
+          </ProjectDialog>
+        ) : undefined
       }
     />
   )

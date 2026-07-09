@@ -21,8 +21,12 @@ export default function BreadcrumbsApp(props: {
   breadcrumbs: string[]
   baseUrl: string
   className?: string
+  // optional segment → human label map; hrefs keep the raw segment
+  labels?: Record<string, string>
 }) {
-  const { breadcrumbs, baseUrl } = props
+  const { breadcrumbs, baseUrl, labels } = props
+
+  const labelFor = (segment: string) => labels?.[segment] ?? segment
 
   // the last section is always our "BreadcrumbPage", the remaining segments are our "BreadcrumbItems":
   const breadcrumbPage = breadcrumbs.pop()
@@ -59,7 +63,7 @@ export default function BreadcrumbsApp(props: {
                               className="text-background-solid text-xs transition-colors"
                               href={href}
                             >
-                              {segment}
+                              {labelFor(segment)}
                             </SuperLink>
                           </DropdownMenuItem>
                         </Fragment>
@@ -86,7 +90,7 @@ export default function BreadcrumbsApp(props: {
                       className="text-background-solid text-xs transition-colors"
                       href={href}
                     >
-                      {segment}
+                      {labelFor(segment)}
                     </SuperLink>
                   </BreadcrumbLink>
                 </BreadcrumbItem>
@@ -98,7 +102,9 @@ export default function BreadcrumbsApp(props: {
           <BreadcrumbSeparator className="text-background-solid text-xs" />
         )}
         <BreadcrumbItem>
-          <BreadcrumbPage className="text-background-text text-xs">{breadcrumbPage}</BreadcrumbPage>
+          <BreadcrumbPage className="text-background-text text-xs">
+            {labelFor(breadcrumbPage)}
+          </BreadcrumbPage>
         </BreadcrumbItem>
       </BreadcrumbList>
     </Breadcrumb>

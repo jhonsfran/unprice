@@ -476,7 +476,7 @@ function UsageDashboardEmptyState({
         <CardContent className="py-6">
           <EmptyPlaceholder className="min-h-[520px] transition-opacity duration-300">
             <EmptyPlaceholder.Icon>
-              <BarChart3 className="h-8 w-8 text-primary motion-safe:animate-pulse" />
+              <BarChart3 className="h-8 w-8" />
             </EmptyPlaceholder.Icon>
             <EmptyPlaceholder.Title>No usage evidence yet</EmptyPlaceholder.Title>
             <EmptyPlaceholder.Description>
@@ -496,21 +496,18 @@ function UsageDashboardEmptyState({
 }
 
 function UsageExampleActions({ exampleParams }: { exampleParams?: SDKExampleParams }) {
+  // one CTA: the sheet itself offers sync (consume) and async (record) methods
   return (
-    <div className="flex flex-col items-center justify-center gap-2 sm:flex-row">
-      <CodeApiSheet defaultMethod="consumeUsage" exampleParams={exampleParams}>
-        <Button size="sm" variant="primary">
-          <Code className="mr-2 size-4" />
-          Report usage synchronously
-        </Button>
-      </CodeApiSheet>
-      <CodeApiSheet defaultMethod="recordUsage" exampleParams={exampleParams}>
-        <Button size="sm" variant="default">
-          <Code className="mr-2 size-4" />
-          Report asynchronously
-        </Button>
-      </CodeApiSheet>
-    </div>
+    <CodeApiSheet
+      defaultMethod="consumeUsage"
+      methods={["consumeUsage", "recordUsage"]}
+      exampleParams={exampleParams}
+    >
+      <Button size="sm" variant="primary">
+        <Code className="mr-2 size-4" />
+        Send a test event
+      </Button>
+    </CodeApiSheet>
   )
 }
 

@@ -63,7 +63,7 @@ export function InvoiceTable({
                   <Typography variant="h6" affects="removePaddingMargin">
                     No billable charges
                   </Typography>
-                  <span className="block font-light text-muted-foreground text-xs">
+                  <span className="block font-light font-mono text-muted-foreground text-xs tabular-nums">
                     Statement period{" "}
                     {formatDate(
                       invoice.statementStartAt,
@@ -86,7 +86,7 @@ export function InvoiceTable({
                     <Typography variant="h6" affects="removePaddingMargin">
                       {line.description ?? line.kind}
                     </Typography>
-                    <span className="block font-light text-muted-foreground text-xs">
+                    <span className="block font-light font-mono text-muted-foreground text-xs tabular-nums">
                       {formatDate(
                         new Date(line.createdAt).getTime(),
                         invoice.subscription.timezone,
@@ -97,10 +97,10 @@ export function InvoiceTable({
                   <TableCell>
                     <Badge variant={getLineStatusVariant(line)}>{getLineStatus(line)}</Badge>
                   </TableCell>
-                  <TableCell className="text-right text-muted-foreground">
+                  <TableCell className="text-right font-mono text-muted-foreground text-xs tabular-nums">
                     {line.quantity ?? "-"}
                   </TableCell>
-                  <TableCell className="text-right font-medium">
+                  <TableCell className="text-right font-medium font-mono tabular-nums">
                     {formatLedger(line.amount)}
                   </TableCell>
                   <TableCell className="text-right">
@@ -117,19 +117,21 @@ export function InvoiceTable({
           <Separator />
           <div className="flex justify-between text-base">
             <span className="font-semibold">Gross:</span>
-            <span>{formatLedger(invoice.grossAmount)}</span>
+            <span className="font-mono tabular-nums">{formatLedger(invoice.grossAmount)}</span>
           </div>
           <div className="flex justify-between text-base">
             <span className="font-semibold">Paid:</span>
-            <span>{formatLedger(invoice.amountPaid)}</span>
+            <span className="font-mono tabular-nums">{formatLedger(invoice.amountPaid)}</span>
           </div>
           <div className="flex justify-between text-base">
             <span className="font-semibold">Included:</span>
-            <span>{formatLedger(invoice.amountIncluded)}</span>
+            <span className="font-mono tabular-nums">{formatLedger(invoice.amountIncluded)}</span>
           </div>
           <div className="flex justify-between text-base">
             <span className="font-semibold">Total Due:</span>
-            <span className="font-bold text-xl">{formatLedger(invoice.amountDue)}</span>
+            <span className="font-bold font-mono text-xl tabular-nums">
+              {formatLedger(invoice.amountDue)}
+            </span>
           </div>
         </div>
       </div>

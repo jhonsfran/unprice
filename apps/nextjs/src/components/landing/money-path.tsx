@@ -267,7 +267,7 @@ function StationRow({
         data-mp-rail-dot
         className={cn(
           "-translate-x-1/2 -translate-y-1/2 absolute top-1/2 left-2 size-[9px] rounded-full",
-          variant === "default" && "border border-background-borderHover bg-background-base",
+          variant === "default" && "border border-background-borderHover bg-surface-panel",
           variant === "ghost" && "border border-background-borderHover border-dashed",
           variant === "terminal" && "bg-success-solid"
         )}
@@ -275,7 +275,7 @@ function StationRow({
       <div className="flex items-baseline gap-2">
         <span
           className={cn(
-            "whitespace-nowrap text-sm transition-colors duration-300",
+            "whitespace-nowrap text-sm transition-colors duration-regular ease-out-quad",
             variant === "ghost"
               ? "text-background-text"
               : "font-medium text-background-textContrast",
@@ -438,7 +438,7 @@ export function MoneyPath({ className }: { className?: string }) {
               className="-translate-x-1/2 absolute top-[5px] left-2 size-2.5 rounded-full bg-info ring-2 ring-info-bg"
             />
             <div className="flex items-baseline gap-2">
-              <span className="whitespace-nowrap font-medium text-background-textContrast text-sm transition-colors duration-300 group-data-[mp-hit=true]:text-info-text">
+              <span className="whitespace-nowrap font-medium text-background-textContrast text-sm transition-colors duration-regular ease-out-quad group-data-[mp-hit=true]:text-info-text">
                 Request
               </span>
               <Leader />
@@ -468,7 +468,7 @@ export function MoneyPath({ className }: { className?: string }) {
               <span className="mp-beacon absolute inset-0 rounded-full bg-warning-text" />
               <span className="absolute inset-0 rounded-full bg-warning-text" />
             </span>
-            <div className="relative rounded-sm border border-warning-line bg-warning-bgSubtle px-4 py-3 transition-colors duration-300 group-data-[mp-hit=true]:border-warning-border group-data-[mp-hit=true]:bg-warning-bg">
+            <div className="relative rounded-sm border border-warning-line bg-warning-bgSubtle px-4 py-3 transition-colors duration-regular ease-out-quad group-data-[mp-hit=true]:border-warning-border group-data-[mp-hit=true]:bg-warning-bg">
               <span
                 aria-hidden
                 className="-top-px -left-px absolute size-2.5 border-warning-text border-t-2 border-l-2"
@@ -487,7 +487,7 @@ export function MoneyPath({ className }: { className?: string }) {
               />
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <p className="font-medium text-background-textContrast text-sm transition-colors duration-300">
+                  <p className="font-medium text-background-textContrast text-sm transition-colors duration-regular ease-out-quad">
                     Budget check
                   </p>
                   <p className="mt-0.5 text-background-text text-xs">
@@ -498,7 +498,7 @@ export function MoneyPath({ className }: { className?: string }) {
                   <p
                     data-mp-budget
                     className={cn(
-                      "font-medium font-mono text-lg leading-6 transition-colors duration-300",
+                      "font-medium font-mono text-lg leading-6 transition-colors duration-regular ease-out-quad",
                       budget.depleted ? "text-warning-text" : "text-background-textContrast"
                     )}
                   >
@@ -530,7 +530,7 @@ export function MoneyPath({ className }: { className?: string }) {
           <div>
             <div
               data-mp-node="allow-chip"
-              className="flex items-center gap-2.5 rounded-sm border border-success-border bg-success-bg px-3 py-2 transition-colors duration-300 data-[mp-hit=true]:border-success-borderHover data-[mp-hit=true]:bg-success-bgActive"
+              className="flex items-center gap-2.5 rounded-sm border border-success-border bg-success-bg px-3 py-2 transition-colors duration-regular ease-out-quad data-[mp-hit=true]:border-success-borderHover data-[mp-hit=true]:bg-success-bgActive"
             >
               <span className="flex size-6 shrink-0 items-center justify-center rounded-sm bg-success-solid text-white">
                 <Check aria-hidden className="size-3.5" />
@@ -558,13 +558,13 @@ export function MoneyPath({ className }: { className?: string }) {
             {/* Terminal receipt rule (design-system-guidelines.md): the allow
                 pass ends in a literal invoice line with its explain chain, not
                 a sentence claiming one exists. */}
-            <div className="mt-2 ml-8 rounded-sm border border-background-border bg-background-base px-3 py-2">
+            <div className="mt-2 ml-8 rounded-sm border border-background-border bg-surface-raised px-3 py-2">
               <div className="flex items-baseline justify-between gap-3">
                 <span className="font-mono text-[10px] text-background-text uppercase tracking-widest">
                   invoice line · explain
                 </span>
                 <span className="font-medium font-mono text-[11px] text-background-textContrast">
-                  $0.002
+                  $4.10
                 </span>
               </div>
               <p className="mt-1 font-mono text-[10px] text-background-text leading-4">
@@ -579,7 +579,7 @@ export function MoneyPath({ className }: { className?: string }) {
           <div>
             <div
               data-mp-node="deny-chip"
-              className="flex items-center gap-2.5 rounded-sm border border-danger-border bg-danger-bg px-3 py-2 transition-colors duration-300 data-[mp-hit=true]:border-danger-borderHover data-[mp-hit=true]:bg-danger-bgActive"
+              className="flex items-center gap-2.5 rounded-sm border border-danger-border bg-danger-bg px-3 py-2 transition-colors duration-regular ease-out-quad data-[mp-hit=true]:border-danger-borderHover data-[mp-hit=true]:bg-danger-bgActive"
             >
               <span className="flex size-6 shrink-0 items-center justify-center rounded-sm bg-danger-solid text-white">
                 <Ban aria-hidden className="size-3.5" />

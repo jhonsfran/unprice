@@ -3,7 +3,6 @@
 import type { ColumnDef } from "@tanstack/react-table"
 
 import type { RouterOutputs } from "@unprice/trpc/routes"
-import { Checkbox } from "@unprice/ui/checkbox"
 import { cn } from "@unprice/ui/utils"
 
 import { Badge } from "@unprice/ui/badge"
@@ -54,36 +53,6 @@ function PlanVersionTitleCell({ row }: { row: { original: PlanVersion } }) {
 
 export const columns: ColumnDef<PlanVersion>[] = [
   {
-    id: "select",
-    size: 50,
-    accessorKey: "select",
-    header: ({ table }) => (
-      <Checkbox
-        checked={
-          table.getIsAllPageRowsSelected() || (table.getIsSomePageRowsSelected() && "indeterminate")
-        }
-        disabled={
-          table.getRowModel().rows.length === 0 ||
-          table.getRowModel().rows.every((row) => !row.original.active)
-        }
-        onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
-        aria-label="Select all"
-        className="translate-y-0.5"
-      />
-    ),
-    cell: ({ row }) => (
-      <Checkbox
-        checked={row.getIsSelected()}
-        onCheckedChange={(value) => row.toggleSelected(!!value)}
-        aria-label="Select row"
-        className="translate-y-0.5"
-      />
-    ),
-    enableSorting: false,
-    enableHiding: false,
-    enableResizing: false,
-  },
-  {
     accessorKey: "title",
     header: ({ column }) => <DataTableColumnHeader column={column} title="Title" />,
     cell: ({ row }) => <PlanVersionTitleCell row={row} />,
@@ -112,14 +81,20 @@ export const columns: ColumnDef<PlanVersion>[] = [
     accessorKey: "subs",
     enableResizing: true,
     header: ({ column }) => <DataTableColumnHeader column={column} title="Subscribers" />,
-    cell: ({ row }) => <Badge>{row.original.subscriptions}</Badge>,
+    cell: ({ row }) => (
+      <span className="font-mono text-xs tabular-nums">{row.original.subscriptions}</span>
+    ),
     size: 20,
   },
   {
     accessorKey: "interval",
     enableResizing: true,
     header: ({ column }) => <DataTableColumnHeader column={column} title="Billing interval" />,
-    cell: ({ row }) => <Badge>{row.original.billingConfig.name}</Badge>,
+    cell: ({ row }) => (
+      <span className="whitespace-nowrap font-mono text-muted-foreground text-xs">
+        {row.original.billingConfig.name}
+      </span>
+    ),
     size: 20,
   },
   {
@@ -127,9 +102,7 @@ export const columns: ColumnDef<PlanVersion>[] = [
     enableResizing: true,
     header: ({ column }) => <DataTableColumnHeader column={column} title="Version" />,
     cell: ({ row }) => (
-      <Badge className="text-xs" variant="secondary">
-        V{row.original.version}
-      </Badge>
+      <span className="font-mono text-xs tabular-nums">v{row.original.version}</span>
     ),
     size: 20,
   },
@@ -137,11 +110,17 @@ export const columns: ColumnDef<PlanVersion>[] = [
     accessorKey: "active",
     enableResizing: true,
     header: ({ column }) => <DataTableColumnHeader column={column} title="Active" />,
+    // active stays a quiet dot; the status chip is the one lifecycle signal
     cell: ({ row }) => {
       const status = row.original.active ? "active" : "inactive"
       const toneClass = statusToneClasses[getStatusTone(status)]
 
-      return <Badge variant={toneClass.badgeVariant}>{status}</Badge>
+      return (
+        <span className="flex items-center gap-1.5 text-muted-foreground text-xs">
+          <span className={cn("size-1.5 rounded-full", toneClass.dot)} aria-hidden="true" />
+          {status}
+        </span>
+      )
     },
     size: 20,
   },
@@ -164,9 +143,7 @@ export const columns: ColumnDef<PlanVersion>[] = [
     enableResizing: true,
     header: ({ column }) => <DataTableColumnHeader column={column} title="Currency" />,
     cell: ({ row }) => (
-      <Badge className="text-xs" variant="secondary">
-        {row.original.currency}
-      </Badge>
+      <span className="font-mono text-muted-foreground text-xs">{row.original.currency}</span>
     ),
     filterFn: (row, id, value) => {
       return Array.isArray(value) && value.includes(row.getValue(id))
@@ -178,9 +155,9 @@ export const columns: ColumnDef<PlanVersion>[] = [
     enableResizing: true,
     header: ({ column }) => <DataTableColumnHeader column={column} title="Provider" />,
     cell: ({ row }) => (
-      <Badge className="text-xs" variant="secondary">
+      <span className="font-mono text-muted-foreground text-xs">
         {row.original.paymentProvider}
-      </Badge>
+      </span>
     ),
     size: 40,
   },
@@ -188,7 +165,11 @@ export const columns: ColumnDef<PlanVersion>[] = [
     accessorKey: "planType",
     enableResizing: true,
     header: ({ column }) => <DataTableColumnHeader column={column} title="Plan type" />,
-    cell: ({ row }) => <Badge className="text-xs">{row.original.billingConfig.planType}</Badge>,
+    cell: ({ row }) => (
+      <span className="font-mono text-muted-foreground text-xs">
+        {row.original.billingConfig.planType}
+      </span>
+    ),
     size: 40,
   },
   {
@@ -196,7 +177,11 @@ export const columns: ColumnDef<PlanVersion>[] = [
     header: ({ column }) => <DataTableColumnHeader column={column} title="Created" />,
     cell: ({ row }) => (
       <div className="flex items-center space-x-1 whitespace-nowrap">
-        <Typography variant="p" affects="removePaddingMargin">
+        <Typography
+          variant="p"
+          affects="removePaddingMargin"
+          className="font-mono text-xs tabular-nums"
+        >
           {formatDate(row.original.createdAtM)}
         </Typography>
       </div>

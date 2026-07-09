@@ -20,6 +20,9 @@ export interface DashboardRoute {
   isNew?: boolean
   href: string
   disabled?: boolean
+  // feature exists but the workspace plan doesn't include it: the nav shows
+  // a locked state instead of hiding the feature entirely
+  locked?: boolean
   icon: LucideIcon
   sidebar?: SidebarRoute[]
 }

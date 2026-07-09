@@ -18,6 +18,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { Typography } from "@unprice/ui/typography"
 import { cn } from "@unprice/ui/utils"
 import { ArrowDownIcon, EyeIcon, PencilIcon, TrashIcon } from "lucide-react"
+import { formatBillingLabel } from "~/components/billing/format-billing-label"
 import { Ping } from "~/components/ping"
 import { formatDate } from "~/lib/dates"
 import {
@@ -69,36 +70,36 @@ export function SubscriptionPhaseRow({
   return (
     <div className="relative">
       <div
-        className={cn("flex w-full flex-col gap-2 rounded-md border border-dashed px-4 py-4", {
+        // settled records get solid borders; dashed reads as mid-edit
+        className={cn("flex w-full flex-col gap-2 rounded-md border px-4 py-4", {
           "border-destructive": hasError,
-          "border-info": isActive,
+          "border-success-border": isActive && !hasError,
+          "border-dashed": isFuture,
         })}
       >
         <div className="flex items-center justify-between gap-4">
           <div className="flex min-w-0 flex-1 flex-col gap-2">
             <Typography variant="h5">
               {index + 1}. {selectedPlanVersion.title} v{selectedPlanVersion.version} -{" "}
-              {selectedPlanVersion.billingConfig.name}
+              {formatBillingLabel(selectedPlanVersion.billingConfig)}
             </Typography>
             <div className="mt-2 hidden items-center sm:flex">
               {phase.trialUnits && phase.trialUnits > 0 ? (
-                <Badge>
+                <Badge className="mr-2">
                   {phase.trialUnits} {trialUnitsMessage} trial
                 </Badge>
-              ) : (
-                <Badge>no trial</Badge>
-              )}
-              <Badge className="ml-2" variant="secondary">
+              ) : null}
+              <span className="font-mono text-muted-foreground text-xs">
                 {phase.paymentProvider} provider
-              </Badge>
-              <Badge className="ml-2">
+              </span>
+              <span className="ml-2 font-mono text-muted-foreground text-xs">
                 {formatPhaseCreditLinePolicy(phase, selectedPlanVersion.currency)}
-              </Badge>
+              </span>
               {isActive && (
-                <div className="mx-2 inline-flex items-center font-semibold text-info text-xs">
+                <div className="mx-2 inline-flex items-center font-semibold text-success text-xs">
                   <span className="mr-1">Active phase</span>
                   <div className="relative">
-                    <Ping variant="info" />
+                    <Ping variant="success" />
                   </div>
                 </div>
               )}

@@ -12,10 +12,15 @@ import { Leader } from "./station"
 // narrow band around the viewport center; no scroll listeners, no rAF.
 
 export function StationHeader({
+  index,
   label,
   fact,
   factClassName,
 }: {
+  /** Station number on the page's request path, e.g. "01". The page is a
+   * real sequence — request, decision, integration, adoption — so the
+   * numbers carry reading order, not decoration. */
+  index?: string
   label: string
   fact?: string
   factClassName?: string
@@ -42,15 +47,25 @@ export function StationHeader({
       <span
         aria-hidden
         className={cn(
-          "size-[9px] shrink-0 self-center rounded-full transition-colors duration-300",
+          "size-[9px] shrink-0 self-center rounded-full transition-colors duration-regular ease-out-quad",
           lit
             ? "border border-info bg-info ring-2 ring-info-bg"
-            : "border border-background-borderHover bg-background-base"
+            : "border border-background-borderHover bg-surface-page"
         )}
       />
+      {index ? (
+        <span
+          className={cn(
+            "whitespace-nowrap font-mono text-xs tabular-nums tracking-widest transition-colors duration-regular ease-out-quad",
+            lit ? "text-info-text" : "text-background-text"
+          )}
+        >
+          {index}
+        </span>
+      ) : null}
       <span
         className={cn(
-          "whitespace-nowrap font-mono text-xs uppercase tracking-widest transition-colors duration-300",
+          "whitespace-nowrap font-mono text-xs uppercase tracking-widest transition-colors duration-regular ease-out-quad",
           lit ? "text-info-text" : "text-background-text"
         )}
       >

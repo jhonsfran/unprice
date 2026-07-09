@@ -730,7 +730,8 @@ function FilterCheckboxMark({ checked }: { checked: boolean }) {
     <span
       aria-hidden="true"
       data-state={checked ? "checked" : "unchecked"}
-      className="flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border border-primary text-primary-foreground data-[state=checked]:bg-primary"
+      // neutral at rest; the accent appears only once the box is checked
+      className="flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border border-background-borderHover text-primary-foreground data-[state=checked]:border-primary-borderHover data-[state=checked]:bg-primary-solid"
     >
       {checked ? <Check className="h-4 w-4" /> : null}
     </span>

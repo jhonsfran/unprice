@@ -3,7 +3,6 @@
 import type { ColumnDef } from "@tanstack/react-table"
 
 import type { RouterOutputs } from "@unprice/trpc/routes"
-import { Checkbox } from "@unprice/ui/checkbox"
 
 import { Typography } from "@unprice/ui/typography"
 import { DataTableColumnHeader } from "~/components/data-table/data-table-column-header"
@@ -13,34 +12,6 @@ import { DataTableRowActions } from "./data-table-row-actions"
 export type ApiKey = RouterOutputs["apikeys"]["listByActiveProject"]["apikeys"][number]
 
 export const columns: ColumnDef<ApiKey>[] = [
-  {
-    id: "select",
-    size: 40,
-    header: ({ table }) => (
-      <Checkbox
-        checked={
-          table.getIsAllPageRowsSelected() || (table.getIsSomePageRowsSelected() && "indeterminate")
-        }
-        disabled={
-          table.getRowModel().rows.length === 0 ||
-          table.getRowModel().rows.every((row) => row.original.revokedAt !== null)
-        }
-        onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
-        aria-label="Select all"
-        className="translate-y-0.5"
-      />
-    ),
-    cell: ({ row }) => (
-      <Checkbox
-        checked={row.getIsSelected()}
-        onCheckedChange={(value) => row.toggleSelected(!!value)}
-        aria-label="Select row"
-        className="translate-y-0.5"
-      />
-    ),
-    enableSorting: false,
-    enableHiding: false,
-  },
   {
     accessorKey: "name",
     header: ({ column }) => <DataTableColumnHeader column={column} title="Name" />,
@@ -54,10 +25,18 @@ export const columns: ColumnDef<ApiKey>[] = [
     header: ({ column }) => <DataTableColumnHeader column={column} title="Default customer" />,
     cell: ({ row }) => {
       if (!row.original.defaultCustomerId) {
-        return <span className="text-muted-foreground">No default customer</span>
+        return (
+          <span aria-label="No default customer" className="text-muted-foreground">
+            —
+          </span>
+        )
       }
 
-      return row.original.defaultCustomerId
+      return (
+        <span className="whitespace-nowrap font-mono text-xs">
+          {row.original.defaultCustomerId}
+        </span>
+      )
     },
     enableSorting: false,
     enableHiding: true,
@@ -67,7 +46,11 @@ export const columns: ColumnDef<ApiKey>[] = [
     header: ({ column }) => <DataTableColumnHeader column={column} title="Created" />,
     cell: ({ row }) => (
       <div className="flex items-center space-x-1 whitespace-nowrap">
-        <Typography variant="p" affects="removePaddingMargin">
+        <Typography
+          variant="p"
+          affects="removePaddingMargin"
+          className="font-mono text-xs tabular-nums"
+        >
           {formatDate(row.getValue("createdAtM"))}
         </Typography>
       </div>
@@ -85,24 +68,27 @@ export const columns: ColumnDef<ApiKey>[] = [
         return (
           <div className="flex flex-col text-destructive">
             <span>Revoked</span>
-            <span>{formatDate(row.original.revokedAt)}</span>
+            <span className="font-mono text-xs tabular-nums">
+              {formatDate(row.original.revokedAt)}
+            </span>
           </div>
         )
       }
 
       if (expiresAt === null) {
-        return "Never expires"
+        // a key that never expires is the risky configuration, not the neutral one
+        return <span className="text-warning-text">Never expires</span>
       }
 
       if (expiresAt < Date.now()) {
         return (
           <div className="flex flex-col text-destructive">
             <span>Expired</span>
-            <span>{formatDate(expiresAt)}</span>
+            <span className="font-mono text-xs tabular-nums">{formatDate(expiresAt)}</span>
           </div>
         )
       }
-      return formatDate(expiresAt)
+      return <span className="font-mono text-xs tabular-nums">{formatDate(expiresAt)}</span>
     },
     enableSorting: true,
     enableHiding: true,
@@ -117,7 +103,11 @@ export const columns: ColumnDef<ApiKey>[] = [
       }
       return (
         <div className="flex items-center space-x-1 whitespace-nowrap">
-          <Typography variant="p" affects="removePaddingMargin">
+          <Typography
+            variant="p"
+            affects="removePaddingMargin"
+            className="font-mono text-xs tabular-nums"
+          >
             {formatDate(lastUsed)}
           </Typography>
         </div>

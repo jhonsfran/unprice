@@ -48,11 +48,15 @@ export default function UpgradePlanError(props: {
   workspaceSlug: string
   blockedFeatureSlug?: string
   returnTo?: string
+  // page-specific copy; the gate should name what the visitor came for, not
+  // just the feature that backs it
+  title?: string
+  description?: string
 }) {
   const router = useRouter()
   const pathname = usePathname()
   const returnTo = props.returnTo ?? pathname
-  const copy = props.blockedFeatureSlug
+  const featureCopy = props.blockedFeatureSlug
     ? (BLOCKED_FEATURE_COPY[props.blockedFeatureSlug] ?? {
         title: "This dashboard capability is not available on your workspace plan",
         description: "Upgrade the workspace plan to use this dashboard capability.",
@@ -61,6 +65,10 @@ export default function UpgradePlanError(props: {
         title: "This dashboard capability is not available on your workspace plan",
         description: "Upgrade the workspace plan to use this dashboard capability.",
       }
+  const copy = {
+    title: props.title ?? featureCopy.title,
+    description: props.description ?? featureCopy.description,
+  }
 
   return (
     <DashboardShell>

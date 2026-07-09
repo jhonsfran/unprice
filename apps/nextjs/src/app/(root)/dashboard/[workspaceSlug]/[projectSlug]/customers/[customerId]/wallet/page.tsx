@@ -40,7 +40,11 @@ export default async function CustomerWalletPage({
 
   return (
     <div className="mt-4 flex flex-col gap-6">
-      <WalletBalanceSummary wallet={wallet} />
+      <div className="flex flex-col gap-3">
+        {/* currency is stated once for the whole wallet, not per tile */}
+        <SectionIntro title="Wallet" description={`All amounts in ${wallet.currency}.`} />
+        <WalletBalanceSummary wallet={wallet} />
+      </div>
 
       <div>
         <SectionIntro
@@ -76,6 +80,7 @@ export default async function CustomerWalletPage({
             hidePaginationWhenEmpty
             filterOptions={{
               filterBy: "id",
+              filterPlaceholder: "Filter by credit id",
               filterColumns: true,
               filterSelectors: {
                 source: walletCreditSourceSchema.options.map((value) => ({

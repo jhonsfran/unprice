@@ -29,6 +29,8 @@ export default async function DashboardPlans(props: {
         workspaceSlug={workspaceSlug}
         blockedFeatureSlug={FEATURE_SLUGS.PAGES.SLUG}
         returnTo={`/${workspaceSlug}/${projectSlug}/dashboard/plans`}
+        title="Plan conversion analytics needs hosted pages"
+        description="Conversion evidence comes from hosted signup and pricing pages. Upgrade to create pages tied to published plan versions."
       />
     )
   }

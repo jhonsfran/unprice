@@ -38,7 +38,13 @@ export function PricingCard({
           )
         }
 
-        return undefined
+        // dashboard preview: the CTA is part of the artifact, not a live
+        // action — keep the page's single solid primary elsewhere
+        return (
+          <Button className="w-full disabled:opacity-100" variant="outline" disabled>
+            Get Started
+          </Button>
+        )
       }}
     />
   )

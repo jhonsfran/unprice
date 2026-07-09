@@ -49,7 +49,15 @@ export function IngestionHealthStrip({
   const actionMessages = getActionMessages(status, { showNoEventsAction })
   const pipelineLabel = getPipelineLabel(status)
   const enforcementLabel = getEnforcementLabel(status)
-  const metrics = (
+  // an empty window collapses to one quiet line: five tiles saying "0" five
+  // ways is noise, not evidence
+  const isEmptyWindow = status.totals.total === 0
+  const metrics = isEmptyWindow ? (
+    <div className="flex items-center gap-2 rounded-md border border-dashed px-4 py-3 text-muted-foreground text-sm">
+      <CircleSlash className="size-4 shrink-0" />
+      <span>No events in this window. Health tiles appear once traffic arrives.</span>
+    </div>
+  ) : (
     <EvidenceMetricStrip className="md:grid-cols-5">
       <EvidenceMetricTile
         label="Success"

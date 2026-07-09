@@ -84,7 +84,7 @@ export function PlanCard(props: {
             </DropdownMenuContent>
           </DropdownMenu>
 
-          <DialogContent className="max-h-screen overflow-y-scroll">
+          <DialogContent>
             <DialogHeader>
               <DialogTitle>Edit plan</DialogTitle>
 

@@ -154,8 +154,10 @@ export function FeatureList({ featuresPromise, planVersion }: FeatureListProps) 
           />
         </div>
       </div>
-      <ScrollArea className="pb-4 lg:h-[750px]">
-        <div className="flex flex-col gap-2 px-4 pt-1 lg:h-[730px]">
+      {/* the pane owns the height: bounded on mobile, flexes to the
+          workbench grid on lg */}
+      <ScrollArea className="max-h-[45vh] min-h-0 flex-1 pb-4 lg:max-h-none">
+        <div className="flex min-h-[200px] flex-col gap-2 px-4 pt-1">
           {isFetching && (
             <div className="flex h-full items-center justify-center">
               <LoadingAnimation className="size-6" />

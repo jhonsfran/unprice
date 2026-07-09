@@ -27,7 +27,7 @@ export function CustomerDialog({
   return (
     <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
       <DialogTrigger asChild>{children}</DialogTrigger>
-      <DialogContent className="max-h-[95vh] md:max-w-screen-md">
+      <DialogContent className="md:max-w-xl">
         <DialogHeader>
           <DialogTitle>Customer details</DialogTitle>
           <DialogDescription>
