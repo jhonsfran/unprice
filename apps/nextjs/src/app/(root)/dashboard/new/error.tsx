@@ -28,7 +28,7 @@ export default function ErrorOnboarding({
           <EmptyPlaceholder.Icon>
             <ShieldAlert className="size-10" />
           </EmptyPlaceholder.Icon>
-          <EmptyPlaceholder.Title>Ups, something went wrong</EmptyPlaceholder.Title>
+          <EmptyPlaceholder.Title>Something went wrong</EmptyPlaceholder.Title>
           <EmptyPlaceholder.Description>{error.message}</EmptyPlaceholder.Description>
           <EmptyPlaceholder.Action>
             <SuperLink href="/">

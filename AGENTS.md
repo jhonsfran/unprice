@@ -37,6 +37,9 @@ contain compatible background; keep them aligned when changing architecture rule
   metrics.
 - `packages/api` and `packages/react`: public package surfaces.
 - `tooling/*`: repo tooling and operational utilities.
+- `docs/brand`: brand, positioning, and marketing source of truth. For any marketing, copy,
+  landing-page, or campaign work, start with `docs/brand/README.md` and follow
+  `docs/brand/marketing-framework.md` (avatar, incident bank, altitude map, offer).
 
 ## Architecture Boundaries
 

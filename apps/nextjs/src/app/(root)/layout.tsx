@@ -14,7 +14,7 @@ import { fontMapper } from "~/styles/fonts"
 
 export const metadata = {
   title: {
-    default: siteConfig.name,
+    default: `${siteConfig.name} — authorize customer spend before paid work runs`,
     template: `%s - ${siteConfig.name}`,
   },
   description: siteConfig.description,
@@ -34,7 +34,7 @@ export const metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: siteConfig.name,
+    title: `${siteConfig.name} — authorize customer spend before paid work runs`,
     description: siteConfig.description,
     images: [{ url: "/og", width: 1200, height: 630, alt: siteConfig.name }],
     creator: "@jhosef90",

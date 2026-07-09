@@ -32,12 +32,12 @@ export default function ManifestoOwnership() {
     <SectionShell labelledBy="ownership-title" className="bg-surface-panel">
       <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,28rem)] lg:gap-16">
         <div className="flex flex-col items-start">
-          <StationHeader index="04" label="Ownership" fact="forkable · runs in your account" />
+          <StationHeader index="03" label="Ownership" fact="forkable · runs in your account" />
           <h2
             id="ownership-title"
             className="mt-6 max-w-xl font-primary text-background-textContrast text-display-3"
           >
-            Your rent can be acquired. The money path you own cannot.
+            The billing layer you rent can be acquired. The money path you own cannot.
           </h2>
           <p className="mt-5 max-w-xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
             Between 2025 and 2026 the independent billing middle market stopped existing: every

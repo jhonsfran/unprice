@@ -46,8 +46,8 @@ const InviteEmail = (props: {
               </Heading>
 
               <Text className="m-0 mb-[32px] text-[#a1a1aa] text-[16px] leading-[1.5]">
-                {inviterName} has invited you to collaborate on {workspaceName} on Unprice —
-                open-source PriceOps infrastructure for usage-based SaaS.
+                {inviterName} has invited you to collaborate on {workspaceName} on Unprice — the
+                open-source customer money path for usage-based SaaS.
               </Text>
 
               <Text className="m-0 mb-[32px] text-[18px] text-white">Hello {inviteeName},</Text>

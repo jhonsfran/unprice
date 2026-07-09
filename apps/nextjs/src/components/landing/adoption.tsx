@@ -44,6 +44,11 @@ const objections = [
       "Keep Stripe for payment capture. Unprice owns the customer money path before and around the invoice: plan versions, entitlements, budgets, credits, ledger captures, and evidence.",
   },
   {
+    question: "Does Unprice touch the money?",
+    answer:
+      "No. Your app asks Unprice before paid work runs and gets an allow or deny with evidence attached. Your payment provider captures the payment — Stripe today, in your own account. Unprice owns the decision, the ledger, and the evidence; it never sits in your funds flow.",
+  },
+  {
     question: "Why not an AI gateway?",
     answer:
       "Gateways cap provider spend. Unprice governs what your customer is allowed to spend and connects that decision to invoice evidence.",
@@ -64,7 +69,7 @@ export function AdoptionSection() {
   return (
     <SectionShell labelledBy="adoption-title">
       <div className="flex flex-col items-start">
-        <StationHeader index="05" label="Adoption path" fact="shadow → sandbox → live" />
+        <StationHeader index="04" label="Adoption path" fact="shadow → sandbox → live" />
         <h2
           id="adoption-title"
           className="mt-6 max-w-2xl font-primary text-background-textContrast text-display-3"

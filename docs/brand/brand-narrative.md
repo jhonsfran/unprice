@@ -62,7 +62,7 @@ Everything else in the story should create context for that moment.
 
 ## Rallying Cry
 
-Authorize customer spend before the paid action runs.
+Authorize customer spend before paid work runs.
 
 This is the most repeatable buyer mission. It is concrete, technical, and action-oriented. It also
 keeps Unprice out of vague billing-platform and gateway language.

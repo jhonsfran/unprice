@@ -160,17 +160,19 @@ export async function GET(req: Request) {
         </div>
       )}
 
-      {/* Footer with subtle branding */}
-      <div
-        style={{
-          position: "absolute",
-          bottom: "40px",
-          fontSize: "18px",
-          color: "#6b7280",
-        }}
-      >
-        Powered by Unprice
-      </div>
+      {/* Attribution footer — customer-branded cards only, never our own */}
+      {logoUrl && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: "40px",
+            fontSize: "18px",
+            color: "#6b7280",
+          }}
+        >
+          Powered by Unprice
+        </div>
+      )}
     </div>,
     {
       width: 1200,

@@ -40,7 +40,7 @@ const WelcomeEmail = ({
             {/* Main Content */}
             <Section>
               <Heading className="mb-[24px] text-center font-bold text-[#ffffff] text-[28px]">
-                Welcome to Unprice, {firstName}!
+                Welcome to Unprice, {firstName}.
               </Heading>
 
               <Text className="mb-[24px] text-[#ffffff] text-[16px] leading-[24px]">
@@ -71,7 +71,11 @@ const WelcomeEmail = ({
               </Section>
 
               <Text className="text-center text-[#ffffff] text-[14px] leading-[20px]">
-                Questions? Reply to this email—we're here to help.
+                Questions? Reply to this email — it lands in my inbox and I answer personally.
+              </Text>
+
+              <Text className="mt-[8px] mb-0 text-center text-[#a1a1aa] text-[14px] leading-[20px]">
+                — Seb, founder of Unprice
               </Text>
             </Section>
 

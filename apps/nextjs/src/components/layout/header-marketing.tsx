@@ -34,13 +34,12 @@ export default function HeaderMarketing() {
             <Link
               href={`${APP_DOMAIN}`}
               className={buttonVariants({
-                variant: "outline",
-                className:
-                  "h-9 gap-1.5 whitespace-nowrap bg-transparent px-2.5 text-xs sm:px-3 sm:text-sm",
+                variant: "primary",
+                className: "h-9 gap-1.5 whitespace-nowrap px-2.5 text-xs sm:px-3 sm:text-sm",
               })}
             >
-              <span className="sm:hidden">Start action</span>
-              <span className="hidden sm:inline">Start with one action</span>
+              <span className="sm:hidden">Start free</span>
+              <span className="hidden sm:inline">Start with one paid action</span>
               <ArrowRight aria-hidden className="size-3.5" />
             </Link>
           </div>

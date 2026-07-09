@@ -44,7 +44,7 @@ export default async function ProjectUsersPage(props: {
       header={
         <HeaderTab
           title="Customers"
-          description="Customers are the economic actors that hold subscriptions, wallet credits, invoices, and budgeted runs."
+          description="Customers hold the subscriptions, wallet credits, invoices, and budgeted runs in this project."
           action={
             <div className="flex items-center gap-2">
               <CodeApiSheet defaultMethod="signUpCustomer">

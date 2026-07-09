@@ -12,7 +12,7 @@ This is the app-level product source of truth. Detailed brand and design rules l
 
 Unprice is the open-source customer money path for usage-based SaaS. It helps developer-led teams sell
 credits and usage-based plans without eating over-budget customer work: authorize in the request
-path, explain on the invoice, and own the money logic in open source.
+path, explain on the invoice, and own the money path in open source.
 
 PriceOps is the operating model behind that promise: plan versions, subscriptions, entitlements,
 meters, budgets, credits, usage evidence, and invoice evidence stay separate but connected.

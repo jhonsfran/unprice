@@ -32,7 +32,7 @@ export default async function AuthenticationPage({
       <Card>
         <CardHeader className="text-center">
           <CardTitle className="text-xl">Welcome back</CardTitle>
-          <CardDescription>Login with your Github or Google account</CardDescription>
+          <CardDescription>Sign in with your GitHub or Google account</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-6">
           <div className="flex w-full flex-col items-center justify-between gap-4">

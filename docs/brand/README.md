@@ -24,7 +24,8 @@ Do not re-derive these. Copy from here; if they change, change them here first.
 - Wedge: customer spend authorization with invoice evidence — authorize customer spend before paid
   work runs, then prove every allow, deny, charge, credit, and invoice line after.
 - Headline: Authorize customer spend before paid work runs.
-- Rallying cry: Sell credits and usage-based plans without eating over-budget customer work.
+- Rallying cry: Authorize customer spend before paid work runs.
+- Promise line: Sell credits and usage-based plans without eating over-budget customer work.
 - Name meaning: "Unprice" = un-hardcoding pricing from your codebase, not removing price.
 - Payments: Stripe-first today, provider-extensible by design. Unprice never sits in the buyer's
   funds flow.
@@ -57,6 +58,7 @@ Each fact has one owner. Other docs should reference, not restate, the owner.
 | Product definition, ICP, pillars, claim boundaries, business model | `PRODUCT.md` |
 | Narrative, pitches, demo script, rallying cry | `brand-narrative.md` |
 | JTBD, triggers, switch forces, copy-review checklist | `jobs-to-be-done.md` |
+| Marketing avatar, incident bank, altitude map, offer placement, channel motion | `marketing-framework.md` |
 | UI/marketing design rules, signature visual | `design-system-guidelines.md` |
 
 ## Governance
@@ -80,6 +82,9 @@ Each fact has one owner. Other docs should reference, not restate, the owner.
   message discipline.
 - [Jobs To Be Done](jobs-to-be-done.md): core job, trigger priority, switch forces, campaign
   angles, and copy-review checklist for marketing and launch work.
+- [Marketing Framework](marketing-framework.md): the marketing operating system — avatar, incident
+  bank, altitude map, offer placement, channel motion, measurement, and the pre-publish checklist
+  for every ad, post, email, and launch asset.
 - [Design System Guidelines](design-system-guidelines.md): product UI and marketing design rules
   for layout, color, typography, components, states, and motion.
 - [Design Tokens](design-tokens.md): canonical color and logo token reference, grounded in the
@@ -93,6 +98,7 @@ Read these before changing:
 - dashboard information architecture or visual style
 - onboarding, quickstarts, or SDK examples
 - sales/demo copy, README positioning, or launch assets
+- any marketing asset — ads, posts, emails, DMs, campaigns (start with `marketing-framework.md`)
 
 When product behavior and these docs conflict, the code wins. Update the docs after verifying the
 implemented behavior.

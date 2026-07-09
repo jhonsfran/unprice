@@ -417,17 +417,22 @@ Interactive demo (2026-07-09) —
 [`apps/nextjs/src/components/landing/decision-demo.tsx`](/Users/jhonsfran/repos/unprice/apps/nextjs/src/components/landing/decision-demo.tsx)
 (`DecisionDemo`, replaced `pricing-hero.tsx`): station 03, the money path driven by hand. Two
 panels joined by the system map's labeled boundary connector (request/decision): the plan sheet
-(paid actions as clickable ledger rows with live meters; guardrails edited inline per row, no
-separate config panel) and the decision receipt (bracket corners in `primary` — the decision
-moment — with `shadow-raised` as the lifted center of gravity; the plan sheet stays
-`shadow-ambient`). The receipt reuses the money path's outcome-chip grammar and proves the deny by
-absence: "work · never ran / cost created · none / invoice line · no line" as ghost rows. Views
-are two text tabs styled as the panel title (decision trail / invoice) — never icon-only
-switchers, and controls live in the panel they affect. Each click sends one `info` dot from the
-row's station dot across the connector (fade at the panel edge, re-emerge on the rail, fade before
-the chip — the chip highlight carries the arrival). Guardrail limits are demo-scale so the deny is
-reachable in a few clicks; a deny auto-opens that row's rule editor because raising the limit is
-the product's answer. Headlines never mutate with demo state — state lives on the receipt.
+(paid actions as clickable full-bleed ledger rows — hover wash and hairline rules run edge to
+edge of the panel, never a floating box) and the decision receipt (bracket corners in `primary` —
+the decision moment — with `shadow-raised` as the lifted center of gravity; the plan sheet stays
+`shadow-ambient`). No guardrail config UI: the rows themselves ship both examples (API requests
+and storage hard, compute soft, support flat) and each row's meta line names its type. A
+hard-blocked row stays clickable — every further click sends a real request and returns the deny
+receipt, which proves itself by absence exactly like the money path's ghost stations: "work ·
+never ran / accepted charge · none / ledger · no entry / invoice line · no line" (the allow fills
+the same four lines in). Views are two segmented mono chips in the receipt header (decision trail
+/ invoice, active = `bg-background-bgActive` + contrast text — never icon-only switchers, never
+underlines, and controls live in the panel they affect); firing a request NEVER switches the
+reader's tab — the invoice view accrues live. The click's motion is one quick `info`-dot hop
+across the connector's dashed rail (~200ms; the row dot flashes at the source, the chip highlight
+carries the arrival) — demo motion answers input, so it must stay under a quarter second.
+Guardrail limits are demo-scale so the deny is reachable in a few clicks. Headlines never mutate
+with demo state — state lives on the receipt.
 
 Recommended hero concept:
 

@@ -7,6 +7,7 @@ patterns. Keep it cheap to load and useful.
 
 - Read before non-trivial code, test, docs, migration, billing, or architecture work.
 - If you need to run the project, always use bin/startup dev
+- use ripgrep when available instead of grep. rg
 - New lessons must be dated, repo-specific, and short: 1-3 bullets per entry.
 - Use "When X, do Y; watch Z". Include files or commands only when they prevent repeats.
 - Update an existing section instead of adding duplicate narrative.

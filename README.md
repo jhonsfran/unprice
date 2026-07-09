@@ -9,7 +9,7 @@
 >
 > Unprice is the open-source customer money path for usage-based SaaS. Sell credits and usage-based plans
 > without eating over-budget customer work: authorize in the request path, explain on the invoice,
-> and own the money logic in open source. "Unprice" means un-hardcoding pricing: moving plan logic
+> and own the money path in open source. "Unprice" means un-hardcoding pricing: moving plan logic
 > out of your codebase into one inspectable runtime, not removing price.
 
 ## The Problem: Billing Is Too Late
@@ -59,7 +59,7 @@ applications without applying the AGPL-3.0 core license to the host app.
 We believe the infrastructure that handles your money should be **fully transparent and auditable.**
 - **No Hidden Logic**: See exactly how every cent is calculated.
 - **Reciprocal Innovation**: Improvements to the core engine benefit the entire community.
-- **No Vendor Lock-in**: You own the code. You own the data. You own your destiny.
+- **No Vendor Lock-in**: You own the code. You own the data.
 
 *Note: For businesses that cannot or will not open-source their modifications, we offer a **Commercial
 License** that grants full proprietary freedom and dedicated support.*
@@ -81,7 +81,7 @@ License** that grants full proprietary freedom and dedicated support.*
 
 ## Tech Stack
 
-Unprice is built for performance and scale:
+Unprice runs on:
 - **Next.js 14** (App Router)
 - **Hono API** & **tRPC**
 - **Drizzle ORM** & **PostgreSQL**

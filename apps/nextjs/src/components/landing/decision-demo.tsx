@@ -1,7 +1,5 @@
 "use client"
 
-import { Badge } from "@unprice/ui/badge"
-import { Input } from "@unprice/ui/input"
 import { cn, focusRing } from "@unprice/ui/utils"
 import { ArrowRight, Ban, Check, Flag, MousePointerClick, RotateCcw } from "lucide-react"
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
@@ -284,20 +282,15 @@ function BoundaryConnector() {
 interface PlanRowProps {
   feature: Feature
   isHit: boolean
-  editorOpen: boolean
   onFire: (id: string) => void
-  onToggleEditor: (id: string) => void
-  onConfigChange: (id: string, config: Partial<FeatureConfig>) => void
 }
 
-function PlanRow({
-  feature,
-  isHit,
-  editorOpen,
-  onFire,
-  onToggleEditor,
-  onConfigChange,
-}: PlanRowProps) {
+// The plan ships with both guardrail types in the rows themselves (API
+// requests and storage are hard, compute is soft) — no config UI, the
+// examples are the lesson. A blocked row stays clickable on purpose: every
+// further click still sends a real request and gets the deny receipt back,
+// so rejection is a state the reader can keep inspecting, not a dead button.
+function PlanRow({ feature, isHit, onFire }: PlanRowProps) {
   const status = rowStatus(feature)
   const isFlat = feature.type === "flat"
   const progress = isFlat ? 0 : Math.min(100, (feature.usage / feature.config.limit) * 100)
@@ -317,144 +310,75 @@ function PlanRow({
   )
 
   return (
-    <div className="border-background-line border-b last:border-0">
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => onFire(feature.id)}
-          disabled={status === "blocked"}
-          aria-label={`Send one ${feature.displayName} request · ${pricingRuleLabel(feature)}`}
+    <button
+      type="button"
+      onClick={() => onFire(feature.id)}
+      aria-label={`Send one ${feature.displayName} request · ${pricingRuleLabel(feature)}`}
+      className={cn(
+        // Full-bleed list row: the hover wash and hairline rules run edge to
+        // edge of the panel, like a table row — never a floating gray box.
+        "block w-full border-background-line border-b px-4 py-2.5 text-left transition-colors duration-quick ease-out-quad last:border-0 hover:bg-background-bgHover active:bg-background-bgActive sm:px-5",
+        focusRing
+      )}
+    >
+      <div className="flex items-baseline gap-2">
+        <span
+          aria-hidden
           className={cn(
-            "group min-w-0 flex-1 rounded-sm py-2.5 text-left transition-colors duration-quick ease-out-quad",
-            focusRing,
-            status === "blocked"
-              ? "cursor-not-allowed"
-              : "hover:bg-background-bgHover active:bg-background-bgActive"
+            "size-[9px] shrink-0 self-center rounded-full transition-colors duration-quick ease-out-quad",
+            isHit
+              ? "bg-info ring-2 ring-info-bg"
+              : status === "blocked"
+                ? "bg-danger-solid"
+                : status === "flagged"
+                  ? "bg-warning-solid"
+                  : "border border-background-borderHover bg-surface-panel"
+          )}
+        />
+        <span
+          className={cn(
+            "whitespace-nowrap font-medium text-sm transition-colors duration-quick ease-out-quad",
+            isHit ? "text-info-text" : "text-background-textContrast"
           )}
         >
-          <div className="flex items-baseline gap-2">
-            <span
-              aria-hidden
-              data-dd-anchor={feature.id}
-              className={cn(
-                "size-[9px] shrink-0 self-center rounded-full transition-colors duration-quick ease-out-quad",
-                isHit
-                  ? "bg-info ring-2 ring-info-bg"
-                  : status === "blocked"
-                    ? "bg-danger-solid"
-                    : status === "flagged"
-                      ? "bg-warning-solid"
-                      : "border border-background-borderHover bg-surface-panel"
-              )}
-            />
-            <span
-              className={cn(
-                "whitespace-nowrap font-medium text-sm transition-colors duration-quick ease-out-quad",
-                isHit ? "text-info-text" : "text-background-textContrast"
-              )}
-            >
-              {feature.displayName}
-            </span>
-            <Leader />
-            <span
-              className={cn(
-                "whitespace-nowrap font-mono text-[11px] tabular-nums",
-                status === "blocked"
-                  ? "text-danger-text"
-                  : status === "flagged"
-                    ? "text-warning-text"
-                    : "text-background-text"
-              )}
-            >
-              {usageFact}
-            </span>
-          </div>
-          <div className="mt-0.5 pl-[17px] font-mono text-[10px] text-background-text">
-            {feature.call} · {pricingRuleLabel(feature)}
-          </div>
-          {!isFlat && (
-            <div className="mt-1.5 ml-[17px] h-0.5 overflow-hidden rounded-full bg-background-line">
-              <div
-                className={cn(
-                  "h-full rounded-full transition-all duration-regular ease-out-quad",
-                  progress >= 100
-                    ? feature.config.limitType === "hard"
-                      ? "bg-danger-solid"
-                      : "bg-warning-solid"
-                    : progress >= 80
-                      ? "bg-warning-solid"
-                      : "bg-background-borderHover"
-                )}
-                style={{ width: `${progress}%` }}
-              />
-            </div>
+          {feature.displayName}
+        </span>
+        <Leader />
+        <span
+          className={cn(
+            "whitespace-nowrap font-mono text-[11px] tabular-nums",
+            status === "blocked"
+              ? "text-danger-text"
+              : status === "flagged"
+                ? "text-warning-text"
+                : "text-background-text"
           )}
-        </button>
-
-        {!isFlat && (
-          <button
-            type="button"
-            onClick={() => onToggleEditor(feature.id)}
-            aria-expanded={editorOpen}
-            aria-label={`Edit the ${feature.displayName} guardrail`}
-            className={cn(
-              "shrink-0 rounded-sm border px-1.5 py-0.5 font-mono text-[10px] transition-colors duration-quick ease-out-quad",
-              focusRing,
-              status === "blocked"
-                ? "border-danger-border text-danger-text"
-                : status === "flagged"
-                  ? "border-warning-border text-warning-text"
-                  : "border-background-border text-background-text hover:border-background-borderHover hover:text-background-textContrast"
-            )}
-          >
-            {feature.config.limitType}
-          </button>
-        )}
+        >
+          {usageFact}
+        </span>
       </div>
-
-      {editorOpen && !isFlat && (
-        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-background-line border-t border-dashed py-2 pl-[17px]">
-          <span className="font-mono text-[10px] text-background-text uppercase tracking-widest">
-            guardrail
-          </span>
-          <div className="flex items-center gap-2">
-            <fieldset className="flex shrink-0 items-center rounded-sm border border-background-border p-px">
-              <legend className="sr-only">{`${feature.displayName} limit type`}</legend>
-              {(["hard", "soft"] as const).map((limitType) => (
-                <button
-                  key={limitType}
-                  type="button"
-                  onClick={() => onConfigChange(feature.id, { limitType })}
-                  aria-pressed={feature.config.limitType === limitType}
-                  className={cn(
-                    "rounded-[3px] px-1.5 py-0.5 font-mono text-[10px] transition-colors duration-quick ease-out-quad",
-                    focusRing,
-                    feature.config.limitType === limitType
-                      ? "bg-background-bgActive text-background-textContrast"
-                      : "text-background-text hover:text-background-textContrast"
-                  )}
-                >
-                  {limitType}
-                </button>
-              ))}
-            </fieldset>
-            <Input
-              type="number"
-              min="1"
-              step="1"
-              value={feature.config.limit}
-              onChange={(e) => {
-                const val = Number.parseInt(e.target.value, 10)
-                if (!Number.isNaN(val) && val >= 1) onConfigChange(feature.id, { limit: val })
-              }}
-              aria-label={`${feature.displayName} limit`}
-              className="h-7 w-16 shrink-0 px-1.5 text-right font-mono text-[11px] text-background-textContrast"
-            />
-            <span className="font-mono text-[10px] text-background-text">{feature.unit}</span>
-          </div>
+      <div className="mt-0.5 truncate pl-[17px] font-mono text-[10px] text-background-text">
+        {feature.call} · {pricingRuleLabel(feature)}
+        {!isFlat && ` · ${feature.config.limitType}`}
+      </div>
+      {!isFlat && (
+        <div className="mt-1.5 ml-[17px] h-0.5 overflow-hidden rounded-full bg-background-line">
+          <div
+            className={cn(
+              "h-full rounded-full transition-all duration-regular ease-out-quad",
+              progress >= 100
+                ? feature.config.limitType === "hard"
+                  ? "bg-danger-solid"
+                  : "bg-warning-solid"
+                : progress >= 80
+                  ? "bg-warning-solid"
+                  : "bg-background-borderHover"
+            )}
+            style={{ width: `${progress}%` }}
+          />
         </div>
       )}
-    </div>
+    </button>
   )
 }
 
@@ -575,13 +499,15 @@ function DecisionReceipt({ decision, feature, chipHit }: DecisionReceiptProps) {
         },
       ]
 
-  // The deny branch proves itself by absence — the same ghost grammar as the
-  // money path's untouched wallet/ledger/invoice stations.
+  // The same four receipt lines on every outcome. The deny proves itself by
+  // absence — never ran, no entry, no line — exactly like the money path's
+  // untouched ghost stations; the allow fills the same lines in.
   const created: { label: string; fact: ReactNode; ghost: boolean }[] =
     pending || denied
       ? [
           { label: "work", fact: pending ? "—" : "never ran", ghost: true },
-          { label: "cost created", fact: pending ? "—" : "none", ghost: true },
+          { label: "accepted charge", fact: pending ? "—" : "none", ghost: true },
+          { label: "ledger", fact: pending ? "—" : "no entry", ghost: true },
           { label: "invoice line", fact: pending ? "—" : "no line", ghost: true },
         ]
       : [
@@ -592,9 +518,14 @@ function DecisionReceipt({ decision, feature, chipHit }: DecisionReceiptProps) {
             ghost: false,
           },
           {
+            label: "ledger",
+            fact: covered ? "no new entry" : "capture · balanced",
+            ghost: covered,
+          },
+          {
             label: "invoice line",
             fact: covered ? "no new line" : "explained · evidence attached",
-            ghost: false,
+            ghost: covered,
           },
         ]
 
@@ -659,16 +590,9 @@ function DecisionReceipt({ decision, feature, chipHit }: DecisionReceiptProps) {
 // INVOICE RECEIPT — the same path, at month end
 // ============================================
 
-interface InvoiceReceiptProps {
-  features: Feature[]
-  discountActive: boolean
-  discountPercentage: number
-}
-
-function InvoiceReceipt({ features, discountActive, discountPercentage }: InvoiceReceiptProps) {
-  const meteredPre = features.reduce((sum, f) => sum + featureCost(f), 0)
-  const discount = discountActive ? meteredPre * (discountPercentage / 100) : 0
-  const total = BASE_FEE + meteredPre - discount
+function InvoiceReceipt({ features }: { features: Feature[] }) {
+  const metered = features.reduce((sum, f) => sum + featureCost(f), 0)
+  const total = BASE_FEE + metered
 
   const period = new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" })
 
@@ -729,18 +653,6 @@ function InvoiceReceipt({ features, discountActive, discountPercentage }: Invoic
               </span>
             </div>
           ))}
-        {discountActive && (
-          <div className="flex items-baseline gap-2 py-[5px]">
-            <span className="text-background-text text-sm">Volume pricing</span>
-            <span className="font-mono text-[10px] text-background-text">
-              −{discountPercentage}% metered
-            </span>
-            <Leader />
-            <span className="whitespace-nowrap font-mono text-[11px] text-primary-text tabular-nums">
-              −${discount.toFixed(2)}
-            </span>
-          </div>
-        )}
       </div>
 
       <div className="mt-2 flex items-baseline justify-between gap-4 border-background-border border-t pt-3">
@@ -764,22 +676,11 @@ function InvoiceReceipt({ features, discountActive, discountPercentage }: Invoic
 // MAIN SECTION
 // ============================================
 
-export interface DecisionDemoProps {
-  discountThreshold?: number
-  discountPercentage?: number
-  className?: string
-}
-
-export function DecisionDemo({
-  discountThreshold = 10,
-  discountPercentage = 20,
-  className,
-}: DecisionDemoProps) {
+export function DecisionDemo({ className }: { className?: string }) {
   const [features, setFeatures] = useState<Feature[]>(DEFAULT_FEATURES)
   const [lastDecision, setLastDecision] = useState<Decision | null>(null)
   const [acceptedActions, setAcceptedActions] = useState(0)
   const [view, setView] = useState<"decision" | "invoice">("decision")
-  const [openEditor, setOpenEditor] = useState<string | null>(null)
   const [hitRowId, setHitRowId] = useState<string | null>(null)
   const [chipHit, setChipHit] = useState(false)
 
@@ -797,18 +698,16 @@ export function DecisionDemo({
     }
   }, [])
 
-  const discountActive = acceptedActions >= discountThreshold
   const metered = features.reduce((sum, f) => sum + featureCost(f), 0)
-  const meteredBilled = discountActive ? metered * (1 - discountPercentage / 100) : metered
-  const acceptedSpend = BASE_FEE + meteredBilled
+  const acceptedSpend = BASE_FEE + metered
   const lastFeature = lastDecision
     ? (features.find((f) => f.id === lastDecision.featureId) ?? null)
     : null
 
-  // The request in flight: the row's station dot exits the plan sheet, fades
-  // at the panel edge, re-emerges on the boundary connector's dashed line, and
-  // fades again before the outcome chip — the chip's own highlight carries the
-  // arrival, the dot only ever lives on rails (money-path grammar).
+  // The request in flight: one quick hop across the boundary connector — the
+  // clicked row's dot flashes at the source, the dot crosses the dashed rail
+  // in under a quarter second, and the outcome chip's highlight carries the
+  // arrival. Rails only, and fast enough to read as the click's echo.
   const launchFlight = useCallback((featureId: string) => {
     setHitRowId(featureId)
     if (rowTimer.current) clearTimeout(rowTimer.current)
@@ -826,54 +725,34 @@ export function DecisionDemo({
       return
     }
     const dot = stage.querySelector<HTMLElement>("[data-dd-dot]")
-    const anchor = stage.querySelector<HTMLElement>(`[data-dd-anchor="${featureId}"]`)
-    const plan = stage.querySelector<HTMLElement>("[data-dd-plan]")
     const line = stage.querySelector<HTMLElement>("[data-dd-line]")
-    const stageBox = stage.getBoundingClientRect()
     const lineBox = line?.getBoundingClientRect()
-    if (!dot || !anchor || !plan || !lineBox || lineBox.width === 0) {
+    if (!dot || !lineBox || lineBox.width === 0) {
       // Stacked layout: no horizontal boundary to travel — the chip flash and
       // the scroll-into-view carry the moment.
       land()
       return
     }
 
-    const a = anchor.getBoundingClientRect()
-    const start = {
-      x: a.left - stageBox.left + a.width / 2,
-      y: a.top - stageBox.top + a.height / 2,
-    }
-    const exitX = plan.getBoundingClientRect().right - stageBox.left - 10
-    const lineY = lineBox.top - stageBox.top + lineBox.height / 2
-    const lineX0 = lineBox.left - stageBox.left + 4
-    const lineX1 = lineBox.right - stageBox.left - 4
+    const stageBox = stage.getBoundingClientRect()
+    const y = lineBox.top - stageBox.top + lineBox.height / 2
+    const x0 = lineBox.left - stageBox.left + 2
+    const x1 = lineBox.right - stageBox.left - 2
 
-    const SPEED = 0.9 // px per ms
-    const FADE = 110
-    const seg1 = Math.abs(exitX - start.x) / SPEED
-    const seg2 = Math.abs(lineX1 - lineX0) / SPEED
-    const total = FADE + seg1 + FADE + FADE + seg2 + FADE
-
-    let t = 0
-    const at = (ms: number) => {
-      t += ms
-      return Math.min(1, t / total)
-    }
-    const frame = (x: number, y: number, o: number, offset: number) => ({
+    const FADE = 60
+    const travel = Math.max(70, (x1 - x0) / 1.1)
+    const total = FADE + travel + FADE
+    const frame = (x: number, o: number, offset: number) => ({
       transform: `translate3d(${(x - 4.5).toFixed(1)}px, ${(y - 4.5).toFixed(1)}px, 0)`,
       opacity: o,
       offset,
     })
 
     const keyframes = [
-      frame(start.x, start.y, 0, 0),
-      frame(start.x, start.y, 1, at(FADE)),
-      frame(exitX, start.y, 1, at(seg1)),
-      frame(exitX, start.y, 0, at(FADE)),
-      frame(lineX0, lineY, 0, at(0)),
-      frame(lineX0, lineY, 1, at(FADE)),
-      frame(lineX1, lineY, 1, at(seg2)),
-      frame(lineX1, lineY, 0, at(FADE)),
+      frame(x0, 0, 0),
+      frame(x0, 1, FADE / total),
+      frame(x1, 1, (FADE + travel) / total),
+      frame(x1, 0, 1),
     ]
 
     flightRef.current?.cancel()
@@ -907,20 +786,18 @@ export function DecisionDemo({
         }
       }
 
-      if (decision.kind === "deny") {
-        // The natural next move after a deny is the rule itself — open it.
-        setOpenEditor(featureId)
-      } else if (decision.reason !== "already_included") {
-        // Covered repeats (access.check on an active seat) run work but
-        // consume nothing — no usage bump, no progress toward volume pricing.
+      // Denies and covered repeats (access.check on an active seat) consume
+      // nothing — only accepted metered work moves the counters.
+      if (decision.kind !== "deny" && decision.reason !== "already_included") {
         setFeatures((prev) =>
           prev.map((f) => (f.id === featureId ? { ...f, usage: f.usage + 1 } : f))
         )
         setAcceptedActions((prev) => prev + 1)
       }
 
+      // Never steal the reader's tab: the invoice view accrues live, and the
+      // decision view updates in place for whoever is watching it.
       setLastDecision(decision)
-      setView("decision")
       launchFlight(featureId)
 
       // On stacked layouts the receipt renders below the plan; bring the
@@ -943,23 +820,12 @@ export function DecisionDemo({
     [features, lastDecision, launchFlight]
   )
 
-  const handleConfigChange = useCallback((featureId: string, config: Partial<FeatureConfig>) => {
-    setFeatures((prev) =>
-      prev.map((f) => (f.id === featureId ? { ...f, config: { ...f.config, ...config } } : f))
-    )
-  }, [])
-
-  const handleToggleEditor = useCallback((featureId: string) => {
-    setOpenEditor((prev) => (prev === featureId ? null : featureId))
-  }, [])
-
   const handleReset = useCallback(() => {
     flightRef.current?.cancel()
     setFeatures(DEFAULT_FEATURES)
     setLastDecision(null)
     setAcceptedActions(0)
     setView("decision")
-    setOpenEditor(null)
     setHitRowId(null)
     setChipHit(false)
   }, [])
@@ -967,7 +833,7 @@ export function DecisionDemo({
   return (
     <SectionShell id="demo" labelledBy="decision-demo-title" className={className}>
       <div className="max-w-2xl">
-        <StationHeader index="03" label="The decision, live" fact="you send the request" />
+        <StationHeader index="02" label="The decision, live" fact="you send the request" />
         <h2
           id="decision-demo-title"
           className="mt-6 font-primary text-background-textContrast text-display-3"
@@ -981,7 +847,7 @@ export function DecisionDemo({
       </div>
 
       <figure
-        aria-label="An interactive plan sheet for acme-corp on pro@v3. The left panel lists the plan's paid actions — API requests, tiered storage, budgeted compute, and a flat premium support seat — each with a live usage meter and an editable hard or soft guardrail. Clicking a paid action sends one request across the request/decision boundary to the decision receipt, which answers allow, flagged, or deny before the work runs, with the evidence kept with the decision: the call, plan version, pricing rule, guardrail, and remaining budget. A denied request shows what it did not create — no work, no cost, no invoice line. The receipt's invoice view accrues the accepted charges into the invoice each decision explains."
+        aria-label="An interactive plan sheet for acme-corp on pro@v3. The left panel lists the plan's paid actions — API requests and tiered storage behind hard guardrails, budgeted compute behind a soft one, and a flat premium support seat — each with a live usage meter. Clicking a paid action sends one request across the request/decision boundary to the decision receipt, which answers allow, flagged, or deny before the work runs, with the evidence kept with the decision: the call, plan version, pricing rule, guardrail, and remaining budget. A hard-limited row stays clickable, and every further click is denied showing what it did not create — work never ran, no charge, no ledger entry, no invoice line. The receipt's invoice view accrues the accepted charges into the invoice each decision explains."
         className="mt-10 sm:mt-12"
       >
         <Reveal>
@@ -991,10 +857,7 @@ export function DecisionDemo({
           >
             {/* Plan sheet: the request side of the boundary */}
             <PanelFrame className="shadow-ambient">
-              <div
-                data-dd-plan
-                className="flex items-baseline justify-between gap-3 border-background-border border-b px-4 py-3 sm:px-5"
-              >
+              <div className="flex items-baseline justify-between gap-3 border-background-border border-b px-4 py-3 sm:px-5">
                 <span className="font-mono text-background-textContrast text-xs uppercase tracking-widest">
                   Pro plan
                 </span>
@@ -1017,16 +880,13 @@ export function DecisionDemo({
                 </span>
               </div>
 
-              <div className="flex-1 px-4 sm:px-5">
+              <div className="flex-1">
                 {features.map((feature) => (
                   <PlanRow
                     key={feature.id}
                     feature={feature}
                     isHit={hitRowId === feature.id}
-                    editorOpen={openEditor === feature.id}
                     onFire={handleFire}
-                    onToggleEditor={handleToggleEditor}
-                    onConfigChange={handleConfigChange}
                   />
                 ))}
               </div>
@@ -1042,7 +902,7 @@ export function DecisionDemo({
                   label="metered spend"
                   variant="ghost"
                   labelClassName="text-xs"
-                  fact={<AnimatedCounter value={meteredBilled} prefix="$" decimals={2} />}
+                  fact={<AnimatedCounter value={metered} prefix="$" decimals={2} />}
                   factClassName="text-background-textContrast"
                 />
                 <div className="mt-1 flex items-baseline justify-between gap-4 border-background-border border-t pt-2">
@@ -1051,16 +911,9 @@ export function DecisionDemo({
                       Accepted spend
                     </span>
                     <div className="mt-0.5">
-                      {discountActive ? (
-                        <Badge variant="primary" className="text-[10px]">
-                          volume pricing · −{discountPercentage}%
-                        </Badge>
-                      ) : (
-                        <span className="font-mono text-[10px] text-background-text">
-                          {acceptedActions} accepted ·{" "}
-                          {Math.max(0, discountThreshold - acceptedActions)} to volume pricing
-                        </span>
-                      )}
+                      <span className="font-mono text-[10px] text-background-text">
+                        {acceptedActions} paid actions accepted
+                      </span>
                     </div>
                   </div>
                   <span className="font-mono font-semibold text-background-textContrast text-lg tabular-nums">
@@ -1095,7 +948,7 @@ export function DecisionDemo({
                 />
 
                 <div className="flex items-baseline justify-between gap-3 border-background-border border-b px-4 py-3 sm:px-5">
-                  <fieldset className="flex items-baseline gap-4">
+                  <fieldset className="-ml-2 flex items-baseline gap-1">
                     <legend className="sr-only">Receipt view</legend>
                     {(["decision", "invoice"] as const).map((tab) => (
                       <button
@@ -1104,11 +957,11 @@ export function DecisionDemo({
                         onClick={() => setView(tab)}
                         aria-pressed={view === tab}
                         className={cn(
-                          "rounded-sm border-b pb-0.5 font-mono text-xs uppercase tracking-widest transition-colors duration-quick ease-out-quad",
+                          "rounded-[3px] px-2 py-0.5 font-mono text-[11px] uppercase tracking-widest transition-colors duration-quick ease-out-quad",
                           focusRing,
                           view === tab
-                            ? "border-background-textContrast text-background-textContrast"
-                            : "border-transparent text-background-text hover:text-background-textContrast"
+                            ? "bg-background-bgActive text-background-textContrast"
+                            : "text-background-text hover:text-background-textContrast"
                         )}
                       >
                         {tab === "decision" ? "Decision trail" : "Invoice"}
@@ -1128,11 +981,7 @@ export function DecisionDemo({
                       chipHit={chipHit}
                     />
                   ) : (
-                    <InvoiceReceipt
-                      features={features}
-                      discountActive={discountActive}
-                      discountPercentage={discountPercentage}
-                    />
+                    <InvoiceReceipt features={features} />
                   )}
                 </div>
               </PanelFrame>
