@@ -81,6 +81,9 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
       QUEUE_SHARD_0: cloudflareQueue,
       QUEUE_SHARD_1: cloudflareQueue,
       INGESTION_REPORTING_QUEUE: cloudflareQueue,
+      // Fraction of typed metric emissions (cache/db/ratelimit) exported to
+      // the log drain. Wide events are sampled separately by evlog.
+      METRICS_SAMPLE_RATE: z.coerce.number().optional(),
 
       STRIPE_API_KEY: z.string().optional(),
       STRIPE_CONNECT_WEBHOOK_SECRET: z.string().optional(),
