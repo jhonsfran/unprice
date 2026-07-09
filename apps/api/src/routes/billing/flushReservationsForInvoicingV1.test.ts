@@ -222,6 +222,30 @@ describe("flushReservationsForInvoicingV1 route", () => {
       billingPeriodIds: ["bp_123"],
     })
   })
+
+  it("skips run budgets whose older durable object does not expose the flush RPC", async () => {
+    runBudgetMocks.getByName.mockReturnValue({})
+
+    const { app, env, executionCtx } = createTestApp({
+      billingPeriods: [{ cycleStartAt: 1_778_000_000_000, id: "bp_123" }],
+      budgetRuns: [{ id: "brun_123" }],
+      entitlements: [],
+    })
+
+    const response = await app.fetch(
+      buildRequest({
+        customerId: "cus_123",
+        subscriptionId: "sub_123",
+        subscriptionPhaseId: "phase_123",
+        statementKey: "stmt_123",
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ ok: true, flushed: 0, skipped: 1 })
+  })
 })
 
 function createTestApp(options: {

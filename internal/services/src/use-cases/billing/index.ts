@@ -51,3 +51,17 @@ export {
   HttpBillingReservationFlushGateway,
 } from "./reservation-flush-gateway"
 export type { BillingReservationFlushGateway } from "./reservation-flush-gateway"
+export {
+  FlushReservationsForInvoicingError,
+  flushReservationsForInvoicing,
+  flushReservationsForInvoicingErrorReasonSchema,
+  flushReservationsForInvoicingInputSchema,
+  flushReservationsForInvoicingOutputSchema,
+} from "./flush-reservations-for-invoicing"
+export type {
+  FlushReservationsForInvoicingDeps,
+  FlushReservationsForInvoicingErrorReason,
+  FlushReservationsForInvoicingInput,
+  FlushReservationsForInvoicingOutput,
+  InvoicingEntitlementWindowClient,
+} from "./flush-reservations-for-invoicing"

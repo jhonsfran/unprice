@@ -1,4 +1,4 @@
-import { Err, Ok, type Result } from "@unprice/error"
+import { BaseError, Err, Ok, type Result } from "@unprice/error"
 import {
   type IngestionEntitlement,
   type IngestionGrant,
@@ -137,6 +137,34 @@ export class CloudflareRunBudgetClient implements RunBudgetClient {
       return Err(
         new RunBudgetErrorClass({
           message: error instanceof Error ? error.message : "getRunStatus failed",
+        })
+      )
+    }
+  }
+
+  async flushCapturesForInvoicing(input: {
+    projectId: string
+    customerId: string
+    runId: string
+    statementKey: string
+    billingPeriodIds: string[]
+  }): Promise<Result<{ flushed: number; skipped: number }, RunBudgetError>> {
+    const stub = this.stub(input)
+    if (typeof stub.flushCapturesForInvoicing !== "function") {
+      return Ok({ flushed: 0, skipped: 1 })
+    }
+
+    try {
+      const result = await stub.flushCapturesForInvoicing({
+        statementKey: input.statementKey,
+        billingPeriodIds: input.billingPeriodIds,
+      })
+      return Ok({ flushed: result.flushed, skipped: result.skipped })
+    } catch (error) {
+      return Err(
+        new RunBudgetErrorClass({
+          message: error instanceof Error ? error.message : "flushCapturesForInvoicing failed",
+          ...(error instanceof BaseError ? { cause: error } : {}),
         })
       )
     }

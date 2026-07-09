@@ -96,6 +96,20 @@ export type {
 } from "./subscription/change-plan"
 export { deriveActivationInputsFromPlan } from "./billing/derive-provision-inputs"
 export { settlePrepaidInvoiceToWallet } from "./billing/settle-invoice"
+export {
+  FlushReservationsForInvoicingError,
+  flushReservationsForInvoicing,
+  flushReservationsForInvoicingErrorReasonSchema,
+  flushReservationsForInvoicingInputSchema,
+  flushReservationsForInvoicingOutputSchema,
+} from "./billing/flush-reservations-for-invoicing"
+export type {
+  FlushReservationsForInvoicingDeps,
+  FlushReservationsForInvoicingErrorReason,
+  FlushReservationsForInvoicingInput,
+  FlushReservationsForInvoicingOutput,
+  InvoicingEntitlementWindowClient,
+} from "./billing/flush-reservations-for-invoicing"
 export { duplicatePlanVersion } from "./plan-version/duplicate"
 export {
   appliedPlanTemplateSchema,

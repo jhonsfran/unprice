@@ -96,4 +96,12 @@ export interface RunBudgetClient {
     customerId: string
     runId: string
   }): Promise<Result<RunBudgetSummary, RunBudgetError>>
+
+  flushCapturesForInvoicing(input: {
+    projectId: string
+    customerId: string
+    runId: string
+    statementKey: string
+    billingPeriodIds: string[]
+  }): Promise<Result<{ flushed: number; skipped: number }, RunBudgetError>>
 }
