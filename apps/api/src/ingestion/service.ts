@@ -4,8 +4,10 @@ import { createStandaloneRequestLogger } from "@unprice/observability"
 import type { Cache } from "@unprice/services/cache"
 import type { EntitlementService } from "@unprice/services/entitlements"
 import {
+  IngestionDlqConsumer,
   IngestionQueueConsumer,
   type IngestionQueueMessage,
+  IngestionReportingDispatcher,
   IngestionService,
 } from "@unprice/services/ingestion"
 import type { SubscriptionService } from "@unprice/services/subscriptions"
@@ -85,6 +87,61 @@ export async function consumeIngestionBatch(
   const consumer = new IngestionQueueConsumer({
     logger,
     processor: service,
+  })
+
+  let thrown: unknown
+
+  try {
+    await consumer.consumeBatch(batch)
+  } catch (error) {
+    thrown = error
+    logger.error(error instanceof Error ? error : new Error(String(error)))
+    throw error
+  } finally {
+    const duration = Math.max(0, Date.now() - startedAt)
+    const status = thrown ? 500 : 200
+
+    requestLogger.set({ status, duration, request: { status, duration } })
+    requestLogger.emit({ status, duration, request: { status, duration } })
+
+    if (drain) {
+      executionCtx.waitUntil(drain.flush())
+    }
+  }
+}
+
+export async function consumeIngestionDlqBatch(
+  batch: MessageBatch<IngestionQueueMessage>,
+  env: Env,
+  executionCtx: ExecutionContext,
+  drain?: { flush: () => Promise<void> }
+): Promise<void> {
+  const batchRequestId = `dlq:${Date.now()}`
+  const startedAt = Date.now()
+  const { logger, requestLogger } = createStandaloneRequestLogger(
+    { requestId: batchRequestId },
+    { flush: drain?.flush }
+  )
+
+  logger.set({
+    service: "ingestion_dlq",
+    request: {
+      id: batchRequestId,
+      timestamp: new Date(startedAt).toISOString(),
+      path: "/queues/ingestion-dlq/consume",
+    },
+    cloud: { platform: "cloudflare" },
+    business: { operation: "consume_dlq_batch" },
+  })
+
+  const consumer = new IngestionDlqConsumer({
+    logger,
+    now: Date.now,
+    reportingDispatcher: new IngestionReportingDispatcher({
+      logger,
+      now: Date.now,
+      reportingClient: new CloudflareReportingQueueClient(env),
+    }),
   })
 
   let thrown: unknown

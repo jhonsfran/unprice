@@ -1,5 +1,6 @@
 export * from "./consumer"
 export * from "./customer-group-processor"
+export * from "./dlq-consumer"
 export * from "./entitlement-context"
 export * from "./entitlement-window-applier"
 export * from "./failure-injection"

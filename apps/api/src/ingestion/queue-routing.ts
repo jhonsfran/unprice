@@ -10,6 +10,7 @@ type MalformedQueueMessageHandler = (failure: { queue: string; errors: unknown }
 
 type IngestionQueueDispatchOptions<TRaw, TReporting> = {
   consumeRaw: (batch: MessageBatch<TRaw>) => Promise<void>
+  consumeRawDlq: (batch: MessageBatch<TRaw>) => Promise<void>
   consumeReporting: (batch: MessageBatch<TReporting>) => Promise<void>
   onMalformed: MalformedQueueMessageHandler
   rawSchema: QueueBodySchema<TRaw>
@@ -40,6 +41,13 @@ export async function dispatchIngestionQueueBatch<TRaw, TReporting>(
       }
       return
     }
+    case "raw_dlq": {
+      const messages = parseBatchBodies(batch, options.rawSchema, options.onMalformed)
+      if (messages.length > 0) {
+        await options.consumeRawDlq(withMessages(batch, messages))
+      }
+      return
+    }
     case "reporting": {
       const messages = parseBatchBodies(batch, options.reportingSchema, options.onMalformed)
       if (messages.length > 0) {
@@ -47,10 +55,8 @@ export async function dispatchIngestionQueueBatch<TRaw, TReporting>(
       }
       return
     }
-    case "raw_dlq":
     case "reporting_dlq": {
-      // Consumers land in the DLQ operability tasks. Until then no consumer
-      // is configured for these queues, so this branch is unreachable.
+      // Reporting DLQ consumption lands in its dedicated operability task.
       throw new Error(`No consumer wired for ingestion queue kind: ${kind} (${batch.queue})`)
     }
   }

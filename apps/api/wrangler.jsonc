@@ -69,6 +69,12 @@
             "max_retries": 3,
             "retry_delay": 60,
             "dead_letter_queue": "unprice-api-ingestion-reporting-dlq-prod"
+          },
+          {
+            "queue": "unprice-api-ingestion-dlq-prod",
+            "max_batch_size": 25,
+            "max_batch_timeout": 10,
+            "max_retries": 3
           }
         ]
       },
@@ -203,6 +209,12 @@
             "max_retries": 3,
             "retry_delay": 60,
             "dead_letter_queue": "unprice-api-ingestion-reporting-dlq-preview"
+          },
+          {
+            "queue": "unprice-api-ingestion-dlq-preview",
+            "max_batch_size": 25,
+            "max_batch_timeout": 10,
+            "max_retries": 3
           }
         ]
       },
@@ -322,6 +334,12 @@
             "max_batch_timeout": 5, // to avoid wait in dev
             "max_retries": 3,
             "dead_letter_queue": "unprice-api-ingestion-reporting-dlq-dev"
+          },
+          {
+            "queue": "unprice-api-ingestion-dlq-dev",
+            "max_batch_size": 25,
+            "max_batch_timeout": 1,
+            "max_retries": 3
           }
         ]
       },

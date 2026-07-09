@@ -16,6 +16,7 @@ describe("dispatchIngestionQueueBatch", () => {
     expect(options.rawSchema.safeParse).toHaveBeenCalledOnce()
     expect(options.reportingSchema.safeParse).not.toHaveBeenCalled()
     expect(options.consumeRaw).toHaveBeenCalledOnce()
+    expect(options.consumeRawDlq).not.toHaveBeenCalled()
     expect(options.consumeReporting).not.toHaveBeenCalled()
   })
 
@@ -30,7 +31,23 @@ describe("dispatchIngestionQueueBatch", () => {
     expect(options.rawSchema.safeParse).not.toHaveBeenCalled()
     expect(options.reportingSchema.safeParse).toHaveBeenCalledOnce()
     expect(options.consumeRaw).not.toHaveBeenCalled()
+    expect(options.consumeRawDlq).not.toHaveBeenCalled()
     expect(options.consumeReporting).toHaveBeenCalledOnce()
+  })
+
+  it("uses the raw schema and DLQ consumer for a raw DLQ", async () => {
+    const options = createOptions()
+    const batch = createBatch("unprice-api-ingestion-dlq-prod", [
+      createMessage({ kind: "raw", value: "raw-1" }).message,
+    ])
+
+    await dispatchIngestionQueueBatch(batch, options)
+
+    expect(options.rawSchema.safeParse).toHaveBeenCalledOnce()
+    expect(options.reportingSchema.safeParse).not.toHaveBeenCalled()
+    expect(options.consumeRaw).not.toHaveBeenCalled()
+    expect(options.consumeRawDlq).toHaveBeenCalledOnce()
+    expect(options.consumeReporting).not.toHaveBeenCalled()
   })
 
   it("acks each malformed message once and delivers valid messages", async () => {
@@ -68,6 +85,7 @@ describe("dispatchIngestionQueueBatch", () => {
     expect(first.ack).toHaveBeenCalledOnce()
     expect(second.ack).toHaveBeenCalledOnce()
     expect(options.consumeRaw).not.toHaveBeenCalled()
+    expect(options.consumeRawDlq).not.toHaveBeenCalled()
     expect(options.consumeReporting).not.toHaveBeenCalled()
   })
 
@@ -96,22 +114,17 @@ describe("dispatchIngestionQueueBatch", () => {
     expect(original.getRetryReceiver()).toBe(original.message)
   })
 
-  it.each(["raw_dlq", "reporting_dlq"] as const)(
-    "rejects the %s queue kind with a loud error",
-    async (kind) => {
-      const options = createOptions()
-      const queue =
-        kind === "raw_dlq"
-          ? "unprice-api-ingestion-dlq-prod"
-          : "unprice-api-ingestion-reporting-dlq-prod"
+  it("rejects the reporting_dlq queue kind with a loud error", async () => {
+    const options = createOptions()
+    const queue = "unprice-api-ingestion-reporting-dlq-prod"
 
-      await expect(dispatchIngestionQueueBatch(createBatch(queue, []), options)).rejects.toThrow(
-        `No consumer wired for ingestion queue kind: ${kind} (${queue})`
-      )
-      expect(options.consumeRaw).not.toHaveBeenCalled()
-      expect(options.consumeReporting).not.toHaveBeenCalled()
-    }
-  )
+    await expect(dispatchIngestionQueueBatch(createBatch(queue, []), options)).rejects.toThrow(
+      `No consumer wired for ingestion queue kind: reporting_dlq (${queue})`
+    )
+    expect(options.consumeRaw).not.toHaveBeenCalled()
+    expect(options.consumeRawDlq).not.toHaveBeenCalled()
+    expect(options.consumeReporting).not.toHaveBeenCalled()
+  })
 })
 
 function createOptions() {
@@ -134,6 +147,7 @@ function createOptions() {
 
   return {
     consumeRaw: vi.fn(async (_batch: MessageBatch<RawBody>) => {}),
+    consumeRawDlq: vi.fn(async (_batch: MessageBatch<RawBody>) => {}),
     consumeReporting: vi.fn(async (_batch: MessageBatch<ReportingBody>) => {}),
     onMalformed: vi.fn(),
     rawSchema,

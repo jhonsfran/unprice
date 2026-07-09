@@ -52,7 +52,7 @@ import { verifyRealtimeTicket } from "~/auth/ticket"
 import { serializeError } from "~/errors/log"
 import { dispatchIngestionQueueBatch } from "~/ingestion/queue-routing"
 import { consumeIngestionReportingQueueBatch } from "~/ingestion/reporting/consumer"
-import { consumeIngestionBatch } from "~/ingestion/service"
+import { consumeIngestionBatch, consumeIngestionDlqBatch } from "~/ingestion/service"
 import { knownRoute } from "~/middleware/known-route"
 import { obs } from "~/middleware/obs"
 import { apiDrain, apiEvlog } from "~/observability"
@@ -249,6 +249,8 @@ const handler = {
       await dispatchIngestionQueueBatch(batch, {
         consumeRaw: (parsedBatch) =>
           consumeIngestionBatch(parsedBatch, parsedEnv, executionCtx, apiDrain ?? undefined),
+        consumeRawDlq: (parsedBatch) =>
+          consumeIngestionDlqBatch(parsedBatch, parsedEnv, executionCtx, apiDrain ?? undefined),
         consumeReporting: (parsedBatch) =>
           consumeIngestionReportingQueueBatch(
             parsedBatch,
