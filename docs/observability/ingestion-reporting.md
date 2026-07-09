@@ -89,7 +89,9 @@ delivery. They also use `retry_delay = 60` so transient Cloudflare, Durable Obje
 Tinybird issues do not burn all retry attempts immediately.
 
 Rejected ingestion rows are business outcomes. They should be queryable in the Events UI, but they
-should not page an operator by default. Alert on failed delivery signals instead:
+should not page an operator by default. The high-priority loss alerts and operator actions are
+centralized under [Dead-letter Behavior](#dead-letter-behavior). Use these as supplemental early or
+stalled-consumer signals:
 
 - Cloudflare Queue backlog alert for `unprice-api-ingestion-dlq-prod`: fire when
   `backlog_count > 0` for two consecutive checks.
@@ -108,34 +110,84 @@ Cloudflare Queue metrics expose backlog fields (`backlog_count`, `backlog_bytes`
 two backlog alerts. If queue IDs are not stable in the alerting tool, match by queue name and keep
 the policy names explicit.
 
-Recommended notification severity:
+Treat retry warnings without a DLQ backlog as low-priority signals that retries are absorbing a
+transient issue. A DLQ backlog across two checks indicates that its consumer may be stalled.
 
-```text
-DLQ backlog > 0:
-  page or high-priority Slack; this is possible silent data loss until recovered.
+## Dead-letter Behavior
 
-Retry warnings without DLQ backlog:
-  low-priority Slack; this is early signal that retries are absorbing a transient issue.
-```
+- **Raw ingestion DLQ** (`unprice-api-ingestion-dlq-*`): consumed by the API worker
+  (`IngestionDlqConsumer`). Each valid raw message is reported as a `failed`, `replayable: true`
+  outcome with `failure_stage: raw_ingestion` and
+  `failure_reason: dead_letter_exhausted_retries`. It appears in the Events UI with the standard
+  Replay action only after the reporting enqueue succeeds. The `ingestion events dead-lettered`
+  error event is sampled at 100%, so it is not sampled out.
+- **Reporting DLQ** (`unprice-api-ingestion-reporting-dlq-*`): consumed by
+  `ReportingDlqConsumer`. Envelopes are re-driven into the reporting queue up to 3
+  times with growing delay (60s/120s/180s). After the cap the full envelope is logged
+  at error level as `ingestion reporting envelope permanently failed` with
+  `envelope_json`. Redrive failures also retain `envelope_json` for manual recovery.
 
-## DLQ Recovery
+Both DLQ consumers have `max_retries = 3` and no downstream DLQ. Persistent downstream failures
+can exhaust those retries, and malformed messages are acknowledged to stop poison-message loops;
+either path can discard the message.
 
-Do not add an automatic DLQ consumer yet. Recovery should be deliberate until failure modes are
-boring and well classified.
+### High-priority Alerts
 
-1. Identify which DLQ has backlog.
-2. Check the matching Axiom service:
-   - `service = ingestion_queue` for `unprice-api-ingestion-dlq-prod`
-   - `service = ingestion_reporting_queue` for `unprice-api-ingestion-reporting-dlq-prod`
-3. Fix the root cause first: schema mismatch, Tinybird/Pipeline outage, Durable Object failure, or
-   malformed message.
-4. For reporting DLQ messages, requeue the original reporting envelope after the downstream sink is
-   healthy. Do not manually synthesize Tinybird status or meter fact rows.
-5. For raw ingestion DLQ messages, prefer the existing Events UI replay when the failed row is
-   visible and replayable. If no failed row exists because reporting also failed, inspect and
-   requeue the raw DLQ message only after the reporting path is healthy.
-6. After recovery, confirm DLQ backlog returns to zero and the Events UI shows processed, rejected,
-   or failed status rows for the affected time window.
+Configure these exact selectors as page or high-priority Slack alerts:
+
+- `message = "ingestion events dead-lettered"`: confirm valid raw failures reached the Events UI,
+  then use the standard Replay action. If a row is absent, correlate the reporting-enqueue alert
+  and recover or re-send the event from the original source.
+- `message = "ingestion reporting envelope permanently failed"`: recover the retained
+  `envelope_json` with the procedure below. This means customer-visible ingestion status was lost
+  until recovery succeeds.
+- `service = ingestion_dlq AND operation = "ingestion_dlq_reporting_enqueue"`: fix reporting
+  enqueue immediately. These errors do not currently retain the full raw payload; page before
+  retries are exhausted and recover or re-send the event from the original source if necessary.
+- `service = ingestion_reporting_dlq AND operation = "ingestion_reporting_dlq_redrive"`: fix the
+  main reporting queue and recover the retained `envelope_json` with the procedure below.
+- `code = "MALFORMED_INGESTION_QUEUE_MESSAGE"`: fix the producer or schema mismatch and recover or
+  re-send a corrected message from the original source; the malformed message is acknowledged and
+  can be discarded.
+
+### Duplicate Handling
+
+A redriven reporting envelope can re-publish records to multiple sinks. Ingestion status endpoints
+dedupe immediately at query time by `(project_id, customer_id, canonical_audit_id)` using `argMax`
+with `tuple(handled_at, created_at)`. `unprice_ingestion_events` ReplacingMergeTree compaction is
+eventual and uses its full sorting key.
+
+Meter facts use the separate business identity `(project, customer, entitlement, period, feature,
+grant, idempotency_key)` and eventual ReplacingMergeTree compaction; they do not dedupe on
+`canonical_audit_id`. R2/Iceberg audit consumers MUST dedupe on `canonical_audit_id` at query time.
+
+### DLQ Recovery
+
+Use the [Cloudflare Queues HTTP Push API](https://developers.cloudflare.com/queues/examples/publish-to-a-queue-via-http/)
+to recover a retained reporting envelope. Do not synthesize Tinybird status or meter fact rows.
+
+1. Fix the root cause before re-sending the envelope.
+2. Choose the environment and its destination main queue:
+   `unprice-api-ingestion-reporting-{environment}`.
+3. Obtain the Cloudflare account ID, the destination queue ID, and an API token with `Queues Edit`
+   permission.
+4. Read `envelope_json` from the terminal or redrive error and parse it into a JSON object.
+5. Send an authenticated request:
+
+   ```text
+   POST https://api.cloudflare.com/client/v4/accounts/<account-id>/queues/<queue-id>/messages
+   Authorization: Bearer <api-token>
+   Content-Type: application/json
+
+   { "body": <envelope-object> }
+   ```
+
+   Do not send `envelope_json` as a JSON string. The queue consumer expects an object, and schema
+   parsing would acknowledge a string body as malformed.
+6. Require HTTP `200` and a response body with `{ "success": true }` before treating the send as
+   successful.
+7. Verify that the DLQ backlog drains, redrive and terminal errors stop, Tinybird and reporting
+   sinks update, and the expected Events UI status appears.
 
 ## Failed Event Replay
 
