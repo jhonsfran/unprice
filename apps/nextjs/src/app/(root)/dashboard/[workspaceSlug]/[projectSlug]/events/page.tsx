@@ -18,7 +18,7 @@ export default async function ProjectEventsPage(_props: {
       header={
         <HeaderTab
           title="Events"
-          description="Processed, rejected, failed, and replayable usage events. Refreshes every 15s."
+          description="Processed, rejected, failed, and replayable usage events. Refreshes every 30s."
           action={<EventsTimeWindowFilterAction />}
         />
       }

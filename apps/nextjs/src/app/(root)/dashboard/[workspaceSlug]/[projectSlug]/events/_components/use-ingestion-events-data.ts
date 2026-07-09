@@ -17,7 +17,8 @@ import {
 } from "./ingestion-events-table-schema"
 
 const DEFAULT_WINDOW_MS = 60 * 60 * 1000
-const AUTO_REFRESH_INTERVAL_MS = 15 * 1000
+// Matches the 30s analytics SWR freshness window (see lessons.md 2026-06-15).
+const AUTO_REFRESH_INTERVAL_MS = 30_000
 const EVENTS_PAGE_SIZE = 50
 const MAX_STORED_REPLAY_IDS = 500
 const INGESTION_STATES = ["processed", "rejected", "failed"] as const
