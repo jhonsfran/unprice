@@ -152,6 +152,77 @@ describe("applyPlanTemplate", () => {
     expect(result.val).toBeNull()
   })
 
+  it("does not create plans or versions when common feature preflight fails", async () => {
+    const creditsError = new FetchError({
+      message: "simulated credits feature creation failure",
+      retry: true,
+    })
+    const plan = {
+      id: "plan_starter",
+      projectId: "proj_123",
+      title: "Starter",
+      slug: "starter",
+    } as unknown as Plan
+    const getPlanBySlug = vi.fn(async () => Ok(plan))
+    const createPlanVersionRecord = vi.fn(async (input: CreatePlanVersionInput) =>
+      Ok({
+        state: "ok" as const,
+        planVersion: makePlanVersion("plan_version_starter", input),
+      })
+    )
+    const createPlanVersionFeatureRecord = vi.fn(async (input: CreatePlanVersionFeatureInput) =>
+      Ok({
+        state: "ok" as const,
+        planVersionFeature: {
+          id: `feature_version_${input.featureId}`,
+          ...input,
+        } as unknown as PlanVersionFeature,
+      })
+    )
+    const createFeatureRecord = vi.fn(async ({ slug }: { slug: string }) =>
+      slug === "credits" ? Err(creditsError) : Ok(makeFeature(slug))
+    )
+
+    const result = await applyPlanTemplate(
+      {
+        services: {
+          plans: {
+            getPlanBySlug,
+            createPlanVersionRecord,
+            createPlanVersionFeatureRecord,
+          },
+          features: {
+            getFeatureBySlug: vi.fn(async () => Ok(null)),
+            createFeatureRecord,
+          },
+          events: {
+            listEventsByProject: vi.fn(async () => Ok([] as Event[])),
+            createEvent: vi.fn(async () => Ok(makeEvent([]))),
+            updateEvent: vi.fn(),
+          },
+          customers: {},
+        } as unknown as Pick<ServiceContext, "plans" | "features" | "events" | "customers">,
+        db: createDbMock(),
+        logger: createLogger(),
+        userId: "usr_123",
+      },
+      {
+        template: "saas_onboarding",
+        projectId: "proj_123",
+        workspaceUnPriceCustomerId: "cus_123",
+        currency: "USD",
+        paymentProvider: "sandbox",
+        publish: true,
+      }
+    )
+
+    expect(result.err).toBe(creditsError)
+    expect(getPlanBySlug).not.toHaveBeenCalled()
+    expect(createPlanVersionRecord).not.toHaveBeenCalled()
+    expect(createPlanVersionFeatureRecord).not.toHaveBeenCalled()
+    expect(publishPlanVersionFlowMock).not.toHaveBeenCalled()
+  })
+
   it("resumes an incomplete template version and publishes only after every expected feature exists", async () => {
     const plans = Object.fromEntries(
       ["starter", "pro", "enterprise"].map((slug) => [

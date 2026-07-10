@@ -8,6 +8,7 @@ import {
   type PlanTemplateMaterializeCaches,
   createTemplatePlanVersion,
   getExistingTemplatePlanVersion,
+  getOrCreateFeature,
   getOrCreatePlan,
   isTemplatePlanVersionComplete,
   materializeTemplatePlanFeatures,
@@ -15,6 +16,8 @@ import {
 import {
   type ApplyPlanTemplateInput,
   type ApplyPlanTemplateOutput,
+  BASE_FEE_FEATURE,
+  CREDITS_FEATURE,
   applyPlanTemplateInputSchema,
   getExpectedFeatureSlugs,
   getTemplateVersionTags,
@@ -78,6 +81,11 @@ export async function applyPlanTemplate(
       project_id: input.projectId,
     },
   })
+
+  for (const commonFeature of [BASE_FEE_FEATURE, CREDITS_FEATURE]) {
+    const feature = await getOrCreateFeature(context, commonFeature)
+    if (feature.err) return Err(feature.err)
+  }
 
   const appliedTemplates: ApplyPlanTemplateOutput["appliedTemplates"] = []
 
