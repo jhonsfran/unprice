@@ -56,6 +56,7 @@ import {
   consumeIngestionReportingQueueBatch,
 } from "~/ingestion/reporting/consumer"
 import { consumeIngestionBatch, consumeIngestionDlqBatch } from "~/ingestion/service"
+import { internalKeyAuth } from "~/middleware/internal-key"
 import { knownRoute } from "~/middleware/known-route"
 import { obs } from "~/middleware/obs"
 import { apiDrain, apiEvlog } from "~/observability"
@@ -156,6 +157,9 @@ app.use(
     },
   })
 )
+
+// Internal routes require an internal or main project key
+app.use("/v1/internal/*", internalKeyAuth())
 
 // Access routes
 registerUpdateACLV1(app)

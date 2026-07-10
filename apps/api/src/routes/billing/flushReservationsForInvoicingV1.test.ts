@@ -4,6 +4,7 @@ import { timing } from "hono/timing"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { UnpriceApiError } from "~/errors"
 import type { HonoEnv } from "~/hono/env"
+import { internalKeyAuth } from "~/middleware/internal-key"
 
 const authMocks = vi.hoisted(() => ({
   keyAuth: vi.fn(),
@@ -29,14 +30,40 @@ const runBudgetMocks = vi.hoisted(() => ({
 
 import { registerFlushReservationsForInvoicingV1 } from "./flushReservationsForInvoicingV1"
 
+// The flush endpoint lives under /v1/internal/* and is only ever called by our own billing
+// service, so the default verified key here represents an internal project.
 const verifiedKey = {
   id: "key_123",
   projectId: "proj_123",
   project: {
     id: "proj_123",
     workspaceId: "ws_123",
+    isInternal: true,
+    isMain: false,
+    workspace: { unPriceCustomerId: null },
+  },
+}
+
+const tenantKey = {
+  id: "key_tenant",
+  projectId: "proj_tenant",
+  project: {
+    id: "proj_tenant",
+    workspaceId: "ws_tenant",
     isInternal: false,
     isMain: false,
+    workspace: { unPriceCustomerId: null },
+  },
+}
+
+const mainKey = {
+  id: "key_main",
+  projectId: "proj_main",
+  project: {
+    id: "proj_main",
+    workspaceId: "ws_main",
+    isInternal: false,
+    isMain: true,
     workspace: { unPriceCustomerId: null },
   },
 }
@@ -50,6 +77,53 @@ afterEach(() => {
 })
 
 describe("flushReservationsForInvoicingV1 route", () => {
+  it("rejects a tenant key with 403", async () => {
+    authMocks.keyAuth.mockResolvedValueOnce(tenantKey)
+
+    const { app, env, executionCtx } = createTestApp({
+      billingPeriods: [{ id: "bp_123" }],
+      entitlements: [{ id: "ce_123", subscriptionId: "sub_123", subscriptionPhaseId: "phase_123" }],
+    })
+
+    const response = await app.fetch(
+      buildRequest({
+        customerId: "cus_123",
+        subscriptionId: "sub_123",
+        subscriptionPhaseId: "phase_123",
+        statementKey: "stmt_123",
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(403)
+  })
+
+  it("allows a main-project key with 200", async () => {
+    authMocks.keyAuth.mockResolvedValue(mainKey)
+    windowMocks.getEntitlementWindowStub.mockReturnValue({
+      flushReservationForInvoicing: vi.fn().mockResolvedValue({ ok: true, outcome: "flushed" }),
+    })
+
+    const { app, env, executionCtx } = createTestApp({
+      billingPeriods: [{ id: "bp_123" }],
+      entitlements: [{ id: "ce_123", subscriptionId: "sub_123", subscriptionPhaseId: "phase_123" }],
+    })
+
+    const response = await app.fetch(
+      buildRequest({
+        customerId: "cus_123",
+        subscriptionId: "sub_123",
+        subscriptionPhaseId: "phase_123",
+        statementKey: "stmt_123",
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(200)
+  })
+
   it("flushes reservation windows for an invoice statement", async () => {
     const flushSpy = vi.fn().mockResolvedValue({ ok: true, outcome: "flushed" })
     windowMocks.getEntitlementWindowStub.mockReturnValue({
@@ -266,7 +340,9 @@ function createTestApp(options: {
             ? 500
             : error.code === "RATE_LIMITED"
               ? 429
-              : 400
+              : error.code === "FORBIDDEN"
+                ? 403
+                : 400
       return c.json({ code: error.code, message: error.message }, status)
     }
     throw error
@@ -299,6 +375,8 @@ function createTestApp(options: {
     })
     await next()
   })
+
+  app.use("/v1/internal/*", internalKeyAuth())
 
   registerFlushReservationsForInvoicingV1(app)
 

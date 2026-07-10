@@ -72,6 +72,18 @@ export function validateEndpointContract(route: RouteIdentity, contract: Endpoin
     throw new Error(`endpoint ${route.operationId} must declare sdk metadata`)
   }
 
+  // audience: "internal" <=> path starts with /v1/internal/. This is what lets the
+  // "/v1/internal/*" auth middleware provably cover every internal contract.
+  if (contract.audience === "internal" && !isV1InternalPath(route.path)) {
+    throw new Error(`internal endpoint ${route.operationId} must use a /v1/internal path`)
+  }
+
+  if (contract.audience !== "internal" && isV1InternalPath(route.path)) {
+    throw new Error(
+      `${contract.audience} endpoint ${route.operationId} cannot use an internal path`
+    )
+  }
+
   if (contract.audience !== "public") {
     if (contract.sdk !== false) {
       throw new Error(`${contract.audience} endpoint ${route.operationId} must use sdk: false`)
@@ -82,10 +94,6 @@ export function validateEndpointContract(route: RouteIdentity, contract: Endpoin
 
   if (contract.sdk === false) {
     return
-  }
-
-  if (isV1InternalPath(route.path)) {
-    throw new Error(`public endpoint ${route.operationId} cannot use an internal path`)
   }
 
   const expectedOperationId = sdkPathToOperationId(contract.sdk.path)

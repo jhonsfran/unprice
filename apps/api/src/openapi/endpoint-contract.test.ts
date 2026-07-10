@@ -219,4 +219,64 @@ describe("defineEndpointContract", () => {
       )
     ).toThrow("internal endpoint usage.record must use sdk: false")
   })
+
+  it("rejects internal contracts whose path is not under /v1/internal", () => {
+    expect(() =>
+      defineEndpointContract(
+        {
+          ...baseRoute,
+          path: "/v1/usage/record",
+          operationId: "usage.internalRecord",
+        },
+        {
+          audience: "internal",
+          category: "operations",
+          docs: {
+            expose: false,
+          },
+          sdk: false,
+        }
+      )
+    ).toThrow("internal endpoint usage.internalRecord must use a /v1/internal path")
+  })
+
+  it("rejects non-internal contracts whose path is under /v1/internal", () => {
+    expect(() =>
+      defineEndpointContract(
+        {
+          ...baseRoute,
+          path: "/v1/internal/usage/callback",
+          operationId: "usage.callback",
+        },
+        {
+          audience: "callback",
+          category: "operations",
+          docs: {
+            expose: false,
+          },
+          sdk: false,
+        }
+      )
+    ).toThrow("callback endpoint usage.callback cannot use an internal path")
+  })
+
+  it("allows internal contracts whose path is under /v1/internal", () => {
+    const route = defineEndpointContract(
+      {
+        ...baseRoute,
+        path: "/v1/internal/usage/record",
+        operationId: "usage.internalRecord",
+      },
+      {
+        audience: "internal",
+        category: "operations",
+        docs: {
+          expose: false,
+        },
+        sdk: false,
+      }
+    )
+
+    expect(route["x-unprice"].audience).toBe("internal")
+  })
 })
