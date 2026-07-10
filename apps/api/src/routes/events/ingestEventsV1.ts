@@ -223,11 +223,6 @@ export const route = createRoute(
       sdk: {
         path: ["usage", "record"],
       },
-      idempotency: {
-        required: true,
-        location: "body",
-        field: "idempotencyKey",
-      },
     }
   )
 )

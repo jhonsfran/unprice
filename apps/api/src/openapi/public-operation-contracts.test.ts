@@ -155,10 +155,6 @@ const expectedSdkPublicOperations = [
   "ingestionEvents.replay",
 ].sort()
 
-const readOnlyPublicRuntimePostOperationIds = new Set(["access.check"])
-
-const mutatingPublicRuntimeAndMoneyOperationIdsWithoutRequestKey = new Set(["runs.end"])
-
 function routeKey(route: RouteUnderTest): string {
   return `${route.method.toUpperCase()} ${route.path}`
 }
@@ -214,50 +210,6 @@ describe("public operation contracts", () => {
       .sort()
 
     expect(sdkPublicOperations).toEqual(expectedSdkPublicOperations)
-  })
-
-  it("declares run start idempotency on the request body key", () => {
-    expect(runsStartRoute["x-unprice"].idempotency).toEqual({
-      required: true,
-      location: "body",
-      field: "idempotencyKey",
-    })
-  })
-
-  it("declares idempotency metadata on mutating public runtime and money routes with request keys", () => {
-    const mutatingRoutes = routes.filter((route) => {
-      const contract = route["x-unprice"]
-
-      return (
-        contract?.audience === "public" &&
-        ["runtime", "money"].includes(contract.category) &&
-        ["POST", "PUT", "PATCH", "DELETE"].includes(route.method.toUpperCase()) &&
-        !readOnlyPublicRuntimePostOperationIds.has(route.operationId)
-      )
-    })
-    const missingIdempotencyOperationIds = mutatingRoutes
-      .filter((route) => route["x-unprice"]?.idempotency?.required !== true)
-      .map((route) => route.operationId)
-      .sort()
-    const mutatingRoutesWithRequestKeys = mutatingRoutes.filter(
-      (route) => !mutatingPublicRuntimeAndMoneyOperationIdsWithoutRequestKey.has(route.operationId)
-    )
-
-    expect(missingIdempotencyOperationIds).toEqual(
-      [...mutatingPublicRuntimeAndMoneyOperationIdsWithoutRequestKey].sort()
-    )
-
-    expect(
-      mutatingRoutesWithRequestKeys.map((route) => ({
-        operationId: route.operationId,
-        idempotency: route["x-unprice"]?.idempotency,
-      }))
-    ).toEqual(
-      mutatingRoutesWithRequestKeys.map((route) => ({
-        operationId: route.operationId,
-        idempotency: expect.objectContaining({ required: true }),
-      }))
-    )
   })
 
   it("does not expose non-public routes in the SDK", () => {

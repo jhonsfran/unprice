@@ -86,11 +86,6 @@ export const route = createRoute(
       sdk: {
         path: ["usage", "consume"],
       },
-      idempotency: {
-        required: true,
-        location: "body",
-        field: "idempotencyKey",
-      },
     }
   )
 )

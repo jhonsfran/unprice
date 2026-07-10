@@ -471,11 +471,6 @@
           },
           "sdk": {
             "path": ["runs", "start"]
-          },
-          "idempotency": {
-            "required": true,
-            "location": "body",
-            "field": "idempotencyKey"
           }
         },
         "requestBody": {
@@ -713,11 +708,6 @@
           },
           "sdk": {
             "path": ["runs", "consume"]
-          },
-          "idempotency": {
-            "required": true,
-            "location": "body",
-            "field": "idempotencyKey"
           }
         },
         "parameters": [
@@ -3422,11 +3412,6 @@
           },
           "sdk": {
             "path": ["usage", "record"]
-          },
-          "idempotency": {
-            "required": true,
-            "location": "body",
-            "field": "idempotencyKey"
           }
         },
         "requestBody": {
@@ -3595,11 +3580,6 @@
           },
           "sdk": {
             "path": ["usage", "consume"]
-          },
-          "idempotency": {
-            "required": true,
-            "location": "body",
-            "field": "idempotencyKey"
           }
         },
         "requestBody": {

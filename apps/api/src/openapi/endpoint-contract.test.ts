@@ -23,11 +23,6 @@ describe("defineEndpointContract", () => {
       sdk: {
         path: ["usage", "record"],
       },
-      idempotency: {
-        required: true,
-        location: "body",
-        field: "idempotencyKey",
-      },
     })
 
     expect(route["x-unprice"]).toEqual({
@@ -38,11 +33,6 @@ describe("defineEndpointContract", () => {
       },
       sdk: {
         path: ["usage", "record"],
-      },
-      idempotency: {
-        required: true,
-        location: "body",
-        field: "idempotencyKey",
       },
     })
   })

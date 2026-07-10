@@ -16,11 +16,6 @@ export type EndpointContract = {
     | {
         path: readonly [string, ...string[]]
       }
-  idempotency?: {
-    required: boolean
-    location: "body" | "header"
-    field: string
-  }
 }
 
 type RouteIdentity = {
