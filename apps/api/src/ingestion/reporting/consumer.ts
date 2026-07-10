@@ -1,6 +1,5 @@
 import { Analytics, type AnalyticsIngestionEvent, ingestionEventSchemaV1 } from "@unprice/analytics"
 import type { Logger } from "@unprice/logs"
-import { createStandaloneRequestLogger } from "@unprice/observability"
 import {
   type IngestionReportingEnvelope,
   ReportingDlqConsumer,
@@ -8,6 +7,7 @@ import {
 } from "@unprice/services/ingestion"
 import { z } from "zod"
 import type { Env } from "~/env"
+import { runQueueConsumerEntrypoint } from "../queue-entrypoint"
 import { type AuditRecordPublisher, createAuditRecordPublisher } from "./audit-record-publisher"
 import {
   type MeterFactIngest,
@@ -146,47 +146,25 @@ export async function consumeIngestionReportingQueueBatch(
   executionCtx: ExecutionContext,
   drain?: { flush: () => Promise<void> }
 ): Promise<void> {
-  const batchRequestId = `reporting-queue:${Date.now()}`
-  const startedAt = Date.now()
-  const { logger, requestLogger } = createStandaloneRequestLogger(
-    { requestId: batchRequestId },
-    { flush: drain?.flush }
-  )
-
-  logger.set({
-    service: "ingestion_reporting_queue",
-    request: {
-      id: batchRequestId,
-      timestamp: new Date(startedAt).toISOString(),
+  await runQueueConsumerEntrypoint(
+    {
+      executionCtx,
+      drain,
+      requestIdPrefix: "reporting-queue",
+      service: "ingestion_reporting_queue",
       path: "/queues/ingestion-reporting/consume",
+      operation: "consume_reporting_batch",
+      onError: (logger) => {
+        logger.warn("ingestion reporting queue batch will retry", {
+          reporting_envelope_count: batch.messages.length,
+          reporting_retry_count: batch.messages.length,
+        })
+      },
     },
-    cloud: { platform: "cloudflare" },
-    business: { operation: "consume_reporting_batch" },
-  })
-
-  let thrown: unknown
-
-  try {
-    await consumeIngestionReportingBatch(batch, env, logger)
-  } catch (error) {
-    thrown = error
-    logger.warn("ingestion reporting queue batch will retry", {
-      reporting_envelope_count: batch.messages.length,
-      reporting_retry_count: batch.messages.length,
-    })
-    logger.error(error instanceof Error ? error : new Error(String(error)))
-    throw error
-  } finally {
-    const duration = Math.max(0, Date.now() - startedAt)
-    const status = thrown ? 500 : 200
-
-    requestLogger.set({ status, duration, request: { status, duration } })
-    requestLogger.emit({ status, duration, request: { status, duration } })
-
-    if (drain) {
-      executionCtx.waitUntil(drain.flush())
+    async (logger) => {
+      await consumeIngestionReportingBatch(batch, env, logger)
     }
-  }
+  )
 }
 
 export async function consumeIngestionReportingDlqBatch(
@@ -195,53 +173,28 @@ export async function consumeIngestionReportingDlqBatch(
   executionCtx: ExecutionContext,
   drain?: { flush: () => Promise<void> }
 ): Promise<void> {
-  const batchRequestId = `reporting-dlq:${Date.now()}`
-  const startedAt = Date.now()
-  const { logger, requestLogger } = createStandaloneRequestLogger(
-    { requestId: batchRequestId },
-    { flush: drain?.flush }
-  )
-
-  logger.set({
-    service: "ingestion_reporting_dlq",
-    request: {
-      id: batchRequestId,
-      timestamp: new Date(startedAt).toISOString(),
+  await runQueueConsumerEntrypoint(
+    {
+      executionCtx,
+      drain,
+      requestIdPrefix: "reporting-dlq",
+      service: "ingestion_reporting_dlq",
       path: "/queues/ingestion-reporting-dlq/consume",
+      operation: "consume_reporting_dlq_batch",
     },
-    cloud: { platform: "cloudflare" },
-    business: { operation: "consume_reporting_dlq_batch" },
-  })
-
-  const consumer = new ReportingDlqConsumer({
-    logger,
-    redrive: async (envelope, options) => {
-      await (env.INGESTION_REPORTING_QUEUE as Queue<IngestionReportingEnvelope>).send(
-        envelope,
-        options
-      )
-    },
-  })
-
-  let thrown: unknown
-
-  try {
-    await consumer.consumeBatch(batch)
-  } catch (error) {
-    thrown = error
-    logger.error(error instanceof Error ? error : new Error(String(error)))
-    throw error
-  } finally {
-    const duration = Math.max(0, Date.now() - startedAt)
-    const status = thrown ? 500 : 200
-
-    requestLogger.set({ status, duration, request: { status, duration } })
-    requestLogger.emit({ status, duration, request: { status, duration } })
-
-    if (drain) {
-      executionCtx.waitUntil(drain.flush())
+    async (logger) => {
+      const consumer = new ReportingDlqConsumer({
+        logger,
+        redrive: async (envelope, options) => {
+          await (env.INGESTION_REPORTING_QUEUE as Queue<IngestionReportingEnvelope>).send(
+            envelope,
+            options
+          )
+        },
+      })
+      await consumer.consumeBatch(batch)
     }
-  }
+  )
 }
 
 export function chunkIngestionEventsForTinybird(

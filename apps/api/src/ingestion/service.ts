@@ -1,6 +1,5 @@
 import type { Database } from "@unprice/db"
 import type { Logger } from "@unprice/logs"
-import { createStandaloneRequestLogger } from "@unprice/observability"
 import type { Cache } from "@unprice/services/cache"
 import type { EntitlementService } from "@unprice/services/entitlements"
 import {
@@ -13,6 +12,7 @@ import type { SubscriptionService } from "@unprice/services/subscriptions"
 import type { Env } from "~/env"
 import { CloudflareEntitlementWindowClient } from "./entitlements/client"
 import { createQueueServices } from "./queue"
+import { runQueueConsumerEntrypoint } from "./queue-entrypoint"
 import { CloudflareReportingQueueClient } from "./reporting/client"
 
 export { IngestionService } from "@unprice/services/ingestion"
@@ -50,63 +50,31 @@ export async function consumeIngestionBatch(
   executionCtx: ExecutionContext,
   drain?: { flush: () => Promise<void> }
 ): Promise<void> {
-  const batchRequestId = `queue:${Date.now()}`
-  const startedAt = Date.now()
-  const { logger, requestLogger } = createStandaloneRequestLogger(
-    { requestId: batchRequestId },
-    { flush: drain?.flush }
-  )
-
-  logger.set({
-    service: "ingestion_queue",
-    request: {
-      id: batchRequestId,
-      timestamp: new Date(startedAt).toISOString(),
+  await runQueueConsumerEntrypoint(
+    {
+      executionCtx,
+      drain,
+      requestIdPrefix: "queue",
+      service: "ingestion_queue",
       path: "/queues/ingestion/consume",
+      operation: "consume_batch",
     },
-    cloud: { platform: "cloudflare" },
-    business: { operation: "consume_batch" },
-  })
+    async (logger) => {
+      const services = createQueueServices({ env, executionCtx, logger })
 
-  const services = createQueueServices({
-    env,
-    executionCtx,
-    logger,
-  })
+      const service = createIngestionService({
+        cache: services.cache,
+        db: services.db,
+        entitlementService: services.entitlements,
+        subscriptionService: services.subscriptions,
+        logger,
+        env,
+      })
 
-  const service = createIngestionService({
-    cache: services.cache,
-    db: services.db,
-    entitlementService: services.entitlements,
-    subscriptionService: services.subscriptions,
-    logger,
-    env,
-  })
-
-  const consumer = new IngestionQueueConsumer({
-    logger,
-    processor: service,
-  })
-
-  let thrown: unknown
-
-  try {
-    await consumer.consumeBatch(batch)
-  } catch (error) {
-    thrown = error
-    logger.error(error instanceof Error ? error : new Error(String(error)))
-    throw error
-  } finally {
-    const duration = Math.max(0, Date.now() - startedAt)
-    const status = thrown ? 500 : 200
-
-    requestLogger.set({ status, duration, request: { status, duration } })
-    requestLogger.emit({ status, duration, request: { status, duration } })
-
-    if (drain) {
-      executionCtx.waitUntil(drain.flush())
+      const consumer = new IngestionQueueConsumer({ logger, processor: service })
+      await consumer.consumeBatch(batch)
     }
-  }
+  )
 }
 
 export async function consumeIngestionDlqBatch(
@@ -115,51 +83,26 @@ export async function consumeIngestionDlqBatch(
   executionCtx: ExecutionContext,
   drain?: { flush: () => Promise<void> }
 ): Promise<void> {
-  const batchRequestId = `dlq:${Date.now()}`
-  const startedAt = Date.now()
-  const { logger, requestLogger } = createStandaloneRequestLogger(
-    { requestId: batchRequestId },
-    { flush: drain?.flush }
-  )
-
-  logger.set({
-    service: "ingestion_dlq",
-    request: {
-      id: batchRequestId,
-      timestamp: new Date(startedAt).toISOString(),
+  await runQueueConsumerEntrypoint(
+    {
+      executionCtx,
+      drain,
+      requestIdPrefix: "dlq",
+      service: "ingestion_dlq",
       path: "/queues/ingestion-dlq/consume",
+      operation: "consume_dlq_batch",
     },
-    cloud: { platform: "cloudflare" },
-    business: { operation: "consume_dlq_batch" },
-  })
-
-  const consumer = new IngestionDlqConsumer({
-    logger,
-    now: Date.now,
-    reportingDispatcher: new IngestionReportingDispatcher({
-      logger,
-      now: Date.now,
-      reportingClient: new CloudflareReportingQueueClient(env),
-    }),
-  })
-
-  let thrown: unknown
-
-  try {
-    await consumer.consumeBatch(batch)
-  } catch (error) {
-    thrown = error
-    logger.error(error instanceof Error ? error : new Error(String(error)))
-    throw error
-  } finally {
-    const duration = Math.max(0, Date.now() - startedAt)
-    const status = thrown ? 500 : 200
-
-    requestLogger.set({ status, duration, request: { status, duration } })
-    requestLogger.emit({ status, duration, request: { status, duration } })
-
-    if (drain) {
-      executionCtx.waitUntil(drain.flush())
+    async (logger) => {
+      const consumer = new IngestionDlqConsumer({
+        logger,
+        now: Date.now,
+        reportingDispatcher: new IngestionReportingDispatcher({
+          logger,
+          now: Date.now,
+          reportingClient: new CloudflareReportingQueueClient(env),
+        }),
+      })
+      await consumer.consumeBatch(batch)
     }
-  }
+  )
 }
