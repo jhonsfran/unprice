@@ -799,7 +799,10 @@ export class StripePaymentProvider implements PaymentProviderInterface {
   > {
     if (!this.providerCustomerId)
       return Err(
-        new UnPricePaymentProviderError({ message: "Customer payment provider id not set" })
+        new UnPricePaymentProviderError({
+          code: "MISSING_PAYMENT_METHOD",
+          message: "Customer payment provider id not set",
+        })
       )
 
     const paymentMethods = await this.client.paymentMethods.list(
@@ -813,7 +816,12 @@ export class StripePaymentProvider implements PaymentProviderInterface {
     const paymentMethod = paymentMethods.data.at(0)
 
     if (!paymentMethod) {
-      return Err(new UnPricePaymentProviderError({ message: "No payment methods found" }))
+      return Err(
+        new UnPricePaymentProviderError({
+          code: "MISSING_PAYMENT_METHOD",
+          message: "No payment methods found",
+        })
+      )
     }
 
     return Ok({ paymentMethodId: paymentMethod.id })

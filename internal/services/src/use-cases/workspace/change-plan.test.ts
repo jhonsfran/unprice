@@ -2,6 +2,7 @@ import type { Database } from "@unprice/db"
 import { FetchError, Ok, SchemaError } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { describe, expect, it, vi } from "vitest"
+import { UnPricePaymentProviderError } from "../../payment-provider/errors"
 import { UnPriceSubscriptionError } from "../../subscriptions/errors"
 
 const { getCustomerCurrentAccessMock } = vi.hoisted(() => ({
@@ -318,9 +319,9 @@ describe("changeWorkspacePlan", () => {
         active: true,
       },
       validatePaymentMethodResult: {
-        err: new FetchError({
+        err: new UnPricePaymentProviderError({
+          code: "MISSING_PAYMENT_METHOD",
           message: "No payment methods found",
-          retry: false,
         }),
       },
     })

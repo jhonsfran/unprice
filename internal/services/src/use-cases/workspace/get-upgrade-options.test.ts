@@ -19,9 +19,10 @@ vi.mock("../payment-provider/availability", () => ({
 }))
 
 import {
-  getWorkspaceUpgradeOptions,
-  isMissingDefaultPaymentMethodError,
-} from "./get-upgrade-options"
+  UnPricePaymentProviderError,
+  isMissingPaymentMethodError,
+} from "../../payment-provider/errors"
+import { getWorkspaceUpgradeOptions } from "./get-upgrade-options"
 import { scheduledPlanChangeUnavailableReason } from "./scheduled-plan-change"
 
 const now = Date.parse("2026-07-04T10:00:00.000Z")
@@ -190,36 +191,47 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
-describe("isMissingDefaultPaymentMethodError", () => {
-  it("treats known default-payment absence messages as non-fatal", () => {
+describe("isMissingPaymentMethodError", () => {
+  it("treats a MISSING_PAYMENT_METHOD provider error as non-fatal", () => {
     expect(
-      isMissingDefaultPaymentMethodError(
-        new FetchError({
+      isMissingPaymentMethodError(
+        new UnPricePaymentProviderError({
+          code: "MISSING_PAYMENT_METHOD",
           message: "Required payment method not found",
-          retry: false,
         })
       )
     ).toBe(true)
 
     expect(
-      isMissingDefaultPaymentMethodError(new Error("Customer payment provider id not set"))
+      isMissingPaymentMethodError(
+        new UnPricePaymentProviderError({
+          code: "MISSING_PAYMENT_METHOD",
+          message: "No payment methods found",
+        })
+      )
     ).toBe(true)
-
-    expect(isMissingDefaultPaymentMethodError(new Error("No payment methods found"))).toBe(true)
   })
 
-  it("keeps unrelated provider and customer failures fatal", () => {
+  it("keeps unrelated failures fatal — classifies by code, never message", () => {
+    // A generic provider error with a payment-method-ish message must NOT match:
+    // classification is by code, not prose.
     expect(
-      isMissingDefaultPaymentMethodError(
+      isMissingPaymentMethodError(
+        new UnPricePaymentProviderError({ message: "No payment methods found" })
+      )
+    ).toBe(false)
+
+    expect(
+      isMissingPaymentMethodError(
         new FetchError({
-          message: "Stripe is disabled for this project.",
+          message: "Required payment method not found",
           retry: false,
         })
       )
     ).toBe(false)
 
     expect(
-      isMissingDefaultPaymentMethodError(
+      isMissingPaymentMethodError(
         new UnPriceCustomerError({
           code: "CUSTOMER_NOT_FOUND",
           message: "Customer not found",
@@ -227,7 +239,7 @@ describe("isMissingDefaultPaymentMethodError", () => {
       )
     ).toBe(false)
 
-    expect(isMissingDefaultPaymentMethodError("No payment methods found")).toBe(false)
+    expect(isMissingPaymentMethodError("No payment methods found")).toBe(false)
   })
 })
 

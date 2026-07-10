@@ -11,6 +11,10 @@ import type { Logger } from "@unprice/logs"
 import { z } from "zod"
 import type { ServiceContext } from "../../context"
 import type { UnPriceCustomerError } from "../../customers/errors"
+import {
+  type UnPricePaymentProviderError,
+  isMissingPaymentMethodError,
+} from "../../payment-provider/errors"
 import type { UnPriceSubscriptionError } from "../../subscriptions/errors"
 import {
   type GetCustomerCurrentAccessAnalytics,
@@ -96,12 +100,6 @@ type ProviderState = {
   unavailableReason: string | null
 }
 
-const missingDefaultPaymentMethodMessages = new Set([
-  "Required payment method not found",
-  "Customer payment provider id not set",
-  "No payment methods found",
-])
-
 export type GetWorkspaceUpgradeOptionsDeps = {
   services: Pick<ServiceContext, "customers" | "plans" | "subscriptions">
   db: Database
@@ -120,17 +118,17 @@ function paymentMethodRequiredReason(paymentProvider: PaymentProvider): string {
   }
 }
 
-export function isMissingDefaultPaymentMethodError(error: unknown): boolean {
-  return error instanceof Error && missingDefaultPaymentMethodMessages.has(error.message)
-}
-
 export async function getWorkspaceUpgradeOptions(
   deps: GetWorkspaceUpgradeOptionsDeps,
   rawInput: GetWorkspaceUpgradeOptionsInput
 ): Promise<
   Result<
     GetWorkspaceUpgradeOptionsOutput,
-    GetWorkspaceUpgradeOptionsError | FetchError | UnPriceCustomerError | UnPriceSubscriptionError
+    | GetWorkspaceUpgradeOptionsError
+    | FetchError
+    | UnPriceCustomerError
+    | UnPricePaymentProviderError
+    | UnPriceSubscriptionError
   >
 > {
   const input = getWorkspaceUpgradeOptionsInputSchema.parse(rawInput)
@@ -321,7 +319,7 @@ export async function getWorkspaceUpgradeOptions(
       })
 
       if (paymentMethodValidationResult.err) {
-        if (isMissingDefaultPaymentMethodError(paymentMethodValidationResult.err)) {
+        if (isMissingPaymentMethodError(paymentMethodValidationResult.err)) {
           providerStates.set(paymentProvider, {
             hasPaymentMethod: false,
             unavailableReason: null,

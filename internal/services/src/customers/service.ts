@@ -35,6 +35,7 @@ import type { Logger } from "@unprice/logs"
 import type { CacheNamespaces, CustomerCache, CustomersProjectCache } from "../cache"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
+import { UnPricePaymentProviderError } from "../payment-provider/errors"
 import type { PaymentProviderResolver } from "../payment-provider/resolver"
 import type { PaymentProviderService } from "../payment-provider/service"
 import { cachedQuery } from "../utils/cached-query"
@@ -1375,7 +1376,7 @@ export class CustomerService {
         paymentMethodId: string | null
         requiredPaymentMethod: boolean
       },
-      FetchError | UnPriceCustomerError
+      FetchError | UnPriceCustomerError | UnPricePaymentProviderError
     >
   > {
     // If payment method is not required or no provider, return early
@@ -1400,6 +1401,12 @@ export class CustomerService {
       await paymentProviderService.getDefaultPaymentMethodId()
 
     if (paymentMethodErr) {
+      // Preserve the provider error so its stable `code` (e.g. MISSING_PAYMENT_METHOD)
+      // survives to callers, who branch on the code rather than the message.
+      if (paymentMethodErr instanceof UnPricePaymentProviderError) {
+        return Err(paymentMethodErr)
+      }
+
       return Err(
         new FetchError({
           message: paymentMethodErr.message,
@@ -1410,9 +1417,9 @@ export class CustomerService {
 
     if (requiredPaymentMethod && !paymentMethodId?.paymentMethodId) {
       return Err(
-        new FetchError({
+        new UnPricePaymentProviderError({
+          code: "MISSING_PAYMENT_METHOD",
           message: "Required payment method not found",
-          retry: false,
         })
       )
     }

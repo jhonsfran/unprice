@@ -10,6 +10,10 @@ import { z } from "zod"
 import type { UnPriceBillingError } from "../../billing/errors"
 import type { ServiceContext } from "../../context"
 import type { UnPriceCustomerError } from "../../customers/errors"
+import {
+  type UnPricePaymentProviderError,
+  isMissingPaymentMethodError,
+} from "../../payment-provider/errors"
 import type { UnPriceSubscriptionError } from "../../subscriptions/errors"
 import {
   type GetCustomerCurrentAccessAnalytics,
@@ -20,7 +24,6 @@ import {
   SubscriptionChangePhasePlanError,
   changeSubscriptionPhasePlan,
 } from "../subscription/change-plan"
-import { isMissingDefaultPaymentMethodError } from "./get-upgrade-options"
 import { scheduledPlanChangeUnavailableReason } from "./scheduled-plan-change"
 
 export const workspaceChangePlanInputSchema = z.object({
@@ -88,6 +91,7 @@ type WorkspaceChangePlanFailure =
   | SchemaError
   | UnPriceBillingError
   | UnPriceCustomerError
+  | UnPricePaymentProviderError
   | UnPriceSubscriptionError
   | WorkspaceChangePlanError
 
@@ -464,7 +468,7 @@ export async function changeWorkspacePlan(
     })
 
     if (paymentMethodValidationResult.err) {
-      if (isMissingDefaultPaymentMethodError(paymentMethodValidationResult.err)) {
+      if (isMissingPaymentMethodError(paymentMethodValidationResult.err)) {
         return Ok(
           workspaceChangePlanOutputSchema.parse({
             status: "requires_payment_method",
