@@ -7,7 +7,6 @@ import {
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 import { unprice } from "#utils/unprice"
-import { refreshRunningRuns } from "./refreshRunningRuns"
 
 const getRunsOutputSchema = z.object({
   customer: customerSelectSchema,
@@ -25,7 +24,7 @@ export const getRuns = protectedProjectProcedure
   .query(async (opts) => {
     const { customerId } = opts.input
     const { project } = opts.ctx
-    const { customers } = opts.ctx.services
+    const { customers, budgetRuns } = opts.ctx.services
 
     const result = await customers.getCustomerRuns({
       customerId,
@@ -47,12 +46,11 @@ export const getRuns = protectedProjectProcedure
       })
     }
 
-    const runs = await refreshRunningRuns({
+    const runs = await budgetRuns.listRunsRefreshed({
       customerId,
       projectId: project.id,
       runs: result.val.runs,
       runsGet: unprice.runs.get,
-      logger: opts.ctx.logger,
     })
 
     return getRunsOutputSchema.parse({

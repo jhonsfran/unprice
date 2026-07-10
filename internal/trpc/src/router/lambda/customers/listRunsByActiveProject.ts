@@ -7,7 +7,6 @@ import {
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 import { unprice } from "#utils/unprice"
-import { refreshRunningRuns } from "./refreshRunningRuns"
 
 const listRunsByActiveProjectOutputSchema = z.object({
   runs: budgetRunSelectSchema
@@ -37,11 +36,10 @@ export const listRunsByActiveProject = protectedProjectProcedure
       })
     }
 
-    const runs = await refreshRunningRuns({
+    const runs = await budgetRuns.listRunsRefreshed({
       projectId: project.id,
       runs: result.val.runs,
       runsGet: unprice.runs.get,
-      logger: opts.ctx.logger,
     })
 
     return listRunsByActiveProjectOutputSchema.parse({

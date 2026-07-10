@@ -68,8 +68,13 @@ export class CacheService {
     this.cache = createCache({
       apiKeyByHash: new Namespace<CacheNamespaces["apiKeyByHash"]>(this.context, defaultOpts),
       budgetRun: new Namespace<CacheNamespaces["budgetRun"]>(this.context, {
+        // Read model of a RunBudget DO run. Memory-first per isolate, so the DO
+        // (a different isolate) cannot invalidate it — the row is refreshed on
+        // observation (BudgetRunService.listRunsRefreshed) plus a sweep, and
+        // invalidated on write via updateRunSummary. A running run's amounts do
+        // change, hence the short freshness window.
         ...defaultOpts,
-        fresh: 1000 * 60 * 5, // 5 minutes – run metadata is effectively immutable
+        fresh: 1000 * 60 * 5, // 5 minutes
         stale: 1000 * 60 * 60, // 1 hour
       }),
       customersProject: new Namespace<CacheNamespaces["customersProject"]>(
