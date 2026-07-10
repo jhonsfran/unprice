@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
-import { sdkOperations } from "./generated/sdk-resources"
+import { sdkOperationIds } from "./generated/sdk-resources"
 
 const openApiMethods = ["get", "post", "put", "patch", "delete"] as const
 const operationId = (...segments: string[]) => segments.join(".")
@@ -82,7 +82,7 @@ describe("OpenAPI SDK contract", () => {
     const paths = getPaths(readOpenApiDocument())
     const openApiSdkOperationIds = collectOpenApiSdkOperationIds(paths)
 
-    expect(Object.keys(sdkOperations).sort()).toEqual(openApiSdkOperationIds)
+    expect([...sdkOperationIds].sort()).toEqual(openApiSdkOperationIds)
   })
 
   it("does not expose stale removed operations in the OpenAPI SDK surface", () => {

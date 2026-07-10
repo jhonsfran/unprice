@@ -1,5 +1,4 @@
 import type { operations } from "./openapi"
-import type { ApiResult } from "./result"
 
 type EmptyObject = Record<never, never>
 type SuccessStatus = 200 | 201 | 202 | 204
@@ -40,16 +39,20 @@ type OperationParameters<TId extends OperationId> = operations[TId] extends {
 
 type NonNever<TValue> = [TValue] extends [never] ? EmptyObject : TValue
 
+// `path`/`query` are optional in the generated parameter types (openapi-typescript
+// emits `query?` when every query param is optional), so match them optionally and
+// strip the `undefined` the optional match introduces — otherwise optional query
+// params (e.g. runs.get's `project_id`) silently vanish from the operation input.
 type OperationPathParams<TId extends OperationId> = OperationParameters<TId> extends {
-  path: infer TPath
+  path?: infer TPath
 }
-  ? NonNever<TPath>
+  ? NonNever<NonNullable<TPath>>
   : EmptyObject
 
 type OperationQueryParams<TId extends OperationId> = OperationParameters<TId> extends {
-  query: infer TQuery
+  query?: infer TQuery
 }
-  ? NonNever<TQuery>
+  ? NonNever<NonNullable<TQuery>>
   : EmptyObject
 
 type MergeInput<TValue> = {
@@ -63,11 +66,6 @@ export type OperationInput<TId extends OperationId> = MergeInput<
 >
 
 export type OperationResponse<TId extends OperationId> = NonNever<SuccessResponse<operations[TId]>>
-
-export type OperationRequester = <TId extends OperationId>(
-  operationId: TId,
-  input: OperationInput<TId> | undefined
-) => Promise<ApiResult<OperationResponse<TId>>>
 
 type AssertAssignable<TValue extends TExpected, TExpected> = TValue
 

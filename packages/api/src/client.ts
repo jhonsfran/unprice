@@ -3,12 +3,10 @@ import { version } from "../package.json"
 import type { ApiError, ErrorResponse } from "./errors"
 import {
   type GeneratedSdkResources,
-  type SdkOperationId,
+  type SdkToResult,
   createGeneratedSdkResources,
-  sdkOperations,
 } from "./generated/sdk-resources"
 import type { paths } from "./openapi"
-import type { OperationInput, OperationResponse } from "./operation-types"
 import type { ApiResult, Result } from "./result"
 import type { Telemetry } from "./telemetry"
 import { getTelemetry } from "./telemetry"
@@ -83,19 +81,6 @@ export type UnpriceOptions = {
   headers?: Record<string, string>
 }
 
-type OpenApiResponse<TResult> = Promise<
-  | {
-      data: TResult
-      error?: never
-      response: Response
-    }
-  | {
-      data?: never
-      error: unknown
-      response: Response
-    }
->
-
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -134,7 +119,7 @@ const getErrorMessage = (error: unknown): string => {
   return "No response"
 }
 
-export class Unprice {
+export class Unprice implements GeneratedSdkResources {
   private readonly baseUrl: string
   private readonly token: string
   private readonly cache?: RequestCache
@@ -194,7 +179,7 @@ export class Unprice {
       headers: this.getHeaders(),
     })
 
-    const resources = createGeneratedSdkResources(this.requestOperation)
+    const resources = createGeneratedSdkResources(this.openapi, this.toResult)
 
     this.access = resources.access
     this.usage = resources.usage
@@ -299,7 +284,7 @@ export class Unprice {
     }
   }
 
-  private async toResult<TResult>(request: OpenApiResponse<TResult>): Promise<ApiResult<TResult>> {
+  private readonly toResult: SdkToResult = async (request) => {
     try {
       const response = await request
 
@@ -310,90 +295,12 @@ export class Unprice {
       }
 
       return {
-        result: response.data as TResult,
+        result: response.data as Exclude<typeof response.data, undefined>,
       }
     } catch (error) {
       return {
         error: this.toFetchError(error),
       }
     }
-  }
-
-  private splitInputForOperation(
-    operation: (typeof sdkOperations)[SdkOperationId],
-    input: unknown
-  ): {
-    path: Record<string, unknown>
-    rest: Record<string, unknown>
-  } {
-    const source = isRecord(input) ? input : {}
-    const pathParamNames = new Set<string>(operation.pathParams)
-    const path: Record<string, unknown> = {}
-    const rest: Record<string, unknown> = {}
-
-    for (const [key, value] of Object.entries(source)) {
-      if (pathParamNames.has(key)) {
-        path[key] = value
-      } else {
-        rest[key] = value
-      }
-    }
-
-    return { path, rest }
-  }
-
-  private requestOperation = <TId extends SdkOperationId>(
-    operationId: TId,
-    input: OperationInput<TId> | undefined
-  ): Promise<ApiResult<OperationResponse<TId>>> => {
-    const operation = sdkOperations[operationId]
-    const method: string = operation.method
-    const { path, rest } = this.splitInputForOperation(operation, input)
-    const pathParams = Object.keys(path).length > 0 ? path : undefined
-    const restParams = Object.keys(rest).length > 0 ? rest : undefined
-
-    if (method === "GET") {
-      return this.toResult(
-        this.openapi.GET(
-          operation.path as never,
-          {
-            params: {
-              ...(pathParams ? { path: pathParams } : {}),
-              ...(restParams ? { query: restParams } : {}),
-            },
-          } as never
-        ) as never
-      )
-    }
-
-    if (method === "POST") {
-      return this.toResult(
-        this.openapi.POST(
-          operation.path as never,
-          {
-            params: pathParams
-              ? {
-                  path: pathParams,
-                }
-              : undefined,
-            body: restParams,
-          } as never
-        ) as never
-      )
-    }
-
-    return this.toResult(
-      Promise.resolve({
-        error: {
-          error: {
-            code: "FETCH_ERROR",
-            message: `Unsupported SDK operation method ${method}`,
-            docs: "https://docs.unprice.dev/api-reference/errors",
-            requestId: "N/A",
-          },
-        },
-        response: new Response(null, { status: 500 }),
-      })
-    )
   }
 }
