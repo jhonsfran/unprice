@@ -1,6 +1,7 @@
 "use client"
 
 import type { ColumnDef } from "@tanstack/react-table"
+import { formatLedgerMoney } from "@unprice/money"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Badge } from "@unprice/ui/badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
@@ -8,7 +9,6 @@ import { Typography } from "@unprice/ui/typography"
 import { format } from "date-fns"
 import { InfoIcon } from "lucide-react"
 import { DataTableColumnHeader } from "~/components/data-table/data-table-column-header"
-import { formatWalletMoney } from "../format-wallet-money"
 
 type WalletCredit = RouterOutputs["customers"]["getWallet"]["wallet"]["credits"][number] & {
   currency: RouterOutputs["customers"]["getWallet"]["wallet"]["currency"]
@@ -83,7 +83,7 @@ export const columns: ColumnDef<WalletCredit>[] = [
     // money is tabular text, not a chip
     cell: ({ row }) => (
       <span className="whitespace-nowrap font-mono text-xs tabular-nums">
-        {formatWalletMoney(row.original.issuedAmount, row.original.currency)}
+        {formatLedgerMoney(row.original.issuedAmount, row.original.currency)}
       </span>
     ),
     size: 28,
@@ -93,7 +93,7 @@ export const columns: ColumnDef<WalletCredit>[] = [
     header: ({ column }) => <DataTableColumnHeader column={column} title="Consumed" />,
     cell: ({ row }) => (
       <span className="whitespace-nowrap font-mono text-xs tabular-nums">
-        {formatWalletMoney(row.original.consumedAmount, row.original.currency)}
+        {formatLedgerMoney(row.original.consumedAmount, row.original.currency)}
       </span>
     ),
     size: 28,
@@ -103,7 +103,7 @@ export const columns: ColumnDef<WalletCredit>[] = [
     header: ({ column }) => <DataTableColumnHeader column={column} title="Available" />,
     cell: ({ row }) => (
       <span className="whitespace-nowrap font-mono text-xs tabular-nums">
-        {formatWalletMoney(row.original.usableAmount, row.original.currency)}
+        {formatLedgerMoney(row.original.usableAmount, row.original.currency)}
       </span>
     ),
     size: 28,

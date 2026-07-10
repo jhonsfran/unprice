@@ -217,6 +217,21 @@ export function formatMoney(
   }).format(Number.parseFloat(amount))
 }
 
+/**
+ * Format a ledger-scale minor amount as a fixed 2-decimal localized currency
+ * string for display. This is the canonical renderer for wallet balances, run
+ * costs, invoice totals, and credit-line policies — all of which store amounts
+ * at ledger scale. Rendering-only.
+ */
+export function formatLedgerMoney(minor: number, currency: string): string {
+  const currencyMinor = toCurrencyMinor(fromLedgerMinor(minor, currency))
+
+  return formatMoney(toDecimal(fromCurrencyMinor(currencyMinor, currency)), currency, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
+}
+
 export function currencySymbol(currencyCode: string): string {
   return ({ USD: "$", EUR: "€", GBP: "£" } as Record<string, string>)[currencyCode] ?? currencyCode
 }

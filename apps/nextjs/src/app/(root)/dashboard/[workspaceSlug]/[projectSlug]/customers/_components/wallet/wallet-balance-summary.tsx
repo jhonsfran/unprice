@@ -1,6 +1,6 @@
+import { formatLedgerMoney } from "@unprice/money"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { EvidenceMetricStrip, EvidenceMetricTile } from "~/components/analytics/evidence-panel"
-import { formatWalletMoney } from "./format-wallet-money"
 
 type CustomerWallet = RouterOutputs["customers"]["getWallet"]["wallet"]
 
@@ -16,7 +16,7 @@ function BalanceRow({
   return (
     <div className="flex items-center justify-between gap-3">
       <dt className="text-muted-foreground">{label}</dt>
-      <dd className="font-mono tabular-nums">{formatWalletMoney(amount, currency)}</dd>
+      <dd className="font-mono tabular-nums">{formatLedgerMoney(amount, currency)}</dd>
     </div>
   )
 }
@@ -31,7 +31,7 @@ export function WalletBalanceSummary({ wallet }: { wallet: CustomerWallet }) {
       <div className="bg-card/80 p-4">
         <p className="truncate text-muted-foreground text-xs">Available</p>
         <div className="mt-2 font-mono font-semibold text-foreground text-xl tabular-nums">
-          {formatWalletMoney(available, wallet.currency)}
+          {formatLedgerMoney(available, wallet.currency)}
         </div>
         <dl className="mt-3 flex flex-col gap-1.5 border-border/60 border-t pt-3 text-xs">
           <BalanceRow
@@ -45,12 +45,12 @@ export function WalletBalanceSummary({ wallet }: { wallet: CustomerWallet }) {
       </div>
       <EvidenceMetricTile
         label="Wallet consumed"
-        value={formatWalletMoney(wallet.balances.walletConsumed, wallet.currency)}
+        value={formatLedgerMoney(wallet.balances.walletConsumed, wallet.currency)}
         helper="Lifetime usage captured from wallet credits"
       />
       <EvidenceMetricTile
         label="Subscription charges"
-        value={formatWalletMoney(wallet.balances.subscriptionCharges, wallet.currency)}
+        value={formatLedgerMoney(wallet.balances.subscriptionCharges, wallet.currency)}
         helper="Lifetime charges billed outside wallet funds"
       />
     </EvidenceMetricStrip>

@@ -1,6 +1,7 @@
 "use client"
 
 import type { ColumnDef } from "@tanstack/react-table"
+import { formatLedgerMoney } from "@unprice/money"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Badge } from "@unprice/ui/badge"
 import { Typography } from "@unprice/ui/typography"
@@ -8,7 +9,6 @@ import { useParams } from "next/navigation"
 import { DataTableColumnHeader } from "~/components/data-table/data-table-column-header"
 import { SuperLink } from "~/components/super-link"
 import { formatDate } from "~/lib/dates"
-import { formatRunMoney } from "../format-run-money"
 
 type CustomerRun = RouterOutputs["customers"]["getRuns"]["runs"][number]
 type ProjectRun = RouterOutputs["customers"]["listRunsByActiveProject"]["runs"][number]
@@ -148,7 +148,7 @@ export const columns: ColumnDef<RunRow>[] = [
     // money is tabular text, not a chip
     cell: ({ row }) => (
       <span className="whitespace-nowrap font-mono text-xs tabular-nums">
-        {formatRunMoney(row.original.budgetAmount, row.original.currency)}
+        {formatLedgerMoney(row.original.budgetAmount, row.original.currency)}
       </span>
     ),
     size: 28,
@@ -158,7 +158,7 @@ export const columns: ColumnDef<RunRow>[] = [
     header: ({ column }) => <DataTableColumnHeader column={column} title="Consumed" />,
     cell: ({ row }) => (
       <span className="whitespace-nowrap font-mono text-xs tabular-nums">
-        {formatRunMoney(row.original.consumedAmount, row.original.currency)}
+        {formatLedgerMoney(row.original.consumedAmount, row.original.currency)}
       </span>
     ),
     size: 28,

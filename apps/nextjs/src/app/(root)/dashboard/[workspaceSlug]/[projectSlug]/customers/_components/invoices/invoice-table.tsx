@@ -1,12 +1,12 @@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@unprice/ui/table"
 
+import { formatLedgerMoney } from "@unprice/money"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Badge } from "@unprice/ui/badge"
 import { Separator } from "@unprice/ui/separator"
 import { Typography } from "@unprice/ui/typography"
 import { formatDate } from "~/lib/dates"
 import { ExplainChargeSheet } from "./explain-charge-sheet"
-import { formatInvoiceMoney } from "./format-invoice-money"
 
 type InvoiceLine = RouterOutputs["customers"]["getInvoiceById"]["invoice"]["lines"][number]
 
@@ -41,7 +41,7 @@ export function InvoiceTable({
   workspaceSlug: string
   projectSlug: string
 }) {
-  const formatLedger = (amount: number) => formatInvoiceMoney(amount, invoice.currency)
+  const formatLedger = (amount: number) => formatLedgerMoney(amount, invoice.currency)
 
   return (
     <div className="mb-8">

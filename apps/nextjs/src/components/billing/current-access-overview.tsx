@@ -1,4 +1,5 @@
 import { nFormatter } from "@unprice/db/utils"
+import { formatLedgerMoney } from "@unprice/money"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
 import { Progress } from "@unprice/ui/progress"
@@ -9,7 +10,6 @@ import { useMemo } from "react"
 import { FreshnessIndicator } from "~/components/analytics/freshness-indicator"
 import { SectionIntro } from "~/components/layout/section-intro"
 import { SuperLink } from "~/components/super-link"
-import { formatWalletMoney } from "./format-wallet-money"
 
 export type CurrentAccessData = RouterOutputs["customers"]["getCurrentAccess"]
 export type CurrentAccessEntitlement = CurrentAccessData["entitlements"][number]
@@ -193,11 +193,11 @@ export function CurrentAccessOverview({
                   />
                   <PlanFact
                     label="Wallet available"
-                    value={formatWalletMoney(walletAvailable, wallet.currency)}
+                    value={formatLedgerMoney(walletAvailable, wallet.currency)}
                   />
                   <PlanFact
                     label="Wallet held"
-                    value={formatWalletMoney(walletHeld, wallet.currency)}
+                    value={formatLedgerMoney(walletHeld, wallet.currency)}
                   />
                 </dl>
               </div>
@@ -208,11 +208,11 @@ export function CurrentAccessOverview({
                 <dl className="mt-3 grid gap-3 text-sm">
                   <PlanFact
                     label="Wallet available"
-                    value={formatWalletMoney(walletAvailable, wallet.currency)}
+                    value={formatLedgerMoney(walletAvailable, wallet.currency)}
                   />
                   <PlanFact
                     label="Wallet held"
-                    value={formatWalletMoney(walletHeld, wallet.currency)}
+                    value={formatLedgerMoney(walletHeld, wallet.currency)}
                   />
                 </dl>
               </div>

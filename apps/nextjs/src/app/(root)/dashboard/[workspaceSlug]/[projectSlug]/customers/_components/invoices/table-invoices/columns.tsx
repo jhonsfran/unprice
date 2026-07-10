@@ -2,6 +2,7 @@
 
 import type { ColumnDef } from "@tanstack/react-table"
 
+import { formatLedgerMoney } from "@unprice/money"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Badge } from "@unprice/ui/badge"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
@@ -11,7 +12,6 @@ import { InfoIcon } from "lucide-react"
 import { useParams } from "next/navigation"
 import { DataTableColumnHeader } from "~/components/data-table/data-table-column-header"
 import { SuperLink } from "~/components/super-link"
-import { formatInvoiceMoney } from "../format-invoice-money"
 import { DataTableRowActions } from "./data-table-row-actions"
 
 type InvoiceCustomer = RouterOutputs["customers"]["getInvoices"]["invoices"][number]
@@ -88,7 +88,7 @@ export const columns: ColumnDef<InvoiceCustomer>[] = [
     // money is tabular text, not a chip
     cell: ({ row }) => (
       <span className="whitespace-nowrap font-mono text-xs tabular-nums">
-        {formatInvoiceMoney(row.original.amountDue, row.original.currency)}
+        {formatLedgerMoney(row.original.amountDue, row.original.currency)}
       </span>
     ),
     size: 20,

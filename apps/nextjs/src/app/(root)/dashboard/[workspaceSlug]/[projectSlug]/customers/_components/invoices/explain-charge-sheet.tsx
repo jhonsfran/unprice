@@ -1,6 +1,7 @@
 "use client"
 
 import { useQuery } from "@tanstack/react-query"
+import { formatLedgerMoney } from "@unprice/money"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
 import { ScrollArea } from "@unprice/ui/scroll-area"
@@ -19,7 +20,6 @@ import { FileSearch, Loader2 } from "lucide-react"
 import { useState } from "react"
 import { formatDate } from "~/lib/dates"
 import { useTRPC } from "~/trpc/client"
-import { formatInvoiceMoney } from "./format-invoice-money"
 
 type Invoice = RouterOutputs["customers"]["getInvoiceById"]["invoice"]
 type InvoiceLine = Invoice["lines"][number]
@@ -77,9 +77,7 @@ export function ExplainChargeSheet({
 
       <SheetContent className="hide-scrollbar flex max-h-screen w-full flex-col overflow-y-auto md:w-1/2 lg:w-[760px]">
         <SheetHeader className="pr-6">
-          <SheetTitle>
-            Why this costs {formatInvoiceMoney(line.amount, invoice.currency)}
-          </SheetTitle>
+          <SheetTitle>Why this costs {formatLedgerMoney(line.amount, invoice.currency)}</SheetTitle>
           <SheetDescription>
             {line.description ?? line.kind} · {line.quantity ?? "-"} units
           </SheetDescription>
@@ -124,7 +122,7 @@ function ExplainChargeContent({
       <div className="grid gap-3 sm:grid-cols-3">
         <Metric label="Usage" value={formatNumber(explanation.summary.totalUsage)} />
         <Metric label="Rated facts" value={formatNumber(explanation.summary.eventCount)} />
-        <Metric label="Amount" value={formatInvoiceMoney(line.amount, invoice.currency)} />
+        <Metric label="Amount" value={formatLedgerMoney(line.amount, invoice.currency)} />
       </div>
 
       <div className="rounded-md border px-4 py-3">
@@ -135,7 +133,7 @@ function ExplainChargeContent({
           </span>
           <span className="text-muted-foreground">-&gt;</span>
           <span>
-            {formatInvoiceMoney(explanation.summary.totalAmount, explanation.summary.currency)}
+            {formatLedgerMoney(explanation.summary.totalAmount, explanation.summary.currency)}
           </span>
         </div>
         <div className="mt-1 text-muted-foreground text-xs">
@@ -176,7 +174,7 @@ function ExplainChargeContent({
                 </div>
                 <div className="text-right">
                   <div className="font-medium">
-                    {formatInvoiceMoney(event.amount, event.currency)}
+                    {formatLedgerMoney(event.amount, event.currency)}
                   </div>
                   <div className="text-muted-foreground text-xs">
                     {formatRawLedgerAmount(event.amount, event.currency, event.amount_scale)}

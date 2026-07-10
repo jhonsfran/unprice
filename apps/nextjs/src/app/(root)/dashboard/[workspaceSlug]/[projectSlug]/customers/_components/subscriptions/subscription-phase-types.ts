@@ -4,7 +4,7 @@ import type {
   SubscriptionPhase,
   SubscriptionPhaseExtended,
 } from "@unprice/db/validators"
-import { formatMoney, fromLedgerMinor, toDecimal } from "@unprice/money"
+import { formatLedgerMoney } from "@unprice/money"
 
 export type SubscriptionPhaseFormMode = "create" | "edit" | "view" | "schedule"
 
@@ -53,7 +53,7 @@ export function formatPhaseCreditLinePolicy(
     return "derived usage cap"
   }
 
-  return `${formatMoney(toDecimal(fromLedgerMinor(phase.creditLineAmount, currency)), currency)} cap`
+  return `${formatLedgerMoney(phase.creditLineAmount, currency)} cap`
 }
 
 export function getPhaseTimingState(
