@@ -22,6 +22,7 @@ import {
   getCustomerCurrentAccess,
 } from "../customer/get-current-access"
 import { checkPaymentProviderAvailability } from "../payment-provider/availability"
+import { paymentMethodRequiredReason, resolveWorkspaceBillingContext } from "./billing-context"
 import { getScheduledPlanChangeUnavailableReason } from "./scheduled-plan-change"
 
 const workspaceBillingContextSchema = workspaceSelectBase.pick({
@@ -133,16 +134,6 @@ export type GetWorkspaceUpgradeOptionsDeps = {
   now?: () => number
 }
 
-function paymentMethodRequiredReason(paymentProvider: PaymentProvider): string {
-  switch (paymentProvider) {
-    case "sandbox":
-      return "Add a payment method before changing to this plan."
-    case "square":
-    case "stripe":
-      return "Add a default payment method before changing to this plan."
-  }
-}
-
 export async function getWorkspaceUpgradeOptions(
   deps: GetWorkspaceUpgradeOptionsDeps,
   rawInput: GetWorkspaceUpgradeOptionsInput
@@ -157,67 +148,53 @@ export async function getWorkspaceUpgradeOptions(
   >
 > {
   const input = getWorkspaceUpgradeOptionsInputSchema.parse(rawInput)
-  const customerId = input.workspace.unPriceCustomerId
 
   deps.logger.set({
     business: {
       operation: "workspace.get_upgrade_options",
       workspace_id: input.workspace.id,
-      unprice_customer_id: customerId ?? undefined,
+      unprice_customer_id: input.workspace.unPriceCustomerId ?? undefined,
     },
   })
 
-  if (!customerId) {
-    return Err(
-      new GetWorkspaceUpgradeOptionsError({
-        code: "WORKSPACE_BILLING_CUSTOMER_ID_MISSING",
-        message: "Workspace billing customer not found",
-        context: {
-          workspaceId: input.workspace.id,
-        },
-      })
-    )
+  const contextResult = await resolveWorkspaceBillingContext(deps, input.workspace)
+
+  if (contextResult.err) {
+    return Err(contextResult.err)
   }
 
-  const customerResult = await deps.services.customers.getCustomerByIdAcrossProjects(customerId, {
-    skipCache: true,
-  })
-
-  if (customerResult.err) {
-    return Err(customerResult.err)
+  if (!contextResult.val.ok) {
+    switch (contextResult.val.reason) {
+      case "customer_id_missing":
+      case "customer_not_found":
+        return Err(
+          new GetWorkspaceUpgradeOptionsError({
+            code:
+              contextResult.val.reason === "customer_id_missing"
+                ? "WORKSPACE_BILLING_CUSTOMER_ID_MISSING"
+                : "WORKSPACE_BILLING_CUSTOMER_NOT_FOUND",
+            message: "Workspace billing customer not found",
+            context: {
+              workspaceId: input.workspace.id,
+              customerId: input.workspace.unPriceCustomerId ?? undefined,
+            },
+          })
+        )
+      case "currency_not_found":
+        return Err(
+          new GetWorkspaceUpgradeOptionsError({
+            code: "WORKSPACE_BILLING_CURRENCY_NOT_FOUND",
+            message: "Workspace billing currency not found",
+            context: {
+              workspaceId: input.workspace.id,
+              customerId: input.workspace.unPriceCustomerId ?? undefined,
+            },
+          })
+        )
+    }
   }
 
-  const customer = customerResult.val
-
-  if (!customer) {
-    return Err(
-      new GetWorkspaceUpgradeOptionsError({
-        code: "WORKSPACE_BILLING_CUSTOMER_NOT_FOUND",
-        message: "Workspace billing customer not found",
-        context: {
-          workspaceId: input.workspace.id,
-          customerId,
-        },
-      })
-    )
-  }
-
-  const billingProjectId = customer.projectId
-  const customerCurrency = customer.defaultCurrency ?? customer.project.defaultCurrency
-
-  if (!customerCurrency) {
-    return Err(
-      new GetWorkspaceUpgradeOptionsError({
-        code: "WORKSPACE_BILLING_CURRENCY_NOT_FOUND",
-        message: "Workspace billing currency not found",
-        context: {
-          workspaceId: input.workspace.id,
-          customerId,
-          billingProjectId,
-        },
-      })
-    )
-  }
+  const { customerId, billingProjectId, customerCurrency } = contextResult.val.context
 
   const [accessResult, planVersionsResult] = await Promise.all([
     getCustomerCurrentAccess(
