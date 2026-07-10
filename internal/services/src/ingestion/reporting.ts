@@ -29,6 +29,12 @@ export const ingestionReportingAuditRecordSchema = z.object({
     .default(null),
   workloadId: z.string().nullable().optional().default(null),
   ingestionMode: ingestionModeSchema.nullable().optional(),
+  // First-class event identity — previously reachable only by JSON-parsing the
+  // auditPayloadJson blob downstream. The record is now the single source and
+  // the snake_case payload is derived from it.
+  eventId: z.string(),
+  slug: z.string(),
+  timestamp: z.number(),
   status: z.enum(["processed", "rejected", "failed"]),
   rejectionReason: z.string().optional(),
   failureStage: z.enum(INGESTION_FAILURE_STAGES).nullable(),

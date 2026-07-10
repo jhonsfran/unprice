@@ -10,7 +10,7 @@ import { StationHeader } from "./station-header"
 const stages = [
   {
     title: "Shadow",
-    body: "Run the decision beside the logic you already trust. Compare answers in production without changing behavior.",
+    body: "Run the decision beside the logic you already trust. Compare answers in without changing behavior.",
     facts: [
       { label: "runs", fact: "access.check" },
       { label: "mutates", fact: "nothing · read-only" },
@@ -19,7 +19,7 @@ const stages = [
   },
   {
     title: "Sandbox",
-    body: "Prove the path before a dollar moves. Model customers, plan versions, budgets, credits, invoices, and failures.",
+    body: "Prove the path before a dollar moves. Model customers, plan versions, budgets, credits, etc.",
     facts: [
       { label: "processor", fact: "none · built-in Sandbox" },
       { label: "customers", fact: "simulated" },

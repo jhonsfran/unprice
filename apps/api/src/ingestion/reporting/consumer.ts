@@ -5,7 +5,6 @@ import {
   ReportingDlqConsumer,
   ingestionReportingEnvelopeSchema,
 } from "@unprice/services/ingestion"
-import { z } from "zod"
 import type { Env } from "~/env"
 import { runQueueConsumerEntrypoint } from "../queue-entrypoint"
 import { type AuditRecordPublisher, createAuditRecordPublisher } from "./audit-record-publisher"
@@ -20,13 +19,6 @@ export { chunkMeterFactsForTinybird } from "./tinybird-meter-facts"
 const TINYBIRD_MAX_INGESTION_EVENTS_PER_REQUEST = 5_000
 const TINYBIRD_MAX_INGESTION_EVENT_NDJSON_BYTES_PER_REQUEST = 5 * 1024 * 1024
 const textEncoder = new TextEncoder()
-
-const auditPayloadForIngestionEventSchema = z.object({
-  id: z.string(),
-  ingestion_mode: z.enum(["async", "sync", "run"]).nullable().optional(),
-  slug: z.string(),
-  timestamp: z.number().int(),
-})
 
 export type IngestionReportingQueueBatchMessage = {
   ack: () => void
@@ -268,10 +260,8 @@ async function publishIngestionEventChunks(
 function buildIngestionEvent(
   record: IngestionReportingEnvelope["auditRecords"][number]
 ): AnalyticsIngestionEvent {
-  const payload = auditPayloadForIngestionEventSchema.parse(JSON.parse(record.auditPayloadJson))
-
   return {
-    event_id: payload.id,
+    event_id: record.eventId,
     canonical_audit_id: record.canonicalAuditId,
     payload_hash: record.payloadHash,
     workspace_id: record.workspaceId,
@@ -287,8 +277,8 @@ function buildIngestionEvent(
     parent_run_id: record.parentRunId,
     workload_type: record.workloadType,
     workload_id: record.workloadId,
-    ingestion_mode: record.runId ? "run" : (record.ingestionMode ?? payload.ingestion_mode ?? null),
-    event_slug: payload.slug,
+    ingestion_mode: record.runId ? "run" : (record.ingestionMode ?? null),
+    event_slug: record.slug,
     idempotency_key: record.idempotencyKey,
     state: record.status,
     rejection_reason: record.rejectionReason ?? null,
@@ -297,7 +287,7 @@ function buildIngestionEvent(
     failure_message: record.failureMessage ?? null,
     replayable: record.replayable ?? false,
     payload_json: record.payloadJson ?? null,
-    timestamp: payload.timestamp,
+    timestamp: record.timestamp,
     received_at: record.firstSeenAt,
     handled_at: record.handledAt,
     created_at: Date.now(),
