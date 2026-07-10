@@ -25,7 +25,7 @@ export default function Footer(props: { className?: string }) {
       )}
     >
       <div className="flex items-center gap-4 md:flex-row md:gap-2 md:px-0">
-        <p className="text-sm leading-5">&copy; {new Date().getFullYear()} Unprice, Inc.</p>
+        <p className="text-sm leading-5">&copy; {new Date().getFullYear()} Unprice</p>
       </div>
 
       <div className="flex flex-1 items-center justify-end">

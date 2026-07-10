@@ -624,8 +624,8 @@ export function MoneyPath({ className }: { className?: string }) {
       </div>
 
       <p className="mt-5 border-background-border border-t pt-3 text-background-text text-xs leading-6">
-        Every step in this path is a method in the public SDK. Drop one call beside the logic you
-        already run — TypeScript, REST, or curl.
+        Every step in this path is a method in the public SDK. Run the check in shadow beside the
+        logic you already run — TypeScript, REST, or curl.
       </p>
     </figure>
   )

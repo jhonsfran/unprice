@@ -97,13 +97,15 @@ One offer everywhere, restated at every conversion point. Long-form owner:
 [`landing-page-grand-slam-offer.md`](landing-page-grand-slam-offer.md).
 
 - Promise: **Start with one paid action in one afternoon** — define the plan version, install the
-  SDK, run the decision in shadow beside the logic you already trust, prove it on Sandbox before a
-  real dollar moves.
+  SDK, sign up one customer against that plan (`customers.signUp` returns the customerId the check
+  needs), run the decision in shadow beside the logic you already trust, prove it on Sandbox before
+  a real dollar moves. The customer step is always stated — the check does not run without one.
 - Ad-ready compression: "Put a budget and an evidence trail around the expensive action in your
   product — one paid action, one afternoon, free during early access, open source. If the
   decisions never match your reality, delete one line and walk away."
 - Risk reversal: **The walk-away guarantee** (shipped on landing station 05). Shadow is read-only;
-  exit is deleting one line; nothing migrates.
+  exit is deleting one line; nothing in the buyer's stack changes. Stated honestly: the only trace
+  left behind is the one test customer signed up inside Unprice.
 - Price frame: free is explained, never bare — AGPL core in your own account, hosted cloud free
   during early access with no card, payments settle to your own Stripe either way.
 - Honest scarcity: design-partner slots ("I onboard N design partners personally"). Never fake

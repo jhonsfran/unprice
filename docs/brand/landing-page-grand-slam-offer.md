@@ -70,8 +70,8 @@ Primary CTA everywhere: **Start with one paid action**. Consultative/design-part
 
 **Outcome line:**
 
-> Start with one paid action in one afternoon: create the plan, install the SDK, run the decision in
-> shadow, and prove the path on Sandbox before you enforce anything.
+> Start with one paid action in one afternoon: create the plan, install the SDK, sign up one
+> customer, run the decision in shadow, and prove the path on Sandbox before you enforce anything.
 
 **Payments microcopy (replace the current line):**
 
@@ -153,8 +153,8 @@ authorize-before-cost wedge.
 **Headline:** Start with one paid action in one afternoon.
 
 Bring the one action in your product that can burn a customer's credits, budget, or usage allowance.
-Create the plan, install the SDK, put Unprice beside your current logic in shadow, and prove the path
-on Sandbox before you enforce anything.
+Create the plan, install the SDK, sign up one customer against the plan, put Unprice beside your
+current logic in shadow, and prove the path on Sandbox before you enforce anything.
 
 **What you get:**
 

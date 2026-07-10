@@ -85,6 +85,10 @@ Each fact has one owner. Other docs should reference, not restate, the owner.
 - [Marketing Framework](marketing-framework.md): the marketing operating system — avatar, incident
   bank, altitude map, offer placement, channel motion, measurement, and the pre-publish checklist
   for every ad, post, email, and launch asset.
+- [Launch Plan](launch-plan.md): the active campaign instance of the framework — the quiet engine
+  (interception, design-partner outreach, weekly receipts), the three signature attention moves
+  (Overspend Challenge, Billing Graveyard, Invoice Autopsy), the Show HN launch playbook, calendar,
+  budget, and kill criteria.
 - [Design System Guidelines](design-system-guidelines.md): product UI and marketing design rules
   for layout, color, typography, components, states, and motion.
 - [Design Tokens](design-tokens.md): canonical color and logo token reference, grounded in the

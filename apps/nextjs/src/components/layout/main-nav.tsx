@@ -5,14 +5,15 @@ import { SuperLink } from "../super-link"
 export function MainNav({
   isMarketing = false,
   isDashboard = false,
-}: { isMarketing?: boolean; isDashboard?: boolean }) {
+  className,
+}: { isMarketing?: boolean; isDashboard?: boolean; className?: string }) {
   const marketingItems = navItems.filter((item) => (isMarketing ? item.isMarketing : true))
   const dashboardItems = navItems.filter((item) => (isDashboard ? item.isDashboard : true))
 
   const items = isMarketing ? marketingItems : dashboardItems
 
   return (
-    <nav className="hidden items-center space-x-2 lg:flex">
+    <nav className={cn("items-center space-x-2", className ?? "hidden lg:flex")}>
       {items.map((item, idx) => (
         <SuperLink
           href={item.href}

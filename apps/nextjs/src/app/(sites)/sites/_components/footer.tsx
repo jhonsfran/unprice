@@ -10,7 +10,7 @@ export default function FooterSites(props: { className?: string; domain: string 
     >
       <div className="flex items-center gap-4 md:flex-row md:gap-2 md:px-0">
         <p className="text-sm leading-5">
-          &copy; {new Date().getFullYear()} {props.domain}, Inc.
+          &copy; {new Date().getFullYear()} {props.domain}
         </p>
       </div>
     </footer>

@@ -6,10 +6,11 @@ import CopyToClipboard from "./copy-to-clipboard"
 import { SectionShell } from "./station"
 import { StationHeader } from "./station-header"
 
-// Developer proof: one real call, shown whole. The section's claim is that
-// the first request path is deliberately small, so it argues with a single
-// snippet — no tabs, no framework switcher. The full SDK surface belongs to
-// the docs; the escalation story (shadow → enforce) lives in adoption.
+// Developer proof: the first integration shown whole — two calls, honestly.
+// customers.signUp runs once at the builder's own signup and returns the
+// customerId; access.check guards every request after that. One snippet, no
+// tabs, no framework switcher — the full SDK surface belongs to the docs;
+// the escalation story (shadow → enforce) lives in adoption.
 
 const API_BASE_URL = API_DOMAIN.replace(/\/$/, "")
 
@@ -20,9 +21,22 @@ const unprice = new Unprice({
   baseUrl: "${API_BASE_URL}",
 })
 
-// Check access before the paid action runs.
+// Once, at your own signup: subscribe the customer to a
+// plan. Unprice provisions the subscription and its
+// entitlements, then returns the id you store.
+const { result: signup } = await unprice.customers.signUp({
+  name: "Acme Inc.",
+  email: "buyer@acme.com",
+  planSlug: "pro",
+  externalId: "user_123", // your id for this customer
+  successUrl: "https://your-app.com/welcome",
+  cancelUrl: "https://your-app.com/pricing",
+})
+
+// Every request after that: check before the paid
+// action runs.
 const { result, error } = await unprice.access.check({
-  customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
+  customerId: signup.customerId,
   featureSlug: "tokens",
 })
 
@@ -44,30 +58,35 @@ export default function CodeExample() {
   return (
     <SectionShell labelledBy="code-example-title">
       <div className="flex flex-col items-start">
-        <StationHeader index="03" label="First integration" fact="access.check · one call" />
+        <StationHeader index="03" label="First integration" fact="signUp once · check per request" />
         <h2
           id="code-example-title"
           className="mt-6 max-w-xl font-primary text-background-textContrast text-display-3"
         >
-          The first request path is deliberately small.
+          The first integration is two calls.
         </h2>
         <p className="mt-5 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-          Define one plan version, provision or map one customer, then run{" "}
+          Define one plan version, then sign up one customer against it —{" "}
+          <code className="rounded-sm bg-background-bg px-1 py-px font-mono text-[13px] text-background-textContrast">
+            customers.signUp
+          </code>{" "}
+          runs once, at your own signup, and returns the customerId you store. After that,{" "}
           <code className="rounded-sm bg-background-bg px-1 py-px font-mono text-[13px] text-background-textContrast">
             access.check
           </code>{" "}
-          next to the code you already trust. Nothing has to block production traffic on day one.
+          guards the paid action on every request, next to the code you already trust. Nothing has
+          to block production traffic on day one.
         </p>
       </div>
 
       <figure
-        aria-label="The complete first integration: create the Unprice client, call access.check for a customer and feature, stop on the denied branch before any cost exists, and run the paid action on allow — the same decision explains the invoice line later."
+        aria-label="The complete first integration: create the Unprice client, sign up one customer to a plan at your own signup and store the returned customerId, then call access.check for that customer and feature on every request — stop on the denied branch before any cost exists, and run the paid action on allow."
         className="mt-12 max-w-3xl"
       >
         <div className="rounded-lg border border-background-border bg-surface-panel shadow-ambient">
           <div className="flex items-center justify-between gap-4 border-background-border border-b px-4 py-2 sm:px-5">
             <span className="font-mono text-background-text text-xs uppercase tracking-widest">
-              access.check
+              signUp → check
             </span>
             <div className="flex items-center gap-3">
               <span className="hidden font-mono text-[10px] text-background-text sm:inline">
@@ -82,7 +101,8 @@ export default function CodeExample() {
         </div>
         <figcaption className="mt-5 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 border-background-border border-t pt-3 text-background-text text-xs leading-6">
           <span>
-            One call shown; the rest of the money path —{" "}
+            Both calls shown; the plan version comes from the dashboard. The rest of the money
+            path —{" "}
             <code className="rounded-sm bg-background-bg px-1 py-px font-mono text-[11px] text-background-textContrast">
               usage.consume
             </code>
