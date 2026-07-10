@@ -652,9 +652,10 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-06-15: Agent-run budget reservations use `ownerType="agent_run"` / `ownerId=runId`;
   entitlement-window reservations keep `ownerType="entitlement_window"` / `ownerId=entitlementId`.
   Active reservation dedupe stays owner-period scoped so both systems coexist on the same wallet.
-- 2026-06-15: RunBudgetDO uses dynamic imports for wallet/ledger services since it runs in a
-  Durable Object context where service construction differs from the request middleware; keep
-  `buildServices()` as an async factory called once in `startRun` and cached for the DO lifetime.
+- 2026-07-09: RunBudgetDO may cache dynamic module imports, but `createConnection({ singleton:
+  false })`, `WalletService`, `LedgerGateway`, and database proxies must be constructed per external
+  wallet operation/invocation and never retained across Worker/DO requests; Neon WebSocket I/O is
+  request-scoped.
 - 2026-06-19: Run sync events must resolve entitlements before delegating to RunBudgetDO; the
   `applyRunSyncEvent` use case uses `RunEntitlementResolver` (backed by the SWR-cached
   `IngestionEntitlementContextLoader` + `IngestionEntitlementRouter` + subscription catch-up) to
