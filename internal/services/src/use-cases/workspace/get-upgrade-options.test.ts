@@ -330,12 +330,14 @@ describe("getWorkspaceUpgradeOptions", () => {
           planVersion: expect.objectContaining({ id: "pv_current" }),
           isCurrent: true,
           isAvailable: false,
+          unavailableCode: "current",
           unavailableReason: "This is your current plan.",
         }),
         expect.objectContaining({
           planVersion: expect.objectContaining({ id: "pv_selectable" }),
           isCurrent: false,
           isAvailable: false,
+          unavailableCode: "scheduled_change",
           unavailableReason: scheduledPlanChangeUnavailableReason,
         }),
       ])

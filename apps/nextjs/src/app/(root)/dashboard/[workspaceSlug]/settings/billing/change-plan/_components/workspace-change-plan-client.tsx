@@ -410,17 +410,7 @@ function getPlanAction(
 }
 
 function isMissingPaymentMethodOption(option: UpgradeOption): boolean {
-  return (
-    !option.isCurrent &&
-    !option.isAvailable &&
-    option.paymentMethodRequired &&
-    !option.hasPaymentMethod &&
-    (option.unavailableReason === null || isPaymentMethodReason(option.unavailableReason))
-  )
-}
-
-function isPaymentMethodReason(reason: string): boolean {
-  return reason.toLowerCase().includes("payment method")
+  return option.unavailableCode === "missing_payment_method"
 }
 
 function getUnavailableReason(option: UpgradeOption): string {

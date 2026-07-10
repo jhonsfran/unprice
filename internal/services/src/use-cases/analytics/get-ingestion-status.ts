@@ -710,7 +710,7 @@ function buildNextActions({
     return [`Inspect rejected or failed events and fix the reported reasons${suffix}`]
   }
 
-  return ["No immediate action required."]
+  return []
 }
 
 function buildAnswer({

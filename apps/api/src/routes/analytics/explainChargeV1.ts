@@ -317,7 +317,7 @@ function buildWarnings(result: ExplainChargeOutput): string[] {
 function buildNextActions(result: ExplainChargeOutput): string[] {
   if (result.summary.eventCount === 0) {
     if (isBillingPeriodScopedLine(result)) {
-      return ["No immediate action required."]
+      return []
     }
 
     return ["Verify the billing period, feature slug, and period key for this invoice line."]
@@ -327,7 +327,7 @@ function buildNextActions(result: ExplainChargeOutput): string[] {
     return ["Request the next page to inspect the remaining rated meter facts."]
   }
 
-  return ["No immediate action required."]
+  return []
 }
 
 function isBillingPeriodScopedLine(result: ExplainChargeOutput): boolean {

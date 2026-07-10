@@ -9,8 +9,6 @@ export type IngestionQueryFilter = NonNullable<
 
 export type IngestionTone = "default" | "success" | "warning" | "destructive"
 
-const NON_ACTION_MESSAGES = new Set(["No immediate action required."])
-
 type ActionMessageOptions = {
   showNoEventsAction?: boolean
 }
@@ -71,7 +69,7 @@ export function getActionMessages(
     return []
   }
 
-  return status.nextActions.filter((message) => !NON_ACTION_MESSAGES.has(message))
+  return status.nextActions
 }
 
 export function getSuccessTone(

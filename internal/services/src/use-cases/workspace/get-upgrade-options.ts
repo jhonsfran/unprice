@@ -35,10 +35,22 @@ export const getWorkspaceUpgradeOptionsInputSchema = z.object({
   targetPlanVersionId: z.string().min(1).optional(),
 })
 
+export const workspaceUpgradeUnavailableCodeSchema = z.enum([
+  "current",
+  "scheduled_change",
+  "provider_unavailable",
+  "missing_payment_method",
+])
+
+export type WorkspaceUpgradeUnavailableCode = z.infer<typeof workspaceUpgradeUnavailableCodeSchema>
+
 export const workspaceUpgradeOptionSchema = z.object({
   planVersion: getPlanVersionApiResponseSchema,
   isCurrent: z.boolean(),
   isAvailable: z.boolean(),
+  // Machine-readable discriminant paired with unavailableReason (the display
+  // string). Clients branch on this code instead of sniffing the prose.
+  unavailableCode: workspaceUpgradeUnavailableCodeSchema.nullable(),
   unavailableReason: z.string().nullable(),
   paymentProvider: paymentProviderSchema,
   paymentMethodRequired: z.boolean(),
@@ -366,6 +378,16 @@ export async function getWorkspaceUpgradeOptions(
       const paymentMethodRequired = planVersion.paymentMethodRequired
       const missingPaymentMethod = paymentMethodRequired && !providerState.hasPaymentMethod
 
+      const unavailableCode: WorkspaceUpgradeUnavailableCode | null = isCurrent
+        ? "current"
+        : scheduledPlanChangeReason
+          ? "scheduled_change"
+          : providerState.unavailableReason
+            ? "provider_unavailable"
+            : missingPaymentMethod
+              ? "missing_payment_method"
+              : null
+
       const unavailableReason = isCurrent
         ? "This is your current plan."
         : scheduledPlanChangeReason
@@ -380,6 +402,7 @@ export async function getWorkspaceUpgradeOptions(
         planVersion,
         isCurrent,
         isAvailable: unavailableReason === null,
+        unavailableCode,
         unavailableReason,
         paymentProvider: planVersion.paymentProvider,
         paymentMethodRequired,

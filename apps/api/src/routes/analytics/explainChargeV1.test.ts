@@ -159,7 +159,7 @@ describe("explainChargeV1 route", () => {
         },
       ],
       warnings: [],
-      nextActions: ["No immediate action required."],
+      nextActions: [],
       pagination: {
         limit: 50,
         offset: 10,
@@ -262,7 +262,7 @@ describe("explainChargeV1 route", () => {
         warnings: [
           "This non-usage line is explained from ledger and billing-period evidence; no rated meter facts are expected.",
         ],
-        nextActions: ["No immediate action required."],
+        nextActions: [],
       })
     )
   })
