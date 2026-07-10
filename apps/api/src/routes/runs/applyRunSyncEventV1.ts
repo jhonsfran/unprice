@@ -1,7 +1,10 @@
 import { createRoute } from "@hono/zod-openapi"
 import { newId } from "@unprice/db/utils"
-import { applyRunSyncEventInputSchema, runSyncDecisionSchema } from "@unprice/db/validators"
-import { fromLedgerMinor, toCurrencyMinor } from "@unprice/money"
+import {
+  applyRunSyncEventInputSchema,
+  runSyncDecisionSchema,
+  toRunSummaryMinor,
+} from "@unprice/db/validators"
 import {
   EventTimestampTooFarInFutureError,
   EventTimestampTooOldError,
@@ -167,17 +170,10 @@ export const registerApplyRunSyncEventV1 = (app: App) =>
       })
     }
 
-    const { currency } = result.val.run
-    const { budgetAmount, consumedAmount, remainingAmount, ...run } = result.val.run
     return c.json(
       {
         ...result.val,
-        run: {
-          ...run,
-          budgetAmountMinor: toCurrencyMinor(fromLedgerMinor(budgetAmount, currency)),
-          consumedAmountMinor: toCurrencyMinor(fromLedgerMinor(consumedAmount, currency)),
-          remainingAmountMinor: toCurrencyMinor(fromLedgerMinor(remainingAmount, currency)),
-        },
+        run: toRunSummaryMinor(result.val.run),
       },
       HttpStatusCodes.OK
     )

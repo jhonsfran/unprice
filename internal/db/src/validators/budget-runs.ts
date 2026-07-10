@@ -1,3 +1,4 @@
+import { fromLedgerMinor, toCurrencyMinor } from "@unprice/money"
 import { createInsertSchema, createSelectSchema } from "drizzle-zod"
 import { z } from "zod"
 import { extendZodWithOpenApi } from "zod-openapi"
@@ -119,4 +120,20 @@ export type EndRunInput = z.infer<typeof endRunInputSchema>
 export type RunLedgerSummary = z.infer<typeof runLedgerSummarySchema>
 export type RunLedgerSyncDecision = z.infer<typeof runLedgerSyncDecisionSchema>
 export type RunSummary = z.infer<typeof runSummarySchema>
+
+/**
+ * Convert a ledger-scaled run summary (pgledger scale 8) into the API-facing
+ * summary whose amounts are in currency minor units (cents). Single source for
+ * the identical conversion previously pasted into startRun/endRun/getRun/applyRunSync.
+ */
+export function toRunSummaryMinor(summary: RunLedgerSummary): RunSummary {
+  const { budgetAmount, consumedAmount, remainingAmount, ...rest } = summary
+  const { currency } = rest
+  return {
+    ...rest,
+    budgetAmountMinor: toCurrencyMinor(fromLedgerMinor(budgetAmount, currency)),
+    consumedAmountMinor: toCurrencyMinor(fromLedgerMinor(consumedAmount, currency)),
+    remainingAmountMinor: toCurrencyMinor(fromLedgerMinor(remainingAmount, currency)),
+  }
+}
 export type RunSyncDecision = z.infer<typeof runSyncDecisionSchema>

@@ -1,6 +1,5 @@
 import { createRoute } from "@hono/zod-openapi"
-import { runSummarySchema, startRunInputSchema } from "@unprice/db/validators"
-import { fromLedgerMinor, toCurrencyMinor } from "@unprice/money"
+import { runSummarySchema, startRunInputSchema, toRunSummaryMinor } from "@unprice/db/validators"
 import { RunUseCaseError, startRunForCustomerSubscription } from "@unprice/services/use-cases"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { keyAuth, resolveCustomerIdForApiKey } from "~/auth/key"
@@ -121,15 +120,5 @@ export const registerStartRunV1 = (app: App) =>
     }
 
     // Convert response amounts from ledger scale back to currency minor units
-    const { currency } = result.val
-    const { budgetAmount, consumedAmount, remainingAmount, ...summary } = result.val
-    return c.json(
-      {
-        ...summary,
-        budgetAmountMinor: toCurrencyMinor(fromLedgerMinor(budgetAmount, currency)),
-        consumedAmountMinor: toCurrencyMinor(fromLedgerMinor(consumedAmount, currency)),
-        remainingAmountMinor: toCurrencyMinor(fromLedgerMinor(remainingAmount, currency)),
-      },
-      HttpStatusCodes.OK
-    )
+    return c.json(toRunSummaryMinor(result.val), HttpStatusCodes.OK)
   })

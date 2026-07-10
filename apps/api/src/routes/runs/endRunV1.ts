@@ -1,6 +1,5 @@
 import { createRoute } from "@hono/zod-openapi"
-import { endRunInputSchema, runSummarySchema } from "@unprice/db/validators"
-import { fromLedgerMinor, toCurrencyMinor } from "@unprice/money"
+import { endRunInputSchema, runSummarySchema, toRunSummaryMinor } from "@unprice/db/validators"
 import { RunUseCaseError, endRun } from "@unprice/services/use-cases"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
@@ -83,15 +82,5 @@ export const registerEndRunV1 = (app: App) =>
       })
     }
 
-    const { currency } = result.val
-    const { budgetAmount, consumedAmount, remainingAmount, ...summary } = result.val
-    return c.json(
-      {
-        ...summary,
-        budgetAmountMinor: toCurrencyMinor(fromLedgerMinor(budgetAmount, currency)),
-        consumedAmountMinor: toCurrencyMinor(fromLedgerMinor(consumedAmount, currency)),
-        remainingAmountMinor: toCurrencyMinor(fromLedgerMinor(remainingAmount, currency)),
-      },
-      HttpStatusCodes.OK
-    )
+    return c.json(toRunSummaryMinor(result.val), HttpStatusCodes.OK)
   })

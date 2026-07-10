@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { runSummarySchema, startRunInputSchema } from "./budget-runs"
+import { runSummarySchema, startRunInputSchema, toRunSummaryMinor } from "./budget-runs"
 
 describe("budget run validators", () => {
   it("accepts workload, trace, and parent attribution on start without currency", () => {
@@ -55,5 +55,48 @@ describe("budget run validators", () => {
       parentRunId: null,
     })
     expect(summary).not.toHaveProperty("agentId")
+  })
+
+  describe("toRunSummaryMinor", () => {
+    const ledgerBase = {
+      runId: "brun_123",
+      status: "running" as const,
+      endedAt: null,
+      customerId: "cus_123",
+      workloadType: "agent" as const,
+      workloadId: "research-assistant",
+      traceId: "trace_123",
+      parentRunId: null,
+    }
+
+    it("converts ledger-scale amounts (scale 8) to currency minor units", () => {
+      const result = toRunSummaryMinor({
+        ...ledgerBase,
+        currency: "USD",
+        budgetAmount: 50_00_000_000, // $50.00 at pgledger scale 8
+        consumedAmount: 12_50_000_000, // $12.50
+        remainingAmount: 37_50_000_000, // $37.50
+      })
+
+      expect(result.budgetAmountMinor).toBe(5000)
+      expect(result.consumedAmountMinor).toBe(1250)
+      expect(result.remainingAmountMinor).toBe(3750)
+      // The raw ledger fields are dropped from the API-facing summary.
+      expect(result).not.toHaveProperty("budgetAmount")
+      expect(runSummarySchema.safeParse(result).success).toBe(true)
+    })
+
+    it("honors the run currency rather than assuming USD", () => {
+      const result = toRunSummaryMinor({
+        ...ledgerBase,
+        currency: "EUR",
+        budgetAmount: 1_00_000_000, // €1.00
+        consumedAmount: 0,
+        remainingAmount: 1_00_000_000,
+      })
+
+      expect(result.currency).toBe("EUR")
+      expect(result.budgetAmountMinor).toBe(100)
+    })
   })
 })
