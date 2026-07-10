@@ -1,6 +1,5 @@
 import type { Metadata } from "next"
 import dynamic from "next/dynamic"
-import { LazyMotionWrapper } from "~/components/landing/lazy-motion-wrapper"
 import ManifestoHero from "~/components/landing/manifesto-hero"
 
 const MechanismSection = dynamic(() =>
@@ -42,14 +41,12 @@ export const metadata: Metadata = {
 
 export default function Manifesto() {
   return (
-    <LazyMotionWrapper>
-      <main className="flex flex-col overflow-hidden">
-        <ManifestoHero />
-        <MechanismSection />
-        <ManifestoPriceOps />
-        <ManifestoOwnership />
-        <ManifestoBelief />
-      </main>
-    </LazyMotionWrapper>
+    <main className="flex flex-col overflow-hidden">
+      <ManifestoHero />
+      <MechanismSection />
+      <ManifestoPriceOps />
+      <ManifestoOwnership />
+      <ManifestoBelief />
+    </main>
   )
 }
