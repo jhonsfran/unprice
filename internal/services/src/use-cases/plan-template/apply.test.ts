@@ -11,8 +11,8 @@ const { publishPlanVersionFlowMock } = vi.hoisted(() => ({
   publishPlanVersionFlowMock: vi.fn(),
 }))
 
-vi.mock("../plan-version/publish-shared", () => ({
-  publishPlanVersionFlow: publishPlanVersionFlowMock,
+vi.mock("../plan-version/publish", () => ({
+  publishPlanVersion: publishPlanVersionFlowMock,
 }))
 
 function createLogger(): Logger {

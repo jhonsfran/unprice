@@ -3,7 +3,7 @@ import type { Event, Feature, PlanVersion } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { ServiceContext } from "../../context"
-import { publishPlanVersionFlow } from "../plan-version/publish-shared"
+import { publishPlanVersion } from "../plan-version/publish"
 import {
   type PlanTemplateMaterializeCaches,
   createTemplatePlanVersion,
@@ -150,7 +150,7 @@ export async function applyPlanTemplate(
     }
 
     if (input.publish && planVersion.status !== "published") {
-      const published = await publishPlanVersionFlow(
+      const published = await publishPlanVersion(
         {
           services: deps.services,
           db: deps.db,

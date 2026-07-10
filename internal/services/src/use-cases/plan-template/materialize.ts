@@ -16,7 +16,7 @@ import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import * as currencies from "dinero.js/currencies"
 import type { ServiceContext } from "../../context"
-import { createPlanFlow } from "../plan/create-shared"
+import { createPlan } from "../plan/create"
 import {
   BASE_FEE_FEATURE,
   CREDITS_FEATURE,
@@ -100,7 +100,7 @@ export async function getOrCreatePlan(
   if (existing.err) return Err(existing.err)
   if (existing.val) return Ok(existing.val)
 
-  return createPlanFlow(
+  return createPlan(
     { services: deps.services, db: deps.db, logger: deps.logger },
     {
       projectId,

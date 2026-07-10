@@ -12,7 +12,7 @@ import type { Logger } from "@unprice/logs"
 import { fromCurrencyMinor, toLedgerMinor } from "@unprice/money"
 import { z } from "zod"
 import type { ServiceContext } from "../../context"
-import { createSubscriptionFlow } from "../subscription/create-shared"
+import { createSubscription } from "../subscription/create"
 
 const usageSeedValues = [2, 3, 5]
 const onboardingRunBudgetAmountMinor = 5000
@@ -229,7 +229,7 @@ export async function seedOnboardingEvidence(
   }
 
   const apiKey = apiKeyResult.val
-  const subscriptionResult = await createSubscriptionFlow(
+  const subscriptionResult = await createSubscription(
     {
       services: deps.services,
       db: deps.db,
