@@ -125,6 +125,58 @@ describe("BudgetRunService.listRunsRefreshed", () => {
     expect(logger.error).not.toHaveBeenCalled()
   })
 
+  it("logs and still returns the refreshed row when persisting a terminal run fails", async () => {
+    // updateRunSummary returns Err when the UPDATE matches no row, so the
+    // persist call fails without throwing — exercising the `if (persisted.err)`
+    // branch in listRunsRefreshed.
+    const setSpy = vi.fn().mockReturnValue({
+      where: vi.fn().mockReturnValue({
+        returning: vi.fn().mockResolvedValue([]),
+      }),
+    })
+    const db = {
+      update: vi.fn().mockReturnValue({ set: setSpy }),
+    } as unknown as Database
+    const service = createService(db)
+
+    const running = createRun({ id: "brun_running", status: "running", consumedAmount: 0 })
+    const runsGet = vi.fn().mockResolvedValue({
+      result: liveSummary({
+        runId: "brun_running",
+        status: "completed",
+        consumedAmountMinor: 300,
+        remainingAmountMinor: 700,
+      }),
+    })
+
+    const runs = await service.listRunsRefreshed({
+      customerId: "cus_123",
+      projectId: "proj_123",
+      runs: [running],
+      runsGet,
+    })
+
+    // A persist failure is surfaced via the log, never thrown.
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining("Failed to persist refreshed run summary"),
+      }),
+      {
+        project_id: "proj_123",
+        customer_id: "cus_123",
+        run_id: "brun_running",
+      }
+    )
+    // The refresh is NOT dropped: the returned row still reflects the live
+    // terminal state even though the read-model write failed.
+    expect(runs[0]).toMatchObject({
+      id: "brun_running",
+      status: "completed",
+      consumedAmount: 300_000_000,
+      remainingAmount: 700_000_000,
+    })
+  })
+
   it("preserves extra row fields (e.g. customer) when refreshing project-wide runs", async () => {
     const service = createService()
     const updateSpy = vi

@@ -99,7 +99,7 @@ describe("budgetRunsRefreshSchedule", () => {
     })
     expect(mocks.flushLogs).toHaveBeenCalledTimes(2)
     expect(mocks.loggerWarn).toHaveBeenCalledTimes(1)
-    expect(result).toEqual({ projectIds: ["proj_1", "proj_2"], stuck: 3, refreshed: 3 })
+    expect(result).toEqual({ projectIds: ["proj_1", "proj_2"], stuck: 3, processed: 3 })
   })
 
   it("does no work when no runs are stuck past the grace window", async () => {
@@ -113,7 +113,7 @@ describe("budgetRunsRefreshSchedule", () => {
     expect(mocks.createContext).not.toHaveBeenCalled()
     expect(mocks.listRunsRefreshed).not.toHaveBeenCalled()
     expect(mocks.loggerWarn).not.toHaveBeenCalled()
-    expect(result).toEqual({ projectIds: [], stuck: 0, refreshed: 0 })
+    expect(result).toEqual({ projectIds: [], stuck: 0, processed: 0 })
   })
 
   it("continues past a project whose refresh fails and flushes that context with a 500", async () => {
@@ -138,7 +138,7 @@ describe("budgetRunsRefreshSchedule", () => {
     expect(mocks.flushLogs).toHaveBeenCalledTimes(2)
     // The failing project's context is still flushed, with a 500.
     expect(mocks.flushLogs).toHaveBeenNthCalledWith(1, 500)
-    // Only the succeeding project counts toward refreshed.
-    expect(result).toEqual({ projectIds: ["proj_1", "proj_2"], stuck: 2, refreshed: 1 })
+    // Only the succeeding project counts toward processed.
+    expect(result).toEqual({ projectIds: ["proj_1", "proj_2"], stuck: 2, processed: 1 })
   })
 })

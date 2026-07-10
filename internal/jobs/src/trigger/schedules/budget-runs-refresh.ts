@@ -45,7 +45,7 @@ export const budgetRunsRefreshSchedule = schedules.task({
     })
 
     if (stuckRuns.length === 0) {
-      return { projectIds: [], stuck: 0, refreshed: 0 }
+      return { projectIds: [], stuck: 0, processed: 0 }
     }
 
     logger.warn("budget-runs.refresh.stuck_runs", {
@@ -65,7 +65,10 @@ export const budgetRunsRefreshSchedule = schedules.task({
       }
     }
 
-    let refreshed = 0
+    // "processed" = runs whose project refresh completed without a project-level
+    // throw. listRunsRefreshed swallows per-run read failures and only writes
+    // newly-terminal runs, so this is NOT a count of rows actually refreshed.
+    let processed = 0
     for (const [projectId, runs] of runsByProject) {
       const context = await createContext({
         taskId: `budget-runs.refresh:${projectId}:${now}`,
@@ -87,7 +90,7 @@ export const budgetRunsRefreshSchedule = schedules.task({
           runs: runs as unknown as BudgetRun[],
           runsGet: unprice.runs.get,
         })
-        refreshed += runs.length
+        processed += runs.length
       } catch (error) {
         // One project's failure must not abort the sweep for the rest.
         status = 500
@@ -103,7 +106,7 @@ export const budgetRunsRefreshSchedule = schedules.task({
     const result = {
       projectIds: [...runsByProject.keys()],
       stuck: stuckRuns.length,
-      refreshed,
+      processed,
     }
     logger.info("budget-runs.refresh.complete", result)
     return result
