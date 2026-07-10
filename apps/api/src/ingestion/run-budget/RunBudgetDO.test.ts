@@ -19,7 +19,7 @@ function createMeterFact(
     source_type: "api_key",
     source_id: "key_1",
     source_name: null,
-    customer_entitlement_id: "ce_1",
+    customer_entitlement_id: "ce_test_1",
     feature_slug: "tokens",
     period_key: "period_1",
     event_slug: "tokens_used",
@@ -137,7 +137,7 @@ const testState = {
   entitlementWindowApply: vi.fn(),
   failRunIdempotencyInsert: false,
   omitTerminalEndedAtFromIdempotency: false,
-  runSpendBucketValues: [] as Record<string, unknown>[],
+  runSpendBuckets: new Map<string, Record<string, unknown>>(),
   logger: {
     debug: vi.fn(),
     error: vi.fn(),
@@ -163,7 +163,7 @@ describe("RunBudgetDO", () => {
     testState.entitlementWindowApply.mockReset()
     testState.failRunIdempotencyInsert = false
     testState.omitTerminalEndedAtFromIdempotency = false
-    testState.runSpendBucketValues.length = 0
+    testState.runSpendBuckets.clear()
 
     // Default mocks
     testState.createReservation.mockResolvedValue({
@@ -1026,7 +1026,7 @@ describe("RunBudgetDO", () => {
         projectId: "proj_1",
       })
     ).resolves.toMatchObject({ consumedAmount: 0, remainingAmount: 100_000 })
-    expect(testState.runSpendBucketValues).toEqual([])
+    expect(testState.runSpendBuckets.size).toBe(0)
 
     testState.entitlementWindowApply.mockResolvedValueOnce({
       allowed: true,
@@ -1038,6 +1038,88 @@ describe("RunBudgetDO", () => {
     })
     expect(testState.entitlementWindowApply).toHaveBeenCalledTimes(2)
   })
+
+  it.each([
+    {
+      factEntitlementId: "",
+      label: "empty",
+      expectedError: "customer_entitlement_id must be non-empty",
+    },
+    {
+      factEntitlementId: "ce_other",
+      label: "mismatched",
+      expectedError: "customer_entitlement_id does not match requested entitlement",
+    },
+  ])(
+    "rejects $label producer entitlement identity without local mutation or idempotency lockout",
+    async ({ expectedError, factEntitlementId, label }) => {
+      const RunBudgetDO = await loadRunBudgetDO()
+      const durable = new RunBudgetDO(createDurableObjectState(), createEnv())
+      const runId = `run_${label}_fact_entitlement`
+      const idempotencyKey = `idem_${label}_fact_entitlement`
+
+      await durable.startRun({
+        runId,
+        customerId: "cus_1",
+        projectId: "proj_1",
+        currency: "USD",
+        budgetAmount: 100_000,
+        idempotencyKey: `start_${idempotencyKey}`,
+        metadata: {},
+        now: BASE_NOW,
+      })
+
+      testState.entitlementWindowApply.mockResolvedValueOnce({
+        allowed: true,
+        meterFacts: [
+          ...(label === "mismatched" ? [createMeterFact()] : []),
+          createMeterFact({
+            customer_entitlement_id: factEntitlementId,
+            event_id: `fact_${label}_entitlement`,
+          }),
+        ],
+      })
+      const eventInput = {
+        runId,
+        customerId: "cus_1",
+        projectId: "proj_1",
+        featureSlug: "tokens",
+        idempotencyKey,
+        event: {
+          id: `evt_${label}_fact_entitlement`,
+          slug: "tokens_used",
+          timestamp: BASE_NOW,
+          properties: { amount: 5 },
+        },
+        source: {
+          workspaceId: "ws_1",
+          environment: "test",
+          apiKeyId: "key_1",
+          sourceType: "api_key" as const,
+          sourceId: "key_1",
+          sourceName: null,
+        },
+        now: BASE_NOW,
+        ...TEST_ENTITLEMENT_FIELDS,
+      }
+
+      await expect(durable.applySyncEvent(eventInput)).rejects.toThrow(expectedError)
+      await expect(
+        durable.getRunStatus({ runId, customerId: "cus_1", projectId: "proj_1" })
+      ).resolves.toMatchObject({ consumedAmount: 0, remainingAmount: 100_000 })
+      expect(testState.runSpendBuckets.size).toBe(0)
+
+      testState.entitlementWindowApply.mockResolvedValueOnce({
+        allowed: true,
+        meterFacts: [createMeterFact()],
+      })
+      await expect(durable.applySyncEvent(eventInput)).resolves.toMatchObject({
+        allowed: true,
+        budget: { consumedAmount: 5000 },
+      })
+      expect(testState.entitlementWindowApply).toHaveBeenCalledTimes(2)
+    }
+  )
 
   it("uses the run currency for spend buckets when producer facts carry another currency", async () => {
     const RunBudgetDO = await loadRunBudgetDO()
@@ -1082,7 +1164,9 @@ describe("RunBudgetDO", () => {
       ...TEST_ENTITLEMENT_FIELDS,
     })
 
-    expect(testState.runSpendBucketValues).toEqual([expect.objectContaining({ currency: "EUR" })])
+    expect([...testState.runSpendBuckets.values()]).toEqual([
+      expect.objectContaining({ currency: "EUR" }),
+    ])
   })
 
   it("serializes concurrent applySyncEvent calls before pricing against remaining budget", async () => {
@@ -1548,7 +1632,7 @@ describe("RunBudgetDO", () => {
       event: {
         id: "evt_invoice_flush_2",
         slug: "tokens_used",
-        timestamp: BASE_NOW + 86_400_000,
+        timestamp: BASE_NOW + 1000,
         properties: { amount: 7 },
       },
       source: {
@@ -1559,9 +1643,16 @@ describe("RunBudgetDO", () => {
         sourceId: "key_1",
         sourceName: null,
       },
-      now: BASE_NOW + 86_400_000,
+      now: BASE_NOW + 1000,
       ...entitlementWithTwoPeriods,
     })
+
+    expect([...testState.runSpendBuckets.values()]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ billingPeriodId: "bp_1", statementKey: "stmt_1" }),
+        expect.objectContaining({ billingPeriodId: "bp_2", statementKey: "stmt_2" }),
+      ])
+    )
 
     const invoicingFlush = await durable.flushCapturesForInvoicing({
       statementKey: "stmt_1",
@@ -2307,6 +2398,7 @@ function buildFakeDrizzle() {
     runCaptureIntents: new Map(),
     runIdempotency: new Map(),
   }
+  testState.runSpendBuckets = tables.runSpendBuckets!
 
   const pkField: Record<string, string> = {
     runState: "runId",
@@ -2423,9 +2515,6 @@ function buildFakeDrizzle() {
 
     return {
       values: (data: Record<string, unknown>) => {
-        if (tableName === "runSpendBuckets") {
-          testState.runSpendBucketValues.push({ ...data })
-        }
         let storedData = data
         if (
           tableName === "runIdempotency" &&

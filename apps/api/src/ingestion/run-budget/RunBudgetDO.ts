@@ -83,9 +83,21 @@ export class RunBudgetDO extends DurableObject {
           wallet: input.wallet,
         })
 
+        const meterFacts = entitlementMeterFactSchemaV1.array().parse(result.meterFacts ?? [])
+        for (const fact of meterFacts) {
+          if (fact.customer_entitlement_id.trim().length === 0) {
+            throw new Error("Producer meter fact customer_entitlement_id must be non-empty")
+          }
+          if (fact.customer_entitlement_id !== input.customerEntitlementId) {
+            throw new Error(
+              `Producer meter fact customer_entitlement_id does not match requested entitlement ${input.customerEntitlementId}; received ${fact.customer_entitlement_id}`
+            )
+          }
+        }
+
         return {
           ...result,
-          meterFacts: entitlementMeterFactSchemaV1.array().parse(result.meterFacts ?? []),
+          meterFacts,
         }
       },
     }
