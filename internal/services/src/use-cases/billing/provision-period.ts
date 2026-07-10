@@ -97,6 +97,7 @@ export async function activateSubscription(
   if (!subscription || !subscription.customer) {
     return Err(
       new UnPriceSubscriptionError({
+        code: "SUBSCRIPTION_OPERATION_FAILED",
         message: "subscription not found for activation",
         context: { subscriptionId: input.subscriptionId, projectId: input.projectId },
       })
@@ -178,6 +179,7 @@ export async function activateSubscription(
     })
     return Err(
       new UnPriceSubscriptionError({
+        code: "SUBSCRIPTION_OPERATION_FAILED",
         message: "subscription activation transaction failed",
         context: {
           subscriptionId: input.subscriptionId,

@@ -61,7 +61,10 @@ describe("activateWalletIfSubscriptionIsActive", () => {
   })
 
   it("logs activation failures without throwing", async () => {
-    const activationError = new UnPriceSubscriptionError({ message: "activation failed" })
+    const activationError = new UnPriceSubscriptionError({
+      code: "SUBSCRIPTION_OPERATION_FAILED",
+      message: "activation failed",
+    })
     const { deps, logger } = createDeps({
       status: "active",
       activateResult: { err: activationError },

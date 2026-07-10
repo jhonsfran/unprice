@@ -52,6 +52,7 @@ export async function createSubscriptionFlow(
     if (!version) {
       return Err(
         new UnPriceSubscriptionError({
+          code: "PLAN_VERSION_NOT_FOUND",
           message: "Version not found. Please check the planVersionId",
         })
       )
@@ -69,6 +70,7 @@ export async function createSubscriptionFlow(
     if (availability.err) {
       return Err(
         new UnPriceSubscriptionError({
+          code: "SUBSCRIPTION_OPERATION_FAILED",
           message: availability.err.message,
         })
       )
@@ -77,6 +79,7 @@ export async function createSubscriptionFlow(
     if (!availability.val.available) {
       return Err(
         new UnPriceSubscriptionError({
+          code: "SUBSCRIPTION_OPERATION_FAILED",
           message: availability.val.message,
           context: {
             paymentProvider,
@@ -136,6 +139,7 @@ export async function createSubscriptionFlow(
       Err(
         transactionError ??
           new UnPriceSubscriptionError({
+            code: "SUBSCRIPTION_OPERATION_FAILED",
             message: error instanceof Error ? error.message : String(error),
           })
       )
@@ -152,7 +156,12 @@ export async function createSubscriptionFlow(
   })
 
   if (billingPeriodsResult.err) {
-    return Err(new UnPriceSubscriptionError({ message: billingPeriodsResult.err.message }))
+    return Err(
+      new UnPriceSubscriptionError({
+        code: "SUBSCRIPTION_OPERATION_FAILED",
+        message: billingPeriodsResult.err.message,
+      })
+    )
   }
 
   // Sub-create is a pure DB write up to here. Wallet activation only fires

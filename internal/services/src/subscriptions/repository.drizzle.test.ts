@@ -19,7 +19,10 @@ describe("DrizzleSubscriptionRepository", () => {
       }),
     } as unknown as Database
     const repo = new DrizzleSubscriptionRepository(db)
-    const resultError = new UnPriceSubscriptionError({ message: "phase failed" })
+    const resultError = new UnPriceSubscriptionError({
+      code: "SUBSCRIPTION_OPERATION_FAILED",
+      message: "phase failed",
+    })
     const expectedResult = Err(resultError)
 
     const result = await repo.withTransaction(async (_txRepo, txDb) => {

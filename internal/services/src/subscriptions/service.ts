@@ -374,6 +374,7 @@ export class SubscriptionService {
       if (expireResult.err) {
         return Err(
           new UnPriceSubscriptionError({
+            code: "SUBSCRIPTION_OPERATION_FAILED",
             message: expireResult.err.message,
           })
         )
@@ -417,6 +418,7 @@ export class SubscriptionService {
     if (phaseOwnedEntitlementsResult.err) {
       return Err(
         new UnPriceSubscriptionError({
+          code: "SUBSCRIPTION_OPERATION_FAILED",
           message: phaseOwnedEntitlementsResult.err.message,
         })
       )
@@ -532,6 +534,7 @@ export class SubscriptionService {
       if (expireEntitlementResult.err) {
         return Err(
           new UnPriceSubscriptionError({
+            code: "SUBSCRIPTION_OPERATION_FAILED",
             message: expireEntitlementResult.err.message,
           })
         )
@@ -563,6 +566,7 @@ export class SubscriptionService {
       if (createEntitlementResult.err) {
         return Err(
           new UnPriceSubscriptionError({
+            code: "SUBSCRIPTION_OPERATION_FAILED",
             message: createEntitlementResult.err.message,
           })
         )
@@ -612,6 +616,7 @@ export class SubscriptionService {
     if (phaseOwnedEntitlementsResult.err) {
       return Err(
         new UnPriceSubscriptionError({
+          code: "SUBSCRIPTION_OPERATION_FAILED",
           message: phaseOwnedEntitlementsResult.err.message,
         })
       )
@@ -638,6 +643,7 @@ export class SubscriptionService {
       if (expireGrantsResult.err) {
         return Err(
           new UnPriceSubscriptionError({
+            code: "SUBSCRIPTION_OPERATION_FAILED",
             message: expireGrantsResult.err.message,
           })
         )
@@ -676,6 +682,7 @@ export class SubscriptionService {
       if (createGrantResult.err) {
         return Err(
           new UnPriceSubscriptionError({
+            code: "SUBSCRIPTION_OPERATION_FAILED",
             message: createGrantResult.err.message,
           })
         )
@@ -707,6 +714,7 @@ export class SubscriptionService {
       if (!phaseToUpdate) {
         return Err(
           new UnPriceSubscriptionError({
+            code: "PHASE_NOT_FOUND",
             message: "Phase not found",
           })
         )
@@ -721,6 +729,7 @@ export class SubscriptionService {
       if (isActivePhase && phase.startAt !== phaseToUpdate.startAt) {
         return Err(
           new UnPriceSubscriptionError({
+            code: "PHASE_START_DATE_LOCKED",
             message: "The phase is active, you can't change the start date",
           })
         )
@@ -736,6 +745,7 @@ export class SubscriptionService {
       if (activePhase) {
         return Err(
           new UnPriceSubscriptionError({
+            code: "PHASE_OVERLAP",
             message: "There is already an active phase in the same date range",
           })
         )
@@ -757,6 +767,7 @@ export class SubscriptionService {
     if (overlappingPhases.length > 0 && overlappingPhases.some((p) => p.id !== phase.id)) {
       return Err(
         new UnPriceSubscriptionError({
+          code: "PHASE_OVERLAP",
           message: "Phases overlap, there is already a phase in the same date range",
         })
       )
@@ -798,6 +809,7 @@ export class SubscriptionService {
     if (consecutivePhases.length !== orderedPhases.length) {
       return Err(
         new UnPriceSubscriptionError({
+          code: "PHASE_NOT_CONSECUTIVE",
           message: "Phases are not consecutive. There are other phases in the same date range.",
         })
       )
@@ -847,6 +859,7 @@ export class SubscriptionService {
     if (endAtToUse && endAtToUse < now) {
       return Err(
         new UnPriceSubscriptionError({
+          code: "PHASE_END_DATE_INVALID",
           message: "End date is in the past",
         })
       )
@@ -861,6 +874,7 @@ export class SubscriptionService {
     if (!subscriptionWithPhases) {
       return Err(
         new UnPriceSubscriptionError({
+          code: "SUBSCRIPTION_NOT_FOUND",
           message: "Subscription not found",
         })
       )
@@ -870,6 +884,7 @@ export class SubscriptionService {
     if (!subscriptionWithPhases.active && subscriptionWithPhases.status !== "active") {
       return Err(
         new UnPriceSubscriptionError({
+          code: "SUBSCRIPTION_NOT_ACTIVE",
           message: "Subscription must be active to create a new phase. Please contact support.",
         })
       )
@@ -883,6 +898,7 @@ export class SubscriptionService {
     if (activePhase?.planVersionId === planVersionId) {
       return Err(
         new UnPriceSubscriptionError({
+          code: "SUBSCRIPTION_OPERATION_FAILED",
           message:
             "There is already an active phase with the same plan version, you can't create a new phase with the same plan version",
         })
@@ -926,6 +942,7 @@ export class SubscriptionService {
     if (!versionData?.id) {
       return Err(
         new UnPriceSubscriptionError({
+          code: "PLAN_VERSION_NOT_FOUND",
           message: "Version not found. Please check the planVersionId",
         })
       )
@@ -934,6 +951,7 @@ export class SubscriptionService {
     if (versionData.status !== "published") {
       return Err(
         new UnPriceSubscriptionError({
+          code: "PLAN_VERSION_NOT_PUBLISHED",
           message: "Plan version is not published, only published versions can be subscribed to",
         })
       )
@@ -942,6 +960,7 @@ export class SubscriptionService {
     if (versionData.active !== true) {
       return Err(
         new UnPriceSubscriptionError({
+          code: "PLAN_VERSION_NOT_ACTIVE",
           message: "Plan version is not active, only active versions can be subscribed to",
         })
       )
@@ -950,6 +969,7 @@ export class SubscriptionService {
     if (!versionData.planFeatures || versionData.planFeatures.length === 0) {
       return Err(
         new UnPriceSubscriptionError({
+          code: "PLAN_VERSION_FEATURES_MISSING",
           message: "Plan version has no features",
         })
       )
@@ -990,6 +1010,7 @@ export class SubscriptionService {
       if (paymentMethodErr) {
         return Err(
           new UnPriceSubscriptionError({
+            code: "SUBSCRIPTION_OPERATION_FAILED",
             message: paymentMethodErr.message,
           })
         )
@@ -1000,6 +1021,7 @@ export class SubscriptionService {
       if (!paymentMethodIdToUse) {
         return Err(
           new UnPriceSubscriptionError({
+            code: "PAYMENT_METHOD_REQUIRED",
             message: "Payment method is required for this plan version",
           })
         )
@@ -1019,6 +1041,7 @@ export class SubscriptionService {
         this.logger.set({ error: toErrorContext(err) })
         return Err(
           new UnPriceSubscriptionError({
+            code: "SUBSCRIPTION_OPERATION_FAILED",
             message: err.message,
           })
         )
@@ -1059,6 +1082,7 @@ export class SubscriptionService {
     if (!calculatedBillingCycle) {
       return Err(
         new UnPriceSubscriptionError({
+          code: "SUBSCRIPTION_OPERATION_FAILED",
           message: "Failed to calculate billing cycle",
         })
       )
@@ -1086,6 +1110,7 @@ export class SubscriptionService {
       if (!phase) {
         return Err(
           new UnPriceSubscriptionError({
+            code: "SUBSCRIPTION_OPERATION_FAILED",
             message: "Error while creating subscription phase",
           })
         )
@@ -1240,6 +1265,7 @@ export class SubscriptionService {
     if (!phase) {
       return Err(
         new UnPriceSubscriptionError({
+          code: "PHASE_NOT_FOUND",
           message: "Phase not found",
         })
       )
@@ -1251,6 +1277,7 @@ export class SubscriptionService {
     if (isActivePhase || isInThePast) {
       return Err(
         new UnPriceSubscriptionError({
+          code: "PHASE_ACTIVE_OR_PAST",
           message: "Phase is active or in the past, can't remove",
         })
       )
@@ -1262,6 +1289,7 @@ export class SubscriptionService {
       if (!subscriptionPhase) {
         return Err(
           new UnPriceSubscriptionError({
+            code: "SUBSCRIPTION_OPERATION_FAILED",
             message: "Error while removing subscription phase",
           })
         )
@@ -1343,6 +1371,7 @@ export class SubscriptionService {
     if (!versionData?.id) {
       return Err(
         new UnPriceSubscriptionError({
+          code: "PLAN_VERSION_NOT_FOUND",
           message: "Version not found. Please check the planVersionId",
         })
       )
@@ -1351,6 +1380,7 @@ export class SubscriptionService {
     if (versionData.status !== "published") {
       return Err(
         new UnPriceSubscriptionError({
+          code: "PLAN_VERSION_NOT_PUBLISHED",
           message: "Plan version is not published, only published versions can be subscribed to",
         })
       )
@@ -1359,6 +1389,7 @@ export class SubscriptionService {
     if (versionData.active !== true) {
       return Err(
         new UnPriceSubscriptionError({
+          code: "PLAN_VERSION_NOT_ACTIVE",
           message: "Plan version is not active, only active versions can be subscribed to",
         })
       )
@@ -1367,6 +1398,7 @@ export class SubscriptionService {
     if (!versionData.planFeatures || versionData.planFeatures.length === 0) {
       return Err(
         new UnPriceSubscriptionError({
+          code: "PLAN_VERSION_FEATURES_MISSING",
           message: "Plan version has no features",
         })
       )
@@ -1411,6 +1443,7 @@ export class SubscriptionService {
       if (paymentMethodErr) {
         return Err(
           new UnPriceSubscriptionError({
+            code: "SUBSCRIPTION_OPERATION_FAILED",
             message: paymentMethodErr.message,
           })
         )
@@ -1421,6 +1454,7 @@ export class SubscriptionService {
       if (!paymentMethodIdToUse) {
         return Err(
           new UnPriceSubscriptionError({
+            code: "PAYMENT_METHOD_REQUIRED",
             message: "Payment method is required for this plan version",
           })
         )
@@ -1440,6 +1474,7 @@ export class SubscriptionService {
         this.logger.set({ error: toErrorContext(defaultConfigResult.err) })
         return Err(
           new UnPriceSubscriptionError({
+            code: "SUBSCRIPTION_OPERATION_FAILED",
             message: defaultConfigResult.err.message,
           })
         )
@@ -1518,6 +1553,7 @@ export class SubscriptionService {
     if (endAt !== null && endAt !== undefined && endAt < startAt) {
       return Err(
         new UnPriceSubscriptionError({
+          code: "PHASE_END_DATE_INVALID",
           message: "End date must be after the phase start date",
         })
       )
@@ -1538,6 +1574,7 @@ export class SubscriptionService {
     if (!subscriptionWithPhases) {
       return Err(
         new UnPriceSubscriptionError({
+          code: "SUBSCRIPTION_NOT_FOUND",
           message: "Subscription not found",
         })
       )
@@ -1546,6 +1583,7 @@ export class SubscriptionService {
     if (!subscriptionWithPhases.active) {
       return Err(
         new UnPriceSubscriptionError({
+          code: "SUBSCRIPTION_NOT_ACTIVE",
           message: "Subscription is not active",
         })
       )
@@ -1559,6 +1597,7 @@ export class SubscriptionService {
     if (!phaseToUpdate) {
       return Err(
         new UnPriceSubscriptionError({
+          code: "PHASE_NOT_FOUND",
           message: "Phase not found",
         })
       )
@@ -1569,6 +1608,7 @@ export class SubscriptionService {
     if (isFuturePhase && startAt <= now) {
       return Err(
         new UnPriceSubscriptionError({
+          code: "PHASE_START_DATE_INVALID",
           message: "Future phases must start in the future",
         })
       )
@@ -1637,6 +1677,7 @@ export class SubscriptionService {
       if (!subscriptionPhase) {
         return Err(
           new UnPriceSubscriptionError({
+            code: "SUBSCRIPTION_OPERATION_FAILED",
             message: "Error while updating subscription phase",
           })
         )
@@ -1763,6 +1804,7 @@ export class SubscriptionService {
     if (!subscriptionWithPhases) {
       return Err(
         new UnPriceSubscriptionError({
+          code: "SUBSCRIPTION_NOT_FOUND",
           message: "Subscription not found",
         })
       )
@@ -1771,6 +1813,7 @@ export class SubscriptionService {
     if (!subscriptionWithPhases.active || subscriptionWithPhases.status === "canceled") {
       return Err(
         new UnPriceSubscriptionError({
+          code: "SUBSCRIPTION_NOT_ACTIVE",
           message: "Subscription is not active",
         })
       )
@@ -1791,6 +1834,7 @@ export class SubscriptionService {
         if (!updatedPhase) {
           return Err(
             new UnPriceSubscriptionError({
+              code: "SUBSCRIPTION_OPERATION_FAILED",
               message: "Error while updating subscription phase",
             })
           )
@@ -1830,6 +1874,7 @@ export class SubscriptionService {
         if (entitlementsResult.err) {
           return Err(
             new UnPriceSubscriptionError({
+              code: "SUBSCRIPTION_OPERATION_FAILED",
               message: entitlementsResult.err.message,
             })
           )
@@ -1847,6 +1892,7 @@ export class SubscriptionService {
         if (expireGrantsResult.err) {
           return Err(
             new UnPriceSubscriptionError({
+              code: "SUBSCRIPTION_OPERATION_FAILED",
               message: expireGrantsResult.err.message,
             })
           )
@@ -1884,6 +1930,7 @@ export class SubscriptionService {
       if (!subscription) {
         return Err(
           new UnPriceSubscriptionError({
+            code: "SUBSCRIPTION_OPERATION_FAILED",
             message: "Error while canceling subscription",
           })
         )
@@ -1937,6 +1984,7 @@ export class SubscriptionService {
     if (!customerData?.id) {
       return Err(
         new UnPriceSubscriptionError({
+          code: "SUBSCRIPTION_OPERATION_FAILED",
           message: "Customer not found. Please check the customerId",
         })
       )
@@ -1946,6 +1994,7 @@ export class SubscriptionService {
     if (!customerData.active) {
       return Err(
         new UnPriceSubscriptionError({
+          code: "SUBSCRIPTION_OPERATION_FAILED",
           message: "Customer is not active",
         })
       )
@@ -1976,6 +2025,7 @@ export class SubscriptionService {
     if (!newSubscription) {
       return Err(
         new UnPriceSubscriptionError({
+          code: "SUBSCRIPTION_OPERATION_FAILED",
           message: "Error while creating subscription",
         })
       )
@@ -2028,6 +2078,7 @@ export class SubscriptionService {
       })
       return Err(
         new UnPriceSubscriptionError({
+          code: "SUBSCRIPTION_OPERATION_FAILED",
           message: err instanceof Error ? err.message : "Error getting subscription by id",
         })
       )
@@ -2069,6 +2120,7 @@ export class SubscriptionService {
 
       return Err(
         new UnPriceSubscriptionError({
+          code: "SUBSCRIPTION_OPERATION_FAILED",
           message: "There was an error listing subscriptions. Contact support.",
         })
       )
@@ -2097,6 +2149,7 @@ export class SubscriptionService {
       })
       return Err(
         new UnPriceSubscriptionError({
+          code: "SUBSCRIPTION_OPERATION_FAILED",
           message:
             err instanceof Error ? err.message : "Error listing subscriptions by plan version",
         })
@@ -2130,7 +2183,10 @@ export class SubscriptionService {
       })
     } catch (e) {
       if (e instanceof Error && e.message === "SUBSCRIPTION_BUSY") {
-        throw new UnPriceSubscriptionError({ message: "SUBSCRIPTION_BUSY" })
+        throw new UnPriceSubscriptionError({
+          code: "SUBSCRIPTION_BUSY",
+          message: "SUBSCRIPTION_BUSY",
+        })
       }
       throw e
     }
@@ -2193,6 +2249,7 @@ export class SubscriptionService {
       if (status === "pending_activation") {
         return Err(
           new UnPriceSubscriptionError({
+            code: "SUBSCRIPTION_OPERATION_FAILED",
             message: "Wallet activation failed; subscription parked in pending_activation",
             context: { subscriptionId, projectId, status },
           })
@@ -2204,7 +2261,10 @@ export class SubscriptionService {
       return Err(
         e instanceof UnPriceSubscriptionError
           ? e
-          : new UnPriceSubscriptionError({ message: (e as Error).message })
+          : new UnPriceSubscriptionError({
+              code: "SUBSCRIPTION_OPERATION_FAILED",
+              message: (e as Error).message,
+            })
       )
     }
   }
@@ -2290,6 +2350,7 @@ export class SubscriptionService {
         error instanceof UnPriceSubscriptionError
           ? error
           : new UnPriceSubscriptionError({
+              code: "SUBSCRIPTION_OPERATION_FAILED",
               message:
                 error instanceof Error
                   ? error.message

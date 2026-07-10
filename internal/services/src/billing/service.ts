@@ -20,6 +20,7 @@ import type { CustomerService } from "../customers/service"
 import type { GrantsManager } from "../entitlements"
 import type { InvoiceLine, LedgerGateway } from "../ledger"
 import type { Metrics } from "../metrics"
+import type { UnPricePaymentProviderError } from "../payment-provider/errors"
 import type { AddInvoiceItemOpts, PaymentProviderInvoice } from "../payment-provider/interface"
 import {
   type InvoiceSubscriptionOutcome,
@@ -418,10 +419,16 @@ export class BillingService {
       })
     } catch (e) {
       if (e instanceof Error && e.message === "SUBSCRIPTION_BUSY") {
-        throw new UnPriceBillingError({ message: "SUBSCRIPTION_BUSY" })
+        throw new UnPriceBillingError({
+          code: "SUBSCRIPTION_BUSY",
+          message: "SUBSCRIPTION_BUSY",
+        })
       }
       if (e instanceof LockLostError) {
-        throw new UnPriceBillingError({ message: e.message })
+        throw new UnPriceBillingError({
+          code: "BILLING_OPERATION_FAILED",
+          message: e.message,
+        })
       }
       throw e
     }
@@ -591,7 +598,12 @@ export class BillingService {
     const invoice = await billingRepo.findInvoiceById({ invoiceId, projectId })
 
     if (!invoice) {
-      return Err(new UnPriceBillingError({ message: "Invoice not found" }))
+      return Err(
+        new UnPriceBillingError({
+          code: "INVOICE_NOT_FOUND",
+          message: "Invoice not found",
+        })
+      )
     }
 
     if (["paid", "void"].includes(invoice.status)) {
@@ -605,6 +617,7 @@ export class BillingService {
     if (!invoice.invoicePaymentProviderId) {
       return Err(
         new UnPriceBillingError({
+          code: "INVOICE_PROVIDER_ID_MISSING",
           message: "Invoice has no invoice id from the payment provider",
         })
       )
@@ -618,7 +631,12 @@ export class BillingService {
       })
 
     if (paymentProviderErr) {
-      return Err(new UnPriceBillingError({ message: paymentProviderErr.message }))
+      return Err(
+        new UnPriceBillingError({
+          code: "BILLING_OPERATION_FAILED",
+          message: paymentProviderErr.message,
+        })
+      )
     }
 
     const providerInvoice = await paymentProviderService.getStatusInvoice({
@@ -626,7 +644,12 @@ export class BillingService {
     })
 
     if (providerInvoice.err) {
-      return Err(new UnPriceBillingError({ message: providerInvoice.err.message }))
+      return Err(
+        new UnPriceBillingError({
+          code: "BILLING_OPERATION_FAILED",
+          message: providerInvoice.err.message,
+        })
+      )
     }
 
     const providerStatus = providerInvoice.val.status
@@ -661,6 +684,7 @@ export class BillingService {
       if (settled.err) {
         return Err(
           new UnPriceBillingError({
+            code: "PAYMENT_SETTLEMENT_FAILED",
             message: `Failed to settle prepaid invoice ${invoice.id} to wallet: ${settled.err.message}`,
           })
         )
@@ -783,7 +807,12 @@ export class BillingService {
           })
 
     if (machineResult.err) {
-      return Err(new UnPriceBillingError({ message: machineResult.err.message }))
+      return Err(
+        new UnPriceBillingError({
+          code: "BILLING_OPERATION_FAILED",
+          message: machineResult.err.message,
+        })
+      )
     }
 
     await billingRepo.updateInvoice({
@@ -814,7 +843,12 @@ export class BillingService {
     const invoice = await billingRepo.findInvoiceById({ invoiceId, projectId })
 
     if (!invoice) {
-      return Err(new UnPriceBillingError({ message: "Invoice not found" }))
+      return Err(
+        new UnPriceBillingError({
+          code: "BILLING_OPERATION_FAILED",
+          message: "Invoice not found",
+        })
+      )
     }
 
     const invoicePaymentProviderId = invoice.invoicePaymentProviderId
@@ -823,7 +857,10 @@ export class BillingService {
     // if the invoice is draft, we can't collect the payment
     if (invoice.status === "draft") {
       return Err(
-        new UnPriceBillingError({ message: "Invoice is not finalized, cannot collect payment" })
+        new UnPriceBillingError({
+          code: "INVOICE_NOT_FINALIZED",
+          message: "Invoice is not finalized, cannot collect payment",
+        })
       )
     }
 
@@ -852,7 +889,12 @@ export class BillingService {
       })
 
       if (!updatedInvoice) {
-        return Err(new UnPriceBillingError({ message: "Error updating invoice" }))
+        return Err(
+          new UnPriceBillingError({
+            code: "INVOICE_UPDATE_FAILED",
+            message: "Error updating invoice",
+          })
+        )
       }
 
       return Ok(updatedInvoice)
@@ -861,13 +903,19 @@ export class BillingService {
     // validate if the invoice is failed
     if (invoice.status === "failed") {
       // meaning the invoice is past due and we cannot collect the payment with 3 attempts
-      return Err(new UnPriceBillingError({ message: "Invoice is failed, cannot collect payment" }))
+      return Err(
+        new UnPriceBillingError({
+          code: "INVOICE_FAILED",
+          message: "Invoice is failed, cannot collect payment",
+        })
+      )
     }
 
     // check if the invoice has an invoice id from the payment provider
     if (!invoicePaymentProviderId) {
       return Err(
         new UnPriceBillingError({
+          code: "INVOICE_PROVIDER_ID_MISSING",
           message:
             "Invoice has no invoice id from the payment provider, please finalize the invoice first",
         })
@@ -879,6 +927,7 @@ export class BillingService {
     if (!paymentMethodId || paymentMethodId === "") {
       return Err(
         new UnPriceBillingError({
+          code: "INVOICE_PAYMENT_METHOD_MISSING",
           message: "Invoice requires a payment method, please set a payment method first",
         })
       )
@@ -911,7 +960,12 @@ export class BillingService {
     })
 
     if (!subscriptionData) {
-      return Err(new UnPriceBillingError({ message: "Subscription not found" }))
+      return Err(
+        new UnPriceBillingError({
+          code: "SUBSCRIPTION_NOT_FOUND",
+          message: "Subscription not found",
+        })
+      )
     }
 
     const { phases, customer } = subscriptionData
@@ -920,6 +974,7 @@ export class BillingService {
     if (!phase) {
       return Err(
         new UnPriceBillingError({
+          code: "SUBSCRIPTION_PHASE_NOT_FOUND",
           message: "Subscription phase not found",
         })
       )
@@ -938,6 +993,7 @@ export class BillingService {
     if (!config) {
       return Err(
         new UnPriceBillingError({
+          code: "PAYMENT_PROVIDER_UNAVAILABLE",
           message: "Payment provider config not found or not active",
         })
       )
@@ -949,7 +1005,12 @@ export class BillingService {
       })
 
     if (paymentProviderServiceErr) {
-      return Err(new UnPriceBillingError({ message: paymentProviderServiceErr.message }))
+      return Err(
+        new UnPriceBillingError({
+          code: "BILLING_OPERATION_FAILED",
+          message: paymentProviderServiceErr.message,
+        })
+      )
     }
 
     // if the invoice is waiting, we need to check if the payment is successful
@@ -961,7 +1022,12 @@ export class BillingService {
       })
 
       if (statusPaymentProviderInvoice.err) {
-        return Err(new UnPriceBillingError({ message: "Error getting invoice status" }))
+        return Err(
+          new UnPriceBillingError({
+            code: "PAYMENT_PROVIDER_STATUS_FAILED",
+            message: "Error getting invoice status",
+          })
+        )
       }
 
       // if the invoice is paid or void, we update the invoice status
@@ -986,7 +1052,12 @@ export class BillingService {
         })
 
         if (!updatedInvoice) {
-          return Err(new UnPriceBillingError({ message: "Error updating invoice" }))
+          return Err(
+            new UnPriceBillingError({
+              code: "BILLING_OPERATION_FAILED",
+              message: "Error updating invoice",
+            })
+          )
         }
 
         if (statusPaymentProviderInvoice.val.status === "paid") {
@@ -997,6 +1068,7 @@ export class BillingService {
           if (settled.err) {
             return Err(
               new UnPriceBillingError({
+                code: "PAYMENT_SETTLEMENT_FAILED",
                 message: `Failed to settle prepaid invoice ${updatedInvoice.id} to wallet: ${settled.err.message}`,
               })
             )
@@ -1024,7 +1096,12 @@ export class BillingService {
         })
 
         if (!updatedInvoice) {
-          return Err(new UnPriceBillingError({ message: "Error updating invoice" }))
+          return Err(
+            new UnPriceBillingError({
+              code: "BILLING_OPERATION_FAILED",
+              message: "Error updating invoice",
+            })
+          )
         }
 
         return Ok(updatedInvoice)
@@ -1040,7 +1117,12 @@ export class BillingService {
       })
 
       if (statusInvoice.err) {
-        return Err(new UnPriceBillingError({ message: "Error getting invoice status" }))
+        return Err(
+          new UnPriceBillingError({
+            code: "BILLING_OPERATION_FAILED",
+            message: "Error getting invoice status",
+          })
+        )
       }
 
       // this happen when there are many invoices and stripe merge them into one invoice
@@ -1060,7 +1142,12 @@ export class BillingService {
         })
 
         if (!updatedInvoice) {
-          return Err(new UnPriceBillingError({ message: "Error updating invoice" }))
+          return Err(
+            new UnPriceBillingError({
+              code: "BILLING_OPERATION_FAILED",
+              message: "Error updating invoice",
+            })
+          )
         }
 
         if (statusInvoice.val.status === "paid") {
@@ -1071,6 +1158,7 @@ export class BillingService {
           if (settled.err) {
             return Err(
               new UnPriceBillingError({
+                code: "PAYMENT_SETTLEMENT_FAILED",
                 message: `Failed to settle prepaid invoice ${updatedInvoice.id} to wallet: ${settled.err.message}`,
               })
             )
@@ -1101,6 +1189,7 @@ export class BillingService {
 
         return Err(
           new UnPriceBillingError({
+            code: "PAYMENT_COLLECTION_FAILED",
             message: `Error collecting payment: ${providerPaymentInvoice.err.message}`,
           })
         )
@@ -1127,7 +1216,12 @@ export class BillingService {
       })
 
       if (!updatedInvoice) {
-        return Err(new UnPriceBillingError({ message: "Error updating invoice" }))
+        return Err(
+          new UnPriceBillingError({
+            code: "BILLING_OPERATION_FAILED",
+            message: "Error updating invoice",
+          })
+        )
       }
 
       // Synchronous providers (Sandbox today) confirm payment inline rather
@@ -1142,6 +1236,7 @@ export class BillingService {
         if (settled.err) {
           return Err(
             new UnPriceBillingError({
+              code: "PAYMENT_SETTLEMENT_FAILED",
               message: `Failed to settle prepaid invoice ${updatedInvoice.id} to wallet: ${settled.err.message}`,
             })
           )
@@ -1160,6 +1255,7 @@ export class BillingService {
       if (providerSendInvoice.err) {
         return Err(
           new UnPriceBillingError({
+            code: "PAYMENT_COLLECTION_FAILED",
             message: `Error sending invoice: ${providerSendInvoice.err.message}`,
           })
         )
@@ -1181,13 +1277,23 @@ export class BillingService {
       })
 
       if (!updatedInvoice) {
-        return Err(new UnPriceBillingError({ message: "Error updating invoice" }))
+        return Err(
+          new UnPriceBillingError({
+            code: "BILLING_OPERATION_FAILED",
+            message: "Error updating invoice",
+          })
+        )
       }
 
       return Ok(updatedInvoice)
     }
 
-    return Err(new UnPriceBillingError({ message: "Unsupported status for invoice" }))
+    return Err(
+      new UnPriceBillingError({
+        code: "INVOICE_STATUS_UNSUPPORTED",
+        message: "Unsupported status for invoice",
+      })
+    )
   }
 
   public async finalizeInvoice({
@@ -1343,6 +1449,7 @@ export class BillingService {
 
       return Err(
         new UnPriceBillingError({
+          code: "BILLING_OPERATION_FAILED",
           message: "Unable to finalize invoice. Please try again or contact support.",
         })
       )
@@ -1373,7 +1480,12 @@ export class BillingService {
       })
 
       if (!invoice) {
-        return Err(new UnPriceBillingError({ message: "Invoice not found" }))
+        return Err(
+          new UnPriceBillingError({
+            code: "BILLING_OPERATION_FAILED",
+            message: "Invoice not found",
+          })
+        )
       }
 
       if (invoice.status === "draft" && invoice.dueAt > now) {
@@ -1385,6 +1497,7 @@ export class BillingService {
 
         return Err(
           new UnPriceBillingError({
+            code: "INVOICE_NOT_READY",
             message: `Invoice is not ready to finalize yet. It can be finalized after ${readyAt} UTC.`,
           })
         )
@@ -1401,6 +1514,7 @@ export class BillingService {
 
       return Err(
         new UnPriceBillingError({
+          code: "BILLING_OPERATION_FAILED",
           message: "Unable to load invoice for finalization. Please try again.",
         })
       )
@@ -1496,7 +1610,7 @@ export class BillingService {
   }): Promise<
     Result<
       { providerInvoiceId: string; providerInvoiceUrl: string },
-      UnPriceBillingError | FetchError
+      UnPriceBillingError | FetchError | UnPricePaymentProviderError
     >
   > {
     const billingRepo = new DrizzleBillingRepository(this.db)
@@ -1509,7 +1623,12 @@ export class BillingService {
       })
 
     if (paymentProviderErr) {
-      return Err(new UnPriceBillingError({ message: paymentProviderErr.message }))
+      return Err(
+        new UnPriceBillingError({
+          code: "BILLING_OPERATION_FAILED",
+          message: paymentProviderErr.message,
+        })
+      )
     }
 
     let providerInvoiceId = existingProviderInvoiceId ?? null
@@ -1525,7 +1644,12 @@ export class BillingService {
     })
 
     if (linesResult.err) {
-      return Err(new UnPriceBillingError({ message: linesResult.err.message }))
+      return Err(
+        new UnPriceBillingError({
+          code: "BILLING_OPERATION_FAILED",
+          message: linesResult.err.message,
+        })
+      )
     }
 
     const lines = linesResult.val
@@ -1537,6 +1661,7 @@ export class BillingService {
       // empty Stripe invoice.
       return Err(
         new UnPriceBillingError({
+          code: "INVOICE_LINES_MISSING",
           message: `No ledger lines for invoice ${invoice.id} (statement ${invoice.statementKey})`,
         })
       )
@@ -1604,7 +1729,12 @@ export class BillingService {
     }
 
     if (!providerInvoiceId) {
-      return Err(new UnPriceBillingError({ message: "Provider invoice id was not resolved" }))
+      return Err(
+        new UnPriceBillingError({
+          code: "INVOICE_PROVIDER_ID_MISSING",
+          message: "Provider invoice id was not resolved",
+        })
+      )
     }
 
     // 2) Push one item per ledger line. Ledger amounts are at `LEDGER_SCALE = 8`;
@@ -1676,6 +1806,7 @@ export class BillingService {
 
       return Err(
         new UnPriceBillingError({
+          code: "INVOICE_PROVIDER_ITEMS_ORPHANED",
           message: `Provider invoice ${providerInvoiceId} has orphaned items and cannot be finalized safely`,
         })
       )
@@ -1966,6 +2097,7 @@ export class BillingService {
 
         return Err(
           new UnPriceBillingError({
+            code: "BILLING_OPERATION_FAILED",
             message: error instanceof Error ? error.message : "Internal transaction error",
           })
         )
@@ -1979,7 +2111,12 @@ export class BillingService {
   ): Promise<Result<ComputeCurrentUsageResult[], UnPriceBillingError>> {
     const result = await this.ratingService.rateBillingPeriod(params)
     return result.err
-      ? Err(new UnPriceBillingError({ message: result.err.message }))
+      ? Err(
+          new UnPriceBillingError({
+            code: "BILLING_OPERATION_FAILED",
+            message: result.err.message,
+          })
+        )
       : Ok(result.val)
   }
 
@@ -2000,7 +2137,12 @@ export class BillingService {
     })
 
     if (linesResult.err) {
-      return Err(new UnPriceBillingError({ message: linesResult.err.message }))
+      return Err(
+        new UnPriceBillingError({
+          code: "BILLING_OPERATION_FAILED",
+          message: linesResult.err.message,
+        })
+      )
     }
 
     const ledgerLines = linesResult.val

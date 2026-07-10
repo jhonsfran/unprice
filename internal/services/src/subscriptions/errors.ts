@@ -1,5 +1,27 @@
 import { BaseError } from "@unprice/error"
 
+export const subscriptionErrorCodes = [
+  "SUBSCRIPTION_BUSY",
+  "SUBSCRIPTION_NOT_FOUND",
+  "SUBSCRIPTION_NOT_ACTIVE",
+  "PLAN_VERSION_NOT_FOUND",
+  "PLAN_VERSION_NOT_PUBLISHED",
+  "PLAN_VERSION_NOT_ACTIVE",
+  "PLAN_VERSION_FEATURES_MISSING",
+  "PAYMENT_METHOD_REQUIRED",
+  "PHASE_NOT_FOUND",
+  "PHASE_START_DATE_LOCKED",
+  "PHASE_START_DATE_INVALID",
+  "PHASE_END_DATE_INVALID",
+  "PHASE_ACTIVE_OR_PAST",
+  "PHASE_OVERLAP",
+  "PHASE_NOT_CONSECUTIVE",
+  "PAYMENT_PROVIDER_UNAVAILABLE",
+  "SUBSCRIPTION_OPERATION_FAILED",
+] as const
+
+export type SubscriptionErrorCode = (typeof subscriptionErrorCodes)[number]
+
 export class UnPriceCalculationError extends BaseError {
   public readonly retry = false
   public readonly name = UnPriceCalculationError.name
@@ -12,14 +34,24 @@ export class UnPriceCalculationError extends BaseError {
 }
 
 export class UnPriceSubscriptionError extends BaseError<{ context?: Record<string, unknown> }> {
+  public readonly code: SubscriptionErrorCode
   public readonly retry = false
   public readonly name = UnPriceSubscriptionError.name
 
-  constructor({ message, context }: { message: string; context?: Record<string, unknown> }) {
+  constructor({
+    code,
+    message,
+    context,
+  }: {
+    code: SubscriptionErrorCode
+    message: string
+    context?: Record<string, unknown>
+  }) {
     super({
       message: `${message}`,
       context,
     })
+    this.code = code
   }
 }
 

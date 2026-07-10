@@ -7,6 +7,7 @@ import { createSubscription } from "./create"
 describe("createSubscription use case", () => {
   it("rolls back the transaction when phase creation returns a Result error", async () => {
     const phaseError = new UnPriceSubscriptionError({
+      code: "SUBSCRIPTION_OPERATION_FAILED",
       message: "phase create failed",
     })
     const tx = {} as Database

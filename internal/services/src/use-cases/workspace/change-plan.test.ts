@@ -454,6 +454,7 @@ describe("changeWorkspacePlan", () => {
       if (overlapsOpenEndedPhase || !isConsecutive) {
         return {
           err: new UnPriceSubscriptionError({
+            code: "SUBSCRIPTION_OPERATION_FAILED",
             message: "Phases overlap, there is already a phase in the same date range",
           }),
         }
@@ -462,6 +463,7 @@ describe("changeWorkspacePlan", () => {
       if (wouldActivateTargetPhase) {
         return {
           err: new UnPriceSubscriptionError({
+            code: "SUBSCRIPTION_OPERATION_FAILED",
             message: "Scheduled future phase activated immediately",
           }),
         }
