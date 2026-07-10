@@ -14,6 +14,7 @@ import { apiMetricsLogger, createApiLogger } from "~/observability"
 
 import { CloudflareRawIngestionQueueClient } from "~/ingestion/raw-queue-client"
 import { createIngestionService } from "~/ingestion/service"
+import { resolveSampleRate } from "~/sampling"
 
 /**
  * These maps persist between worker executions and are used for caching
@@ -28,15 +29,6 @@ const hashCache = new Map()
  */
 let isolateId: string | undefined = undefined
 let isolateCreatedAt: number | undefined = undefined
-
-const DEFAULT_METRICS_SAMPLE_RATE = 0.1
-
-export function resolveMetricsSampleRate(configured: number | undefined): number {
-  if (configured === undefined || Number.isNaN(configured) || configured < 0 || configured > 1) {
-    return DEFAULT_METRICS_SAMPLE_RATE
-  }
-  return configured
-}
 
 /**
  * Initialize all services.
@@ -114,7 +106,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
           colo: stats.colo,
           country: stats.country,
           continent: stats.continent,
-          sampleRate: resolveMetricsSampleRate(c.env.METRICS_SAMPLE_RATE),
+          sampleRate: resolveSampleRate(c.env.METRICS_SAMPLE_RATE),
         })
       : new NoopMetrics()
 

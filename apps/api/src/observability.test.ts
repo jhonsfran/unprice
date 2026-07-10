@@ -72,30 +72,6 @@ describe("shouldAlwaysKeepDoLogEvent", () => {
   })
 })
 
-describe("resolveDoLogSampleRate", () => {
-  it("accepts finite rates from zero through one and defaults invalid values", async () => {
-    const { resolveDoLogSampleRate } = await loadObservability()
-    const cases = [
-      [undefined, 0.1],
-      ["0", 0],
-      ["0.5", 0.5],
-      ["1", 1],
-      ["-0.001", 0.1],
-      ["1.001", 0.1],
-      ["", 0.1],
-      ["   ", 0.1],
-      ["Infinity", 0.1],
-      ["-Infinity", 0.1],
-      ["NaN", 0.1],
-      ["nonsense", 0.1],
-    ] satisfies ReadonlyArray<readonly [string | undefined, number]>
-
-    for (const [raw, expected] of cases) {
-      expect(resolveDoLogSampleRate(raw)).toBe(expected)
-    }
-  })
-})
-
 describe("createDoLogger", () => {
   it("emits DO info logs as first-class log events with durable object context", async () => {
     const { createDoLogger } = await loadObservability()

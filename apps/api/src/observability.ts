@@ -9,6 +9,7 @@ import {
   sharedSamplingConfig,
 } from "@unprice/observability"
 import { evlog } from "evlog/hono"
+import { resolveSampleRate } from "~/sampling"
 
 // ============================================
 // Single drain for the entire API worker
@@ -57,19 +58,6 @@ export function createApiLogger(
  */
 export const apiMetricsLogger: Logger = createMetricsLogger(apiDrain)
 
-const DEFAULT_DO_LOG_SAMPLE_RATE = 0.1
-
-export function resolveDoLogSampleRate(raw: string | undefined): number {
-  const normalized = raw?.trim()
-  if (!normalized) return DEFAULT_DO_LOG_SAMPLE_RATE
-
-  const parsed = Number(normalized)
-  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
-    return DEFAULT_DO_LOG_SAMPLE_RATE
-  }
-  return parsed
-}
-
 /**
  * DO diagnostics that must never be sampled away: errors, business denials,
  * batches containing denials, and operator-recovery states. Everything else
@@ -88,9 +76,7 @@ export function shouldAlwaysKeepDoLogEvent(fields: Record<string, unknown> | und
   return false
 }
 
-const doLogSampleRate = resolveDoLogSampleRate(
-  (env as unknown as Record<string, unknown>).DO_LOG_SAMPLE_RATE as string | undefined
-)
+const doLogSampleRate = resolveSampleRate(env.DO_LOG_SAMPLE_RATE)
 
 function shouldEmitDoInfoEvent(fields: Record<string, unknown> | undefined): boolean {
   if (shouldAlwaysKeepDoLogEvent(fields)) return true

@@ -118,6 +118,9 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
       // Fraction of typed metric emissions (cache/db/ratelimit) exported to
       // the log drain. Wide events are sampled separately by evlog.
       METRICS_SAMPLE_RATE: z.coerce.number().optional(),
+      // Fraction of happy-path Durable Object info/debug logs exported to the
+      // drain. Errors and business denials are never sampled away.
+      DO_LOG_SAMPLE_RATE: z.coerce.number().optional(),
 
       STRIPE_API_KEY: z.string().optional(),
       STRIPE_CONNECT_WEBHOOK_SECRET: z.string().optional(),
