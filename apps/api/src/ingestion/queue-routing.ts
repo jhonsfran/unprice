@@ -1,103 +1,36 @@
 export type IngestionQueueKind = "raw" | "raw_dlq" | "reporting" | "reporting_dlq"
 
-type QueueBodySchema<T> = {
-  safeParse: (
-    value: unknown
-  ) => { success: true; data: T } | { success: false; error: { issues: unknown } }
-}
+type IngestionQueueConsumer = (batch: MessageBatch<unknown>) => Promise<void>
 
-type MalformedQueueMessageHandler = (failure: { queue: string; errors: unknown }) => void
-
-type IngestionQueueDispatchOptions<TRaw, TReporting> = {
-  consumeRaw: (batch: MessageBatch<TRaw>) => Promise<void>
-  consumeRawDlq: (batch: MessageBatch<TRaw>) => Promise<void>
-  consumeReporting: (batch: MessageBatch<TReporting>) => Promise<void>
-  consumeReportingDlq: (batch: MessageBatch<TReporting>) => Promise<void>
-  onMalformed: MalformedQueueMessageHandler
-  rawSchema: QueueBodySchema<TRaw>
-  reportingSchema: QueueBodySchema<TReporting>
+type IngestionQueueDispatchOptions = {
+  consumers: Record<IngestionQueueKind, IngestionQueueConsumer>
+  onUnknownQueue: (failure: { queue: string }) => void
 }
 
 /**
  * Queue names are defined in apps/api/wrangler.jsonc. Order matters:
- * "reporting-dlq" contains "reporting" and "dlq" as substrings.
+ * "reporting-dlq" starts with the reporting queue prefix.
  */
-export function classifyIngestionQueue(queueName: string): IngestionQueueKind {
+export function classifyIngestionQueue(queueName: string): IngestionQueueKind | undefined {
   if (queueName.startsWith("unprice-api-ingestion-reporting-dlq-")) return "reporting_dlq"
   if (queueName.startsWith("unprice-api-ingestion-reporting-")) return "reporting"
   if (queueName.startsWith("unprice-api-ingestion-dlq-")) return "raw_dlq"
-  return "raw"
+  if (queueName.startsWith("unprice-api-ingestion-shard-")) return "raw"
+  return undefined
 }
 
-export async function dispatchIngestionQueueBatch<TRaw, TReporting>(
+export async function dispatchIngestionQueueBatch(
   batch: MessageBatch<unknown>,
-  options: IngestionQueueDispatchOptions<TRaw, TReporting>
+  options: IngestionQueueDispatchOptions
 ): Promise<void> {
   const kind = classifyIngestionQueue(batch.queue)
-  switch (kind) {
-    case "raw": {
-      const messages = parseBatchBodies(batch, options.rawSchema, options.onMalformed)
-      if (messages.length > 0) {
-        await options.consumeRaw(withMessages(batch, messages))
-      }
-      return
+  if (!kind) {
+    for (const message of batch.messages) {
+      message.retry()
     }
-    case "raw_dlq": {
-      const messages = parseBatchBodies(batch, options.rawSchema, options.onMalformed)
-      if (messages.length > 0) {
-        await options.consumeRawDlq(withMessages(batch, messages))
-      }
-      return
-    }
-    case "reporting": {
-      const messages = parseBatchBodies(batch, options.reportingSchema, options.onMalformed)
-      if (messages.length > 0) {
-        await options.consumeReporting(withMessages(batch, messages))
-      }
-      return
-    }
-    case "reporting_dlq": {
-      const messages = parseBatchBodies(batch, options.reportingSchema, options.onMalformed)
-      if (messages.length > 0) {
-        await options.consumeReportingDlq(withMessages(batch, messages))
-      }
-      return
-    }
+    options.onUnknownQueue({ queue: batch.queue })
+    return
   }
 
-  return kind satisfies never
-}
-
-function parseBatchBodies<T>(
-  batch: MessageBatch<unknown>,
-  schema: QueueBodySchema<T>,
-  onMalformed: MalformedQueueMessageHandler
-): Message<T>[] {
-  const parsed: Message<T>[] = []
-  for (const message of batch.messages) {
-    const result = schema.safeParse(message.body)
-    if (result.success) {
-      parsed.push(withParsedBody(message, result.data))
-      continue
-    }
-    onMalformed({ queue: batch.queue, errors: result.error.issues })
-    message.ack()
-  }
-  return parsed
-}
-
-function withParsedBody<T>(message: Message<unknown>, body: T): Message<T> {
-  return {
-    ...message,
-    ack: message.ack.bind(message),
-    body,
-    retry: message.retry.bind(message),
-  } as Message<T>
-}
-
-function withMessages<T>(batch: MessageBatch<unknown>, messages: Message<T>[]): MessageBatch<T> {
-  return {
-    ...batch,
-    messages,
-  } as MessageBatch<T>
+  await options.consumers[kind](batch)
 }

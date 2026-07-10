@@ -41,12 +41,7 @@ import { registerStartRunV1 } from "./routes/runs/startRunV1"
 import { registerGetSubscriptionV1 } from "./routes/subscriptions/getSubscriptionV1"
 
 import { env } from "cloudflare:workers"
-import {
-  type IngestionQueueMessage,
-  type IngestionReportingEnvelope,
-  ingestionQueueMessageSchema,
-  ingestionReportingEnvelopeSchema,
-} from "@unprice/services/ingestion"
+import type { IngestionQueueMessage, IngestionReportingEnvelope } from "@unprice/services/ingestion"
 import { timing } from "hono/timing"
 import { verifyRealtimeTicket } from "~/auth/ticket"
 import { serializeError } from "~/errors/log"
@@ -254,34 +249,33 @@ const handler = {
     try {
       const parsedEnv = createRuntimeEnv(env as unknown as Record<string, unknown>)
       await dispatchIngestionQueueBatch(batch, {
-        consumeRaw: (parsedBatch) =>
-          consumeIngestionBatch(parsedBatch, parsedEnv, executionCtx, apiDrain ?? undefined),
-        consumeRawDlq: (parsedBatch) =>
-          consumeIngestionDlqBatch(parsedBatch, parsedEnv, executionCtx, apiDrain ?? undefined),
-        consumeReporting: (parsedBatch) =>
-          consumeIngestionReportingQueueBatch(
-            parsedBatch,
-            parsedEnv,
-            executionCtx,
-            apiDrain ?? undefined
-          ),
-        consumeReportingDlq: (parsedBatch) =>
-          consumeIngestionReportingDlqBatch(
-            parsedBatch,
-            parsedEnv,
-            executionCtx,
-            apiDrain ?? undefined
-          ),
-        onMalformed: ({ queue, errors }) => {
+        consumers: {
+          raw: (queueBatch) =>
+            consumeIngestionBatch(queueBatch, parsedEnv, executionCtx, apiDrain ?? undefined),
+          raw_dlq: (queueBatch) =>
+            consumeIngestionDlqBatch(queueBatch, parsedEnv, executionCtx, apiDrain ?? undefined),
+          reporting: (queueBatch) =>
+            consumeIngestionReportingQueueBatch(
+              queueBatch,
+              parsedEnv,
+              executionCtx,
+              apiDrain ?? undefined
+            ),
+          reporting_dlq: (queueBatch) =>
+            consumeIngestionReportingDlqBatch(
+              queueBatch,
+              parsedEnv,
+              executionCtx,
+              apiDrain ?? undefined
+            ),
+        },
+        onUnknownQueue: ({ queue }) => {
           log.error({
-            code: "MALFORMED_INGESTION_QUEUE_MESSAGE",
-            message: "dropping malformed ingestion queue message",
+            code: "UNKNOWN_INGESTION_QUEUE",
+            message: "retrying messages from unknown ingestion queue",
             queue,
-            errors,
           })
         },
-        rawSchema: ingestionQueueMessageSchema,
-        reportingSchema: ingestionReportingEnvelopeSchema,
       })
     } catch (error) {
       const serializedError = serializeError(error)

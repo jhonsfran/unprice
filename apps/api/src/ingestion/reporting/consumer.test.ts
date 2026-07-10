@@ -83,6 +83,40 @@ describe("IngestionReportingConsumer", () => {
     expect(ack).toHaveBeenCalledTimes(1)
   })
 
+  it("acks malformed envelopes and still publishes valid siblings", async () => {
+    const malformedAck = vi.fn()
+    const malformedRetry = vi.fn()
+    const validAck = vi.fn()
+    const auditRecord = createAuditRecord()
+    const logger = createLogger()
+    const publishAuditRecords = vi.fn().mockResolvedValue(undefined)
+    const consumer = new IngestionReportingConsumer({
+      ingestIngestionEvents: vi.fn().mockResolvedValue({ quarantined_rows: 0, successful_rows: 1 }),
+      ingestMeterFacts: vi.fn().mockResolvedValue({ quarantined_rows: 0, successful_rows: 0 }),
+      logger: logger as never,
+      publishAuditRecords,
+    })
+
+    await consumer.consumeBatch({
+      messages: [
+        { ack: malformedAck, body: { kind: "renamed.reporting.v1" }, retry: malformedRetry },
+        {
+          ack: validAck,
+          body: createEnvelope({ auditRecords: [auditRecord] }),
+          retry: vi.fn(),
+        },
+      ],
+    })
+
+    expect(logger.error).toHaveBeenCalledWith("dropping malformed reporting queue message", {
+      errors: expect.any(Array),
+    })
+    expect(malformedAck).toHaveBeenCalledOnce()
+    expect(malformedRetry).not.toHaveBeenCalled()
+    expect(publishAuditRecords).toHaveBeenCalledWith([auditRecord])
+    expect(validAck).toHaveBeenCalledOnce()
+  })
+
   it("chunks a large fact list into multiple Tinybird writes", async () => {
     const facts = Array.from({ length: 5_001 }, (_, index) =>
       createMeterFact({

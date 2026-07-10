@@ -6,7 +6,6 @@ import type { EntitlementService } from "@unprice/services/entitlements"
 import {
   IngestionDlqConsumer,
   IngestionQueueConsumer,
-  type IngestionQueueMessage,
   IngestionReportingDispatcher,
   IngestionService,
 } from "@unprice/services/ingestion"
@@ -46,7 +45,7 @@ export function createIngestionService(params: CreateIngestionServiceParams): In
 }
 
 export async function consumeIngestionBatch(
-  batch: MessageBatch<IngestionQueueMessage>,
+  batch: MessageBatch<unknown>,
   env: Env,
   executionCtx: ExecutionContext,
   drain?: { flush: () => Promise<void> }
@@ -111,7 +110,7 @@ export async function consumeIngestionBatch(
 }
 
 export async function consumeIngestionDlqBatch(
-  batch: MessageBatch<IngestionQueueMessage>,
+  batch: MessageBatch<unknown>,
   env: Env,
   executionCtx: ExecutionContext,
   drain?: { flush: () => Promise<void> }

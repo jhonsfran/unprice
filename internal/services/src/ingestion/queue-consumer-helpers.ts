@@ -9,7 +9,7 @@ import {
 
 export type IngestionQueueBatchMessage = {
   ack: () => void
-  body: IngestionQueueMessage
+  body: unknown
   retry: (options?: { delaySeconds?: number }) => void
 }
 

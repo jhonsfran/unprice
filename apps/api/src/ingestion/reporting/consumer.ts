@@ -30,7 +30,7 @@ const auditPayloadForIngestionEventSchema = z.object({
 
 export type IngestionReportingQueueBatchMessage = {
   ack: () => void
-  body: IngestionReportingEnvelope
+  body: unknown
   retry: (options?: { delaySeconds?: number }) => void
 }
 
@@ -61,9 +61,23 @@ export class IngestionReportingConsumer {
   }
 
   public async consumeBatch(batch: IngestionReportingQueueBatch): Promise<void> {
-    const envelopes = batch.messages.map((message) =>
-      ingestionReportingEnvelopeSchema.parse(message.body)
-    )
+    const validMessages = batch.messages.flatMap((message) => {
+      const parsed = ingestionReportingEnvelopeSchema.safeParse(message.body)
+      if (!parsed.success) {
+        this.logger.error("dropping malformed reporting queue message", {
+          errors: parsed.error.issues,
+        })
+        message.ack()
+        return []
+      }
+
+      return [{ envelope: parsed.data, message }]
+    })
+    if (validMessages.length === 0) {
+      return
+    }
+
+    const envelopes = validMessages.map(({ envelope }) => envelope)
 
     const auditRecords = envelopes.flatMap((envelope) => envelope.auditRecords)
     const meterFacts = envelopes.flatMap((envelope) => envelope.meterFacts)
@@ -76,7 +90,7 @@ export class IngestionReportingConsumer {
     await publishMeterFactChunks(tinybirdChunks, this.ingestMeterFacts)
     await publishIngestionEventChunks(ingestionEventChunks, this.ingestIngestionEvents)
 
-    for (const message of batch.messages) {
+    for (const { message } of validMessages) {
       message.ack()
     }
 

@@ -7,7 +7,7 @@ const REDRIVE_BASE_DELAY_SECONDS = 60
 
 type ReportingDlqMessage = {
   ack: () => void
-  body: IngestionReportingEnvelope
+  body: unknown
   retry: (options?: { delaySeconds?: number }) => void
 }
 
