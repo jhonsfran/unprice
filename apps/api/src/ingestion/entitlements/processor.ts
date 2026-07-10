@@ -2171,14 +2171,7 @@ export class EntitlementWindowProcessor {
     let thrown: unknown
 
     try {
-      // The entitlement-local fact outbox is gone; these fields stay at their
-      // terminal values because operator dashboards still query them.
-      wideEvent.tinybird_flush_failed = false
-
       wideEvent.idempotency_cleaned = this.runAlarmIdempotencyCleanup(now, wideEvent)
-
-      wideEvent.outbox_remaining = 0
-      wideEvent.outbox_alert = false
 
       const inactivityMs = this.timing.inactivityThresholdMs
       const closeHandled = await this.handleAlarmReservationClose({

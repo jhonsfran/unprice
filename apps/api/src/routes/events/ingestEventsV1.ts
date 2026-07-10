@@ -389,13 +389,6 @@ export function buildIngestionQueueMessage(params: {
   })
 }
 
-export function resolveRequestCustomerId(params: {
-  explicitCustomerId?: string
-  defaultCustomerId?: string | null
-}): string | null {
-  return params.explicitCustomerId ?? params.defaultCustomerId ?? null
-}
-
 export function resolveIngestionMessageRequestId(params: {
   appEnv: Env["APP_ENV"]
   failureTestHeader?: string | undefined

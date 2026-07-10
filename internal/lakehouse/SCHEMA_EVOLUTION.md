@@ -59,8 +59,13 @@ Cloudflare conversions/normalization are handled by `toCloudflarePipelineSchema(
    - `description` with clear semantics
 3. Bump that source `currentVersion` if needed.
 4. Prefer `required: false` first unless every producer can immediately populate it.
-5. Update event production in API pipeline:
-   - `apps/api/src/lakehouse/pipeline.ts`
+5. Update event production: `internal/services/src/ingestion/reporting-envelope.ts`
+   (`buildIngestionAuditPayload`) populates the payload; records are published by
+   `apps/api/src/ingestion/reporting/audit-record-publisher.ts` (R2 Pipelines) and
+   `apps/api/src/ingestion/reporting/consumer.ts` (Tinybird `unprice_ingestion_events`
+   + `unprice_entitlement_meter_facts`). Customer-visible fields also require
+   `internal/analytics` datasource/pipe/fixture updates — see the checklist in
+   docs/observability/ingestion-reporting.md.
 6. Regenerate Cloudflare stream schemas:
    - `cd apps/api && npm run scripts:lakehouse-schemas`
 7. Recreate pipeline resources for the target environment:
