@@ -91,9 +91,11 @@ type RunBudgetDOConstructor = new (
 }
 
 const testState = {
+  createConnection: vi.fn(createPostgresConnectionMock),
   createReservation: vi.fn(),
   captureReservationUsage: vi.fn(),
   releaseReservation: vi.fn(),
+  walletServiceConstructions: 0,
   entitlementWindowApply: vi.fn(),
   failRunIdempotencyInsert: false,
   persistExpiredRunSummary: vi.fn(),
@@ -114,9 +116,11 @@ describe("RunBudgetDO", () => {
 
   beforeEach(() => {
     for (const fn of Object.values(testState.logger)) fn.mockReset()
+    testState.createConnection.mockClear()
     testState.createReservation.mockReset()
     testState.captureReservationUsage.mockReset()
     testState.releaseReservation.mockReset()
+    testState.walletServiceConstructions = 0
     testState.entitlementWindowApply.mockReset()
     testState.failRunIdempotencyInsert = false
     testState.persistExpiredRunSummary.mockReset()
@@ -188,9 +192,86 @@ describe("RunBudgetDO", () => {
         remainingAmount: 100_000,
       })
       expect(testState.createReservation).toHaveBeenCalledTimes(1)
+      expect(testState.createReservation).toHaveBeenCalledWith({
+        projectId: "proj_1",
+        customerId: "cus_1",
+        currency: "USD",
+        entitlementId: null,
+        owner: { type: "agent_run", id: "run_1" },
+        requestedAmount: 100_000,
+        minimumAllocationAmount: 100_000,
+        refillThresholdBps: 2000,
+        refillChunkAmount: 100_000,
+        periodStartAt: new Date(BASE_NOW),
+        periodEndAt: new Date(BASE_NOW + 24 * 60 * 60 * 1000),
+        idempotencyKey: "idem_start_1",
+        metadata: {
+          run_id: "run_1",
+          trace_id: null,
+          parent_run_id: null,
+          workload_type: "agent",
+          workload_id: "agent_1",
+        },
+      })
     },
     DO_STARTUP_TEST_TIMEOUT_MS
   )
+
+  it("constructs wallet services per public RPC wallet operation on one DO instance", async () => {
+    const RunBudgetDO = await loadRunBudgetDO()
+    const state = createDurableObjectState()
+    const durable = new RunBudgetDO(state, createEnv())
+
+    await durable.startRun({
+      workloadType: "agent",
+      workloadId: "agent_1",
+      runId: "run_wallet_scope",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      currency: "USD",
+      budgetAmount: 100_000,
+      idempotencyKey: "idem_wallet_scope",
+      metadata: {},
+      now: BASE_NOW,
+    })
+
+    expect(testState.createConnection).toHaveBeenCalledTimes(1)
+    expect(testState.walletServiceConstructions).toBe(1)
+
+    await durable.endRun({
+      workloadType: "agent",
+      workloadId: "agent_1",
+      runId: "run_wallet_scope",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      status: "completed",
+      endedAt: BASE_NOW + 5000,
+    })
+
+    expect(testState.createConnection).toHaveBeenCalledTimes(2)
+    expect(testState.createConnection).toHaveBeenNthCalledWith(1, {
+      env: "test",
+      primaryDatabaseUrl: "postgres://user:pass@localhost:5432/unprice",
+      read1DatabaseUrl: "postgres://user:pass@localhost:5432/unprice",
+      read2DatabaseUrl: "postgres://user:pass@localhost:5432/unprice",
+      logger: false,
+      singleton: false,
+    })
+    expect(testState.createConnection).toHaveBeenNthCalledWith(2, {
+      env: "test",
+      primaryDatabaseUrl: "postgres://user:pass@localhost:5432/unprice",
+      read1DatabaseUrl: "postgres://user:pass@localhost:5432/unprice",
+      read2DatabaseUrl: "postgres://user:pass@localhost:5432/unprice",
+      logger: false,
+      singleton: false,
+    })
+    const startConnection = testState.createConnection.mock.results[0]?.value
+    const endConnection = testState.createConnection.mock.results[1]?.value
+    expect(startConnection).toBeDefined()
+    expect(endConnection).toBeDefined()
+    expect(endConnection).not.toBe(startConnection)
+    expect(testState.walletServiceConstructions).toBe(2)
+  })
 
   it(
     "startRun is idempotent - returns existing run state",
@@ -801,6 +882,32 @@ describe("RunBudgetDO", () => {
     expect(result.budget.remainingAmount).toBe(95_000)
     // Alarm scheduled since consumedAmount > flushedAmount
     expect(state.alarmAt).toBe(BASE_NOW + 10_000)
+    expect(env.entitlementwindow.idFromName).toHaveBeenCalledWith("test:proj_1:cus_1:ce_test_1")
+    expect(testState.entitlementWindowApply).toHaveBeenCalledWith({
+      event: {
+        id: "evt_1",
+        slug: "tokens_used",
+        timestamp: BASE_NOW,
+        properties: { amount: 3 },
+        source: {
+          workspaceId: "ws_1",
+          environment: "test",
+          apiKeyId: "key_1",
+          sourceType: "api_key",
+          sourceId: "key_1",
+          sourceName: null,
+        },
+      },
+      idempotencyKey: "idem_event_1:ew",
+      projectId: "proj_1",
+      customerId: "cus_1",
+      entitlement: TEST_ENTITLEMENT_FIELDS.entitlement,
+      grants: TEST_ENTITLEMENT_FIELDS.grants,
+      enforceLimit: true,
+      now: BASE_NOW,
+      walletMode: "external_reservation",
+      externalReservation: { remainingAmount: 100_000 },
+    })
   })
 
   it("serializes concurrent applySyncEvent calls before pricing against remaining budget", async () => {
@@ -2250,15 +2357,7 @@ async function loadRunBudgetDO() {
 
   vi.doMock("@unprice/db", () => ({
     and: vi.fn((...args: unknown[]) => args),
-    createConnection: vi.fn(() => ({
-      update: vi.fn(() => ({
-        set: vi.fn((values: unknown) => ({
-          where: vi.fn((condition: unknown) => ({
-            returning: vi.fn(() => testState.persistExpiredRunSummary(values, condition)),
-          })),
-        })),
-      })),
-    })),
+    createConnection: testState.createConnection,
     eq: vi.fn((column: unknown, value: unknown) => ({ column, value })),
   }))
 
@@ -2282,6 +2381,10 @@ async function loadRunBudgetDO() {
       public createReservation = testState.createReservation
       public captureReservationUsage = testState.captureReservationUsage
       public releaseReservation = testState.releaseReservation
+
+      constructor() {
+        testState.walletServiceConstructions += 1
+      }
     },
   }))
 
@@ -2294,6 +2397,18 @@ async function loadRunBudgetDO() {
   )
 
   return runBudgetDOPromise
+}
+
+function createPostgresConnectionMock() {
+  return {
+    update: vi.fn(() => ({
+      set: vi.fn((values: unknown) => ({
+        where: vi.fn((condition: unknown) => ({
+          returning: vi.fn(() => testState.persistExpiredRunSummary(values, condition)),
+        })),
+      })),
+    })),
+  }
 }
 
 function createDurableObjectState(): FakeDurableObjectState {
@@ -2340,7 +2455,7 @@ function createEnv() {
     DATABASE_READ1_URL: "postgres://user:pass@localhost:5432/unprice",
     DATABASE_READ2_URL: "postgres://user:pass@localhost:5432/unprice",
     entitlementwindow: {
-      idFromName: (_name: string) => ({ toString: () => "ew_id_123" }),
+      idFromName: vi.fn((_name: string) => ({ toString: () => "ew_id_123" })),
       get: (_id: unknown) => ({
         apply: testState.entitlementWindowApply,
       }),

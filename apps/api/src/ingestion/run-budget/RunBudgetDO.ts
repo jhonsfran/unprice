@@ -20,6 +20,7 @@ import {
 } from "./contracts"
 import * as schema from "./db/schema"
 import migrations from "./drizzle/migrations"
+import type { RunBudgetPricingDelegate, RunBudgetWalletOps } from "./ports"
 
 type RunStateRow = typeof schema.runState.$inferSelect
 type RunCaptureIntentRow = typeof schema.runCaptureIntents.$inferSelect
@@ -49,12 +50,34 @@ class RunCapturesPendingError extends Error {
 export class RunBudgetDO extends DurableObject {
   private readonly ready: Promise<void>
   private readonly db: DrizzleSqliteDODatabase<typeof schema>
+  private readonly pricing: RunBudgetPricingDelegate
 
   constructor(
     state: DurableObjectState,
     private readonly runtimeEnv: Env
   ) {
     super(state, runtimeEnv as unknown as Cloudflare.Env)
+    this.pricing = {
+      apply: async (input) => {
+        const entitlementWindowId = this.runtimeEnv.entitlementwindow.idFromName(
+          `${this.runtimeEnv.APP_ENV}:${input.projectId}:${input.customerId}:${input.customerEntitlementId}`
+        )
+        const entitlementWindow = this.runtimeEnv.entitlementwindow.get(entitlementWindowId)
+
+        return entitlementWindow.apply({
+          event: input.event,
+          idempotencyKey: input.idempotencyKey,
+          projectId: input.projectId,
+          customerId: input.customerId,
+          entitlement: input.entitlement,
+          grants: input.grants,
+          enforceLimit: input.enforceLimit,
+          now: input.now,
+          walletMode: "external_reservation",
+          externalReservation: input.externalReservation,
+        })
+      },
+    }
     this.db = drizzle(this.ctx.storage, { schema, logger: false })
     this.ready = this.ctx.blockConcurrencyWhile(async () => {
       migrate(this.db, migrations)
@@ -550,6 +573,7 @@ export class RunBudgetDO extends DurableObject {
       read1DatabaseUrl: this.runtimeEnv.DATABASE_READ1_URL,
       read2DatabaseUrl: this.runtimeEnv.DATABASE_READ2_URL,
       logger: false,
+      singleton: false,
     })
 
     const updatedRows = await db
@@ -620,23 +644,7 @@ export class RunBudgetDO extends DurableObject {
     | { success: true; reservationId: string; allocationAmount: number }
     | { success: false; reason: string }
   > {
-    const { createConnection } = await import("@unprice/db")
-    const { WalletService } = await import("@unprice/services/wallet")
-    const { LedgerGateway } = await import("@unprice/services/ledger")
-
-    const db = createConnection({
-      env: this.runtimeEnv.APP_ENV,
-      primaryDatabaseUrl: this.runtimeEnv.DATABASE_URL,
-      read1DatabaseUrl: this.runtimeEnv.DATABASE_READ1_URL,
-      read2DatabaseUrl: this.runtimeEnv.DATABASE_READ2_URL,
-      logger: false,
-    })
-
-    const { createDoLogger } = await import("~/observability")
-    const logger = createDoLogger(this.ctx.id.toString())
-
-    const ledger = new LedgerGateway({ db, logger })
-    const wallet = new WalletService({ db, logger, ledgerGateway: ledger })
+    const wallet = await this.createWalletOps()
 
     const result = await wallet.createReservation({
       projectId: input.projectId,
@@ -672,30 +680,44 @@ export class RunBudgetDO extends DurableObject {
     }
   }
 
-  private async callEntitlementWindow(input: ApplyRunSyncEventInput, remainingAmount: number) {
-    // Address the EntitlementWindowDO using the same naming scheme as the normal ingestion path:
-    // ${appEnv}:${projectId}:${customerId}:${customerEntitlementId}
-    const entitlementWindowId = this.runtimeEnv.entitlementwindow.idFromName(
-      `${this.runtimeEnv.APP_ENV}:${input.projectId}:${input.customerId}:${input.customerEntitlementId}`
-    )
-    const entitlementWindow = this.runtimeEnv.entitlementwindow.get(entitlementWindowId)
+  /**
+   * Creates fresh wallet operations for one external wallet use. The lazy Neon
+   * WebSocket connection and services must never cross Worker/DO request boundaries.
+   */
+  private async createWalletOps(): Promise<RunBudgetWalletOps> {
+    const { createConnection } = await import("@unprice/db")
+    const { WalletService } = await import("@unprice/services/wallet")
+    const { LedgerGateway } = await import("@unprice/services/ledger")
 
-    // The entitlement and grants are validated upstream by the use case and pass through
-    // the DO contract as opaque objects. The EntitlementWindowDO re-parses them with its
-    // own applyInputSchema, so the runtime data is correct even though the DO contract
-    // uses looser types for these pass-through fields.
-    return entitlementWindow.apply({
+    const db = createConnection({
+      env: this.runtimeEnv.APP_ENV,
+      primaryDatabaseUrl: this.runtimeEnv.DATABASE_URL,
+      read1DatabaseUrl: this.runtimeEnv.DATABASE_READ1_URL,
+      read2DatabaseUrl: this.runtimeEnv.DATABASE_READ2_URL,
+      logger: false,
+      singleton: false,
+    })
+
+    const { createDoLogger } = await import("~/observability")
+    const logger = createDoLogger(this.ctx.id.toString())
+
+    const ledger = new LedgerGateway({ db, logger })
+    return new WalletService({ db, logger, ledgerGateway: ledger })
+  }
+
+  private async callEntitlementWindow(input: ApplyRunSyncEventInput, remainingAmount: number) {
+    // The entitlement and grants are validated upstream by the use case. The
+    // EntitlementWindowDO re-parses them with its own applyInputSchema at the RPC boundary.
+    return this.pricing.apply({
       event: { ...input.event, source: input.source },
       idempotencyKey: `${input.idempotencyKey}:ew`,
       projectId: input.projectId,
       customerId: input.customerId,
-      entitlement: input.entitlement as Parameters<
-        typeof entitlementWindow.apply
-      >[0]["entitlement"],
-      grants: input.grants as Parameters<typeof entitlementWindow.apply>[0]["grants"],
+      customerEntitlementId: input.customerEntitlementId,
+      entitlement: input.entitlement,
+      grants: input.grants,
       enforceLimit: true,
       now: input.now,
-      walletMode: "external_reservation",
       externalReservation: { remainingAmount },
     })
   }
@@ -714,22 +736,7 @@ export class RunBudgetDO extends DurableObject {
     quantity: number
     flushSeq: number
   }): Promise<void> {
-    const { createConnection } = await import("@unprice/db")
-    const { WalletService } = await import("@unprice/services/wallet")
-    const { LedgerGateway } = await import("@unprice/services/ledger")
-
-    const db = createConnection({
-      env: this.runtimeEnv.APP_ENV,
-      primaryDatabaseUrl: this.runtimeEnv.DATABASE_URL,
-      read1DatabaseUrl: this.runtimeEnv.DATABASE_READ1_URL,
-      read2DatabaseUrl: this.runtimeEnv.DATABASE_READ2_URL,
-      logger: false,
-    })
-
-    const { createDoLogger } = await import("~/observability")
-    const logger = createDoLogger(this.ctx.id.toString())
-    const ledger = new LedgerGateway({ db, logger })
-    const wallet = new WalletService({ db, logger, ledgerGateway: ledger })
+    const wallet = await this.createWalletOps()
 
     const result = await wallet.captureReservationUsage({
       projectId: input.projectId,
@@ -755,22 +762,7 @@ export class RunBudgetDO extends DurableObject {
   }
 
   private async releaseReservation(run: RunStateRow): Promise<void> {
-    const { createConnection } = await import("@unprice/db")
-    const { WalletService } = await import("@unprice/services/wallet")
-    const { LedgerGateway } = await import("@unprice/services/ledger")
-
-    const db = createConnection({
-      env: this.runtimeEnv.APP_ENV,
-      primaryDatabaseUrl: this.runtimeEnv.DATABASE_URL,
-      read1DatabaseUrl: this.runtimeEnv.DATABASE_READ1_URL,
-      read2DatabaseUrl: this.runtimeEnv.DATABASE_READ2_URL,
-      logger: false,
-    })
-
-    const { createDoLogger } = await import("~/observability")
-    const logger = createDoLogger(this.ctx.id.toString())
-    const ledger = new LedgerGateway({ db, logger })
-    const wallet = new WalletService({ db, logger, ledgerGateway: ledger })
+    const wallet = await this.createWalletOps()
 
     const result = await wallet.releaseReservation({
       projectId: run.projectId,
