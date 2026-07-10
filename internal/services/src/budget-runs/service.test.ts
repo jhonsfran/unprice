@@ -336,6 +336,30 @@ describe("BudgetRunService.listRunsRefreshed", () => {
   })
 })
 
+describe("BudgetRunService.updateRunSummary", () => {
+  it("rejects a terminal update without endedAt before mutating Postgres", async () => {
+    const update = vi.fn()
+    const service = new BudgetRunService({
+      db: { update } as unknown as Database,
+      logger: {} as unknown as Logger,
+      cache: {} as unknown as Cache,
+      waitUntil: vi.fn(),
+    })
+
+    const result = await service.updateRunSummary({
+      projectId: "proj_123",
+      runId: "brun_123",
+      status: "completed",
+      consumedAmount: 300,
+      remainingAmount: 700,
+      endedAt: null,
+    } as unknown as Parameters<BudgetRunService["updateRunSummary"]>[0])
+
+    expect(result.err?.message).toBe("Terminal run summary requires endedAt")
+    expect(update).not.toHaveBeenCalled()
+  })
+})
+
 function liveSummary(
   overrides: Partial<{
     runId: string

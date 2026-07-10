@@ -182,6 +182,13 @@ export async function startRun(
   // Check if the DO reported a wallet error (e.g. WALLET_EMPTY)
   const summary = doResult.val.summary
   if (summary.status === "failed" && doResult.val.walletError) {
+    // Older DOs can omit endedAt during rollout. Do not make the PG row
+    // terminal with a synthetic timestamp; a retry against the upgraded DO
+    // will return the authoritative failure time.
+    if (summary.endedAt == null) {
+      return Err(new RunUseCaseError("BUDGET_ERROR"))
+    }
+
     // Mark the Postgres row as failed before returning the business error
     const updateResult = await deps.services.budgetRuns.updateRunSummary({
       projectId: input.projectId,
@@ -190,7 +197,7 @@ export async function startRun(
       statusReason: `wallet: ${doResult.val.walletError}`,
       consumedAmount: 0,
       remainingAmount: 0,
-      endedAt: new Date(),
+      endedAt: new Date(summary.endedAt),
     })
     if (updateResult.err) {
       return Err(new RunUseCaseError("BUDGET_ERROR"))

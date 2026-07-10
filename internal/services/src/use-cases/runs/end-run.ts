@@ -54,17 +54,18 @@ export async function endRun(
   // does not return endedAt. Never replace the authoritative SQLite timestamp
   // with observation time; fail without changing the PG read model so a retry
   // after rollout convergence can persist the real terminal time.
-  if (doResult.val.endedAt == null) {
+  if (doResult.val.status === "running" || doResult.val.endedAt == null) {
     return Err(new RunUseCaseError("BUDGET_ERROR"))
   }
 
   const endedAt = doResult.val.endedAt
+  const finalStatus = input.status === "failed" ? "failed" : doResult.val.status
 
   // Persist final summary
   const summaryUpdateResult = await deps.services.budgetRuns.updateRunSummary({
     projectId: run.projectId,
     runId: run.id,
-    status: input.status === "failed" ? "failed" : doResult.val.status,
+    status: finalStatus,
     consumedAmount: doResult.val.consumedAmount,
     remainingAmount: doResult.val.remainingAmount,
     endedAt: new Date(endedAt),
@@ -75,7 +76,7 @@ export async function endRun(
 
   return Ok({
     runId: run.id,
-    status: input.status === "failed" ? "failed" : doResult.val.status,
+    status: finalStatus,
     endedAt,
     customerId: run.customerId,
     budgetAmount: doResult.val.budgetAmount,

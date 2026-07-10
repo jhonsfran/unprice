@@ -31,7 +31,7 @@ describe("applyRunSyncEvent", () => {
         workload_id: run.workloadId,
       }),
     ]
-    const { deps, enqueueOutcomes, runBudget } = createDeps({
+    const { deps, enqueueOutcomes, runBudget, updateRunSummary } = createDeps({
       run,
       runBudgetDecision: {
         allowed: true,
@@ -72,6 +72,12 @@ describe("applyRunSyncEvent", () => {
         event: input.event,
         source: input.source,
         now: input.now,
+      })
+    )
+    expect(updateRunSummary).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "running",
+        endedAt: null,
       })
     )
     expect(enqueueOutcomes).toHaveBeenCalledWith({
@@ -168,6 +174,7 @@ describe("applyRunSyncEvent", () => {
       traceId: "trace_rejected_001",
       parentRunId: "brun_parent_001",
     })
+    const endedAt = TEST_NOW - 500
     const { deps, enqueueOutcomes, runBudget, updateRunSummary } = createDeps({
       run,
       runBudgetDecision: {
@@ -177,6 +184,7 @@ describe("applyRunSyncEvent", () => {
         budget: {
           runId: run.id,
           status: "budget_exceeded",
+          endedAt,
           budgetAmount: 1_000_000_000,
           consumedAmount: 1_000_000_000,
           remainingAmount: 0,
@@ -195,6 +203,7 @@ describe("applyRunSyncEvent", () => {
       run: {
         runId: run.id,
         status: "budget_exceeded",
+        endedAt,
         workloadType: "agent",
         workloadId: "research-assistant",
         traceId: "trace_rejected_001",
@@ -206,6 +215,7 @@ describe("applyRunSyncEvent", () => {
       expect.objectContaining({
         status: "budget_exceeded",
         statusReason: "RUN_BUDGET_EXCEEDED",
+        endedAt: new Date(endedAt),
       })
     )
     expect(enqueueOutcomes).toHaveBeenCalledWith({
@@ -230,6 +240,52 @@ describe("applyRunSyncEvent", () => {
         },
       ],
     })
+  })
+
+  it("does not make Postgres terminal when an older DO omits the terminal timestamp", async () => {
+    const run = createRun()
+    const { deps, enqueueOutcomes, updateRunSummary } = createDeps({
+      run,
+      runBudgetDecision: {
+        allowed: false,
+        state: "rejected",
+        rejectionReason: "RUN_BUDGET_EXCEEDED",
+        budget: {
+          runId: run.id,
+          status: "budget_exceeded",
+          budgetAmount: 1_000_000_000,
+          consumedAmount: 1_000_000_000,
+          remainingAmount: 0,
+        },
+        meterFacts: [],
+      },
+    })
+
+    const result = await applyRunSyncEvent(deps, createInput())
+
+    expect(result.err?.message).toBe("BUDGET_ERROR")
+    expect(updateRunSummary).not.toHaveBeenCalled()
+    expect(enqueueOutcomes).not.toHaveBeenCalled()
+  })
+
+  it("returns the stored timestamp when Postgres is already terminal before DO delegation", async () => {
+    const endedAt = new Date("2026-06-19T11:55:00.000Z")
+    const run = createRun({ status: "expired", endedAt })
+    const { deps, runBudget } = createDeps({
+      run,
+      entitlementResolution: {
+        ok: false,
+        reason: "NO_MATCHING_ENTITLEMENT",
+      },
+    })
+
+    const result = await applyRunSyncEvent(deps, createInput())
+
+    expect(result.val?.run).toMatchObject({
+      status: "expired",
+      endedAt: endedAt.getTime(),
+    })
+    expect(runBudget.applySyncEvent).not.toHaveBeenCalled()
   })
 
   it("returns a budget error without reporting when the summary update fails", async () => {
@@ -349,6 +405,7 @@ function createRun(
     workloadId: string | null
     traceId: string | null
     parentRunId: string | null
+    endedAt: Date | null
   }> = {}
 ) {
   return {
@@ -364,6 +421,7 @@ function createRun(
     workloadId: null,
     traceId: null,
     parentRunId: null,
+    endedAt: null,
     ...overrides,
   }
 }

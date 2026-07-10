@@ -49,6 +49,17 @@ type BudgetRunServiceDeps = {
 type BudgetRunRow = typeof budgetRuns.$inferSelect
 export type BudgetRunWithCustomer = BudgetRun & { customer: Customer }
 
+type UpdateRunSummaryInput = {
+  projectId: string
+  runId: string
+  statusReason?: string | null
+  consumedAmount: number
+  remainingAmount: number
+} & (
+  | { status: "running"; endedAt?: null }
+  | { status: Exclude<BudgetRunStatus, "running">; endedAt: Date }
+)
+
 export class BudgetRunService {
   constructor(private readonly deps: BudgetRunServiceDeps) {}
 
@@ -296,15 +307,20 @@ export class BudgetRunService {
     }
   }
 
-  async updateRunSummary(input: {
-    projectId: string
-    runId: string
-    status: BudgetRunStatus
-    statusReason?: string | null
-    consumedAmount: number
-    remainingAmount: number
-    endedAt?: Date | null
-  }): Promise<Result<BudgetRunRow, BudgetRunServiceError>> {
+  async updateRunSummary(
+    input: UpdateRunSummaryInput
+  ): Promise<Result<BudgetRunRow, BudgetRunServiceError>> {
+    if (
+      input.status !== "running" &&
+      (!(input.endedAt instanceof Date) || Number.isNaN(input.endedAt.getTime()))
+    ) {
+      return Err(
+        new BudgetRunServiceError({
+          message: "Terminal run summary requires endedAt",
+        })
+      )
+    }
+
     try {
       const [row] = await this.deps.db
         .update(budgetRuns)

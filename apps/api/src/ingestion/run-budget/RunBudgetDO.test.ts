@@ -98,6 +98,7 @@ const testState = {
   walletServiceConstructions: 0,
   entitlementWindowApply: vi.fn(),
   failRunIdempotencyInsert: false,
+  omitTerminalEndedAtFromIdempotency: false,
   logger: {
     debug: vi.fn(),
     error: vi.fn(),
@@ -122,6 +123,7 @@ describe("RunBudgetDO", () => {
     testState.walletServiceConstructions = 0
     testState.entitlementWindowApply.mockReset()
     testState.failRunIdempotencyInsert = false
+    testState.omitTerminalEndedAtFromIdempotency = false
 
     // Default mocks
     testState.createReservation.mockResolvedValue({
@@ -213,6 +215,35 @@ describe("RunBudgetDO", () => {
     },
     DO_STARTUP_TEST_TIMEOUT_MS
   )
+
+  it("returns the input timestamp when wallet reservation fails during start", async () => {
+    const RunBudgetDO = await loadRunBudgetDO()
+    const durable = new RunBudgetDO(createDurableObjectState(), createEnv())
+    testState.createReservation.mockResolvedValue({
+      err: new Error("wallet empty"),
+      val: null,
+    })
+
+    const result = await durable.startRun({
+      workloadType: "workflow",
+      workloadId: "daily-research",
+      runId: "run_wallet_empty",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      currency: "USD",
+      budgetAmount: 100_000,
+      idempotencyKey: "idem_wallet_empty",
+      metadata: {},
+      now: BASE_NOW,
+    })
+
+    expect(result).toMatchObject({
+      runId: "run_wallet_empty",
+      status: "failed",
+      endedAt: BASE_NOW,
+      walletError: "wallet empty",
+    })
+  })
 
   it("constructs wallet services per public RPC wallet operation on one DO instance", async () => {
     const RunBudgetDO = await loadRunBudgetDO()
@@ -562,6 +593,10 @@ describe("RunBudgetDO", () => {
     }
 
     vi.spyOn(Date, "now").mockReturnValue(expiredNow)
+    // Simulate a decision cached by the pre-endedAt DO version. The first
+    // response is current, while the stored replay payload intentionally omits
+    // the terminal timestamp.
+    testState.omitTerminalEndedAtFromIdempotency = true
     const result = await durable.applySyncEvent(eventInput)
 
     expect(result).toMatchObject({
@@ -571,6 +606,7 @@ describe("RunBudgetDO", () => {
       budget: {
         runId: "run_expired_apply",
         status: "expired",
+        endedAt: expiredNow,
         consumedAmount: 0,
         remainingAmount: 100_000,
       },
@@ -593,7 +629,19 @@ describe("RunBudgetDO", () => {
     })
 
     const duplicate = await durable.applySyncEvent(eventInput)
-    expect(duplicate).toEqual(result)
+    expect(duplicate).toMatchObject({
+      allowed: result.allowed,
+      state: result.state,
+      rejectionReason: result.rejectionReason,
+      budget: {
+        runId: "run_expired_apply",
+        status: "failed",
+        endedAt: expiredNow,
+        consumedAmount: 12_345,
+        remainingAmount: 87_655,
+      },
+      meterFacts: [],
+    })
     expect(testState.releaseReservation).toHaveBeenCalledTimes(1)
     expect(testState.entitlementWindowApply).not.toHaveBeenCalled()
   })
@@ -2253,13 +2301,36 @@ function buildFakeDrizzle() {
 
     return {
       values: (data: Record<string, unknown>) => {
-        const key = data[pk] as string
+        let storedData = data
+        if (
+          tableName === "runIdempotency" &&
+          testState.omitTerminalEndedAtFromIdempotency &&
+          typeof data.decisionJson === "string"
+        ) {
+          const decision = JSON.parse(data.decisionJson) as {
+            budget?: {
+              status: string
+              endedAt?: number | null
+              consumedAmount: number
+              remainingAmount: number
+            }
+          }
+          if (decision.budget) {
+            delete decision.budget.endedAt
+            decision.budget.status = "failed"
+            decision.budget.consumedAmount = 12_345
+            decision.budget.remainingAmount = 87_655
+          }
+          storedData = { ...data, decisionJson: JSON.stringify(decision) }
+        }
+
+        const key = storedData[pk] as string
         let handledByConflictClause = false
 
         const insertPromise = Promise.resolve().then(() => {
           if (!handledByConflictClause) {
             assertInsertAllowed(tableName)
-            store.set(key, { ...data })
+            store.set(key, { ...storedData })
           }
         })
 
@@ -2274,7 +2345,7 @@ function buildFakeDrizzle() {
                 existing[field] = evaluateSetValue(existing, field, val)
               }
             } else {
-              store.set(key, { ...data })
+              store.set(key, { ...storedData })
             }
             return Promise.resolve()
           },
@@ -2282,7 +2353,7 @@ function buildFakeDrizzle() {
             handledByConflictClause = true
             assertInsertAllowed(tableName)
             if (!store.has(key)) {
-              store.set(key, { ...data })
+              store.set(key, { ...storedData })
             }
             return Promise.resolve()
           },

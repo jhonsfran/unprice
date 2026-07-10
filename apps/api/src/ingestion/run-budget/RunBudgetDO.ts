@@ -112,6 +112,7 @@ export class RunBudgetDO extends DurableObject {
       return {
         runId: input.runId,
         status: "failed" as RunBudgetSummary["status"],
+        endedAt: input.now,
         budgetAmount: input.budgetAmount,
         consumedAmount: 0,
         remainingAmount: 0,
@@ -164,6 +165,26 @@ export class RunBudgetDO extends DurableObject {
     })
     if (cached) {
       const decision = JSON.parse(cached.decisionJson) as RunBudgetDecision
+
+      // Rolling-deploy repair: an older DO may have cached a terminal decision
+      // before summaries carried endedAt. Rehydrate only the missing timestamp
+      // from this DO's authoritative run state; every cached decision field
+      // remains unchanged.
+      if (decision.budget.status !== "running" && decision.budget.endedAt == null) {
+        const run = await this.loadRun(input.runId)
+        if (
+          run?.runId === decision.budget.runId &&
+          run.status !== "running" &&
+          run.endedAt != null
+        ) {
+          return {
+            ...decision,
+            budget: { ...decision.budget, endedAt: run.endedAt },
+            meterFacts: decision.meterFacts ?? [],
+          }
+        }
+      }
+
       return { ...decision, meterFacts: decision.meterFacts ?? [] }
     }
 

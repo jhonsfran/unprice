@@ -120,6 +120,7 @@ export async function applyRunSyncEvent(
       run: {
         runId: run.id,
         status: run.status,
+        endedAt: run.endedAt?.getTime() ?? null,
         customerId: run.customerId,
         budgetAmount: run.budgetAmount,
         consumedAmount: run.consumedAmount,
@@ -153,16 +154,42 @@ export async function applyRunSyncEvent(
   }
 
   const decision = doResult.val
+  const statusReason = decision.allowed ? null : (decision.rejectionReason ?? "RUN_BUDGET_EXCEEDED")
+  let endedAt: number | null
+  let summaryUpdateResult: Awaited<ReturnType<BudgetRunService["updateRunSummary"]>>
 
-  // Update stored summary
-  const summaryUpdateResult = await deps.services.budgetRuns.updateRunSummary({
-    projectId: run.projectId,
-    runId: run.id,
-    status: decision.budget.status,
-    statusReason: decision.allowed ? null : (decision.rejectionReason ?? "RUN_BUDGET_EXCEEDED"),
-    consumedAmount: decision.budget.consumedAmount,
-    remainingAmount: decision.budget.remainingAmount,
-  })
+  if (decision.budget.status === "running") {
+    endedAt = null
+    summaryUpdateResult = await deps.services.budgetRuns.updateRunSummary({
+      projectId: run.projectId,
+      runId: run.id,
+      status: "running",
+      statusReason,
+      consumedAmount: decision.budget.consumedAmount,
+      remainingAmount: decision.budget.remainingAmount,
+      endedAt: null,
+    })
+  } else {
+    const terminalEndedAt = decision.budget.endedAt
+
+    // A terminal DO decision without endedAt can only come from an older class
+    // during rollout. Leave the PG row running so retry/sweep can repair it after
+    // convergence; never make the read model terminal with observation time.
+    if (terminalEndedAt == null) {
+      return Err(new RunUseCaseError("BUDGET_ERROR"))
+    }
+
+    endedAt = terminalEndedAt
+    summaryUpdateResult = await deps.services.budgetRuns.updateRunSummary({
+      projectId: run.projectId,
+      runId: run.id,
+      status: decision.budget.status,
+      statusReason,
+      consumedAmount: decision.budget.consumedAmount,
+      remainingAmount: decision.budget.remainingAmount,
+      endedAt: new Date(terminalEndedAt),
+    })
+  }
   if (summaryUpdateResult.err) {
     return Err(new RunUseCaseError("BUDGET_ERROR"))
   }
@@ -193,6 +220,7 @@ export async function applyRunSyncEvent(
     run: {
       runId: run.id,
       status: decision.budget.status,
+      endedAt,
       customerId: run.customerId,
       budgetAmount: decision.budget.budgetAmount,
       consumedAmount: decision.budget.consumedAmount,
