@@ -104,5 +104,5 @@ export const registerFlushReservationsForInvoicingV1 = (app: App) =>
       })
     }
 
-    return c.json({ ok: true, ...result.val }, HttpStatusCodes.OK)
+    return c.json({ ...result.val, ok: true as const }, HttpStatusCodes.OK)
   })
