@@ -12,10 +12,6 @@ import {
   type SubscriptionItemConfig,
   type SubscriptionPhase,
   calculateCycleWindow,
-  calculateDateAt,
-  createDefaultSubscriptionConfig,
-  getAnchor,
-  getTrialIntervalForBillingInterval,
 } from "@unprice/db/validators"
 import { Err, Ok, type Result, type SchemaError } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
@@ -30,10 +26,10 @@ import type { LedgerGateway } from "../ledger"
 import type { Metrics } from "../metrics"
 import type { RatingService } from "../rating/service"
 import type { BillingReservationFlushGateway } from "../use-cases/billing/reservation-flush-gateway"
-import { toErrorContext } from "../utils/log-context"
 import type { WalletService } from "../wallet"
 import { UnPriceSubscriptionError } from "./errors"
 import type { SubscriptionMachine } from "./machine"
+import { resolvePhaseSetup } from "./phase-setup"
 import type {
   SubscriptionFullData,
   SubscriptionRepository,
@@ -921,148 +917,41 @@ export class SubscriptionService {
       return validatePhasesAction
     }
 
-    const versionData = await (db ?? this.db).query.versions.findFirst({
-      with: {
-        planFeatures: {
-          with: {
-            feature: true,
-          },
-        },
-        plan: true,
-        project: true,
+    const setupResult = await resolvePhaseSetup(
+      {
+        db: db ?? this.db,
+        customerService: this.customerService,
+        logger: this.logger,
       },
-      where(fields, operators) {
-        return operators.and(
-          operators.eq(fields.id, planVersionId),
-          operators.eq(fields.projectId, projectId)
-        )
-      },
-    })
-
-    if (!versionData?.id) {
-      return Err(
-        new UnPriceSubscriptionError({
-          code: "PLAN_VERSION_NOT_FOUND",
-          message: "Version not found. Please check the planVersionId",
-        })
-      )
-    }
-
-    if (versionData.status !== "published") {
-      return Err(
-        new UnPriceSubscriptionError({
-          code: "PLAN_VERSION_NOT_PUBLISHED",
-          message: "Plan version is not published, only published versions can be subscribed to",
-        })
-      )
-    }
-
-    if (versionData.active !== true) {
-      return Err(
-        new UnPriceSubscriptionError({
-          code: "PLAN_VERSION_NOT_ACTIVE",
-          message: "Plan version is not active, only active versions can be subscribed to",
-        })
-      )
-    }
-
-    if (!versionData.planFeatures || versionData.planFeatures.length === 0) {
-      return Err(
-        new UnPriceSubscriptionError({
-          code: "PLAN_VERSION_FEATURES_MISSING",
-          message: "Plan version has no features",
-        })
-      )
-    }
-
-    const paymentMethodRequired = versionData.paymentMethodRequired
-    const trialUnitsToUse = trialUnits ?? versionData.trialUnits ?? 0
-    const billingAnchorToUse = getAnchor(
-      startAtToUse,
-      versionData.billingConfig.billingInterval,
-      versionData.billingConfig.billingAnchor
+      {
+        planVersionId,
+        projectId,
+        customerId: subscriptionWithPhases.customerId,
+        startAt: startAtToUse,
+        config,
+        trialUnits,
+        paymentProvider,
+        creditLinePolicy,
+        creditLineAmount,
+        paymentMethodId,
+      }
     )
 
-    // TODO: evaluate if we need to use the billing interval of the subscription
-    // const billingIntervalToUse = versionData.billingConfig.billingInterval
-    // const subscriptionTimezone = subscriptionWithPhases.timezone
-
-    // calculate the day of creation of the subscription
-    // important to keep in mind the timezone of the project
-    // if (billingAnchorToUse === "dayOfCreation") {
-    //   billingAnchorToUse = getDate(toZonedTime(startAtToUse, subscriptionTimezone))
-    // }
-    const paymentProviderToUse = paymentProvider ?? versionData.paymentProvider
-    const creditLinePolicyToUse = creditLinePolicy ?? "uncapped"
-    const creditLineAmountToUse =
-      creditLinePolicyToUse === "uncapped" ? null : (creditLineAmount ?? null)
-    let paymentMethodIdToUse = paymentMethodId ?? null
-
-    if (paymentMethodRequired && (!paymentMethodIdToUse || paymentMethodIdToUse === "")) {
-      const { err: paymentMethodErr, val: paymentMethod } =
-        await this.customerService.validatePaymentMethod({
-          customerId: subscriptionWithPhases.customerId,
-          projectId,
-          paymentProvider: paymentProviderToUse,
-          requiredPaymentMethod: true,
-        })
-
-      if (paymentMethodErr) {
-        return Err(
-          new UnPriceSubscriptionError({
-            code: "SUBSCRIPTION_OPERATION_FAILED",
-            message: paymentMethodErr.message,
-          })
-        )
-      }
-
-      paymentMethodIdToUse = paymentMethod.paymentMethodId
-
-      if (!paymentMethodIdToUse) {
-        return Err(
-          new UnPriceSubscriptionError({
-            code: "PAYMENT_METHOD_REQUIRED",
-            message: "Payment method is required for this plan version",
-          })
-        )
-      }
+    if (setupResult.err) {
+      return Err(setupResult.err)
     }
 
-    // check the subscription items configuration
-    let configItemsSubscription: SubscriptionItemConfig[] = []
-
-    if (!config) {
-      // if no items are passed, configuration is created from the default quantities of the plan version
-      const { err, val } = createDefaultSubscriptionConfig({
-        planVersion: versionData,
-      })
-
-      if (err) {
-        this.logger.set({ error: toErrorContext(err) })
-        return Err(
-          new UnPriceSubscriptionError({
-            code: "SUBSCRIPTION_OPERATION_FAILED",
-            message: err.message,
-          })
-        )
-      }
-
-      configItemsSubscription = val
-    } else {
-      configItemsSubscription = config
-    }
-
-    // Minute-billed plans support minute trials for local/test loops. All other plans use trial days.
-    let trialsEndAt = null
-    if (trialUnitsToUse > 0) {
-      trialsEndAt = calculateDateAt({
-        startDate: startAtToUse,
-        config: {
-          interval: getTrialIntervalForBillingInterval(versionData.billingConfig.billingInterval),
-          units: trialUnitsToUse,
-        },
-      })
-    }
+    const {
+      versionData,
+      paymentProviderToUse,
+      creditLinePolicyToUse,
+      creditLineAmountToUse,
+      trialUnitsToUse,
+      billingAnchorToUse,
+      trialEndsAt: trialsEndAt,
+      paymentMethodIdToUse,
+      configItemsSubscription,
+    } = setupResult.val
 
     // get the billing cycle for the subscription given the start date
     const calculatedBillingCycle = calculateCycleWindow({
@@ -1171,7 +1060,7 @@ export class SubscriptionService {
           : null
         const isAdvancePending =
           versionStrategy?.billPhaseTrigger === "period_start" &&
-          paymentMethodRequired &&
+          versionData.paymentMethodRequired &&
           (!paymentMethodIdToUse || paymentMethodIdToUse === "")
         const status =
           trialUnitsToUse > 0 ? "trialing" : isAdvancePending ? "pending_payment" : "active"
@@ -1350,138 +1239,41 @@ export class SubscriptionService {
     config?: SubscriptionItemConfig[]
     db?: Database
   }): Promise<Result<FuturePhaseUpdatePlan, UnPriceSubscriptionError>> {
-    const versionData = await (db ?? this.db).query.versions.findFirst({
-      with: {
-        planFeatures: {
-          with: {
-            feature: true,
-          },
-        },
-        plan: true,
-        project: true,
+    const setupResult = await resolvePhaseSetup(
+      {
+        db: db ?? this.db,
+        customerService: this.customerService,
+        logger: this.logger,
       },
-      where(fields, operators) {
-        return operators.and(
-          operators.eq(fields.id, input.planVersionId),
-          operators.eq(fields.projectId, projectId)
-        )
-      },
-    })
-
-    if (!versionData?.id) {
-      return Err(
-        new UnPriceSubscriptionError({
-          code: "PLAN_VERSION_NOT_FOUND",
-          message: "Version not found. Please check the planVersionId",
-        })
-      )
-    }
-
-    if (versionData.status !== "published") {
-      return Err(
-        new UnPriceSubscriptionError({
-          code: "PLAN_VERSION_NOT_PUBLISHED",
-          message: "Plan version is not published, only published versions can be subscribed to",
-        })
-      )
-    }
-
-    if (versionData.active !== true) {
-      return Err(
-        new UnPriceSubscriptionError({
-          code: "PLAN_VERSION_NOT_ACTIVE",
-          message: "Plan version is not active, only active versions can be subscribed to",
-        })
-      )
-    }
-
-    if (!versionData.planFeatures || versionData.planFeatures.length === 0) {
-      return Err(
-        new UnPriceSubscriptionError({
-          code: "PLAN_VERSION_FEATURES_MISSING",
-          message: "Plan version has no features",
-        })
-      )
-    }
-
-    const paymentProviderToUse = input.paymentProvider ?? versionData.paymentProvider
-    const creditLinePolicyToUse = input.creditLinePolicy ?? "uncapped"
-    const creditLineAmountToUse =
-      creditLinePolicyToUse === "uncapped" ? null : (input.creditLineAmount ?? null)
-    const trialUnitsToUse = input.trialUnits ?? versionData.trialUnits ?? 0
-    const billingAnchorToUse = getAnchor(
-      startAt,
-      versionData.billingConfig.billingInterval,
-      versionData.billingConfig.billingAnchor
+      {
+        planVersionId: input.planVersionId,
+        projectId,
+        customerId: subscriptionWithPhases.customerId,
+        startAt,
+        config,
+        trialUnits: input.trialUnits,
+        paymentProvider: input.paymentProvider,
+        creditLinePolicy: input.creditLinePolicy,
+        creditLineAmount: input.creditLineAmount,
+        paymentMethodId: input.paymentMethodId,
+      }
     )
-    const trialEndsAtToUse =
-      trialUnitsToUse > 0
-        ? calculateDateAt({
-            startDate: startAt,
-            config: {
-              interval: getTrialIntervalForBillingInterval(
-                versionData.billingConfig.billingInterval
-              ),
-              units: trialUnitsToUse,
-            },
-          })
-        : null
-    let paymentMethodIdToUse = input.paymentMethodId ?? null
 
-    if (
-      versionData.paymentMethodRequired &&
-      (!paymentMethodIdToUse || paymentMethodIdToUse === "")
-    ) {
-      const { err: paymentMethodErr, val: paymentMethod } =
-        await this.customerService.validatePaymentMethod({
-          customerId: subscriptionWithPhases.customerId,
-          projectId,
-          paymentProvider: paymentProviderToUse,
-          requiredPaymentMethod: true,
-        })
-
-      if (paymentMethodErr) {
-        return Err(
-          new UnPriceSubscriptionError({
-            code: "SUBSCRIPTION_OPERATION_FAILED",
-            message: paymentMethodErr.message,
-          })
-        )
-      }
-
-      paymentMethodIdToUse = paymentMethod.paymentMethodId
-
-      if (!paymentMethodIdToUse) {
-        return Err(
-          new UnPriceSubscriptionError({
-            code: "PAYMENT_METHOD_REQUIRED",
-            message: "Payment method is required for this plan version",
-          })
-        )
-      }
+    if (setupResult.err) {
+      return Err(setupResult.err)
     }
 
-    let configItemsSubscription: SubscriptionItemConfig[]
-
-    if (config) {
-      configItemsSubscription = config
-    } else {
-      const defaultConfigResult = createDefaultSubscriptionConfig({
-        planVersion: versionData,
-      })
-
-      if (defaultConfigResult.err) {
-        this.logger.set({ error: toErrorContext(defaultConfigResult.err) })
-        return Err(
-          new UnPriceSubscriptionError({
-            code: "SUBSCRIPTION_OPERATION_FAILED",
-            message: defaultConfigResult.err.message,
-          })
-        )
-      }
-
-      configItemsSubscription = defaultConfigResult.val
-    }
+    const {
+      versionData,
+      paymentProviderToUse,
+      creditLinePolicyToUse,
+      creditLineAmountToUse,
+      trialUnitsToUse,
+      billingAnchorToUse,
+      trialEndsAt: trialEndsAtToUse,
+      paymentMethodIdToUse,
+      configItemsSubscription,
+    } = setupResult.val
 
     const replacementSubscriptionItemValues = configItemsSubscription.map((item) => ({
       id: newId("subscription_item"),
