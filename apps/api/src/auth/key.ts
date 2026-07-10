@@ -1,9 +1,9 @@
-import type { ApiKeyExtended } from "@unprice/db/validators"
+import type { ApiKeyExtended, Customer } from "@unprice/db/validators"
 import { SchemaError } from "@unprice/error"
 import { UnPriceApiKeyError } from "@unprice/services/apikey"
 import type { Context } from "hono"
 import { endTime, startTime } from "hono/timing"
-import { UnpriceApiError } from "~/errors"
+import { UnpriceApiError, toUnpriceApiError } from "~/errors"
 import type { HonoEnv } from "~/hono/env"
 
 // verify is sensitive to latency
@@ -345,4 +345,44 @@ export function validateIsAllowedToAccessProject({
     code: "FORBIDDEN",
     message: "You are not allowed to access a different project.",
   })
+}
+
+/**
+ * Shared prologue for customer-scoped routes: authenticate the key, resolve the
+ * target customer id (explicit or the key's default binding), resolve+authorize
+ * the project, then load and existence-check the customer within that project.
+ *
+ * Replaces the 4-step block pasted across the wallet and payment-method routes.
+ * Throws UnpriceApiError (mapped) on any failure.
+ */
+export async function resolveOwnedCustomer(
+  c: Context<HonoEnv>,
+  input: { customerId?: string | null; projectId?: string | null }
+): Promise<{ key: ApiKeyExtended; customerId: string; projectId: string; customer: Customer }> {
+  const key = await keyAuth(c)
+
+  const customerId = resolveCustomerIdForApiKeyOrThrow({
+    explicitCustomerId: input.customerId,
+    defaultCustomerId: key.defaultCustomerId,
+  })
+
+  const projectId = validateIsAllowedToAccessProject({
+    key,
+    requestedProjectId: input.projectId ?? key.project.id ?? "",
+  })
+
+  const { val: customer, err } = await c.get("services").customer.getCustomerByIdInProject({
+    id: customerId,
+    projectId,
+  })
+
+  if (err) {
+    throw toUnpriceApiError(err)
+  }
+
+  if (!customer || customer.projectId !== projectId) {
+    throw new UnpriceApiError({ code: "NOT_FOUND", message: "Customer not found" })
+  }
+
+  return { key, customerId, projectId, customer }
 }

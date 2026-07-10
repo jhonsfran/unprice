@@ -1,25 +1,17 @@
 import { OpenAPIHono } from "@hono/zod-openapi"
 import { UnPriceCustomerError } from "@unprice/services/customers"
 import type { ExecutionContext } from "hono"
+import { timing } from "hono/timing"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { UnpriceApiError } from "~/errors"
 import type { HonoEnv } from "~/hono/env"
 import { registerCreatePaymentMethodV1 } from "./createPaymentMethodV1"
 import { registerListPaymentMethodsV1 } from "./listPaymentMethodsV1"
 
-const authMocks = vi.hoisted(() => ({
-  keyAuth: vi.fn(),
-}))
-
-vi.mock("~/auth/key", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("~/auth/key")>()
-
-  return {
-    ...actual,
-    keyAuth: authMocks.keyAuth,
-  }
-})
-
+// These are integration tests over the real shared prologue (resolveOwnedCustomer
+// → keyAuth → resolveCustomerIdForApiKeyOrThrow → validateIsAllowedToAccessProject
+// → getCustomerByIdInProject). We stub the apikey service (keyAuth's collaborator)
+// rather than keyAuth itself, so the whole prologue exercises real code.
 const verifiedKey = {
   id: "key_123",
   projectId: "proj_123",
@@ -31,6 +23,7 @@ const verifiedKey = {
     isMain: false,
     workspace: {
       unPriceCustomerId: null,
+      isMain: false,
     },
   },
 }
@@ -48,7 +41,6 @@ const customerRecord = {
 }
 
 beforeEach(() => {
-  authMocks.keyAuth.mockResolvedValue(verifiedKey)
   vi.clearAllMocks()
 })
 
@@ -109,9 +101,9 @@ describe("payment method routes", () => {
   })
 
   it("rejects create payment method when a customer-bound key targets another customer", async () => {
-    authMocks.keyAuth.mockResolvedValue(boundKey)
     const { app, env, executionCtx, customer } = createTestApp({
       customerResult: { err: undefined, val: customerRecord },
+      key: boundKey,
     })
 
     const response = await app.fetch(
@@ -216,9 +208,11 @@ describe("payment method routes", () => {
 function createTestApp({
   customerResult,
   paymentProviderResult,
+  key = verifiedKey,
 }: {
   customerResult: { err?: Error; val?: unknown }
   paymentProviderResult?: { err?: Error; val?: unknown }
+  key?: typeof verifiedKey
 }) {
   const app = new OpenAPIHono<HonoEnv>()
   const paymentProviderService = {
@@ -243,6 +237,11 @@ function createTestApp({
       }
     ),
   }
+  const apikey = {
+    verifyApiKey: vi.fn().mockResolvedValue({ err: undefined, val: key }),
+    rateLimit: vi.fn().mockResolvedValue(false),
+  }
+  const logger = { set: vi.fn(), error: vi.fn(), info: vi.fn(), warn: vi.fn() }
 
   app.onError((error, c) => {
     if (error instanceof UnpriceApiError) {
@@ -252,10 +251,13 @@ function createTestApp({
     throw error
   })
 
+  app.use(timing())
   app.use("*", async (c, next) => {
     c.set("services", {
       customer,
+      apikey,
     })
+    c.set("logger", logger)
 
     await next()
   })

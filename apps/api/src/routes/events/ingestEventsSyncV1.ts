@@ -1,18 +1,13 @@
 import { createRoute } from "@hono/zod-openapi"
 import {
-  EventTimestampTooFarInFutureError,
-  EventTimestampTooOldError,
-  validateEventTimestamp,
-} from "@unprice/services/entitlements"
-import {
   INGESTION_IDEMPOTENCY_STATUSES,
   INGESTION_REJECTION_REASONS,
 } from "@unprice/services/ingestion"
 import { endTime, startTime } from "hono/timing"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
-import { keyAuth, resolveContextProjectId, resolveCustomerIdForApiKey } from "~/auth/key"
-import { UnpriceApiError, toUnpriceApiError } from "~/errors"
+import { keyAuth, resolveContextProjectId, resolveCustomerIdForApiKeyOrThrow } from "~/auth/key"
+import { toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import type { ServiceContext } from "~/hono/env"
@@ -25,6 +20,7 @@ import {
   logEventTooOldRejection,
   rawEventSchema,
 } from "./ingestEventsV1"
+import { validateEventTimestampOrThrow } from "./validate-event-timestamp"
 
 const tags = ["usage"]
 export const USAGE_CONSUME_PATH = "/v1/usage/consume"
@@ -113,26 +109,15 @@ export const registerIngestEventsSyncV1 = (app: App) => {
     const logger = c.get("logger")
 
     const key = await keyAuth(c)
-    const customer = resolveCustomerIdForApiKey({
+    const customerId = resolveCustomerIdForApiKeyOrThrow({
       explicitCustomerId: body.customerId,
       defaultCustomerId: key.defaultCustomerId,
     })
 
-    if (!customer.success) {
-      throw new UnpriceApiError({
-        code: customer.code === "customer_forbidden" ? "FORBIDDEN" : "BAD_REQUEST",
-        message: customer.message,
-      })
-    }
-
-    const customerId = customer.customerId
-
     const projectId = await resolveContextProjectId(c, key.projectId, customerId)
 
-    try {
-      validateEventTimestamp(timestamp, receivedAt)
-    } catch (error) {
-      if (error instanceof EventTimestampTooOldError) {
+    validateEventTimestampOrThrow(timestamp, receivedAt, {
+      onTooOld: (error) => {
         logEventTooOldRejection({
           customerId,
           eventId: body.id,
@@ -144,20 +129,8 @@ export const registerIngestEventsSyncV1 = (app: App) => {
           projectId,
           maxEventAgeMs: error.context?.maxEventAgeMs,
         })
-      }
-
-      if (
-        error instanceof EventTimestampTooFarInFutureError ||
-        error instanceof EventTimestampTooOldError
-      ) {
-        throw new UnpriceApiError({
-          code: "BAD_REQUEST",
-          message: error.message,
-        })
-      }
-
-      throw error
-    }
+      },
+    })
 
     const message = buildIngestionQueueMessage({
       body,

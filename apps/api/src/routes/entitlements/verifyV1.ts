@@ -1,21 +1,16 @@
 import { createRoute } from "@hono/zod-openapi"
 import { LEDGER_SCALE } from "@unprice/money"
-import {
-  EventTimestampTooFarInFutureError,
-  EventTimestampTooOldError,
-  validateEventTimestamp,
-} from "@unprice/services/entitlements"
 import { INGESTION_REJECTION_REASONS } from "@unprice/services/ingestion"
 import { endTime } from "hono/timing"
 import { startTime } from "hono/timing"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
 import { keyAuth, resolveContextProjectId, resolveCustomerIdForApiKeyOrThrow } from "~/auth/key"
-import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
+import { validateEventTimestampOrThrow } from "../events/validate-event-timestamp"
 
 const tags = ["access"]
 
@@ -162,21 +157,7 @@ export const registerVerifyV1 = (app: App) =>
     })
     const projectId = await resolveContextProjectId(c, key.projectId, customerId)
 
-    try {
-      validateEventTimestamp(timestamp, requestStartedAt)
-    } catch (error) {
-      if (
-        error instanceof EventTimestampTooFarInFutureError ||
-        error instanceof EventTimestampTooOldError
-      ) {
-        throw new UnpriceApiError({
-          code: "BAD_REQUEST",
-          message: error.message,
-        })
-      }
-
-      throw error
-    }
+    validateEventTimestampOrThrow(timestamp, requestStartedAt)
 
     startTime(c, "verify")
 

@@ -1,11 +1,6 @@
 import { createRoute } from "@hono/zod-openapi"
 import type { Logger } from "@unprice/logs"
 import {
-  EventTimestampTooFarInFutureError,
-  EventTimestampTooOldError,
-  validateEventTimestamp,
-} from "@unprice/services/entitlements"
-import {
   type IngestionQueueMessage,
   ingestionQueueMessageSchema,
   markRawProcessingFailureTestRequestId,
@@ -14,7 +9,7 @@ import type { MiddlewareHandler } from "hono"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { ulid } from "ulid"
 import { z } from "zod"
-import { keyAuth, resolveContextProjectId, resolveCustomerIdForApiKey } from "~/auth/key"
+import { keyAuth, resolveContextProjectId, resolveCustomerIdForApiKeyOrThrow } from "~/auth/key"
 import type { Env } from "~/env"
 import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
@@ -22,6 +17,7 @@ import type { App } from "~/hono/app"
 import type { HonoEnv } from "~/hono/env"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
+import { validateEventTimestampOrThrow } from "./validate-event-timestamp"
 
 const tags = ["usage"]
 export const RAW_EVENT_MAX_BODY_BYTES = 128 * 1024
@@ -251,28 +247,17 @@ export const registerIngestEventsV1 = (app: App) => {
 
     // 1. auth for the request
     const key = await keyAuth(c)
-    const customer = resolveCustomerIdForApiKey({
+    const customerId = resolveCustomerIdForApiKeyOrThrow({
       explicitCustomerId: body.customerId,
       defaultCustomerId: key.defaultCustomerId,
     })
 
-    if (!customer.success) {
-      throw new UnpriceApiError({
-        code: customer.code === "customer_forbidden" ? "FORBIDDEN" : "BAD_REQUEST",
-        message: customer.message,
-      })
-    }
-
-    const customerId = customer.customerId
-
     // 2. resolve the proper project Id if this is called from main project
     const projectId = await resolveContextProjectId(c, key.projectId, customerId)
 
-    try {
-      // 3. events that are too old doesn't get pass, also events that are too far from the future.
-      validateEventTimestamp(timestamp, receivedAt)
-    } catch (error) {
-      if (error instanceof EventTimestampTooOldError) {
+    // 3. events that are too old doesn't get pass, also events that are too far from the future.
+    validateEventTimestampOrThrow(timestamp, receivedAt, {
+      onTooOld: (error) => {
         logEventTooOldRejection({
           customerId,
           eventId: body.id,
@@ -284,20 +269,8 @@ export const registerIngestEventsV1 = (app: App) => {
           projectId,
           maxEventAgeMs: error.context?.maxEventAgeMs,
         })
-      }
-
-      if (
-        error instanceof EventTimestampTooFarInFutureError ||
-        error instanceof EventTimestampTooOldError
-      ) {
-        throw new UnpriceApiError({
-          code: "BAD_REQUEST",
-          message: error.message,
-        })
-      }
-
-      throw error
-    }
+      },
+    })
 
     const isDevelopment = c.env.APP_ENV === "development" && c.env.NODE_ENV === "development"
     // this improve dev ex

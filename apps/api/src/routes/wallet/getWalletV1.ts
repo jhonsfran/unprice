@@ -1,4 +1,4 @@
-import { createRoute } from "@hono/zod-openapi"
+import { type RouteHandler, createRoute } from "@hono/zod-openapi"
 import {
   type Currency,
   type WalletCredit,
@@ -8,14 +8,11 @@ import {
 import { formatMoney, fromLedgerMinor, toDecimal } from "@unprice/money"
 import { jsonContent } from "stoker/openapi/helpers"
 import { z } from "zod"
-import {
-  keyAuth,
-  resolveCustomerIdForApiKeyOrThrow,
-  validateIsAllowedToAccessProject,
-} from "~/auth/key"
+import { resolveOwnedCustomer } from "~/auth/key"
 import { UnpriceApiError, toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import type { HonoEnv } from "~/hono/env"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
@@ -221,115 +218,50 @@ function formatWalletState(
   }
 }
 
+// The public route and the internal compatibility alias are character-identical;
+// register one handler for both.
+const walletBalanceHandler: RouteHandler<typeof walletBalanceRoute, HonoEnv> = async (c) => {
+  const { customerId: inputCustomerId, projectId } = c.req.valid("query")
+  const { wallet: walletService } = c.get("services")
+
+  const {
+    customerId,
+    projectId: finalProjectId,
+    customer,
+  } = await resolveOwnedCustomer(c, {
+    customerId: inputCustomerId,
+    projectId,
+  })
+
+  const { val, err } = await walletService.getWalletState({
+    projectId: finalProjectId,
+    customerId,
+  })
+
+  if (err) {
+    throw toUnpriceApiError(err)
+  }
+
+  return c.json(formatWalletState(val, customer.defaultCurrency), HttpStatusCodes.OK)
+}
+
 export const registerGetWalletV1 = (app: App) => {
-  app.openapi(walletBalanceRoute, async (c) => {
-    const { customerId: inputCustomerId, projectId } = c.req.valid("query")
-    const { customer, wallet: walletService } = c.get("services")
-
-    const key = await keyAuth(c)
-    const customerId = resolveCustomerIdForApiKeyOrThrow({
-      explicitCustomerId: inputCustomerId,
-      defaultCustomerId: key.defaultCustomerId,
-    })
-
-    const finalProjectId = validateIsAllowedToAccessProject({
-      key,
-      requestedProjectId: projectId ?? key.project.id ?? "",
-    })
-
-    const { val: customerRecord, err: customerErr } = await customer.getCustomerByIdInProject({
-      id: customerId,
-      projectId: finalProjectId,
-    })
-
-    if (customerErr) {
-      throw toUnpriceApiError(customerErr)
-    }
-
-    if (!customerRecord || customerRecord.projectId !== finalProjectId) {
-      throw new UnpriceApiError({ code: "NOT_FOUND", message: "Customer not found" })
-    }
-
-    const { val, err } = await walletService.getWalletState({
-      projectId: finalProjectId,
-      customerId,
-    })
-
-    if (err) {
-      throw toUnpriceApiError(err)
-    }
-
-    return c.json(formatWalletState(val, customerRecord.defaultCurrency), HttpStatusCodes.OK)
-  })
-
-  app.openapi(route, async (c) => {
-    const { customerId: inputCustomerId, projectId } = c.req.valid("query")
-    const { customer, wallet: walletService } = c.get("services")
-
-    const key = await keyAuth(c)
-    const customerId = resolveCustomerIdForApiKeyOrThrow({
-      explicitCustomerId: inputCustomerId,
-      defaultCustomerId: key.defaultCustomerId,
-    })
-
-    const finalProjectId = validateIsAllowedToAccessProject({
-      key,
-      requestedProjectId: projectId ?? key.project.id ?? "",
-    })
-
-    const { val: customerRecord, err: customerErr } = await customer.getCustomerByIdInProject({
-      id: customerId,
-      projectId: finalProjectId,
-    })
-
-    if (customerErr) {
-      throw toUnpriceApiError(customerErr)
-    }
-
-    if (!customerRecord || customerRecord.projectId !== finalProjectId) {
-      throw new UnpriceApiError({ code: "NOT_FOUND", message: "Customer not found" })
-    }
-
-    const { val, err } = await walletService.getWalletState({
-      projectId: finalProjectId,
-      customerId,
-    })
-
-    if (err) {
-      throw toUnpriceApiError(err)
-    }
-
-    return c.json(formatWalletState(val, customerRecord.defaultCurrency), HttpStatusCodes.OK)
-  })
+  app.openapi(walletBalanceRoute, walletBalanceHandler)
+  app.openapi(route, walletBalanceHandler)
 
   app.openapi(walletCreditBalanceRoute, async (c) => {
     const { customerId: inputCustomerId, projectId } = c.req.valid("query")
     const { walletId } = c.req.valid("param")
-    const { customer, wallet: walletService } = c.get("services")
+    const { wallet: walletService } = c.get("services")
 
-    const key = await keyAuth(c)
-    const customerId = resolveCustomerIdForApiKeyOrThrow({
-      explicitCustomerId: inputCustomerId,
-      defaultCustomerId: key.defaultCustomerId,
-    })
-
-    const finalProjectId = validateIsAllowedToAccessProject({
-      key,
-      requestedProjectId: projectId ?? key.project.id ?? "",
-    })
-
-    const { val: customerRecord, err: customerErr } = await customer.getCustomerByIdInProject({
-      id: customerId,
+    const {
+      customerId,
       projectId: finalProjectId,
+      customer,
+    } = await resolveOwnedCustomer(c, {
+      customerId: inputCustomerId,
+      projectId,
     })
-
-    if (customerErr) {
-      throw toUnpriceApiError(customerErr)
-    }
-
-    if (!customerRecord || customerRecord.projectId !== finalProjectId) {
-      throw new UnpriceApiError({ code: "NOT_FOUND", message: "Customer not found" })
-    }
 
     const { val, err } = await walletService.getWalletCreditBalance({
       projectId: finalProjectId,
@@ -347,8 +279,8 @@ export const registerGetWalletV1 = (app: App) => {
 
     return c.json(
       {
-        currency: customerRecord.defaultCurrency,
-        wallet: formatWalletCredit(val, customerRecord.defaultCurrency),
+        currency: customer.defaultCurrency,
+        wallet: formatWalletCredit(val, customer.defaultCurrency),
       },
       HttpStatusCodes.OK
     )
