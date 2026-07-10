@@ -20,6 +20,7 @@ import { BaseError, Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { fromCurrencyMinor, toLedgerMinor } from "@unprice/money"
 import type { Cache } from "../cache"
+import type { ServiceContext } from "../context"
 import { cachedQuery } from "../utils/cached-query"
 
 type BudgetRunWorkloadType = "agent" | "workflow" | "job" | "tool" | "custom"
@@ -271,6 +272,127 @@ export class BudgetRunService {
           message: "Failed to list budget runs",
         })
       )
+    }
+  }
+
+  async listCustomerRuns(
+    services: Pick<ServiceContext, "customers">,
+    input: {
+      customerId: string
+      projectId: string
+      query: SearchParamsDataTable
+    }
+  ): Promise<
+    Result<{ customer: Customer; runs: BudgetRun[]; pageCount: number } | null, FetchError>
+  > {
+    const { customerId, projectId, query } = input
+
+    const customerResult = await services.customers.getCustomerByIdInProject({
+      id: customerId,
+      projectId,
+    })
+
+    if (customerResult.err) {
+      return Err(customerResult.err)
+    }
+
+    const customer = customerResult.val
+
+    if (!customer) {
+      return Ok(null)
+    }
+
+    const runColumns = getTableColumns(budgetRuns)
+    const runStatusValues = new Set<BudgetRunStatus>([
+      "running",
+      "completed",
+      "expired",
+      "canceled",
+      "budget_exceeded",
+      "failed",
+    ])
+    const filter = `%${query.search ?? ""}%`
+    const statusFilters =
+      query.filters.status?.filter(
+        (value): value is BudgetRunStatus =>
+          typeof value === "string" && runStatusValues.has(value as BudgetRunStatus)
+      ) ?? []
+
+    try {
+      const { data, total } = await this.deps.db.transaction(async (tx) => {
+        const expressions = [
+          eq(runColumns.customerId, customerId),
+          eq(runColumns.projectId, projectId),
+          query.search
+            ? or(
+                ilike(runColumns.id, filter),
+                ilike(runColumns.traceId, filter),
+                ilike(runColumns.workloadId, filter)
+              )
+            : undefined,
+          statusFilters.length > 0 ? inArray(runColumns.status, statusFilters) : undefined,
+        ]
+        const startedFrom = query.from !== null ? new Date(query.from) : null
+        const startedTo = query.to !== null ? new Date(query.to) : null
+        const whereQuery = and(
+          and(...expressions),
+          startedFrom && startedTo
+            ? between(runColumns.startedAt, startedFrom, startedTo)
+            : undefined,
+          startedFrom ? gte(runColumns.startedAt, startedFrom) : undefined,
+          startedTo ? lte(runColumns.startedAt, startedTo) : undefined
+        ) as SQL<BudgetRun>
+        const runQuery = tx.select().from(budgetRuns).$dynamic()
+
+        const data = await withPagination(
+          runQuery,
+          whereQuery,
+          [
+            {
+              column: runColumns.startedAt,
+              order: "desc",
+            },
+            {
+              column: runColumns.id,
+              order: "desc",
+            },
+          ],
+          query.page,
+          query.page_size
+        )
+
+        const total = await tx
+          .select({
+            count: count(),
+          })
+          .from(budgetRuns)
+          .where(whereQuery)
+          .execute()
+          .then((res) => res[0]?.count ?? 0)
+
+        return { data, total }
+      })
+
+      return Ok({
+        customer,
+        runs: data as BudgetRun[],
+        pageCount: Math.ceil(total / query.page_size),
+      })
+    } catch (error) {
+      const fetchError = new FetchError({
+        message: `error getting customer runs: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        retry: false,
+      })
+
+      this.deps.logger.error(fetchError, {
+        context: "error getting customer runs",
+        customerId,
+        projectId,
+      })
+
+      return Err(fetchError)
     }
   }
 

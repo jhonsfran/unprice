@@ -24,9 +24,9 @@ export const getRuns = protectedProjectProcedure
   .query(async (opts) => {
     const { customerId } = opts.input
     const { project } = opts.ctx
-    const { customers, budgetRuns } = opts.ctx.services
+    const { budgetRuns } = opts.ctx.services
 
-    const result = await customers.getCustomerRuns({
+    const result = await budgetRuns.listCustomerRuns(opts.ctx.services, {
       customerId,
       projectId: project.id,
       query: opts.input,
