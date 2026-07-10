@@ -1,15 +1,11 @@
 import { entitlementMeterFactSchemaV1 } from "@unprice/analytics"
+// Canonical run status + workload enums live with the budget-run validators;
+// import them here so the internal DO contract can never drift from the DB/API.
+import { runStatusSchema, workloadTypeSchema } from "@unprice/db/validators"
 import { z } from "zod"
 import { activeGrantSchema, entitlementConfigSchema } from "../entitlements/contracts"
 
-export const runStatusSchema = z.enum([
-  "running",
-  "completed",
-  "expired",
-  "canceled",
-  "budget_exceeded",
-  "failed",
-])
+export { runStatusSchema }
 
 export const runBudgetSummarySchema = z.object({
   runId: z.string().min(1),
@@ -29,8 +25,6 @@ export const runBudgetSummarySchema = z.object({
    */
   reconciliationNeeded: z.boolean().optional(),
 })
-
-const workloadTypeSchema = z.enum(["agent", "workflow", "job", "tool", "custom"])
 
 const sourceSchema = z.object({
   workspaceId: z.string().min(1),

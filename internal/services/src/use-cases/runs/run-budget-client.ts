@@ -16,7 +16,8 @@ export type RunBudgetSummary = {
 
 export type RunBudgetStartResult = {
   summary: RunBudgetSummary
-  walletReservationId: string
+  /** Null when no wallet reservation was created (e.g. zero-budget runs). */
+  walletReservationId: string | null
   walletError?: string
 }
 

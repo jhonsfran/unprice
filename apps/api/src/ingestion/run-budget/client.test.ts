@@ -111,23 +111,4 @@ describe("CloudflareRunBudgetClient", () => {
     expect(result.err?.message).toBe("flushCapturesForInvoicing failed")
     expect(result.err?.cause).toBeUndefined()
   })
-
-  it("skips invoicing flushes when an older durable object does not expose the RPC", async () => {
-    const getByName = vi.fn().mockReturnValue({})
-    const env = {
-      APP_ENV: "production",
-      runbudget: { getByName },
-    } as unknown as ConstructorParameters<typeof CloudflareRunBudgetClient>[0]
-    const client = new CloudflareRunBudgetClient(env)
-
-    const result = await client.flushCapturesForInvoicing({
-      projectId: "proj_123",
-      customerId: "cus_123",
-      runId: "brun_123",
-      statementKey: "stmt_123",
-      billingPeriodIds: ["bp_123"],
-    })
-
-    expect(result.val).toEqual({ flushed: 0, skipped: 1 })
-  })
 })

@@ -1,9 +1,5 @@
 import { BaseError, Err, Ok, type Result } from "@unprice/error"
-import {
-  type IngestionEntitlement,
-  type IngestionGrant,
-  buildRunBudgetName,
-} from "@unprice/services/ingestion"
+import { buildRunBudgetName } from "@unprice/services/ingestion"
 import type {
   RunBudgetClient,
   RunBudgetError,
@@ -15,8 +11,6 @@ import { RunBudgetError as RunBudgetErrorClass } from "@unprice/services/use-cas
 import type { Env } from "~/env"
 import type { RunBudgetDecision } from "./contracts"
 
-type RunWorkloadType = "agent" | "workflow" | "job" | "tool" | "custom"
-
 export class CloudflareRunBudgetClient implements RunBudgetClient {
   private readonly appEnv: Env["APP_ENV"]
   private readonly runbudget: Env["runbudget"]
@@ -26,20 +20,9 @@ export class CloudflareRunBudgetClient implements RunBudgetClient {
     this.runbudget = env.runbudget
   }
 
-  async startRun(input: {
-    projectId: string
-    customerId: string
-    runId: string
-    budgetAmount: number
-    currency: string
-    idempotencyKey: string
-    workloadType?: RunWorkloadType | null
-    workloadId?: string | null
-    traceId?: string | null
-    parentRunId?: string | null
-    metadata?: Record<string, unknown>
-    expiresAt?: number | null
-  }): Promise<Result<RunBudgetStartResult, RunBudgetError>> {
+  async startRun(
+    input: Parameters<RunBudgetClient["startRun"]>[0]
+  ): Promise<Result<RunBudgetStartResult, RunBudgetError>> {
     try {
       const summary = await this.stub(input).startRun({
         ...input,
@@ -48,7 +31,7 @@ export class CloudflareRunBudgetClient implements RunBudgetClient {
       })
       return Ok({
         summary,
-        walletReservationId: summary.walletReservationId ?? "",
+        walletReservationId: summary.walletReservationId ?? null,
         walletError: summary.walletError,
       })
     } catch (error) {
@@ -60,33 +43,9 @@ export class CloudflareRunBudgetClient implements RunBudgetClient {
     }
   }
 
-  async applySyncEvent(input: {
-    projectId: string
-    customerId: string
-    runId: string
-    featureSlug: string
-    idempotencyKey: string
-    event: {
-      id: string
-      slug: string
-      timestamp: number
-      properties: Record<string, unknown>
-    }
-    source: {
-      workspaceId: string
-      environment: string
-      apiKeyId: string | null
-      sourceType: "api_key" | "system" | "unknown"
-      sourceId: string
-      sourceName: string | null
-    }
-    now: number
-    customerEntitlementId: string
-    entitlement: IngestionEntitlement & {
-      meterConfig: NonNullable<IngestionEntitlement["meterConfig"]>
-    }
-    grants: IngestionGrant[]
-  }): Promise<Result<RunSyncDecision, RunBudgetError>> {
+  async applySyncEvent(
+    input: Parameters<RunBudgetClient["applySyncEvent"]>[0]
+  ): Promise<Result<RunSyncDecision, RunBudgetError>> {
     try {
       const decision: RunBudgetDecision = await this.stub(input).applySyncEvent(input)
       return Ok({
@@ -106,13 +65,9 @@ export class CloudflareRunBudgetClient implements RunBudgetClient {
     }
   }
 
-  async endRun(input: {
-    projectId: string
-    customerId: string
-    runId: string
-    status: "completed" | "expired" | "canceled"
-    endedAt: number
-  }): Promise<Result<RunBudgetSummary, RunBudgetError>> {
+  async endRun(
+    input: Parameters<RunBudgetClient["endRun"]>[0]
+  ): Promise<Result<RunBudgetSummary, RunBudgetError>> {
     try {
       const summary = await this.stub(input).endRun(input)
       return Ok(summary)
@@ -125,11 +80,9 @@ export class CloudflareRunBudgetClient implements RunBudgetClient {
     }
   }
 
-  async getRunStatus(input: {
-    projectId: string
-    customerId: string
-    runId: string
-  }): Promise<Result<RunBudgetSummary, RunBudgetError>> {
+  async getRunStatus(
+    input: Parameters<RunBudgetClient["getRunStatus"]>[0]
+  ): Promise<Result<RunBudgetSummary, RunBudgetError>> {
     try {
       const summary = await this.stub(input).getRunStatus(input)
       return Ok(summary)
@@ -142,17 +95,10 @@ export class CloudflareRunBudgetClient implements RunBudgetClient {
     }
   }
 
-  async flushCapturesForInvoicing(input: {
-    projectId: string
-    customerId: string
-    runId: string
-    statementKey: string
-    billingPeriodIds: string[]
-  }): Promise<Result<{ flushed: number; skipped: number }, RunBudgetError>> {
+  async flushCapturesForInvoicing(
+    input: Parameters<RunBudgetClient["flushCapturesForInvoicing"]>[0]
+  ): Promise<Result<{ flushed: number; skipped: number }, RunBudgetError>> {
     const stub = this.stub(input)
-    if (typeof stub.flushCapturesForInvoicing !== "function") {
-      return Ok({ flushed: 0, skipped: 1 })
-    }
 
     try {
       const result = await stub.flushCapturesForInvoicing({
