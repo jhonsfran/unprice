@@ -215,10 +215,16 @@
   }
 }
 
-/** Prevent scrolling on body when modal is open */
-body[style*="pointer-events: none"] .overflow-auto,
-body[style*="pointer-events: none"] .overflow-y-auto,
-body[style*="pointer-events: none"] .overflow-x-auto {
+/** Prevent the background page from scrolling while a modal is open, but never
+ *  neuter scroll containers that live inside the modal itself. Radix marks its
+ *  content with role="dialog"/"alertdialog", so exclude that subtree. */
+body[style*="pointer-events: none"]
+  :is(.overflow-auto, .overflow-y-auto, .overflow-x-auto):not(
+    [role="dialog"],
+    [role="dialog"] *,
+    [role="alertdialog"],
+    [role="alertdialog"] *
+  ) {
   overflow: hidden !important;
 }
 

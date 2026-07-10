@@ -34,8 +34,8 @@ export default function Cta() {
         </h2>
         <p className="mt-5 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
           <Balancer>
-            The core is AGPL-3.0 and free to run in your own Cloudflare account. The hosted cloud
-            is free during early access, with no card at signup. Payments settle to your own Stripe
+            The core is AGPL-3.0 and free to run in your own Cloudflare account. The hosted cloud is
+            free during early access, with no card at signup. Payments settle to your own Stripe
             account either way — Unprice never sits in your funds flow.
           </Balancer>
         </p>
@@ -103,18 +103,18 @@ export default function Cta() {
           </div>
           <p className="mt-3 text-background-text text-sm leading-6">
             Adopt in shadow: sign up one test customer, then run one read-only{" "}
-            <code className="font-mono text-[12px]">access.check</code> beside the logic you
-            already trust, blocking nothing. If the decisions never match your reality, delete that
-            line and walk away — nothing in your stack changed, no card on file, no contract to
-            exit. The only trace left is the one test customer inside Unprice. Enforce only when
-            the evidence convinces you.
+            <code className="font-mono text-[12px]">access.check</code> beside the logic you already
+            trust, blocking nothing. If the decisions never match your reality, delete that line and
+            walk away — nothing in your stack changed, no card on file, no contract to exit. The
+            only trace left is the one test customer inside Unprice. Enforce only when the evidence
+            convinces you.
           </p>
         </Reveal>
 
         {/* The founder letter: open prose, not a panel — the one human voice
             on the page, and the design-partner pipeline. */}
         <Reveal className="mt-16 w-full max-w-2xl text-left sm:mt-20">
-          <h3 className="font-primary font-medium text-background-textContrast text-xl">
+          <h3 className="font-medium font-primary text-background-textContrast text-xl">
             Not sure where to start?
           </h3>
           <p className="mt-3 text-background-text text-sm leading-6">

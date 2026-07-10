@@ -1,5 +1,5 @@
-import { Button } from "@unprice/ui/button"
 import { DOCS_DOMAIN } from "@unprice/config"
+import { Button } from "@unprice/ui/button"
 import { Skeleton } from "@unprice/ui/skeleton"
 import { Link } from "next-view-transitions"
 import dynamic from "next/dynamic"

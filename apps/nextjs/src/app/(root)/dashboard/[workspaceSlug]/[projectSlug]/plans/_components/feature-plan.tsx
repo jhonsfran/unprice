@@ -113,7 +113,17 @@ const FeaturePlan = forwardRef<ElementRef<"div">, FeaturePlanProps>((props, ref)
     if (mode !== "FeaturePlan") return
     if (!isExpanded) return
     if (planFeatureVersion.id) return
-    innerRef.current?.scrollIntoView({ block: "center", behavior: "smooth" })
+    const card = innerRef.current
+    const scrollParent = card?.closest<HTMLElement>("[data-feature-scroll]")
+    if (!card || !scrollParent) return
+    // Reveal the freshly-added card *within its own column only*. Native scrollIntoView walks
+    // every scrollable ancestor (including the window), which yanks the whole page and pushes
+    // the workbench header / nav / pricing preview out of view. Scoping the scroll to the
+    // column keeps all that chrome fixed while still bringing the new editor into sight.
+    const parentRect = scrollParent.getBoundingClientRect()
+    const cardRect = card.getBoundingClientRect()
+    const nextTop = scrollParent.scrollTop + (cardRect.top - parentRect.top) - 12
+    scrollParent.scrollTo({ top: nextTop, behavior: "smooth" })
   }, [isExpanded, mode, planFeatureVersion.id])
 
   const priceSummary = (() => {

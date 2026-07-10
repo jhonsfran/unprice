@@ -58,7 +58,11 @@ export default function CodeExample() {
   return (
     <SectionShell labelledBy="code-example-title">
       <div className="flex flex-col items-start">
-        <StationHeader index="03" label="First integration" fact="signUp once · check per request" />
+        <StationHeader
+          index="03"
+          label="First integration"
+          fact="signUp once · check per request"
+        />
         <h2
           id="code-example-title"
           className="mt-6 max-w-xl font-primary text-background-textContrast text-display-3"
@@ -101,8 +105,8 @@ export default function CodeExample() {
         </div>
         <figcaption className="mt-5 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 border-background-border border-t pt-3 text-background-text text-xs leading-6">
           <span>
-            Both calls shown; the plan version comes from the dashboard. The rest of the money
-            path —{" "}
+            Both calls shown; the plan version comes from the dashboard. The rest of the money path
+            —{" "}
             <code className="rounded-sm bg-background-bg px-1 py-px font-mono text-[11px] text-background-textContrast">
               usage.consume
             </code>
