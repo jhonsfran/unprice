@@ -1,10 +1,19 @@
 import type { Database } from "@unprice/db"
 import type { Event, Feature, Plan, PlanVersion, PlanVersionFeature } from "@unprice/db/validators"
-import { Ok } from "@unprice/error"
+import { Err, FetchError, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { describe, expect, it, vi } from "vitest"
 import type { ServiceContext } from "../../context"
 import { applyPlanTemplate } from "./apply"
+import { getExistingTemplatePlanVersion } from "./materialize"
+
+const { publishPlanVersionFlowMock } = vi.hoisted(() => ({
+  publishPlanVersionFlowMock: vi.fn(),
+}))
+
+vi.mock("../plan-version/publish-shared", () => ({
+  publishPlanVersionFlow: publishPlanVersionFlowMock,
+}))
 
 function createLogger(): Logger {
   return {
@@ -61,6 +70,14 @@ function makeEvent(availableProperties: string[]): Event {
   } as unknown as Event
 }
 
+function makePlanVersionFeature(slug: string) {
+  return {
+    id: `feature_version_${slug}`,
+    featureId: `feature_${slug}`,
+    feature: makeFeature(slug),
+  } as unknown as PlanVersionFeature & { feature: Feature }
+}
+
 function makePlanVersion(id: string, input: CreatePlanVersionInput): PlanVersion {
   return {
     id,
@@ -94,6 +111,224 @@ type CreatePlanVersionFeatureInput = Parameters<
 type UpdateEventInput = Parameters<ServiceContext["events"]["updateEvent"]>[0]
 
 describe("applyPlanTemplate", () => {
+  it("does not resume a published version that is missing expected features", async () => {
+    const incompletePublishedVersion = {
+      id: "plan_version_starter_partial",
+      projectId: "proj_123",
+      planId: "plan_starter",
+      currency: "USD",
+      paymentProvider: "sandbox",
+      status: "published",
+      tags: ["template:saas_onboarding", "template-plan:starter"],
+      createdAtM: 1,
+      planFeatures: [makePlanVersionFeature("workflow-runtime-access")],
+    } as unknown as PlanVersion & {
+      planFeatures: Array<PlanVersionFeature & { feature: Feature }>
+    }
+    const result = await getExistingTemplatePlanVersion(
+      {
+        deps: {
+          services: {} as Pick<ServiceContext, "plans" | "features" | "events">,
+          db: createDbMock({ existingPlanVersions: [incompletePublishedVersion] }),
+          logger: createLogger(),
+        },
+        projectId: "proj_123",
+        caches: {
+          features: new Map(),
+          events: new Map(),
+          planVersionFeatureSlugs: new Map(),
+        },
+      },
+      {
+        planId: "plan_starter",
+        tags: ["template:saas_onboarding", "template-plan:starter"],
+        currency: "USD",
+        paymentProvider: "sandbox",
+        expectedFeatureSlugs: new Set(["workflow-runtime-access", "credits"]),
+      }
+    )
+
+    expect(result.err).toBeUndefined()
+    expect(result.val).toBeNull()
+  })
+
+  it("resumes an incomplete template version and publishes only after every expected feature exists", async () => {
+    const plans = Object.fromEntries(
+      ["starter", "pro", "enterprise"].map((slug) => [
+        slug,
+        {
+          id: `plan_${slug}`,
+          projectId: "proj_123",
+          title: slug,
+          slug,
+        } as unknown as Plan,
+      ])
+    )
+    const versions: Array<
+      PlanVersion & {
+        planFeatures: Array<PlanVersionFeature & { feature: Feature }>
+      }
+    > = []
+    const expectedFeatureSlugs = new Map([
+      [
+        "plan_version_starter",
+        new Set([
+          "workflow-runtime-access",
+          "operator-seats",
+          "run-history",
+          "sandbox-environments",
+          "runs",
+          "credits",
+        ]),
+      ],
+      [
+        "plan_version_pro",
+        new Set([
+          "workflow-runtime-access",
+          "operator-seats",
+          "saml-sso",
+          "audit-trail",
+          "compute",
+          "credits",
+        ]),
+      ],
+      [
+        "plan_version_enterprise",
+        new Set([
+          "workflow-runtime-access",
+          "private-deployment",
+          "priority-incident-response",
+          "runs",
+          "credits",
+        ]),
+      ],
+    ])
+    const publishedFeatureSnapshots: string[][] = []
+    let featureCreationAttempts = 0
+    let shouldCrash = true
+    let event = makeEvent([])
+
+    const db = {
+      query: {
+        versions: {
+          findMany: vi.fn(async () => versions),
+        },
+      },
+    } as unknown as Database
+    const createPlanVersionRecord = vi.fn(async (input: CreatePlanVersionInput) => {
+      const planSlug = input.planId.replace("plan_", "")
+      const version = {
+        ...makePlanVersion(`plan_version_${planSlug}`, input),
+        planFeatures: [],
+      }
+      versions.push(version)
+
+      return Ok({ state: "ok" as const, planVersion: version })
+    })
+    const createPlanVersionFeatureRecord = vi.fn(async (input: CreatePlanVersionFeatureInput) => {
+      featureCreationAttempts += 1
+      if (shouldCrash && featureCreationAttempts === 2) {
+        shouldCrash = false
+        return Err(
+          new FetchError({
+            message: "simulated crash after first feature",
+            retry: true,
+          })
+        )
+      }
+
+      const version = versions.find(({ id }) => id === input.planVersionId)
+      const featureSlug = input.featureId.replace("feature_", "")
+      const planVersionFeature = {
+        id: `feature_version_${input.planVersionId}_${featureSlug}`,
+        ...input,
+        feature: makeFeature(featureSlug),
+      } as unknown as PlanVersionFeature & { feature: Feature }
+      version?.planFeatures.push(planVersionFeature)
+
+      return Ok({ state: "ok" as const, planVersionFeature })
+    })
+
+    publishPlanVersionFlowMock.mockImplementation(async (_deps: unknown, input: { id: string }) => {
+      const version = versions.find(({ id }) => id === input.id)
+      publishedFeatureSnapshots.push(version?.planFeatures.map(({ feature }) => feature.slug) ?? [])
+      if (version) {
+        version.status = "published"
+      }
+      return Ok({ state: "ok" as const })
+    })
+
+    const deps = {
+      services: {
+        plans: {
+          getPlanBySlug: vi.fn(async ({ slug }: { slug: string }) => Ok(plans[slug] ?? null)),
+          createPlanVersionRecord,
+          createPlanVersionFeatureRecord,
+        },
+        features: {
+          getFeatureBySlug: vi.fn(async ({ slug }: { slug: string }) => Ok(makeFeature(slug))),
+          createFeatureRecord: vi.fn(),
+        },
+        events: {
+          listEventsByProject: vi.fn(async () => Ok([event])),
+          createEvent: vi.fn(),
+          updateEvent: vi.fn(async (input: UpdateEventInput) => {
+            event = makeEvent(input.availableProperties ?? [])
+            return Ok({ state: "ok" as const, event })
+          }),
+        },
+        customers: {},
+      } as unknown as Pick<ServiceContext, "plans" | "features" | "events" | "customers">,
+      db,
+      logger: createLogger(),
+      userId: "usr_123",
+    }
+    const input = {
+      template: "saas_onboarding" as const,
+      projectId: "proj_123",
+      workspaceUnPriceCustomerId: "cus_123",
+      currency: "USD" as const,
+      paymentProvider: "sandbox" as const,
+      publish: true,
+    }
+
+    const crashed = await applyPlanTemplate(deps, input)
+
+    expect(crashed.err?.message).toBe("simulated crash after first feature")
+    expect(publishPlanVersionFlowMock).not.toHaveBeenCalled()
+    expect(versions).toHaveLength(1)
+    expect(versions[0]?.planFeatures.map(({ feature }) => feature.slug)).toEqual([
+      "workflow-runtime-access",
+    ])
+
+    versions[0]?.planFeatures.push(
+      ...Array.from({ length: 5 }, (_, index) => makePlanVersionFeature(`unexpected-${index}`))
+    )
+
+    const resumed = await applyPlanTemplate(deps, input)
+
+    expect(resumed.err).toBeUndefined()
+    expect(resumed.val?.state).toBe("ok")
+    expect(createPlanVersionRecord).toHaveBeenCalledTimes(3)
+    expect(publishPlanVersionFlowMock).toHaveBeenCalledTimes(3)
+    expect(publishedFeatureSnapshots).toHaveLength(3)
+    expect(
+      createPlanVersionFeatureRecord.mock.calls.filter(
+        ([featureInput]) =>
+          featureInput.planVersionId === "plan_version_starter" &&
+          featureInput.featureId === "feature_workflow-runtime-access"
+      )
+    ).toHaveLength(1)
+    for (const [index, version] of versions.entries()) {
+      const publishedSlugs = new Set(publishedFeatureSnapshots[index])
+      const finalSlugs = new Set(version.planFeatures.map(({ feature }) => feature.slug))
+      for (const expectedSlug of expectedFeatureSlugs.get(version.id) ?? []) {
+        expect(publishedSlugs.has(expectedSlug)).toBe(true)
+        expect(finalSlugs.has(expectedSlug)).toBe(true)
+      }
+    }
+  })
+
   it("creates the onboarding SaaS plan family through service primitives", async () => {
     let planVersionCount = 0
     let eventProperties: string[] = []
@@ -237,7 +472,14 @@ describe("applyPlanTemplate", () => {
         status: "published",
         tags: ["template:saas_onboarding", "template-plan:starter"],
         createdAtM: 1,
-        planFeatures: [{ id: "feature_version_starter" } as unknown as PlanVersionFeature],
+        planFeatures: [
+          "workflow-runtime-access",
+          "operator-seats",
+          "run-history",
+          "sandbox-environments",
+          "runs",
+          "credits",
+        ].map(makePlanVersionFeature),
       },
       {
         id: "plan_version_pro",
@@ -248,7 +490,14 @@ describe("applyPlanTemplate", () => {
         status: "published",
         tags: ["template:saas_onboarding", "template-plan:pro"],
         createdAtM: 2,
-        planFeatures: [{ id: "feature_version_pro" } as unknown as PlanVersionFeature],
+        planFeatures: [
+          "workflow-runtime-access",
+          "operator-seats",
+          "saml-sso",
+          "audit-trail",
+          "compute",
+          "credits",
+        ].map(makePlanVersionFeature),
       },
       {
         id: "plan_version_enterprise",
@@ -259,9 +508,15 @@ describe("applyPlanTemplate", () => {
         status: "published",
         tags: ["template:saas_onboarding", "template-plan:enterprise"],
         createdAtM: 3,
-        planFeatures: [{ id: "feature_version_enterprise" } as unknown as PlanVersionFeature],
+        planFeatures: [
+          "workflow-runtime-access",
+          "private-deployment",
+          "priority-incident-response",
+          "runs",
+          "credits",
+        ].map(makePlanVersionFeature),
       },
-    ] as Array<PlanVersion & { planFeatures: PlanVersionFeature[] }>
+    ] as unknown as Array<PlanVersion & { planFeatures: PlanVersionFeature[] }>
     const db = createDbMock({
       existingPlanVersions,
     })
