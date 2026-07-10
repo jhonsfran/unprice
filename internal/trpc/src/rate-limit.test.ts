@@ -1,5 +1,6 @@
+import { consumeFixedWindowRateLimit } from "@unprice/services/cache"
 import { describe, expect, it } from "vitest"
-import { consumeFixedWindowRateLimit, resolveTrpcRateLimitIdentity } from "./rate-limit"
+import { resolveTrpcRateLimitIdentity } from "./rate-limit"
 
 function createFakeRedis() {
   const counters = new Map<string, number>()
@@ -34,6 +35,7 @@ describe("tRPC rate limit helpers", () => {
 
     const first = await consumeFixedWindowRateLimit({
       identity: "workspace:ws_123",
+      keyPrefix: "trpc:rate-limit",
       limit: 2,
       name: "workspaces.inviteMember",
       now: 1000,
@@ -43,6 +45,7 @@ describe("tRPC rate limit helpers", () => {
 
     const second = await consumeFixedWindowRateLimit({
       identity: "workspace:ws_123",
+      keyPrefix: "trpc:rate-limit",
       limit: 2,
       name: "workspaces.inviteMember",
       now: 30_000,
@@ -52,6 +55,7 @@ describe("tRPC rate limit helpers", () => {
 
     const third = await consumeFixedWindowRateLimit({
       identity: "workspace:ws_123",
+      keyPrefix: "trpc:rate-limit",
       limit: 2,
       name: "workspaces.inviteMember",
       now: 59_000,
@@ -71,6 +75,7 @@ describe("tRPC rate limit helpers", () => {
 
     const first = await consumeFixedWindowRateLimit({
       identity: "user:user_123",
+      keyPrefix: "trpc:rate-limit",
       limit: 1,
       name: "workspaces.signUp",
       now: 59_000,
@@ -80,6 +85,7 @@ describe("tRPC rate limit helpers", () => {
 
     const second = await consumeFixedWindowRateLimit({
       identity: "user:user_123",
+      keyPrefix: "trpc:rate-limit",
       limit: 1,
       name: "workspaces.signUp",
       now: 60_000,
