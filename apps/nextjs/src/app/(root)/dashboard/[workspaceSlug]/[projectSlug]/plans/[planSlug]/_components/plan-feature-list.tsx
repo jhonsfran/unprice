@@ -94,7 +94,7 @@ export function PlanFeatureList({ planVersion }: PlanFeatureListProps) {
       </div>
       <div
         data-feature-scroll
-        className="flex max-h-[60vh] min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-4 pt-1 lg:max-h-none"
+        className="hide-scrollbar flex max-h-[60vh] min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain p-4 pt-1 lg:max-h-none"
       >
         <DroppableContainer id={"planVersionFeaturesList"}>
           <SortableContext

@@ -1,7 +1,7 @@
 "use client"
 
 import type { Row } from "@tanstack/react-table"
-import { useRouter } from "next/navigation"
+import { useParams, useRouter } from "next/navigation"
 import { startTransition, useMemo, useState } from "react"
 
 import { selectApiKeySchema } from "@unprice/db/validators"
@@ -56,6 +56,10 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
   )
   const router = useRouter()
   const trpc = useTRPC()
+  const { workspaceSlug, projectSlug } = useParams<{
+    workspaceSlug: string
+    projectSlug: string
+  }>()
   const { data: customersData } = useQuery(
     trpc.customers.listByActiveProject.queryOptions({
       search: null,
@@ -63,6 +67,8 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
       to: null,
       page: 1,
       page_size: 1_000,
+      workspaceSlug,
+      projectSlug,
     })
   )
   const customers = customersData?.customers ?? []
@@ -110,6 +116,8 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
       toast.promise(
         revokeApiKeys.mutateAsync({
           ids: [apikey.id],
+          workspaceSlug,
+          projectSlug,
         }),
         {
           loading: "Revoking key...",
@@ -125,6 +133,8 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
         rollApiKey
           .mutateAsync({
             hashKey: apikey.hash,
+            workspaceSlug,
+            projectSlug,
           })
           .then((data) => {
             navigator.clipboard.writeText(data.apikey.key)
@@ -151,6 +161,8 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
           unbindCustomer
             .mutateAsync({
               apikeyId: apikey.id,
+              workspaceSlug,
+              projectSlug,
             })
             .then(() => {
               setCustomerConfigOpen(false)
@@ -168,6 +180,8 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
           .mutateAsync({
             apikeyId: apikey.id,
             customerId: nextCustomerId,
+            workspaceSlug,
+            projectSlug,
           })
           .then(() => {
             setCustomerConfigOpen(false)

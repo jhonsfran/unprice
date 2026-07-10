@@ -6,6 +6,8 @@ export const unbindCustomer = protectedProjectProcedure
   .input(
     z.object({
       apikeyId: z.string(),
+      projectSlug: z.string().optional(),
+      workspaceSlug: z.string().optional(),
     })
   )
   .output(

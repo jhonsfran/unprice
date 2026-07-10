@@ -3,7 +3,13 @@ import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 
 export const revoke = protectedProjectProcedure
-  .input(z.object({ ids: z.string().array() }))
+  .input(
+    z.object({
+      ids: z.string().array(),
+      projectSlug: z.string().optional(),
+      workspaceSlug: z.string().optional(),
+    })
+  )
   .output(z.object({ success: z.boolean(), numRevoked: z.number() }))
   .mutation(async (opts) => {
     const { ids } = opts.input

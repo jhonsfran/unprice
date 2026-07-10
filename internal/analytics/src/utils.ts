@@ -13,9 +13,7 @@ export type Interval = keyof typeof DEFAULT_INTERVALS
 export const INTERVAL_KEYS = Object.keys(DEFAULT_INTERVALS) as Array<keyof typeof DEFAULT_INTERVALS>
 export const DEFAULT_INTERVAL = "24h"
 
-export function prepareInterval(interval: Interval) {
-  const now = Date.now()
-
+export function prepareInterval(interval: Interval, now = Date.now()) {
   switch (interval) {
     case "24h": {
       const intervalMs = 1000 * 60 * 60 * 24

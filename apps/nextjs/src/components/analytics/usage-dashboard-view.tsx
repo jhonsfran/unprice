@@ -155,17 +155,17 @@ export function UsageDashboardView({
     )
   }
 
-  const maxFeatureUsage = data.features[0]?.usage ?? 1
-  const featureLog = (
-    <UsageFeatureTable
-      features={data.features}
-      maxFeatureUsage={maxFeatureUsage}
-      featureCount={data.summary.featureCount}
-      totalLatestUsage={data.summary.totalLatestUsage}
-      spending={data.summary.spending}
-      showSummaryStats={mode === "project" || showCustomerSummary}
-    />
-  )
+  const featureLog =
+    mode === "project" ? (
+      <UsageFeatureTable
+        features={data.features}
+        maxFeatureUsage={data.features[0]?.usage ?? 1}
+        featureCount={data.summary.featureCount}
+        totalLatestUsage={data.summary.totalLatestUsage}
+        spending={data.summary.spending}
+        showSummaryStats
+      />
+    ) : null
   const topConsumers =
     mode === "project" && data.topConsumers.length > 0 && customerHref ? (
       <TopConsumersTable consumers={data.topConsumers} customerHref={customerHref} />
@@ -233,14 +233,13 @@ export function UsageDashboardView({
           />
         )}
 
-        {topConsumers ? (
+        {topConsumers && featureLog ? (
           <div className="grid items-start gap-4 xl:grid-cols-2">
             {featureLog}
             {topConsumers}
           </div>
-        ) : (
-          featureLog
-        )}
+        ) : null}
+        {!topConsumers && featureLog ? featureLog : null}
       </div>
     </section>
   )
@@ -523,9 +522,14 @@ function buildChartData(
 
     const point =
       pointsByDate.get(row.date) ??
-      ({ date: row.date, dateLabel: formatDateLabel(row.date, dateFormat) } as UsageChartPoint)
+      ({
+        date: row.date,
+        dateLabel: formatDateLabel(row.date, dateFormat),
+        spendingByFeature: {},
+      } as UsageChartPoint)
 
     point[row.featureSlug] = row.usage
+    point.spendingByFeature[row.featureSlug] = row.spending.displayAmount
     pointsByDate.set(row.date, point)
   }
 

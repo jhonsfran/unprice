@@ -12,6 +12,7 @@ const fillVariants = cva("h-full rounded-full transition-[width] duration-200", 
     variant: {
       default: "bg-background-solid",
       primary: "bg-primary-solid",
+      info: "bg-info-solid",
       destructive: "bg-danger-solid",
       secondary: "bg-secondary-solid",
     },

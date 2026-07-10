@@ -16,6 +16,8 @@ const firstHour = Date.parse("2026-06-13T07:00:00.000Z")
 const secondHour = Date.parse("2026-06-13T08:00:00.000Z")
 const thirdHour = Date.parse("2026-06-13T09:00:00.000Z")
 const now = Date.parse("2026-06-13T09:30:00.000Z")
+const last24hQueryStart = Date.parse("2026-06-12T09:00:00.000Z")
+const last30dQueryStart = Date.parse("2026-05-14T00:00:00.000Z")
 
 describe("getUsageDashboard", () => {
   it("derives summary rows from period totals and chart rows from time buckets", async () => {
@@ -106,16 +108,45 @@ describe("getUsageDashboard", () => {
     expect(analytics.getFeaturesUsageTimeseries).toHaveBeenCalledWith({
       project_id: "proj_1",
       customer_id: "cus_1",
-      start: expect.any(Number),
-      end: expect.any(Number),
+      start: last24hQueryStart,
+      end: now,
     })
     expect(analytics.getFeaturesUsagePeriod).toHaveBeenCalledWith({
       project_id: "proj_1",
       customer_id: "cus_1",
-      start: expect.any(Number),
-      end: expect.any(Number),
+      start: last24hQueryStart,
+      end: now,
     })
     expect(analytics.getTopConsumers).not.toHaveBeenCalled()
+  })
+
+  it("aligns rolling dashboard windows to Tinybird rollup buckets", async () => {
+    const { deps, analytics } = makeDeps({
+      now: () => now,
+      timeseriesRows: [timeseriesRow({})],
+      periodRows: [periodRow({})],
+    })
+
+    const result = await getUsageDashboard(deps, baseInput({ range: "30d" }))
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.freshness).toEqual({
+      generatedAt: now,
+      dataFrom: last30dQueryStart,
+      dataTo: now,
+    })
+    expect(analytics.getFeaturesUsageTimeseries).toHaveBeenCalledWith({
+      project_id: "proj_1",
+      customer_id: "cus_1",
+      start: last30dQueryStart,
+      end: now,
+    })
+    expect(analytics.getFeaturesUsagePeriod).toHaveBeenCalledWith({
+      project_id: "proj_1",
+      customer_id: "cus_1",
+      start: last30dQueryStart,
+      end: now,
+    })
   })
 
   it("loads top consumers only for the project dashboard", async () => {
@@ -163,8 +194,8 @@ describe("getUsageDashboard", () => {
     ])
     expect(analytics.getTopConsumers).toHaveBeenCalledWith({
       project_id: "proj_1",
-      start: expect.any(Number),
-      end: expect.any(Number),
+      start: last24hQueryStart,
+      end: now,
       limit: 10,
     })
   })

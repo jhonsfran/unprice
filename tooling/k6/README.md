@@ -2,9 +2,9 @@
 
 Simple load test for one project and one customer.
 
-The script reads active entitlements from `/v1/entitlements/get`, builds async usage calls from
-the entitlement meter configs, and verifies every entitlement. If multiple meters share the same
-`eventSlug`, the script sends one event with all required aggregation properties.
+The scripts use the TypeScript SDK with a k6 fetch adapter. They read active entitlements through
+`access.entitlements.list`, build usage calls from entitlement meter configs, and verify
+entitlements through `access.check`.
 
 ## Setup
 
@@ -32,11 +32,11 @@ This command builds `baseline.js` and runs k6 through Docker with `tooling/k6/.e
 Run it only from a trusted local shell that has Docker access and a non-production
 test token/customer using the required variables from the setup section.
 
-`EVENTS=1000` means at least 1000 `/v1/events/ingest` calls. If the customer has multiple distinct
+`EVENTS=1000` means at least 1000 `usage.record` calls. If the customer has multiple distinct
 usage event slugs, the run sends `EVENTS * eventSlugCount` async usage events.
 
 The script also verifies every active entitlement on every iteration. Usage and verification
-requests are sent in parallel with `http.batch()`.
+requests are sent through SDK methods so API contract drift is caught by TypeScript before k6 runs.
 
 ## Ingestion Failure Test
 

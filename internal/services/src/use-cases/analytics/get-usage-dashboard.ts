@@ -117,13 +117,14 @@ export async function getUsageDashboard(
   rawInput: GetUsageDashboardInput
 ): Promise<Result<GetUsageDashboardOutput, GetUsageDashboardFailure>> {
   const input = getUsageDashboardInputSchema.parse(rawInput)
-  const interval = prepareInterval(input.range)
   const generatedAt = deps.now?.() ?? Date.now()
+  const interval = prepareInterval(input.range, generatedAt)
+  const queryWindow = alignRollupWindow(interval)
   const usageQuery = {
     project_id: input.projectId,
     ...(input.customerId ? { customer_id: input.customerId } : {}),
-    start: interval.start,
-    end: interval.end,
+    start: queryWindow.start,
+    end: queryWindow.end,
   }
 
   const [timeseriesResult, periodResult] = await Promise.all([
@@ -177,8 +178,8 @@ export async function getUsageDashboard(
     const topConsumersResult = await loadTopConsumers({
       deps,
       projectId: input.projectId,
-      start: interval.start,
-      end: interval.end,
+      start: queryWindow.start,
+      end: queryWindow.end,
       limit: input.topConsumersLimit,
     })
 
@@ -196,12 +197,35 @@ export async function getUsageDashboard(
     topConsumers,
     freshness: {
       generatedAt,
-      dataFrom: interval.start,
-      dataTo: interval.end,
+      dataFrom: queryWindow.start,
+      dataTo: queryWindow.end,
     },
   }
 
   return Ok(getUsageDashboardOutputSchema.parse(output))
+}
+
+function alignRollupWindow(interval: ReturnType<typeof prepareInterval>): {
+  start: number
+  end: number
+} {
+  return {
+    start:
+      interval.granularity === "hour" ? floorUtcHour(interval.start) : floorUtcDay(interval.start),
+    end: interval.end,
+  }
+}
+
+function floorUtcHour(timestamp: number): number {
+  const date = new Date(timestamp)
+  date.setUTCMinutes(0, 0, 0)
+  return date.getTime()
+}
+
+function floorUtcDay(timestamp: number): number {
+  const date = new Date(timestamp)
+  date.setUTCHours(0, 0, 0, 0)
+  return date.getTime()
 }
 
 export function emptyUsageDashboardOutput(

@@ -1,7 +1,9 @@
 import { check, fail } from "k6"
-import http from "k6/http"
 import { Counter } from "k6/metrics"
+import type { ApiResult } from "../../packages/api/src/index"
+import { type K6SdkClient, createK6SdkClient } from "./sdk-client"
 import {
+  type CustomerUsageProfile,
   buildProperties,
   discoverCustomerUsageProfile,
   nonNegativeInteger,
@@ -21,6 +23,7 @@ const CUSTOMER_ID = __ENV.CUSTOMER_ID || ""
 const EVENTS = positiveInteger(__ENV.EVENTS, 1000)
 const VUS = positiveInteger(__ENV.VUS, Math.min(10, EVENTS))
 const VERIFY_EVERY = nonNegativeInteger(__ENV.VERIFY_EVERY, 100)
+let sdk: K6SdkClient | null = null
 
 export const options = {
   scenarios: {
@@ -38,10 +41,10 @@ export const options = {
   },
 }
 
-export function setup() {
+export async function setup(): Promise<CustomerUsageProfile> {
   validateConfig()
 
-  const profile = discoverCustomerProfile()
+  const profile = await discoverCustomerProfile()
 
   if (profile.usageEvents.length === 0) {
     fail(`No usage-metered entitlements found for customer ${CUSTOMER_ID}`)
@@ -50,46 +53,45 @@ export function setup() {
   return profile
 }
 
-export default function (profile) {
-  const usageRequests = profile.usageEvents.map((event) =>
-    postJsonRequest(
-      "/v1/usage/record",
-      {
+export default async function (profile: CustomerUsageProfile): Promise<void> {
+  const client = getSdk()
+  const usageResults = await Promise.all(
+    profile.usageEvents.map((event) =>
+      client.usage.record({
         customerId: CUSTOMER_ID,
         eventSlug: event.eventSlug,
         idempotencyKey: nextIdempotencyKey(event.eventSlug),
         properties: buildProperties(event.propertyFields),
-      },
-      "POST /v1/usage/record"
+      })
     )
   )
   const verifyRequests = shouldVerifyThisIteration()
-    ? buildVerifyRequests(profile.featureSlugs)
+    ? await runVerifyRequests(client, profile.featureSlugs)
     : []
 
-  asyncUsageEventsSent.add(usageRequests.length)
+  asyncUsageEventsSent.add(usageResults.length)
   verifyRequestsSent.add(verifyRequests.length)
 
-  for (const response of http.batch([...usageRequests, ...verifyRequests])) {
-    recordApiResponse(response)
+  for (const result of [...usageResults, ...verifyRequests]) {
+    recordApiResponse(result)
   }
 }
 
-export function teardown(profile) {
-  const verifyRequests = buildVerifyRequests(profile.featureSlugs)
+export async function teardown(profile: CustomerUsageProfile): Promise<void> {
+  const verifyResults = await runVerifyRequests(getSdk(), profile.featureSlugs)
 
-  verifyRequestsSent.add(verifyRequests.length)
+  verifyRequestsSent.add(verifyResults.length)
 
-  for (const response of http.batch(verifyRequests)) {
-    recordApiResponse(response)
+  for (const result of verifyResults) {
+    recordApiResponse(result)
   }
 }
 
-function discoverCustomerProfile() {
-  const profile = discoverCustomerUsageProfile({
+async function discoverCustomerProfile(): Promise<CustomerUsageProfile> {
+  const profile = await discoverCustomerUsageProfile({
     customerId: CUSTOMER_ID,
     projectId: PROJECT_ID,
-    postJson,
+    sdk: getSdk(),
   })
 
   check(profile, {
@@ -99,37 +101,18 @@ function discoverCustomerProfile() {
   return profile
 }
 
-function postJson(path, body, name) {
-  return http.post(`${BASE_URL}${path}`, JSON.stringify(body), requestParams(name))
-}
-
-function postJsonRequest(path, body, name) {
-  return ["POST", `${BASE_URL}${path}`, JSON.stringify(body), requestParams(name)]
-}
-
-function buildVerifyRequests(featureSlugs) {
-  return featureSlugs.map((featureSlug) =>
-    postJsonRequest(
-      "/v1/access/check",
-      {
+function runVerifyRequests(
+  client: K6SdkClient,
+  featureSlugs: string[]
+): Promise<ApiResult<unknown>[]> {
+  return Promise.all(
+    featureSlugs.map((featureSlug) =>
+      client.access.check({
         customerId: CUSTOMER_ID,
         featureSlug,
-      },
-      "POST /v1/access/check"
+      })
     )
   )
-}
-
-function requestParams(name) {
-  return {
-    headers: {
-      authorization: `Bearer ${UNPRICE_TOKEN}`,
-      "content-type": "application/json",
-    },
-    tags: {
-      name,
-    },
-  }
 }
 
 function validateConfig() {
@@ -146,20 +129,29 @@ function validateConfig() {
   }
 }
 
-function recordApiResponse(response) {
-  if (response.status >= 400) {
+function recordApiResponse(result: ApiResult<unknown>): void {
+  if (result.error) {
     apiErrors.add(1)
   }
 
-  check(response, {
-    "request status is successful": (res) => res.status >= 200 && res.status < 300,
+  check(result, {
+    "request status is successful": (res) => !res.error,
   })
 }
 
-function shouldVerifyThisIteration() {
+function shouldVerifyThisIteration(): boolean {
   return VERIFY_EVERY > 0 && __ITER % VERIFY_EVERY === 0
 }
 
-function nextIdempotencyKey(eventSlug) {
+function nextIdempotencyKey(eventSlug: string): string {
   return `k6-async-${eventSlug}-${Date.now()}-${__VU}-${__ITER}-${randomInteger(100000, 999999)}`
+}
+
+function getSdk(): K6SdkClient {
+  sdk ??= createK6SdkClient({
+    baseUrl: BASE_URL,
+    token: UNPRICE_TOKEN,
+  })
+
+  return sdk
 }

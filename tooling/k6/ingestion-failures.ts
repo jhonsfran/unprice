@@ -1,7 +1,9 @@
 import { check, fail } from "k6"
-import http from "k6/http"
 import { Counter } from "k6/metrics"
+import { type K6SdkClient, createK6SdkClient } from "./sdk-client"
 import {
+  type CustomerUsageProfile,
+  type UsageEventTarget,
   buildProperties,
   discoverCustomerUsageProfile,
   normalizeBaseUrl,
@@ -21,6 +23,8 @@ const VUS = positiveInteger(__ENV.VUS, Math.min(10, EVENTS))
 
 const FAILURE_HEADER = "x-unprice-ingestion-test-failure"
 const FAILURE_HEADER_VALUE = "raw_queue_processing_failed"
+let sdk: K6SdkClient | null = null
+let failureSdk: K6SdkClient | null = null
 
 export const options = {
   scenarios: {
@@ -38,13 +42,13 @@ export const options = {
   },
 }
 
-export function setup() {
+export async function setup(): Promise<{ target: UsageEventTarget }> {
   validateConfig()
 
-  const profile = discoverCustomerUsageProfile({
+  const profile: CustomerUsageProfile = await discoverCustomerUsageProfile({
     customerId: CUSTOMER_ID,
     projectId: PROJECT_ID,
-    postJson,
+    sdk: getSdk(),
   })
   const target = profile.usageEvents[0]
 
@@ -55,57 +59,33 @@ export function setup() {
   return { target }
 }
 
-export default function ({ target }) {
-  const response = postJson(
-    "/v1/usage/record",
-    {
-      customerId: CUSTOMER_ID,
-      eventSlug: target.eventSlug,
-      id: nextEventId(),
-      idempotencyKey: nextIdempotencyKey(target.eventSlug),
-      properties: buildProperties(target.propertyFields),
-    },
-    "POST /v1/usage/record failure test",
-    {
-      [FAILURE_HEADER]: FAILURE_HEADER_VALUE,
-    }
-  )
+export default async function ({ target }: { target: UsageEventTarget }): Promise<void> {
+  const result = await getFailureSdk().usage.record({
+    customerId: CUSTOMER_ID,
+    eventSlug: target.eventSlug,
+    id: nextEventId(),
+    idempotencyKey: nextIdempotencyKey(target.eventSlug),
+    properties: buildProperties(target.propertyFields),
+  })
 
-  if (response.status >= 400) {
+  if (result.error) {
     apiErrors.add(1)
   }
 
   if (
-    check(response, {
-      "failure-test event is accepted": (res) => res.status === 202,
+    check(result, {
+      "failure-test event is accepted": (res) => !res.error && res.result?.accepted === true,
     })
   ) {
     failureEventsAccepted.add(1)
   }
 }
 
-function postJson(path, body, name, extraHeaders = {}) {
-  return http.post(`${BASE_URL}${path}`, JSON.stringify(body), requestParams(name, extraHeaders))
-}
-
-function requestParams(name, extraHeaders = {}) {
-  return {
-    headers: {
-      authorization: `Bearer ${UNPRICE_TOKEN}`,
-      "content-type": "application/json",
-      ...extraHeaders,
-    },
-    tags: {
-      name,
-    },
-  }
-}
-
-function nextEventId() {
+function nextEventId(): string {
   return `evt_k6_failure_${Date.now()}_${__VU}_${__ITER}_${randomInteger(100000, 999999)}`
 }
 
-function nextIdempotencyKey(eventSlug) {
+function nextIdempotencyKey(eventSlug: string): string {
   return `k6-failure-${eventSlug}-${Date.now()}-${__VU}-${__ITER}-${randomInteger(100000, 999999)}`
 }
 
@@ -121,4 +101,25 @@ function validateConfig() {
   if (!CUSTOMER_ID) {
     fail("Missing CUSTOMER_ID")
   }
+}
+
+function getSdk(): K6SdkClient {
+  sdk ??= createK6SdkClient({
+    baseUrl: BASE_URL,
+    token: UNPRICE_TOKEN,
+  })
+
+  return sdk
+}
+
+function getFailureSdk(): K6SdkClient {
+  failureSdk ??= createK6SdkClient({
+    baseUrl: BASE_URL,
+    headers: {
+      [FAILURE_HEADER]: FAILURE_HEADER_VALUE,
+    },
+    token: UNPRICE_TOKEN,
+  })
+
+  return failureSdk
 }

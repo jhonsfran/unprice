@@ -4,7 +4,13 @@ import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 
 export const roll = protectedProjectProcedure
-  .input(z.object({ hashKey: z.string() }))
+  .input(
+    z.object({
+      hashKey: z.string(),
+      projectSlug: z.string().optional(),
+      workspaceSlug: z.string().optional(),
+    })
+  )
   .output(
     z.object({
       apikey: selectApiKeySchema.extend({

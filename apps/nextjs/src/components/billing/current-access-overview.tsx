@@ -331,6 +331,7 @@ function EntitlementUsageRow({
             value={entitlement.usagePercent ?? 0}
             className="h-1.5"
             max={100}
+            variant="info"
             aria-label={`${entitlement.featureTitle} usage`}
           />
         )}

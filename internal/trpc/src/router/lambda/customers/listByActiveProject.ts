@@ -4,7 +4,12 @@ import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 
 export const listByActiveProject = protectedProjectProcedure
-  .input(searchParamsSchemaDataTable)
+  .input(
+    searchParamsSchemaDataTable.extend({
+      projectSlug: z.string().optional(),
+      workspaceSlug: z.string().optional(),
+    })
+  )
   .output(
     z.object({
       customers: z.array(customerSelectSchema),

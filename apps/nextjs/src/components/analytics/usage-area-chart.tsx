@@ -44,14 +44,32 @@ export function UsageAreaChart({
             content={
               <ChartTooltipContent
                 indicator="line"
-                formatter={(value, name) => (
-                  <>
-                    <span>{String(name)}</span>
-                    <span className="ml-auto font-medium font-mono text-foreground tabular-nums">
-                      {nFormatter(Number(value), { digits: 1 })}
-                    </span>
-                  </>
-                )}
+                formatter={(value, name, item) => {
+                  const feature = String(name)
+                  const spending = getFeatureSpending(item.payload, feature)
+
+                  return (
+                    <div className="flex min-w-[12rem] flex-1 flex-col gap-1">
+                      <span className="min-w-0 truncate font-medium text-foreground">
+                        {feature}
+                      </span>
+                      <span className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4">
+                        <span className="text-muted-foreground">Used</span>
+                        <span className="text-right font-medium font-mono text-foreground tabular-nums">
+                          {nFormatter(Number(value), { digits: 1 })}
+                        </span>
+                        {spending ? (
+                          <>
+                            <span className="text-muted-foreground">Consumed</span>
+                            <span className="text-right font-mono text-muted-foreground tabular-nums">
+                              {spending}
+                            </span>
+                          </>
+                        ) : null}
+                      </span>
+                    </div>
+                  )
+                }}
               />
             }
           />
@@ -71,4 +89,19 @@ export function UsageAreaChart({
       </ChartContainer>
     </div>
   )
+}
+
+function getFeatureSpending(payload: unknown, feature: string): string | null {
+  if (!payload || typeof payload !== "object" || !("spendingByFeature" in payload)) {
+    return null
+  }
+
+  const spendingByFeature = payload.spendingByFeature
+
+  if (!spendingByFeature || typeof spendingByFeature !== "object") {
+    return null
+  }
+
+  const spending = (spendingByFeature as Record<string, unknown>)[feature]
+  return typeof spending === "string" ? spending : null
 }

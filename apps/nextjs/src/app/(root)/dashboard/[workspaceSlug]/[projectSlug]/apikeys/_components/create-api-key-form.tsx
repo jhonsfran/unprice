@@ -92,6 +92,8 @@ export default function CreateApiKeyForm(props: CreateApiKeyFormProps) {
       to: null,
       page: 1,
       page_size: 1_000,
+      workspaceSlug,
+      projectSlug,
     })
   )
   const customers = customersData?.customers ?? []
@@ -119,7 +121,14 @@ export default function CreateApiKeyForm(props: CreateApiKeyFormProps) {
   return (
     <Form {...form}>
       <form
-        onSubmit={form.handleSubmit(async (data: CreateApiKey) => await create.mutateAsync(data))}
+        onSubmit={form.handleSubmit(
+          async (data: CreateApiKey) =>
+            await create.mutateAsync({
+              ...data,
+              workspaceSlug,
+              projectSlug,
+            })
+        )}
         className="space-y-6"
       >
         {key && (

@@ -49,6 +49,7 @@ export default async function PlanVersionLayout(props: {
 
   return (
     <DashboardShell
+      fullHeight
       header={
         <div className="flex w-full flex-col gap-3">
           <HeaderTab
@@ -83,7 +84,7 @@ export default async function PlanVersionLayout(props: {
         </div>
       }
     >
-      <div className="flex w-full flex-col justify-center gap-4">
+      <div className="flex w-full flex-col justify-center gap-4 lg:min-h-0 lg:flex-1">
         {!active ? (
           <BannerInactiveVersion />
         ) : status === "published" ? (

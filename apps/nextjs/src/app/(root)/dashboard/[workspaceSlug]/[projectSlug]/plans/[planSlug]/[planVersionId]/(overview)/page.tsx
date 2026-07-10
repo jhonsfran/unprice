@@ -36,14 +36,16 @@ export default async function OverviewVersionPage({
 
   return (
     <DragDrop>
-      <div className="flex flex-col gap-4">
-        {/* bounded workbench: the grid owns the height on lg and each pane
-            scrolls internally, so long feature lists can't stretch the page */}
+      <div className="flex flex-col gap-4 lg:min-h-0 lg:flex-1">
+        {/* bounded workbench: on lg the grid flex-fills the dashboard content well
+            (via DashboardShell `fullHeight`) instead of a fixed vh height, so it can
+            never overflow the well regardless of header/breadcrumb chrome height, and
+            each pane scrolls internally */}
         <div
           className={
             isPublished
-              ? "grid grid-cols-1 gap-4 lg:h-[max(560px,calc(100vh-18rem))] lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-0 lg:divide-x lg:rounded-lg lg:border"
-              : "grid grid-cols-1 gap-4 lg:h-[max(560px,calc(100vh-16rem))] lg:grid-cols-[280px_minmax(0,1fr)_320px] lg:gap-0 lg:divide-x lg:rounded-lg lg:border"
+              ? "grid grid-cols-1 gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-0 lg:divide-x lg:rounded-lg lg:border"
+              : "grid grid-cols-1 gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[280px_minmax(0,1fr)_320px] lg:gap-0 lg:divide-x lg:rounded-lg lg:border"
           }
         >
           {/* ── Left: feature library (draft versions only) ─────── */}
@@ -82,7 +84,9 @@ export default async function OverviewVersionPage({
 
           {/* ── Right: version preview + settings ─────────── */}
           <aside className="min-h-0 bg-muted/20 lg:overflow-hidden lg:rounded-r-lg">
-            <div className="lg:h-full lg:overflow-y-auto">
+            {/* hide-scrollbar + overscroll-contain: keep the thick native bar out of the rail
+                and stop its scroll from chaining into the dashboard content well */}
+            <div className="hide-scrollbar overscroll-contain lg:h-full lg:overflow-y-auto">
               <PlanWorkspaceRail planVersion={planVersion} />
             </div>
           </aside>

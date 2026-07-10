@@ -8,11 +8,21 @@ export function DashboardShell(props: {
   className?: string
   header?: React.ReactNode
   aside?: React.ReactNode
+  /**
+   * Opt-in: make the shell fill the dashboard content well's height on lg so a page
+   * can flex-fill it (e.g. a workbench that must fit the viewport without the well
+   * scrolling). Off by default — other pages keep their natural, well-scrolling height.
+   */
+  fullHeight?: boolean
 }) {
   return (
-    <MaxWidthWrapper className="hide-scrollbar overflow-x-hidden">
+    <MaxWidthWrapper
+      className={cn("hide-scrollbar overflow-x-hidden", props.fullHeight && "lg:h-full")}
+    >
       {!props.aside && (
-        <div className={cn("flex min-h-0 flex-col", props.className)}>
+        <div
+          className={cn("flex min-h-0 flex-col", props.fullHeight && "lg:h-full", props.className)}
+        >
           <div className="flex min-h-0 flex-1 flex-col space-y-6 px-0 md:space-y-8 md:py-4">
             {props.header && props.header}
 

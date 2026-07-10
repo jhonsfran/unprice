@@ -7,6 +7,8 @@ export const bindCustomer = protectedProjectProcedure
     z.object({
       apikeyId: z.string(),
       customerId: z.string(),
+      projectSlug: z.string().optional(),
+      workspaceSlug: z.string().optional(),
     })
   )
   .output(

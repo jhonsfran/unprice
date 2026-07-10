@@ -156,7 +156,10 @@ export function FeatureList({ featuresPromise, planVersion }: FeatureListProps) 
       </div>
       {/* the pane owns the height: bounded on mobile, flexes to the
           workbench grid on lg */}
-      <ScrollArea className="max-h-[45vh] min-h-0 flex-1 pb-4 lg:max-h-none">
+      <ScrollArea
+        hideScrollBar
+        className="max-h-[45vh] min-h-0 flex-1 pb-4 lg:max-h-none [&_[data-radix-scroll-area-viewport]]:overscroll-contain"
+      >
         <div className="flex min-h-[200px] flex-col gap-2 px-4 pt-1">
           {isFetching && (
             <div className="flex h-full items-center justify-center">
@@ -180,7 +183,9 @@ export function FeatureList({ featuresPromise, planVersion }: FeatureListProps) 
                     description: "",
                   }}
                 >
-                  <Button size={"sm"}>Create feature</Button>
+                  <Button size={"sm"} variant={"default"}>
+                    Create feature
+                  </Button>
                 </FeatureDialog>
               </EmptyPlaceholder.Action>
             </EmptyPlaceholder>

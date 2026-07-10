@@ -1,27 +1,52 @@
 import { fail } from "k6"
+import type { K6SdkClient } from "./sdk-client"
 
-export function discoverCustomerUsageProfile({ customerId, projectId, postJson }) {
-  const response = postJson(
-    "/v1/access/entitlements/list",
-    {
-      customerId,
-      projectId,
-    },
-    "POST /v1/access/entitlements/list"
-  )
+type EntitlementList = NonNullable<
+  Awaited<ReturnType<K6SdkClient["access"]["entitlements"]["list"]>>["result"]
+>
+type Entitlement = EntitlementList[number]
 
-  if (response.status !== 200) {
-    fail(`access.entitlements.list failed: ${response.status} ${response.body}`)
+export type UsageEventTarget = {
+  eventSlug: string
+  featureSlug: string
+  aggregationMethod: string
+  aggregationField: string | null
+  propertyFields: string[]
+}
+
+export type CustomerUsageProfile = {
+  featureSlugs: string[]
+  usageEvents: UsageEventTarget[]
+}
+
+export async function discoverCustomerUsageProfile({
+  customerId,
+  projectId,
+  sdk,
+}: {
+  customerId: string
+  projectId?: string
+  sdk: Pick<K6SdkClient, "access">
+}): Promise<CustomerUsageProfile> {
+  const entitlementsResult = await sdk.access.entitlements.list({
+    customerId,
+    ...(projectId ? { projectId } : {}),
+  })
+
+  if (entitlementsResult.error) {
+    fail(
+      `access.entitlements.list failed: ${entitlementsResult.error.code}: ${entitlementsResult.error.message}`
+    )
   }
 
-  const entitlements = parseJson(response)
+  const entitlements = entitlementsResult.result
 
   if (!Array.isArray(entitlements) || entitlements.length === 0) {
     fail(`No active entitlements found for customer ${customerId} in project ${projectId}`)
   }
 
-  const featureSlugs = []
-  const usageEventsByKey = new Map()
+  const featureSlugs: string[] = []
+  const usageEventsByKey = new Map<string, UsageEventTarget>()
 
   for (const entitlement of entitlements) {
     const featureSlug = getFeatureSlug(entitlement)
@@ -55,6 +80,8 @@ export function discoverCustomerUsageProfile({ customerId, projectId, postJson }
     usageEventsByKey.set(key, {
       eventSlug: meterConfig.eventSlug,
       featureSlug: featureSlug ?? meterConfig.eventSlug,
+      aggregationMethod: meterConfig.aggregationMethod,
+      aggregationField: meterConfig.aggregationField,
       propertyFields,
     })
   }
@@ -69,8 +96,8 @@ export function discoverCustomerUsageProfile({ customerId, projectId, postJson }
   }
 }
 
-export function buildProperties(propertyFields) {
-  const properties = {}
+export function buildProperties(propertyFields: string[]): Record<string, unknown> {
+  const properties: Record<string, unknown> = {}
 
   for (const field of propertyFields) {
     properties[field] = randomUsageValue()
@@ -79,11 +106,11 @@ export function buildProperties(propertyFields) {
   return properties
 }
 
-export function normalizeBaseUrl(value) {
+export function normalizeBaseUrl(value: string): string {
   return value.endsWith("/") ? value.slice(0, -1) : value
 }
 
-export function parseJson(response) {
+export function parseJson(response: { json(): unknown }): unknown {
   try {
     return response.json()
   } catch (_error) {
@@ -91,7 +118,7 @@ export function parseJson(response) {
   }
 }
 
-export function positiveInteger(value, fallback) {
+export function positiveInteger(value: string | undefined, fallback: number): number {
   const parsed = Number(value)
 
   if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -101,7 +128,7 @@ export function positiveInteger(value, fallback) {
   return Math.floor(parsed)
 }
 
-export function nonNegativeInteger(value, fallback) {
+export function nonNegativeInteger(value: string | undefined, fallback: number): number {
   if (value === undefined || value === null || value === "") {
     return fallback
   }
@@ -115,21 +142,19 @@ export function nonNegativeInteger(value, fallback) {
   return parsed
 }
 
-export function randomInteger(min, max) {
+export function randomInteger(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min
 }
 
-function getFeatureSlug(entitlement) {
-  const directSlug = trimString(entitlement?.featureSlug)
-
-  if (directSlug) {
-    return directSlug
-  }
-
+function getFeatureSlug(entitlement: Entitlement): string | null {
   return trimString(entitlement?.featurePlanVersion?.feature?.slug)
 }
 
-function getMeterConfig(entitlement) {
+function getMeterConfig(entitlement: Entitlement): {
+  eventSlug: string
+  aggregationMethod: string
+  aggregationField: string | null
+} | null {
   const meterConfig = entitlement?.featurePlanVersion?.meterConfig
 
   if (!meterConfig || typeof meterConfig !== "object") {
@@ -149,14 +174,14 @@ function getMeterConfig(entitlement) {
   }
 }
 
-function randomUsageValue() {
+function randomUsageValue(): number {
   return randomInteger(1, 5)
 }
 
-function trimString(value) {
+function trimString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null
 }
 
-function unique(values) {
+function unique(values: string[]): string[] {
   return [...new Set(values)]
 }

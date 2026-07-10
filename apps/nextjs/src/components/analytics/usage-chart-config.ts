@@ -3,7 +3,8 @@ import type { ChartConfig } from "@unprice/ui/chart"
 export type UsageChartPoint = {
   date: number
   dateLabel: string
-  [feature: string]: string | number
+  spendingByFeature: Record<string, string>
+  [feature: string]: number | string | Record<string, string>
 }
 
 const TIMESERIES_COLORS = [

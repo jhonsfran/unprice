@@ -1,16 +1,16 @@
 import { check, fail } from "k6"
-import http from "k6/http"
 import { Counter, Trend } from "k6/metrics"
+import type { ApiResult } from "../../packages/api/src/index"
+import { type K6SdkClient, createK6SdkClient, describeSdkError } from "./sdk-client"
 import {
+  type CustomerUsageProfile,
   buildProperties,
   discoverCustomerUsageProfile,
   normalizeBaseUrl,
-  parseJson,
   positiveInteger,
   randomInteger,
 } from "./usage-profile.js"
 
-// --- Custom metrics ---
 const runsStarted = new Counter("runs_started")
 const runsCompleted = new Counter("runs_completed")
 const syncEventsAccepted = new Counter("sync_events_accepted")
@@ -20,17 +20,15 @@ const startRunDuration = new Trend("start_run_duration", true)
 const syncEventDuration = new Trend("sync_event_duration", true)
 const endRunDuration = new Trend("end_run_duration", true)
 
-// --- Configuration ---
 const BASE_URL = normalizeBaseUrl(__ENV.BASE_URL || "http://localhost:8787")
 const UNPRICE_TOKEN = __ENV.UNPRICE_TOKEN || ""
 const PROJECT_ID = __ENV.PROJECT_ID || ""
 const CUSTOMER_ID = __ENV.CUSTOMER_ID || ""
-// Budget per run in currency minor units (cents). Keep small relative to the
-// wallet cap so multiple concurrent runs can coexist. Default: 100 = $1.00/€1.00.
 const BUDGET_AMOUNT = positiveInteger(__ENV.BUDGET_AMOUNT, 100)
 const EVENTS_PER_RUN = positiveInteger(__ENV.EVENTS_PER_RUN, 50)
 const RUNS = positiveInteger(__ENV.RUNS, 10)
 const VUS = positiveInteger(__ENV.VUS, Math.min(5, RUNS))
+let sdk: K6SdkClient | null = null
 
 export const options = {
   scenarios: {
@@ -50,13 +48,13 @@ export const options = {
   },
 }
 
-export function setup() {
+export async function setup(): Promise<CustomerUsageProfile> {
   validateConfig()
 
-  const profile = discoverCustomerUsageProfile({
+  const profile = await discoverCustomerUsageProfile({
     customerId: CUSTOMER_ID,
     projectId: PROJECT_ID,
-    postJson,
+    sdk: getSdk(),
   })
 
   if (profile.usageEvents.length === 0) {
@@ -65,88 +63,74 @@ export function setup() {
 
   check(profile, {
     "access.entitlements.list returns usage profile": (p) => p.usageEvents.length > 0,
-    "usage events have featureSlug": (p) => p.usageEvents.every((e) => e.featureSlug),
+    "usage events have featureSlug": (p) => p.usageEvents.every((e) => e.featureSlug.length > 0),
   })
 
   return profile
 }
 
-export default function (profile) {
-  // 1. Start a budgeted run
+export default async function (profile: CustomerUsageProfile): Promise<void> {
+  const client = getSdk()
   const runIdempotencyKey = `k6-run-${__VU}-${__ITER}-${Date.now()}`
-
-  const startRes = postJson(
-    "/v1/runs/start",
-    {
+  const startResult = await timeSdkCall(startRunDuration, () =>
+    client.runs.start({
       customerId: CUSTOMER_ID,
-      budgetAmount: BUDGET_AMOUNT,
+      budgetAmountMinor: BUDGET_AMOUNT,
       idempotencyKey: runIdempotencyKey,
       workloadType: "agent",
       workloadId: `k6-agent-vu${__VU}`,
       metadata: { k6_vu: __VU, k6_iter: __ITER },
-    },
-    "POST /v1/runs/start"
+    })
   )
 
-  startRunDuration.add(startRes.timings.duration)
-
-  const startOk = check(startRes, {
-    "run started (200)": (r) => r.status === 200,
+  const startOk = check(startResult, {
+    "run started": (r) => !r.error && !!r.result,
   })
 
-  if (!startOk) {
-    const body = parseJson(startRes)
-    const message = body?.error?.message || startRes.body
+  if (!startOk || !startResult.result) {
+    const message = startResult.error?.message ?? describeSdkError(startResult)
 
-    // Wallet-empty is an expected condition in load tests -- log and skip iteration
-    if (startRes.status === 400 && message.includes("wallet balance")) {
+    if (message.includes("wallet balance")) {
       console.warn(`[VU${__VU}] Skipping iteration: ${message}`)
       return
     }
 
-    fail(`Failed to start run: ${startRes.status} ${message}`)
+    fail(`Failed to start run: ${describeSdkError(startResult)}`)
   }
 
-  const run = parseJson(startRes)
+  const run = startResult.result
   const runId = run.runId
   runsStarted.add(1)
 
   check(run, {
-    "runId is present": (r) => r.runId && r.runId.length > 0,
+    "runId is present": (r) => r.runId.length > 0,
     "run status is running": (r) => r.status === "running",
     "customerId matches": (r) => r.customerId === CUSTOMER_ID,
   })
 
-  // 2. Stream sync events into the run
   let denied = false
 
   for (let i = 0; i < EVENTS_PER_RUN; i++) {
-    const target = profile.usageEvents[i % profile.usageEvents.length]
-
-    const eventRes = postJson(
-      `/v1/runs/consume/${runId}`,
-      {
+    const target = profile.usageEvents[i % profile.usageEvents.length]!
+    const consumeResult = await timeSdkCall(syncEventDuration, () =>
+      client.runs.consume({
+        runId,
         featureSlug: target.featureSlug,
         eventSlug: target.eventSlug,
         idempotencyKey: `k6-evt-${runId}-${i}-${randomInteger(100000, 999999)}`,
         properties: buildProperties(target.propertyFields),
-      },
-      "POST /v1/runs/consume/:runId"
+      })
     )
 
-    syncEventDuration.add(eventRes.timings.duration)
-
-    check(eventRes, {
-      "sync event response (200)": (r) => r.status === 200,
+    const consumeOk = check(consumeResult, {
+      "sync event response": (r) => !r.error && !!r.result,
     })
 
-    if (eventRes.status !== 200) {
-      break
+    if (!consumeOk || consumeResult.error) {
+      fail(`Failed to consume run event: ${describeSdkError(consumeResult)}`)
     }
 
-    const decision = parseJson(eventRes)
-
-    if (!decision.accepted) {
+    if (!consumeResult.result.accepted) {
       syncEventsDenied.add(1)
       budgetDenials.add(1)
       denied = true
@@ -156,74 +140,70 @@ export default function (profile) {
     syncEventsAccepted.add(1)
   }
 
-  // 3. End the run
-  const endStatus = denied ? "completed" : "completed"
-  const endRes = postJson(
-    `/v1/runs/end/${runId}`,
-    { status: endStatus },
-    "POST /v1/runs/end/:runId"
+  const endResult = await timeSdkCall(endRunDuration, () =>
+    client.runs.end({
+      runId,
+      status: denied ? "completed" : "completed",
+    })
   )
 
-  endRunDuration.add(endRes.timings.duration)
-
-  check(endRes, {
-    "run ended (200)": (r) => r.status === 200,
+  check(endResult, {
+    "run ended": (r) => !r.error && !!r.result,
   })
 
-  if (endRes.status === 200) {
+  if (endResult.result) {
     runsCompleted.add(1)
-    const endBody = parseJson(endRes)
 
-    check(endBody, {
+    check(endResult.result, {
       "end status is completed": (r) => r.status === "completed",
-      "consumed <= budget": (r) => r.consumedAmount <= BUDGET_AMOUNT,
+      "consumed <= budget": (r) => r.consumedAmountMinor <= BUDGET_AMOUNT,
     })
   }
 
-  // 4. Verify final state via GET
-  const getRes = http.get(
-    `${BASE_URL}/v1/runs/get/${runId}`,
-    requestParams("GET /v1/runs/get/:runId")
-  )
+  const getResult = await client.runs.get({ runId })
 
-  check(getRes, {
-    "get run (200)": (r) => r.status === 200,
+  check(getResult, {
+    "get run": (r) => !r.error && !!r.result,
   })
 
-  if (getRes.status === 200) {
-    const final = parseJson(getRes)
-
-    check(final, {
+  if (getResult.result) {
+    check(getResult.result, {
       "final status is terminal": (r) =>
         ["completed", "canceled", "expired", "budget_exceeded", "failed"].includes(r.status),
-      "final consumed <= budget": (r) => r.consumedAmount <= BUDGET_AMOUNT,
-      "final remaining is non-negative": (r) => r.remainingAmount >= 0,
+      "final consumed <= budget": (r) => r.consumedAmountMinor <= BUDGET_AMOUNT,
+      "final remaining is non-negative": (r) => r.remainingAmountMinor >= 0,
     })
   }
 }
 
-export function teardown() {
-  // No teardown needed -- each run is self-contained
+export function teardown(): void {
+  // No teardown needed; each run is self-contained.
 }
 
-// --- Helpers ---
-
-function postJson(path, body, name) {
-  return http.post(`${BASE_URL}${path}`, JSON.stringify(body), requestParams(name))
-}
-
-function requestParams(name) {
-  return {
-    headers: {
-      authorization: `Bearer ${UNPRICE_TOKEN}`,
-      "content-type": "application/json",
-    },
-    tags: { name },
-  }
-}
-
-function validateConfig() {
+function validateConfig(): void {
   if (!UNPRICE_TOKEN) fail("Missing UNPRICE_TOKEN")
   if (!PROJECT_ID) fail("Missing PROJECT_ID")
   if (!CUSTOMER_ID) fail("Missing CUSTOMER_ID")
+}
+
+async function timeSdkCall<T>(
+  trend: Trend,
+  operation: () => Promise<ApiResult<T>>
+): Promise<ApiResult<T>> {
+  const startedAt = Date.now()
+
+  try {
+    return await operation()
+  } finally {
+    trend.add(Date.now() - startedAt)
+  }
+}
+
+function getSdk(): K6SdkClient {
+  sdk ??= createK6SdkClient({
+    baseUrl: BASE_URL,
+    token: UNPRICE_TOKEN,
+  })
+
+  return sdk
 }

@@ -190,7 +190,7 @@ async function customerSignup(): Promise<void> {
     },
     ...(BILLING_INTERVAL ? { billingInterval: BILLING_INTERVAL as BillingInterval } : {}),
     ...(CURRENCY ? { defaultCurrency: CURRENCY as Currency } : {}),
-    ...(CREDIT_LINE_AMOUNT !== null ? { creditLineAmount: CREDIT_LINE_AMOUNT } : {}),
+    ...(CREDIT_LINE_AMOUNT !== null ? { creditLineAmountMinor: CREDIT_LINE_AMOUNT } : {}),
   }
 
   const { result, error } = await unprice.customers.signUp(request)

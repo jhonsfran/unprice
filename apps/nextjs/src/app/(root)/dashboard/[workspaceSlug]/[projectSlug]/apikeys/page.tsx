@@ -31,7 +31,12 @@ export default async function ApiKeysPage(props: {
   }
 
   const filters = dataTableParams(props.searchParams)
-  const { apikeys, pageCount } = await api.apikeys.listByActiveProject(filters)
+  const { workspaceSlug, projectSlug } = props.params
+  const { apikeys, pageCount } = await api.apikeys.listByActiveProject({
+    ...filters,
+    workspaceSlug,
+    projectSlug,
+  })
 
   return (
     <DashboardShell

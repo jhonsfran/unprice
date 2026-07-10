@@ -17,6 +17,7 @@ export const createApiKeySchema = insertApiKeySchema
   })
   .extend({
     projectSlug: z.string().optional(),
+    workspaceSlug: z.string().optional(),
     key: z.string().optional(),
   })
 

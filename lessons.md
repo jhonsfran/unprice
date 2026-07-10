@@ -252,6 +252,9 @@ patterns. Keep it cheap to load and useful.
 - 2026-07-03: Customer current-access usage is a per-feature entitlement-period view, not the
   last-30-days evidence view; compute/query each active usage entitlement by its current grant
   `period_key` and keep the UI on realtime polling so reset-specific windows update in place.
+- 2026-07-10: Usage dashboard Tinybird reads query bucketed rollups; floor rolling interval
+  starts to the rollup bucket boundary before sending `start/end`, or first-bucket usage can be
+  hidden while entitlement `period_key` reads still show it.
 - 2026-07-03: Workspace billing overview is self-reflective customer reporting; resolve
   `workspace.unPriceCustomerId` to the customer owning project before calling customer
   current-access, wallet, or usage-dashboard queries.
