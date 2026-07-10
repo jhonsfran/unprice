@@ -17,7 +17,7 @@ export type RunBudgetPricingInput = Pick<
 > & {
   customerEntitlementId: string
   enforceLimit: true
-  externalReservation: NonNullable<ApplyInput["externalReservation"]>
+  wallet: Extract<NonNullable<ApplyInput["wallet"]>, { mode: "external_reservation" }>
 }
 
 /**

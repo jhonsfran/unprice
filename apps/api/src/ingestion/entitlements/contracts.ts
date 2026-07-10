@@ -222,11 +222,14 @@ export const applyInputSchema = z.object({
   grants: z.array(activeGrantSchema).min(1),
   enforceLimit: z.boolean(),
   now: z.number().finite(),
-  walletMode: z.enum(["standard", "external_reservation"]).optional(),
-  externalReservation: z
-    .object({
-      remainingAmount: z.number().int().nonnegative(),
-    })
+  wallet: z
+    .discriminatedUnion("mode", [
+      z.object({ mode: z.literal("standard") }),
+      z.object({
+        mode: z.literal("external_reservation"),
+        remainingAmount: z.number().int().nonnegative(),
+      }),
+    ])
     .optional(),
 })
 

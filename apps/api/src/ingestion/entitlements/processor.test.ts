@@ -89,6 +89,33 @@ describe("in-memory store internals", () => {
     expect(retried.idempotencyStatus).toBeUndefined()
     expect(harness.store.meterStates.values().next().value?.usage).toBe(4)
   })
+
+  it("uses the required external reservation remaining amount for budget checks", async () => {
+    const now = Date.now()
+    const harness = createHarness({ now })
+    await harness.processor.initialize()
+
+    const accepted = await harness.processor.apply({
+      ...createLiveApplyInput(now, {
+        idempotencyKey: "idem_external_budget_funded",
+        event: { id: "evt_external_budget_funded" },
+      }),
+      wallet: { mode: "external_reservation", remainingAmount: 100_000_000 },
+    })
+    const denied = await harness.processor.apply({
+      ...createLiveApplyInput(now, {
+        idempotencyKey: "idem_external_budget_empty",
+        event: { id: "evt_external_budget_empty" },
+      }),
+      wallet: { mode: "external_reservation", remainingAmount: 0 },
+    })
+
+    expect(accepted).toMatchObject({ allowed: true })
+    expect(denied).toMatchObject({
+      allowed: false,
+      deniedReason: "RUN_BUDGET_EXCEEDED",
+    })
+  })
 })
 
 describeEntitlementWindowProcessorContract(

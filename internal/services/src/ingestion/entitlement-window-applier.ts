@@ -61,10 +61,7 @@ export type EntitlementWindowApplyInput = {
   idempotencyKey: string
   now: number
   projectId: string
-  /** When "external_reservation", the DO skips wallet reservation I/O and uses externalReservation.remainingAmount for budget checks. */
-  walletMode?: "standard" | "external_reservation"
-  /** Required when walletMode is "external_reservation". */
-  externalReservation?: { remainingAmount: number }
+  wallet?: { mode: "standard" } | { mode: "external_reservation"; remainingAmount: number }
 }
 
 export type EntitlementWindowStatus = {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { activeGrantSchema, enforcementStateInputSchema } from "./contracts"
+import { activeGrantSchema, applyInputSchema, enforcementStateInputSchema } from "./contracts"
+import { createApplyInput } from "./entitlement-window-test-fixtures"
 
 const enrichedGrant = {
   allowanceUnits: 100,
@@ -71,5 +72,14 @@ describe("EntitlementWindowDO contracts", () => {
         now: 1_781_503_200_000,
       })
     ).toMatchObject({ grants: [] })
+  })
+
+  it("rejects external reservation mode without a remaining amount", () => {
+    const result = applyInputSchema.safeParse({
+      ...createApplyInput(),
+      wallet: { mode: "external_reservation" },
+    })
+
+    expect(result.success).toBe(false)
   })
 })

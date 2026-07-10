@@ -939,8 +939,7 @@ describe("RunBudgetDO", () => {
       grants: TEST_ENTITLEMENT_FIELDS.grants,
       enforceLimit: true,
       now: BASE_NOW,
-      walletMode: "external_reservation",
-      externalReservation: { remainingAmount: 100_000 },
+      wallet: { mode: "external_reservation", remainingAmount: 100_000 },
     })
   })
 
@@ -963,9 +962,9 @@ describe("RunBudgetDO", () => {
 
     testState.entitlementWindowApply.mockImplementation(async (input: unknown) => {
       pricingCallCount += 1
-      const remainingAmount =
-        (input as { externalReservation?: { remainingAmount?: number } }).externalReservation
-          ?.remainingAmount ?? 0
+      const { remainingAmount } = (
+        input as { wallet: { mode: "external_reservation"; remainingAmount: number } }
+      ).wallet
 
       if (pricingCallCount === 1) {
         firstPricingStarted()
@@ -1053,13 +1052,13 @@ describe("RunBudgetDO", () => {
     expect(secondResult.rejectionReason).toBe("RUN_BUDGET_EXCEEDED")
 
     const firstPricingInput = testState.entitlementWindowApply.mock.calls[0]?.[0] as {
-      externalReservation: { remainingAmount: number }
+      wallet: { remainingAmount: number }
     }
     const secondPricingInput = testState.entitlementWindowApply.mock.calls[1]?.[0] as {
-      externalReservation: { remainingAmount: number }
+      wallet: { remainingAmount: number }
     }
-    expect(firstPricingInput.externalReservation.remainingAmount).toBe(10_000)
-    expect(secondPricingInput.externalReservation.remainingAmount).toBe(3000)
+    expect(firstPricingInput.wallet.remainingAmount).toBe(10_000)
+    expect(secondPricingInput.wallet.remainingAmount).toBe(3000)
 
     await expect(
       durable.getRunStatus({

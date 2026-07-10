@@ -79,8 +79,7 @@ export class RunBudgetDO extends DurableObject {
           grants: input.grants,
           enforceLimit: input.enforceLimit,
           now: input.now,
-          walletMode: "external_reservation",
-          externalReservation: input.externalReservation,
+          wallet: input.wallet,
         })
       },
     }
@@ -779,7 +778,7 @@ export class RunBudgetDO extends DurableObject {
       grants: input.grants,
       enforceLimit: true,
       now: input.now,
-      externalReservation: { remainingAmount },
+      wallet: { mode: "external_reservation", remainingAmount },
     })
   }
 

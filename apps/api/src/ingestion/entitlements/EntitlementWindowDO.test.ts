@@ -6280,7 +6280,7 @@ describe("EntitlementWindowDO", () => {
 
   // ---------------------------------------------------------------------
   // External reservation mode. RunBudgetDO calls EntitlementWindowDO with
-  // walletMode: "external_reservation" to price and limit-check events
+  // wallet.mode: "external_reservation" to price and limit-check events
   // without creating/managing wallet reservations.
   // ---------------------------------------------------------------------
 
@@ -6296,11 +6296,10 @@ describe("EntitlementWindowDO", () => {
     })
 
     const durableObject = new EntitlementWindowDO(state, createEnv())
-    const input = createApplyInput({ walletMode: "external_reservation" })
+    const input = createApplyInput()
     const result = await durableObject.apply({
       ...input,
-      walletMode: "external_reservation",
-      externalReservation: { remainingAmount: 1_000_000_000 },
+      wallet: { mode: "external_reservation", remainingAmount: 1_000_000_000 },
     })
 
     expect(result).toMatchObject({ allowed: true })
@@ -6323,11 +6322,10 @@ describe("EntitlementWindowDO", () => {
     })
 
     const durableObject = new EntitlementWindowDO(state, createEnv())
-    const input = createApplyInput({ walletMode: "external_reservation" })
+    const input = createApplyInput()
     const result = await durableObject.apply({
       ...input,
-      walletMode: "external_reservation",
-      externalReservation: { remainingAmount: 1_000_000_000 },
+      wallet: { mode: "external_reservation", remainingAmount: 1_000_000_000 },
     })
 
     expect(result).toMatchObject({
@@ -6359,7 +6357,7 @@ describe("EntitlementWindowDO", () => {
     })
 
     const durableObject = new EntitlementWindowDO(state, createEnv())
-    // No walletMode field = default "standard"
+    // No wallet field = default "standard"
     const result = await durableObject.apply(createApplyInput())
 
     expect(result).toMatchObject({ allowed: true })

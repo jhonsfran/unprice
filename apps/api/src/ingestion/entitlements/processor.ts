@@ -1068,7 +1068,7 @@ export class EntitlementWindowProcessor {
     const input = applyInputSchema.parse(rawInput)
     const idempotencyKey = input.idempotencyKey
     const createdAt = this.clock.now()
-    const walletMode = input.walletMode ?? "standard"
+    const wallet = input.wallet ?? { mode: "standard" as const }
     const { activeGrants, creditLinePolicy, entitlement, meter, overageStrategy } =
       this.prepareSingleApplyContext(input, createdAt)
 
@@ -1083,7 +1083,7 @@ export class EntitlementWindowProcessor {
       input,
       meter,
     })
-    wideEvent.wallet_mode = walletMode
+    wideEvent.wallet_mode = wallet.mode
 
     let result: ApplyResult | undefined
     let thrown: unknown
@@ -1113,7 +1113,7 @@ export class EntitlementWindowProcessor {
         return lateDenial
       }
 
-      if (walletMode === "external_reservation") {
+      if (wallet.mode === "external_reservation") {
         const externalResult = this.executeSingleApplyExternalReservation({
           activeGrants,
           createdAt,
@@ -1123,6 +1123,7 @@ export class EntitlementWindowProcessor {
           meter,
           metrics,
           overageStrategy,
+          remainingAmount: wallet.remainingAmount,
         })
         result = externalResult
         return externalResult
@@ -1174,7 +1175,7 @@ export class EntitlementWindowProcessor {
 
   // External reservation mode: prices the event and enforces entitlement limits
   // but does NOT create/manage wallet reservations. Instead, it compares the
-  // priced cost against the caller-provided externalReservation.remainingAmount.
+  // priced cost against the caller-provided remaining amount.
   // Used by RunBudgetDO which manages its own run-level budget.
   private executeSingleApplyExternalReservation(params: {
     activeGrants: ActiveGrantInput[]
@@ -1185,6 +1186,7 @@ export class EntitlementWindowProcessor {
     meter: MeterIdentity
     metrics: SingleApplyExecutionMetrics
     overageStrategy: OverageStrategy
+    remainingAmount: number
   }): ApplyResult {
     const {
       activeGrants,
@@ -1195,6 +1197,7 @@ export class EntitlementWindowProcessor {
       meter,
       metrics,
       overageStrategy,
+      remainingAmount,
     } = params
 
     try {
@@ -1237,7 +1240,6 @@ export class EntitlementWindowProcessor {
 
         // Compare priced cost against external reservation remaining amount
         const totalCost = pricedFacts.reduce((sum, { amountMinor }) => sum + amountMinor, 0)
-        const remainingAmount = input.externalReservation?.remainingAmount ?? 0
 
         if (totalCost > remainingAmount) {
           throw new ExternalReservationBudgetExceededError(totalCost, remainingAmount)
