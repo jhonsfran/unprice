@@ -140,6 +140,9 @@ describe("Unprice client", () => {
     }>().toMatchTypeOf<OperationResponse<"runs.consume">>()
     expectTypeOf<NullableRunSummary>().toMatchTypeOf<OperationResponse<"runs.end">>()
     expectTypeOf<NullableRunSummary>().toMatchTypeOf<OperationResponse<"runs.get">>()
+    expectTypeOf<OperationResponse<"runs.get">["endedAt"]>().toEqualTypeOf<
+      number | null | undefined
+    >()
   })
 
   it("uses openapi-fetch path params, query params, body, and auth headers", async () => {

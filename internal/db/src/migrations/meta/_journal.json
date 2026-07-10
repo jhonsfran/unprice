@@ -113,6 +113,13 @@
       "when": 1783254479308,
       "tag": "0015_goofy_longshot",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1783689025063,
+      "tag": "0016_foamy_speed",
+      "breakpoints": true
     }
   ]
 }

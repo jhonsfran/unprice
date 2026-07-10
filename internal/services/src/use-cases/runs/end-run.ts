@@ -50,6 +50,16 @@ export async function endRun(
     return Err(new RunUseCaseError("BUDGET_ERROR"))
   }
 
+  // A rolling deploy can briefly pair this Worker with an older DO class that
+  // does not return endedAt. Never replace the authoritative SQLite timestamp
+  // with observation time; fail without changing the PG read model so a retry
+  // after rollout convergence can persist the real terminal time.
+  if (doResult.val.endedAt == null) {
+    return Err(new RunUseCaseError("BUDGET_ERROR"))
+  }
+
+  const endedAt = doResult.val.endedAt
+
   // Persist final summary
   const summaryUpdateResult = await deps.services.budgetRuns.updateRunSummary({
     projectId: run.projectId,
@@ -57,7 +67,7 @@ export async function endRun(
     status: input.status === "failed" ? "failed" : doResult.val.status,
     consumedAmount: doResult.val.consumedAmount,
     remainingAmount: doResult.val.remainingAmount,
-    endedAt: new Date(),
+    endedAt: new Date(endedAt),
   })
   if (summaryUpdateResult.err) {
     return Err(new RunUseCaseError("BUDGET_ERROR"))
@@ -66,6 +76,7 @@ export async function endRun(
   return Ok({
     runId: run.id,
     status: input.status === "failed" ? "failed" : doResult.val.status,
+    endedAt,
     customerId: run.customerId,
     budgetAmount: doResult.val.budgetAmount,
     consumedAmount: doResult.val.consumedAmount,

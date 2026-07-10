@@ -54,6 +54,9 @@ export const budgetRuns = pgTableProject(
       table.customerId
     ),
     projectStatusIdx: index("budget_runs_project_status_idx").on(table.projectId, table.status),
+    runningExpirySweepIdx: index("budget_runs_running_expiry_sweep_idx")
+      .on(table.expiresAt, table.projectId, table.id)
+      .where(sql`${table.status} = 'running' AND ${table.expiresAt} IS NOT NULL`),
     projectTraceIdx: index("budget_runs_project_trace_idx").on(table.projectId, table.traceId),
     projectParentIdx: index("budget_runs_project_parent_idx").on(
       table.projectId,

@@ -7,6 +7,8 @@ type RunWorkloadType = "agent" | "workflow" | "job" | "tool" | "custom"
 export type RunBudgetSummary = {
   runId: string
   status: "running" | "completed" | "expired" | "canceled" | "budget_exceeded" | "failed"
+  /** Epoch milliseconds from the authoritative DO; optional during rolling deploys. */
+  endedAt?: number | null
   budgetAmount: number
   consumedAmount: number
   remainingAmount: number

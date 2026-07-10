@@ -52,6 +52,9 @@ export const endRunInputSchema = z.object({
 const runSummaryCommonShape = {
   runId: z.string(),
   status: runStatusSchema,
+  endedAt: z.number().int().nonnegative().nullable().optional().openapi({
+    description: "Authoritative run terminal timestamp in epoch milliseconds; null while running.",
+  }),
   customerId: z.string(),
   currency: z.string(),
   workloadType: nullableWorkloadTypeSchema,

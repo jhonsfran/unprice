@@ -69,10 +69,11 @@ describe("budgetRunsRefreshSchedule", () => {
   })
 
   it("groups stuck running runs by project and refreshes each through listRunsRefreshed", async () => {
+    const expiresAt = new Date("2026-07-06T10:00:00.000Z")
     mocks.budgetRunsFindMany.mockResolvedValue([
-      { id: "brun_1", projectId: "proj_1", status: "running" },
-      { id: "brun_2", projectId: "proj_1", status: "running" },
-      { id: "brun_3", projectId: "proj_2", status: "running" },
+      { id: "brun_1", projectId: "proj_1", status: "running", expiresAt },
+      { id: "brun_2", projectId: "proj_1", status: "running", expiresAt },
+      { id: "brun_3", projectId: "proj_2", status: "running", expiresAt },
     ])
 
     const { budgetRunsRefreshSchedule: definition } = await import("./budget-runs-refresh")
@@ -87,14 +88,14 @@ describe("budgetRunsRefreshSchedule", () => {
     expect(mocks.listRunsRefreshed).toHaveBeenCalledWith({
       projectId: "proj_1",
       runs: [
-        { id: "brun_1", projectId: "proj_1", status: "running" },
-        { id: "brun_2", projectId: "proj_1", status: "running" },
+        { id: "brun_1", projectId: "proj_1", status: "running", expiresAt },
+        { id: "brun_2", projectId: "proj_1", status: "running", expiresAt },
       ],
       runsGet: mocks.runsGet,
     })
     expect(mocks.listRunsRefreshed).toHaveBeenCalledWith({
       projectId: "proj_2",
-      runs: [{ id: "brun_3", projectId: "proj_2", status: "running" }],
+      runs: [{ id: "brun_3", projectId: "proj_2", status: "running", expiresAt }],
       runsGet: mocks.runsGet,
     })
     expect(mocks.flushLogs).toHaveBeenCalledTimes(2)
@@ -117,9 +118,10 @@ describe("budgetRunsRefreshSchedule", () => {
   })
 
   it("continues past a project whose refresh fails and flushes that context with a 500", async () => {
+    const expiresAt = new Date("2026-07-06T10:00:00.000Z")
     mocks.budgetRunsFindMany.mockResolvedValue([
-      { id: "brun_1", projectId: "proj_1", status: "running" },
-      { id: "brun_3", projectId: "proj_2", status: "running" },
+      { id: "brun_1", projectId: "proj_1", status: "running", expiresAt },
+      { id: "brun_3", projectId: "proj_2", status: "running", expiresAt },
     ])
     mocks.listRunsRefreshed
       .mockRejectedValueOnce(new Error("refresh boom"))
@@ -140,5 +142,42 @@ describe("budgetRunsRefreshSchedule", () => {
     expect(mocks.flushLogs).toHaveBeenNthCalledWith(1, 500)
     // Only the succeeding project counts toward processed.
     expect(result).toEqual({ projectIds: ["proj_1", "proj_2"], stuck: 2, processed: 1 })
+  })
+
+  it("advances beyond a full failed page so later stuck runs are still attempted", async () => {
+    const expiresAt = new Date("2026-07-06T10:00:00.000Z")
+    const failedPage = Array.from({ length: 500 }, (_, index) => ({
+      id: `brun_${index.toString().padStart(3, "0")}`,
+      projectId: "proj_failing",
+      status: "running",
+      expiresAt,
+    }))
+    const laterRun = {
+      id: "brun_500",
+      projectId: "proj_later",
+      status: "running",
+      expiresAt,
+    }
+    mocks.budgetRunsFindMany.mockResolvedValueOnce(failedPage).mockResolvedValueOnce([laterRun])
+    mocks.listRunsRefreshed
+      .mockRejectedValueOnce(new Error("first page failed"))
+      .mockResolvedValueOnce([])
+
+    const { budgetRunsRefreshSchedule: definition } = await import("./budget-runs-refresh")
+    const schedule = runnableSchedule<SchedulePayload>(definition)
+
+    const result = await schedule.run({ timestamp: new Date("2026-07-06T12:00:00.000Z") })
+
+    expect(mocks.budgetRunsFindMany).toHaveBeenCalledTimes(2)
+    expect(mocks.listRunsRefreshed).toHaveBeenLastCalledWith({
+      projectId: "proj_later",
+      runs: [laterRun],
+      runsGet: mocks.runsGet,
+    })
+    expect(result).toEqual({
+      projectIds: ["proj_failing", "proj_later"],
+      stuck: 501,
+      processed: 1,
+    })
   })
 })

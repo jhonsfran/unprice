@@ -424,14 +424,30 @@ export class BudgetRunService {
         // refreshed. AWAIT (never waitUntil): the sweep runs with a no-op
         // waitUntil, so a deferred write there would be silently dropped.
         if (live.status !== "running") {
+          // During a rolling deployment an older public API can return a
+          // terminal summary without the newly-added DO timestamp. Never invent
+          // an observation time: leave the PG row running so the next sweep
+          // retries after the API/DO rollout converges.
+          if (live.endedAt == null) {
+            this.deps.logger.error(
+              new Error("Refreshed terminal run is missing its authoritative terminal timestamp"),
+              {
+                project_id: input.projectId,
+                customer_id: expectedCustomerId,
+                run_id: run.id,
+              }
+            )
+            return run
+          }
+
+          const endedAt = new Date(live.endedAt)
           const persisted = await this.updateRunSummary({
             projectId: input.projectId,
             runId: run.id,
             status: live.status,
             consumedAmount,
             remainingAmount,
-            // RunSummary carries no ended timestamp; stamp observation time.
-            endedAt: new Date(),
+            endedAt,
           })
 
           if (persisted.err) {
@@ -444,6 +460,15 @@ export class BudgetRunService {
               }
             )
           }
+
+          return {
+            ...run,
+            status: live.status,
+            budgetAmount,
+            consumedAmount,
+            remainingAmount,
+            endedAt,
+          } as T
         }
 
         return {

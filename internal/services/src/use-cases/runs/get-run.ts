@@ -50,6 +50,7 @@ export async function getRun(
   return Ok({
     runId: run.id,
     status: liveSummary?.val.status ?? run.status,
+    endedAt: liveSummary?.val.endedAt ?? run.endedAt?.getTime() ?? null,
     customerId: run.customerId,
     budgetAmount: liveSummary?.val.budgetAmount ?? run.budgetAmount,
     consumedAmount: liveSummary?.val.consumedAmount ?? run.consumedAmount,

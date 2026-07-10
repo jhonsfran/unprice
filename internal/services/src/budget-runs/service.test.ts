@@ -86,12 +86,14 @@ describe("BudgetRunService.listRunsRefreshed", () => {
     const service = createService(db)
 
     const running = createRun({ id: "brun_running", status: "running", consumedAmount: 0 })
+    const endedAt = new Date("2026-06-21T10:05:00.000Z")
     const runsGet = vi.fn().mockResolvedValue({
       result: liveSummary({
         runId: "brun_running",
         status: "completed",
         consumedAmountMinor: 300,
         remainingAmountMinor: 700,
+        endedAt: endedAt.getTime(),
       }),
     })
 
@@ -109,7 +111,7 @@ describe("BudgetRunService.listRunsRefreshed", () => {
         status: "completed",
         consumedAmount: 300_000_000,
         remainingAmount: 700_000_000,
-        endedAt: expect.any(Date),
+        endedAt,
       })
     )
     // updateRunSummary owns cache invalidation for the memory-first cache.
@@ -121,8 +123,38 @@ describe("BudgetRunService.listRunsRefreshed", () => {
       status: "completed",
       consumedAmount: 300_000_000,
       remainingAmount: 700_000_000,
+      endedAt,
     })
     expect(logger.error).not.toHaveBeenCalled()
+  })
+
+  it("keeps the row running and logs when an older API omits the terminal timestamp", async () => {
+    const service = createService()
+    const updateSpy = vi.spyOn(service, "updateRunSummary")
+    const running = createRun({ id: "brun_running", status: "running", endedAt: null })
+    const runsGet = vi.fn().mockResolvedValue({
+      result: liveSummary({ runId: "brun_running", status: "expired", endedAt: undefined }),
+    })
+
+    const runs = await service.listRunsRefreshed({
+      customerId: "cus_123",
+      projectId: "proj_123",
+      runs: [running],
+      runsGet,
+    })
+
+    expect(updateSpy).not.toHaveBeenCalled()
+    expect(runs[0]).toBe(running)
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining("terminal timestamp"),
+      }),
+      {
+        project_id: "proj_123",
+        customer_id: "cus_123",
+        run_id: "brun_running",
+      }
+    )
   })
 
   it("logs and still returns the refreshed row when persisting a terminal run fails", async () => {
@@ -313,8 +345,14 @@ function liveSummary(
     budgetAmountMinor: number
     consumedAmountMinor: number
     remainingAmountMinor: number
+    endedAt: number | null | undefined
   }> = {}
 ) {
+  const terminalEndedAt =
+    overrides.status && overrides.status !== "running"
+      ? new Date("2026-06-21T10:05:00.000Z").getTime()
+      : null
+
   return {
     runId: "brun_running",
     status: "running" as const,
@@ -327,6 +365,7 @@ function liveSummary(
     workloadId: "daily-research",
     traceId: "trace_123",
     parentRunId: null,
+    endedAt: terminalEndedAt,
     ...overrides,
   }
 }
@@ -336,6 +375,7 @@ function createRun(
     id: string
     status: "running" | "completed" | "expired" | "canceled" | "budget_exceeded" | "failed"
     consumedAmount: number
+    endedAt: Date | null
   }> = {}
 ) {
   return {

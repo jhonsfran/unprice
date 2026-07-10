@@ -589,6 +589,7 @@ describe("budgeted runs API", () => {
         workloadId: "daily-research",
         traceId: "trace_123",
         parentRunId: null,
+        endedAt: 1_788_000_000_000,
       },
       err: undefined,
     })
@@ -617,6 +618,7 @@ describe("budgeted runs API", () => {
       budgetAmountMinor: 1000,
       consumedAmountMinor: 250,
       remainingAmountMinor: 750,
+      endedAt: 1_788_000_000_000,
     })
   })
 

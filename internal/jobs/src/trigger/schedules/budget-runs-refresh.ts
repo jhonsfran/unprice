@@ -22,9 +22,9 @@ import { createContext } from "../tasks/context"
 // sweep from racing freshly-expired runs that the DO alarm is still closing.
 const STUCK_RUN_GRACE_MS = 60 * 60 * 1000
 
-// Bounded fan-out per sweep. Stuck runs should be rare; a large backlog is a
-// signal (surfaced via WARN) rather than something to drain in one pass.
-const STUCK_RUN_LIMIT = 500
+// Bounded fan-out per page. Keyset pagination drains every page in this
+// invocation while keeping each query and refresh batch bounded.
+const STUCK_RUN_PAGE_SIZE = 500
 
 export const budgetRunsRefreshSchedule = schedules.task({
   id: "budget-runs.refresh",
@@ -38,74 +38,119 @@ export const budgetRunsRefreshSchedule = schedules.task({
     const now = payload.timestamp.getTime()
     const cutoff = new Date(now - STUCK_RUN_GRACE_MS)
 
-    const stuckRuns = await db.query.budgetRuns.findMany({
-      where: (run, { and, eq, isNotNull, lt }) =>
-        and(eq(run.status, "running"), isNotNull(run.expiresAt), lt(run.expiresAt, cutoff)),
-      limit: STUCK_RUN_LIMIT,
-    })
-
-    if (stuckRuns.length === 0) {
-      return { projectIds: [], stuck: 0, processed: 0 }
-    }
-
-    logger.warn("budget-runs.refresh.stuck_runs", {
-      count: stuckRuns.length,
-      cutoff: cutoff.toISOString(),
-    })
-
-    // Group by project: listRunsRefreshed is scoped to one project, and each
-    // project gets its own service context (logger/cache/analytics).
-    const runsByProject = new Map<string, typeof stuckRuns>()
-    for (const run of stuckRuns) {
-      const bucket = runsByProject.get(run.projectId)
-      if (bucket) {
-        bucket.push(run)
-      } else {
-        runsByProject.set(run.projectId, [run])
-      }
-    }
-
-    // "processed" = runs whose project refresh completed without a project-level
-    // throw. listRunsRefreshed swallows per-run read failures and only writes
-    // newly-terminal runs, so this is NOT a count of rows actually refreshed.
+    const projectIds = new Set<string>()
+    let cursor: { expiresAt: Date; projectId: string; id: string } | undefined
+    let page = 0
+    let stuck = 0
+    // "processed" = runs whose project-page refresh completed without a
+    // project-level throw. listRunsRefreshed swallows per-run read failures and
+    // only writes newly-terminal runs, so this is NOT a count of rows actually refreshed.
     let processed = 0
-    for (const [projectId, runs] of runsByProject) {
-      const context = await createContext({
-        taskId: `budget-runs.refresh:${projectId}:${now}`,
-        subscriptionId: "",
-        projectId,
-        defaultFields: {
-          projectId,
-          api: "jobs.budget-runs.refresh",
-          now: now.toString(),
-        },
+
+    while (true) {
+      const stuckRuns = await db.query.budgetRuns.findMany({
+        where: (run, { and, eq, gt, isNotNull, lt, or }) =>
+          and(
+            eq(run.status, "running"),
+            isNotNull(run.expiresAt),
+            lt(run.expiresAt, cutoff),
+            cursor
+              ? or(
+                  gt(run.expiresAt, cursor.expiresAt),
+                  and(
+                    eq(run.expiresAt, cursor.expiresAt),
+                    or(
+                      gt(run.projectId, cursor.projectId),
+                      and(eq(run.projectId, cursor.projectId), gt(run.id, cursor.id))
+                    )
+                  )
+                )
+              : undefined
+          ),
+        orderBy: (run, { asc }) => [asc(run.expiresAt), asc(run.projectId), asc(run.id)],
+        limit: STUCK_RUN_PAGE_SIZE,
       })
 
-      let status = 200
-      try {
-        await context.services.budgetRuns.listRunsRefreshed({
+      if (stuckRuns.length === 0) {
+        break
+      }
+
+      page += 1
+      stuck += stuckRuns.length
+      logger.warn("budget-runs.refresh.stuck_runs", {
+        count: stuckRuns.length,
+        cutoff: cutoff.toISOString(),
+        page,
+      })
+
+      // Advance from the fetched page regardless of refresh outcomes. Failed
+      // rows remain running for the next hourly invocation, but cannot starve
+      // later keys in this invocation.
+      const lastRun = stuckRuns.at(-1)
+      if (!lastRun?.expiresAt) {
+        throw new Error("Stuck budget run page violated the non-null expiresAt predicate")
+      }
+      cursor = {
+        expiresAt: lastRun.expiresAt,
+        projectId: lastRun.projectId,
+        id: lastRun.id,
+      }
+
+      // Group by project: listRunsRefreshed is scoped to one project, and each
+      // project gets its own service context (logger/cache/analytics).
+      const runsByProject = new Map<string, typeof stuckRuns>()
+      for (const run of stuckRuns) {
+        projectIds.add(run.projectId)
+        const bucket = runsByProject.get(run.projectId)
+        if (bucket) {
+          bucket.push(run)
+        } else {
+          runsByProject.set(run.projectId, [run])
+        }
+      }
+
+      for (const [projectId, runs] of runsByProject) {
+        const context = await createContext({
+          taskId: `budget-runs.refresh:${projectId}:${now}:${page}`,
+          subscriptionId: "",
           projectId,
-          // Reconcile drizzle's inferred row type with the zod BudgetRun type
-          // (json column nominal mismatch); same cast the service query methods use.
-          runs: runs as unknown as BudgetRun[],
-          runsGet: unprice.runs.get,
+          defaultFields: {
+            projectId,
+            api: "jobs.budget-runs.refresh",
+            now: now.toString(),
+          },
         })
-        processed += runs.length
-      } catch (error) {
-        // One project's failure must not abort the sweep for the rest.
-        status = 500
-        logger.error("budget-runs.refresh.project_failed", {
-          projectId,
-          error: error instanceof Error ? error.message : String(error),
-        })
-      } finally {
-        await context.flushLogs(status)
+
+        let status = 200
+        try {
+          await context.services.budgetRuns.listRunsRefreshed({
+            projectId,
+            // Reconcile drizzle's inferred row type with the zod BudgetRun type
+            // (json column nominal mismatch); same cast the service query methods use.
+            runs: runs as unknown as BudgetRun[],
+            runsGet: unprice.runs.get,
+          })
+          processed += runs.length
+        } catch (error) {
+          // One project's failure must not abort the sweep for the rest.
+          status = 500
+          logger.error("budget-runs.refresh.project_failed", {
+            projectId,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        } finally {
+          await context.flushLogs(status)
+        }
+      }
+
+      if (stuckRuns.length < STUCK_RUN_PAGE_SIZE) {
+        break
       }
     }
 
     const result = {
-      projectIds: [...runsByProject.keys()],
-      stuck: stuckRuns.length,
+      projectIds: [...projectIds],
+      stuck,
       processed,
     }
     logger.info("budget-runs.refresh.complete", result)

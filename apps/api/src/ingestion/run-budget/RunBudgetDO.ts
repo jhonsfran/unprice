@@ -1055,6 +1055,7 @@ export class RunBudgetDO extends DurableObject {
     return {
       runId: run.runId,
       status: run.status as RunBudgetSummary["status"],
+      endedAt: run.endedAt,
       budgetAmount: run.budgetAmount,
       consumedAmount: run.consumedAmount,
       remainingAmount: Math.max(0, run.budgetAmount - run.consumedAmount),

@@ -35,6 +35,7 @@ describe("budget run validators", () => {
     const summary = runSummarySchema.parse({
       runId: "brun_123",
       status: "running",
+      endedAt: null,
       customerId: "cus_123",
       budgetAmountMinor: 100,
       consumedAmountMinor: 0,
@@ -48,6 +49,7 @@ describe("budget run validators", () => {
 
     expect(summary).toMatchObject({
       workloadType: "agent",
+      endedAt: null,
       workloadId: "research-assistant",
       traceId: "trace_123",
       parentRunId: null,

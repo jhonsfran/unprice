@@ -14,6 +14,10 @@ export const runStatusSchema = z.enum([
 export const runBudgetSummarySchema = z.object({
   runId: z.string().min(1),
   status: runStatusSchema,
+  // Optional during rolling deploys so a new Worker can still read a summary
+  // from an older DO class. New DOs always return the authoritative SQLite
+  // terminal timestamp (or null while running).
+  endedAt: z.number().finite().nullable().optional(),
   budgetAmount: z.number().int().nonnegative(),
   consumedAmount: z.number().int().nonnegative(),
   remainingAmount: z.number().int().nonnegative(),

@@ -824,6 +824,8 @@ export interface operations {
             runId: string
             /** @enum {string} */
             status: "running" | "completed" | "expired" | "canceled" | "budget_exceeded" | "failed"
+            /** @description Authoritative run terminal timestamp in epoch milliseconds; null while running. */
+            endedAt?: number | null
             customerId: string
             budgetAmountMinor: number
             consumedAmountMinor: number
@@ -962,6 +964,8 @@ export interface operations {
                 | "canceled"
                 | "budget_exceeded"
                 | "failed"
+              /** @description Authoritative run terminal timestamp in epoch milliseconds; null while running. */
+              endedAt?: number | null
               customerId: string
               budgetAmountMinor: number
               consumedAmountMinor: number
@@ -1082,6 +1086,8 @@ export interface operations {
             runId: string
             /** @enum {string} */
             status: "running" | "completed" | "expired" | "canceled" | "budget_exceeded" | "failed"
+            /** @description Authoritative run terminal timestamp in epoch milliseconds; null while running. */
+            endedAt?: number | null
             customerId: string
             budgetAmountMinor: number
             consumedAmountMinor: number
@@ -1192,6 +1198,8 @@ export interface operations {
             runId: string
             /** @enum {string} */
             status: "running" | "completed" | "expired" | "canceled" | "budget_exceeded" | "failed"
+            /** @description Authoritative run terminal timestamp in epoch milliseconds; null while running. */
+            endedAt?: number | null
             customerId: string
             budgetAmountMinor: number
             consumedAmountMinor: number

@@ -15,6 +15,7 @@ describe("getRun", () => {
         budgetAmount: 1_000,
         consumedAmount: 250,
         remainingAmount: 750,
+        endedAt: null,
       })
     )
 
@@ -40,11 +41,48 @@ describe("getRun", () => {
       remainingAmount: 750,
       workloadType: "workflow",
       workloadId: "daily-research",
+      endedAt: null,
     })
     expect(getRunStatus).toHaveBeenCalledWith({
       projectId: run.projectId,
       customerId: run.customerId,
       runId: run.id,
+    })
+  })
+
+  it("returns the authoritative DO terminal timestamp for a run observed after it ended", async () => {
+    const run = createRun({ status: "running", consumedAmount: 0, remainingAmount: 1_000 })
+    const getRunById = vi.fn().mockResolvedValue(Ok(run))
+    const endedAt = new Date("2026-06-21T10:05:00.000Z").getTime()
+    const getRunStatus = vi.fn<RunBudgetClient["getRunStatus"]>().mockResolvedValue(
+      Ok({
+        runId: run.id,
+        status: "expired",
+        budgetAmount: 1_000,
+        consumedAmount: 250,
+        remainingAmount: 750,
+        endedAt,
+      })
+    )
+
+    const result = await getRun(
+      {
+        services: {
+          budgetRuns: { getRun: getRunById } as unknown as BudgetRunService,
+        },
+        runBudget: { getRunStatus } as unknown as Pick<RunBudgetClient, "getRunStatus">,
+      },
+      {
+        projectId: run.projectId,
+        runId: run.id,
+        keyCustomerId: null,
+      }
+    )
+
+    expect(result.val).toMatchObject({
+      runId: run.id,
+      status: "expired",
+      endedAt,
     })
   })
 

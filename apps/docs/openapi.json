@@ -560,6 +560,12 @@
                         "failed"
                       ]
                     },
+                    "endedAt": {
+                      "type": "integer",
+                      "nullable": true,
+                      "minimum": 0,
+                      "description": "Authoritative run terminal timestamp in epoch milliseconds; null while running."
+                    },
                     "customerId": {
                       "type": "string"
                     },
@@ -807,6 +813,12 @@
                             "failed"
                           ]
                         },
+                        "endedAt": {
+                          "type": "integer",
+                          "nullable": true,
+                          "minimum": 0,
+                          "description": "Authoritative run terminal timestamp in epoch milliseconds; null while running."
+                        },
                         "customerId": {
                           "type": "string"
                         },
@@ -1012,6 +1024,12 @@
                         "failed"
                       ]
                     },
+                    "endedAt": {
+                      "type": "integer",
+                      "nullable": true,
+                      "minimum": 0,
+                      "description": "Authoritative run terminal timestamp in epoch milliseconds; null while running."
+                    },
                     "customerId": {
                       "type": "string"
                     },
@@ -1204,6 +1222,12 @@
                         "budget_exceeded",
                         "failed"
                       ]
+                    },
+                    "endedAt": {
+                      "type": "integer",
+                      "nullable": true,
+                      "minimum": 0,
+                      "description": "Authoritative run terminal timestamp in epoch milliseconds; null while running."
                     },
                     "customerId": {
                       "type": "string"

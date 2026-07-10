@@ -1,0 +1,1 @@
+CREATE INDEX "budget_runs_running_expiry_sweep_idx" ON "unprice_budget_runs" USING btree ("expires_at","project_id","id") WHERE "unprice_budget_runs"."status" = 'running' AND "unprice_budget_runs"."expires_at" IS NOT NULL;

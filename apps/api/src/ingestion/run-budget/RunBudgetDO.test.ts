@@ -1871,6 +1871,7 @@ describe("RunBudgetDO", () => {
       ...TEST_ENTITLEMENT_FIELDS,
     })
 
+    const endedAt = BASE_NOW + 5000
     const result = await durable.endRun({
       workloadType: "agent",
       workloadId: "agent_1",
@@ -1878,11 +1879,12 @@ describe("RunBudgetDO", () => {
       customerId: "cus_1",
       projectId: "proj_1",
       status: "completed",
-      endedAt: BASE_NOW + 5000,
+      endedAt,
     })
 
     expect(result.status).toBe("completed")
     expect(result.consumedAmount).toBe(5000)
+    expect(result.endedAt).toBe(endedAt)
     // Capture was called during flush
     expect(testState.captureReservationUsage).toHaveBeenCalled()
     // Release was called
