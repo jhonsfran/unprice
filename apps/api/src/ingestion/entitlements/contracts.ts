@@ -213,25 +213,27 @@ export const entitlementConfigSchema = z.object({
   subscriptionItemId: z.string().min(1).nullable().optional(),
 })
 
-export const applyInputSchema = z.object({
-  event: rawEventSchema,
-  idempotencyKey: z.string().min(1),
-  projectId: z.string().min(1),
-  customerId: z.string().min(1),
-  entitlement: entitlementConfigSchema,
-  grants: z.array(activeGrantSchema).min(1),
-  enforceLimit: z.boolean(),
-  now: z.number().finite(),
-  wallet: z
-    .discriminatedUnion("mode", [
-      z.object({ mode: z.literal("standard") }),
-      z.object({
-        mode: z.literal("external_reservation"),
-        remainingAmount: z.number().int().nonnegative(),
-      }),
-    ])
-    .optional(),
-})
+export const applyInputSchema = z
+  .object({
+    event: rawEventSchema,
+    idempotencyKey: z.string().min(1),
+    projectId: z.string().min(1),
+    customerId: z.string().min(1),
+    entitlement: entitlementConfigSchema,
+    grants: z.array(activeGrantSchema).min(1),
+    enforceLimit: z.boolean(),
+    now: z.number().finite(),
+    wallet: z
+      .discriminatedUnion("mode", [
+        z.object({ mode: z.literal("standard") }),
+        z.object({
+          mode: z.literal("external_reservation"),
+          remainingAmount: z.number().int().nonnegative(),
+        }),
+      ])
+      .optional(),
+  })
+  .strict()
 
 const applyBatchEventSchema = rawEventSchema.extend({
   correlationKey: z.string().min(1),

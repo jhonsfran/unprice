@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import type { ApplyInput } from "./contracts"
 import { createApplyInput } from "./entitlement-window-test-fixtures"
 import { InMemoryEntitlementWindowStore } from "./testing/in-memory-store"
 import {
@@ -115,6 +116,23 @@ describe("in-memory store internals", () => {
       allowed: false,
       deniedReason: "RUN_BUDGET_EXCEEDED",
     })
+  })
+
+  it("rejects legacy wallet fields before writing processor state", async () => {
+    const now = Date.now()
+    const harness = createHarness({ now })
+    await harness.processor.initialize()
+    const malformedInput = {
+      ...createLiveApplyInput(now),
+      walletMode: "external_reservation",
+      externalReservation: { remainingAmount: 100_000_000 },
+    } as unknown as ApplyInput
+
+    await expect(harness.processor.apply(malformedInput)).rejects.toThrow()
+    expect(harness.store.idempotency.size).toBe(0)
+    expect(harness.store.meterStates.size).toBe(0)
+    expect(harness.store.grantStates.size).toBe(0)
+    expect(harness.getAlarmAt()).toBeNull()
   })
 })
 

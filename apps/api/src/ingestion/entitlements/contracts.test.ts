@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { activeGrantSchema, applyInputSchema, enforcementStateInputSchema } from "./contracts"
+import {
+  activeGrantSchema,
+  applyBatchInputSchema,
+  applyInputSchema,
+  enforcementStateInputSchema,
+} from "./contracts"
 import { createApplyInput } from "./entitlement-window-test-fixtures"
 
 const enrichedGrant = {
@@ -78,6 +83,27 @@ describe("EntitlementWindowDO contracts", () => {
     const result = applyInputSchema.safeParse({
       ...createApplyInput(),
       wallet: { mode: "external_reservation" },
+    })
+
+    expect(result.success).toBe(false)
+  })
+
+  it("rejects legacy external reservation fields instead of treating them as standard mode", () => {
+    const result = applyInputSchema.safeParse({
+      ...createApplyInput(),
+      walletMode: "external_reservation",
+      externalReservation: { remainingAmount: 100_000_000 },
+    })
+
+    expect(result.success).toBe(false)
+  })
+
+  it("keeps the derived batch input strict", () => {
+    const { event, idempotencyKey, now, ...sharedInput } = createApplyInput()
+    const result = applyBatchInputSchema.safeParse({
+      ...sharedInput,
+      events: [{ ...event, correlationKey: "correlation_123", idempotencyKey, now }],
+      walletMode: "standard",
     })
 
     expect(result.success).toBe(false)
