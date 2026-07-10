@@ -118,6 +118,9 @@
     "test": {
       "cache": false
     },
+    "test:workers": {
+      "cache": false
+    },
     "typecheck": {
       "dependsOn": ["^typecheck"],
       "cache": false

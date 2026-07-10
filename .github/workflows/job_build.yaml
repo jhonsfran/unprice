@@ -56,6 +56,13 @@ jobs:
           DATABASE_URL: postgresql://postgresql:postgresql@localhost:5432/unprice
           NODE_ENV: test
 
+      - name: Run workers-pool tests (real Durable Objects)
+        run: pnpm test:workers
+        env:
+          # fake database url — miniflare DOs never reach a real database in these suites
+          DATABASE_URL: postgresql://postgresql:postgresql@localhost:5432/unprice
+          NODE_ENV: test
+
       - name: React Doctor (errors only)
         uses: millionco/react-doctor@v2
         with:
