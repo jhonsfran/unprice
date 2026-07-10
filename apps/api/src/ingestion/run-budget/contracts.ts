@@ -19,6 +19,11 @@ export const runBudgetSummarySchema = z.object({
   remainingAmount: z.number().int().nonnegative(),
   walletReservationId: z.string().nullable().optional(),
   walletError: z.string().optional(),
+  /**
+   * True when the run closed while holding captures that exhausted all retries
+   * and were abandoned unbilled. Operators must reconcile these manually.
+   */
+  reconciliationNeeded: z.boolean().optional(),
 })
 
 const workloadTypeSchema = z.enum(["agent", "workflow", "job", "tool", "custom"])

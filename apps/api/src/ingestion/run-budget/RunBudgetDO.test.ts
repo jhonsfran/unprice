@@ -1513,7 +1513,9 @@ describe("RunBudgetDO", () => {
       consumedAmount: 5000,
       remainingAmount: 95_000,
     })
-    expect(state.alarmAt).toBe(expiredNow + 30_000)
+    // Exponential backoff: after one failed attempt (attemptCount=1) the next
+    // capture retry is scheduled 30s * 2^1 = 60s out.
+    expect(state.alarmAt).toBe(expiredNow + 60_000)
 
     vi.spyOn(Date, "now").mockReturnValue(expiredNow + 30_000)
     await durable.alarm()
@@ -1535,7 +1537,7 @@ describe("RunBudgetDO", () => {
     })
   })
 
-  it("blocks expiration close while a failed capture intent has exhausted retries", async () => {
+  it("closes an expired run with a reconciliation flag once a capture is abandoned", async () => {
     const RunBudgetDO = await loadRunBudgetDO()
     const state = createDurableObjectState()
     const env = createEnv()
@@ -1543,6 +1545,7 @@ describe("RunBudgetDO", () => {
     const expiresAt = BASE_NOW + 60_000
     const expiredNow = expiresAt + 1
 
+    // The wallet never accepts the capture, so every retry fails.
     testState.captureReservationUsage.mockRejectedValue(new Error("wallet unavailable"))
 
     await durable.startRun({
@@ -1587,26 +1590,127 @@ describe("RunBudgetDO", () => {
       ...TEST_ENTITLEMENT_FIELDS,
     })
 
+    // Drive alarm cycles until the intent reaches MAX_CAPTURE_ATTEMPTS (5) and
+    // transitions to terminal `abandoned`. After the fifth failed attempt the
+    // run is no longer blocked from closing.
     vi.spyOn(Date, "now").mockReturnValue(expiredNow)
     await durable.alarm()
     await durable.alarm()
     await durable.alarm()
 
     expect(testState.captureReservationUsage).toHaveBeenCalledTimes(5)
-    expect(testState.persistExpiredRunSummary).not.toHaveBeenCalled()
-    expect(testState.releaseReservation).not.toHaveBeenCalled()
+    // The run finally closes (expired) instead of being orphaned forever.
+    expect(testState.releaseReservation).toHaveBeenCalledTimes(1)
+    expect(testState.persistExpiredRunSummary).toHaveBeenCalledTimes(1)
+    // A never-silent error log is emitted for the unbilled abandoned capture.
+    expect(testState.logger.error).toHaveBeenCalledWith(
+      expect.stringContaining("reconciliation"),
+      expect.objectContaining({
+        recovery_required: true,
+        run_id: "brun_expiring_capture_exhausted",
+        project_id: "proj_1",
+        abandoned_amount: 5000,
+      })
+    )
+
+    const closed = await durable.getRunStatus({
+      runId: "brun_expiring_capture_exhausted",
+      customerId: "cus_1",
+      projectId: "proj_1",
+    })
+    expect(closed).toMatchObject({
+      runId: "brun_expiring_capture_exhausted",
+      status: "expired",
+      consumedAmount: 5000,
+      remainingAmount: 95_000,
+      reconciliationNeeded: true,
+    })
+
+    // Skip-guard: an abandoned intent must never be resurrected by a later flush.
+    await durable.flushCaptures()
+    expect(testState.captureReservationUsage).toHaveBeenCalledTimes(5)
     await expect(
       durable.getRunStatus({
         runId: "brun_expiring_capture_exhausted",
         customerId: "cus_1",
         projectId: "proj_1",
       })
-    ).resolves.toMatchObject({
-      runId: "brun_expiring_capture_exhausted",
-      status: "running",
-      consumedAmount: 5000,
-      remainingAmount: 95_000,
+    ).resolves.toMatchObject({ status: "expired", reconciliationNeeded: true })
+  })
+
+  it("always reschedules an alarm while a retryable capture intent remains", async () => {
+    const RunBudgetDO = await loadRunBudgetDO()
+    const state = createDurableObjectState()
+    const env = createEnv()
+    const durable = new RunBudgetDO(state, env)
+
+    // No expiresAt, so the only alarm source under test is capture retry.
+    await durable.startRun({
+      workloadType: "agent",
+      workloadId: "agent_1",
+      runId: "run_reschedule_invariant",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      currency: "USD",
+      budgetAmount: 100_000,
+      idempotencyKey: "idem_start_reschedule_invariant",
+      metadata: {},
+      now: BASE_NOW,
     })
+
+    await durable.applySyncEvent({
+      workloadType: "agent",
+      workloadId: "agent_1",
+      runId: "run_reschedule_invariant",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      featureSlug: "tokens",
+      idempotencyKey: "idem_event_reschedule_invariant",
+      event: {
+        id: "evt_reschedule_invariant",
+        slug: "tokens_used",
+        timestamp: BASE_NOW,
+        properties: { amount: 3 },
+      },
+      source: {
+        workspaceId: "ws_1",
+        environment: "test",
+        apiKeyId: "key_1",
+        sourceType: "api_key" as const,
+        sourceId: "key_1",
+        sourceName: null,
+      },
+      now: BASE_NOW,
+      ...TEST_ENTITLEMENT_FIELDS,
+    })
+
+    // First flush fails, creating a `failed` intent that still has retries left.
+    testState.captureReservationUsage.mockRejectedValue(new Error("wallet down"))
+    await durable.flushCaptures()
+
+    state.alarmAt = null
+    await durable.alarm()
+
+    // Invariant: a retryable (pending|failed) intent exists, so an alarm is set.
+    expect(state.alarmAt).not.toBeNull()
+
+    // Now let the capture succeed; the intent becomes terminal `captured`.
+    testState.captureReservationUsage.mockReset()
+    testState.captureReservationUsage.mockResolvedValue({ err: null, val: { capturedAmount: 0 } })
+
+    state.alarmAt = null
+    await durable.alarm()
+
+    // No retryable intent remains and the run is non-expiring, so no capture
+    // alarm is scheduled.
+    expect(state.alarmAt).toBeNull()
+    await expect(
+      durable.getRunStatus({
+        runId: "run_reschedule_invariant",
+        customerId: "cus_1",
+        projectId: "proj_1",
+      })
+    ).resolves.toMatchObject({ status: "running", reconciliationNeeded: false })
   })
 
   it("reschedules expiresAt when startRun returns an existing running run", async () => {

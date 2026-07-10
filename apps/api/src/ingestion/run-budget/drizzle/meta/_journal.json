@@ -29,6 +29,13 @@
       "when": 1782122668296,
       "tag": "0003_milky_the_hand",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1783679397003,
+      "tag": "0004_abandoned_tarantula",
+      "breakpoints": true
     }
   ]
 }

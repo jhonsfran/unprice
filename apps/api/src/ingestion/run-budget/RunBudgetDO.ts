@@ -1,8 +1,14 @@
 import { DurableObject } from "cloudflare:workers"
-import { eq, sql } from "drizzle-orm"
+import { eq, inArray, sql } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
 import type { Env } from "~/env"
+import {
+  CAPTURE_ABANDONED_STATUS,
+  CAPTURE_RETRY_STATUSES,
+  MAX_CAPTURE_ATTEMPTS,
+  captureBackoffMs,
+} from "./capture-policy"
 import {
   type ApplyRunSyncEventInput,
   type EndRunInput,
@@ -324,6 +330,15 @@ export class RunBudgetDO extends DurableObject {
 
       const now = Date.now()
 
+      // Skip-guard: a capture that exhausted its retries is terminal. Never
+      // resurrect it back to `pending` (which would loop forever) -- leave it
+      // abandoned so the run can close with a reconciliation flag instead.
+      const existingIntent = await this.loadCaptureIntent(intentKey)
+      if (existingIntent?.status === CAPTURE_ABANDONED_STATUS) {
+        skipped++
+        continue
+      }
+
       // Persist capture intent before external I/O. On conflict, keep the original
       // amount snapshot so wallet replay never changes payload for the same key.
       await this.db
@@ -387,12 +402,18 @@ export class RunBudgetDO extends DurableObject {
           })
           .where(eq(schema.runState.runId, bucket.runId))
       } catch (error) {
-        // Mark intent as failed for retry
+        // Record the failed attempt. Once we reach the attempt cap the intent
+        // becomes terminal `abandoned`: it will never be retried again and no
+        // longer blocks the run from closing (see closeRunInStorage). attemptCount
+        // is preserved across the flush upsert, so this count is stable per intent.
+        const nextAttempt = intent.attemptCount + 1
+        const nextStatus = nextAttempt >= MAX_CAPTURE_ATTEMPTS ? CAPTURE_ABANDONED_STATUS : "failed"
+
         await this.db
           .update(schema.runCaptureIntents)
           .set({
-            status: "failed",
-            attemptCount: sql`${schema.runCaptureIntents.attemptCount} + 1`,
+            status: nextStatus,
+            attemptCount: nextAttempt,
             lastError: error instanceof Error ? error.message : "unknown",
             updatedAt: Date.now(),
           })
@@ -416,9 +437,11 @@ export class RunBudgetDO extends DurableObject {
   override async alarm(): Promise<void> {
     await this.ready
 
-    // Retry pending/failed capture intents
+    // Retry outstanding capture intents. No attemptCount cap here: intents that
+    // exhausted their retries are already terminal `abandoned` and drop out of
+    // the retryable status set, so this naturally stops chasing dead captures.
     const pendingIntents = await this.db.query.runCaptureIntents.findMany({
-      where: sql`${schema.runCaptureIntents.status} IN ('pending', 'failed') AND ${schema.runCaptureIntents.attemptCount} < 5`,
+      where: this.retryableCaptureIntentsWhere(),
     })
 
     if (pendingIntents.length > 0) {
@@ -465,11 +488,20 @@ export class RunBudgetDO extends DurableObject {
       }
     }
 
-    // Reschedule for the earliest outstanding capture retry or run expiration.
+    // Reschedule the capture retry (plus any run-expiration alarm). While ANY
+    // retryable (pending|failed) intent remains, the capture alarm is always
+    // rescheduled -- never null -- so outstanding captures can never be orphaned.
+    // Backoff uses the LONGEST backoff among outstanding intents (the highest
+    // attemptCount, capped at 1h) to avoid hammering a persistently failing wallet.
     const remaining = await this.db.query.runCaptureIntents.findMany({
-      where: sql`${schema.runCaptureIntents.status} IN ('pending', 'failed') AND ${schema.runCaptureIntents.attemptCount} < 5`,
+      where: this.retryableCaptureIntentsWhere(),
     })
-    const nextCaptureAlarmAt = remaining.length > 0 ? now + 30_000 : null
+    const maxRemainingAttempt = remaining.reduce(
+      (max, intent) => Math.max(max, intent.attemptCount),
+      0
+    )
+    const nextCaptureAlarmAt =
+      remaining.length > 0 ? now + captureBackoffMs(maxRemainingAttempt) : null
     const nextPersistenceRetryAlarmAt = hasPersistenceFailures ? now + 30_000 : null
     const nextExpirationAlarmAt = await this.findNextExpirationAlarmAt(now)
     const nextAlarmAt = [nextCaptureAlarmAt, nextPersistenceRetryAlarmAt, nextExpirationAlarmAt]
@@ -510,13 +542,24 @@ export class RunBudgetDO extends DurableObject {
       await this.releaseReservation(afterFlush)
     }
 
+    // Captures that exhausted every retry are abandoned unbilled. Never close
+    // silently over them: persist a reconciliation flag and emit an error log so
+    // operators can settle the missing capture manually.
+    const abandonedIntents = await this.findAbandonedCaptureIntents(input.runId)
+    const reconciliationNeeded = abandonedIntents.length > 0
+
     await this.db
       .update(schema.runState)
       .set({
         status: input.status,
         endedAt: input.endedAt,
+        reconciliationNeeded,
       })
       .where(eq(schema.runState.runId, input.runId))
+
+    if (reconciliationNeeded) {
+      await this.logAbandonedCaptures(afterFlush, abandonedIntents)
+    }
 
     const final = await this.loadRun(input.runId)
     if (!final) throw new Error("Run state missing after close")
@@ -617,14 +660,54 @@ export class RunBudgetDO extends DurableObject {
       .where(eq(schema.runState.runId, run.runId))
   }
 
+  /**
+   * The single retryable-status predicate shared by every capture query so the
+   * "which intents are still open" rule is defined exactly once. Terminal
+   * statuses (`captured`, `abandoned`) are excluded.
+   */
+  private retryableCaptureIntentsWhere() {
+    return inArray(schema.runCaptureIntents.status, [...CAPTURE_RETRY_STATUSES])
+  }
+
   private async hasUnresolvedCaptureIntents(runId: string): Promise<boolean> {
     const intents = await this.db.query.runCaptureIntents.findMany({
-      where: sql`${schema.runCaptureIntents.status} IN ('pending', 'failed')`,
+      where: this.retryableCaptureIntentsWhere(),
     })
 
-    return intents.some(
-      (intent) => intent.runId === runId || intent.intentKey.startsWith(`run-capture:${runId}:`)
-    )
+    return intents.some((intent) => this.intentBelongsToRun(intent, runId))
+  }
+
+  private async findAbandonedCaptureIntents(runId: string): Promise<RunCaptureIntentRow[]> {
+    const intents = await this.db.query.runCaptureIntents.findMany({
+      where: eq(schema.runCaptureIntents.status, CAPTURE_ABANDONED_STATUS),
+    })
+
+    return intents.filter((intent) => this.intentBelongsToRun(intent, runId))
+  }
+
+  private intentBelongsToRun(intent: RunCaptureIntentRow, runId: string): boolean {
+    return intent.runId === runId || intent.intentKey.startsWith(`run-capture:${runId}:`)
+  }
+
+  private async logAbandonedCaptures(
+    run: RunStateRow,
+    abandonedIntents: RunCaptureIntentRow[]
+  ): Promise<void> {
+    const { createDoLogger } = await import("~/observability")
+    const logger = createDoLogger(this.ctx.id.toString())
+    const abandonedAmount = abandonedIntents.reduce((sum, intent) => sum + intent.amount, 0)
+
+    logger.error("run closed with abandoned captures requiring reconciliation", {
+      outcome: "error",
+      recovery_required: true,
+      run_id: run.runId,
+      project_id: run.projectId,
+      customer_id: run.customerId,
+      abandoned_intent_keys: abandonedIntents.map((intent) => intent.intentKey),
+      abandoned_capture_count: abandonedIntents.length,
+      abandoned_amount: abandonedAmount,
+      currency: run.currency,
+    })
   }
 
   private async findNextExpirationAlarmAt(now: number): Promise<number | null> {
@@ -1019,6 +1102,7 @@ export class RunBudgetDO extends DurableObject {
       consumedAmount: run.consumedAmount,
       remainingAmount: Math.max(0, run.budgetAmount - run.consumedAmount),
       walletReservationId: run.reservationId ?? null,
+      reconciliationNeeded: Boolean(run.reconciliationNeeded),
     }
   }
 

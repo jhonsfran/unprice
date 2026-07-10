@@ -20,6 +20,9 @@ export const runState = sqliteTable("run_state", {
   expiresAt: integer("expires_at"),
   lastEventAt: integer("last_event_at"),
   metadataJson: text("metadata_json").notNull().default("{}"),
+  reconciliationNeeded: integer("reconciliation_needed", { mode: "boolean" })
+    .notNull()
+    .default(false),
 })
 
 export const runSpendBuckets = sqliteTable(
