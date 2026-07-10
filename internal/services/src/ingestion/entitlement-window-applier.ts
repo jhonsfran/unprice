@@ -120,7 +120,7 @@ export type FlushReservationForInvoicingResult = {
 
 export type EntitlementWindowController = {
   apply: (input: EntitlementWindowApplyInput) => Promise<EntitlementWindowApplyResult>
-  applyBatch?: (input: {
+  applyBatch: (input: {
     customerId: string
     enforceLimit: boolean
     entitlement: IngestionEntitlement & { meterConfig: MeterConfig }
@@ -171,19 +171,6 @@ export class EntitlementWindowApplier {
     const applyEntitlement = {
       ...entitlement,
       meterConfig: entitlement.meterConfig,
-    }
-
-    if (!stub.applyBatch) {
-      return this.applySequentially({
-        applyEntitlement,
-        customerId,
-        enforceLimit,
-        entitlement,
-        messageOutcomeKeys,
-        messages,
-        projectId,
-        stub,
-      })
     }
 
     const batchResult = await stub.applyBatch({
@@ -246,55 +233,6 @@ export class EntitlementWindowApplier {
       enforceLimit,
       now: message.receivedAt,
     })
-  }
-
-  private async applySequentially(params: {
-    applyEntitlement: IngestionEntitlement & { meterConfig: MeterConfig }
-    customerId: string
-    enforceLimit: boolean
-    entitlement: IngestionEntitlement
-    messageOutcomeKeys: ReadonlyMap<IngestionQueueMessage, string>
-    messages: IngestionQueueMessage[]
-    projectId: string
-    stub: EntitlementWindowController
-  }): Promise<EntitlementWindowApplyBatchResult[]> {
-    const {
-      applyEntitlement,
-      customerId,
-      enforceLimit,
-      entitlement,
-      messageOutcomeKeys,
-      messages,
-      projectId,
-      stub,
-    } = params
-    const results: EntitlementWindowApplyBatchResult[] = []
-
-    for (const message of messages) {
-      const result = await stub.apply({
-        event: {
-          id: message.id,
-          slug: message.slug,
-          timestamp: message.timestamp,
-          properties: message.properties,
-          source: buildEntitlementWindowApplySource(message),
-        },
-        entitlement: applyEntitlement,
-        idempotencyKey: message.idempotencyKey,
-        projectId,
-        customerId,
-        grants: entitlement.grants,
-        enforceLimit,
-        now: message.receivedAt,
-      })
-      results.push({
-        ...result,
-        correlationKey: getMessageOutcomeKey(message, messageOutcomeKeys),
-        idempotencyKey: message.idempotencyKey,
-      })
-    }
-
-    return results
   }
 
   private getStub(params: {

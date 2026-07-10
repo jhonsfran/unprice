@@ -1562,13 +1562,23 @@ describe("IngestionService entitlement routing", () => {
 
   it("records late closed-period DO denials as rejected queue outcomes", async () => {
     const entitlement = createEntitlement()
-    const apply = vi.fn().mockResolvedValue({
-      allowed: false,
-      deniedReason: "LATE_EVENT_CLOSED_PERIOD",
-      message: "closed period",
-    })
+    const applyBatch = vi
+      .fn()
+      .mockImplementation(
+        (input: { events: { correlationKey: string; idempotencyKey: string }[] }) =>
+          Promise.resolve({
+            results: input.events.map((event) => ({
+              allowed: false,
+              correlationKey: event.correlationKey,
+              deniedReason: "LATE_EVENT_CLOSED_PERIOD",
+              idempotencyKey: event.idempotencyKey,
+              message: "closed period",
+            })),
+          })
+      )
     const getEntitlementWindowStub = vi.fn().mockReturnValue({
-      apply,
+      apply: vi.fn(),
+      applyBatch,
       getEnforcementState: vi.fn(),
     })
     const send = vi.fn().mockResolvedValue(undefined)

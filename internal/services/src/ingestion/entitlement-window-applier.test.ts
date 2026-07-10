@@ -41,34 +41,6 @@ describe("EntitlementWindowApplier", () => {
     ])
   })
 
-  it("falls back to sequential apply when applyBatch is unavailable", async () => {
-    const apply = vi.fn().mockResolvedValue({ allowed: true })
-    const messages = [
-      createMessage({ id: "evt_1", idempotencyKey: "idem_1" }),
-      createMessage({ id: "evt_2", idempotencyKey: "idem_2" }),
-    ]
-    const applier = new EntitlementWindowApplier(createClient({ apply }))
-
-    const results = await applier.applyBatch({
-      customerId: "cus_123",
-      enforceLimit: false,
-      entitlement: createEntitlement(),
-      messageOutcomeKeys: buildMessageOutcomeKeys(messages),
-      messages,
-      projectId: "proj_123",
-    })
-
-    expect(apply).toHaveBeenCalledTimes(2)
-    expect(apply.mock.calls.map(([input]) => input.event.id)).toEqual(["evt_1", "evt_2"])
-    expect(apply.mock.calls[0]?.[0].event.source).toMatchObject({
-      workspaceId: "ws_123",
-      sourceType: "api_key",
-      sourceId: "key_123",
-    })
-    expect(results.map((result) => result.idempotencyKey)).toEqual(["idem_1", "idem_2"])
-    expect(results.every((result) => result.allowed)).toBe(true)
-  })
-
   it("maps out-of-order batch results back to the original message order", async () => {
     const messages = [
       createMessage({ id: "evt_1", idempotencyKey: "idem_1" }),
@@ -171,6 +143,7 @@ function createClient(stub: Partial<EntitlementWindowController>): EntitlementWi
   return {
     getEntitlementWindowStub: vi.fn().mockReturnValue({
       apply: stub.apply ?? vi.fn().mockResolvedValue({ allowed: true }),
+      applyBatch: stub.applyBatch ?? vi.fn().mockResolvedValue({ results: [] }),
       getEnforcementState: vi.fn(),
       ...stub,
     }),
