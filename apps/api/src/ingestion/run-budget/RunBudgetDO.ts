@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers"
+import { entitlementMeterFactSchemaV1 } from "@unprice/analytics"
 import { eq, inArray, sql } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
@@ -26,7 +27,7 @@ import {
 } from "./contracts"
 import * as schema from "./db/schema"
 import migrations from "./drizzle/migrations"
-import type { RunBudgetPricingDelegate, RunBudgetWalletOps } from "./ports"
+import type { RunBudgetMeterFact, RunBudgetPricingDelegate, RunBudgetWalletOps } from "./ports"
 
 type RunStateRow = typeof schema.runState.$inferSelect
 type RunCaptureIntentRow = typeof schema.runCaptureIntents.$inferSelect
@@ -70,7 +71,7 @@ export class RunBudgetDO extends DurableObject {
         )
         const entitlementWindow = this.runtimeEnv.entitlementwindow.get(entitlementWindowId)
 
-        return entitlementWindow.apply({
+        const result = await entitlementWindow.apply({
           event: input.event,
           idempotencyKey: input.idempotencyKey,
           projectId: input.projectId,
@@ -81,6 +82,11 @@ export class RunBudgetDO extends DurableObject {
           now: input.now,
           wallet: input.wallet,
         })
+
+        return {
+          ...result,
+          meterFacts: entitlementMeterFactSchemaV1.array().parse(result.meterFacts ?? []),
+        }
       },
     }
     this.db = drizzle(this.ctx.storage, { schema, logger: false })
@@ -242,17 +248,16 @@ export class RunBudgetDO extends DurableObject {
     }
 
     // Derive priced cost from meter facts
-    const rawMeterFacts = entitlementResult.meterFacts ?? []
-    const meterFacts = this.withRunContext(run, rawMeterFacts)
+    const meterFacts = this.withRunContext(run, entitlementResult.meterFacts)
     const pricedAmount = this.sumPricedAmount(meterFacts)
-    const bucketDeltas = this.deriveBucketDeltas(input.runId, input.entitlement, meterFacts)
+    const bucketDeltas = this.deriveBucketDeltas(run, input.entitlement, meterFacts)
 
     const updatedRun = this.projectRunSpend(run, pricedAmount, input.now)
     const decision: RunBudgetDecision = {
       allowed: true,
       state: "processed",
       budget: this.toSummary(updatedRun),
-      meterFacts: meterFacts as RunBudgetDecision["meterFacts"],
+      meterFacts,
     }
 
     await this.commitSpendAndIdempotency(
@@ -843,98 +848,68 @@ export class RunBudgetDO extends DurableObject {
     if (result.err) throw result.err
   }
 
-  private withRunContext(
-    run: RunStateRow,
-    meterFacts: Array<Record<string, unknown>>
-  ): Array<Record<string, unknown>> {
+  private withRunContext(run: RunStateRow, meterFacts: RunBudgetMeterFact[]): RunBudgetMeterFact[] {
+    const workloadType = startRunInputSchema.shape.workloadType.parse(run.workloadType)
+
     return meterFacts.map((fact) => ({
       ...fact,
       run_id: run.runId,
       trace_id: run.traceId ?? null,
       parent_run_id: run.parentRunId ?? null,
-      workload_type: run.workloadType ?? null,
+      workload_type: workloadType ?? null,
       workload_id: run.workloadId ?? null,
     }))
   }
 
-  private sumPricedAmount(meterFacts: Record<string, unknown>[]): number {
-    return meterFacts.reduce(
-      (sum: number, fact: Record<string, unknown>) => sum + ((fact.amount as number) ?? 0),
-      0
-    )
+  private sumPricedAmount(meterFacts: RunBudgetMeterFact[]): number {
+    return meterFacts.reduce((sum, fact) => sum + fact.amount, 0)
   }
 
   private deriveBucketDeltas(
-    runId: string,
+    run: Pick<RunStateRow, "runId" | "currency">,
     entitlement: ApplyRunSyncEventInput["entitlement"],
-    meterFacts: Record<string, unknown>[]
+    meterFacts: RunBudgetMeterFact[]
   ): RunSpendBucketDelta[] {
-    return meterFacts.flatMap((fact: Record<string, unknown>) => {
-      const amount = this.readFactNumber(fact, "amount") ?? 0
-      if (amount <= 0) return []
+    return meterFacts.flatMap((fact) => {
+      if (fact.amount <= 0) return []
 
-      const statementKey = this.readFactString(fact, "statement_key")
-      const periodKey = this.readFactString(fact, "period_key") ?? "unknown"
-      const invoiceContext = this.resolveBillingPeriodContext({
-        entitlement,
-        fact,
-        statementKey,
-      })
+      const invoiceContext = this.resolveBillingPeriodContext(entitlement, fact.timestamp)
       const bucketKey = [
-        runId,
-        this.readFactString(fact, "customer_entitlement_id") ?? "unknown",
+        run.runId,
+        fact.customer_entitlement_id,
         invoiceContext.statementKey,
-        periodKey,
+        fact.period_key,
       ].join(":")
 
       return {
         bucketKey,
         billingPeriodId: invoiceContext.billingPeriodId,
-        entitlementId: this.readFactString(fact, "customer_entitlement_id") ?? "unknown",
-        featureId: this.readFactString(fact, "feature_id"),
+        entitlementId: fact.customer_entitlement_id,
+        featureId: null,
         featurePlanVersionItemId: invoiceContext.featurePlanVersionItemId,
-        featureSlug: this.readFactString(fact, "feature_slug") ?? entitlement.featureSlug,
+        featureSlug: fact.feature_slug,
         statementKey: invoiceContext.statementKey,
-        periodStartAt: this.readFactNumber(fact, "period_start_at") ?? invoiceContext.cycleStartAt,
-        periodEndAt: this.readFactNumber(fact, "period_end_at") ?? invoiceContext.cycleEndAt,
-        quantity: this.readFactNumber(fact, "delta") ?? 0,
-        currency: this.readFactString(fact, "currency") ?? "USD",
-        amount,
+        periodStartAt: invoiceContext.cycleStartAt,
+        periodEndAt: invoiceContext.cycleEndAt,
+        quantity: fact.delta,
+        currency: run.currency,
+        amount: fact.amount,
       }
     })
   }
 
-  private readFactString(fact: Record<string, unknown>, key: string): string | null {
-    const value = fact[key]
-    if (typeof value !== "string") return null
-    const trimmed = value.trim()
-    if (trimmed.length === 0 || trimmed.toLowerCase() === "unknown") return null
-    return trimmed
-  }
-
-  private readFactNumber(fact: Record<string, unknown>, key: string): number | null {
-    const value = fact[key]
-    return typeof value === "number" && Number.isFinite(value) ? value : null
-  }
-
-  private resolveBillingPeriodContext(params: {
-    entitlement: ApplyRunSyncEventInput["entitlement"]
-    fact: Record<string, unknown>
-    statementKey: string | null
-  }): ApplyRunSyncEventInput["entitlement"]["billingPeriods"][number] {
-    const eventTimestamp = this.readFactNumber(params.fact, "timestamp")
-    const period = params.entitlement.billingPeriods.find((candidate) => {
-      if (params.statementKey) return candidate.statementKey === params.statementKey
-      return (
-        eventTimestamp !== null &&
-        candidate.cycleStartAt <= eventTimestamp &&
-        eventTimestamp < candidate.cycleEndAt
-      )
-    })
+  private resolveBillingPeriodContext(
+    entitlement: ApplyRunSyncEventInput["entitlement"],
+    eventTimestamp: number
+  ): ApplyRunSyncEventInput["entitlement"]["billingPeriods"][number] {
+    const period = entitlement.billingPeriods.find(
+      (candidate) =>
+        candidate.cycleStartAt <= eventTimestamp && eventTimestamp < candidate.cycleEndAt
+    )
 
     if (!period) {
       throw new Error(
-        `Missing billing period invoice context for run spend statement ${params.statementKey ?? "unknown"}`
+        `Missing billing period invoice context for run spend event at ${eventTimestamp}`
       )
     }
 

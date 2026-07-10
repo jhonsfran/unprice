@@ -1,4 +1,6 @@
+import type { entitlementMeterFactSchemaV1 } from "@unprice/analytics"
 import type { WalletService } from "@unprice/services/wallet"
+import type { z } from "zod"
 import type { ApplyInput, ApplyResult } from "../entitlements/contracts"
 
 /**
@@ -20,10 +22,16 @@ export type RunBudgetPricingInput = Pick<
   wallet: Extract<NonNullable<ApplyInput["wallet"]>, { mode: "external_reservation" }>
 }
 
+export type RunBudgetMeterFact = z.infer<typeof entitlementMeterFactSchemaV1>
+
+export type RunBudgetPricingResult = Omit<ApplyResult, "meterFacts"> & {
+  meterFacts: RunBudgetMeterFact[]
+}
+
 /**
  * Prices through external-reservation mode: the delegate preserves the
  * idempotency key and never creates an entitlement wallet reservation.
  */
 export type RunBudgetPricingDelegate = {
-  apply(input: RunBudgetPricingInput): Promise<ApplyResult>
+  apply(input: RunBudgetPricingInput): Promise<RunBudgetPricingResult>
 }

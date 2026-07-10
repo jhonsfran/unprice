@@ -129,6 +129,8 @@ patterns. Keep it cheap to load and useful.
 - 2026-07-05: RunBudgetDO tests should cache the mocked DO module import in `beforeAll`; per-spec
   `vi.resetModules()` makes Vite transform/import startup count against individual test timeouts
   and can flake under Turbo contention.
+- 2026-07-10: Parse EntitlementWindow meter facts once at the RunBudget pricing-port boundary;
+  derive invoice context from the typed fact timestamp and spend-bucket currency from the run.
 - 2026-05-08: Tiny-tools usage discovery reads `featurePlanVersion.meterConfig` from
   `entitlements.get`; `verify` is only for the decision.
 - 2026-05-11: Tier/package entitlements are static quantity limits from subscription grants; do

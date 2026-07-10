@@ -1,8 +1,46 @@
+import type { AnalyticsEntitlementMeterFact } from "@unprice/analytics"
 import type * as DbSchema from "@unprice/db/schema"
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 
 const BASE_NOW = Date.UTC(2026, 2, 19, 12, 0, 0)
 const DO_STARTUP_TEST_TIMEOUT_MS = 15_000
+
+function createMeterFact(
+  overrides: Partial<AnalyticsEntitlementMeterFact> = {}
+): AnalyticsEntitlementMeterFact {
+  return {
+    event_id: "evt_1",
+    idempotency_key: "idem_event_1:ew",
+    workspace_id: "ws_1",
+    project_id: "proj_1",
+    customer_id: "cus_1",
+    environment: "test",
+    api_key_id: "key_1",
+    source_type: "api_key",
+    source_id: "key_1",
+    source_name: null,
+    customer_entitlement_id: "ce_1",
+    feature_slug: "tokens",
+    period_key: "period_1",
+    event_slug: "tokens_used",
+    aggregation_method: "sum",
+    timestamp: BASE_NOW,
+    created_at: BASE_NOW,
+    delta: 5,
+    value_after: 5,
+    grant_id: "grant_1",
+    feature_plan_version_id: "fpv_1",
+    amount: 5000,
+    amount_after: 5000,
+    amount_scale: 8,
+    currency: "USD",
+    priced_at: BASE_NOW,
+    tier_index: null,
+    tier_mode: null,
+    pricing_component_count: 1,
+    ...overrides,
+  }
+}
 
 /**
  * Default entitlement config and grants for test fixtures.
@@ -99,6 +137,7 @@ const testState = {
   entitlementWindowApply: vi.fn(),
   failRunIdempotencyInsert: false,
   omitTerminalEndedAtFromIdempotency: false,
+  runSpendBucketValues: [] as Record<string, unknown>[],
   logger: {
     debug: vi.fn(),
     error: vi.fn(),
@@ -124,6 +163,7 @@ describe("RunBudgetDO", () => {
     testState.entitlementWindowApply.mockReset()
     testState.failRunIdempotencyInsert = false
     testState.omitTerminalEndedAtFromIdempotency = false
+    testState.runSpendBucketValues.length = 0
 
     // Default mocks
     testState.createReservation.mockResolvedValue({
@@ -140,18 +180,7 @@ describe("RunBudgetDO", () => {
     })
     testState.entitlementWindowApply.mockResolvedValue({
       allowed: true,
-      meterFacts: [
-        {
-          amount: 5000,
-          customer_entitlement_id: "ce_1",
-          statement_key: "stmt_1",
-          period_key: "period_1",
-          feature_id: "feat_1",
-          period_start_at: BASE_NOW - 60_000,
-          period_end_at: BASE_NOW + 60_000,
-          currency: "USD",
-        },
-      ],
+      meterFacts: [createMeterFact()],
     })
 
     vi.spyOn(Date, "now").mockReturnValue(BASE_NOW)
@@ -943,6 +972,119 @@ describe("RunBudgetDO", () => {
     })
   })
 
+  it("rejects malformed producer meter facts without persisting spend or idempotency", async () => {
+    const RunBudgetDO = await loadRunBudgetDO()
+    const durable = new RunBudgetDO(createDurableObjectState(), createEnv())
+
+    await durable.startRun({
+      runId: "run_malformed_fact",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      currency: "USD",
+      budgetAmount: 100_000,
+      idempotencyKey: "idem_start_malformed_fact",
+      metadata: {},
+      now: BASE_NOW,
+    })
+
+    const malformedFact: Record<string, unknown> = { ...createMeterFact() }
+    delete malformedFact.customer_entitlement_id
+    testState.entitlementWindowApply.mockResolvedValueOnce({
+      allowed: true,
+      meterFacts: [malformedFact],
+    })
+
+    const eventInput = {
+      runId: "run_malformed_fact",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      featureSlug: "tokens",
+      idempotencyKey: "idem_malformed_fact",
+      event: {
+        id: "evt_malformed_fact",
+        slug: "tokens_used",
+        timestamp: BASE_NOW,
+        properties: { amount: 5 },
+      },
+      source: {
+        workspaceId: "ws_1",
+        environment: "test",
+        apiKeyId: "key_1",
+        sourceType: "api_key" as const,
+        sourceId: "key_1",
+        sourceName: null,
+      },
+      now: BASE_NOW,
+      ...TEST_ENTITLEMENT_FIELDS,
+    }
+
+    await expect(durable.applySyncEvent(eventInput)).rejects.toThrow("customer_entitlement_id")
+    await expect(
+      durable.getRunStatus({
+        runId: "run_malformed_fact",
+        customerId: "cus_1",
+        projectId: "proj_1",
+      })
+    ).resolves.toMatchObject({ consumedAmount: 0, remainingAmount: 100_000 })
+    expect(testState.runSpendBucketValues).toEqual([])
+
+    testState.entitlementWindowApply.mockResolvedValueOnce({
+      allowed: true,
+      meterFacts: [createMeterFact()],
+    })
+    await expect(durable.applySyncEvent(eventInput)).resolves.toMatchObject({
+      allowed: true,
+      budget: { consumedAmount: 5000 },
+    })
+    expect(testState.entitlementWindowApply).toHaveBeenCalledTimes(2)
+  })
+
+  it("uses the run currency for spend buckets when producer facts carry another currency", async () => {
+    const RunBudgetDO = await loadRunBudgetDO()
+    const durable = new RunBudgetDO(createDurableObjectState(), createEnv())
+
+    await durable.startRun({
+      runId: "run_eur",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      currency: "EUR",
+      budgetAmount: 100_000,
+      idempotencyKey: "idem_start_eur",
+      metadata: {},
+      now: BASE_NOW,
+    })
+
+    testState.entitlementWindowApply.mockResolvedValueOnce({
+      allowed: true,
+      meterFacts: [createMeterFact({ currency: "USD" })],
+    })
+    await durable.applySyncEvent({
+      runId: "run_eur",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      featureSlug: "tokens",
+      idempotencyKey: "idem_event_eur",
+      event: {
+        id: "evt_eur",
+        slug: "tokens_used",
+        timestamp: BASE_NOW,
+        properties: { amount: 5 },
+      },
+      source: {
+        workspaceId: "ws_1",
+        environment: "test",
+        apiKeyId: "key_1",
+        sourceType: "api_key",
+        sourceId: "key_1",
+        sourceName: null,
+      },
+      now: BASE_NOW,
+      ...TEST_ENTITLEMENT_FIELDS,
+    })
+
+    expect(testState.runSpendBucketValues).toEqual([expect.objectContaining({ currency: "EUR" })])
+  })
+
   it("serializes concurrent applySyncEvent calls before pricing against remaining budget", async () => {
     const RunBudgetDO = await loadRunBudgetDO()
     const state = createDurableObjectState()
@@ -983,16 +1125,12 @@ describe("RunBudgetDO", () => {
       return {
         allowed: true,
         meterFacts: [
-          {
+          createMeterFact({
             amount: eventAmount,
-            customer_entitlement_id: "ce_1",
-            statement_key: "stmt_1",
-            period_key: "period_1",
-            feature_id: "feat_1",
-            period_start_at: BASE_NOW - 60_000,
-            period_end_at: BASE_NOW + 60_000,
-            currency: "USD",
-          },
+            amount_after: eventAmount,
+            delta: 7,
+            value_after: 7,
+          }),
         ],
       }
     })
@@ -1237,16 +1375,13 @@ describe("RunBudgetDO", () => {
     testState.entitlementWindowApply.mockResolvedValueOnce({
       allowed: true,
       meterFacts: [
-        {
+        createMeterFact({
           amount: 7000,
-          customer_entitlement_id: "ce_1",
-          statement_key: "stmt_1",
-          period_key: "period_1",
-          feature_id: "feat_1",
-          period_start_at: BASE_NOW - 60_000,
-          period_end_at: BASE_NOW + 60_000,
-          currency: "USD",
-        },
+          amount_after: 12_000,
+          delta: 7,
+          timestamp: BASE_NOW + 1000,
+          value_after: 12,
+        }),
       ],
     })
 
@@ -1344,32 +1479,20 @@ describe("RunBudgetDO", () => {
     testState.entitlementWindowApply
       .mockResolvedValueOnce({
         allowed: true,
-        meterFacts: [
-          {
-            amount: 5000,
-            customer_entitlement_id: "ce_1",
-            statement_key: "stmt_1",
-            period_key: "period_1",
-            feature_id: "feat_1",
-            period_start_at: BASE_NOW - 60_000,
-            period_end_at: BASE_NOW + 60_000,
-            currency: "USD",
-          },
-        ],
+        meterFacts: [createMeterFact()],
       })
       .mockResolvedValueOnce({
         allowed: true,
         meterFacts: [
-          {
+          createMeterFact({
             amount: 7000,
-            customer_entitlement_id: "ce_1",
-            statement_key: "stmt_2",
+            amount_after: 12_000,
+            delta: 7,
+            idempotency_key: "idem_event_invoice_flush_2:ew",
             period_key: "period_2",
-            feature_id: "feat_1",
-            period_start_at: BASE_NOW + 86_400_000,
-            period_end_at: BASE_NOW + 172_800_000,
-            currency: "USD",
-          },
+            timestamp: BASE_NOW + 86_400_000,
+            value_after: 12,
+          }),
         ],
       })
 
@@ -2300,6 +2423,9 @@ function buildFakeDrizzle() {
 
     return {
       values: (data: Record<string, unknown>) => {
+        if (tableName === "runSpendBuckets") {
+          testState.runSpendBucketValues.push({ ...data })
+        }
         let storedData = data
         if (
           tableName === "runIdempotency" &&
