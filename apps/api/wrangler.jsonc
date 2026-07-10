@@ -31,14 +31,6 @@
           {
             "binding": "INGESTION_REPORTING_QUEUE",
             "queue": "unprice-api-ingestion-reporting-prod"
-          },
-          {
-            "binding": "INGESTION_DLQ",
-            "queue": "unprice-api-ingestion-dlq-prod"
-          },
-          {
-            "binding": "INGESTION_REPORTING_DLQ",
-            "queue": "unprice-api-ingestion-reporting-dlq-prod"
           }
         ],
         "consumers": [
@@ -165,14 +157,6 @@
           {
             "binding": "INGESTION_REPORTING_QUEUE",
             "queue": "unprice-api-ingestion-reporting-preview"
-          },
-          {
-            "binding": "INGESTION_DLQ",
-            "queue": "unprice-api-ingestion-dlq-preview"
-          },
-          {
-            "binding": "INGESTION_REPORTING_DLQ",
-            "queue": "unprice-api-ingestion-reporting-dlq-preview"
           }
         ],
         "consumers": [
@@ -287,14 +271,6 @@
           {
             "binding": "INGESTION_REPORTING_QUEUE",
             "queue": "unprice-api-ingestion-reporting-dev"
-          },
-          {
-            "binding": "INGESTION_DLQ",
-            "queue": "unprice-api-ingestion-dlq-dev"
-          },
-          {
-            "binding": "INGESTION_REPORTING_DLQ",
-            "queue": "unprice-api-ingestion-reporting-dlq-dev"
           }
         ],
         "consumers": [
