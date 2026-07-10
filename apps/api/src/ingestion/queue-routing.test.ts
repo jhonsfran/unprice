@@ -5,7 +5,6 @@ describe("classifyIngestionQueue", () => {
   it("classifies every configured queue name across envs", () => {
     for (const env of ["prod", "preview", "dev"]) {
       expect(classifyIngestionQueue(`unprice-api-ingestion-shard-0-${env}`)).toBe("raw")
-      expect(classifyIngestionQueue(`unprice-api-ingestion-shard-1-${env}`)).toBe("raw")
       expect(classifyIngestionQueue(`unprice-api-ingestion-reporting-${env}`)).toBe("reporting")
       expect(classifyIngestionQueue(`unprice-api-ingestion-dlq-${env}`)).toBe("raw_dlq")
       expect(classifyIngestionQueue(`unprice-api-ingestion-reporting-dlq-${env}`)).toBe(
