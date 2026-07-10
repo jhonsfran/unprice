@@ -14,16 +14,9 @@ import {
   resolveCustomerGrantContextWindow,
 } from "./entitlement-context"
 import { IngestionEntitlementRouter } from "./entitlement-routing"
+import { catchUpAndReloadContext } from "./invoice-context"
 import type { IngestionQueueMessage } from "./message"
-
-type RunSubscriptionCatchUp = {
-  catchUpForPreparedGroup(params: {
-    candidateEntitlements: IngestionEntitlement[]
-    customerId: string
-    messages: IngestionQueueMessage[]
-    projectId: string
-  }): Promise<{ changed: boolean; caughtUpSubscriptionIds: string[] }>
-}
+import type { IngestionSubscriptionCatchUp } from "./subscription-catchup"
 
 /**
  * Resolves the active entitlement for a feature slug in the context of a run sync event.
@@ -32,12 +25,15 @@ type RunSubscriptionCatchUp = {
 export class IngestionRunEntitlementResolver implements RunEntitlementResolver {
   private readonly entitlementContext: CustomerGrantContextReader
   private readonly router: IngestionEntitlementRouter
-  private readonly subscriptionCatchUp?: RunSubscriptionCatchUp
+  private readonly subscriptionCatchUp?: Pick<
+    IngestionSubscriptionCatchUp,
+    "catchUpForPreparedGroup"
+  >
 
   constructor(opts: {
     entitlementContext: CustomerGrantContextReader
     logger: Pick<Logger, "error" | "warn">
-    subscriptionCatchUp?: RunSubscriptionCatchUp
+    subscriptionCatchUp?: Pick<IngestionSubscriptionCatchUp, "catchUpForPreparedGroup">
   }) {
     this.entitlementContext = opts.entitlementContext
     this.router = new IngestionEntitlementRouter({ logger: opts.logger })
@@ -87,22 +83,21 @@ export class IngestionRunEntitlementResolver implements RunEntitlementResolver {
       return resolution
     }
 
-    const catchUp = await this.subscriptionCatchUp.catchUpForPreparedGroup({
+    const outcome = await catchUpAndReloadContext({
       candidateEntitlements: preparedContext.candidateEntitlements,
+      catchUp: this.subscriptionCatchUp,
+      current: preparedContext,
       customerId,
       messages: [message],
       projectId,
+      reload: () => this.loadPreparedContext({ customerId, eventTimestamp, projectId }),
     })
 
-    if (!catchUp.changed) {
+    if (!outcome.changed) {
       return resolution
     }
 
-    const refreshedContext = await this.loadPreparedContext({
-      customerId,
-      eventTimestamp,
-      projectId,
-    })
+    const refreshedContext = outcome.context
 
     if (refreshedContext.rejectionReason) {
       return { ok: false, reason: refreshedContext.rejectionReason }

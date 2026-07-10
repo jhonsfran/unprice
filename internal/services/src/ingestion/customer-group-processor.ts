@@ -6,6 +6,7 @@ import type {
 import { hasRawProcessingFailureTestMarker } from "./failure-injection"
 import type { FanoutMessageOutcome as MessageOutcome } from "./fanout-outcomes"
 import type { IngestionMessageProcessingResult, IngestionRejectionReason } from "./interface"
+import { catchUpAndReloadContext } from "./invoice-context"
 import type { IngestionQueueMessage } from "./message"
 import {
   type IngestionMessageOutcomes,
@@ -111,21 +112,22 @@ export class IngestionCustomerGroupProcessor {
         ]
       }
 
-      const catchUpResult = await this.subscriptionCatchUp?.catchUpForPreparedGroup({
-        customerId,
-        projectId,
-        messages: preparedGroup.messages,
+      const catchUpOutcome = await catchUpAndReloadContext({
         candidateEntitlements: preparedGroup.candidateEntitlements,
+        catchUp: this.subscriptionCatchUp,
+        current: preparedGroup,
+        customerId,
+        messages: preparedGroup.messages,
+        projectId,
+        reload: () =>
+          this.entitlementContext.prepareCustomerMessageGroup({
+            customerId,
+            messages: freshMessages,
+            projectId,
+          }),
       })
-
-      if (catchUpResult?.changed) {
-        preparedGroup = await this.entitlementContext.prepareCustomerMessageGroup({
-          customerId,
-          messages: freshMessages,
-          projectId,
-        })
-        unfinalizedMessages = preparedGroup.messages
-      }
+      preparedGroup = catchUpOutcome.context
+      unfinalizedMessages = preparedGroup.messages
 
       const freshOutcomes = await this.processFreshPreparedMessages({
         customerId,

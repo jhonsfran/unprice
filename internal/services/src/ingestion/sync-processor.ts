@@ -16,6 +16,7 @@ import type {
   IngestionRejectionReason,
   IngestionSyncResult,
 } from "./interface"
+import { catchUpAndReloadContext } from "./invoice-context"
 import type { IngestionQueueMessage } from "./message"
 import { type IngestionMessageOutcomes, toSyncResult } from "./message-outcomes"
 import type { IngestionReportingOutcomeDispatcher } from "./reporting-dispatcher"
@@ -128,30 +129,29 @@ export class IngestionSyncProcessor {
       })
     }
 
-    const catchUp = await this.subscriptionCatchUp.catchUpForPreparedGroup({
+    const catchUpOutcome = await catchUpAndReloadContext({
       candidateEntitlements: applyContext.candidateEntitlements,
+      catchUp: this.subscriptionCatchUp,
+      current: null,
       customerId,
       messages: [message],
       projectId,
+      reload: () => this.prepareSyncContext({ customerId, message, projectId }),
     })
-    if (!catchUp.changed) {
+    if (!catchUpOutcome.changed) {
       return this.reportPreparedSyncApplyResult({
         message,
         result: applyResult,
       })
     }
 
-    const refreshedContext = await this.prepareSyncContext({
-      customerId,
-      message,
-      projectId,
-    })
-    if (refreshedContext.rejectionReason) {
+    const refreshedContext = catchUpOutcome.context
+    if (refreshedContext === null || refreshedContext.rejectionReason) {
       return this.rejectSyncMessage({
         customerId,
         message,
         projectId,
-        rejectionReason: refreshedContext.rejectionReason,
+        rejectionReason: refreshedContext?.rejectionReason ?? "NO_MATCHING_ENTITLEMENT",
       })
     }
 
@@ -205,21 +205,16 @@ export class IngestionSyncProcessor {
       return preparedContext
     }
 
-    const catchUp = await this.subscriptionCatchUp.catchUpForPreparedGroup({
+    const outcome = await catchUpAndReloadContext({
       candidateEntitlements: preparedContext.candidateEntitlements,
+      catchUp: this.subscriptionCatchUp,
+      current: preparedContext,
       customerId,
       messages: [message],
       projectId,
+      reload: () => this.prepareSyncContext({ customerId, message, projectId }),
     })
-    if (!catchUp.changed) {
-      return preparedContext
-    }
-
-    return this.prepareSyncContext({
-      customerId,
-      message,
-      projectId,
-    })
+    return outcome.context
   }
 
   private async applyPreparedSyncMessage(params: {
