@@ -49,6 +49,23 @@ jobs:
       - name: Check workspaces
         run: pnpm manypkg check
 
+      # Phase 2 exit gate: control flow must branch on typed error codes, never
+      # on human-readable messages/UI copy. Fails if any retired string-match
+      # contract reappears in non-test source.
+      - name: String-matched error contract gate
+        run: |
+          set -uo pipefail
+          patterns='expectedSubscriptionPreconditionMessages|missingDefaultPaymentMethodMessages|includes\("payment method"\)|No immediate action required\.'
+          if grep -rnE "$patterns" \
+            --include='*.ts' --include='*.tsx' \
+            --exclude='*.test.ts' --exclude='*.test.tsx' \
+            --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=dist --exclude-dir=.wrangler \
+            internal apps packages; then
+            echo "::error::String-matched error control-flow found. Branch on a typed code, not the message/copy."
+            exit 1
+          fi
+          echo "OK: no string-matched error contracts in source."
+
       - name: Run tests
         run: pnpm test
         env:
