@@ -91,14 +91,13 @@ type RunBudgetDOConstructor = new (
 }
 
 const testState = {
-  createConnection: vi.fn(createPostgresConnectionMock),
+  createConnection: vi.fn(() => ({})),
   createReservation: vi.fn(),
   captureReservationUsage: vi.fn(),
   releaseReservation: vi.fn(),
   walletServiceConstructions: 0,
   entitlementWindowApply: vi.fn(),
   failRunIdempotencyInsert: false,
-  persistExpiredRunSummary: vi.fn(),
   logger: {
     debug: vi.fn(),
     error: vi.fn(),
@@ -123,7 +122,6 @@ describe("RunBudgetDO", () => {
     testState.walletServiceConstructions = 0
     testState.entitlementWindowApply.mockReset()
     testState.failRunIdempotencyInsert = false
-    testState.persistExpiredRunSummary.mockReset()
 
     // Default mocks
     testState.createReservation.mockResolvedValue({
@@ -138,7 +136,6 @@ describe("RunBudgetDO", () => {
       err: null,
       val: { releasedAmount: 0 },
     })
-    testState.persistExpiredRunSummary.mockResolvedValue([{ id: "budget_run_1" }])
     testState.entitlementWindowApply.mockResolvedValue({
       allowed: true,
       meterFacts: [
@@ -599,17 +596,6 @@ describe("RunBudgetDO", () => {
     expect(duplicate).toEqual(result)
     expect(testState.releaseReservation).toHaveBeenCalledTimes(1)
     expect(testState.entitlementWindowApply).not.toHaveBeenCalled()
-
-    await durable.alarm()
-
-    expect(testState.persistExpiredRunSummary).toHaveBeenCalledWith(
-      expect.objectContaining({
-        status: "expired",
-        consumedAmount: 0,
-        remainingAmount: 100_000,
-      }),
-      expect.anything()
-    )
   })
 
   it("applySyncEvent rejects post-expiry usage when capture retry is pending without adding spend", async () => {
@@ -1103,7 +1089,7 @@ describe("RunBudgetDO", () => {
     expect(retry.budget.consumedAmount).toBe(5000)
   })
 
-  it("schedules expiresAt and persists expired run summary", async () => {
+  it("schedules expiresAt and closes the expired run in storage", async () => {
     const RunBudgetDO = await loadRunBudgetDO()
     const state = createDurableObjectState()
     const env = createEnv()
@@ -1131,15 +1117,10 @@ describe("RunBudgetDO", () => {
     vi.spyOn(Date, "now").mockReturnValue(expiresAt + 1)
     await durable.alarm()
 
-    expect(testState.persistExpiredRunSummary).toHaveBeenCalledWith(
-      expect.objectContaining({
-        status: "expired",
-        consumedAmount: 0,
-        remainingAmount: 100_000,
-        endedAt: expect.any(Date),
-      }),
-      expect.anything()
-    )
+    // The DO closes the run in its own SQLite storage and releases the wallet
+    // reservation. It does NOT write to Postgres — that read model is refreshed
+    // worker-side via listRunsRefreshed / the budget-runs-refresh sweep.
+    expect(testState.releaseReservation).toHaveBeenCalledTimes(1)
 
     await expect(
       durable.getRunStatus({
@@ -1499,7 +1480,6 @@ describe("RunBudgetDO", () => {
     await durable.alarm()
 
     expect(testState.captureReservationUsage).toHaveBeenCalledTimes(1)
-    expect(testState.persistExpiredRunSummary).not.toHaveBeenCalled()
     expect(testState.releaseReservation).not.toHaveBeenCalled()
     await expect(
       durable.getRunStatus({
@@ -1522,7 +1502,6 @@ describe("RunBudgetDO", () => {
 
     expect(testState.captureReservationUsage).toHaveBeenCalledTimes(2)
     expect(testState.releaseReservation).toHaveBeenCalledTimes(1)
-    expect(testState.persistExpiredRunSummary).toHaveBeenCalledTimes(1)
     await expect(
       durable.getRunStatus({
         runId: "brun_expiring_capture_retry",
@@ -1601,7 +1580,6 @@ describe("RunBudgetDO", () => {
     expect(testState.captureReservationUsage).toHaveBeenCalledTimes(5)
     // The run finally closes (expired) instead of being orphaned forever.
     expect(testState.releaseReservation).toHaveBeenCalledTimes(1)
-    expect(testState.persistExpiredRunSummary).toHaveBeenCalledTimes(1)
     // A never-silent error log is emitted for the unbilled abandoned capture.
     expect(testState.logger.error).toHaveBeenCalledWith(
       expect.stringContaining("reconciliation"),
@@ -1742,7 +1720,7 @@ describe("RunBudgetDO", () => {
     expect(testState.createReservation).toHaveBeenCalledTimes(1)
   })
 
-  it("persists expired summary when user metadata contains retry marker text", async () => {
+  it("finalizes an expired run only once and clears its expiry marker", async () => {
     const RunBudgetDO = await loadRunBudgetDO()
     const state = createDurableObjectState()
     const env = createEnv()
@@ -1752,51 +1730,9 @@ describe("RunBudgetDO", () => {
     await durable.startRun({
       workloadType: "workflow",
       workloadId: "daily-research",
-      traceId: "trace_expiring_metadata_1",
+      traceId: "trace_expiring_finalize_1",
       parentRunId: null,
-      runId: "brun_expiring_metadata",
-      customerId: "cus_1",
-      projectId: "proj_1",
-      currency: "USD",
-      budgetAmount: 100_000,
-      idempotencyKey: "idem_start_1",
-      metadata: {
-        note: 'caller metadata mentioning "expiredSummaryPersistedAt"',
-      },
-      expiresAt,
-      now: BASE_NOW,
-    })
-
-    vi.spyOn(Date, "now").mockReturnValue(expiresAt + 1)
-    await durable.alarm()
-
-    expect(testState.persistExpiredRunSummary).toHaveBeenCalledWith(
-      expect.objectContaining({
-        status: "expired",
-        consumedAmount: 0,
-        remainingAmount: 100_000,
-      }),
-      expect.anything()
-    )
-  })
-
-  it("retries expired summary persistence after a failed Postgres update", async () => {
-    const RunBudgetDO = await loadRunBudgetDO()
-    const state = createDurableObjectState()
-    const env = createEnv()
-    const durable = new RunBudgetDO(state, env)
-    const expiresAt = BASE_NOW + 60_000
-
-    testState.persistExpiredRunSummary
-      .mockResolvedValueOnce([])
-      .mockResolvedValue([{ id: "brun_retry_expiring" }])
-
-    await durable.startRun({
-      workloadType: "workflow",
-      workloadId: "daily-research",
-      traceId: "trace_expiring_retry_1",
-      parentRunId: null,
-      runId: "brun_retry_expiring",
+      runId: "brun_finalize_once",
       customerId: "cus_1",
       projectId: "proj_1",
       currency: "USD",
@@ -1810,40 +1746,25 @@ describe("RunBudgetDO", () => {
     vi.spyOn(Date, "now").mockReturnValue(expiresAt + 1)
     await durable.alarm()
 
-    expect(testState.persistExpiredRunSummary).toHaveBeenCalledTimes(1)
-    expect(state.alarmAt).toBe(expiresAt + 1 + 30_000)
+    // Closed + reservation released on the first alarm.
+    expect(testState.releaseReservation).toHaveBeenCalledTimes(1)
     await expect(
       durable.getRunStatus({
-        runId: "brun_retry_expiring",
+        runId: "brun_finalize_once",
         customerId: "cus_1",
         projectId: "proj_1",
       })
     ).resolves.toMatchObject({
-      runId: "brun_retry_expiring",
+      runId: "brun_finalize_once",
       status: "expired",
       consumedAmount: 0,
       remainingAmount: 100_000,
     })
 
+    // The expiry marker is cleared, so a subsequent alarm does not re-close or
+    // re-release the same run.
     await durable.alarm()
-
-    expect(testState.persistExpiredRunSummary).toHaveBeenCalledTimes(2)
-    await expect(
-      durable.getRunStatus({
-        runId: "brun_retry_expiring",
-        customerId: "cus_1",
-        projectId: "proj_1",
-      })
-    ).resolves.toMatchObject({
-      runId: "brun_retry_expiring",
-      status: "expired",
-      consumedAmount: 0,
-      remainingAmount: 100_000,
-    })
-
-    await durable.alarm()
-
-    expect(testState.persistExpiredRunSummary).toHaveBeenCalledTimes(2)
+    expect(testState.releaseReservation).toHaveBeenCalledTimes(1)
   })
 
   it("preserves expired status when endRun is called after alarm expiration", async () => {
@@ -2291,18 +2212,6 @@ function buildFakeDrizzle() {
           )
         }
 
-        if (sqlTextIncludes(where, " OR ")) {
-          return rows.filter((r) => {
-            const expiredAt = r.expiresAt as number | null
-            const isDue = expiredAt != null && expiredAt <= Date.now()
-            const isRunningExpired = (r.status as string) === "running" && isDue
-            const needsPersistRetry =
-              (r.status as string) === "expired" && r.endedAt != null && isDue
-
-            return isRunningExpired || needsPersistRetry
-          })
-        }
-
         // status = 'running' AND expires_at IS NOT NULL AND expires_at <= now
         return rows.filter(
           (r) =>
@@ -2501,18 +2410,6 @@ async function loadRunBudgetDO() {
   )
 
   return runBudgetDOPromise
-}
-
-function createPostgresConnectionMock() {
-  return {
-    update: vi.fn(() => ({
-      set: vi.fn((values: unknown) => ({
-        where: vi.fn((condition: unknown) => ({
-          returning: vi.fn(() => testState.persistExpiredRunSummary(values, condition)),
-        })),
-      })),
-    })),
-  }
 }
 
 function createDurableObjectState(): FakeDurableObjectState {

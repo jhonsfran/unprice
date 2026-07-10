@@ -448,44 +448,34 @@ export class RunBudgetDO extends DurableObject {
       await this.flushCaptures()
     }
 
-    let hasPersistenceFailures = false
-
-    // Expire runs past their expiry time and retry summaries that failed to persist externally.
+    // Close runs past their expiry. Only the DO can release the run's wallet
+    // reservation, so this SQLite source-of-truth transition MUST stay here.
+    // The Postgres row is a read model refreshed worker-side (on observation
+    // via BudgetRunService.listRunsRefreshed + the budget-runs-refresh sweep),
+    // so the DO no longer writes budget runs to Postgres at all.
     const now = Date.now()
-    const expiredRuns = await this.findExpiredRunsNeedingSummaryPersistence(now)
+    const expiredRuns = await this.findRunningRunsPastExpiry(now)
 
     for (const run of expiredRuns) {
-      let summary: RunBudgetSummary
-      let closedRun: RunStateRow
-
-      if (run.status === "running") {
-        try {
-          const closed = await this.closeRunInStorage({
-            runId: run.runId,
-            customerId: run.customerId,
-            projectId: run.projectId,
-            status: "expired",
-            endedAt: now,
-          })
-          summary = closed.summary
-          closedRun = closed.run
-        } catch (error) {
-          if (error instanceof RunCapturesPendingError) {
-            continue
-          }
-          throw error
-        }
-      } else {
-        summary = this.toSummary(run)
-        closedRun = run
-      }
-
       try {
-        await this.persistExpiredRunSummary(closedRun, summary)
-        await this.markExpiredRunSummaryPersisted(closedRun)
-      } catch (_error) {
-        hasPersistenceFailures = true
+        await this.closeRunInStorage({
+          runId: run.runId,
+          customerId: run.customerId,
+          projectId: run.projectId,
+          status: "expired",
+          endedAt: now,
+        })
+      } catch (error) {
+        // A run with unresolved captures must not finalize yet; its capture
+        // retry alarm will re-drive it. Anything else is a genuine failure.
+        if (error instanceof RunCapturesPendingError) {
+          continue
+        }
+        throw error
       }
+
+      // Clear the expiresAt marker so a finalized run never re-fires this branch.
+      await this.markExpiredRunFinalized(run)
     }
 
     // Reschedule the capture retry (plus any run-expiration alarm). While ANY
@@ -502,9 +492,8 @@ export class RunBudgetDO extends DurableObject {
     )
     const nextCaptureAlarmAt =
       remaining.length > 0 ? now + captureBackoffMs(maxRemainingAttempt) : null
-    const nextPersistenceRetryAlarmAt = hasPersistenceFailures ? now + 30_000 : null
     const nextExpirationAlarmAt = await this.findNextExpirationAlarmAt(now)
-    const nextAlarmAt = [nextCaptureAlarmAt, nextPersistenceRetryAlarmAt, nextExpirationAlarmAt]
+    const nextAlarmAt = [nextCaptureAlarmAt, nextExpirationAlarmAt]
       .filter((value): value is number => typeof value === "number")
       .sort((a, b) => a - b)[0]
 
@@ -603,55 +592,23 @@ export class RunBudgetDO extends DurableObject {
     }
   }
 
-  private async persistExpiredRunSummary(
-    run: RunStateRow,
-    summary: RunBudgetSummary
-  ): Promise<void> {
-    const { createConnection, eq: eqOp, and: andOp } = await import("@unprice/db")
-    const { budgetRuns } = await import("@unprice/db/schema")
-
-    const db = createConnection({
-      env: this.runtimeEnv.APP_ENV,
-      primaryDatabaseUrl: this.runtimeEnv.DATABASE_URL,
-      read1DatabaseUrl: this.runtimeEnv.DATABASE_READ1_URL,
-      read2DatabaseUrl: this.runtimeEnv.DATABASE_READ2_URL,
-      logger: false,
-      singleton: false,
-    })
-
-    const updatedRows = await db
-      .update(budgetRuns)
-      .set({
-        status: "expired",
-        consumedAmount: summary.consumedAmount,
-        remainingAmount: summary.remainingAmount,
-        endedAt: new Date(run.endedAt ?? Date.now()),
-        updatedAt: new Date(),
-      })
-      .where(andOp(eqOp(budgetRuns.id, run.runId), eqOp(budgetRuns.projectId, run.projectId)))
-      .returning({ id: budgetRuns.id })
-
-    if (updatedRows.length === 0) {
-      throw new Error("BUDGET_RUN_NOT_FOUND")
-    }
-  }
-
-  private async findExpiredRunsNeedingSummaryPersistence(now: number): Promise<RunStateRow[]> {
+  private async findRunningRunsPastExpiry(now: number): Promise<RunStateRow[]> {
     return this.db.query.runState.findMany({
-      where: sql`(
+      where: sql`
         ${schema.runState.status} = 'running'
         AND ${schema.runState.expiresAt} IS NOT NULL
         AND ${schema.runState.expiresAt} <= ${now}
-      ) OR (
-        ${schema.runState.status} = 'expired'
-        AND ${schema.runState.endedAt} IS NOT NULL
-        AND ${schema.runState.expiresAt} IS NOT NULL
-        AND ${schema.runState.expiresAt} <= ${now}
-      )`,
+      `,
     })
   }
 
-  private async markExpiredRunSummaryPersisted(run: RunStateRow): Promise<void> {
+  /**
+   * SQLite-side bookkeeping: clear the expiresAt marker once a run has been
+   * finalized so the expiry sweep in `alarm()` never re-selects it. This is the
+   * only "summary needs finalizing" state the DO keeps — there is no Postgres
+   * write here; the read model is refreshed worker-side.
+   */
+  private async markExpiredRunFinalized(run: RunStateRow): Promise<void> {
     await this.db
       .update(schema.runState)
       .set({
