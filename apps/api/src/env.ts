@@ -114,7 +114,6 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
       LOCAL_PIPELINE_URL: z.string().url().optional(),
       PIPELINE_EVENTS: cloudflarePipeline.optional(),
       QUEUE_SHARD_0: cloudflareQueue,
-      QUEUE_SHARD_1: cloudflareQueue,
       INGESTION_REPORTING_QUEUE: cloudflareQueue,
       // Fraction of typed metric emissions (cache/db/ratelimit) exported to
       // the log drain. Wide events are sampled separately by evlog.

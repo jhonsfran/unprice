@@ -29,10 +29,6 @@
             "queue": "unprice-api-ingestion-shard-0-prod"
           },
           {
-            "binding": "QUEUE_SHARD_1",
-            "queue": "unprice-api-ingestion-shard-1-prod"
-          },
-          {
             "binding": "INGESTION_REPORTING_QUEUE",
             "queue": "unprice-api-ingestion-reporting-prod"
           },
@@ -48,14 +44,6 @@
         "consumers": [
           {
             "queue": "unprice-api-ingestion-shard-0-prod",
-            "max_batch_size": 50,
-            "max_batch_timeout": 20,
-            "max_retries": 3,
-            "retry_delay": 60,
-            "dead_letter_queue": "unprice-api-ingestion-dlq-prod"
-          },
-          {
-            "queue": "unprice-api-ingestion-shard-1-prod",
             "max_batch_size": 50,
             "max_batch_timeout": 20,
             "max_retries": 3,
@@ -175,10 +163,6 @@
             "queue": "unprice-api-ingestion-shard-0-preview"
           },
           {
-            "binding": "QUEUE_SHARD_1",
-            "queue": "unprice-api-ingestion-shard-1-preview"
-          },
-          {
             "binding": "INGESTION_REPORTING_QUEUE",
             "queue": "unprice-api-ingestion-reporting-preview"
           },
@@ -194,14 +178,6 @@
         "consumers": [
           {
             "queue": "unprice-api-ingestion-shard-0-preview",
-            "max_batch_size": 50,
-            "max_batch_timeout": 20,
-            "max_retries": 3,
-            "retry_delay": 60,
-            "dead_letter_queue": "unprice-api-ingestion-dlq-preview"
-          },
-          {
-            "queue": "unprice-api-ingestion-shard-1-preview",
             "max_batch_size": 50,
             "max_batch_timeout": 20,
             "max_retries": 3,
@@ -309,10 +285,6 @@
             "queue": "unprice-api-ingestion-shard-0-dev"
           },
           {
-            "binding": "QUEUE_SHARD_1",
-            "queue": "unprice-api-ingestion-shard-1-dev"
-          },
-          {
             "binding": "INGESTION_REPORTING_QUEUE",
             "queue": "unprice-api-ingestion-reporting-dev"
           },
@@ -328,13 +300,6 @@
         "consumers": [
           {
             "queue": "unprice-api-ingestion-shard-0-dev",
-            "max_batch_size": 100,
-            "max_batch_timeout": 1, // to avoid wait in dev
-            "max_retries": 3,
-            "dead_letter_queue": "unprice-api-ingestion-dlq-dev"
-          },
-          {
-            "queue": "unprice-api-ingestion-shard-1-dev",
             "max_batch_size": 100,
             "max_batch_timeout": 1, // to avoid wait in dev
             "max_retries": 3,
