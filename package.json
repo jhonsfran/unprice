@@ -20,6 +20,7 @@
     "knip": "knip --use-tsconfig-files --include files,dependencies",
     "test": "cross-env SKIP_ENV_VALIDATION=1 NODE_ENV=test turbo run test",
     "test:workers": "cross-env SKIP_ENV_VALIDATION=1 NODE_ENV=test turbo run test:workers",
+    "test:ingestion": "pnpm --filter @unprice/services test src/ingestion && pnpm --filter api test src/ingestion src/routes/events && pnpm --filter api test:workers",
     "audit:high": "node tooling/scripts/audit-high.mjs",
     "fmt:fix": "pnpm biome format . --write && pnpm biome check .  --write --unsafe ",
     "fmt": "pnpm biome format . && pnpm biome check .",
