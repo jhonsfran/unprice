@@ -421,7 +421,7 @@ export class BillingService {
       if (e instanceof Error && e.message === "SUBSCRIPTION_BUSY") {
         throw new UnPriceBillingError({
           code: "SUBSCRIPTION_BUSY",
-          message: "SUBSCRIPTION_BUSY",
+          message: "Subscription is already being updated",
         })
       }
       if (e instanceof LockLostError) {

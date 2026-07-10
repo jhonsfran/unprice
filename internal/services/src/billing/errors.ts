@@ -1,4 +1,5 @@
 import { BaseError } from "@unprice/error"
+import type { DomainErrorKind } from "../domain-error-kind"
 
 export const billingErrorCodes = [
   "SUBSCRIPTION_BUSY",
@@ -23,6 +24,28 @@ export const billingErrorCodes = [
 ] as const
 
 export type BillingErrorCode = (typeof billingErrorCodes)[number]
+
+export const billingErrorKinds: Record<BillingErrorCode, DomainErrorKind> = {
+  SUBSCRIPTION_BUSY: "conflict",
+  SUBSCRIPTION_NOT_ACTIVE: "precondition",
+  SUBSCRIPTION_NOT_FOUND: "internal",
+  SUBSCRIPTION_PHASE_NOT_FOUND: "internal",
+  INVOICE_NOT_FOUND: "internal",
+  INVOICE_NOT_FINALIZED: "internal",
+  INVOICE_FAILED: "internal",
+  INVOICE_NOT_READY: "internal",
+  INVOICE_PROVIDER_ID_MISSING: "internal",
+  INVOICE_PAYMENT_METHOD_MISSING: "internal",
+  INVOICE_STATUS_UNSUPPORTED: "internal",
+  INVOICE_UPDATE_FAILED: "internal",
+  INVOICE_LINES_MISSING: "internal",
+  INVOICE_PROVIDER_ITEMS_ORPHANED: "internal",
+  PAYMENT_PROVIDER_UNAVAILABLE: "internal",
+  PAYMENT_PROVIDER_STATUS_FAILED: "internal",
+  PAYMENT_COLLECTION_FAILED: "internal",
+  PAYMENT_SETTLEMENT_FAILED: "internal",
+  BILLING_OPERATION_FAILED: "internal",
+}
 
 export class UnPriceBillingError extends BaseError<{ context?: Record<string, unknown> }> {
   public readonly code: BillingErrorCode

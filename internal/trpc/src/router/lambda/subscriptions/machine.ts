@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server"
 import { z } from "zod"
+import { domainErrorToTrpcError } from "#domain-error"
 import { protectedProjectProcedure } from "#trpc"
-import { toSubscriptionMachineTrpcError } from "./machine-errors"
 
 export const machine = protectedProjectProcedure
   .input(
@@ -33,7 +33,7 @@ export const machine = protectedProjectProcedure
         })
 
         if (err) {
-          throw toSubscriptionMachineTrpcError(err)
+          throw domainErrorToTrpcError(err)
         }
 
         return {
@@ -57,7 +57,7 @@ export const machine = protectedProjectProcedure
         })
 
         if (err) {
-          throw toSubscriptionMachineTrpcError(err)
+          throw domainErrorToTrpcError(err)
         }
         return {
           providerInvoiceId: val.providerInvoiceId,
@@ -74,7 +74,7 @@ export const machine = protectedProjectProcedure
           now: Date.now(),
         })
         if (err) {
-          throw toSubscriptionMachineTrpcError(err)
+          throw domainErrorToTrpcError(err)
         }
         return {
           status: val.status,
@@ -89,7 +89,7 @@ export const machine = protectedProjectProcedure
         })
 
         if (err) {
-          throw toSubscriptionMachineTrpcError(err)
+          throw domainErrorToTrpcError(err)
         }
 
         return {

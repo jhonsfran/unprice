@@ -4,6 +4,7 @@ import type {
   SubscriptionPhaseExtended,
   SubscriptionStatus,
 } from "@unprice/db/validators"
+import type { DomainErrorKind } from "../domain-error-kind"
 
 export type SusbriptionMachineStatus =
   | SubscriptionStatus
@@ -33,6 +34,7 @@ export interface SubscriptionContext {
   currentPhase: SubscriptionPhaseExtended | null
   error?: {
     message: string
+    kind?: DomainErrorKind
   }
 }
 

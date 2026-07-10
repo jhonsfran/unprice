@@ -3,8 +3,8 @@ import {
   subscriptionPhaseUpdateSchema,
 } from "@unprice/db/validators"
 import { z } from "zod"
+import { domainErrorToTrpcError } from "#domain-error"
 import { protectedProjectProcedure } from "#trpc"
-import { updatePhaseErrorToTrpcError } from "./updatePhase-errors"
 
 export const updatePhase = protectedProjectProcedure
   .input(subscriptionPhaseUpdateSchema)
@@ -21,7 +21,7 @@ export const updatePhase = protectedProjectProcedure
     })
 
     if (err) {
-      throw updatePhaseErrorToTrpcError(err)
+      throw domainErrorToTrpcError(err, "Failed to update subscription phase")
     }
 
     return {

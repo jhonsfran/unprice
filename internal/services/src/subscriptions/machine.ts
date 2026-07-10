@@ -484,6 +484,7 @@ export class SubscriptionMachine {
                 actions: assign({
                   error: () => ({
                     message: "Subscription is not active",
+                    kind: "precondition",
                   }),
                 }),
               },
@@ -509,23 +510,27 @@ export class SubscriptionMachine {
                     if (!isExpired) {
                       return {
                         message: `Cannot end trial, dates are not due yet at ${trialEndAtDate}`,
+                        kind: "precondition",
                       }
                     }
 
                     if (!canRenewResult) {
                       return {
                         message: `Cannot end trial, subscription is not due to be renewed at ${trialEndAtDate}`,
+                        kind: "precondition",
                       }
                     }
 
                     if (!isPaymentMethodValid) {
                       return {
                         message: `Cannot end trial, payment method is invalid at ${trialEndAtDate}`,
+                        kind: "precondition",
                       }
                     }
 
                     return {
                       message: `Cannot end trial, dates are not due yet and payment method is invalid at ${trialEndAtDate}`,
+                      kind: "precondition",
                     }
                   },
                 }),
@@ -782,6 +787,7 @@ export class SubscriptionMachine {
                 actions: assign({
                   error: () => ({
                     message: "Subscription is not active",
+                    kind: "precondition",
                   }),
                 }),
               },
@@ -808,18 +814,21 @@ export class SubscriptionMachine {
                     if (!autoRenew) {
                       return {
                         message: "Cannot renew subscription, auto renew is disabled",
+                        kind: "precondition",
                       }
                     }
 
                     if (!renew) {
                       return {
                         message: `Cannot renew subscription, subscription  will be renewed at ${renewAtDate}`,
+                        kind: "precondition",
                       }
                     }
 
                     return {
                       message:
                         "Cannot renew subscription, dates are not due yet and auto renew is disabled",
+                      kind: "precondition",
                     }
                   },
                 }),
@@ -835,6 +844,7 @@ export class SubscriptionMachine {
                 actions: assign({
                   error: () => ({
                     message: "Cannot invoice wallet-only subscription (BILL phase is skipped)",
+                    kind: "precondition",
                   }),
                 }),
               },
@@ -855,11 +865,13 @@ export class SubscriptionMachine {
                     if (!isPaymentMethodValid) {
                       return {
                         message: "Cannot invoice subscription, payment method is invalid",
+                        kind: "precondition",
                       }
                     }
 
                     return {
                       message: "Cannot invoice subscription, payment method is invalid",
+                      kind: "precondition",
                     }
                   },
                 }),
@@ -918,6 +930,7 @@ export class SubscriptionMachine {
                 actions: assign({
                   error: () => ({
                     message: "Cannot invoice wallet-only subscription (BILL phase is skipped)",
+                    kind: "precondition",
                   }),
                 }),
               },
@@ -931,6 +944,7 @@ export class SubscriptionMachine {
                 actions: assign({
                   error: () => ({
                     message: "Cannot invoice subscription yet, payment method is invalid",
+                    kind: "precondition",
                   }),
                 }),
               },
@@ -1149,7 +1163,10 @@ export class SubscriptionMachine {
       if (snap.hasTag("error")) {
         // Correctly access the error from the context
         return Err(
-          new UnPriceMachineError({ message: snap.context.error?.message ?? "Unknown error" })
+          new UnPriceMachineError({
+            message: snap.context.error?.message ?? "Unknown error",
+            kind: snap.context.error?.kind ?? "internal",
+          })
         )
       }
 

@@ -10,6 +10,7 @@ import type { Logger } from "@unprice/logs"
 import { z } from "zod"
 import type { UnPriceBillingError } from "../../billing/errors"
 import type { ServiceContext } from "../../context"
+import type { DomainErrorKind } from "../../domain-error-kind"
 import type { UnPriceSubscriptionError } from "../../subscriptions/errors"
 import { checkPaymentProviderAvailability } from "../payment-provider/availability"
 
@@ -33,6 +34,19 @@ const subscriptionChangePlanErrorCodeSchema = z.enum([
 ])
 
 type SubscriptionChangePlanErrorCode = z.infer<typeof subscriptionChangePlanErrorCodeSchema>
+
+const subscriptionChangePlanErrorKinds: Record<SubscriptionChangePlanErrorCode, DomainErrorKind> = {
+  SUBSCRIPTION_CHANGE_PLAN_NOT_FOUND: "bad_request",
+  SUBSCRIPTION_CHANGE_PLAN_TARGET_PLAN_NOT_FOUND: "bad_request",
+  SUBSCRIPTION_CHANGE_PLAN_NOT_ACTIVE: "precondition",
+  SUBSCRIPTION_CHANGE_PLAN_ACTIVE_PHASE_NOT_FOUND: "precondition",
+  SUBSCRIPTION_CHANGE_PLAN_ALREADY_SCHEDULED: "precondition",
+  SUBSCRIPTION_CHANGE_PLAN_SAME_PLAN_VERSION: "precondition",
+  SUBSCRIPTION_CHANGE_PLAN_TARGET_PLAN_INACTIVE: "precondition",
+  SUBSCRIPTION_CHANGE_PLAN_TARGET_PLAN_UNPUBLISHED: "precondition",
+  SUBSCRIPTION_CHANGE_PLAN_TARGET_PLAN_ARCHIVED: "precondition",
+  SUBSCRIPTION_CHANGE_PLAN_PROVIDER_UNAVAILABLE: "precondition",
+}
 
 export type SubscriptionChangePhasePlanOutput = z.infer<
   typeof subscriptionChangePhasePlanOutputSchema
@@ -58,6 +72,7 @@ export class SubscriptionChangePhasePlanError extends BaseError<{
   targetPlanVersionId?: string
 }> {
   public readonly code: SubscriptionChangePlanErrorCode
+  public readonly kind: DomainErrorKind
   public readonly retry = false
   public override readonly name = "SubscriptionChangePhasePlanError"
 
@@ -75,6 +90,7 @@ export class SubscriptionChangePhasePlanError extends BaseError<{
       context: opts.context ?? {},
     })
     this.code = opts.code
+    this.kind = subscriptionChangePlanErrorKinds[opts.code]
   }
 }
 

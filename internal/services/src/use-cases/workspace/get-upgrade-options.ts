@@ -11,6 +11,7 @@ import type { Logger } from "@unprice/logs"
 import { z } from "zod"
 import type { ServiceContext } from "../../context"
 import type { UnPriceCustomerError } from "../../customers/errors"
+import type { DomainErrorKind } from "../../domain-error-kind"
 import {
   type UnPricePaymentProviderError,
   isMissingPaymentMethodError,
@@ -63,6 +64,16 @@ const getWorkspaceUpgradeOptionsErrorCodeSchema = z.enum([
 
 type GetWorkspaceUpgradeOptionsErrorCode = z.infer<typeof getWorkspaceUpgradeOptionsErrorCodeSchema>
 
+const getWorkspaceUpgradeOptionsErrorKinds: Record<
+  GetWorkspaceUpgradeOptionsErrorCode,
+  DomainErrorKind
+> = {
+  WORKSPACE_BILLING_CUSTOMER_ID_MISSING: "bad_request",
+  WORKSPACE_BILLING_CUSTOMER_NOT_FOUND: "not_found",
+  WORKSPACE_BILLING_ACCESS_NOT_FOUND: "not_found",
+  WORKSPACE_BILLING_CURRENCY_NOT_FOUND: "precondition",
+}
+
 export type GetWorkspaceUpgradeOptionsInput = z.infer<typeof getWorkspaceUpgradeOptionsInputSchema>
 export type WorkspaceUpgradeOption = z.infer<typeof workspaceUpgradeOptionSchema>
 export type GetWorkspaceUpgradeOptionsOutput = z.infer<
@@ -75,6 +86,7 @@ export class GetWorkspaceUpgradeOptionsError extends BaseError<{
   workspaceId?: string
 }> {
   public readonly code: GetWorkspaceUpgradeOptionsErrorCode
+  public readonly kind: DomainErrorKind
   public readonly retry = false
   public override readonly name = "GetWorkspaceUpgradeOptionsError"
 
@@ -92,6 +104,7 @@ export class GetWorkspaceUpgradeOptionsError extends BaseError<{
       context: opts.context ?? {},
     })
     this.code = opts.code
+    this.kind = getWorkspaceUpgradeOptionsErrorKinds[opts.code]
   }
 }
 

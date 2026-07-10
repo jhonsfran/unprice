@@ -10,6 +10,7 @@ import { z } from "zod"
 import type { UnPriceBillingError } from "../../billing/errors"
 import type { ServiceContext } from "../../context"
 import type { UnPriceCustomerError } from "../../customers/errors"
+import type { DomainErrorKind } from "../../domain-error-kind"
 import {
   type UnPricePaymentProviderError,
   isMissingPaymentMethodError,
@@ -70,6 +71,22 @@ const workspaceChangePlanErrorCodeSchema = z.enum([
 
 type WorkspaceChangePlanErrorCode = z.infer<typeof workspaceChangePlanErrorCodeSchema>
 
+const workspaceChangePlanErrorKinds: Record<WorkspaceChangePlanErrorCode, DomainErrorKind> = {
+  WORKSPACE_BILLING_CUSTOMER_ID_MISSING: "bad_request",
+  WORKSPACE_TARGET_PLAN_VERSION_NOT_FOUND: "bad_request",
+  WORKSPACE_TARGET_PLAN_VERSION_WRONG_PROJECT: "bad_request",
+  WORKSPACE_BILLING_CUSTOMER_NOT_FOUND: "precondition",
+  WORKSPACE_BILLING_CURRENCY_NOT_FOUND: "precondition",
+  WORKSPACE_BILLING_ACCESS_NOT_FOUND: "precondition",
+  WORKSPACE_PLAN_CHANGE_ALREADY_SCHEDULED: "precondition",
+  WORKSPACE_TARGET_PLAN_VERSION_SAME_AS_CURRENT: "precondition",
+  WORKSPACE_TARGET_PLAN_VERSION_INACTIVE: "precondition",
+  WORKSPACE_TARGET_PLAN_VERSION_UNPUBLISHED: "precondition",
+  WORKSPACE_TARGET_PLAN_VERSION_ARCHIVED: "precondition",
+  WORKSPACE_TARGET_PLAN_VERSION_WRONG_CURRENCY: "precondition",
+  WORKSPACE_TARGET_PLAN_PROVIDER_UNAVAILABLE: "precondition",
+}
+
 export type WorkspaceChangePlanInput = z.infer<typeof workspaceChangePlanInputSchema>
 export type WorkspaceChangePlanOutput = z.infer<typeof workspaceChangePlanOutputSchema>
 type WorkspaceBillingContext = {
@@ -102,6 +119,7 @@ export class WorkspaceChangePlanError extends BaseError<{
   workspaceId?: string
 }> {
   public readonly code: WorkspaceChangePlanErrorCode
+  public readonly kind: DomainErrorKind
   public readonly retry = false
   public override readonly name = "WorkspaceChangePlanError"
 
@@ -120,6 +138,7 @@ export class WorkspaceChangePlanError extends BaseError<{
       context: opts.context ?? {},
     })
     this.code = opts.code
+    this.kind = workspaceChangePlanErrorKinds[opts.code]
   }
 }
 

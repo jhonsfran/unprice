@@ -2185,7 +2185,7 @@ export class SubscriptionService {
       if (e instanceof Error && e.message === "SUBSCRIPTION_BUSY") {
         throw new UnPriceSubscriptionError({
           code: "SUBSCRIPTION_BUSY",
-          message: "SUBSCRIPTION_BUSY",
+          message: "Subscription is already being updated",
         })
       }
       throw e
