@@ -50,7 +50,6 @@ export const registerReplayIngestionEventsV1 = (app: App) =>
     const key = await keyAuth(c)
     const body = c.req.valid("json")
     const projectId = validateIsAllowedToAccessProject({
-      isMain: (key.project.isMain ?? false) || key.project.workspace.isMain,
       key,
       requestedProjectId: body.project_id ?? key.projectId,
     })

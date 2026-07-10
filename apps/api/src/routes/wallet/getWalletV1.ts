@@ -233,7 +233,6 @@ export const registerGetWalletV1 = (app: App) => {
     })
 
     const finalProjectId = validateIsAllowedToAccessProject({
-      isMain: key.project.isMain ?? false,
       key,
       requestedProjectId: projectId ?? key.project.id ?? "",
     })
@@ -274,7 +273,6 @@ export const registerGetWalletV1 = (app: App) => {
     })
 
     const finalProjectId = validateIsAllowedToAccessProject({
-      isMain: key.project.isMain ?? false,
       key,
       requestedProjectId: projectId ?? key.project.id ?? "",
     })
@@ -316,7 +314,6 @@ export const registerGetWalletV1 = (app: App) => {
     })
 
     const finalProjectId = validateIsAllowedToAccessProject({
-      isMain: key.project.isMain ?? false,
       key,
       requestedProjectId: projectId ?? key.project.id ?? "",
     })

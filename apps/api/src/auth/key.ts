@@ -322,14 +322,17 @@ export function resolveCustomerIdForApiKeyOrThrow(input: {
 }
 
 export function validateIsAllowedToAccessProject({
-  isMain,
   key,
   requestedProjectId,
 }: {
-  isMain: boolean
   key: ApiKeyExtended
   requestedProjectId: string
 }) {
+  // Canonical "is main" predicate: a project is treated as main when either the
+  // project itself or its workspace is flagged main. This is the single source of
+  // truth — callers no longer pass their own (and previously divergent) boolean.
+  const isMain = (key.project.isMain ?? false) || key.project.workspace.isMain
+
   if (isMain) {
     return requestedProjectId || key.projectId
   }

@@ -61,7 +61,6 @@ export const registerGetRunV1 = (app: App) =>
     const { project_id: requestedProjectId } = c.req.valid("query")
     const key = await keyAuth(c)
     const projectId = validateIsAllowedToAccessProject({
-      isMain: (key.project.isMain ?? false) || key.project.workspace.isMain,
       key,
       requestedProjectId: requestedProjectId ?? key.projectId,
     })

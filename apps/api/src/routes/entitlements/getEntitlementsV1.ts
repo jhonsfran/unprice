@@ -88,7 +88,6 @@ export const registerGetEntitlementsV1 = (app: App) =>
     startTime(c, "getEntitlements")
 
     const finalProjectId = validateIsAllowedToAccessProject({
-      isMain: key.project.isMain ?? false,
       key,
       requestedProjectId: projectId ?? key.project.id,
     })

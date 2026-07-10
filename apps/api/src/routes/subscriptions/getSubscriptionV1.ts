@@ -85,7 +85,6 @@ export const registerGetSubscriptionV1 = (app: App) =>
     })
 
     const finalProjectId = validateIsAllowedToAccessProject({
-      isMain: key.project.isMain ?? false,
       key,
       requestedProjectId: projectId ?? key.project.id ?? "",
     })

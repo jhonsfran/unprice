@@ -7,21 +7,26 @@ import {
   validateIsAllowedToAccessProject,
 } from "./key"
 
-const baseKey = {
-  projectId: "proj_key",
-  project: {
-    id: "proj_key",
-    isMain: false,
-  },
-} as const
-
 const asApiKey = (value: unknown) => value as ApiKeyExtended
+
+const makeKey = (opts: { projectIsMain?: boolean | null; workspaceIsMain?: boolean }) =>
+  asApiKey({
+    projectId: "proj_key",
+    project: {
+      id: "proj_key",
+      isMain: opts.projectIsMain ?? false,
+      workspace: {
+        isMain: opts.workspaceIsMain ?? false,
+      },
+    },
+  })
+
+const baseKey = makeKey({})
 
 describe("validateIsAllowedToAccessProject", () => {
   it("uses key project when request does not provide a project", () => {
     const projectId = validateIsAllowedToAccessProject({
-      isMain: false,
-      key: asApiKey(baseKey),
+      key: baseKey,
       requestedProjectId: "",
     })
 
@@ -30,8 +35,7 @@ describe("validateIsAllowedToAccessProject", () => {
 
   it("allows non-main keys to use their own project id", () => {
     const projectId = validateIsAllowedToAccessProject({
-      isMain: false,
-      key: asApiKey(baseKey),
+      key: baseKey,
       requestedProjectId: "proj_key",
     })
 
@@ -41,28 +45,41 @@ describe("validateIsAllowedToAccessProject", () => {
   it("throws when non-main key requests another project", () => {
     expect(() =>
       validateIsAllowedToAccessProject({
-        isMain: false,
-        key: asApiKey(baseKey),
+        key: baseKey,
         requestedProjectId: "proj_other",
       })
     ).toThrowError(UnpriceApiError)
   })
 
-  it("allows main keys to access requested projects", () => {
-    const projectId = validateIsAllowedToAccessProject({
-      isMain: true,
-      key: {
-        ...baseKey,
-        project: {
-          ...baseKey.project,
-          isMain: true,
-        },
-      } as ApiKeyExtended,
-      requestedProjectId: "proj_other",
-    })
+  // Table-driven coverage of the canonical predicate: a key is "main" when either
+  // the project OR its workspace is flagged main. This mirrors the eight routes that
+  // now delegate the computation to the helper instead of passing their own boolean.
+  const cases = [
+    { name: "project.isMain", projectIsMain: true, workspaceIsMain: false, isMain: true },
+    { name: "workspace.isMain", projectIsMain: false, workspaceIsMain: true, isMain: true },
+    { name: "both main", projectIsMain: true, workspaceIsMain: true, isMain: true },
+    { name: "neither main", projectIsMain: false, workspaceIsMain: false, isMain: false },
+    { name: "null project.isMain", projectIsMain: null, workspaceIsMain: false, isMain: false },
+  ] as const
 
-    expect(projectId).toBe("proj_other")
-  })
+  for (const testCase of cases) {
+    it(`${testCase.name}: ${testCase.isMain ? "grants" : "denies"} cross-project access`, () => {
+      const key = makeKey({
+        projectIsMain: testCase.projectIsMain,
+        workspaceIsMain: testCase.workspaceIsMain,
+      })
+
+      if (testCase.isMain) {
+        expect(validateIsAllowedToAccessProject({ key, requestedProjectId: "proj_other" })).toBe(
+          "proj_other"
+        )
+      } else {
+        expect(() =>
+          validateIsAllowedToAccessProject({ key, requestedProjectId: "proj_other" })
+        ).toThrowError(UnpriceApiError)
+      }
+    })
+  }
 })
 
 describe("isValidApiKeyShape", () => {

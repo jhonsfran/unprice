@@ -143,7 +143,6 @@ export const registerExplainChargeV1 = (app: App) =>
     const key = await keyAuth(c)
     const { ledger } = c.get("services")
     const projectId = validateIsAllowedToAccessProject({
-      isMain: (key.project.isMain ?? false) || key.project.workspace.isMain,
       key,
       requestedProjectId: requestedProjectId ?? key.projectId,
     })
