@@ -63,7 +63,7 @@ export default async function PlanVersionLayout(props: {
                   defaultMethod="listPlanVersions"
                   exampleParams={listPlanVersionsExampleParams}
                 >
-                  <Button variant={"ghost"}>
+                  <Button variant={"link"}>
                     <Code className="mr-2 h-4 w-4" />
                     API
                   </Button>

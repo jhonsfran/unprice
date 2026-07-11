@@ -224,6 +224,9 @@ patterns. Keep it cheap to load and useful.
   timestamp.
 - 2026-06-19: RunBudgetDO and EntitlementWindowDO names must include `APP_ENV`; copied data across
   environments can otherwise route to the same Durable Object name for the same project/customer id.
+- 2026-07-11: Subscription phase scheduling must normalize stale `currentCycleEndAt` values to a future boundary; otherwise `updatePhase` clamps the old end to `now` and `createPhase` reports a false overlap.
+- 2026-07-11: Subscription creation must return a conflict when a customer already has an active subscription; explain the one-subscription invariant and direct callers to update the existing subscription.
+- 2026-07-11: Subscription creation checks customer activity before duplicate-subscription handling; map inactive customers to a visible precondition instead of `SUBSCRIPTION_OPERATION_FAILED`, which becomes a generic internal error.
 
 ## Next.js And Dashboard
 

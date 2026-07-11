@@ -230,7 +230,7 @@ function ApiKeyCreatedSecret({
             customerId,
           }}
         >
-          <Button type="button" variant="outline" size="sm" className="shrink-0">
+          <Button type="button" variant="link" size="sm" className="shrink-0">
             <Code className="mr-2 size-4" />
             Open SDK example
           </Button>

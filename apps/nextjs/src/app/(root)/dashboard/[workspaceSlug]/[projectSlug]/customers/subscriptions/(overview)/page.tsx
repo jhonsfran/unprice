@@ -1,7 +1,7 @@
 import { SUBSCRIPTION_STATUS } from "@unprice/db/utils"
 import { Button } from "@unprice/ui/button"
 import { TabNavigation, TabNavigationLink } from "@unprice/ui/tabs-navigation"
-import { Code, Plus } from "lucide-react"
+import { Code } from "lucide-react"
 import type { SearchParams } from "nuqs/server"
 import { Suspense } from "react"
 import { CodeApiSheet } from "~/components/code-api-sheet"
@@ -40,16 +40,13 @@ export default async function PlanSubscriptionsPage({
           action={
             <div className="flex items-center gap-2">
               <CodeApiSheet defaultMethod="getSubscription">
-                <Button variant={"ghost"}>
+                <Button variant={"link"}>
                   <Code className="mr-2 h-4 w-4" />
                   API
                 </Button>
               </CodeApiSheet>
               <SuperLink href={`/${workspaceSlug}/${projectSlug}/customers/subscriptions/new`}>
-                <Button variant={"primary"}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Subscription
-                </Button>
+                <Button variant={"primary"}>Create Subscription</Button>
               </SuperLink>
             </div>
           }

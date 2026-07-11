@@ -10,7 +10,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@unprice/ui/dialog"
-import { Add } from "@unprice/ui/icons"
 import CreateApiKeyForm from "./create-api-key-form"
 
 export default function NewApiKeyDialog() {
@@ -28,10 +27,7 @@ export default function NewApiKeyDialog() {
       }}
     >
       <DialogTrigger asChild>
-        <Button>
-          <Add className="mr-2 size-4" aria-hidden="true" />
-          Create API key
-        </Button>
+        <Button>Create API key</Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>

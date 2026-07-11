@@ -46,7 +46,7 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuLabel>Actions</DropdownMenuLabel>
+          <DropdownMenuLabel>More actions</DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DialogTrigger asChild>
             <DropdownMenuItem>Edit Customer</DropdownMenuItem>

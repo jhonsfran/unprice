@@ -305,7 +305,12 @@ export async function getCustomerCurrentAccess(
             const featurePlanVersion = entitlement.featurePlanVersion
             const feature = featurePlanVersion.feature
             const grantAllowance = sumGrantAllowance(entitlement.grants)
-            const limit = featurePlanVersion.limit ?? grantAllowance
+            const isStaticQuantityEntitlement =
+              featurePlanVersion.featureType === "tier" ||
+              featurePlanVersion.featureType === "package"
+            const limit = isStaticQuantityEntitlement
+              ? grantAllowance
+              : (featurePlanVersion.limit ?? grantAllowance)
             const isUsageEntitlement =
               featurePlanVersion.featureType === "usage" ||
               (featurePlanVersion.meterConfig !== null &&

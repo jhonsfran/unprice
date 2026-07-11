@@ -2,7 +2,7 @@ import { CURRENCIES, STATUS_PLAN } from "@unprice/db/utils"
 import { Button } from "@unprice/ui/button"
 import { Separator } from "@unprice/ui/separator"
 import { TabNavigation, TabNavigationLink } from "@unprice/ui/tabs-navigation"
-import { Code, Plus } from "lucide-react"
+import { Code } from "lucide-react"
 import { notFound } from "next/navigation"
 import { Suspense } from "react"
 import { CodeApiSheet } from "~/components/code-api-sheet"
@@ -69,7 +69,7 @@ export default async function PlanPage({
                 defaultMethod="listPlanVersions"
                 exampleParams={listPlanVersionsExampleParams}
               >
-                <Button variant={"ghost"}>
+                <Button variant={"link"}>
                   <Code className="mr-2 h-4 w-4" />
                   API
                 </Button>
@@ -99,9 +99,7 @@ export default async function PlanPage({
                       isDefault: plan.defaultPlan ?? false,
                     }}
                   >
-                    <Button variant={"custom"}>
-                      <Plus className="mr-2 h-4 w-4" /> Create version
-                    </Button>
+                    <Button variant={"custom"}>Create Version</Button>
                   </PlanVersionDialog>
                 </div>
 

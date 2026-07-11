@@ -176,6 +176,10 @@
   /* Solid signal primary — keep in sync with globals.css */
   .button-primary {
     @apply border border-primary-borderHover bg-primary-solid text-primary-foreground shadow-keycap transition-[background-color,border-color,box-shadow,transform] duration-quick ease-out-quad hover:bg-primary-solidHover active:translate-y-[0.5px] active:shadow-keycap-press;
+
+    & > [data-orientation="vertical"] {
+      @apply bg-primary-foreground;
+    }
   }
 
   .button-success {

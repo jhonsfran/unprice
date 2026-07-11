@@ -2,7 +2,6 @@ import Balancer from "react-wrap-balancer"
 
 import { FEATURE_SLUGS } from "@unprice/config"
 import { Button } from "@unprice/ui/button"
-import { Plus } from "@unprice/ui/icons"
 import { Typography } from "@unprice/ui/typography"
 import { Fragment } from "react"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
@@ -40,10 +39,7 @@ export default async function PlansPage(props: {
           description="Define plans, features, meters, and limits without hardcoding the money path."
           action={
             <PlanDialog>
-              <Button>
-                <Plus className="mr-2 h-4 w-4" />
-                Create plan
-              </Button>
+              <Button>Create plan</Button>
             </PlanDialog>
           }
         />

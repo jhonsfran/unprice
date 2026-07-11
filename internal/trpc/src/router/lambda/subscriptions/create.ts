@@ -2,7 +2,7 @@ import { subscriptionInsertSchema, subscriptionSelectSchema } from "@unprice/db/
 import { createSubscription } from "@unprice/services/use-cases"
 import { z } from "zod"
 
-import { TRPCError } from "@trpc/server"
+import { domainErrorToTrpcError } from "#domain-error"
 import { protectedProjectProcedure } from "#trpc"
 
 export const create = protectedProjectProcedure
@@ -30,10 +30,7 @@ export const create = protectedProjectProcedure
     )
 
     if (err) {
-      throw new TRPCError({
-        code: "INTERNAL_SERVER_ERROR",
-        message: err.message,
-      })
+      throw domainErrorToTrpcError(err, "Failed to create subscription")
     }
 
     return {

@@ -22,7 +22,7 @@ const buttonVariants = cva(
         ghost: "button-ghost bg-transparent",
         link: "button-link hover:underline-none focus-visible:ring-none focus-visible:ring-ring focus-visible:ring-offset-none underline-offset-4",
         custom:
-          "hover:underline-none focus-visible:ring-offset-none focus-visible:ring-none focus-visible:ring-offset-0 focus-visible:ring-0",
+          "hover:underline-none focus:outline-none focus-visible:ring-offset-none focus-visible:ring-none focus-visible:ring-offset-0 focus-visible:ring-0",
       },
       size: {
         default: "h-9 rounded-md px-3",

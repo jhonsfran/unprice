@@ -21,12 +21,8 @@ export function CustomerHeaderActions({
     <div className="flex flex-wrap items-center justify-end gap-2">
       {isRunsTab && (
         <CodeApiSheet defaultMethod="startBudgetedRun" exampleParams={{ customerId: customer.id }}>
-          <Button
-            type="button"
-            variant="ghost"
-            className="gap-2 px-2 text-background-solidHover hover:text-background-textContrast"
-          >
-            <Code className="h-4 w-4" />
+          <Button variant="link">
+            <Code className="mr-2 h-4 w-4" />
             API
           </Button>
         </CodeApiSheet>

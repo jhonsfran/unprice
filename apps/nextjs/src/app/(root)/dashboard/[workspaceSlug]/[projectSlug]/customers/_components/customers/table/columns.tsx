@@ -3,8 +3,6 @@
 import type { ColumnDef } from "@tanstack/react-table"
 
 import type { Customer } from "@unprice/db/validators"
-
-import { Badge } from "@unprice/ui/badge"
 import { Typography } from "@unprice/ui/typography"
 import { DataTableColumnHeader } from "~/components/data-table/data-table-column-header"
 import { SuperLink } from "~/components/super-link"
@@ -73,7 +71,10 @@ export const columns: ColumnDef<Customer>[] = [
           Active
         </span>
       ) : (
-        <Badge className="danger">inactive</Badge>
+        <span className="flex items-center gap-1.5 text-muted-foreground text-xs">
+          <span className="size-1.5 rounded-full bg-danger-solid" aria-hidden="true" />
+          Inactive
+        </span>
       ),
     size: 20,
   },

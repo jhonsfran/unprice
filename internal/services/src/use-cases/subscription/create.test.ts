@@ -138,4 +138,54 @@ describe("createSubscription use case", () => {
     expect(result.err?.message).toMatch(/Stripe is disabled/)
     expect(transaction).not.toHaveBeenCalled()
   })
+
+  it("propagates the customer subscription conflict", async () => {
+    const existingSubscriptionError = new UnPriceSubscriptionError({
+      code: "SUBSCRIPTION_ALREADY_EXISTS",
+      message:
+        "This customer already has an active subscription. Each customer can have only one subscription. To make a change, update the existing active subscription.",
+    })
+    const transaction = vi.fn(async (callback: (tx: Database) => Promise<unknown>) =>
+      callback({} as Database)
+    )
+
+    const result = await createSubscription(
+      {
+        db: {
+          query: {
+            paymentProviderConfig: {
+              findFirst: vi.fn().mockResolvedValue({
+                id: "ppc_123",
+                projectId: "proj_123",
+                paymentProvider: "sandbox",
+                active: true,
+                connectionType: "managed_connection",
+                mode: "test",
+                status: "active",
+              }),
+            },
+          },
+          transaction,
+        } as unknown as Database,
+        logger: { set: vi.fn() } as never,
+        services: {
+          subscriptions: {
+            createSubscription: vi.fn().mockResolvedValue(Err(existingSubscriptionError)),
+            createPhase: vi.fn(),
+          },
+        } as never,
+      },
+      {
+        projectId: "proj_123",
+        input: {
+          customerId: "cus_123",
+          phases: [
+            { planVersionId: "version_123", startAt: Date.now(), paymentProvider: "sandbox" },
+          ],
+        } as never,
+      }
+    )
+
+    expect(result.err).toBe(existingSubscriptionError)
+  })
 })

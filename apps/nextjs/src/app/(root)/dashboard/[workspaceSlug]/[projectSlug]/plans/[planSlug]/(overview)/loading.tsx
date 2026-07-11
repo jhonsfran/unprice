@@ -1,5 +1,5 @@
 import { Button } from "@unprice/ui/button"
-import { ChevronDown, Plus } from "lucide-react"
+import { ChevronDown, Code } from "lucide-react"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
 
@@ -20,19 +20,23 @@ export default function Loading() {
           label="active"
           id="1"
           action={
-            <div className="button-primary flex items-center space-x-1 rounded-md">
-              <div className="sm:col-span-full">
-                <Button variant={"custom"}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Version
+            <div className="flex items-center gap-2 rounded-md">
+              <Button variant={"link"}>
+                <Code className="mr-2 h-4 w-4" />
+                API
+              </Button>
+              <div className="button-primary flex items-center gap-1 rounded-md">
+                <div className="sm:col-span-full">
+                  <Button variant={"custom"}>Create Version</Button>
+                </div>
+
+                <Separator orientation="vertical" className="h-[20px] p-0" />
+
+                <Button variant={"custom"} disabled>
+                  <span className="sr-only">More actions</span>
+                  <ChevronDown className="h-4 w-4" />
                 </Button>
               </div>
-
-              <Separator orientation="vertical" className="h-[20px] p-0" />
-              <Button variant={"custom"}>
-                <span className="sr-only">Actions</span>
-                <ChevronDown className="h-4 w-4" />
-              </Button>
             </div>
           }
         />

@@ -3,6 +3,8 @@ import type { DomainErrorKind } from "../domain-error-kind"
 
 export const subscriptionErrorCodes = [
   "SUBSCRIPTION_BUSY",
+  "SUBSCRIPTION_ALREADY_EXISTS",
+  "CUSTOMER_NOT_ACTIVE",
   "SUBSCRIPTION_NOT_FOUND",
   "SUBSCRIPTION_NOT_ACTIVE",
   "PLAN_VERSION_NOT_FOUND",
@@ -25,6 +27,8 @@ export type SubscriptionErrorCode = (typeof subscriptionErrorCodes)[number]
 
 export const subscriptionErrorKinds: Record<SubscriptionErrorCode, DomainErrorKind> = {
   SUBSCRIPTION_BUSY: "conflict",
+  SUBSCRIPTION_ALREADY_EXISTS: "conflict",
+  CUSTOMER_NOT_ACTIVE: "precondition",
   SUBSCRIPTION_OPERATION_FAILED: "internal",
   SUBSCRIPTION_NOT_FOUND: "precondition",
   SUBSCRIPTION_NOT_ACTIVE: "precondition",

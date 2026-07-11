@@ -48,13 +48,13 @@ export default async function ProjectUsersPage(props: {
           action={
             <div className="flex items-center gap-2">
               <CodeApiSheet defaultMethod="signUpCustomer">
-                <Button variant={"ghost"}>
+                <Button variant={"link"}>
                   <Code className="mr-2 h-4 w-4" />
                   API
                 </Button>
               </CodeApiSheet>
               <CustomerDialog>
-                <Button>Create customer</Button>
+                <Button>Create Customer</Button>
               </CustomerDialog>
             </div>
           }

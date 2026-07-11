@@ -62,7 +62,13 @@
         "UPSTASH_REDIS_REST_URL",
         "UPSTASH_REDIS_REST_TOKEN",
         "USERJOT_ID",
-        "USERJOT_SECRET"
+        "USERJOT_SECRET",
+        "FLAGS_SECRET",
+        "MAIN_PROJECT_ID",
+        "CLOUDFLARE_API_TOKEN_LAKEHOUSE",
+        "CLOUDFLARE_LAKEHOUSE_ACCESS_KEY_ID",
+        "ENABLE_EXPERIMENTAL_COREPACK",
+        "LAKEHOUSE_API_TOKEN"
       ]
     },
     "fmt": {

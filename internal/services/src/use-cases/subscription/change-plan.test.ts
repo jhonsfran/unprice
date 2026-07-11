@@ -182,6 +182,35 @@ describe("changeSubscriptionPhasePlan", () => {
     })
   })
 
+  it("falls back to an immediate boundary when the cycle end is stale", async () => {
+    const staleCycleEnd = now - 100
+    const subscription = createSubscription()
+    subscription.currentCycleEndAt = staleCycleEnd
+    const { deps, tx, updatePhase, createPhase } = createDeps({ subscription })
+
+    const result = await changeSubscriptionPhasePlan(
+      { ...deps, now: () => now } as never,
+      createInput("end_of_cycle")
+    )
+
+    if (result.err) {
+      throw result.err
+    }
+
+    expect(updatePhase).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({ endAt: now }),
+        db: tx,
+      })
+    )
+    expect(createPhase).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({ startAt: now + 1 }),
+        db: tx,
+      })
+    )
+  })
+
   it("rejects the target plan version when its currency does not match expectedCurrency", async () => {
     const { deps, createPhase } = createDeps()
 

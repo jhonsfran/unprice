@@ -8,6 +8,8 @@ import { ToasterProvider } from "~/components/layout/theme-provider"
 import { env } from "~/env"
 import { TRPCReactProvider } from "~/trpc/client"
 
+export const dynamic = "force-dynamic"
+
 export default async function DashboardLayout({
   breadcrumbs,
   sidebar,

@@ -1,6 +1,6 @@
 import type { FeatureUsagePeriodRow } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
-import type { BillingConfig, ResetConfig } from "@unprice/db/validators"
+import type { BillingConfig, MeterConfig, ResetConfig } from "@unprice/db/validators"
 import { describe, expect, it, vi } from "vitest"
 import { computeGrantPeriodBucket } from "../../entitlements"
 import { type GetCustomerCurrentAccessDeps, getCustomerCurrentAccess } from "./get-current-access"
@@ -309,6 +309,31 @@ describe("getCustomerCurrentAccess", () => {
       })
     )
   })
+
+  it("uses the subscribed grant quantity for tier entitlements", async () => {
+    const entitlement = usageEntitlement({
+      featureSlug: "plans",
+      featureTitle: "Plans",
+      grantId: "grant_plans",
+      grantAllowances: [10],
+      limit: 10_000,
+    })
+    entitlement.featurePlanVersion.featureType = "tier"
+    entitlement.featurePlanVersion.meterConfig = null
+
+    const { deps } = makeDeps({ entitlements: [entitlement] })
+    const result = await getCustomerCurrentAccess(deps, { projectId, customerId })
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.entitlements[0]).toEqual(
+      expect.objectContaining({
+        featureType: "tier",
+        grantAllowance: 10,
+        limit: 10,
+        currentUsage: null,
+      })
+    )
+  })
 })
 
 function makeDeps({
@@ -395,6 +420,12 @@ function usageEntitlement({
   grantAllowances = [10_000],
   grantId,
   limit = 10_000,
+  meterConfig = {
+    eventId: `evt_${featureSlug}`,
+    eventSlug: `${featureSlug}_used`,
+    aggregationMethod: "sum",
+    aggregationField: "quantity",
+  },
   resetConfig = resetEveryFiveMinutes,
   billingConfig = billingEveryFiveMinutes,
 }: {
@@ -404,6 +435,7 @@ function usageEntitlement({
   grantAllowances?: Array<number | null>
   grantId: string
   limit?: number | null
+  meterConfig?: MeterConfig | null
   resetConfig?: ResetConfig | null
   billingConfig?: BillingConfig
 }) {
@@ -424,12 +456,7 @@ function usageEntitlement({
       featureType: "usage",
       unitOfMeasure: featureSlug.slice(0, -1) || "unit",
       limit,
-      meterConfig: {
-        eventId: `evt_${featureSlug}`,
-        eventSlug: `${featureSlug}_used`,
-        aggregationMethod: "sum",
-        aggregationField: "quantity",
-      },
+      meterConfig,
       resetConfig,
       billingConfig,
       feature: {

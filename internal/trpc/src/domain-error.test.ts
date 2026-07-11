@@ -40,6 +40,18 @@ describe("domainErrorToTrpcError", () => {
     expect(error.message).toContain("Payment method is required")
   })
 
+  it("keeps inactive-customer subscription failures customer-visible", () => {
+    const error = domainErrorToTrpcError(
+      new UnPriceSubscriptionError({
+        code: "CUSTOMER_NOT_ACTIVE",
+        message: "This customer is inactive. Activate the customer before creating a subscription.",
+      })
+    )
+
+    expect(error.code).toBe("PRECONDITION_FAILED")
+    expect(error.message).toContain("This customer is inactive")
+  })
+
   it("maps schema failures to bad request", () => {
     const error = domainErrorToTrpcError(
       new SchemaError({ message: "End date must be after the phase start date" })

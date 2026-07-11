@@ -27,7 +27,7 @@ export default function ErrorPage({
   return (
     <DashboardShell>
       <div className="flex flex-col items-center justify-center">
-        <EmptyPlaceholder className="min-h-[520px] w-full">
+        <EmptyPlaceholder className="min-h-[80vh] w-full">
           <EmptyPlaceholder.Title className="mt-0" variant="h1">
             Dashboard data could not load
           </EmptyPlaceholder.Title>

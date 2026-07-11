@@ -17,7 +17,7 @@ export default function Loading() {
           description="Budgeted run lifecycle, spend, and failure evidence across this project."
           action={
             <CodeApiSheet defaultMethod="startBudgetedRun">
-              <Button variant={"ghost"}>
+              <Button variant={"link"}>
                 <Code className="mr-2 h-4 w-4" />
                 API
               </Button>

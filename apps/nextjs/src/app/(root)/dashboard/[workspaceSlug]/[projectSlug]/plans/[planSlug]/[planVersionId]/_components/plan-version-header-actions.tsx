@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "@unprice/ui/dropdown-menu"
 
+import { Separator } from "@unprice/ui/separator"
 import {
   PlanVersionDeactivate,
   PlanVersionDelete,
@@ -49,6 +50,8 @@ export function PlanVersionHeaderActions({
       ) : (
         <PlanVersionDuplicate planVersionId={planVersionId} />
       )}
+
+      <Separator orientation="vertical" className="h-[20px] p-0" />
 
       {hasMenuItems && (
         <DropdownMenu>

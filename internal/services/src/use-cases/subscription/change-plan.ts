@@ -318,10 +318,12 @@ export async function changeSubscriptionPhasePlan(
   let transactionError: SubscriptionChangePhasePlanFailure | undefined
   const transactionResult = await deps.db
     .transaction(async (tx) => {
-      const targetStartAt =
-        whenToChange === "immediately" ? now + 1 : subscription.currentCycleEndAt
-      const currentPhaseEndAt =
-        whenToChange === "immediately" ? now : subscription.currentCycleEndAt - 1
+      // A stale cycle boundary can occur when billing-period renewal has not run yet.
+      // Never create a phase in the past: updatePhase clamps past end dates to `now`,
+      // which would leave the active phase open and make createPhase reject the target.
+      const cycleEndAt = Math.max(subscription.currentCycleEndAt, now + 1)
+      const targetStartAt = whenToChange === "immediately" ? now + 1 : cycleEndAt
+      const currentPhaseEndAt = whenToChange === "immediately" ? now : cycleEndAt - 1
       const targetPhaseEvaluationNow = whenToChange === "immediately" ? targetStartAt : now
       const billingPeriodsNow = whenToChange === "immediately" ? targetStartAt : now
       const closeCurrentPhaseInput: SubscriptionPhase = {

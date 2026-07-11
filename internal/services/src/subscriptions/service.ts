@@ -1782,19 +1782,26 @@ export class SubscriptionService {
       )
     }
 
-    // if customer is not active, throw an error
-    if (!customerData.active) {
+    // IMPORTANT: for now we only allow one active subscription per customer.
+    if (customerData.subscriptions.length > 0) {
       return Err(
         new UnPriceSubscriptionError({
-          code: "SUBSCRIPTION_OPERATION_FAILED",
-          message: "Customer is not active",
+          code: "SUBSCRIPTION_ALREADY_EXISTS",
+          message:
+            "This customer already has an active subscription. Each customer can have only one subscription. To make a change, update the existing active subscription.",
         })
       )
     }
 
-    // IMPORTANT: for now we only allow one subscription per customer
-    if (customerData.subscriptions.length > 0) {
-      return Ok(customerData.subscriptions[0]!)
+    // if customer is not active, throw an error
+    if (!customerData.active) {
+      return Err(
+        new UnPriceSubscriptionError({
+          code: "CUSTOMER_NOT_ACTIVE",
+          message:
+            "This customer is inactive. Activate the customer before creating a subscription.",
+        })
+      )
     }
 
     // project defaults
