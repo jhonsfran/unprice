@@ -339,6 +339,35 @@ describe("changeWorkspacePlan", () => {
     expect(createPhase).not.toHaveBeenCalled()
   })
 
+  it("resolves the target plan version once and delegates validity downstream", async () => {
+    const { deps, getPlanVersionByIdRecord } = createDeps()
+
+    const result = await changeWorkspacePlan(deps as never, createInput("immediately"))
+
+    expect(result.err).toBeUndefined()
+    // The workspace use case fetches the version once (for the payment-method
+    // prompt and to hand it downstream); the subscription use case reuses it
+    // instead of fetching a second time.
+    expect(getPlanVersionByIdRecord).toHaveBeenCalledTimes(1)
+  })
+
+  it("maps a currency mismatch surfaced by the subscription use case", async () => {
+    const { deps, updatePhase, createPhase } = createDeps({
+      targetPlanVersion: {
+        currency: "EUR",
+      },
+    })
+
+    const result = await changeWorkspacePlan(deps as never, createInput())
+
+    expect(result.err).toBeInstanceOf(WorkspaceChangePlanError)
+    expect((result.err as WorkspaceChangePlanError).code).toBe(
+      "WORKSPACE_TARGET_PLAN_VERSION_WRONG_CURRENCY"
+    )
+    expect(updatePhase).not.toHaveBeenCalled()
+    expect(createPhase).not.toHaveBeenCalled()
+  })
+
   it("returns a provider-unavailable error when the target provider is disabled", async () => {
     const { deps } = createDeps({
       targetPlanVersion: {

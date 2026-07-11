@@ -16,7 +16,6 @@ import {
   type GetCustomerCurrentAccessAnalytics,
   getCustomerCurrentAccess,
 } from "../customer/get-current-access"
-import { checkPaymentProviderAvailability } from "../payment-provider/availability"
 import {
   SubscriptionChangePhasePlanError,
   changeSubscriptionPhasePlan,
@@ -189,6 +188,12 @@ function mapSubscriptionChangePlanError(
         message: error.message,
         context,
       })
+    case "SUBSCRIPTION_CHANGE_PLAN_TARGET_PLAN_WRONG_CURRENCY":
+      return new WorkspaceChangePlanError({
+        code: "WORKSPACE_TARGET_PLAN_VERSION_WRONG_CURRENCY",
+        message: error.message,
+        context,
+      })
     case "SUBSCRIPTION_CHANGE_PLAN_PROVIDER_UNAVAILABLE":
       return new WorkspaceChangePlanError({
         code: "WORKSPACE_TARGET_PLAN_PROVIDER_UNAVAILABLE",
@@ -305,21 +310,11 @@ export async function changeWorkspacePlan(
 
   const subscriptionId = activePlan.subscriptionId
 
-  if (activePhase.planVersionId === input.targetPlanVersionId) {
-    return Err(
-      new WorkspaceChangePlanError({
-        code: "WORKSPACE_TARGET_PLAN_VERSION_SAME_AS_CURRENT",
-        message: "Workspace is already subscribed to this plan",
-        context: {
-          workspaceId: rawInput.workspace.id,
-          customerId,
-          billingProjectId,
-          targetPlanVersionId: input.targetPlanVersionId,
-        },
-      })
-    )
-  }
-
+  // Plan-version validity (same-plan, active, published, archived, currency,
+  // provider) is owned by changeSubscriptionPhasePlan below. Here we only resolve
+  // the target version once — needed for the self-serve payment-method prompt and
+  // to hand it to the subscription use case so it isn't fetched twice — and scope
+  // it to the workspace's billing project (tenant concern).
   const targetPlanVersionResult = await deps.services.plans.getPlanVersionByIdRecord({
     planVersionId: input.targetPlanVersionId,
     projectId: billingProjectId,
@@ -364,90 +359,6 @@ export async function changeWorkspacePlan(
           customerId,
           billingProjectId,
           targetPlanVersionId: input.targetPlanVersionId,
-        },
-      })
-    )
-  }
-
-  if (!targetPlanVersion.active) {
-    return Err(
-      new WorkspaceChangePlanError({
-        code: "WORKSPACE_TARGET_PLAN_VERSION_INACTIVE",
-        message: "Target plan version is inactive",
-        context: {
-          workspaceId: rawInput.workspace.id,
-          customerId,
-          billingProjectId,
-          targetPlanVersionId: targetPlanVersion.id,
-        },
-      })
-    )
-  }
-
-  if (targetPlanVersion.status !== "published") {
-    return Err(
-      new WorkspaceChangePlanError({
-        code: "WORKSPACE_TARGET_PLAN_VERSION_UNPUBLISHED",
-        message: "Target plan version is not published",
-        context: {
-          workspaceId: rawInput.workspace.id,
-          customerId,
-          billingProjectId,
-          targetPlanVersionId: targetPlanVersion.id,
-        },
-      })
-    )
-  }
-
-  if (targetPlanVersion.archived) {
-    return Err(
-      new WorkspaceChangePlanError({
-        code: "WORKSPACE_TARGET_PLAN_VERSION_ARCHIVED",
-        message: "Target plan version is archived",
-        context: {
-          workspaceId: rawInput.workspace.id,
-          customerId,
-          billingProjectId,
-          targetPlanVersionId: targetPlanVersion.id,
-        },
-      })
-    )
-  }
-
-  if (targetPlanVersion.currency !== customerCurrency) {
-    return Err(
-      new WorkspaceChangePlanError({
-        code: "WORKSPACE_TARGET_PLAN_VERSION_WRONG_CURRENCY",
-        message: `Target plan version uses ${targetPlanVersion.currency}, but the workspace billing currency is ${customerCurrency}`,
-        context: {
-          workspaceId: rawInput.workspace.id,
-          customerId,
-          billingProjectId,
-          targetPlanVersionId: targetPlanVersion.id,
-        },
-      })
-    )
-  }
-
-  const providerAvailabilityResult = await checkPaymentProviderAvailability(deps, {
-    projectId: billingProjectId,
-    paymentProvider: targetPlanVersion.paymentProvider,
-  })
-
-  if (providerAvailabilityResult.err) {
-    return Err(providerAvailabilityResult.err)
-  }
-
-  if (!providerAvailabilityResult.val.available) {
-    return Err(
-      new WorkspaceChangePlanError({
-        code: "WORKSPACE_TARGET_PLAN_PROVIDER_UNAVAILABLE",
-        message: providerAvailabilityResult.val.message,
-        context: {
-          workspaceId: rawInput.workspace.id,
-          customerId,
-          billingProjectId,
-          targetPlanVersionId: targetPlanVersion.id,
         },
       })
     )
@@ -503,7 +414,9 @@ export async function changeWorkspacePlan(
       config: input.config,
       paymentMethodId: paymentMethodId ?? undefined,
       paymentMethodRequired: targetPlanVersion.paymentMethodRequired,
-    }
+      expectedCurrency: customerCurrency,
+    },
+    { targetPlanVersion }
   )
 
   if (changeResult.err) {

@@ -292,6 +292,10 @@ export const subscriptionChangePlanSchema = subscriptionSelectSchema
     creditLinePolicy: creditLinePolicySchema.default("uncapped").optional(),
     creditLineAmount: z.coerce.number().int().min(0).nullable().optional(),
     trialUnits: z.coerce.number().int().min(0).optional(),
+    // When set, the target plan version must use this currency. Callers that
+    // resolve a billing currency (e.g. the workspace change-plan use case) push
+    // it here so plan-version currency validity lives in one owner: this use case.
+    expectedCurrency: z.string().optional(),
   })
 
 export const subscriptionPhaseCacheSchema = subscriptionPhaseSelectSchema.extend({

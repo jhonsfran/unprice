@@ -1,5 +1,6 @@
 import type { Database } from "@unprice/db"
 import {
+  type PlanVersion,
   type SubscriptionChangePlan,
   type SubscriptionPhase,
   subscriptionChangePlanSchema,
@@ -30,6 +31,7 @@ const subscriptionChangePlanErrorCodeSchema = z.enum([
   "SUBSCRIPTION_CHANGE_PLAN_TARGET_PLAN_INACTIVE",
   "SUBSCRIPTION_CHANGE_PLAN_TARGET_PLAN_UNPUBLISHED",
   "SUBSCRIPTION_CHANGE_PLAN_TARGET_PLAN_ARCHIVED",
+  "SUBSCRIPTION_CHANGE_PLAN_TARGET_PLAN_WRONG_CURRENCY",
   "SUBSCRIPTION_CHANGE_PLAN_PROVIDER_UNAVAILABLE",
 ])
 
@@ -45,6 +47,7 @@ const subscriptionChangePlanErrorKinds: Record<SubscriptionChangePlanErrorCode, 
   SUBSCRIPTION_CHANGE_PLAN_TARGET_PLAN_INACTIVE: "precondition",
   SUBSCRIPTION_CHANGE_PLAN_TARGET_PLAN_UNPUBLISHED: "precondition",
   SUBSCRIPTION_CHANGE_PLAN_TARGET_PLAN_ARCHIVED: "precondition",
+  SUBSCRIPTION_CHANGE_PLAN_TARGET_PLAN_WRONG_CURRENCY: "precondition",
   SUBSCRIPTION_CHANGE_PLAN_PROVIDER_UNAVAILABLE: "precondition",
 }
 
@@ -96,7 +99,11 @@ export class SubscriptionChangePhasePlanError extends BaseError<{
 
 export async function changeSubscriptionPhasePlan(
   deps: SubscriptionChangePhasePlanDeps,
-  rawInput: SubscriptionChangePlan
+  rawInput: SubscriptionChangePlan,
+  // Callers that already loaded the target plan version (scoped to this project)
+  // can inject it to avoid a redundant fetch; this use case still owns validating
+  // it. When absent it is fetched below.
+  options?: { targetPlanVersion?: PlanVersion | null }
 ): Promise<Result<SubscriptionChangePhasePlanOutput, SubscriptionChangePhasePlanFailure>> {
   const input = subscriptionChangePlanSchema.parse(rawInput)
   const projectId = input.projectId
@@ -200,16 +207,20 @@ export async function changeSubscriptionPhasePlan(
     )
   }
 
-  const targetPlanVersionResult = await deps.services.plans.getPlanVersionByIdRecord({
-    planVersionId: input.planVersionId,
-    projectId,
-  })
+  let targetPlanVersion = options?.targetPlanVersion ?? null
 
-  if (targetPlanVersionResult.err) {
-    return Err(targetPlanVersionResult.err)
+  if (!targetPlanVersion) {
+    const targetPlanVersionResult = await deps.services.plans.getPlanVersionByIdRecord({
+      planVersionId: input.planVersionId,
+      projectId,
+    })
+
+    if (targetPlanVersionResult.err) {
+      return Err(targetPlanVersionResult.err)
+    }
+
+    targetPlanVersion = targetPlanVersionResult.val
   }
-
-  const targetPlanVersion = targetPlanVersionResult.val
 
   if (!targetPlanVersion) {
     return Err(
@@ -258,6 +269,20 @@ export async function changeSubscriptionPhasePlan(
       new SubscriptionChangePhasePlanError({
         code: "SUBSCRIPTION_CHANGE_PLAN_TARGET_PLAN_ARCHIVED",
         message: "Target plan version is archived",
+        context: {
+          projectId,
+          subscriptionId: subscription.id,
+          targetPlanVersionId: input.planVersionId,
+        },
+      })
+    )
+  }
+
+  if (input.expectedCurrency && targetPlanVersion.currency !== input.expectedCurrency) {
+    return Err(
+      new SubscriptionChangePhasePlanError({
+        code: "SUBSCRIPTION_CHANGE_PLAN_TARGET_PLAN_WRONG_CURRENCY",
+        message: `Target plan version uses ${targetPlanVersion.currency}, but the expected billing currency is ${input.expectedCurrency}`,
         context: {
           projectId,
           subscriptionId: subscription.id,
