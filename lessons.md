@@ -45,6 +45,9 @@ patterns. Keep it cheap to load and useful.
   `entitlement-window-store.ts`, and check `processor.test.ts` for the in-memory store contract a
   future Redis backend must satisfy; do not reintroduce storage or wallet calls into the DO class
   or a hand-rolled Drizzle/SQLite interpreter into behavioral tests.
+- 2026-07-11: When splitting `EntitlementWindowProcessor` lifecycle collaborators, keep operation
+  instrumentation at the processor boundary and pass close/flush callbacks into collaborators so
+  nested `alarm`, `close_reservation`, and `flush_refill` telemetry remains unchanged.
 
 - 2026-06-06: EntitlementWindowDO SQLite columns need the schema, contract snapshot, SQL migration,
   `drizzle/migrations.js`, and `drizzle/meta/_journal.json` updated together; otherwise existing
