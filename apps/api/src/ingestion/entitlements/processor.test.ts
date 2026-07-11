@@ -1,5 +1,6 @@
 import { DO_IDEMPOTENCY_TTL_MS, LATE_EVENT_GRACE_MS } from "@unprice/services/entitlements"
 import { describe, expect, it, vi } from "vitest"
+import { createDeferred } from "../test-fixtures/race"
 import type { ApplyInput } from "./contracts"
 import type { WalletReservationSnapshot } from "./contracts"
 import {
@@ -10,6 +11,7 @@ import type { EntitlementWindowWalletOps } from "./ports"
 import { InMemoryEntitlementWindowStore } from "./testing/in-memory-store"
 import {
   createEntitlementWindowProcessorHarness,
+  createEntitlementWindowStoreContractHostFactory,
   describeEntitlementWindowProcessorContract,
 } from "./testing/processor-contract"
 
@@ -803,6 +805,40 @@ describe("EntitlementWindowProcessor batch behavior", () => {
     })
   })
 
+  it("denies the first optimized batch event beyond max outstanding headroom", async () => {
+    const wallet = createWalletHarness({ extendAmount: 0 })
+    const store = new InMemoryEntitlementWindowStore()
+    seedWallet(store, {
+      allocationAmount: 3_000_000_000,
+      targetReservationAmount: 3_000_000_000,
+      maxEventCostAmount: 1_000_000_000,
+    })
+    const harness = createHarness({ now: BASE_NOW, store, wallet: wallet.provider })
+    await harness.processor.initialize()
+    const result = await harness.processor.applyBatch(
+      createBatchInput(
+        createApplyInput({ creditLinePolicy: "capped" }),
+        [10, 10, 10, 10],
+        "max_outstanding"
+      )
+    )
+
+    expect(
+      result.results.map((row) => ({ allowed: row.allowed, reason: row.deniedReason }))
+    ).toEqual([
+      { allowed: true, reason: undefined },
+      { allowed: true, reason: undefined },
+      { allowed: true, reason: undefined },
+      { allowed: false, reason: "WALLET_EMPTY" },
+    ])
+    expect(store.idempotency.get("idem_max_outstanding_3")).toMatchObject({
+      allowed: false,
+      deniedReason: "WALLET_EMPTY",
+    })
+    expect(result.results.flatMap((row) => row.meterFacts ?? [])).toHaveLength(3)
+    expect(store.walletRow?.consumedAmount).toBe(3_000_000_000)
+  })
+
   it("closes an active reservation after a staged hard-limit denial", async () => {
     const wallet = createWalletHarness()
     const store = new InMemoryEntitlementWindowStore()
@@ -825,6 +861,50 @@ describe("EntitlementWindowProcessor batch behavior", () => {
 })
 
 describe("EntitlementWindowProcessor wallet behavior", () => {
+  it("deduplicates concurrent same-key applies during wallet bootstrap", async () => {
+    const reservationStarted = createDeferred<void>()
+    const reservationResult = createDeferred<{
+      err: null
+      val: { reservationId: string; allocationAmount: number }
+    }>()
+    const wallet = createWalletHarness()
+    wallet.createReservation.mockImplementation(async () => {
+      reservationStarted.resolve()
+      return reservationResult.promise
+    })
+    const store = new InMemoryEntitlementWindowStore()
+    const harness = createHarness({ now: BASE_NOW, store, wallet: wallet.provider })
+    await harness.processor.initialize()
+    const input = createApplyInput({
+      creditLinePolicy: "capped",
+      event: { properties: { amount: 3 } },
+    })
+
+    const first = harness.processor.apply(input)
+    await reservationStarted.promise
+    const second = harness.processor.apply(input)
+    await Promise.resolve()
+    expect(wallet.createReservation).toHaveBeenCalledTimes(1)
+
+    reservationResult.resolve({
+      err: null,
+      val: { reservationId: "res_concurrent_bootstrap", allocationAmount: 1_000_000_000 },
+    })
+    const results = await Promise.all([first, second])
+
+    expect(results).toEqual([
+      expect.objectContaining({ allowed: true }),
+      expect.objectContaining({ allowed: true }),
+    ])
+    expect(wallet.createReservation).toHaveBeenCalledTimes(1)
+    expect(store.idempotency.size).toBe(1)
+    expect(store.meterStates.values().next().value?.usage).toBe(3)
+    expect(store.walletRow).toMatchObject({
+      reservationId: "res_concurrent_bootstrap",
+      consumedAmount: 300_000_000,
+    })
+  })
+
   it("opens a priced capped reservation lazily and stamps consumption", async () => {
     const wallet = createWalletHarness()
     const store = new InMemoryEntitlementWindowStore()
@@ -1060,6 +1140,36 @@ describe("EntitlementWindowProcessor wallet behavior", () => {
     expect(wallet.captureReservationUsage).not.toHaveBeenCalled()
   })
 
+  it("refreshes missing reservation invoice context before wallet spend", async () => {
+    const wallet = createWalletHarness()
+    const store = new InMemoryEntitlementWindowStore()
+    seedWallet(store, {
+      billingPeriodId: null,
+      cycleEndAt: null,
+      cycleStartAt: null,
+      featurePlanVersionItemId: null,
+      featureSlug: null,
+      statementKey: null,
+      refillThresholdBps: 0,
+      refillChunkAmount: 0,
+    })
+    const harness = createHarness({ now: BASE_NOW, store, wallet: wallet.provider })
+    await harness.processor.initialize()
+
+    await expect(
+      harness.processor.apply(createApplyInput({ creditLinePolicy: "capped" }))
+    ).resolves.toMatchObject({ allowed: true })
+    expect(store.walletRow).toMatchObject({
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      featureSlug: "api_calls",
+      statementKey: "stmt_123",
+      consumedAmount: 100_000_000,
+    })
+  })
+
   it("flushes matching unflushed usage for invoicing and reports no-op outcomes", async () => {
     const wallet = createWalletHarness()
     const store = new InMemoryEntitlementWindowStore()
@@ -1228,6 +1338,42 @@ describe("EntitlementWindowProcessor reads and lifecycle", () => {
     expect(harness.wasDestroyed()).toBe(true)
   })
 
+  it("preserves pending wallet recovery for an operator during deletion", async () => {
+    const wallet = createWalletHarness()
+    const store = new InMemoryEntitlementWindowStore()
+    seedWallet(store, {
+      consumedAmount: 200_000_000,
+      flushedAmount: 100_000_000,
+      consumedQuantity: 2,
+      flushedQuantity: 1,
+      refillInFlight: true,
+      flushSeq: 1,
+      pendingFlushSeq: 2,
+      pendingFlushAmount: 100_000_000,
+      pendingFlushQuantity: 1,
+      pendingRefillAmount: 400_000_000,
+      deletionRequested: true,
+    })
+    const harness = createHarness({ now: BASE_NOW, store, wallet: wallet.provider })
+    await harness.processor.initialize()
+
+    await harness.processor.alarm()
+
+    expect(wallet.captureReservationUsage).not.toHaveBeenCalled()
+    expect(wallet.extendReservation).not.toHaveBeenCalled()
+    expect(wallet.releaseReservation).not.toHaveBeenCalled()
+    expect(harness.wasDestroyed()).toBe(false)
+    expect(store.walletRow).toMatchObject({
+      reservationId: "res_seeded",
+      deletionRequested: true,
+      refillInFlight: true,
+      flushSeq: 1,
+      pendingFlushSeq: 2,
+      pendingFlushAmount: 100_000_000,
+      pendingRefillAmount: 400_000_000,
+    })
+  })
+
   it("keeps a live reservation open before inactivity and closes it after the threshold", async () => {
     let now = BASE_NOW
     const wallet = createWalletHarness()
@@ -1252,6 +1398,47 @@ describe("EntitlementWindowProcessor reads and lifecycle", () => {
     expect(store.walletRow?.reservationId).toBeNull()
   })
 
+  it("time-based wallet flush captures usage without requesting a zero refill", async () => {
+    const wallet = createWalletHarness()
+    const store = new InMemoryEntitlementWindowStore()
+    seedWallet(store, {
+      allocationAmount: 1_000_000_000,
+      consumedAmount: 595_600_000,
+      consumedQuantity: 12,
+      flushedAmount: 0,
+      flushedQuantity: 0,
+      flushSeq: 2,
+      lastEventAt: BASE_NOW,
+      lastFlushedAt: BASE_NOW - 10 * 60_000,
+      reservationEndAt: BASE_NOW + 2 * 60 * 60_000,
+    })
+    const harness = createHarness({
+      now: BASE_NOW,
+      store,
+      timing: { inactivityThresholdMs: 60 * 60_000, maxFlushIntervalMs: 5 * 60_000 },
+      wallet: wallet.provider,
+    })
+    await harness.processor.initialize()
+
+    await harness.processor.alarm()
+
+    expect(wallet.captureReservationUsage).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: 595_600_000, flushSeq: 3, statementKey: "stmt_123" })
+    )
+    expect(wallet.extendReservation).not.toHaveBeenCalled()
+    expect(wallet.releaseReservation).not.toHaveBeenCalled()
+    expect(store.walletRow).toMatchObject({
+      allocationAmount: 1_000_000_000,
+      flushedAmount: 595_600_000,
+      flushedQuantity: 12,
+      flushSeq: 3,
+      pendingFlushSeq: null,
+      pendingFlushAmount: null,
+      pendingRefillAmount: 0,
+      refillInFlight: false,
+    })
+  })
+
   it("skips automatic close while recovery is required", async () => {
     const wallet = createWalletHarness()
     const store = new InMemoryEntitlementWindowStore()
@@ -1263,6 +1450,35 @@ describe("EntitlementWindowProcessor reads and lifecycle", () => {
     expect(wallet.captureReservationUsage).not.toHaveBeenCalled()
     expect(wallet.releaseReservation).not.toHaveBeenCalled()
     expect(store.walletRow?.reservationId).toBe("res_seeded")
+  })
+
+  it("does not auto-recover a pending flush marked recoveryRequired", async () => {
+    const wallet = createWalletHarness()
+    const store = new InMemoryEntitlementWindowStore()
+    seedWallet(store, {
+      consumedAmount: 300_000_000,
+      pendingFlushAmount: 200_000_000,
+      pendingFlushQuantity: 2,
+      pendingFlushSeq: 5,
+      pendingRefillAmount: 200_000_000,
+      flushSeq: 4,
+      recoveryRequired: true,
+    })
+    const harness = createHarness({ now: BASE_NOW, store, wallet: wallet.provider })
+
+    await harness.processor.initialize()
+    await Promise.all(harness.waitUntilPromises)
+
+    expect(harness.waitUntilPromises).toHaveLength(0)
+    expect(wallet.captureReservationUsage).not.toHaveBeenCalled()
+    expect(wallet.extendReservation).not.toHaveBeenCalled()
+    expect(store.walletRow).toMatchObject({
+      flushSeq: 4,
+      pendingFlushSeq: 5,
+      pendingFlushAmount: 200_000_000,
+      pendingRefillAmount: 200_000_000,
+      recoveryRequired: true,
+    })
   })
 
   it("recovers a persisted pending final close with the same flush sequence", async () => {
@@ -1301,11 +1517,13 @@ describe("EntitlementWindowProcessor reads and lifecycle", () => {
     expect(harness.wasDestroyed()).toBe(false)
   })
 
-  it("reissues a persisted pending flush on processor initialization", async () => {
+  it("replays the exact persisted pending flush and refill payload on initialization", async () => {
     const wallet = createWalletHarness({ extendAmount: 200_000_000 })
     const store = new InMemoryEntitlementWindowStore()
     seedWallet(store, {
+      allocationAmount: 1_000_000_000,
       consumedAmount: 300_000_000,
+      refillChunkAmount: 900_000_000,
       pendingFlushAmount: 300_000_000,
       pendingFlushQuantity: 3,
       pendingFlushSeq: 1,
@@ -1320,9 +1538,18 @@ describe("EntitlementWindowProcessor reads and lifecycle", () => {
     expect(wallet.captureReservationUsage).toHaveBeenCalledWith(
       expect.objectContaining({ amount: 300_000_000, flushSeq: 1 })
     )
+    expect(wallet.extendReservation).toHaveBeenCalledWith(
+      expect.objectContaining({ flushSeq: 1, requestedAmount: 200_000_000 })
+    )
+    expect(wallet.releaseReservation).not.toHaveBeenCalled()
     expect(store.walletRow).toMatchObject({
+      allocationAmount: 1_200_000_000,
       flushSeq: 1,
+      flushedAmount: 300_000_000,
+      flushedQuantity: 3,
       pendingFlushSeq: null,
+      pendingFlushAmount: null,
+      pendingRefillAmount: 0,
       refillInFlight: false,
     })
   })
@@ -1330,5 +1557,5 @@ describe("EntitlementWindowProcessor reads and lifecycle", () => {
 
 describeEntitlementWindowProcessorContract(
   "EntitlementWindowProcessor (in-memory store contract)",
-  () => new InMemoryEntitlementWindowStore()
+  createEntitlementWindowStoreContractHostFactory(() => new InMemoryEntitlementWindowStore())
 )

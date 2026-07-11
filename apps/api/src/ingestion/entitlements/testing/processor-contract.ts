@@ -19,9 +19,16 @@ export type EntitlementWindowProcessorContractTarget = Pick<
   "apply" | "getEnforcementState"
 >
 
-export type EntitlementWindowProcessorContractTargetFactory = () =>
-  | EntitlementWindowProcessorContractTarget
-  | Promise<EntitlementWindowProcessorContractTarget>
+export type EntitlementWindowProcessorContractHost = {
+  target: EntitlementWindowProcessorContractTarget
+  revive():
+    | EntitlementWindowProcessorContractTarget
+    | Promise<EntitlementWindowProcessorContractTarget>
+}
+
+export type EntitlementWindowProcessorContractHostFactory = () =>
+  | EntitlementWindowProcessorContractHost
+  | Promise<EntitlementWindowProcessorContractHost>
 
 function createNoopLogger(): Logger {
   return {
@@ -114,53 +121,33 @@ function createLiveApplyInput(now: number, overrides: Record<string, unknown> = 
  * a fresh store factory. These cases only observe the processor's public API;
  * in-memory-map assertions remain in processor.test.ts.
  */
-export function describeEntitlementWindowProcessorContract<
+export function createEntitlementWindowStoreContractHostFactory<
   TStore extends EntitlementWindowStateStore,
->(suiteName: string, makeStore: EntitlementWindowStoreFactory<TStore>): void {
-  describeEntitlementWindowProcessorBehaviorContract(suiteName, async () => {
-    const harness = createEntitlementWindowProcessorHarness({ now: Date.now(), store: makeStore() })
-    await harness.processor.initialize()
-    return harness.processor
-  })
+>(makeStore: EntitlementWindowStoreFactory<TStore>): EntitlementWindowProcessorContractHostFactory {
+  return async () => {
+    const store = makeStore()
+    const createTarget = async () => {
+      const harness = createEntitlementWindowProcessorHarness({ now: Date.now(), store })
+      await harness.processor.initialize()
+      return harness.processor
+    }
 
-  describe(suiteName, () => {
-    it("keeps committed state visible to a fresh processor over the same store", async () => {
-      const now = Date.now()
-      const first = createEntitlementWindowProcessorHarness({ now, store: makeStore() })
-      await first.processor.initialize()
-
-      const input = createLiveApplyInput(now, {
-        idempotencyKey: "idem_port_evict",
-        event: { id: "evt_port_evict", properties: { amount: 5 } },
-      })
-      await first.processor.apply(input)
-
-      // Same durable state, new processor instance — the "eviction" contract.
-      const revived = createEntitlementWindowProcessorHarness({ now, store: first.store })
-      await revived.processor.initialize()
-
-      const replay = await revived.processor.apply(input)
-      expect(replay).toMatchObject({ allowed: true, idempotencyStatus: "already_reported" })
-      await expect(
-        revived.processor.getEnforcementState({
-          entitlement: input.entitlement,
-          grants: input.grants,
-          now,
-        })
-      ).resolves.toMatchObject({ usage: 5 })
-    })
-  })
+    return {
+      target: await createTarget(),
+      revive: createTarget,
+    }
+  }
 }
 
-/** Runs backend-neutral public behavior against a processor or host adapter. */
-export function describeEntitlementWindowProcessorBehaviorContract(
+/** Runs the full portable processor contract against one persistent host. */
+export function describeEntitlementWindowProcessorContract(
   suiteName: string,
-  makeTarget: EntitlementWindowProcessorContractTargetFactory
+  makeHost: EntitlementWindowProcessorContractHostFactory
 ): void {
   describe(suiteName, () => {
     it("enforces hard limits and seals the denial for stable retries", async () => {
       const now = Date.now()
-      const target = await makeTarget()
+      const { target } = await makeHost()
       const input = createLiveApplyInput(now, {
         enforceLimit: true,
         limit: 2,
@@ -184,6 +171,29 @@ export function describeEntitlementWindowProcessorBehaviorContract(
           now,
         })
       ).toMatchObject({ usage: 0, limit: 2, isLimitReached: false })
+    })
+
+    it("keeps committed state visible after reviving a fresh host", async () => {
+      const now = Date.now()
+      const host = await makeHost()
+
+      const input = createLiveApplyInput(now, {
+        idempotencyKey: "idem_port_evict",
+        event: { id: "evt_port_evict", properties: { amount: 5 } },
+      })
+      await host.target.apply(input)
+
+      const revived = await host.revive()
+
+      const replay = await revived.apply(input)
+      expect(replay).toMatchObject({ allowed: true, idempotencyStatus: "already_reported" })
+      await expect(
+        revived.getEnforcementState({
+          entitlement: input.entitlement,
+          grants: input.grants,
+          now,
+        })
+      ).resolves.toMatchObject({ usage: 5 })
     })
   })
 }

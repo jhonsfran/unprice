@@ -3,7 +3,7 @@ import { env } from "cloudflare:workers"
 import { buildIngestionWindowName } from "@unprice/services/ingestion"
 import { afterEach, describe, expect, it } from "vitest"
 import { createApplyInput } from "./entitlement-window-test-fixtures"
-import { describeEntitlementWindowProcessorBehaviorContract } from "./testing/processor-contract"
+import { describeEntitlementWindowProcessorContract } from "./testing/processor-contract"
 
 const WORKERS_NOW = Date.now()
 
@@ -48,9 +48,18 @@ afterEach(async () => {
   await reset()
 })
 
-describeEntitlementWindowProcessorBehaviorContract(
+describeEntitlementWindowProcessorContract(
   "EntitlementWindowProcessor (Durable Object SQLite contract)",
-  () => entitlementStub({})
+  async () => {
+    const stub = entitlementStub({})
+    return {
+      target: stub,
+      revive: async () => {
+        await evictDurableObject(stub)
+        return entitlementStub({})
+      },
+    }
+  }
 )
 
 describe("EntitlementWindowDO workers runtime invariants", () => {
