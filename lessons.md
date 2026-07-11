@@ -148,6 +148,9 @@ patterns. Keep it cheap to load and useful.
 - 2026-07-11: Durable SQLite atomic store callbacks must execute synchronous Drizzle `.run()`
   statements inside `db.transaction`; async callbacks can leave earlier writes committed when a
   later statement fails.
+- 2026-07-11: RunBudget wallet captures must atomically persist a run-monotonic sequence and an
+  immutable `[range_start_amount, target_amount)` before wallet I/O; abandoned targets advance the
+  logical range cursor but only successful captures advance `flushed_amount`.
 - 2026-05-08: Tiny-tools usage discovery reads `featurePlanVersion.meterConfig` from
   `entitlements.get`; `verify` is only for the decision.
 - 2026-05-11: Tier/package entitlements are static quantity limits from subscription grants; do

@@ -246,19 +246,31 @@ describe("RunBudgetProcessor injected behavior", () => {
     expect(harness.state.alarmAt).toBe(RUN_BUDGET_TEST_NOW + 10_000)
   })
 
-  it("retries a persisted capture with its original amount and flush sequence", async () => {
+  it("retries an immutable persisted capture before opening a later range", async () => {
     const harness = createRunBudgetProcessorHarness()
     await harness.processor.startRun(createRunBudgetStartInput())
     await harness.processor.applySyncEvent(createRunBudgetApplyInput())
     harness.captureReservationUsage.mockRejectedValueOnce(new Error("wallet unavailable"))
 
     await harness.processor.flushCaptures()
+    await harness.processor.applySyncEvent(
+      createRunBudgetApplyInput({
+        idempotencyKey: "idem_after_retryable_capture",
+        event: {
+          ...createRunBudgetApplyInput().event,
+          id: "evt_after_retryable_capture",
+        },
+      })
+    )
     await harness.processor.flushCaptures()
 
-    expect(harness.captureReservationUsage).toHaveBeenCalledTimes(2)
+    expect(harness.captureReservationUsage).toHaveBeenCalledTimes(3)
     const first = harness.captureReservationUsage.mock.calls[0]?.[0]
     const second = harness.captureReservationUsage.mock.calls[1]?.[0]
-    expect(second).toMatchObject({ amount: 5_000, flushSeq: first?.flushSeq })
+    const third = harness.captureReservationUsage.mock.calls[2]?.[0]
+    expect(second).toEqual(first)
+    expect(third).toMatchObject({ amount: 5_000 })
+    expect(third?.flushSeq).toBeGreaterThan(second?.flushSeq ?? 0)
   })
 
   it("rolls back partial capture success bookkeeping and recovers on retry", async () => {
@@ -483,5 +495,113 @@ describe("RunBudgetProcessor injected behavior", () => {
         projectId: "proj_1",
       })
     ).rejects.toThrow("RUN_NOT_FOUND")
+  })
+})
+
+describe("RunBudgetProcessor capture sequence regressions", () => {
+  it("assigns distinct wallet command sequences to distinct buckets created in one millisecond", async () => {
+    const store = new InMemoryRunBudgetStore()
+    const harness = createRunBudgetProcessorHarness({ store })
+    await harness.processor.startRun(createRunBudgetStartInput({ budgetAmount: 20_000 }))
+    await harness.processor.applySyncEvent(createRunBudgetApplyInput())
+
+    const secondAt = RUN_BUDGET_TEST_NOW + 100_000
+    harness.pricingApply.mockResolvedValueOnce({
+      allowed: true,
+      meterFacts: [
+        createRunBudgetMeterFact({
+          event_id: "evt_sequence_2",
+          idempotency_key: "idem_sequence_2:ew",
+          period_key: "period_2",
+          timestamp: secondAt,
+        }),
+      ],
+    })
+    const second = createRunBudgetApplyInput({
+      idempotencyKey: "idem_sequence_2",
+      event: {
+        ...createRunBudgetApplyInput().event,
+        id: "evt_sequence_2",
+        timestamp: secondAt,
+      },
+    })
+    await harness.processor.applySyncEvent({
+      ...second,
+      entitlement: {
+        ...second.entitlement,
+        billingPeriods: [
+          {
+            billingPeriodId: "bp_2",
+            cycleStartAt: RUN_BUDGET_TEST_NOW + 50_000,
+            cycleEndAt: RUN_BUDGET_TEST_NOW + 150_000,
+            featurePlanVersionItemId: "item_2",
+            statementKey: "stmt_2",
+          },
+        ],
+      },
+    })
+
+    const walletCommands = new Map<string, string>()
+    harness.captureReservationUsage.mockImplementation(async (input) => {
+      const commandKey = `capture:${input.reservationId}:${input.flushSeq}`
+      const payload = JSON.stringify({
+        amount: input.amount,
+        billingPeriodId: input.billingPeriodId,
+        metadata: input.metadata,
+        statementKey: input.statementKey,
+      })
+      const existing = walletCommands.get(commandKey)
+      if (existing !== undefined && existing !== payload) {
+        throw new UnPriceWalletError({ message: "WALLET_IDEMPOTENCY_CONFLICT" })
+      }
+      walletCommands.set(commandKey, payload)
+      return { val: { capturedAmount: input.amount } }
+    })
+
+    await harness.processor.flushCaptures()
+
+    expect(walletCommands.size).toBe(2)
+    expect([...store.buckets.values()].map((bucket) => bucket.flushedAmount)).toEqual([
+      5_000, 5_000,
+    ])
+  })
+
+  it("creates a fresh capture range when later spend follows an abandoned range", async () => {
+    const store = new InMemoryRunBudgetStore()
+    const harness = createRunBudgetProcessorHarness({ store })
+    await harness.processor.startRun(createRunBudgetStartInput({ budgetAmount: 20_000 }))
+    await harness.processor.applySyncEvent(createRunBudgetApplyInput())
+    harness.captureReservationUsage.mockRejectedValue(new Error("wallet unavailable"))
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+      await harness.processor.flushCaptures()
+    }
+    expect([...store.intents.values()][0]).toMatchObject({
+      amount: 5_000,
+      attemptCount: 5,
+      status: "abandoned",
+    })
+
+    harness.captureReservationUsage.mockResolvedValue({ val: { capturedAmount: 5_000 } })
+    await harness.processor.applySyncEvent(
+      createRunBudgetApplyInput({
+        idempotencyKey: "idem_after_abandonment",
+        event: {
+          ...createRunBudgetApplyInput().event,
+          id: "evt_after_abandonment",
+        },
+      })
+    )
+    await harness.processor.flushCaptures()
+
+    expect(store.intents.size).toBe(2)
+    expect([...store.intents.values()]).toEqual([
+      expect.objectContaining({ rangeStartAmount: 0, targetAmount: 5_000 }),
+      expect.objectContaining({ rangeStartAmount: 5_000, targetAmount: 10_000 }),
+    ])
+    expect([...store.buckets.values()][0]).toMatchObject({
+      consumedAmount: 10_000,
+      flushedAmount: 5_000,
+    })
   })
 })

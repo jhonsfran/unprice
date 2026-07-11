@@ -29,6 +29,7 @@ export type RunState = {
   reservedAmount: number
   consumedAmount: number
   flushedAmount: number
+  lastCaptureSeq: number
   startedAt: number
   endedAt: number | null
   expiresAt: number | null
@@ -60,6 +61,9 @@ export type RunCaptureIntent = {
   runId: string
   bucketKey: string
   amount: number
+  flushSeq: number
+  rangeStartAmount: number
+  targetAmount: number
   status: RunCaptureStatus
   attemptCount: number
   lastError: string | null
@@ -114,7 +118,11 @@ export type RunBudgetStore = {
   }): Promise<void>
   listUnflushedBuckets(): Promise<RunSpendBucket[]>
   loadCaptureIntent(intentKey: string): Promise<RunCaptureIntent | undefined>
-  upsertCaptureIntent(intent: RunCaptureIntent): Promise<void>
+  openCaptureIntent(input: {
+    runId: string
+    bucketKey: string
+    now: number
+  }): Promise<RunCaptureIntent | null>
   commitCaptureSuccess(input: {
     intentKey: string
     bucketKey: string
@@ -131,6 +139,7 @@ export type RunBudgetStore = {
   }): Promise<void>
   listRetryableCaptureIntents(): Promise<RunCaptureIntent[]>
   hasUnresolvedCaptureIntents(runId: string): Promise<boolean>
+  hasCaptureableSpend(runId: string): Promise<boolean>
   findAbandonedCaptureIntents(runId: string): Promise<RunCaptureIntent[]>
   findRunningRunsPastExpiry(now: number): Promise<RunState[]>
   findNextExpirationAlarmAt(now: number): Promise<number | null>

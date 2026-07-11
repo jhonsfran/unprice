@@ -4,6 +4,7 @@ import {
   CAPTURE_SUCCESS_STATUS,
   type CaptureFailureStatus,
 } from "../capture-policy"
+import { captureIntentFlushSeq, captureIntentRange } from "../capture-range"
 import type { EndRunInput, RunBudgetDecision } from "../contracts"
 import type {
   RunBudgetStore,
@@ -103,14 +104,60 @@ export class InMemoryRunBudgetStore implements RunBudgetStore {
     return this.clone(this.intents.get(intentKey))
   }
 
-  async upsertCaptureIntent(intent: RunCaptureIntent): Promise<void> {
-    const existing = this.intents.get(intent.intentKey)
-    this.intents.set(
-      intent.intentKey,
-      existing
-        ? { ...existing, status: "pending", updatedAt: intent.updatedAt }
-        : this.clone(intent)
-    )
+  async openCaptureIntent(input: {
+    runId: string
+    bucketKey: string
+    now: number
+  }): Promise<RunCaptureIntent | null> {
+    const existing = [...this.intents.values()]
+      .filter(
+        (intent) =>
+          intent.bucketKey === input.bucketKey &&
+          CAPTURE_RETRY_STATUSES.some((status) => status === intent.status)
+      )
+      .sort((left, right) => captureIntentFlushSeq(left) - captureIntentFlushSeq(right))[0]
+    if (existing) return this.clone(existing)
+
+    const snapshot = this.snapshot()
+    try {
+      const bucket = this.buckets.get(input.bucketKey)
+      const run = this.runs.get(input.runId)
+      if (!bucket || !run) throw new Error("Run capture state missing")
+
+      const bucketIntents = [...this.intents.values()].filter(
+        (intent) => intent.bucketKey === input.bucketKey
+      )
+      const rangeStartAmount = this.captureCursor(bucket.flushedAmount, bucketIntents)
+      if (bucket.consumedAmount <= rangeStartAmount) return null
+
+      const highestIntentSeq = [...this.intents.values()].reduce(
+        (highest, intent) =>
+          intent.runId === input.runId ? Math.max(highest, captureIntentFlushSeq(intent)) : highest,
+        0
+      )
+      const flushSeq = Math.max(input.now, run.lastCaptureSeq + 1, highestIntentSeq + 1)
+      const targetAmount = bucket.consumedAmount
+      const intent: RunCaptureIntent = {
+        intentKey: `run-capture:${input.runId}:${input.bucketKey}:${rangeStartAmount}`,
+        runId: input.runId,
+        bucketKey: input.bucketKey,
+        amount: targetAmount - rangeStartAmount,
+        flushSeq,
+        rangeStartAmount,
+        targetAmount,
+        status: "pending",
+        attemptCount: 0,
+        lastError: null,
+        createdAt: flushSeq,
+        updatedAt: input.now,
+      }
+      run.lastCaptureSeq = flushSeq
+      this.intents.set(intent.intentKey, this.clone(intent))
+      return this.clone(intent)
+    } catch (error) {
+      this.restore(snapshot)
+      throw error
+    }
   }
 
   async commitCaptureSuccess(input: {
@@ -163,6 +210,23 @@ export class InMemoryRunBudgetStore implements RunBudgetStore {
     )
   }
 
+  async hasCaptureableSpend(runId: string): Promise<boolean> {
+    return [...this.buckets.values()]
+      .filter((bucket) => bucket.runId === runId)
+      .some((bucket) => {
+        const bucketIntents = [...this.intents.values()].filter(
+          (intent) => intent.bucketKey === bucket.bucketKey
+        )
+        const hasRetryable = bucketIntents.some((intent) =>
+          CAPTURE_RETRY_STATUSES.some((status) => status === intent.status)
+        )
+        return (
+          hasRetryable ||
+          bucket.consumedAmount > this.captureCursor(bucket.flushedAmount, bucketIntents)
+        )
+      })
+  }
+
   async findAbandonedCaptureIntents(runId: string) {
     return [...this.intents.values()]
       .filter(
@@ -212,6 +276,15 @@ export class InMemoryRunBudgetStore implements RunBudgetStore {
 
   private intentBelongsToRun(intent: RunCaptureIntent, runId: string): boolean {
     return intent.runId === runId || intent.intentKey.startsWith(`run-capture:${runId}:`)
+  }
+
+  private captureCursor(flushedAmount: number, intents: RunCaptureIntent[]): number {
+    return intents.reduce((cursor, intent) => {
+      if (intent.status !== CAPTURE_SUCCESS_STATUS && intent.status !== CAPTURE_ABANDONED_STATUS) {
+        return cursor
+      }
+      return Math.max(cursor, captureIntentRange(intent).targetAmount)
+    }, flushedAmount)
   }
 
   private snapshot() {

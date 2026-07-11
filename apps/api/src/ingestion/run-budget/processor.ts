@@ -1,4 +1,5 @@
 import { CAPTURE_ABANDONED_STATUS, MAX_CAPTURE_ATTEMPTS, captureBackoffMs } from "./capture-policy"
+import { captureIntentFlushSeq } from "./capture-range"
 import {
   type ApplyRunSyncEventInput,
   type EndRunInput,
@@ -77,6 +78,7 @@ export class RunBudgetProcessor {
       reservedAmount: walletResult.allocationAmount,
       consumedAmount: 0,
       flushedAmount: 0,
+      lastCaptureSeq: 0,
       startedAt: input.now,
       endedAt: null,
       expiresAt: input.expiresAt ?? null,
@@ -290,97 +292,66 @@ export class RunBudgetProcessor {
     let flushed = 0
     let skipped = 0
     for (const bucket of buckets) {
-      const pendingAmount = bucket.consumedAmount - bucket.flushedAmount
-      if (pendingAmount <= 0) {
-        skipped++
-        continue
-      }
-
       const run = await this.deps.store.loadRun(bucket.runId)
       if (!run?.reservationId) {
         skipped++
         continue
       }
-
-      const intentKey = `run-capture:${bucket.runId}:${bucket.bucketKey}:${bucket.flushedAmount}`
-
-      const now = this.deps.clock.now()
-
-      // Skip-guard: a capture that exhausted its retries is terminal. Never
-      // resurrect it back to `pending` (which would loop forever) -- leave it
-      // abandoned so the run can close with a reconciliation flag instead.
-      const existingIntent = await this.deps.store.loadCaptureIntent(intentKey)
-      if (existingIntent?.status === CAPTURE_ABANDONED_STATUS) {
-        skipped++
-        continue
-      }
-
-      // Persist capture intent before external I/O. On conflict, keep the original
-      // amount snapshot so wallet replay never changes payload for the same key.
-      await this.deps.store.upsertCaptureIntent({
-        intentKey,
-        runId: bucket.runId,
-        bucketKey: bucket.bucketKey,
-        amount: pendingAmount,
-        status: "pending",
-        attemptCount: 0,
-        lastError: null,
-        createdAt: now,
-        updatedAt: now,
-      })
-
-      const intent = await this.deps.store.loadCaptureIntent(intentKey)
-      if (!intent) throw new Error("Run capture intent missing after insert")
-
-      try {
-        // External wallet capture
-        await this.captureToWallet({
-          reservationId: run.reservationId,
-          projectId: run.projectId,
-          customerId: run.customerId,
-          currency: run.currency,
-          amount: intent.amount,
-          billingPeriodId: bucket.billingPeriodId,
-          featurePlanVersionItemId: bucket.featurePlanVersionItemId,
-          featureSlug: bucket.featureSlug,
-          statementKey: bucket.statementKey,
-          idempotencyKey: intentKey,
-          quantity: bucket.quantity,
-          flushSeq: intent.createdAt,
-        })
-
-        await this.deps.store.commitCaptureSuccess({
-          amount: intent.amount,
-          bucketKey: bucket.bucketKey,
-          intentKey,
+      let capturedRange = false
+      while (true) {
+        const intent = await this.deps.store.openCaptureIntent({
           runId: bucket.runId,
-          updatedAt: this.deps.clock.now(),
+          bucketKey: bucket.bucketKey,
+          now: this.deps.clock.now(),
         })
-      } catch (error) {
-        // Record the failed attempt. Once we reach the attempt cap the intent
-        // becomes terminal `abandoned`: it will never be retried again and no
-        // longer blocks the run from closing (see closeRunInStorage). attemptCount
-        // is preserved across the flush upsert, so this count is stable per intent.
-        const nextAttempt = intent.attemptCount + 1
-        const nextStatus = nextAttempt >= MAX_CAPTURE_ATTEMPTS ? CAPTURE_ABANDONED_STATUS : "failed"
-
-        await this.deps.store.markCaptureFailure({
-          intentKey,
-          status: nextStatus,
-          attemptCount: nextAttempt,
-          lastError: error instanceof Error ? error.message : "unknown",
-          updatedAt: this.deps.clock.now(),
-        })
-
-        if (filter?.failOnCaptureError) {
-          throw error
+        if (!intent) {
+          if (capturedRange) flushed++
+          else skipped++
+          break
         }
 
-        skipped++
-        continue
-      }
+        try {
+          await this.captureToWallet({
+            reservationId: run.reservationId,
+            projectId: run.projectId,
+            customerId: run.customerId,
+            currency: run.currency,
+            amount: intent.amount,
+            billingPeriodId: bucket.billingPeriodId,
+            featurePlanVersionItemId: bucket.featurePlanVersionItemId,
+            featureSlug: bucket.featureSlug,
+            statementKey: bucket.statementKey,
+            idempotencyKey: intent.intentKey,
+            quantity: bucket.quantity,
+            flushSeq: captureIntentFlushSeq(intent),
+          })
 
-      flushed++
+          await this.deps.store.commitCaptureSuccess({
+            amount: intent.amount,
+            bucketKey: bucket.bucketKey,
+            intentKey: intent.intentKey,
+            runId: bucket.runId,
+            updatedAt: this.deps.clock.now(),
+          })
+          capturedRange = true
+        } catch (error) {
+          const nextAttempt = intent.attemptCount + 1
+          const nextStatus =
+            nextAttempt >= MAX_CAPTURE_ATTEMPTS ? CAPTURE_ABANDONED_STATUS : "failed"
+
+          await this.deps.store.markCaptureFailure({
+            intentKey: intent.intentKey,
+            status: nextStatus,
+            attemptCount: nextAttempt,
+            lastError: error instanceof Error ? error.message : "unknown",
+            updatedAt: this.deps.clock.now(),
+          })
+
+          if (filter?.failOnCaptureError) throw error
+          skipped++
+          break
+        }
+      }
     }
 
     return { flushed, skipped }
@@ -824,7 +795,7 @@ export class RunBudgetProcessor {
     if (run.expiresAt !== null) {
       await this.scheduleAlarmAt(Math.max(this.deps.clock.now(), run.expiresAt))
     }
-    if (run.consumedAmount > run.flushedAmount) {
+    if (await this.deps.store.hasCaptureableSpend(run.runId)) {
       await this.scheduleAlarm()
     }
   }

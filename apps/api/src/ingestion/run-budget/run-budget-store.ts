@@ -7,6 +7,7 @@ import {
   type CaptureFailureStatus,
   runCaptureStatusSchema,
 } from "./capture-policy"
+import { captureIntentFlushSeq, captureIntentRange } from "./capture-range"
 import { type EndRunInput, type RunBudgetDecision, runStatusSchema } from "./contracts"
 import * as schema from "./db/schema"
 import type {
@@ -92,14 +93,74 @@ export class RunBudgetStore implements RunBudgetStateStore {
     return row ? this.toCaptureIntent(row) : undefined
   }
 
-  async upsertCaptureIntent(intent: RunCaptureIntent): Promise<void> {
-    await this.db
-      .insert(schema.runCaptureIntents)
-      .values(intent)
-      .onConflictDoUpdate({
-        target: schema.runCaptureIntents.intentKey,
-        set: { status: "pending", updatedAt: intent.updatedAt },
-      })
+  async openCaptureIntent(input: {
+    runId: string
+    bucketKey: string
+    now: number
+  }): Promise<RunCaptureIntent | null> {
+    let openedIntent: RunCaptureIntent | null = null
+
+    this.db.transaction((tx) => {
+      const rows = tx
+        .select()
+        .from(schema.runCaptureIntents)
+        .where(eq(schema.runCaptureIntents.runId, input.runId))
+        .all()
+      const intents = rows.map((row) => this.toCaptureIntent(row))
+      const bucketIntents = intents.filter((intent) => intent.bucketKey === input.bucketKey)
+      const retryable = bucketIntents
+        .filter((intent) => CAPTURE_RETRY_STATUSES.some((status) => status === intent.status))
+        .sort((left, right) => captureIntentFlushSeq(left) - captureIntentFlushSeq(right))[0]
+      if (retryable) {
+        openedIntent = retryable
+        return
+      }
+
+      const bucket = tx
+        .select()
+        .from(schema.runSpendBuckets)
+        .where(eq(schema.runSpendBuckets.bucketKey, input.bucketKey))
+        .get()
+      const run = tx
+        .select()
+        .from(schema.runState)
+        .where(eq(schema.runState.runId, input.runId))
+        .get()
+      if (!bucket || !run) throw new Error("Run capture state missing")
+
+      const rangeStartAmount = this.captureCursor(bucket.flushedAmount, bucketIntents)
+      if (bucket.consumedAmount <= rangeStartAmount) return
+
+      const highestIntentSeq = intents.reduce(
+        (highest, intent) => Math.max(highest, captureIntentFlushSeq(intent)),
+        0
+      )
+      const flushSeq = Math.max(input.now, run.lastCaptureSeq + 1, highestIntentSeq + 1)
+      const targetAmount = bucket.consumedAmount
+      const intent: RunCaptureIntent = {
+        intentKey: `run-capture:${input.runId}:${input.bucketKey}:${rangeStartAmount}`,
+        runId: input.runId,
+        bucketKey: input.bucketKey,
+        amount: targetAmount - rangeStartAmount,
+        flushSeq,
+        rangeStartAmount,
+        targetAmount,
+        status: "pending",
+        attemptCount: 0,
+        lastError: null,
+        createdAt: flushSeq,
+        updatedAt: input.now,
+      }
+
+      tx.update(schema.runState)
+        .set({ lastCaptureSeq: flushSeq })
+        .where(eq(schema.runState.runId, input.runId))
+        .run()
+      tx.insert(schema.runCaptureIntents).values(intent).run()
+      openedIntent = intent
+    })
+
+    return openedIntent
   }
 
   async commitCaptureSuccess(input: {
@@ -157,6 +218,27 @@ export class RunBudgetStore implements RunBudgetStateStore {
     return intents.some((intent) => this.intentBelongsToRun(intent, runId))
   }
 
+  async hasCaptureableSpend(runId: string): Promise<boolean> {
+    const buckets = await this.db.query.runSpendBuckets.findMany({
+      where: eq(schema.runSpendBuckets.runId, runId),
+    })
+    const rows = await this.db.query.runCaptureIntents.findMany({
+      where: eq(schema.runCaptureIntents.runId, runId),
+    })
+    const intents = rows.map((row) => this.toCaptureIntent(row))
+
+    return buckets.some((bucket) => {
+      const bucketIntents = intents.filter((intent) => intent.bucketKey === bucket.bucketKey)
+      const hasRetryable = bucketIntents.some((intent) =>
+        CAPTURE_RETRY_STATUSES.some((status) => status === intent.status)
+      )
+      return (
+        hasRetryable ||
+        bucket.consumedAmount > this.captureCursor(bucket.flushedAmount, bucketIntents)
+      )
+    })
+  }
+
   async findAbandonedCaptureIntents(runId: string) {
     const rows = await this.db.query.runCaptureIntents.findMany({
       where: eq(schema.runCaptureIntents.status, CAPTURE_ABANDONED_STATUS),
@@ -211,6 +293,15 @@ export class RunBudgetStore implements RunBudgetStateStore {
 
   private intentBelongsToRun(intent: RunCaptureIntent, runId: string): boolean {
     return intent.runId === runId || intent.intentKey.startsWith(`run-capture:${runId}:`)
+  }
+
+  private captureCursor(flushedAmount: number, intents: RunCaptureIntent[]): number {
+    return intents.reduce((cursor, intent) => {
+      if (intent.status !== CAPTURE_SUCCESS_STATUS && intent.status !== CAPTURE_ABANDONED_STATUS) {
+        return cursor
+      }
+      return Math.max(cursor, captureIntentRange(intent).targetAmount)
+    }, flushedAmount)
   }
 
   private toRunState(row: typeof schema.runState.$inferSelect): RunState {

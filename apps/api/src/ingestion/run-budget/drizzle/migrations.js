@@ -3,6 +3,7 @@ import m0001 from "./0001_rainy_gwen_stacy.sql"
 import m0002 from "./0002_equal_morg.sql"
 import m0003 from "./0003_milky_the_hand.sql"
 import m0004 from "./0004_abandoned_tarantula.sql"
+import m0005 from "./0005_wise_george_stacy.sql"
 import journal from "./meta/_journal.json"
 
 export default {
@@ -13,5 +14,6 @@ export default {
     m0002,
     m0003,
     m0004,
+    m0005,
   },
 }
