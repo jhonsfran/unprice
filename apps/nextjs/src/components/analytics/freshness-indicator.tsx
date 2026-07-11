@@ -3,6 +3,7 @@
 import { cn } from "@unprice/ui/utils"
 import { RefreshCw } from "lucide-react"
 import { useEffect, useState } from "react"
+import { ANALYTICS_REFRESH_INTERVAL_MS } from "./ingestion-health-query"
 
 const ABSOLUTE_TIME_FORMAT = new Intl.DateTimeFormat(undefined, {
   month: "short",
@@ -30,7 +31,7 @@ export function FreshnessIndicator({
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
-    const intervalId = globalThis.setInterval(() => setNow(Date.now()), 30_000)
+    const intervalId = globalThis.setInterval(() => setNow(Date.now()), ANALYTICS_REFRESH_INTERVAL_MS)
 
     return () => globalThis.clearInterval(intervalId)
   }, [])

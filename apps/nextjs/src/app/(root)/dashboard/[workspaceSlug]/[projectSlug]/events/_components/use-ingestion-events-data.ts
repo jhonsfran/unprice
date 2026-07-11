@@ -1,9 +1,9 @@
 "use client"
 
-import { useInfiniteQuery, useMutation } from "@tanstack/react-query"
-import { toast } from "@unprice/ui/sonner"
+import { useInfiniteQuery } from "@tanstack/react-query"
 import { useParams } from "next/navigation"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
+import { ANALYTICS_REFRESH_INTERVAL_MS } from "~/components/analytics/ingestion-health-query"
 import type { IngestionQueryFilter } from "~/components/analytics/ingestion-health-model"
 import { useFilterDataTable } from "~/hooks/use-filter-datatable"
 import type { DataTableFilterParams } from "~/lib/searchParams"
@@ -15,36 +15,13 @@ import {
   type IngestionStatus,
   buildIngestionEventsFilters,
 } from "./ingestion-events-table-schema"
+import { useReplayQueue } from "./use-replay-queue"
+import { useRollingWindow } from "./use-rolling-window"
 
-const DEFAULT_WINDOW_MS = 60 * 60 * 1000
-// Matches the 30s analytics SWR freshness window (see lessons.md 2026-06-15).
-const AUTO_REFRESH_INTERVAL_MS = 30_000
+export { MAX_REPLAY_IDS } from "./use-replay-queue"
+
 const EVENTS_PAGE_SIZE = 50
-const MAX_STORED_REPLAY_IDS = 500
 const INGESTION_STATES = ["processed", "rejected", "failed"] as const
-
-export const MAX_REPLAY_IDS = 50
-
-function computeWindowLabel(from: number, to: number): string {
-  const diffMs = to - from
-  const diffHours = Math.round(diffMs / (1000 * 60 * 60))
-  if (diffHours <= 1) return "in the last hour"
-  if (diffHours < 24) return `in the last ${diffHours} hours`
-  const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24))
-  if (diffDays === 1) return "today"
-  return `in the last ${diffDays} days`
-}
-
-function resolveWindow(
-  from: number | null,
-  to: number | null,
-  now: number
-): { from: number; to: number } {
-  return {
-    from: from ?? now - DEFAULT_WINDOW_MS,
-    to: to ?? now,
-  }
-}
 
 export function useIngestionEventsData() {
   const trpc = useTRPC()
@@ -54,14 +31,10 @@ export function useIngestionEventsData() {
   }>()
   const [filters, setFilters] = useFilterDataTable()
   const [detailsEvent, setDetailsEvent] = useState<IngestionEventRow | null>(null)
-  const [rollingNow, setRollingNow] = useState(() => Date.now())
   const replayStorageKey = `unprice:events:replay-queued:${workspaceSlug}:${projectSlug}`
-  const [queuedReplayIds, setQueuedReplayIds] = useState<ReadonlySet<string>>(() => new Set())
-  const [pendingReplayIds, setPendingReplayIds] = useState<ReadonlySet<string>>(() => new Set())
-  const hasExplicitDateRange = filters.from !== null || filters.to !== null
-  const queryWindow = useMemo(
-    () => resolveWindow(filters.from, filters.to, rollingNow),
-    [filters.from, filters.to, rollingNow]
+  const { queryWindow, hasExplicitDateRange, windowLabel } = useRollingWindow(
+    filters.from,
+    filters.to
   )
   const filterValues = useMemo(
     () => getIngestionEventsFilterValues(filters.filters),
@@ -71,30 +44,6 @@ export function useIngestionEventsData() {
     () => buildIngestionQueryFilter(filterValues, filters.search),
     [filterValues, filters.search]
   )
-  const blockedReplayIds = useMemo(
-    () => new Set([...queuedReplayIds, ...pendingReplayIds]),
-    [pendingReplayIds, queuedReplayIds]
-  )
-
-  useEffect(() => {
-    setQueuedReplayIds(new Set(readStoredReplayIds(replayStorageKey)))
-  }, [replayStorageKey])
-
-  useEffect(() => {
-    if (hasExplicitDateRange) {
-      return
-    }
-
-    const refresh = () => setRollingNow(Date.now())
-    refresh()
-    const intervalId = globalThis.setInterval(refresh, AUTO_REFRESH_INTERVAL_MS)
-    globalThis.addEventListener("focus", refresh)
-
-    return () => {
-      globalThis.clearInterval(intervalId)
-      globalThis.removeEventListener("focus", refresh)
-    }
-  }, [hasExplicitDateRange])
 
   const {
     data: queryData,
@@ -117,18 +66,14 @@ export function useIngestionEventsData() {
         initialCursor: null,
         getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
         placeholderData: (previousData) => previousData,
-        refetchInterval: hasExplicitDateRange ? AUTO_REFRESH_INTERVAL_MS : false,
+        refetchInterval: hasExplicitDateRange ? ANALYTICS_REFRESH_INTERVAL_MS : false,
         refetchOnWindowFocus: true,
       }
     )
   )
-  const replayMutation = useMutation(
-    trpc.analytics.replayIngestionEvents.mutationOptions({
-      onSuccess: async () => {
-        await refetch()
-      },
-    })
-  )
+
+  const { queuedReplayIds, pendingReplayIds, blockedReplayIds, handleReplay, replayIsPending } =
+    useReplayQueue(replayStorageKey, refetch)
 
   const pages = queryData?.pages
   const rows = useMemo(() => flattenUniqueEvents(pages ?? []), [pages])
@@ -157,40 +102,6 @@ export function useIngestionEventsData() {
 
     return fetchNextPage().then(() => undefined)
   }, [fetchNextPage, hasNextPage, isFetchingNextPage])
-
-  const handleReplay = useCallback(
-    async (canonicalAuditIds: string | string[]) => {
-      const ids = Array.isArray(canonicalAuditIds) ? canonicalAuditIds : [canonicalAuditIds]
-      const dedupedIds = Array.from(new Set(ids)).filter((id) => !blockedReplayIds.has(id))
-
-      if (dedupedIds.length === 0) {
-        toast.info("Replay already queued")
-        return
-      }
-
-      if (dedupedIds.length > MAX_REPLAY_IDS) {
-        const message = `Select ${MAX_REPLAY_IDS} or fewer failed events to replay.`
-        toast.error(message)
-        throw new Error(message)
-      }
-
-      setPendingReplayIds((previousIds) => new Set([...previousIds, ...dedupedIds]))
-
-      try {
-        const result = await replayMutation.mutateAsync({ canonicalAuditIds: dedupedIds })
-        setQueuedReplayIds((previousIds) =>
-          persistReplayIds(replayStorageKey, previousIds, dedupedIds)
-        )
-        toast.success(result.replayed === 1 ? "Replay queued" : `${result.replayed} replays queued`)
-      } catch (error) {
-        toast.error(getReplayErrorMessage(error))
-        throw error
-      } finally {
-        setPendingReplayIds((previousIds) => removeReplayIds(previousIds, dedupedIds))
-      }
-    },
-    [blockedReplayIds, replayMutation, replayStorageKey]
-  )
 
   const handleDetailsOpenChange = useCallback((open: boolean) => {
     if (!open) {
@@ -244,8 +155,6 @@ export function useIngestionEventsData() {
     [filterValues, firstPage?.facets, handleFilterChange]
   )
 
-  const windowLabel = computeWindowLabel(queryWindow.from, queryWindow.to)
-
   const isInitialLoading = isLoading && rows.length === 0
   const isRefreshing = isFetching && !isInitialLoading && !isFetchingNextPage
 
@@ -266,7 +175,7 @@ export function useIngestionEventsData() {
     hasNextPage,
     handleLoadMore,
     handleReplay,
-    replayIsPending: replayMutation.isPending,
+    replayIsPending,
     blockedReplayIds,
     hasReplayableRows,
     queuedReplayIds,
@@ -359,60 +268,6 @@ function isIngestionState(
 
 export function isReplayQueued(row: IngestionEventRow, replayIds: ReadonlySet<string>): boolean {
   return row.state === "failed" && row.replayable && replayIds.has(row.canonicalAuditId)
-}
-
-function readStoredReplayIds(storageKey: string): string[] {
-  try {
-    const rawValue = window.localStorage.getItem(storageKey)
-    if (!rawValue) {
-      return []
-    }
-
-    const parsedValue: unknown = JSON.parse(rawValue)
-    if (!Array.isArray(parsedValue)) {
-      return []
-    }
-
-    return parsedValue.filter((value): value is string => typeof value === "string")
-  } catch {
-    return []
-  }
-}
-
-function persistReplayIds(
-  storageKey: string,
-  previousIds: ReadonlySet<string>,
-  addedIds: string[]
-): ReadonlySet<string> {
-  const nextIds = Array.from(new Set([...previousIds, ...addedIds])).slice(-MAX_STORED_REPLAY_IDS)
-
-  try {
-    window.localStorage.setItem(storageKey, JSON.stringify(nextIds))
-  } catch {
-    // Storage may be unavailable in private mode; the in-memory block still applies.
-  }
-
-  return new Set(nextIds)
-}
-
-function removeReplayIds(
-  previousIds: ReadonlySet<string>,
-  removedIds: string[]
-): ReadonlySet<string> {
-  const nextIds = new Set(previousIds)
-  for (const removedId of removedIds) {
-    nextIds.delete(removedId)
-  }
-
-  return nextIds
-}
-
-function getReplayErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message) {
-    return error.message
-  }
-
-  return "Failed to replay ingestion events"
 }
 
 function flattenUniqueEvents(pages: IngestionStatus[]): IngestionEventRow[] {
