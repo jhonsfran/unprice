@@ -233,7 +233,12 @@ export function InvoiceReceipt({ features }: { features: Feature[] }) {
           labelClassName="text-xs"
           fact="INV-0042 · sandbox"
         />
-        <LedgerRow label="billed to" variant="ghost" labelClassName="text-xs" fact={DEMO_CUSTOMER} />
+        <LedgerRow
+          label="billed to"
+          variant="ghost"
+          labelClassName="text-xs"
+          fact={DEMO_CUSTOMER}
+        />
         <LedgerRow label="period" variant="ghost" labelClassName="text-xs" fact={period} />
         <LedgerRow
           label="status"

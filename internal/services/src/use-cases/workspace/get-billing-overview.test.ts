@@ -32,7 +32,10 @@ vi.mock("../analytics/get-usage-dashboard", async () => {
   return { ...actual, getUsageDashboard: getUsageDashboardMock }
 })
 
-import { GetWorkspaceBillingOverviewError, getWorkspaceBillingOverview } from "./get-billing-overview"
+import {
+  GetWorkspaceBillingOverviewError,
+  getWorkspaceBillingOverview,
+} from "./get-billing-overview"
 
 const now = Date.parse("2026-07-04T10:00:00.000Z")
 
@@ -187,18 +190,19 @@ describe("getWorkspaceBillingOverview", () => {
       paymentProvider: "stripe",
     })
     expect(result.val?.usage.summary.featureCount).toBe(2)
-    expect(getCustomerCurrentAccessMock).toHaveBeenCalledWith(
-      expect.anything(),
-      { projectId: "proj_billing", customerId: "cus_workspace" }
-    )
-    expect(getCustomerWalletMock).toHaveBeenCalledWith(
-      expect.anything(),
-      { projectId: "proj_billing", customerId: "cus_workspace" }
-    )
-    expect(getUsageDashboardMock).toHaveBeenCalledWith(
-      expect.anything(),
-      { projectId: "proj_billing", customerId: "cus_workspace", range: "30d" }
-    )
+    expect(getCustomerCurrentAccessMock).toHaveBeenCalledWith(expect.anything(), {
+      projectId: "proj_billing",
+      customerId: "cus_workspace",
+    })
+    expect(getCustomerWalletMock).toHaveBeenCalledWith(expect.anything(), {
+      projectId: "proj_billing",
+      customerId: "cus_workspace",
+    })
+    expect(getUsageDashboardMock).toHaveBeenCalledWith(expect.anything(), {
+      projectId: "proj_billing",
+      customerId: "cus_workspace",
+      range: "30d",
+    })
   })
 
   it("rejects when the workspace has no billing customer id", async () => {

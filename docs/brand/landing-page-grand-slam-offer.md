@@ -11,7 +11,7 @@ use the strategy doc for the full reasoning.
 - **Canonical offer (full value stack, guarantee, bonuses, value equation):**
   [`the-expensive-action-offer.md`](the-expensive-action-offer.md). Defer to it for offer logic.
 - **Canonical positioning, headline, competitor contrast:**
-  [`positioning-and-messaging.md`](positioning-and-messaging.md).
+  [`positioning-and-messaging.md`](strategic/positioning-and-messaging.md).
 - **Voice, vocabulary, claims policy:** [`brand-identity.md`](brand-identity.md).
 
 **Claims guardrails:** no exact latency/throughput numbers, no "Stripe replacement," no

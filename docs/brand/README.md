@@ -77,7 +77,7 @@ Each fact has one owner. Other docs should reference, not restate, the owner.
   language, CTAs, replacement dictionary, surface-specific copy rules, and review checklist.
 - [Brand Narrative](brand-narrative.md): core story, rallying cry, pitch variants, demo script,
   repeatable lines, and narrative guardrails.
-- [Positioning And Messaging](positioning-and-messaging.md): canonical source for beachhead market,
+- [Positioning And Messaging](strategic/positioning-and-messaging.md): canonical source for beachhead market,
   ICP, category, positioning statement, headline, message hierarchy, competitor contrast, and GTM
   message discipline.
 - [Jobs To Be Done](jobs-to-be-done.md): core job, trigger priority, switch forces, campaign

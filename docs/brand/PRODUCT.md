@@ -70,7 +70,7 @@ application money path.
 
 ## Positioning
 
-Canonical source: [`positioning-and-messaging.md`](positioning-and-messaging.md). Keep this section
+Canonical source: [`positioning-and-messaging.md`](strategic/positioning-and-messaging.md). Keep this section
 in sync with it.
 
 Public frame: open-source customer money path for usage-based SaaS. PriceOps is the internal

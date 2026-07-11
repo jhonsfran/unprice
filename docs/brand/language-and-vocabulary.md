@@ -31,7 +31,7 @@ flowchart LR
 ## Canonical Sources
 
 - Positioning, category, and message hierarchy:
-  [`positioning-and-messaging.md`](positioning-and-messaging.md).
+  [`positioning-and-messaging.md`](strategic/positioning-and-messaging.md).
 - Product model, pillars, and claim boundaries: [`PRODUCT.md`](PRODUCT.md).
 - Voice, personality, archetype, and claims policy: [`brand-identity.md`](brand-identity.md).
 - Narrative, pitch lines, CTAs, and demo angle: [`brand-narrative.md`](brand-narrative.md).

@@ -1,16 +1,16 @@
 # Agent Guide
 
 This is the canonical guide for automated agents working in this repository. Read it before
-editing. Read `lessons.md` before non-trivial work and keep it updated when a task reveals
-repo-specific lessons. `CLAUDE.md` and `docs/adr/ADR-0001-canonical-backend-architecture-boundaries.md`
+editing. Read `docs/lessons.md` before non-trivial work and keep it updated when a task reveals
+repo-specific lessons. `CLAUDE.md` and `docs/adr` folder
 contain compatible background; keep them aligned when changing architecture rules.
 
 ## Operating Principles
 
-- Treat [`lessons.md`](lessons.md) as durable working memory. Read it before changing code, tests,
+- Treat [`lessons.md`](docs/lessons.md) as durable working memory. Read it before changing code, tests,
   docs, migrations, payment flows, billing flows, or architecture-sensitive paths. When you learn a
   repeatable repo-specific lesson, add or update a dated entry before finishing the task. Keep new
-  lessons tiny: 1-3 bullets, one concrete repo-specific rule per bullet.
+  lessons tiny: 1-3 bullets, one concrete repo-specific rule per bullet. The file can be ignored in git, doesn't matter read it.
 - Fix the problem at the owning architectural layer. Do not hide a domain bug in an API route,
   component, or test helper when the invariant belongs in a service, use case, schema, or database
   model.
@@ -129,12 +129,11 @@ contain compatible background; keep them aligned when changing architecture rule
 - Common commands:
   - `bin/migrate.dev`
   - `pnpm validate`
-  - `pnpm --filter @unprice/services test`
-  - `pnpm --filter @unprice/services typecheck`
-  - `pnpm --filter @unprice/trpc typecheck`
-  - `pnpm --filter api test`
-  - `pnpm --filter api type-check`
-  - `pnpm --filter nextjs typecheck`
+  - `pnpm test`
+  - `pnpm test`
+  - `pnpm test:workers`
+  - `pnpm typecheck`
+  - `pnpm --filter @unprice/services test:integration`
 - Use `pnpm validate` when checking or validating changes. Targeted commands are for local
   iteration before the full validation.
 - Avoid `pnpm fmt:fix` unless broad formatting writes are intentional.

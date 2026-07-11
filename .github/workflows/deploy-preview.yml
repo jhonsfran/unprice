@@ -111,7 +111,6 @@ jobs:
           project_id: ${{ env.NEON_PROJECT_ID }}
           base_branch: main
           compare_branch: preview/pr-${{ steps.branch-name.outputs.current_branch }}
-          username: ${{ env.NEON_DATABASE_USERNAME }}
           database: ${{ env.NEON_DATABASE_NAME }}
           api_key: ${{ env.NEON_API_KEY }}
 

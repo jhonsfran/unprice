@@ -110,7 +110,9 @@ export function CurrentAccessOverview({
                   <PlanFact
                     label="Billing cadence"
                     value={
-                      activePhase ? formatBillingLabel(activePhase.planVersion.billingConfig) : "None"
+                      activePhase
+                        ? formatBillingLabel(activePhase.planVersion.billingConfig)
+                        : "None"
                     }
                   />
                   <PlanFact

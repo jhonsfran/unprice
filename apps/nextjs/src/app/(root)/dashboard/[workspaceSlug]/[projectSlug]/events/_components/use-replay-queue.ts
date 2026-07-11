@@ -57,9 +57,7 @@ export function useReplayQueue(storageKey: string, onReplaySuccess: () => Promis
 
       try {
         const result = await replayMutation.mutateAsync({ canonicalAuditIds: dedupedIds })
-        setQueuedReplayIds((previousIds) =>
-          persistReplayIds(storageKey, previousIds, dedupedIds)
-        )
+        setQueuedReplayIds((previousIds) => persistReplayIds(storageKey, previousIds, dedupedIds))
         toast.success(result.replayed === 1 ? "Replay queued" : `${result.replayed} replays queued`)
       } catch (error) {
         toast.error(getReplayErrorMessage(error))

@@ -10,6 +10,7 @@ echo "Running pre-commit hook"
 pnpm lint-staged
 pnpm typecheck
 pnpm test
+pnpm test:workers
 
 echo "Checking tinybird deployment"
 cd internal/analytics

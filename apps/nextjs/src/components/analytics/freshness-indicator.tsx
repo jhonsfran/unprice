@@ -31,7 +31,10 @@ export function FreshnessIndicator({
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
-    const intervalId = globalThis.setInterval(() => setNow(Date.now()), ANALYTICS_REFRESH_INTERVAL_MS)
+    const intervalId = globalThis.setInterval(
+      () => setNow(Date.now()),
+      ANALYTICS_REFRESH_INTERVAL_MS
+    )
 
     return () => globalThis.clearInterval(intervalId)
   }, [])

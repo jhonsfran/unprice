@@ -9,7 +9,7 @@ export default function FooterSites(props: { className?: string; domain: string 
       )}
     >
       <div className="flex items-center gap-4 md:flex-row md:gap-2 md:px-0">
-        <p className="text-sm leading-5">
+        <p className="text-sm leading-5" suppressHydrationWarning>
           &copy; {new Date().getFullYear()} {props.domain}
         </p>
       </div>

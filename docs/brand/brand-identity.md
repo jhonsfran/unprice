@@ -48,7 +48,7 @@ work immediately:
 
 ## Positioning Statement
 
-Canonical source: [`positioning-and-messaging.md`](positioning-and-messaging.md).
+Canonical source: [`positioning-and-messaging.md`](strategic/positioning-and-messaging.md).
 
 For developer-led usage-based SaaS teams — CTOs, founding engineers, and platform engineers — who
 sell credits, usage, or hybrid plans, Unprice is the open-source customer money path that authorizes

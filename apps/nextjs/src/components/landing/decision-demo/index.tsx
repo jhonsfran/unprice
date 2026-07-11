@@ -299,7 +299,11 @@ export function DecisionDemo({ className }: { className?: string }) {
 
                 <div className="flex flex-1 flex-col px-4 py-4 sm:px-5">
                   {view === "decision" ? (
-                    <DecisionReceipt decision={lastDecision} feature={lastFeature} chipHit={chipHit} />
+                    <DecisionReceipt
+                      decision={lastDecision}
+                      feature={lastFeature}
+                      chipHit={chipHit}
+                    />
                   ) : (
                     <InvoiceReceipt features={features} />
                   )}

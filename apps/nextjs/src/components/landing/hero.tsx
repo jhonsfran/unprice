@@ -33,7 +33,7 @@ export default function Hero() {
               work runs.
             </Balancer>
           </h1>
-          {/* Compression rule (positioning-and-messaging.md): one loss-framed
+          {/* Compression rule (strategic/positioning-and-messaging.md): one loss-framed
               sentence plus the category frame. The enumeration lives below the
               fold as state — the problem trace and the money-path stations. */}
           <p className="mt-5 max-w-xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">

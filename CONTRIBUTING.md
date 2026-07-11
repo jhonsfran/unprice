@@ -35,7 +35,6 @@ before writing code. This is money-path logic; correctness and evidence trails o
 Two documents are canonical for engineering conventions — read them before non-trivial changes:
 
 - [`AGENTS.md`](AGENTS.md) — architecture boundaries, Zod contracts, error handling, testing rules.
-- [`lessons.md`](lessons.md) — dated, repo-specific lessons learned. Add to it when a task teaches
   you one.
 
 ## Development Setup

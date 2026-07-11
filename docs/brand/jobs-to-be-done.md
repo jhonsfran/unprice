@@ -17,7 +17,7 @@ Inputs:
 
 - [`PRODUCT.md`](PRODUCT.md)
 - [`brand-identity.md`](brand-identity.md)
-- [`positioning-and-messaging.md`](positioning-and-messaging.md)
+- [`positioning-and-messaging.md`](strategic/positioning-and-messaging.md)
 - [`design-system-guidelines.md`](design-system-guidelines.md)
 
 Evidence limits:

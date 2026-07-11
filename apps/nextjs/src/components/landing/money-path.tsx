@@ -2,7 +2,7 @@
 
 import { cn } from "@unprice/ui/utils"
 import { Ban, Check } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { type RefObject, useEffect, useRef, useState } from "react"
 import { AnimatedCounter } from "./animated-counter"
 import { Leader } from "./station"
 
@@ -301,11 +301,15 @@ function PhaseMarker({ children }: { children: string }) {
   )
 }
 
-export function MoneyPath({ className }: { className?: string }) {
-  const stageRef = useRef<HTMLDivElement>(null)
+type Budget = { value: number; depleted: boolean }
+
+// The request-path choreography: watches the stage into view, then animates the
+// dot through two alternating passes and drives the remaining-budget readout off
+// the same clock. Lifted out of the component so MoneyPath stays render-only.
+function useMoneyPathChoreography(stageRef: RefObject<HTMLDivElement | null>): Budget {
   // The remaining budget is real state, told on the choreography's clock:
   // the allow pass spends it to zero, the next period refills it.
-  const [budget, setBudget] = useState({ value: BUDGET_START, depleted: false })
+  const [budget, setBudget] = useState<Budget>({ value: BUDGET_START, depleted: false })
 
   useEffect(() => {
     const root = stageRef.current
@@ -388,7 +392,199 @@ export function MoneyPath({ className }: { className?: string }) {
       clearHits()
       setBudget({ value: BUDGET_START, depleted: false })
     }
-  }, [])
+  }, [stageRef])
+
+  return budget
+}
+
+// request → decision: the resolve stations and the budget gate whose readout
+// counts down on the choreography clock.
+function RequestDecisionRail({ budget }: { budget: Budget }) {
+  return (
+    <div data-mp-trace className="relative">
+      <span
+        aria-hidden
+        className="-translate-x-1/2 absolute top-1 bottom-0 left-2 w-px bg-background-border"
+      />
+
+      <div data-mp-node="request" className="group relative pb-3 pl-8">
+        <span
+          aria-hidden
+          data-mp-rail-dot
+          className="-translate-x-1/2 absolute top-[5px] left-2 size-2.5 rounded-full bg-info ring-2 ring-info-bg"
+        />
+        <div className="flex items-baseline gap-2">
+          <span className="whitespace-nowrap font-medium text-background-textContrast text-sm transition-colors duration-regular ease-out-quad group-data-[mp-hit=true]:text-info-text">
+            Request
+          </span>
+          <Leader />
+          <span className="whitespace-nowrap font-mono text-[11px] text-info-text">
+            POST /v1/consume
+          </span>
+        </div>
+        <p className="mt-0.5 text-background-text text-xs">the paid action asks before it runs</p>
+      </div>
+
+      <PhaseMarker>resolve</PhaseMarker>
+
+      {resolveStations.map((station) => (
+        <StationRow key={station.label} {...station} />
+      ))}
+
+      <PhaseMarker>decide</PhaseMarker>
+
+      <div data-mp-node="decision" className="group relative mt-1 pl-8">
+        <span
+          aria-hidden
+          data-mp-rail-dot
+          className="-translate-x-1/2 -translate-y-1/2 absolute top-1/2 left-2 block size-2.5"
+        >
+          <span className="mp-beacon absolute inset-0 rounded-full bg-warning-text" />
+          <span className="absolute inset-0 rounded-full bg-warning-text" />
+        </span>
+        <div className="relative rounded-sm border border-warning-line bg-warning-bgSubtle px-4 py-3 transition-colors duration-regular ease-out-quad group-data-[mp-hit=true]:border-warning-border group-data-[mp-hit=true]:bg-warning-bg">
+          <span
+            aria-hidden
+            className="-top-px -left-px absolute size-2.5 border-warning-text border-t-2 border-l-2"
+          />
+          <span
+            aria-hidden
+            className="-top-px -right-px absolute size-2.5 border-warning-text border-t-2 border-r-2"
+          />
+          <span
+            aria-hidden
+            className="-bottom-px -left-px absolute size-2.5 border-warning-text border-b-2 border-l-2"
+          />
+          <span
+            aria-hidden
+            className="-bottom-px -right-px absolute size-2.5 border-warning-text border-r-2 border-b-2"
+          />
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-medium text-background-textContrast text-sm transition-colors duration-regular ease-out-quad">
+                Budget check
+              </p>
+              <p className="mt-0.5 text-background-text text-xs">
+                is this spend commercially allowed?
+              </p>
+            </div>
+            <div className="text-right">
+              <p
+                data-mp-budget
+                className={cn(
+                  "font-medium font-mono text-lg leading-6 transition-colors duration-regular ease-out-quad",
+                  budget.depleted ? "text-warning-text" : "text-background-textContrast"
+                )}
+              >
+                <AnimatedCounter value={budget.value} prefix="$" decimals={2} duration={650} />
+              </p>
+              <p className="font-mono text-[10px] text-background-text uppercase tracking-widest">
+                remaining
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// The two futures of the same request: the allow branch settles and explains,
+// the deny branch shows the same stations untouched — absence as proof.
+function OutcomeFork() {
+  return (
+    <div className="grid grid-cols-1 gap-x-6 gap-y-6 sm:grid-cols-2">
+      <div>
+        <div
+          data-mp-node="allow-chip"
+          className="flex items-center gap-2.5 rounded-sm border border-success-border bg-success-bg px-3 py-2 transition-colors duration-regular ease-out-quad data-[mp-hit=true]:border-success-borderHover data-[mp-hit=true]:bg-success-bgActive"
+        >
+          <span className="flex size-6 shrink-0 items-center justify-center rounded-sm bg-success-solid text-white">
+            <Check aria-hidden className="size-3.5" />
+          </span>
+          <div className="flex flex-1 items-baseline justify-between gap-2">
+            <p className="font-medium text-background-textContrast text-sm">
+              allow · within budget
+            </p>
+            <p className="font-mono text-[11px] text-success-text">200</p>
+          </div>
+        </div>
+        <div className="relative mt-2">
+          <span
+            aria-hidden
+            className="-top-2 -translate-x-1/2 absolute bottom-4 left-2 w-px bg-background-border"
+          />
+          {settleStations.map((station, index) => (
+            <StationRow
+              key={station.label}
+              {...station}
+              variant={index === settleStations.length - 1 ? "terminal" : "default"}
+            />
+          ))}
+        </div>
+        {/* Terminal receipt rule (design-system-guidelines.md): the allow
+            pass ends in a literal invoice line with its explain chain, not
+            a sentence claiming one exists. */}
+        <div className="mt-2 ml-8 rounded-sm border border-background-border bg-surface-raised px-3 py-2">
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="font-mono text-[10px] text-background-text uppercase tracking-widest">
+              invoice line · explain
+            </span>
+            <span className="font-medium font-mono text-[11px] text-background-textContrast">
+              $4.10
+            </span>
+          </div>
+          <p className="mt-1 font-mono text-[10px] text-background-text leading-4">
+            pro@v3 · $0.002/token
+          </p>
+          <p className="font-mono text-[10px] text-background-text leading-4">
+            reserve → capture · balanced
+          </p>
+        </div>
+      </div>
+
+      <div>
+        <div
+          data-mp-node="deny-chip"
+          className="flex items-center gap-2.5 rounded-sm border border-danger-border bg-danger-bg px-3 py-2 transition-colors duration-regular ease-out-quad data-[mp-hit=true]:border-danger-borderHover data-[mp-hit=true]:bg-danger-bgActive"
+        >
+          <span className="flex size-6 shrink-0 items-center justify-center rounded-sm bg-danger-solid text-white">
+            <Ban aria-hidden className="size-3.5" />
+          </span>
+          <div className="flex flex-1 items-baseline justify-between gap-2">
+            <p className="font-medium text-background-textContrast text-sm">deny · over budget</p>
+            <p className="font-mono text-[11px] text-danger-text">429</p>
+          </div>
+        </div>
+        <div className="relative mt-2">
+          <span
+            aria-hidden
+            className="-top-2 -translate-x-1/2 absolute bottom-4 left-2 w-0 border-background-border border-l border-dashed"
+          />
+          {ghostStations.map((station) => (
+            <StationRow key={station.label} {...station} variant="ghost" />
+          ))}
+        </div>
+        {/* The deny receipt is the same receipt, empty: absence as proof. */}
+        <div className="mt-2 ml-8 rounded-sm border border-background-border border-dashed px-3 py-2 opacity-80">
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="font-mono text-[10px] text-background-text uppercase tracking-widest">
+              invoice line
+            </span>
+            <span className="font-mono text-[11px] text-background-text">—</span>
+          </div>
+          <p className="mt-1 font-mono text-[10px] text-background-text leading-4">
+            no cost created · nothing to explain
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export function MoneyPath({ className }: { className?: string }) {
+  const stageRef = useRef<HTMLDivElement>(null)
+  const budget = useMoneyPathChoreography(stageRef)
 
   return (
     <figure
@@ -417,93 +613,7 @@ export function MoneyPath({ className }: { className?: string }) {
 
       <div ref={stageRef} className="relative">
         {/* request → decision */}
-        <div data-mp-trace className="relative">
-          <span
-            aria-hidden
-            className="-translate-x-1/2 absolute top-1 bottom-0 left-2 w-px bg-background-border"
-          />
-
-          <div data-mp-node="request" className="group relative pb-3 pl-8">
-            <span
-              aria-hidden
-              data-mp-rail-dot
-              className="-translate-x-1/2 absolute top-[5px] left-2 size-2.5 rounded-full bg-info ring-2 ring-info-bg"
-            />
-            <div className="flex items-baseline gap-2">
-              <span className="whitespace-nowrap font-medium text-background-textContrast text-sm transition-colors duration-regular ease-out-quad group-data-[mp-hit=true]:text-info-text">
-                Request
-              </span>
-              <Leader />
-              <span className="whitespace-nowrap font-mono text-[11px] text-info-text">
-                POST /v1/consume
-              </span>
-            </div>
-            <p className="mt-0.5 text-background-text text-xs">
-              the paid action asks before it runs
-            </p>
-          </div>
-
-          <PhaseMarker>resolve</PhaseMarker>
-
-          {resolveStations.map((station) => (
-            <StationRow key={station.label} {...station} />
-          ))}
-
-          <PhaseMarker>decide</PhaseMarker>
-
-          <div data-mp-node="decision" className="group relative mt-1 pl-8">
-            <span
-              aria-hidden
-              data-mp-rail-dot
-              className="-translate-x-1/2 -translate-y-1/2 absolute top-1/2 left-2 block size-2.5"
-            >
-              <span className="mp-beacon absolute inset-0 rounded-full bg-warning-text" />
-              <span className="absolute inset-0 rounded-full bg-warning-text" />
-            </span>
-            <div className="relative rounded-sm border border-warning-line bg-warning-bgSubtle px-4 py-3 transition-colors duration-regular ease-out-quad group-data-[mp-hit=true]:border-warning-border group-data-[mp-hit=true]:bg-warning-bg">
-              <span
-                aria-hidden
-                className="-top-px -left-px absolute size-2.5 border-warning-text border-t-2 border-l-2"
-              />
-              <span
-                aria-hidden
-                className="-top-px -right-px absolute size-2.5 border-warning-text border-t-2 border-r-2"
-              />
-              <span
-                aria-hidden
-                className="-bottom-px -left-px absolute size-2.5 border-warning-text border-b-2 border-l-2"
-              />
-              <span
-                aria-hidden
-                className="-bottom-px -right-px absolute size-2.5 border-warning-text border-r-2 border-b-2"
-              />
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <p className="font-medium text-background-textContrast text-sm transition-colors duration-regular ease-out-quad">
-                    Budget check
-                  </p>
-                  <p className="mt-0.5 text-background-text text-xs">
-                    is this spend commercially allowed?
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p
-                    data-mp-budget
-                    className={cn(
-                      "font-medium font-mono text-lg leading-6 transition-colors duration-regular ease-out-quad",
-                      budget.depleted ? "text-warning-text" : "text-background-textContrast"
-                    )}
-                  >
-                    <AnimatedCounter value={budget.value} prefix="$" decimals={2} duration={650} />
-                  </p>
-                  <p className="font-mono text-[10px] text-background-text uppercase tracking-widest">
-                    remaining
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        <RequestDecisionRail budget={budget} />
 
         {/* fork connector (desktop) */}
         <div aria-hidden data-mp-connector className="relative hidden h-9 sm:block">
@@ -518,94 +628,7 @@ export function MoneyPath({ className }: { className?: string }) {
         </div>
 
         {/* the two futures of the same request */}
-        <div className="grid grid-cols-1 gap-x-6 gap-y-6 sm:grid-cols-2">
-          <div>
-            <div
-              data-mp-node="allow-chip"
-              className="flex items-center gap-2.5 rounded-sm border border-success-border bg-success-bg px-3 py-2 transition-colors duration-regular ease-out-quad data-[mp-hit=true]:border-success-borderHover data-[mp-hit=true]:bg-success-bgActive"
-            >
-              <span className="flex size-6 shrink-0 items-center justify-center rounded-sm bg-success-solid text-white">
-                <Check aria-hidden className="size-3.5" />
-              </span>
-              <div className="flex flex-1 items-baseline justify-between gap-2">
-                <p className="font-medium text-background-textContrast text-sm">
-                  allow · within budget
-                </p>
-                <p className="font-mono text-[11px] text-success-text">200</p>
-              </div>
-            </div>
-            <div className="relative mt-2">
-              <span
-                aria-hidden
-                className="-top-2 -translate-x-1/2 absolute bottom-4 left-2 w-px bg-background-border"
-              />
-              {settleStations.map((station, index) => (
-                <StationRow
-                  key={station.label}
-                  {...station}
-                  variant={index === settleStations.length - 1 ? "terminal" : "default"}
-                />
-              ))}
-            </div>
-            {/* Terminal receipt rule (design-system-guidelines.md): the allow
-                pass ends in a literal invoice line with its explain chain, not
-                a sentence claiming one exists. */}
-            <div className="mt-2 ml-8 rounded-sm border border-background-border bg-surface-raised px-3 py-2">
-              <div className="flex items-baseline justify-between gap-3">
-                <span className="font-mono text-[10px] text-background-text uppercase tracking-widest">
-                  invoice line · explain
-                </span>
-                <span className="font-medium font-mono text-[11px] text-background-textContrast">
-                  $4.10
-                </span>
-              </div>
-              <p className="mt-1 font-mono text-[10px] text-background-text leading-4">
-                pro@v3 · $0.002/token
-              </p>
-              <p className="font-mono text-[10px] text-background-text leading-4">
-                reserve → capture · balanced
-              </p>
-            </div>
-          </div>
-
-          <div>
-            <div
-              data-mp-node="deny-chip"
-              className="flex items-center gap-2.5 rounded-sm border border-danger-border bg-danger-bg px-3 py-2 transition-colors duration-regular ease-out-quad data-[mp-hit=true]:border-danger-borderHover data-[mp-hit=true]:bg-danger-bgActive"
-            >
-              <span className="flex size-6 shrink-0 items-center justify-center rounded-sm bg-danger-solid text-white">
-                <Ban aria-hidden className="size-3.5" />
-              </span>
-              <div className="flex flex-1 items-baseline justify-between gap-2">
-                <p className="font-medium text-background-textContrast text-sm">
-                  deny · over budget
-                </p>
-                <p className="font-mono text-[11px] text-danger-text">429</p>
-              </div>
-            </div>
-            <div className="relative mt-2">
-              <span
-                aria-hidden
-                className="-top-2 -translate-x-1/2 absolute bottom-4 left-2 w-0 border-background-border border-l border-dashed"
-              />
-              {ghostStations.map((station) => (
-                <StationRow key={station.label} {...station} variant="ghost" />
-              ))}
-            </div>
-            {/* The deny receipt is the same receipt, empty: absence as proof. */}
-            <div className="mt-2 ml-8 rounded-sm border border-background-border border-dashed px-3 py-2 opacity-80">
-              <div className="flex items-baseline justify-between gap-3">
-                <span className="font-mono text-[10px] text-background-text uppercase tracking-widest">
-                  invoice line
-                </span>
-                <span className="font-mono text-[11px] text-background-text">—</span>
-              </div>
-              <p className="mt-1 font-mono text-[10px] text-background-text leading-4">
-                no cost created · nothing to explain
-              </p>
-            </div>
-          </div>
-        </div>
+        <OutcomeFork />
 
         {/* the request in flight — driven by the choreography effect above */}
         <span

@@ -21,28 +21,38 @@ export function AnimatedCounter({
   duration?: number
   className?: string
 }) {
-  const [displayValue, setDisplayValue] = useState(value)
+  // Only the in-flight animation frame lives in state — it is null whenever
+  // the counter is at rest, so render reads the `value` prop directly. That
+  // keeps SSR/first paint and reduced-motion correct and means a changed prop
+  // can never leave a stale copy behind (react-doctor/no-derived-useState).
+  const [animatedValue, setAnimatedValue] = useState<number | null>(null)
   const previousValue = useRef(value)
 
   useEffect(() => {
-    if (value !== previousValue.current) {
-      const start = previousValue.current
-      const end = value
-      const startTime = performance.now()
+    if (value === previousValue.current) return
 
-      const animate = (currentTime: number) => {
-        const elapsed = currentTime - startTime
-        const progress = Math.min(elapsed / duration, 1)
-        const easeProgress = 1 - (1 - progress) ** 3
-        const current = start + (end - start) * easeProgress
-        setDisplayValue(current)
-        if (progress < 1) requestAnimationFrame(animate)
+    const start = previousValue.current
+    const end = value
+    const startTime = performance.now()
+    previousValue.current = value
+
+    const animate = (currentTime: number) => {
+      const elapsed = currentTime - startTime
+      const progress = Math.min(elapsed / duration, 1)
+      const easeProgress = 1 - (1 - progress) ** 3
+      if (progress < 1) {
+        setAnimatedValue(start + (end - start) * easeProgress)
+        requestAnimationFrame(animate)
+      } else {
+        // Settle back onto the prop so render stops reading interim state.
+        setAnimatedValue(null)
       }
-
-      requestAnimationFrame(animate)
-      previousValue.current = value
     }
+
+    requestAnimationFrame(animate)
   }, [value, duration])
+
+  const displayValue = animatedValue ?? value
 
   return (
     <span className={cn("font-mono tabular-nums", className)}>

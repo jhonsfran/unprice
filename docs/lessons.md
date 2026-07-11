@@ -35,6 +35,10 @@ patterns. Keep it cheap to load and useful.
 
 - 2026-07-04: `job_build.yaml` requests `pull-requests: write` and `statuses: write`; callers
   that set workflow-level `permissions` must grant those scopes on the reusable-workflow job.
+- 2026-07-11: `neondatabase/schema-diff-action@v1` does not accept `username`; pass only its
+  supported `database` input because the action resolves the branch role itself.
+- 2026-07-11: Jobs schedule tests must reset the chained query's `limit` mock between cases;
+  `clearAllMocks()` preserves queued `mockResolvedValueOnce` results and can leak period rows.
 
 ## Cloudflare, API, And Ingestion
 

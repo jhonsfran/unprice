@@ -163,6 +163,7 @@ describe("billingSchedule", () => {
 describe("invoicingSchedule", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.selectQuery.limit.mockReset()
     mocks.select.mockReturnValue(mocks.selectQuery)
     mocks.selectQuery.from.mockReturnValue(mocks.selectQuery)
     mocks.selectQuery.groupBy.mockReturnValue(mocks.selectQuery)

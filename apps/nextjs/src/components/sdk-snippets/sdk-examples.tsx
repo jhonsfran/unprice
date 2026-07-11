@@ -248,7 +248,8 @@ const SPECS: Record<RegularMethod, Spec> = {
       field("customerId", str(getCustomerId(params))),
       field("featureSlug", str("tokens")),
     ],
-    sdkTail: () => '\nif (!result.allowed) {\n  throw new Error("Denied before paid usage ran")\n}\n',
+    sdkTail: () =>
+      '\nif (!result.allowed) {\n  throw new Error("Denied before paid usage ran")\n}\n',
   },
   recordUsage: {
     sdkCall: "usage.record",
@@ -388,7 +389,9 @@ function renderSdk(spec: Spec, params?: SDKExampleParams): string {
     "",
   ]
   if (spec.comment) lines.push(spec.comment)
-  lines.push(`const { result, error } = await unprice.${spec.sdkCall}(${jsObject(sdkArgs(spec, params), "")})`)
+  lines.push(
+    `const { result, error } = await unprice.${spec.sdkCall}(${jsObject(sdkArgs(spec, params), "")})`
+  )
   if (spec.showError !== false) {
     lines.push("", "if (error) {", "  console.error(error.message)", "  return", "}")
   }
@@ -456,7 +459,9 @@ function renderCurl(spec: Spec, params?: SDKExampleParams): string {
 function planVersionsRequestLines(params: ListPlanVersionsExampleParams, indent = "  ") {
   const lines: string[] = []
   if (params.planVersionIds && params.planVersionIds.length > 0) {
-    lines.push(`${indent}planVersionIds: [${params.planVersionIds.map((v) => JSON.stringify(v)).join(", ")}],`)
+    lines.push(
+      `${indent}planVersionIds: [${params.planVersionIds.map((v) => JSON.stringify(v)).join(", ")}],`
+    )
   }
   if (params.billingInterval) {
     lines.push(`${indent}billingInterval: ${JSON.stringify(params.billingInterval)},`)
@@ -481,11 +486,15 @@ function planVersionsContextComment(params: ListPlanVersionsExampleParams) {
 function planVersionsJsonBody(params: ListPlanVersionsExampleParams) {
   const lines: string[] = []
   if (params.planVersionIds && params.planVersionIds.length > 0) {
-    lines.push(`  "planVersionIds": [${params.planVersionIds.map((v) => JSON.stringify(v)).join(", ")}]`)
+    lines.push(
+      `  "planVersionIds": [${params.planVersionIds.map((v) => JSON.stringify(v)).join(", ")}]`
+    )
   }
-  if (params.billingInterval) lines.push(`  "billingInterval": ${JSON.stringify(params.billingInterval)}`)
+  if (params.billingInterval)
+    lines.push(`  "billingInterval": ${JSON.stringify(params.billingInterval)}`)
   if (params.currency) lines.push(`  "currency": ${JSON.stringify(params.currency)}`)
-  const bodyLines = lines.length > 0 ? lines : ['  "billingInterval": "month"', '  "currency": "USD"']
+  const bodyLines =
+    lines.length > 0 ? lines : ['  "billingInterval": "month"', '  "currency": "USD"']
   return `{\n${bodyLines.join(",\n")}\n}`
 }
 

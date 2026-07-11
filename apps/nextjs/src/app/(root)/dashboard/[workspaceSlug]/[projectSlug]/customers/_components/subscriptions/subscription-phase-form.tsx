@@ -81,7 +81,9 @@ export function SubscriptionPhaseForm(props: {
   onSubmit: (data: SubscriptionPhaseFormSubmitValue) => void
 }) {
   if (props.mode === "schedule") {
-    return <SchedulePhaseForm setDialogOpen={props.setDialogOpen} defaultValues={props.defaultValues} />
+    return (
+      <SchedulePhaseForm setDialogOpen={props.setDialogOpen} defaultValues={props.defaultValues} />
+    )
   }
 
   return <CreateEditPhaseForm {...props} />
@@ -282,7 +284,9 @@ function CreateEditPhaseForm({
   // Both create and edit share the same field set; only the resolver schema differs at runtime.
   // Anchoring the form's static type to createPhaseSchema keeps every field access concretely typed
   // (the editable/insert ZodEffects don't structurally overlap, hence the unknown bridge).
-  const resolverSchema = (editMode ? editablePhaseSchema : createPhaseSchema) as unknown as typeof createPhaseSchema
+  const resolverSchema = (editMode
+    ? editablePhaseSchema
+    : createPhaseSchema) as unknown as typeof createPhaseSchema
 
   const form = useZodForm({
     schema: resolverSchema,

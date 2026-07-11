@@ -312,7 +312,9 @@ export function FilterDataTable<TData, TValue>({
         )}
       >
         <aside className={cn("hidden border-border md:block md:border-r", classes.aside)}>
-          <div className={cn("flex items-center border-b px-4", classes.filtersHeader)}>Filters</div>
+          <div className={cn("flex items-center border-b px-4", classes.filtersHeader)}>
+            Filters
+          </div>
           <ScrollArea hideScrollBar={isWorkbench} className={cn(classes.viewport, classes.scroll)}>
             <FilterList table={table} filters={filters} presentation={presentation} />
           </ScrollArea>
@@ -341,7 +343,10 @@ export function FilterDataTable<TData, TValue>({
             ) : null}
             {computedToolbarActions}
           </div>
-          <ScrollArea hideScrollBar={isWorkbench} className={cn(classes.viewport, classes.scrollBody)}>
+          <ScrollArea
+            hideScrollBar={isWorkbench}
+            className={cn(classes.viewport, classes.scrollBody)}
+          >
             <Table className="[&_td:first-child]:px-4 [&_th:first-child]:px-4">
               <TableHeader
                 className={cn(

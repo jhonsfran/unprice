@@ -141,7 +141,7 @@ export default function FooterMarketing() {
         </div>
 
         <div className="mt-12 flex items-center justify-between gap-4 border-background-border border-t pt-4">
-          <p className="text-background-text text-xs leading-6">
+          <p className="text-background-text text-xs leading-6" suppressHydrationWarning>
             © {new Date().getFullYear()} Unprice · open source under AGPL-3.0
           </p>
           <ThemeToggle />
