@@ -1,5 +1,10 @@
-import { CAPTURE_ABANDONED_STATUS, CAPTURE_RETRY_STATUSES } from "../capture-policy"
-import type { RunBudgetDecision } from "../contracts"
+import {
+  CAPTURE_ABANDONED_STATUS,
+  CAPTURE_RETRY_STATUSES,
+  CAPTURE_SUCCESS_STATUS,
+  type CaptureFailureStatus,
+} from "../capture-policy"
+import type { EndRunInput, RunBudgetDecision } from "../contracts"
 import type {
   RunBudgetStore,
   RunCaptureIntent,
@@ -15,6 +20,7 @@ export class InMemoryRunBudgetStore implements RunBudgetStore {
   readonly intents = new Map<string, RunCaptureIntent>()
   readonly idempotency = new Map<string, RunIdempotencyEntry>()
   failNextIdempotencyWrite = false
+  failNextCaptureSuccessAfterBucketWrite = false
 
   async loadRun(runId: string) {
     return this.clone(this.runs.get(runId))
@@ -33,7 +39,7 @@ export class InMemoryRunBudgetStore implements RunBudgetStore {
     runId: string,
     decision: RunBudgetDecision,
     pricedAmount: number,
-    bucketDeltas: unknown[],
+    bucketDeltas: RunSpendBucketDelta[],
     createdAt: number
   ): Promise<void> {
     this.writeIdempotency({
@@ -114,17 +120,29 @@ export class InMemoryRunBudgetStore implements RunBudgetStore {
     amount: number
     updatedAt: number
   }): Promise<void> {
-    const intent = this.intents.get(input.intentKey)
-    const bucket = this.buckets.get(input.bucketKey)
-    const run = this.runs.get(input.runId)
-    if (intent) Object.assign(intent, { status: "captured", updatedAt: input.updatedAt })
-    if (bucket) bucket.flushedAmount += input.amount
-    if (run) run.flushedAmount += input.amount
+    const snapshot = this.snapshot()
+    try {
+      const intent = this.intents.get(input.intentKey)
+      const bucket = this.buckets.get(input.bucketKey)
+      const run = this.runs.get(input.runId)
+      if (intent) {
+        Object.assign(intent, { status: CAPTURE_SUCCESS_STATUS, updatedAt: input.updatedAt })
+      }
+      if (bucket) bucket.flushedAmount += input.amount
+      if (this.failNextCaptureSuccessAfterBucketWrite) {
+        this.failNextCaptureSuccessAfterBucketWrite = false
+        throw new Error("capture success failed after bucket write")
+      }
+      if (run) run.flushedAmount += input.amount
+    } catch (error) {
+      this.restore(snapshot)
+      throw error
+    }
   }
 
   async markCaptureFailure(input: {
     intentKey: string
-    status: string
+    status: CaptureFailureStatus
     attemptCount: number
     lastError: string
     updatedAt: number
@@ -169,7 +187,7 @@ export class InMemoryRunBudgetStore implements RunBudgetStore {
 
   async closeRun(input: {
     runId: string
-    status: string
+    status: EndRunInput["status"]
     endedAt: number
     reconciliationNeeded: boolean
   }): Promise<void> {

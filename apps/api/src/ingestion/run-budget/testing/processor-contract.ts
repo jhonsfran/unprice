@@ -14,6 +14,15 @@ export type RunBudgetProcessorContractTarget = {
   applySyncEvent(input: ApplyRunSyncEventInput): Promise<RunBudgetDecision>
   endRun(input: EndRunInput): Promise<RunBudgetSummary>
   getRunStatus(input: GetRunStatusInput): Promise<RunBudgetSummary>
+  flushCaptures(): Promise<void>
+  alarm(): Promise<void>
+  advanceClock(milliseconds: number): void
+  setCaptureFailure(failing: boolean): void
+  failNextSchedulerCall(): void
+  alarmAt(): Promise<number | null>
+  clockNow(): number
+  captureCallCount(): number
+  captureAttemptCount(): Promise<number>
   pricingCallCount(): number
 }
 
@@ -185,6 +194,66 @@ export function describeRunBudgetProcessorContract(
       ).resolves.toMatchObject({ status: "running", consumedAmount: 5_000 })
       await expect(revived.applySyncEvent(createRunBudgetApplyInput())).resolves.toEqual(decision)
       expect(revived.pricingCallCount()).toBe(1)
+    })
+
+    it("retries a failed capture and closes after capture recovery", async () => {
+      const { target } = await createHost()
+      await target.startRun(createRunBudgetStartInput())
+      await target.applySyncEvent(createRunBudgetApplyInput())
+      target.setCaptureFailure(true)
+
+      await target.flushCaptures()
+      expect(target.captureCallCount()).toBe(1)
+      target.setCaptureFailure(false)
+      await target.flushCaptures()
+      expect(target.captureCallCount()).toBe(2)
+      await expect(
+        target.endRun({
+          runId: "run_1",
+          customerId: "cus_1",
+          projectId: "proj_1",
+          status: "completed",
+          endedAt: RUN_BUDGET_TEST_NOW + 1,
+        })
+      ).resolves.toMatchObject({ status: "completed", reconciliationNeeded: false })
+    })
+
+    it("expires with reconciliation after capture retries are abandoned", async () => {
+      const { target } = await createHost()
+      await target.startRun(createRunBudgetStartInput({ expiresAt: RUN_BUDGET_TEST_NOW + 1 }))
+      await target.applySyncEvent(createRunBudgetApplyInput())
+      target.setCaptureFailure(true)
+      target.advanceClock(1)
+
+      await target.alarm()
+      await target.alarm()
+      await target.alarm()
+      await expect(
+        target.getRunStatus({ runId: "run_1", customerId: "cus_1", projectId: "proj_1" })
+      ).resolves.toMatchObject({ status: "expired", reconciliationNeeded: true })
+      await expect(target.captureAttemptCount()).resolves.toBe(5)
+      const captureCallsBeforeTerminalAlarm = target.captureCallCount()
+      await target.alarm()
+      await expect(target.captureAttemptCount()).resolves.toBe(5)
+      expect(target.captureCallCount()).toBe(captureCallsBeforeTerminalAlarm)
+    })
+
+    it("repairs a failed post-commit scheduler write from cached replay", async () => {
+      const { target } = await createHost()
+      await target.startRun(createRunBudgetStartInput())
+      target.failNextSchedulerCall()
+      const input = createRunBudgetApplyInput()
+
+      await expect(target.applySyncEvent(input)).rejects.toThrow("scheduler unavailable")
+      await expect(
+        target.getRunStatus({ runId: "run_1", customerId: "cus_1", projectId: "proj_1" })
+      ).resolves.toMatchObject({ consumedAmount: 5_000 })
+      await expect(target.applySyncEvent(input)).resolves.toMatchObject({
+        allowed: true,
+        budget: { consumedAmount: 5_000 },
+      })
+      expect(target.pricingCallCount()).toBe(1)
+      await expect(target.alarmAt()).resolves.toBe(target.clockNow() + 10_000)
     })
   })
 }

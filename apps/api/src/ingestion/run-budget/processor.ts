@@ -105,19 +105,20 @@ export class RunBudgetProcessor {
     const cached = await this.deps.store.loadIdempotency(input.idempotencyKey)
     if (cached) {
       const decision = JSON.parse(cached.decisionJson) as RunBudgetDecision
+      const run = await this.deps.store.loadRun(input.runId)
+      let replay = { ...decision, meterFacts: decision.meterFacts ?? [] }
 
       // Rolling-deploy repair: an older DO may have cached a terminal decision
       // before summaries carried endedAt. Rehydrate only the missing timestamp
       // from this DO's authoritative run state; every cached decision field
       // remains unchanged.
       if (decision.budget.status !== "running" && decision.budget.endedAt == null) {
-        const run = await this.deps.store.loadRun(input.runId)
         if (
           run?.runId === decision.budget.runId &&
           run.status !== "running" &&
           run.endedAt != null
         ) {
-          return {
+          replay = {
             ...decision,
             budget: { ...decision.budget, endedAt: run.endedAt },
             meterFacts: decision.meterFacts ?? [],
@@ -125,7 +126,8 @@ export class RunBudgetProcessor {
         }
       }
 
-      return { ...decision, meterFacts: decision.meterFacts ?? [] }
+      await this.repairAcceptedReplayAlarm(run, replay)
+      return replay
     }
 
     // Load run state
@@ -799,7 +801,7 @@ export class RunBudgetProcessor {
   private toSummary(run: RunState): RunBudgetSummary {
     return {
       runId: run.runId,
-      status: run.status as RunBudgetSummary["status"],
+      status: run.status,
       endedAt: run.endedAt,
       budgetAmount: run.budgetAmount,
       consumedAmount: run.consumedAmount,
@@ -811,6 +813,20 @@ export class RunBudgetProcessor {
 
   private async scheduleAlarm(delayMs = 10_000): Promise<void> {
     await this.scheduleAlarmAt(this.deps.clock.now() + delayMs)
+  }
+
+  private async repairAcceptedReplayAlarm(
+    run: RunState | undefined,
+    decision: RunBudgetDecision
+  ): Promise<void> {
+    if (!decision.allowed || run?.status !== "running") return
+
+    if (run.expiresAt !== null) {
+      await this.scheduleAlarmAt(Math.max(this.deps.clock.now(), run.expiresAt))
+    }
+    if (run.consumedAmount > run.flushedAmount) {
+      await this.scheduleAlarm()
+    }
   }
 
   private async scheduleAlarmAt(timestamp: number): Promise<void> {

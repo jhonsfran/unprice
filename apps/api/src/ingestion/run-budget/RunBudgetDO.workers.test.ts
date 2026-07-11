@@ -13,7 +13,7 @@ import * as schema from "./db/schema"
 import type { RunBudgetWalletOps } from "./ports"
 import { RunBudgetProcessor } from "./processor"
 import { RunBudgetStore } from "./run-budget-store"
-import { RUN_BUDGET_TEST_NOW, createRunBudgetMeterFact } from "./testing/harness"
+import { createRunBudgetMeterFact } from "./testing/harness"
 import {
   type RunBudgetProcessorContractTarget,
   describeRunBudgetProcessorContract,
@@ -27,7 +27,13 @@ describeRunBudgetProcessorContract(
   "RunBudgetProcessor (Durable Object SQLite contract)",
   async () => {
     const name = `test:run-budget-contract:${crypto.randomUUID()}`
-    const stats = { pricingCalls: 0 }
+    const stats = {
+      pricingCalls: 0,
+      captureCalls: 0,
+      captureFailing: false,
+      now: Date.now(),
+      schedulerFailures: 0,
+    }
     const createTarget = (): RunBudgetProcessorContractTarget => {
       const stub = env.runbudget.getByName(name)
       const invoke = async <T>(fn: (processor: RunBudgetProcessor) => Promise<T>): Promise<T> =>
@@ -41,21 +47,30 @@ describeRunBudgetProcessorContract(
             .catch(() => undefined)
 
           const wallet = {
-            createReservation: vi.fn(async () => ({
-              err: null,
-              val: { reservationId: "res_workers_123", allocationAmount: 100_000 },
-            })),
-            captureReservationUsage: vi.fn(async () => ({
-              err: null,
-              val: { capturedAmount: 0 },
-            })),
-            releaseReservation: vi.fn(async () => ({
-              err: null,
-              val: { releasedAmount: 0 },
-            })),
-          } as unknown as RunBudgetWalletOps
+            createReservation: vi.fn(
+              async (_input: Parameters<RunBudgetWalletOps["createReservation"]>[0]) => ({
+                val: { reservationId: "res_workers_123", allocationAmount: 100_000 },
+              })
+            ),
+            captureReservationUsage: vi.fn(
+              async (_input: Parameters<RunBudgetWalletOps["captureReservationUsage"]>[0]) => {
+                stats.captureCalls++
+                if (stats.captureFailing) throw new Error("wallet unavailable")
+                return { val: { capturedAmount: 0 } }
+              }
+            ),
+            releaseReservation: vi.fn(
+              async (_input: Parameters<RunBudgetWalletOps["releaseReservation"]>[0]) => ({
+                val: {
+                  releasedAmount: 0,
+                  restoredGrantedAmount: 0,
+                  refundedPurchasedAmount: 0,
+                },
+              })
+            ),
+          } satisfies RunBudgetWalletOps
           const processor = new RunBudgetProcessor({
-            clock: { now: () => RUN_BUDGET_TEST_NOW },
+            clock: { now: () => stats.now },
             logger: { error: () => undefined },
             pricing: {
               apply: async (input) => {
@@ -73,7 +88,13 @@ describeRunBudgetProcessorContract(
             },
             scheduler: {
               getAlarm: () => state.storage.getAlarm(),
-              setAlarm: (at) => state.storage.setAlarm(at),
+              setAlarm: (at) => {
+                if (stats.schedulerFailures > 0) {
+                  stats.schedulerFailures--
+                  throw new Error("scheduler unavailable")
+                }
+                return state.storage.setAlarm(at)
+              },
             },
             store: new RunBudgetStore(drizzle(state.storage, { schema, logger: false })),
             wallet: { create: async () => wallet },
@@ -88,6 +109,32 @@ describeRunBudgetProcessorContract(
         endRun: (input: EndRunInput) => invoke((processor) => processor.endRun(input)),
         getRunStatus: (input: GetRunStatusInput) =>
           invoke((processor) => processor.getRunStatus(input)),
+        flushCaptures: () => invoke((processor) => processor.flushCaptures()),
+        alarm: () => invoke((processor) => processor.alarm()),
+        advanceClock: (milliseconds) => {
+          stats.now += milliseconds
+        },
+        setCaptureFailure: (failing) => {
+          stats.captureFailing = failing
+        },
+        failNextSchedulerCall: () => {
+          stats.schedulerFailures++
+        },
+        alarmAt: () =>
+          runInDurableObject(stub, async (_instance: RunBudgetDO, state) =>
+            state.storage.getAlarm()
+          ),
+        captureCallCount: () => stats.captureCalls,
+        captureAttemptCount: () =>
+          runInDurableObject(stub, async (_instance: RunBudgetDO, state) => {
+            const store = new RunBudgetStore(drizzle(state.storage, { schema, logger: false }))
+            const intents = [
+              ...(await store.listRetryableCaptureIntents()),
+              ...(await store.findAbandonedCaptureIntents("run_1")),
+            ]
+            return intents[0]?.attemptCount ?? 0
+          }),
+        clockNow: () => stats.now,
         pricingCallCount: () => stats.pricingCalls,
       }
     }

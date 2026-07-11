@@ -1,6 +1,11 @@
 import type { AnalyticsEntitlementMeterFact } from "@unprice/analytics"
 import { vi } from "vitest"
-import type { RunBudgetStore, RunBudgetWalletOps } from "../ports"
+import type {
+  RunBudgetPricingInput,
+  RunBudgetPricingResult,
+  RunBudgetStore,
+  RunBudgetWalletOps,
+} from "../ports"
 import { RunBudgetProcessor } from "../processor"
 import { InMemoryRunBudgetStore } from "./in-memory-store"
 
@@ -46,45 +51,59 @@ export function createRunBudgetMeterFact(
 export function createRunBudgetProcessorHarness(
   options: {
     now?: number
+    schedulerFailures?: number
     store?: RunBudgetStore
   } = {}
 ) {
   const state = {
     now: options.now ?? RUN_BUDGET_TEST_NOW,
     alarmAt: null as number | null,
+    schedulerFailuresRemaining: options.schedulerFailures ?? 0,
   }
   const store = options.store ?? new InMemoryRunBudgetStore()
-  const createReservation = vi.fn(async () => ({
-    err: null,
-    val: { reservationId: "res_test_123", allocationAmount: 100_000 },
-  }))
-  const captureReservationUsage = vi.fn(async () => ({
-    err: null,
-    val: { capturedAmount: 0 },
-  }))
-  const releaseReservation = vi.fn(async () => ({
-    err: null,
-    val: { releasedAmount: 0 },
-  }))
+  const createReservation = vi.fn(
+    async (_input: Parameters<RunBudgetWalletOps["createReservation"]>[0]) => ({
+      val: { reservationId: "res_test_123", allocationAmount: 100_000 },
+    })
+  )
+  const captureReservationUsage = vi.fn(
+    async (_input: Parameters<RunBudgetWalletOps["captureReservationUsage"]>[0]) => ({
+      val: { capturedAmount: 0 },
+    })
+  )
+  const releaseReservation = vi.fn(
+    async (_input: Parameters<RunBudgetWalletOps["releaseReservation"]>[0]) => ({
+      val: { releasedAmount: 0, restoredGrantedAmount: 0, refundedPurchasedAmount: 0 },
+    })
+  )
   const wallet = {
     createReservation,
     captureReservationUsage,
     releaseReservation,
-  } as unknown as RunBudgetWalletOps
+  } satisfies RunBudgetWalletOps
   const walletCreate = vi.fn(async () => wallet)
-  const pricingApply = vi.fn(async (input: { wallet: { remainingAmount: number } }) => {
-    const fact = createRunBudgetMeterFact()
-    if (fact.amount > input.wallet.remainingAmount) {
-      return {
-        allowed: false,
-        deniedReason: "RUN_BUDGET_EXCEEDED" as const,
-        message: "Run budget exceeded",
-        meterFacts: [],
+  const pricingApply = vi.fn(
+    async (input: RunBudgetPricingInput): Promise<RunBudgetPricingResult> => {
+      const fact = createRunBudgetMeterFact()
+      if (fact.amount > input.wallet.remainingAmount) {
+        return {
+          allowed: false,
+          deniedReason: "RUN_BUDGET_EXCEEDED",
+          message: "Run budget exceeded",
+          meterFacts: [],
+        }
       }
+      return { allowed: true, meterFacts: [fact] }
     }
-    return { allowed: true, meterFacts: [fact] }
-  })
+  )
   const logger = { error: vi.fn() }
+  const schedulerSetAlarm = vi.fn(async (at: number) => {
+    if (state.schedulerFailuresRemaining > 0) {
+      state.schedulerFailuresRemaining--
+      throw new Error("scheduler unavailable")
+    }
+    state.alarmAt = at
+  })
 
   const createProcessor = () =>
     new RunBudgetProcessor({
@@ -93,9 +112,7 @@ export function createRunBudgetProcessorHarness(
       pricing: { apply: pricingApply },
       scheduler: {
         getAlarm: async () => state.alarmAt,
-        setAlarm: async (at) => {
-          state.alarmAt = at
-        },
+        setAlarm: schedulerSetAlarm,
       },
       store,
       wallet: { create: walletCreate },
@@ -109,6 +126,7 @@ export function createRunBudgetProcessorHarness(
     pricingApply,
     processor: createProcessor(),
     releaseReservation,
+    schedulerSetAlarm,
     state,
     store,
     walletCreate,

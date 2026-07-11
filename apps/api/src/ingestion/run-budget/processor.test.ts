@@ -1,3 +1,4 @@
+import { UnPriceWalletError } from "@unprice/services/wallet"
 import { describe, expect, it } from "vitest"
 import type { RunBudgetProcessor } from "./processor"
 import {
@@ -20,6 +21,31 @@ describeRunBudgetProcessorContract("RunBudgetProcessor (in-memory contract)", as
     applySyncEvent: (input) => processor.applySyncEvent(input),
     endRun: (input) => processor.endRun(input),
     getRunStatus: (input) => processor.getRunStatus(input),
+    flushCaptures: () => processor.flushCaptures(),
+    alarm: () => processor.alarm(),
+    advanceClock: (milliseconds) => {
+      harness.state.now += milliseconds
+    },
+    setCaptureFailure: (failing) => {
+      if (failing) {
+        harness.captureReservationUsage.mockRejectedValue(new Error("wallet unavailable"))
+      } else {
+        harness.captureReservationUsage.mockResolvedValue({ val: { capturedAmount: 0 } })
+      }
+    },
+    failNextSchedulerCall: () => {
+      harness.state.schedulerFailuresRemaining++
+    },
+    alarmAt: async () => harness.state.alarmAt,
+    clockNow: () => harness.state.now,
+    captureCallCount: () => harness.captureReservationUsage.mock.calls.length,
+    captureAttemptCount: async () => {
+      const intents = [
+        ...(await harness.store.listRetryableCaptureIntents()),
+        ...(await harness.store.findAbandonedCaptureIntents("run_1")),
+      ]
+      return intents[0]?.attemptCount ?? 0
+    },
     pricingCallCount: () => harness.pricingApply.mock.calls.length,
   })
   return {
@@ -32,9 +58,8 @@ describe("RunBudgetProcessor injected behavior", () => {
   it("returns the input timestamp when wallet reservation fails during start", async () => {
     const harness = createRunBudgetProcessorHarness()
     harness.createReservation.mockResolvedValueOnce({
-      err: new Error("wallet empty"),
-      val: null,
-    } as never)
+      err: new UnPriceWalletError({ message: "WALLET_EMPTY" }),
+    })
 
     await expect(harness.processor.startRun(createRunBudgetStartInput())).resolves.toMatchObject({
       runId: "run_1",
@@ -42,7 +67,7 @@ describe("RunBudgetProcessor injected behavior", () => {
       endedAt: RUN_BUDGET_TEST_NOW,
       consumedAmount: 0,
       remainingAmount: 0,
-      walletError: "wallet empty",
+      walletError: "WALLET_EMPTY",
     })
   })
 
@@ -126,7 +151,7 @@ describe("RunBudgetProcessor injected behavior", () => {
       deniedReason: "LIMIT_EXCEEDED",
       message: "Feature limit exceeded",
       meterFacts: [],
-    } as never)
+    })
 
     await expect(
       harness.processor.applySyncEvent(createRunBudgetApplyInput())
@@ -156,6 +181,27 @@ describe("RunBudgetProcessor injected behavior", () => {
     ).resolves.toMatchObject({ consumedAmount: 0, remainingAmount: 10_000 })
     expect(store.buckets.size).toBe(0)
     expect(store.idempotency.size).toBe(0)
+  })
+
+  it("repairs a failed post-commit alarm on cached replay without double spend", async () => {
+    const store = new InMemoryRunBudgetStore()
+    const harness = createRunBudgetProcessorHarness({ store, schedulerFailures: 1 })
+    await harness.processor.startRun(createRunBudgetStartInput())
+    const input = createRunBudgetApplyInput()
+
+    await expect(harness.processor.applySyncEvent(input)).rejects.toThrow("scheduler unavailable")
+    expect(store.runs.get("run_1")).toMatchObject({ consumedAmount: 5_000, flushedAmount: 0 })
+    expect(store.buckets.size).toBe(1)
+    expect(store.idempotency.size).toBe(1)
+    expect(harness.state.alarmAt).toBeNull()
+
+    await expect(harness.processor.applySyncEvent(input)).resolves.toMatchObject({
+      allowed: true,
+      budget: { consumedAmount: 5_000, remainingAmount: 5_000 },
+    })
+    expect(harness.pricingApply).toHaveBeenCalledTimes(1)
+    expect(store.runs.get("run_1")).toMatchObject({ consumedAmount: 5_000, flushedAmount: 0 })
+    expect(harness.state.alarmAt).toBe(RUN_BUDGET_TEST_NOW + 10_000)
   })
 
   it("rejects missing billing-period context before calling pricing", async () => {
@@ -215,6 +261,25 @@ describe("RunBudgetProcessor injected behavior", () => {
     expect(second).toMatchObject({ amount: 5_000, flushSeq: first?.flushSeq })
   })
 
+  it("rolls back partial capture success bookkeeping and recovers on retry", async () => {
+    const store = new InMemoryRunBudgetStore()
+    const harness = createRunBudgetProcessorHarness({ store })
+    await harness.processor.startRun(createRunBudgetStartInput())
+    await harness.processor.applySyncEvent(createRunBudgetApplyInput())
+    store.failNextCaptureSuccessAfterBucketWrite = true
+
+    await harness.processor.flushCaptures()
+    expect(store.runs.get("run_1")).toMatchObject({ flushedAmount: 0 })
+    expect([...store.buckets.values()][0]).toMatchObject({ flushedAmount: 0 })
+    expect([...store.intents.values()][0]).toMatchObject({ status: "failed", attemptCount: 1 })
+
+    await harness.processor.flushCaptures()
+    expect(store.runs.get("run_1")).toMatchObject({ flushedAmount: 5_000 })
+    expect([...store.buckets.values()][0]).toMatchObject({ flushedAmount: 5_000 })
+    expect([...store.intents.values()][0]).toMatchObject({ status: "captured" })
+    expect(harness.captureReservationUsage).toHaveBeenCalledTimes(2)
+  })
+
   it("uses run currency for spend buckets when producer fact currency differs", async () => {
     const store = new InMemoryRunBudgetStore()
     const harness = createRunBudgetProcessorHarness({ store })
@@ -222,7 +287,7 @@ describe("RunBudgetProcessor injected behavior", () => {
     harness.pricingApply.mockResolvedValueOnce({
       allowed: true,
       meterFacts: [createRunBudgetMeterFact({ currency: "EUR" })],
-    } as never)
+    })
 
     await harness.processor.applySyncEvent(createRunBudgetApplyInput())
     expect([...store.buckets.values()][0]).toMatchObject({ currency: "USD", consumedAmount: 5_000 })
@@ -244,7 +309,7 @@ describe("RunBudgetProcessor injected behavior", () => {
           period_key: "period_2",
         }),
       ],
-    } as never)
+    })
     const second = createRunBudgetApplyInput({
       idempotencyKey: "idem_consume_2",
       event: { ...createRunBudgetApplyInput().event, id: "evt_2", timestamp: secondAt },
@@ -292,7 +357,7 @@ describe("RunBudgetProcessor injected behavior", () => {
     expect(harness.releaseReservation).not.toHaveBeenCalled()
     expect(harness.state.alarmAt).toBeGreaterThan(harness.state.now)
 
-    harness.captureReservationUsage.mockResolvedValue({ err: null, val: { capturedAmount: 0 } })
+    harness.captureReservationUsage.mockResolvedValue({ val: { capturedAmount: 0 } })
     await harness.processor.alarm()
     await expect(
       harness.processor.getRunStatus({ runId: "run_1", customerId: "cus_1", projectId: "proj_1" })

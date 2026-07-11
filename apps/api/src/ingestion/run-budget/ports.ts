@@ -1,8 +1,18 @@
 import type { entitlementMeterFactSchemaV1 } from "@unprice/analytics"
-import type { WalletService } from "@unprice/services/wallet"
+import type { Result } from "@unprice/error"
+import type {
+  CaptureReservationUsageInput,
+  CaptureReservationUsageOutput,
+  CreateReservationInput,
+  CreateReservationOutput,
+  ReleaseReservationInput,
+  ReleaseReservationOutput,
+  UnPriceWalletError,
+} from "@unprice/services/wallet"
 import type { z } from "zod"
 import type { ApplyInput, ApplyResult } from "../entitlements/contracts"
-import type { RunBudgetDecision } from "./contracts"
+import type { CaptureFailureStatus, RunCaptureStatus } from "./capture-policy"
+import type { EndRunInput, RunBudgetDecision, RunBudgetSummary } from "./contracts"
 
 export type RunState = {
   runId: string
@@ -13,7 +23,7 @@ export type RunState = {
   traceId: string | null
   parentRunId: string | null
   reservationId: string | null
-  status: string
+  status: RunBudgetSummary["status"]
   currency: string
   budgetAmount: number
   reservedAmount: number
@@ -50,7 +60,7 @@ export type RunCaptureIntent = {
   runId: string
   bucketKey: string
   amount: number
-  status: string
+  status: RunCaptureStatus
   attemptCount: number
   lastError: string | null
   createdAt: number
@@ -90,7 +100,7 @@ export type RunBudgetStore = {
     runId: string,
     decision: RunBudgetDecision,
     pricedAmount: number,
-    bucketDeltas: unknown[],
+    bucketDeltas: RunSpendBucketDelta[],
     createdAt: number
   ): Promise<void>
   commitSpendAndIdempotency(input: {
@@ -114,7 +124,7 @@ export type RunBudgetStore = {
   }): Promise<void>
   markCaptureFailure(input: {
     intentKey: string
-    status: string
+    status: CaptureFailureStatus
     attemptCount: number
     lastError: string
     updatedAt: number
@@ -126,7 +136,7 @@ export type RunBudgetStore = {
   findNextExpirationAlarmAt(now: number): Promise<number | null>
   closeRun(input: {
     runId: string
-    status: string
+    status: EndRunInput["status"]
     endedAt: number
     reconciliationNeeded: boolean
   }): Promise<void>
@@ -134,10 +144,17 @@ export type RunBudgetStore = {
 }
 
 /** A fresh service graph is required for every external wallet operation. */
-export type RunBudgetWalletOps = Pick<
-  WalletService,
-  "captureReservationUsage" | "createReservation" | "releaseReservation"
->
+export type RunBudgetWalletOps = {
+  createReservation(
+    input: CreateReservationInput
+  ): Promise<Result<CreateReservationOutput, UnPriceWalletError>>
+  captureReservationUsage(
+    input: CaptureReservationUsageInput
+  ): Promise<Result<CaptureReservationUsageOutput, UnPriceWalletError>>
+  releaseReservation(
+    input: ReleaseReservationInput
+  ): Promise<Result<ReleaseReservationOutput, UnPriceWalletError>>
+}
 
 export type RunBudgetWalletFactory = {
   create(): Promise<RunBudgetWalletOps>

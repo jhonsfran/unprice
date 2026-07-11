@@ -1,7 +1,13 @@
 import { eq, inArray, sql } from "drizzle-orm"
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite"
-import { CAPTURE_ABANDONED_STATUS, CAPTURE_RETRY_STATUSES } from "./capture-policy"
-import type { RunBudgetDecision } from "./contracts"
+import {
+  CAPTURE_ABANDONED_STATUS,
+  CAPTURE_RETRY_STATUSES,
+  CAPTURE_SUCCESS_STATUS,
+  type CaptureFailureStatus,
+  runCaptureStatusSchema,
+} from "./capture-policy"
+import { type EndRunInput, type RunBudgetDecision, runStatusSchema } from "./contracts"
 import * as schema from "./db/schema"
 import type {
   RunBudgetStore as RunBudgetStateStore,
@@ -17,7 +23,8 @@ export class RunBudgetStore implements RunBudgetStateStore {
   constructor(private readonly db: SqliteHandle) {}
 
   async loadRun(runId: string) {
-    return this.db.query.runState.findFirst({ where: eq(schema.runState.runId, runId) })
+    const row = await this.db.query.runState.findFirst({ where: eq(schema.runState.runId, runId) })
+    return row ? this.toRunState(row) : undefined
   }
 
   async createRun(run: RunState): Promise<void> {
@@ -35,10 +42,10 @@ export class RunBudgetStore implements RunBudgetStateStore {
     runId: string,
     decision: RunBudgetDecision,
     pricedAmount: number,
-    bucketDeltas: unknown[],
+    bucketDeltas: RunSpendBucketDelta[],
     createdAt: number
   ): Promise<void> {
-    await this.writeIdempotency(
+    this.writeIdempotency(
       this.db,
       idempotencyKey,
       runId,
@@ -58,9 +65,9 @@ export class RunBudgetStore implements RunBudgetStateStore {
     bucketDeltas: RunSpendBucketDelta[]
     createdAt: number
   }): Promise<void> {
-    await this.db.transaction(async (tx) => {
-      await this.persistSpend(tx, input.run, input.updatedRun, input.bucketDeltas)
-      await this.writeIdempotency(
+    this.db.transaction((tx) => {
+      this.persistSpend(tx, input.run, input.updatedRun, input.bucketDeltas)
+      this.writeIdempotency(
         tx,
         input.idempotencyKey,
         input.run.runId,
@@ -79,9 +86,10 @@ export class RunBudgetStore implements RunBudgetStateStore {
   }
 
   async loadCaptureIntent(intentKey: string) {
-    return this.db.query.runCaptureIntents.findFirst({
+    const row = await this.db.query.runCaptureIntents.findFirst({
       where: eq(schema.runCaptureIntents.intentKey, intentKey),
     })
+    return row ? this.toCaptureIntent(row) : undefined
   }
 
   async upsertCaptureIntent(intent: RunCaptureIntent): Promise<void> {
@@ -101,25 +109,27 @@ export class RunBudgetStore implements RunBudgetStateStore {
     amount: number
     updatedAt: number
   }): Promise<void> {
-    await this.db
-      .update(schema.runCaptureIntents)
-      .set({ status: "captured", updatedAt: input.updatedAt })
-      .where(eq(schema.runCaptureIntents.intentKey, input.intentKey))
-    await this.db
-      .update(schema.runSpendBuckets)
-      .set({
-        flushedAmount: sql`${schema.runSpendBuckets.flushedAmount} + ${input.amount}`,
-      })
-      .where(eq(schema.runSpendBuckets.bucketKey, input.bucketKey))
-    await this.db
-      .update(schema.runState)
-      .set({ flushedAmount: sql`${schema.runState.flushedAmount} + ${input.amount}` })
-      .where(eq(schema.runState.runId, input.runId))
+    this.db.transaction((tx) => {
+      tx.update(schema.runCaptureIntents)
+        .set({ status: CAPTURE_SUCCESS_STATUS, updatedAt: input.updatedAt })
+        .where(eq(schema.runCaptureIntents.intentKey, input.intentKey))
+        .run()
+      tx.update(schema.runSpendBuckets)
+        .set({
+          flushedAmount: sql`${schema.runSpendBuckets.flushedAmount} + ${input.amount}`,
+        })
+        .where(eq(schema.runSpendBuckets.bucketKey, input.bucketKey))
+        .run()
+      tx.update(schema.runState)
+        .set({ flushedAmount: sql`${schema.runState.flushedAmount} + ${input.amount}` })
+        .where(eq(schema.runState.runId, input.runId))
+        .run()
+    })
   }
 
   async markCaptureFailure(input: {
     intentKey: string
-    status: string
+    status: CaptureFailureStatus
     attemptCount: number
     lastError: string
     updatedAt: number
@@ -136,9 +146,10 @@ export class RunBudgetStore implements RunBudgetStateStore {
   }
 
   async listRetryableCaptureIntents() {
-    return this.db.query.runCaptureIntents.findMany({
+    const rows = await this.db.query.runCaptureIntents.findMany({
       where: inArray(schema.runCaptureIntents.status, [...CAPTURE_RETRY_STATUSES]),
     })
+    return rows.map((row) => this.toCaptureIntent(row))
   }
 
   async hasUnresolvedCaptureIntents(runId: string): Promise<boolean> {
@@ -147,20 +158,22 @@ export class RunBudgetStore implements RunBudgetStateStore {
   }
 
   async findAbandonedCaptureIntents(runId: string) {
-    const intents = await this.db.query.runCaptureIntents.findMany({
+    const rows = await this.db.query.runCaptureIntents.findMany({
       where: eq(schema.runCaptureIntents.status, CAPTURE_ABANDONED_STATUS),
     })
+    const intents = rows.map((row) => this.toCaptureIntent(row))
     return intents.filter((intent) => this.intentBelongsToRun(intent, runId))
   }
 
   async findRunningRunsPastExpiry(now: number) {
-    return this.db.query.runState.findMany({
+    const rows = await this.db.query.runState.findMany({
       where: sql`
         ${schema.runState.status} = 'running'
         AND ${schema.runState.expiresAt} IS NOT NULL
         AND ${schema.runState.expiresAt} <= ${now}
       `,
     })
+    return rows.map((row) => this.toRunState(row))
   }
 
   async findNextExpirationAlarmAt(now: number): Promise<number | null> {
@@ -175,7 +188,7 @@ export class RunBudgetStore implements RunBudgetStateStore {
 
   async closeRun(input: {
     runId: string
-    status: string
+    status: EndRunInput["status"]
     endedAt: number
     reconciliationNeeded: boolean
   }): Promise<void> {
@@ -200,20 +213,27 @@ export class RunBudgetStore implements RunBudgetStateStore {
     return intent.runId === runId || intent.intentKey.startsWith(`run-capture:${runId}:`)
   }
 
-  private async persistSpend(
+  private toRunState(row: typeof schema.runState.$inferSelect): RunState {
+    return { ...row, status: runStatusSchema.parse(row.status) }
+  }
+
+  private toCaptureIntent(row: typeof schema.runCaptureIntents.$inferSelect): RunCaptureIntent {
+    return { ...row, status: runCaptureStatusSchema.parse(row.status) }
+  }
+
+  private persistSpend(
     db: DbWriter,
     run: RunState,
     updatedRun: RunState,
     bucketDeltas: RunSpendBucketDelta[]
-  ): Promise<void> {
-    await db
-      .update(schema.runState)
+  ): void {
+    db.update(schema.runState)
       .set({ consumedAmount: updatedRun.consumedAmount, lastEventAt: updatedRun.lastEventAt })
       .where(eq(schema.runState.runId, run.runId))
+      .run()
 
     for (const delta of bucketDeltas) {
-      await db
-        .insert(schema.runSpendBuckets)
+      db.insert(schema.runSpendBuckets)
         .values({
           bucketKey: delta.bucketKey,
           runId: run.runId,
@@ -238,20 +258,20 @@ export class RunBudgetStore implements RunBudgetStateStore {
             pendingAmount: sql`${schema.runSpendBuckets.pendingAmount} + ${delta.amount}`,
           },
         })
+        .run()
     }
   }
 
-  private async writeIdempotency(
+  private writeIdempotency(
     db: DbWriter,
     idempotencyKey: string,
     runId: string,
     decision: RunBudgetDecision,
     pricedAmount: number,
-    bucketDeltas: unknown[],
+    bucketDeltas: RunSpendBucketDelta[],
     createdAt: number
-  ): Promise<void> {
-    await db
-      .insert(schema.runIdempotency)
+  ): void {
+    db.insert(schema.runIdempotency)
       .values({
         idempotencyKey,
         runId,
@@ -261,5 +281,6 @@ export class RunBudgetStore implements RunBudgetStateStore {
         createdAt,
       })
       .onConflictDoNothing()
+      .run()
   }
 }

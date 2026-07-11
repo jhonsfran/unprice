@@ -145,6 +145,9 @@ patterns. Keep it cheap to load and useful.
 - 2026-07-11: Keep RunBudget state-machine and bucket behavior in `processor.ts`, all Durable
   SQLite access in `run-budget-store.ts`, and construct the injected wallet service graph once per
   external operation so Neon request-scoped resources never cross Worker requests.
+- 2026-07-11: Durable SQLite atomic store callbacks must execute synchronous Drizzle `.run()`
+  statements inside `db.transaction`; async callbacks can leave earlier writes committed when a
+  later statement fails.
 - 2026-05-08: Tiny-tools usage discovery reads `featurePlanVersion.meterConfig` from
   `entitlements.get`; `verify` is only for the decision.
 - 2026-05-11: Tier/package entitlements are static quantity limits from subscription grants; do

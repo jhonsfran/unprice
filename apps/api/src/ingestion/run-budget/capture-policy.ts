@@ -1,3 +1,5 @@
+import { z } from "zod"
+
 /**
  * Single source of truth for the RunBudget capture-retry policy.
  *
@@ -25,6 +27,14 @@ export type CaptureRetryStatus = (typeof CAPTURE_RETRY_STATUSES)[number]
  * persisted reconciliation flag rather than staying open forever.
  */
 export const CAPTURE_ABANDONED_STATUS = "abandoned"
+export const CAPTURE_SUCCESS_STATUS = "captured"
+export const runCaptureStatusSchema = z.enum([
+  ...CAPTURE_RETRY_STATUSES,
+  CAPTURE_SUCCESS_STATUS,
+  CAPTURE_ABANDONED_STATUS,
+])
+export type RunCaptureStatus = z.infer<typeof runCaptureStatusSchema>
+export type CaptureFailureStatus = Extract<RunCaptureStatus, "abandoned" | "failed">
 
 const BASE_BACKOFF_MS = 30_000
 const MAX_BACKOFF_MS = 3_600_000

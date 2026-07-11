@@ -3,7 +3,6 @@ import { drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
 import type { Env } from "~/env"
 import { createDoLogger } from "~/observability"
-import { serializeRunBudgetApply } from "./apply-serialization"
 import type {
   ApplyRunSyncEventInput,
   EndRunInput,
@@ -19,11 +18,12 @@ import migrations from "./drizzle/migrations"
 import type { RunBudgetWalletOps } from "./ports"
 import { createRunBudgetPricingDelegate } from "./pricing-adapter"
 import { RunBudgetProcessor } from "./processor"
+import { RunBudgetRpcShell } from "./rpc-shell"
 import { RunBudgetStore } from "./run-budget-store"
 
 /** Cloudflare adapter; run-budget behavior lives in RunBudgetProcessor. */
 export class RunBudgetDO extends DurableObject {
-  private readonly processor: RunBudgetProcessor
+  private readonly rpc: RunBudgetRpcShell
   private readonly ready: Promise<void>
   private readonly runtimeEnv: Env
 
@@ -33,7 +33,7 @@ export class RunBudgetDO extends DurableObject {
 
     const db = drizzle(this.ctx.storage, { schema, logger: false })
     const logger = createDoLogger(this.ctx.id.toString())
-    this.processor = new RunBudgetProcessor({
+    const processor = new RunBudgetProcessor({
       clock: { now: () => Date.now() },
       logger,
       pricing: createRunBudgetPricingDelegate(env),
@@ -44,6 +44,9 @@ export class RunBudgetDO extends DurableObject {
       store: new RunBudgetStore(db),
       wallet: { create: () => this.createWalletOps() },
     })
+    this.rpc = new RunBudgetRpcShell(processor, (mutation) =>
+      this.ctx.blockConcurrencyWhile(mutation)
+    )
     this.ready = this.ctx.blockConcurrencyWhile(async () => {
       await migrate(db, migrations)
     })
@@ -51,39 +54,39 @@ export class RunBudgetDO extends DurableObject {
 
   async startRun(input: StartRunInput): Promise<RunBudgetSummary> {
     await this.ready
-    return this.processor.startRun(input)
+    return this.rpc.startRun(input)
   }
 
   async applySyncEvent(input: ApplyRunSyncEventInput): Promise<RunBudgetDecision> {
     await this.ready
-    return serializeRunBudgetApply(this.ctx, () => this.processor.applySyncEvent(input))
+    return this.rpc.applySyncEvent(input)
   }
 
   async endRun(input: EndRunInput): Promise<RunBudgetSummary> {
     await this.ready
-    return this.processor.endRun(input)
+    return this.rpc.endRun(input)
   }
 
   async getRunStatus(input: GetRunStatusInput): Promise<RunBudgetSummary> {
     await this.ready
-    return this.processor.getRunStatus(input)
+    return this.rpc.getRunStatus(input)
   }
 
   async flushCaptures(): Promise<void> {
     await this.ready
-    return this.processor.flushCaptures()
+    return this.rpc.flushCaptures()
   }
 
   async flushCapturesForInvoicing(
     input: FlushRunBudgetCapturesForInvoicingInput
   ): Promise<FlushRunBudgetCapturesForInvoicingResult> {
     await this.ready
-    return this.processor.flushCapturesForInvoicing(input)
+    return this.rpc.flushCapturesForInvoicing(input)
   }
 
   override async alarm(): Promise<void> {
     await this.ready
-    return this.processor.alarm()
+    return this.rpc.alarm()
   }
 
   private async createWalletOps(): Promise<RunBudgetWalletOps> {
