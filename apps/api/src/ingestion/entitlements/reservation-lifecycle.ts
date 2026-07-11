@@ -1,13 +1,9 @@
 import type { Currency } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logs"
 import {
-  AsyncMeterAggregationEngine,
-  type Fact,
   type GrantConsumptionState,
   computeGrantPeriodBucket,
   computeMaxMarginalPriceMinor,
-  computeUsagePriceDeltaMinor,
-  consumeGrantsByPriority,
 } from "@unprice/services/entitlements"
 import type { CreateReservationOutput, ReservationCloseReason } from "@unprice/services/wallet"
 import {
@@ -39,8 +35,7 @@ import type {
   ReservationGrowthResult,
   WalletReservationSnapshot,
 } from "./contracts"
-import { readNumericEventField } from "./meter-helpers"
-import { InMemoryMeterStorageAdapter, type MeterStateDraft } from "./meter-state-adapter"
+import type { MeterStateDraft } from "./meter-state-adapter"
 import type {
   EntitlementWindowClock,
   EntitlementWindowRuntime,
@@ -49,7 +44,7 @@ import type {
   EntitlementWindowWalletOps,
   EntitlementWindowWalletProvider,
 } from "./ports"
-import { firstGrantByDrainOrder, priceFactsFromGrantStates } from "./pricing"
+import { firstGrantByDrainOrder, projectEventCostMinor } from "./pricing"
 import {
   type ReservationInvoiceContext,
   hasPendingWalletFlush,
@@ -1502,155 +1497,40 @@ export class ReservationLifecycle {
 
   private computeProjectedCurrentEventCostMinor(
     input: ApplyInput,
-    activeGrants: ActiveGrantInput[],
+    activeGrants: readonly ActiveGrantInput[],
     meter: MeterIdentity
   ): number {
-    const fact = this.projectFactForCurrentEvent(input, meter)
-    if (!fact) return 0
+    const now = this.clock.now()
+    const grantStates = this.store.readGrantStatesForActiveGrants(
+      [...activeGrants],
+      input.event.timestamp
+    )
+    const meterState = this.store.readMeterStateDraft(meter.key, now)
 
-    return this.priceProjectedFact({
+    return projectEventCostMinor({
       activeGrants,
       entitlement: input.entitlement,
+      event: input.event,
       eventTimestamp: input.event.timestamp,
-      fact,
+      grantStates,
+      meter,
+      meterState,
+      timestampValidationNow: null,
     })
   }
 
   public computeProjectedBatchEventCostMinor(params: {
-    activeGrants: ActiveGrantInput[]
+    activeGrants: readonly ActiveGrantInput[]
     entitlement: EntitlementConfigInput
     event: ApplyInput["event"]
     eventTimestamp: number
-    grantStates: GrantConsumptionState[]
+    grantStates: readonly GrantConsumptionState[]
     meter: MeterIdentity
-    meterState: MeterStateDraft
+    meterState: Readonly<MeterStateDraft>
   }): number {
-    const projectedMeterState: MeterStateDraft = { ...params.meterState }
-    const adapter = new InMemoryMeterStorageAdapter(projectedMeterState)
-    const engine = new AsyncMeterAggregationEngine([params.meter.config], adapter, this.clock.now())
-    const facts = engine.applyEventSync(params.event)
-    if (facts.length === 0) {
-      return 0
-    }
-
-    const projectedGrantStates = params.grantStates.map((state) => ({ ...state }))
-    const { pricedFacts } = priceFactsFromGrantStates({
-      activeGrants: params.activeGrants,
-      entitlement: params.entitlement,
-      eventTimestamp: params.eventTimestamp,
-      facts,
-      grantStates: projectedGrantStates,
+    return projectEventCostMinor({
+      ...params,
+      timestampValidationNow: this.clock.now(),
     })
-
-    return pricedFacts.reduce((sum, fact) => sum + fact.amountMinor, 0)
-  }
-
-  private projectFactForCurrentEvent(input: ApplyInput, meter: MeterIdentity): Fact | null {
-    if (meter.config.eventSlug !== input.event.slug) {
-      return null
-    }
-
-    const row = this.store.readMeterStateDraft(meter.key, this.clock.now())
-
-    const previousValue = row.usage
-    const previousUpdatedAt = row.updatedAt === null ? Number.NEGATIVE_INFINITY : row.updatedAt
-
-    switch (meter.config.aggregationMethod) {
-      case "count": {
-        return {
-          eventId: input.event.id,
-          meterKey: meter.key,
-          delta: 1,
-          valueAfter: previousValue + 1,
-        }
-      }
-      case "sum": {
-        const numericValue = readNumericEventField(meter.config, input.event)
-        return {
-          eventId: input.event.id,
-          meterKey: meter.key,
-          delta: numericValue,
-          valueAfter: previousValue + numericValue,
-        }
-      }
-      case "max": {
-        const numericValue = readNumericEventField(meter.config, input.event)
-        const nextValue = row.exists ? Math.max(previousValue, numericValue) : numericValue
-        return {
-          eventId: input.event.id,
-          meterKey: meter.key,
-          delta: nextValue - previousValue,
-          valueAfter: nextValue,
-        }
-      }
-      case "latest": {
-        const numericValue = readNumericEventField(meter.config, input.event)
-        if (input.event.timestamp < previousUpdatedAt) {
-          return {
-            eventId: input.event.id,
-            meterKey: meter.key,
-            delta: 0,
-            valueAfter: previousValue,
-          }
-        }
-
-        return {
-          eventId: input.event.id,
-          meterKey: meter.key,
-          delta: numericValue - previousValue,
-          valueAfter: numericValue,
-        }
-      }
-      default:
-        return null
-    }
-  }
-
-  private priceProjectedFact(params: {
-    activeGrants: ActiveGrantInput[]
-    entitlement: EntitlementConfigInput
-    eventTimestamp: number
-    fact: Fact
-  }): number {
-    const priceGrant = firstGrantByDrainOrder(params.activeGrants)
-    const { fact } = params
-
-    if (fact.delta <= 0) {
-      const usageAfter = Math.max(0, fact.valueAfter)
-      const usageBefore = Math.max(0, fact.valueAfter - fact.delta)
-      return computeUsagePriceDeltaMinor({
-        priceConfig: params.entitlement.featureConfig,
-        usageAfter,
-        usageBefore,
-      })
-    }
-
-    const consumed = consumeGrantsByPriority({
-      grants: params.activeGrants,
-      states: this.store.readGrantStatesForActiveGrants(params.activeGrants, params.eventTimestamp),
-      timestamp: params.eventTimestamp,
-      units: fact.delta,
-    })
-
-    let total = 0
-    for (const allocation of consumed.allocations) {
-      total += computeUsagePriceDeltaMinor({
-        priceConfig: params.entitlement.featureConfig,
-        usageAfter: allocation.usageAfter,
-        usageBefore: allocation.usageBefore,
-      })
-    }
-
-    if (consumed.remaining > 0 && priceGrant) {
-      const usageAfter = Math.max(0, fact.valueAfter)
-      const usageBefore = Math.max(0, fact.valueAfter - fact.delta)
-      total += computeUsagePriceDeltaMinor({
-        priceConfig: params.entitlement.featureConfig,
-        usageAfter,
-        usageBefore,
-      })
-    }
-
-    return total
   }
 }

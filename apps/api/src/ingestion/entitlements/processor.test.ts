@@ -1166,6 +1166,19 @@ describe("EntitlementWindowProcessor wallet behavior", () => {
       flushedAmount: 300_000_000,
       reservationId: "res_seeded",
     })
+    expect(harness.instrumentationCalls).toContainEqual({
+      operation: "flush_refill",
+      baseFields: {
+        flush_seq: 1,
+        flush_amount: 300_000_000,
+        flush_quantity: 3,
+        reservation_refill_requested_amount: 0,
+      },
+    })
+    expect(harness.instrumentationCalls.slice(-2).map(({ operation }) => operation)).toEqual([
+      "flush_reservation_for_invoicing",
+      "flush_refill",
+    ])
 
     await expect(
       harness.processor.flushReservationForInvoicing({
@@ -1358,6 +1371,11 @@ describe("EntitlementWindowProcessor reads and lifecycle", () => {
     await harness.processor.alarm()
     expect(wallet.releaseReservation).toHaveBeenCalledTimes(1)
     expect(store.walletRow?.reservationId).toBeNull()
+    expect(harness.instrumentationCalls.map(({ operation }) => operation)).toEqual([
+      "alarm",
+      "alarm",
+      "close_reservation",
+    ])
   })
 
   it("time-based wallet flush captures usage without requesting a zero refill", async () => {
@@ -1399,6 +1417,18 @@ describe("EntitlementWindowProcessor reads and lifecycle", () => {
       pendingRefillAmount: 0,
       refillInFlight: false,
     })
+    expect(harness.instrumentationCalls).toEqual([
+      { operation: "alarm" },
+      {
+        operation: "flush_refill",
+        baseFields: {
+          flush_seq: 3,
+          flush_amount: 595_600_000,
+          flush_quantity: 12,
+          reservation_refill_requested_amount: 0,
+        },
+      },
+    ])
   })
 
   it("skips automatic close while recovery is required", async () => {
@@ -1464,6 +1494,7 @@ describe("EntitlementWindowProcessor reads and lifecycle", () => {
     )
     expect(wallet.releaseReservation).toHaveBeenCalledTimes(1)
     expect(store.walletRow?.reservationId).toBeNull()
+    expect(harness.instrumentationCalls).toEqual([{ operation: "close_reservation" }])
   })
 
   it("leaves a failed final flush for operator recovery", async () => {
@@ -1514,6 +1545,17 @@ describe("EntitlementWindowProcessor reads and lifecycle", () => {
       pendingRefillAmount: 0,
       refillInFlight: false,
     })
+    expect(harness.instrumentationCalls).toEqual([
+      {
+        operation: "flush_refill",
+        baseFields: {
+          flush_seq: 1,
+          flush_amount: 300_000_000,
+          flush_quantity: 3,
+          reservation_refill_requested_amount: 200_000_000,
+        },
+      },
+    ])
   })
 })
 

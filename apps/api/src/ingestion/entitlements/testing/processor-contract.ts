@@ -50,12 +50,22 @@ export function createEntitlementWindowProcessorHarness<
   wallet?: EntitlementWindowWalletProvider
 }) {
   const waitUntilPromises: Promise<unknown>[] = []
+  const instrumentationCalls: Array<{
+    baseFields?: Record<string, unknown>
+    operation: string
+  }> = []
   let alarmAt: number | null = null
   let destroyed = false
 
   const deps: EntitlementWindowProcessorDeps = {
     clock: { now: () => (typeof params.now === "function" ? params.now() : params.now) },
-    instrument: (_operation, fn) => fn(),
+    instrument: (operation, fn, baseFields) => {
+      instrumentationCalls.push({
+        operation,
+        ...(baseFields ? { baseFields: { ...baseFields } } : {}),
+      })
+      return fn()
+    },
     logger: createNoopLogger(),
     runtime: {
       instanceId: "window_test_1",
@@ -92,6 +102,7 @@ export function createEntitlementWindowProcessorHarness<
   }
 
   return {
+    instrumentationCalls,
     processor: new EntitlementWindowProcessor(deps),
     store: params.store,
     waitUntilPromises,

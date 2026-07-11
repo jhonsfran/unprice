@@ -87,7 +87,6 @@ import type {
 import {
   buildMeterFactPayload,
   findGrantLimitExceededFact,
-  priceFactsFromCompactGrantState,
   priceFactsFromGrantStates,
   resolveLateClosedPeriod,
   resolveTotalGrantUnits,
@@ -623,7 +622,7 @@ export class EntitlementWindowProcessor {
       return null
     }
 
-    const { pricedFacts, touchedStates } = priceFactsFromGrantStates({
+    const { grantStates, pricedFacts, touchedStates } = priceFactsFromGrantStates({
       activeGrants,
       entitlement: setup.entitlement,
       eventTimestamp: event.timestamp,
@@ -632,12 +631,13 @@ export class EntitlementWindowProcessor {
     })
     state.metrics.priced_fact_count += pricedFacts.length
     state.metrics.grant_allocation_count += touchedStates.size
+    state.grantStates = [...grantStates]
 
     for (const [bucketKey, grantState] of touchedStates.entries()) {
       state.touchedGrantStates.set(bucketKey, grantState)
     }
 
-    return pricedFacts
+    return [...pricedFacts]
   }
 
   private stageOptimizedBatchAllowedResult(params: {
@@ -1730,17 +1730,22 @@ export class EntitlementWindowProcessor {
 
     this.persistMeterStateDraft(tx, { meter, meterState, metrics })
 
-    const priced = priceFactsFromCompactGrantState(tx, {
+    const grantStates = facts.some((fact) => fact.delta > 0)
+      ? tx.readGrantStatesForActiveGrants(activeGrants, input.event.timestamp)
+      : []
+    const priced = priceFactsFromGrantStates({
       activeGrants,
       entitlement,
       eventTimestamp: input.event.timestamp,
       facts,
+      grantStates,
     })
+    const periodWriteCount = tx.writeGrantConsumptions(priced.touchedStates.values())
     metrics.pricedFactCount = priced.pricedFacts.length
-    metrics.grantAllocationCount = priced.touchedStateCount
-    metrics.grantWindowWriteCount = priced.periodWriteCount
+    metrics.grantAllocationCount = priced.touchedStates.size
+    metrics.grantWindowWriteCount = periodWriteCount
 
-    return priced.pricedFacts
+    return [...priced.pricedFacts]
   }
 
   private applySingleApplyWalletReservationSpend(

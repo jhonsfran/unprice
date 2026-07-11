@@ -48,6 +48,8 @@ patterns. Keep it cheap to load and useful.
 - 2026-07-11: When splitting `EntitlementWindowProcessor` lifecycle collaborators, keep operation
   instrumentation at the processor boundary and pass close/flush callbacks into collaborators so
   nested `alarm`, `close_reservation`, and `flush_refill` telemetry remains unchanged.
+- 2026-07-11: Keep entitlement pricing helpers store-free: pass readonly meter/grant snapshots,
+  return next/touched grant states, and let processor transactions own all state reads and writes.
 
 - 2026-06-06: EntitlementWindowDO SQLite columns need the schema, contract snapshot, SQL migration,
   `drizzle/migrations.js`, and `drizzle/meta/_journal.json` updated together; otherwise existing

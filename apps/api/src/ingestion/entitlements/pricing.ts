@@ -8,6 +8,7 @@ import {
   computeUsagePriceDeltaExplanation,
   consumeGrantsByPriority,
   resolveAvailableGrantUnits,
+  validateEventTimestamp,
 } from "@unprice/services/entitlements"
 import type {
   ActiveGrantInput,
@@ -17,10 +18,13 @@ import type {
   MeterIdentity,
   PricedFact,
 } from "./contracts"
-import { replaceGrantConsumptionState } from "./entitlement-window-store"
-import type { EntitlementWindowStateOps } from "./ports"
+import { readNumericEventField } from "./meter-helpers"
+import type { MeterStateDraft } from "./meter-state-adapter"
 
-export function resolveTotalGrantUnits(grants: ActiveGrantInput[]): number | null {
+type GrantConsumptionSnapshot = Readonly<GrantConsumptionState>
+type ActiveGrantSnapshot = Readonly<ActiveGrantInput>
+
+export function resolveTotalGrantUnits(grants: readonly ActiveGrantSnapshot[]): number | null {
   if (grants.some((grant) => grant.allowanceUnits === null)) {
     return null
   }
@@ -29,11 +33,11 @@ export function resolveTotalGrantUnits(grants: ActiveGrantInput[]): number | nul
 }
 
 export function findGrantLimitExceededFact(params: {
-  activeGrants: ActiveGrantInput[]
+  activeGrants: readonly ActiveGrantSnapshot[]
   entitlement: EntitlementConfigInput
-  facts: Fact[]
+  facts: readonly Fact[]
   overageStrategy: OverageStrategy
-  states: GrantConsumptionState[]
+  states: readonly GrantConsumptionSnapshot[]
   timestamp: number
 }): { available: number; fact: Fact } | null {
   if (params.overageStrategy === "always") {
@@ -41,8 +45,8 @@ export function findGrantLimitExceededFact(params: {
   }
 
   let available = resolveAvailableGrantUnits({
-    grants: params.activeGrants,
-    states: params.states,
+    grants: [...params.activeGrants],
+    states: params.states.map((state) => ({ ...state })),
     timestamp: params.timestamp,
   })
 
@@ -112,41 +116,22 @@ export function buildMeterFactPayload(params: {
   }
 }
 
-export function priceFactsFromCompactGrantState(
-  tx: EntitlementWindowStateOps,
-  params: {
-    activeGrants: ActiveGrantInput[]
-    entitlement: EntitlementConfigInput
-    eventTimestamp: number
-    facts: Fact[]
-  }
-): { periodWriteCount: number; pricedFacts: PricedFact[]; touchedStateCount: number } {
-  const grantStates = params.facts.some((fact) => fact.delta > 0)
-    ? tx.readGrantStatesForActiveGrants(params.activeGrants, params.eventTimestamp)
-    : []
-  const { pricedFacts, touchedStates } = priceFactsFromGrantStates({
-    ...params,
-    grantStates,
-  })
-
-  const periodWriteCount = tx.writeGrantConsumptions(touchedStates.values())
-
-  return { periodWriteCount, pricedFacts, touchedStateCount: touchedStates.size }
-}
-
 export function priceFactsFromGrantStates(params: {
-  activeGrants: ActiveGrantInput[]
+  activeGrants: readonly ActiveGrantSnapshot[]
   entitlement: EntitlementConfigInput
   eventTimestamp: number
-  facts: Fact[]
-  grantStates: GrantConsumptionState[]
+  facts: readonly Fact[]
+  grantStates: readonly GrantConsumptionSnapshot[]
 }): {
-  pricedFacts: PricedFact[]
-  touchedStates: Map<string, GrantConsumptionState>
+  grantStates: readonly GrantConsumptionSnapshot[]
+  pricedFacts: readonly PricedFact[]
+  touchedStates: ReadonlyMap<string, GrantConsumptionSnapshot>
 } {
   const pricedFacts: PricedFact[] = []
   const touchedStates = new Map<string, GrantConsumptionState>()
-  const priceGrant = firstGrantByDrainOrder(params.activeGrants)
+  const grantStates = params.grantStates.map((state) => ({ ...state }))
+  const activeGrants = params.activeGrants.map((grant) => ({ ...grant }))
+  const priceGrant = firstGrantByDrainOrder(activeGrants)
 
   for (const fact of params.facts) {
     if (fact.delta <= 0) {
@@ -162,8 +147,8 @@ export function priceFactsFromGrantStates(params: {
     }
 
     const consumed = consumeGrantsByPriority({
-      grants: params.activeGrants,
-      states: params.grantStates,
+      grants: activeGrants,
+      states: grantStates,
       timestamp: params.eventTimestamp,
       units: fact.delta,
     })
@@ -197,7 +182,7 @@ export function priceFactsFromGrantStates(params: {
         units: allocation.units,
       })
 
-      replaceGrantConsumptionState(params.grantStates, allocation.nextState)
+      replaceGrantState(grantStates, allocation.nextState)
       touchedStates.set(allocation.nextState.bucketKey, allocation.nextState)
     }
 
@@ -213,13 +198,121 @@ export function priceFactsFromGrantStates(params: {
     }
   }
 
-  return { pricedFacts, touchedStates }
+  return { grantStates, pricedFacts, touchedStates }
+}
+
+function replaceGrantState(
+  states: GrantConsumptionState[],
+  nextState: GrantConsumptionState
+): void {
+  const index = states.findIndex((state) => state.bucketKey === nextState.bucketKey)
+  if (index === -1) {
+    states.push(nextState)
+    return
+  }
+  states[index] = nextState
+}
+
+export function projectEventCostMinor(params: {
+  activeGrants: readonly ActiveGrantSnapshot[]
+  entitlement: EntitlementConfigInput
+  event: ApplyInput["event"]
+  eventTimestamp: number
+  grantStates: readonly GrantConsumptionSnapshot[]
+  meter: MeterIdentity
+  meterState: Readonly<MeterStateDraft>
+  timestampValidationNow: number | null
+}): number {
+  if (params.timestampValidationNow !== null) {
+    validateEventTimestamp(params.event.timestamp, params.timestampValidationNow)
+  }
+  const fact = projectMeterFact({
+    event: params.event,
+    meter: params.meter,
+    meterState: params.meterState,
+  })
+  if (!fact) {
+    return 0
+  }
+
+  const { pricedFacts } = priceFactsFromGrantStates({
+    activeGrants: params.activeGrants,
+    entitlement: params.entitlement,
+    eventTimestamp: params.eventTimestamp,
+    facts: [fact],
+    grantStates: params.grantStates,
+  })
+
+  return pricedFacts.reduce((sum, fact) => sum + fact.amountMinor, 0)
+}
+
+function projectMeterFact(params: {
+  event: ApplyInput["event"]
+  meter: MeterIdentity
+  meterState: Readonly<MeterStateDraft>
+}): Fact | null {
+  const { event, meter, meterState } = params
+  if (meter.config.eventSlug !== event.slug) {
+    return null
+  }
+
+  const previousValue = meterState.usage
+  const previousUpdatedAt =
+    meterState.updatedAt === null ? Number.NEGATIVE_INFINITY : meterState.updatedAt
+
+  switch (meter.config.aggregationMethod) {
+    case "count":
+      return {
+        eventId: event.id,
+        meterKey: meter.key,
+        delta: 1,
+        valueAfter: previousValue + 1,
+      }
+    case "sum": {
+      const numericValue = readNumericEventField(meter.config, event)
+      return {
+        eventId: event.id,
+        meterKey: meter.key,
+        delta: numericValue,
+        valueAfter: previousValue + numericValue,
+      }
+    }
+    case "max": {
+      const numericValue = readNumericEventField(meter.config, event)
+      const nextValue = meterState.exists ? Math.max(previousValue, numericValue) : numericValue
+      return {
+        eventId: event.id,
+        meterKey: meter.key,
+        delta: nextValue - previousValue,
+        valueAfter: nextValue,
+      }
+    }
+    case "latest": {
+      const numericValue = readNumericEventField(meter.config, event)
+      if (event.timestamp < previousUpdatedAt) {
+        return {
+          eventId: event.id,
+          meterKey: meter.key,
+          delta: 0,
+          valueAfter: previousValue,
+        }
+      }
+      return {
+        eventId: event.id,
+        meterKey: meter.key,
+        delta: numericValue - previousValue,
+        valueAfter: numericValue,
+      }
+    }
+    default:
+      return null
+  }
 }
 
 export function priceFactWithEntitlement(params: {
   entitlement: EntitlementConfigInput
   fact: Fact
-  grant: ActiveGrantInput
+  grant: ActiveGrantSnapshot
   timestamp: number
 }): PricedFact {
   const { entitlement, fact, grant, timestamp } = params
@@ -259,7 +352,9 @@ export function priceFactWithEntitlement(params: {
   }
 }
 
-export function firstGrantByDrainOrder(grants: ActiveGrantInput[]): ActiveGrantInput {
+export function firstGrantByDrainOrder(
+  grants: readonly ActiveGrantSnapshot[]
+): ActiveGrantSnapshot {
   const grant = [...grants].sort((left, right) => compareGrantDrainOrder(left, right))[0]
   if (!grant) {
     throw new Error("Expected at least one grant")
@@ -268,7 +363,7 @@ export function firstGrantByDrainOrder(grants: ActiveGrantInput[]): ActiveGrantI
 }
 
 export function resolveLateClosedPeriod(params: {
-  activeGrants: ActiveGrantInput[]
+  activeGrants: readonly ActiveGrantSnapshot[]
   eventTimestamp: number
   now: number
 }): { lagMs: number; periodEndAt: number } | null {
