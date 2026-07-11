@@ -80,6 +80,37 @@ async function seedSpend(
   })
 }
 
+async function appendSpend(
+  store: RunBudgetStore,
+  runId: string,
+  delta: RunSpendBucketDelta,
+  idempotencyKey: string
+): Promise<void> {
+  const run = await store.loadRun(runId)
+  if (!run) throw new Error("Run fixture missing")
+  const consumedAmount = run.consumedAmount + delta.amount
+  await store.commitSpendAndIdempotency({
+    run,
+    updatedRun: { ...run, consumedAmount, lastEventAt: RUN_BUDGET_TEST_NOW + 1 },
+    idempotencyKey,
+    decision: {
+      allowed: true,
+      state: "processed",
+      budget: {
+        runId,
+        status: "running",
+        budgetAmount: run.budgetAmount,
+        consumedAmount,
+        remainingAmount: run.budgetAmount - consumedAmount,
+      },
+      meterFacts: [],
+    },
+    pricedAmount: delta.amount,
+    bucketDeltas: [delta],
+    createdAt: RUN_BUDGET_TEST_NOW + 1,
+  })
+}
+
 afterEach(async () => {
   await reset()
 })
@@ -184,9 +215,12 @@ describe("RunBudgetStore real SQLite transactions", () => {
         })
       ).resolves.toMatchObject({
         amount: 5_000,
+        captureQuantity: 5,
         flushSeq: RUN_BUDGET_TEST_NOW,
         rangeStartAmount: 0,
+        rangeStartQuantity: 0,
         targetAmount: 5_000,
+        targetQuantity: 5,
       })
       await expect(store.loadRun(run.runId)).resolves.toMatchObject({
         lastCaptureSeq: RUN_BUDGET_TEST_NOW,
@@ -220,9 +254,12 @@ describe("RunBudgetStore real SQLite transactions", () => {
       })
 
       await expect(store.loadCaptureIntent(legacyIntentKey)).resolves.toMatchObject({
+        captureQuantity: null,
         flushSeq: 0,
         rangeStartAmount: 0,
+        rangeStartQuantity: null,
         targetAmount: 0,
+        targetQuantity: null,
       })
       await expect(
         store.openCaptureIntent({
@@ -232,9 +269,85 @@ describe("RunBudgetStore real SQLite transactions", () => {
         })
       ).resolves.toMatchObject({
         amount: 5_000,
+        captureQuantity: 0,
         flushSeq: RUN_BUDGET_TEST_NOW + 1,
         rangeStartAmount: 5_000,
+        rangeStartQuantity: 5,
         targetAmount: 10_000,
+        targetQuantity: 5,
+      })
+    })
+  })
+
+  it("seals a legacy retry quantity before later spend increments the bucket", async () => {
+    const stub = env.runbudget.getByName(`test:run-budget-legacy-quantity:${crypto.randomUUID()}`)
+    await runInDurableObject(stub, async (instance: RunBudgetDO, state) => {
+      await instance
+        .getRunStatus({ runId: "__bootstrap__", customerId: "cus_1", projectId: "proj_1" })
+        .catch(() => undefined)
+      const db = drizzle(state.storage, { schema, logger: false })
+      const store = new RunBudgetStore(db)
+      const run = createRun("run_legacy_quantity")
+      const firstDelta = { ...createDelta(run.runId, 2_000), quantity: 2 }
+      await seedSpend(store, run, firstDelta)
+
+      const legacyIntentKey = `run-capture:${run.runId}:${firstDelta.bucketKey}:0`
+      await db.insert(schema.runCaptureIntents).values({
+        intentKey: legacyIntentKey,
+        runId: run.runId,
+        bucketKey: firstDelta.bucketKey,
+        amount: 2_000,
+        flushSeq: RUN_BUDGET_TEST_NOW,
+        rangeStartAmount: 0,
+        targetAmount: 2_000,
+        status: "failed",
+        attemptCount: 1,
+        lastError: "wallet unavailable",
+        createdAt: RUN_BUDGET_TEST_NOW,
+        updatedAt: RUN_BUDGET_TEST_NOW,
+      })
+
+      const laterDelta = { ...createDelta(run.runId, 7_000), quantity: 7 }
+      await appendSpend(store, run.runId, laterDelta, "idem:legacy-quantity:later")
+
+      await expect(store.loadCaptureIntent(legacyIntentKey)).resolves.toMatchObject({
+        captureQuantity: 2,
+        rangeStartQuantity: 0,
+        targetQuantity: 2,
+      })
+      await expect(
+        db.query.runSpendBuckets.findFirst({
+          where: eq(schema.runSpendBuckets.bucketKey, firstDelta.bucketKey),
+        })
+      ).resolves.toMatchObject({ quantity: 9 })
+
+      const revivedStore = new RunBudgetStore(db)
+      const retry = await revivedStore.openCaptureIntent({
+        runId: run.runId,
+        bucketKey: firstDelta.bucketKey,
+        now: RUN_BUDGET_TEST_NOW + 1,
+      })
+      expect(retry).toMatchObject({ intentKey: legacyIntentKey, captureQuantity: 2 })
+      await revivedStore.commitCaptureSuccess({
+        intentKey: legacyIntentKey,
+        bucketKey: firstDelta.bucketKey,
+        runId: run.runId,
+        amount: 2_000,
+        updatedAt: RUN_BUDGET_TEST_NOW + 2,
+      })
+      await expect(
+        revivedStore.openCaptureIntent({
+          runId: run.runId,
+          bucketKey: firstDelta.bucketKey,
+          now: RUN_BUDGET_TEST_NOW + 2,
+        })
+      ).resolves.toMatchObject({
+        amount: 7_000,
+        captureQuantity: 7,
+        rangeStartAmount: 2_000,
+        rangeStartQuantity: 2,
+        targetAmount: 9_000,
+        targetQuantity: 9,
       })
     })
   })

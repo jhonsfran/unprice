@@ -1,4 +1,4 @@
-import { eq, inArray, sql } from "drizzle-orm"
+import { and, eq, inArray, isNull, sql } from "drizzle-orm"
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite"
 import {
   CAPTURE_ABANDONED_STATUS,
@@ -7,10 +7,15 @@ import {
   type CaptureFailureStatus,
   runCaptureStatusSchema,
 } from "./capture-policy"
-import { captureIntentFlushSeq, captureIntentRange } from "./capture-range"
+import {
+  captureIntentFlushSeq,
+  captureIntentRange,
+  requireCaptureIntentQuantityRange,
+} from "./capture-range"
 import { type EndRunInput, type RunBudgetDecision, runStatusSchema } from "./contracts"
 import * as schema from "./db/schema"
 import type {
+  OpenRunCaptureIntent,
   RunBudgetStore as RunBudgetStateStore,
   RunCaptureIntent,
   RunSpendBucketDelta,
@@ -18,7 +23,7 @@ import type {
 } from "./ports"
 
 type SqliteHandle = DrizzleSqliteDODatabase<typeof schema>
-type DbWriter = Pick<SqliteHandle, "insert" | "update">
+type DbWriter = Pick<SqliteHandle, "insert" | "select" | "update">
 
 export class RunBudgetStore implements RunBudgetStateStore {
   constructor(private readonly db: SqliteHandle) {}
@@ -97,25 +102,10 @@ export class RunBudgetStore implements RunBudgetStateStore {
     runId: string
     bucketKey: string
     now: number
-  }): Promise<RunCaptureIntent | null> {
-    let openedIntent: RunCaptureIntent | null = null
+  }): Promise<OpenRunCaptureIntent | null> {
+    let openedIntent: OpenRunCaptureIntent | null = null
 
     this.db.transaction((tx) => {
-      const rows = tx
-        .select()
-        .from(schema.runCaptureIntents)
-        .where(eq(schema.runCaptureIntents.runId, input.runId))
-        .all()
-      const intents = rows.map((row) => this.toCaptureIntent(row))
-      const bucketIntents = intents.filter((intent) => intent.bucketKey === input.bucketKey)
-      const retryable = bucketIntents
-        .filter((intent) => CAPTURE_RETRY_STATUSES.some((status) => status === intent.status))
-        .sort((left, right) => captureIntentFlushSeq(left) - captureIntentFlushSeq(right))[0]
-      if (retryable) {
-        openedIntent = retryable
-        return
-      }
-
       const bucket = tx
         .select()
         .from(schema.runSpendBuckets)
@@ -128,8 +118,27 @@ export class RunBudgetStore implements RunBudgetStateStore {
         .get()
       if (!bucket || !run) throw new Error("Run capture state missing")
 
+      this.sealLegacyCaptureQuantities(tx, input.bucketKey, bucket.quantity)
+      const rows = tx
+        .select()
+        .from(schema.runCaptureIntents)
+        .where(eq(schema.runCaptureIntents.runId, input.runId))
+        .all()
+      const intents = rows.map((row) => this.toCaptureIntent(row))
+      const bucketIntents = intents.filter((intent) => intent.bucketKey === input.bucketKey)
+      const retryable = bucketIntents
+        .filter((intent) => CAPTURE_RETRY_STATUSES.some((status) => status === intent.status))
+        .sort((left, right) => captureIntentFlushSeq(left) - captureIntentFlushSeq(right))[0]
+      if (retryable) {
+        openedIntent = requireCaptureIntentQuantityRange(retryable)
+        return
+      }
+
       const rangeStartAmount = this.captureCursor(bucket.flushedAmount, bucketIntents)
       if (bucket.consumedAmount <= rangeStartAmount) return
+
+      const rangeStartQuantity = this.captureQuantityCursor(bucketIntents)
+      const targetQuantity = bucket.quantity
 
       const highestIntentSeq = intents.reduce(
         (highest, intent) => Math.max(highest, captureIntentFlushSeq(intent)),
@@ -137,11 +146,14 @@ export class RunBudgetStore implements RunBudgetStateStore {
       )
       const flushSeq = Math.max(input.now, run.lastCaptureSeq + 1, highestIntentSeq + 1)
       const targetAmount = bucket.consumedAmount
-      const intent: RunCaptureIntent = {
+      const intent: OpenRunCaptureIntent = {
         intentKey: `run-capture:${input.runId}:${input.bucketKey}:${rangeStartAmount}`,
         runId: input.runId,
         bucketKey: input.bucketKey,
         amount: targetAmount - rangeStartAmount,
+        captureQuantity: targetQuantity - rangeStartQuantity,
+        rangeStartQuantity,
+        targetQuantity,
         flushSeq,
         rangeStartAmount,
         targetAmount,
@@ -304,6 +316,37 @@ export class RunBudgetStore implements RunBudgetStateStore {
     }, flushedAmount)
   }
 
+  private captureQuantityCursor(intents: RunCaptureIntent[]): number {
+    const latest = intents.reduce<{ amount: number; quantity: number } | null>((cursor, intent) => {
+      if (intent.status !== CAPTURE_SUCCESS_STATUS && intent.status !== CAPTURE_ABANDONED_STATUS) {
+        return cursor
+      }
+      const targetAmount = captureIntentRange(intent).targetAmount
+      if (cursor && cursor.amount > targetAmount) return cursor
+      return {
+        amount: targetAmount,
+        quantity: requireCaptureIntentQuantityRange(intent).targetQuantity,
+      }
+    }, null)
+    return latest?.quantity ?? 0
+  }
+
+  private sealLegacyCaptureQuantities(db: DbWriter, bucketKey: string, quantity: number): void {
+    db.update(schema.runCaptureIntents)
+      .set({
+        captureQuantity: quantity,
+        rangeStartQuantity: 0,
+        targetQuantity: quantity,
+      })
+      .where(
+        and(
+          eq(schema.runCaptureIntents.bucketKey, bucketKey),
+          isNull(schema.runCaptureIntents.captureQuantity)
+        )
+      )
+      .run()
+  }
+
   private toRunState(row: typeof schema.runState.$inferSelect): RunState {
     return { ...row, status: runStatusSchema.parse(row.status) }
   }
@@ -324,6 +367,15 @@ export class RunBudgetStore implements RunBudgetStateStore {
       .run()
 
     for (const delta of bucketDeltas) {
+      const existingBucket = db
+        .select({ quantity: schema.runSpendBuckets.quantity })
+        .from(schema.runSpendBuckets)
+        .where(eq(schema.runSpendBuckets.bucketKey, delta.bucketKey))
+        .get()
+      if (existingBucket) {
+        this.sealLegacyCaptureQuantities(db, delta.bucketKey, existingBucket.quantity)
+      }
+
       db.insert(schema.runSpendBuckets)
         .values({
           bucketKey: delta.bucketKey,
@@ -347,6 +399,7 @@ export class RunBudgetStore implements RunBudgetStateStore {
           set: {
             consumedAmount: sql`${schema.runSpendBuckets.consumedAmount} + ${delta.amount}`,
             pendingAmount: sql`${schema.runSpendBuckets.pendingAmount} + ${delta.amount}`,
+            quantity: sql`${schema.runSpendBuckets.quantity} + ${delta.quantity}`,
           },
         })
         .run()

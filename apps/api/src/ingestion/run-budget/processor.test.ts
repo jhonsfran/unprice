@@ -605,3 +605,238 @@ describe("RunBudgetProcessor capture sequence regressions", () => {
     })
   })
 })
+
+describe("RunBudgetProcessor alarm capture regressions", () => {
+  it("leaves an idle alarm unarmed when there is no captureable spend or expiry", async () => {
+    const harness = createRunBudgetProcessorHarness()
+
+    await harness.processor.alarm()
+
+    expect(harness.captureReservationUsage).not.toHaveBeenCalled()
+    expect(harness.schedulerSetAlarm).not.toHaveBeenCalled()
+    expect(harness.state.alarmAt).toBeNull()
+  })
+
+  it("flushes fresh accepted spend when its first scheduled alarm fires", async () => {
+    const store = new InMemoryRunBudgetStore()
+    const harness = createRunBudgetProcessorHarness({ store })
+    await harness.processor.startRun(createRunBudgetStartInput())
+    await harness.processor.applySyncEvent(createRunBudgetApplyInput())
+
+    expect(await store.listRetryableCaptureIntents()).toEqual([])
+    expect(harness.state.alarmAt).toBe(RUN_BUDGET_TEST_NOW + 10_000)
+
+    harness.state.alarmAt = null
+    await harness.processor.alarm()
+
+    expect(harness.captureReservationUsage).toHaveBeenCalledTimes(1)
+    expect([...store.buckets.values()][0]).toMatchObject({ flushedAmount: 5_000 })
+    expect(harness.state.alarmAt).toBeNull()
+  })
+
+  it("rearms the alarm when the first capture attempt for fresh spend fails", async () => {
+    const store = new InMemoryRunBudgetStore()
+    const harness = createRunBudgetProcessorHarness({ store })
+    await harness.processor.startRun(createRunBudgetStartInput())
+    await harness.processor.applySyncEvent(createRunBudgetApplyInput())
+    harness.captureReservationUsage.mockRejectedValueOnce(new Error("wallet unavailable"))
+
+    harness.state.alarmAt = null
+    await harness.processor.alarm()
+
+    expect(harness.captureReservationUsage).toHaveBeenCalledTimes(1)
+    expect(await store.listRetryableCaptureIntents()).toEqual([
+      expect.objectContaining({ attemptCount: 1, status: "failed" }),
+    ])
+    expect(harness.state.alarmAt).toBeGreaterThan(harness.state.now)
+  })
+
+  it("flushes later spend from an alarm after the previous range was abandoned", async () => {
+    const store = new InMemoryRunBudgetStore()
+    const harness = createRunBudgetProcessorHarness({ store })
+    await harness.processor.startRun(createRunBudgetStartInput({ budgetAmount: 20_000 }))
+    await harness.processor.applySyncEvent(createRunBudgetApplyInput())
+    harness.captureReservationUsage.mockRejectedValue(new Error("wallet unavailable"))
+    for (let attempt = 0; attempt < 5; attempt++) {
+      await harness.processor.flushCaptures()
+    }
+
+    harness.captureReservationUsage.mockResolvedValue({ val: { capturedAmount: 5_000 } })
+    harness.state.alarmAt = null
+    await harness.processor.applySyncEvent(
+      createRunBudgetApplyInput({
+        idempotencyKey: "idem_alarm_after_abandonment",
+        event: {
+          ...createRunBudgetApplyInput().event,
+          id: "evt_alarm_after_abandonment",
+        },
+      })
+    )
+    expect(await store.listRetryableCaptureIntents()).toEqual([])
+
+    harness.state.alarmAt = null
+    await harness.processor.alarm()
+
+    expect(harness.captureReservationUsage).toHaveBeenCalledTimes(6)
+    expect(store.intents.size).toBe(2)
+    expect([...store.buckets.values()][0]).toMatchObject({ flushedAmount: 5_000 })
+  })
+})
+
+describe("RunBudgetProcessor capture quantity regressions", () => {
+  it("persists zero as an explicit capture quantity instead of a legacy sentinel", async () => {
+    const store = new InMemoryRunBudgetStore()
+    const harness = createRunBudgetProcessorHarness({ store })
+    await harness.processor.startRun(createRunBudgetStartInput())
+    harness.pricingApply.mockResolvedValueOnce({
+      allowed: true,
+      meterFacts: [
+        createRunBudgetMeterFact({ delta: 0, value_after: 0, amount: 5_000, amount_after: 5_000 }),
+      ],
+    })
+
+    await harness.processor.applySyncEvent(createRunBudgetApplyInput())
+    await harness.processor.flushCaptures()
+
+    expect(harness.captureReservationUsage).toHaveBeenCalledWith(
+      expect.objectContaining({ metadata: expect.objectContaining({ quantity: 0 }) })
+    )
+    expect([...store.intents.values()][0]).toMatchObject({
+      captureQuantity: 0,
+      rangeStartQuantity: 0,
+      targetQuantity: 0,
+    })
+  })
+
+  it("captures the exact quantity for each same-bucket money range", async () => {
+    const store = new InMemoryRunBudgetStore()
+    const harness = createRunBudgetProcessorHarness({ store })
+    await harness.processor.startRun(createRunBudgetStartInput({ budgetAmount: 20_000 }))
+    harness.pricingApply.mockResolvedValueOnce({
+      allowed: true,
+      meterFacts: [
+        createRunBudgetMeterFact({ delta: 2, value_after: 2, amount: 2_000, amount_after: 2_000 }),
+      ],
+    })
+    await harness.processor.applySyncEvent(createRunBudgetApplyInput())
+    await harness.processor.flushCaptures()
+
+    harness.pricingApply.mockResolvedValueOnce({
+      allowed: true,
+      meterFacts: [
+        createRunBudgetMeterFact({
+          event_id: "evt_quantity_2",
+          idempotency_key: "idem_quantity_2:ew",
+          delta: 7,
+          value_after: 9,
+          amount: 7_000,
+          amount_after: 9_000,
+        }),
+      ],
+    })
+    await harness.processor.applySyncEvent(
+      createRunBudgetApplyInput({
+        idempotencyKey: "idem_quantity_2",
+        event: { ...createRunBudgetApplyInput().event, id: "evt_quantity_2" },
+      })
+    )
+    await harness.processor.flushCaptures()
+
+    expect(
+      harness.captureReservationUsage.mock.calls.map(([input]) => input.metadata?.quantity)
+    ).toEqual([2, 7])
+    expect([...store.buckets.values()][0]).toMatchObject({ quantity: 9 })
+    expect([...store.intents.values()]).toEqual([
+      expect.objectContaining({
+        captureQuantity: 2,
+        rangeStartQuantity: 0,
+        targetQuantity: 2,
+      }),
+      expect.objectContaining({
+        captureQuantity: 7,
+        rangeStartQuantity: 2,
+        targetQuantity: 9,
+      }),
+    ])
+  })
+
+  it("keeps retry quantity immutable before assigning later quantity to a new range", async () => {
+    const harness = createRunBudgetProcessorHarness()
+    await harness.processor.startRun(createRunBudgetStartInput({ budgetAmount: 20_000 }))
+    harness.pricingApply.mockResolvedValueOnce({
+      allowed: true,
+      meterFacts: [
+        createRunBudgetMeterFact({ delta: 2, value_after: 2, amount: 2_000, amount_after: 2_000 }),
+      ],
+    })
+    await harness.processor.applySyncEvent(createRunBudgetApplyInput())
+    harness.captureReservationUsage.mockRejectedValueOnce(new Error("wallet unavailable"))
+    await harness.processor.flushCaptures()
+
+    harness.pricingApply.mockResolvedValueOnce({
+      allowed: true,
+      meterFacts: [
+        createRunBudgetMeterFact({
+          event_id: "evt_quantity_retry_2",
+          idempotency_key: "idem_quantity_retry_2:ew",
+          delta: 7,
+          value_after: 9,
+          amount: 7_000,
+          amount_after: 9_000,
+        }),
+      ],
+    })
+    await harness.processor.applySyncEvent(
+      createRunBudgetApplyInput({
+        idempotencyKey: "idem_quantity_retry_2",
+        event: { ...createRunBudgetApplyInput().event, id: "evt_quantity_retry_2" },
+      })
+    )
+    await harness.processor.flushCaptures()
+
+    expect(
+      harness.captureReservationUsage.mock.calls.map(([input]) => input.metadata?.quantity)
+    ).toEqual([2, 2, 7])
+  })
+
+  it("assigns only later quantity to a range after abandonment", async () => {
+    const harness = createRunBudgetProcessorHarness()
+    await harness.processor.startRun(createRunBudgetStartInput({ budgetAmount: 20_000 }))
+    harness.pricingApply.mockResolvedValueOnce({
+      allowed: true,
+      meterFacts: [
+        createRunBudgetMeterFact({ delta: 2, value_after: 2, amount: 2_000, amount_after: 2_000 }),
+      ],
+    })
+    await harness.processor.applySyncEvent(createRunBudgetApplyInput())
+    harness.captureReservationUsage.mockRejectedValue(new Error("wallet unavailable"))
+    for (let attempt = 0; attempt < 5; attempt++) {
+      await harness.processor.flushCaptures()
+    }
+
+    harness.captureReservationUsage.mockResolvedValue({ val: { capturedAmount: 7_000 } })
+    harness.pricingApply.mockResolvedValueOnce({
+      allowed: true,
+      meterFacts: [
+        createRunBudgetMeterFact({
+          event_id: "evt_quantity_abandoned_2",
+          idempotency_key: "idem_quantity_abandoned_2:ew",
+          delta: 7,
+          value_after: 9,
+          amount: 7_000,
+          amount_after: 9_000,
+        }),
+      ],
+    })
+    await harness.processor.applySyncEvent(
+      createRunBudgetApplyInput({
+        idempotencyKey: "idem_quantity_abandoned_2",
+        event: { ...createRunBudgetApplyInput().event, id: "evt_quantity_abandoned_2" },
+      })
+    )
+    await harness.processor.flushCaptures()
+
+    expect(harness.captureReservationUsage).toHaveBeenCalledTimes(6)
+    expect(harness.captureReservationUsage.mock.calls[5]?.[0].metadata?.quantity).toBe(7)
+  })
+})

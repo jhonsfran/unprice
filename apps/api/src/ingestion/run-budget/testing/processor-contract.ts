@@ -196,6 +196,16 @@ export function describeRunBudgetProcessorContract(
       expect(revived.pricingCallCount()).toBe(1)
     })
 
+    it("flushes fresh accepted spend when the scheduled alarm fires", async () => {
+      const { target } = await createHost()
+      await target.startRun(createRunBudgetStartInput())
+      await target.applySyncEvent(createRunBudgetApplyInput())
+
+      await target.alarm()
+
+      expect(target.captureCallCount()).toBe(1)
+    })
+
     it("retries a failed capture and closes after capture recovery", async () => {
       const { target } = await createHost()
       await target.startRun(createRunBudgetStartInput())

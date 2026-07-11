@@ -1,4 +1,4 @@
-import type { RunCaptureIntent } from "./ports"
+import type { OpenRunCaptureIntent, RunCaptureIntent } from "./ports"
 
 export function captureIntentFlushSeq(intent: RunCaptureIntent): number {
   return intent.flushSeq > 0 ? intent.flushSeq : intent.createdAt
@@ -21,4 +21,21 @@ export function captureIntentRange(intent: RunCaptureIntent): {
     Number.isSafeInteger(legacyStartAmount) && legacyStartAmount >= 0 ? legacyStartAmount : 0
 
   return { startAmount, targetAmount: startAmount + intent.amount }
+}
+
+export function requireCaptureIntentQuantityRange(intent: RunCaptureIntent): OpenRunCaptureIntent {
+  if (
+    intent.captureQuantity === null ||
+    intent.rangeStartQuantity === null ||
+    intent.targetQuantity === null
+  ) {
+    throw new Error(`Run capture intent ${intent.intentKey} has no persisted quantity range`)
+  }
+
+  return {
+    ...intent,
+    captureQuantity: intent.captureQuantity,
+    rangeStartQuantity: intent.rangeStartQuantity,
+    targetQuantity: intent.targetQuantity,
+  }
 }

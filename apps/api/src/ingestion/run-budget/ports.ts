@@ -61,6 +61,9 @@ export type RunCaptureIntent = {
   runId: string
   bucketKey: string
   amount: number
+  captureQuantity: number | null
+  rangeStartQuantity: number | null
+  targetQuantity: number | null
   flushSeq: number
   rangeStartAmount: number
   targetAmount: number
@@ -78,6 +81,12 @@ export type RunIdempotencyEntry = {
   pricedAmount: number
   bucketDeltasJson: string
   createdAt: number
+}
+
+export type OpenRunCaptureIntent = RunCaptureIntent & {
+  captureQuantity: number
+  rangeStartQuantity: number
+  targetQuantity: number
 }
 
 export type RunSpendBucketDelta = {
@@ -122,7 +131,7 @@ export type RunBudgetStore = {
     runId: string
     bucketKey: string
     now: number
-  }): Promise<RunCaptureIntent | null>
+  }): Promise<OpenRunCaptureIntent | null>
   commitCaptureSuccess(input: {
     intentKey: string
     bucketKey: string

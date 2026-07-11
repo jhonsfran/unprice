@@ -4,9 +4,14 @@ import {
   CAPTURE_SUCCESS_STATUS,
   type CaptureFailureStatus,
 } from "../capture-policy"
-import { captureIntentFlushSeq, captureIntentRange } from "../capture-range"
+import {
+  captureIntentFlushSeq,
+  captureIntentRange,
+  requireCaptureIntentQuantityRange,
+} from "../capture-range"
 import type { EndRunInput, RunBudgetDecision } from "../contracts"
 import type {
+  OpenRunCaptureIntent,
   RunBudgetStore,
   RunCaptureIntent,
   RunIdempotencyEntry,
@@ -68,8 +73,10 @@ export class InMemoryRunBudgetStore implements RunBudgetStore {
       for (const delta of input.bucketDeltas) {
         const existing = this.buckets.get(delta.bucketKey)
         if (existing) {
+          this.sealLegacyCaptureQuantities(delta.bucketKey, existing.quantity)
           existing.consumedAmount += delta.amount
           existing.pendingAmount += delta.amount
+          existing.quantity += delta.quantity
         } else {
           this.buckets.set(delta.bucketKey, {
             ...delta,
@@ -108,27 +115,27 @@ export class InMemoryRunBudgetStore implements RunBudgetStore {
     runId: string
     bucketKey: string
     now: number
-  }): Promise<RunCaptureIntent | null> {
-    const existing = [...this.intents.values()]
-      .filter(
-        (intent) =>
-          intent.bucketKey === input.bucketKey &&
-          CAPTURE_RETRY_STATUSES.some((status) => status === intent.status)
-      )
-      .sort((left, right) => captureIntentFlushSeq(left) - captureIntentFlushSeq(right))[0]
-    if (existing) return this.clone(existing)
-
+  }): Promise<OpenRunCaptureIntent | null> {
     const snapshot = this.snapshot()
     try {
       const bucket = this.buckets.get(input.bucketKey)
       const run = this.runs.get(input.runId)
       if (!bucket || !run) throw new Error("Run capture state missing")
 
+      this.sealLegacyCaptureQuantities(input.bucketKey, bucket.quantity)
       const bucketIntents = [...this.intents.values()].filter(
         (intent) => intent.bucketKey === input.bucketKey
       )
+      const existing = bucketIntents
+        .filter((intent) => CAPTURE_RETRY_STATUSES.some((status) => status === intent.status))
+        .sort((left, right) => captureIntentFlushSeq(left) - captureIntentFlushSeq(right))[0]
+      if (existing) return this.clone(requireCaptureIntentQuantityRange(existing))
+
       const rangeStartAmount = this.captureCursor(bucket.flushedAmount, bucketIntents)
       if (bucket.consumedAmount <= rangeStartAmount) return null
+
+      const rangeStartQuantity = this.captureQuantityCursor(bucketIntents)
+      const targetQuantity = bucket.quantity
 
       const highestIntentSeq = [...this.intents.values()].reduce(
         (highest, intent) =>
@@ -137,11 +144,14 @@ export class InMemoryRunBudgetStore implements RunBudgetStore {
       )
       const flushSeq = Math.max(input.now, run.lastCaptureSeq + 1, highestIntentSeq + 1)
       const targetAmount = bucket.consumedAmount
-      const intent: RunCaptureIntent = {
+      const intent: OpenRunCaptureIntent = {
         intentKey: `run-capture:${input.runId}:${input.bucketKey}:${rangeStartAmount}`,
         runId: input.runId,
         bucketKey: input.bucketKey,
         amount: targetAmount - rangeStartAmount,
+        captureQuantity: targetQuantity - rangeStartQuantity,
+        rangeStartQuantity,
+        targetQuantity,
         flushSeq,
         rangeStartAmount,
         targetAmount,
@@ -285,6 +295,33 @@ export class InMemoryRunBudgetStore implements RunBudgetStore {
       }
       return Math.max(cursor, captureIntentRange(intent).targetAmount)
     }, flushedAmount)
+  }
+
+  private captureQuantityCursor(intents: RunCaptureIntent[]): number {
+    const latest = intents.reduce<{ amount: number; quantity: number } | null>((cursor, intent) => {
+      if (intent.status !== CAPTURE_SUCCESS_STATUS && intent.status !== CAPTURE_ABANDONED_STATUS) {
+        return cursor
+      }
+      const targetAmount = captureIntentRange(intent).targetAmount
+      if (cursor && cursor.amount > targetAmount) return cursor
+      return {
+        amount: targetAmount,
+        quantity: requireCaptureIntentQuantityRange(intent).targetQuantity,
+      }
+    }, null)
+    return latest?.quantity ?? 0
+  }
+
+  private sealLegacyCaptureQuantities(bucketKey: string, quantity: number): void {
+    for (const intent of this.intents.values()) {
+      if (intent.bucketKey === bucketKey && intent.captureQuantity === null) {
+        Object.assign(intent, {
+          captureQuantity: quantity,
+          rangeStartQuantity: 0,
+          targetQuantity: quantity,
+        })
+      }
+    }
   }
 
   private snapshot() {

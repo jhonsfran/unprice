@@ -322,7 +322,7 @@ export class RunBudgetProcessor {
             featureSlug: bucket.featureSlug,
             statementKey: bucket.statementKey,
             idempotencyKey: intent.intentKey,
-            quantity: bucket.quantity,
+            quantity: intent.captureQuantity,
             flushSeq: captureIntentFlushSeq(intent),
           })
 
@@ -362,11 +362,7 @@ export class RunBudgetProcessor {
     // Retry outstanding capture intents. No attemptCount cap here: intents that
     // exhausted their retries are already terminal `abandoned` and drop out of
     // the retryable status set, so this naturally stops chasing dead captures.
-    const pendingIntents = await this.deps.store.listRetryableCaptureIntents()
-
-    if (pendingIntents.length > 0) {
-      await this.flushCaptures()
-    }
+    await this.flushCaptures()
 
     // Close runs past their expiry. Only the DO can release the run's wallet
     // reservation, so this SQLite source-of-truth transition MUST stay here.
