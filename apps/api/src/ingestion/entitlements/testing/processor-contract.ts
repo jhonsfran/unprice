@@ -16,7 +16,7 @@ export type EntitlementWindowStoreFactory<
 
 export type EntitlementWindowProcessorContractTarget = Pick<
   EntitlementWindowProcessor,
-  "apply" | "getEnforcementState"
+  "apply" | "applyBatch" | "getEnforcementState"
 >
 
 export type EntitlementWindowProcessorContractHost = {
@@ -114,6 +114,31 @@ function createLiveApplyInput(now: number, overrides: Record<string, unknown> = 
   )
 }
 
+function createLiveApplyBatchInput(params: {
+  amounts: number[]
+  idPrefix: string
+  now: number
+  overrides?: Record<string, unknown>
+}) {
+  const base = createLiveApplyInput(params.now, params.overrides)
+  return {
+    customerId: base.customerId,
+    entitlement: base.entitlement,
+    enforceLimit: base.enforceLimit,
+    events: params.amounts.map((amount, index) => ({
+      ...base.event,
+      correlationKey: `${params.idPrefix}_${index}`,
+      id: `evt_${params.idPrefix}_${index}`,
+      idempotencyKey: `idem_${params.idPrefix}_${index}`,
+      now: params.now + index,
+      properties: { amount },
+      timestamp: params.now + index,
+    })),
+    grants: base.grants,
+    projectId: base.projectId,
+  }
+}
+
 /**
  * Runs the portable processor/store contract against a backend factory.
  *
@@ -139,7 +164,7 @@ export function createEntitlementWindowStoreContractHostFactory<
   }
 }
 
-/** Runs the full portable processor contract against one persistent host. */
+/** Runs the portable apply/applyBatch/enforcement contract against one persistent host. */
 export function describeEntitlementWindowProcessorContract(
   suiteName: string,
   makeHost: EntitlementWindowProcessorContractHostFactory
@@ -187,6 +212,100 @@ export function describeEntitlementWindowProcessorContract(
 
       const replay = await revived.apply(input)
       expect(replay).toMatchObject({ allowed: true, idempotencyStatus: "already_reported" })
+      await expect(
+        revived.getEnforcementState({
+          entitlement: input.entitlement,
+          grants: input.grants,
+          now,
+        })
+      ).resolves.toMatchObject({ usage: 5 })
+    })
+
+    it("commits mixed batch outcomes and deduplicates repeated keys atomically", async () => {
+      const now = Date.now()
+      const host = await makeHost()
+      const input = createLiveApplyBatchInput({
+        amounts: [2, 2, 1],
+        idPrefix: "port_mixed_batch",
+        now,
+        overrides: { enforceLimit: true, limit: 3 },
+      })
+      input.events[2]!.idempotencyKey = input.events[0]!.idempotencyKey
+
+      const result = await host.target.applyBatch(input)
+
+      expect(
+        result.results.map(({ allowed, deniedReason, idempotencyStatus }) => ({
+          allowed,
+          deniedReason,
+          idempotencyStatus,
+        }))
+      ).toEqual([
+        { allowed: true, deniedReason: undefined, idempotencyStatus: undefined },
+        {
+          allowed: false,
+          deniedReason: "LIMIT_EXCEEDED",
+          idempotencyStatus: undefined,
+        },
+        { allowed: true, deniedReason: undefined, idempotencyStatus: "already_reported" },
+      ])
+      expect(result.results[0]?.meterFacts).toHaveLength(1)
+      expect(result.results[1]?.meterFacts).toBeUndefined()
+      expect(result.results[2]?.meterFacts).toEqual(result.results[0]?.meterFacts)
+      await expect(
+        host.target.getEnforcementState({
+          entitlement: input.entitlement,
+          grants: input.grants,
+          now,
+        })
+      ).resolves.toMatchObject({ usage: 2, limit: 3 })
+
+      const revived = await host.revive()
+      const replay = await revived.applyBatch(input)
+      expect(
+        replay.results.map(({ allowed, deniedReason, idempotencyStatus }) => ({
+          allowed,
+          deniedReason,
+          idempotencyStatus,
+        }))
+      ).toEqual([
+        { allowed: true, deniedReason: undefined, idempotencyStatus: "already_reported" },
+        {
+          allowed: false,
+          deniedReason: "LIMIT_EXCEEDED",
+          idempotencyStatus: "already_reported",
+        },
+        { allowed: true, deniedReason: undefined, idempotencyStatus: "already_reported" },
+      ])
+      expect(replay.results[2]?.meterFacts).toEqual(replay.results[0]?.meterFacts)
+      await expect(
+        revived.getEnforcementState({
+          entitlement: input.entitlement,
+          grants: input.grants,
+          now,
+        })
+      ).resolves.toMatchObject({ usage: 2, limit: 3 })
+    })
+
+    it("replays a committed batch after reviving a fresh host without double metering", async () => {
+      const now = Date.now()
+      const host = await makeHost()
+      const input = createLiveApplyBatchInput({
+        amounts: [2, 3],
+        idPrefix: "port_replay_batch",
+        now,
+      })
+
+      const original = await host.target.applyBatch(input)
+      const revived = await host.revive()
+      const replay = await revived.applyBatch(input)
+
+      expect(replay.results).toEqual(
+        original.results.map((result) => ({
+          ...result,
+          idempotencyStatus: "already_reported" as const,
+        }))
+      )
       await expect(
         revived.getEnforcementState({
           entitlement: input.entitlement,

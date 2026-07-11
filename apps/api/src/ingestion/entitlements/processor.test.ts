@@ -1,5 +1,6 @@
+import { Ok } from "@unprice/error"
 import { DO_IDEMPOTENCY_TTL_MS, LATE_EVENT_GRACE_MS } from "@unprice/services/entitlements"
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it } from "vitest"
 import { createDeferred } from "../test-fixtures/race"
 import type { ApplyInput } from "./contracts"
 import type { WalletReservationSnapshot } from "./contracts"
@@ -14,6 +15,7 @@ import {
   createEntitlementWindowStoreContractHostFactory,
   describeEntitlementWindowProcessorContract,
 } from "./testing/processor-contract"
+import { createEntitlementWindowWalletHarness } from "./testing/wallet-harness"
 
 // Characterizes the port boundary: the processor must run against a plain
 // in-memory store (no Durable Object, no SQLite/drizzle) using the real meter
@@ -56,64 +58,7 @@ function createHarness(
   return harness
 }
 
-function createWalletHarness(
-  overrides: Partial<{
-    allocationAmount: number
-    captureError: Error
-    createError: Error
-    extendAmount: number
-    extendError: Error
-    releaseError: Error
-  }> = {}
-) {
-  const createReservation = vi.fn(async () =>
-    overrides.createError
-      ? { err: overrides.createError, val: null }
-      : {
-          err: null,
-          val: {
-            reservationId: "res_test",
-            allocationAmount: overrides.allocationAmount ?? 1_000_000_000,
-          },
-        }
-  )
-  const captureReservationUsage = vi.fn(async (input: { amount: number }) =>
-    overrides.captureError
-      ? { err: overrides.captureError, val: null }
-      : { err: null, val: { capturedAmount: input.amount } }
-  )
-  const extendReservation = vi.fn(async (input: { requestedAmount: number }) =>
-    overrides.extendError
-      ? { err: overrides.extendError, val: null }
-      : { err: null, val: { grantedAmount: overrides.extendAmount ?? input.requestedAmount } }
-  )
-  const releaseReservation = vi.fn(async () =>
-    overrides.releaseError
-      ? { err: overrides.releaseError, val: null }
-      : {
-          err: null,
-          val: {
-            releasedAmount: 0,
-            restoredGrantedAmount: 0,
-            refundedPurchasedAmount: 0,
-          },
-        }
-  )
-  const operations = {
-    captureReservationUsage,
-    createReservation,
-    extendReservation,
-    releaseReservation,
-  } as unknown as EntitlementWindowWalletOps
-
-  return {
-    captureReservationUsage,
-    createReservation,
-    extendReservation,
-    provider: { get: () => operations },
-    releaseReservation,
-  }
-}
+const createWalletHarness = createEntitlementWindowWalletHarness
 
 function seedWallet(
   store: InMemoryEntitlementWindowStore,
@@ -645,7 +590,7 @@ describe("EntitlementWindowProcessor pricing behavior", () => {
 })
 
 describe("EntitlementWindowProcessor batch behavior", () => {
-  it("matches sequential priced facts and seals duplicate keys once", async () => {
+  it("matches sequential priced facts", async () => {
     const now = BASE_NOW
     const base = createApplyInput({ creditLinePolicy: "uncapped" })
     const batchStore = new InMemoryEntitlementWindowStore()
@@ -668,7 +613,14 @@ describe("EntitlementWindowProcessor batch behavior", () => {
     }
 
     expect(batched.results.flatMap((result) => result.meterFacts ?? [])).toEqual(sequentialFacts)
+  })
 
+  it("meters a repeated idempotency key only once within the same batch", async () => {
+    const now = BASE_NOW
+    const store = new InMemoryEntitlementWindowStore()
+    const harness = createHarness({ now, store })
+    await harness.processor.initialize()
+    const base = createApplyInput({ creditLinePolicy: "uncapped" })
     const repeatedKey = {
       ...createBatchInput(base, [1, 1], "duplicate"),
       events: createBatchInput(base, [1, 1], "duplicate").events.map((event) => ({
@@ -676,12 +628,25 @@ describe("EntitlementWindowProcessor batch behavior", () => {
         idempotencyKey: "idem_repeated_in_batch",
       })),
     }
-    const duplicateResult = await batch.processor.applyBatch(repeatedKey)
-    expect(duplicateResult.results).toHaveLength(2)
-    expect(batchStore.idempotency.has("idem_repeated_in_batch")).toBe(true)
-    expect(
-      [...batchStore.idempotency].filter(([key]) => key === "idem_repeated_in_batch")
-    ).toHaveLength(1)
+    const result = await harness.processor.applyBatch(repeatedKey)
+
+    expect(result.results[0]).toMatchObject({
+      allowed: true,
+      correlationKey: "duplicate_0",
+      idempotencyKey: "idem_repeated_in_batch",
+    })
+    expect(result.results[0]?.idempotencyStatus).toBeUndefined()
+    expect(result.results[0]?.meterFacts).toHaveLength(1)
+    expect(result.results[1]).toMatchObject({
+      allowed: true,
+      correlationKey: "duplicate_1",
+      idempotencyKey: "idem_repeated_in_batch",
+      idempotencyStatus: "already_reported",
+    })
+    expect(result.results[1]?.meterFacts).toEqual(result.results[0]?.meterFacts)
+    expect(store.idempotency.size).toBe(1)
+    expect(store.meterStates.values().next().value?.usage).toBe(1)
+    expect(store.grantStates.values().next().value?.consumedInCurrentWindow).toBe(1)
   })
 
   it("persists mixed allowed, denied, and replayed outcomes atomically", async () => {
@@ -863,10 +828,8 @@ describe("EntitlementWindowProcessor batch behavior", () => {
 describe("EntitlementWindowProcessor wallet behavior", () => {
   it("deduplicates concurrent same-key applies during wallet bootstrap", async () => {
     const reservationStarted = createDeferred<void>()
-    const reservationResult = createDeferred<{
-      err: null
-      val: { reservationId: string; allocationAmount: number }
-    }>()
+    const reservationResult =
+      createDeferred<Awaited<ReturnType<EntitlementWindowWalletOps["createReservation"]>>>()
     const wallet = createWalletHarness()
     wallet.createReservation.mockImplementation(async () => {
       reservationStarted.resolve()
@@ -886,10 +849,9 @@ describe("EntitlementWindowProcessor wallet behavior", () => {
     await Promise.resolve()
     expect(wallet.createReservation).toHaveBeenCalledTimes(1)
 
-    reservationResult.resolve({
-      err: null,
-      val: { reservationId: "res_concurrent_bootstrap", allocationAmount: 1_000_000_000 },
-    })
+    reservationResult.resolve(
+      Ok({ reservationId: "res_concurrent_bootstrap", allocationAmount: 1_000_000_000 })
+    )
     const results = await Promise.all([first, second])
 
     expect(results).toEqual([
@@ -962,14 +924,14 @@ describe("EntitlementWindowProcessor wallet behavior", () => {
   )
 
   it("propagates wallet bootstrap errors without caching a business denial", async () => {
-    const wallet = createWalletHarness({ createError: new Error("wallet unavailable") })
+    const wallet = createWalletHarness({ createError: "WALLET_LEDGER_FAILED" })
     const store = new InMemoryEntitlementWindowStore()
     const harness = createHarness({ now: BASE_NOW, store, wallet: wallet.provider })
     await harness.processor.initialize()
 
     await expect(
       harness.processor.apply(createApplyInput({ creditLinePolicy: "capped" }))
-    ).rejects.toThrow("wallet unavailable")
+    ).rejects.toThrow("WALLET_LEDGER_FAILED")
     expect(store.idempotency.size).toBe(0)
     expect(store.grantStates.size).toBe(0)
   })
@@ -1001,8 +963,8 @@ describe("EntitlementWindowProcessor wallet behavior", () => {
   })
 
   it.each([
-    { failure: "capture", overrides: { captureError: new Error("capture failed") } },
-    { failure: "extend", overrides: { extendError: new Error("extend failed") } },
+    { failure: "capture", overrides: { captureError: "WALLET_LEDGER_FAILED" as const } },
+    { failure: "extend", overrides: { extendError: "WALLET_LEDGER_FAILED" as const } },
   ])("preserves pending flush intent when wallet $failure fails", async ({ overrides }) => {
     const wallet = createWalletHarness(overrides)
     const store = new InMemoryEntitlementWindowStore()
@@ -1505,7 +1467,7 @@ describe("EntitlementWindowProcessor reads and lifecycle", () => {
   })
 
   it("leaves a failed final flush for operator recovery", async () => {
-    const wallet = createWalletHarness({ releaseError: new Error("release failed") })
+    const wallet = createWalletHarness({ releaseError: "WALLET_LEDGER_FAILED" })
     const store = new InMemoryEntitlementWindowStore()
     seedWallet(store, { reservationEndAt: BASE_NOW - 1 })
     const harness = createHarness({ now: BASE_NOW, store, wallet: wallet.provider })
