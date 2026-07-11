@@ -2,12 +2,26 @@ import type { Logger } from "@unprice/logs"
 import { describe, expect, it } from "vitest"
 import { applyInputSchema } from "../contracts"
 import { createApplyInput } from "../entitlement-window-test-fixtures"
-import type { EntitlementWindowProcessorDeps, EntitlementWindowStateStore } from "../ports"
+import type {
+  EntitlementWindowProcessorDeps,
+  EntitlementWindowStateStore,
+  EntitlementWindowTimingConfig,
+  EntitlementWindowWalletProvider,
+} from "../ports"
 import { EntitlementWindowProcessor } from "../processor"
 
 export type EntitlementWindowStoreFactory<
   TStore extends EntitlementWindowStateStore = EntitlementWindowStateStore,
 > = () => TStore
+
+export type EntitlementWindowProcessorContractTarget = Pick<
+  EntitlementWindowProcessor,
+  "apply" | "getEnforcementState"
+>
+
+export type EntitlementWindowProcessorContractTargetFactory = () =>
+  | EntitlementWindowProcessorContractTarget
+  | Promise<EntitlementWindowProcessorContractTarget>
 
 function createNoopLogger(): Logger {
   return {
@@ -22,13 +36,18 @@ function createNoopLogger(): Logger {
 
 export function createEntitlementWindowProcessorHarness<
   TStore extends EntitlementWindowStateStore,
->(params: { now: number; store: TStore }) {
+>(params: {
+  now: number | (() => number)
+  store: TStore
+  timing?: Partial<EntitlementWindowTimingConfig>
+  wallet?: EntitlementWindowWalletProvider
+}) {
   const waitUntilPromises: Promise<unknown>[] = []
   let alarmAt: number | null = null
   let destroyed = false
 
   const deps: EntitlementWindowProcessorDeps = {
-    clock: { now: () => params.now },
+    clock: { now: () => (typeof params.now === "function" ? params.now() : params.now) },
     instrument: (_operation, fn) => fn(),
     logger: createNoopLogger(),
     runtime: {
@@ -51,12 +70,18 @@ export function createEntitlementWindowProcessorHarness<
       },
     },
     store: params.store,
-    timing: { inactivityThresholdMs: 60 * 60 * 1000, maxFlushIntervalMs: 10 * 60_000 },
-    wallet: {
-      get: () => {
-        throw new Error("wallet must not be constructed for uncapped entitlements")
-      },
+    timing: {
+      inactivityThresholdMs: 60 * 60 * 1000,
+      maxFlushIntervalMs: 10 * 60_000,
+      ...params.timing,
     },
+    wallet:
+      params.wallet ??
+      ({
+        get: () => {
+          throw new Error("wallet must not be constructed for uncapped entitlements")
+        },
+      } satisfies EntitlementWindowWalletProvider),
   }
 
   return {
@@ -92,37 +117,13 @@ function createLiveApplyInput(now: number, overrides: Record<string, unknown> = 
 export function describeEntitlementWindowProcessorContract<
   TStore extends EntitlementWindowStateStore,
 >(suiteName: string, makeStore: EntitlementWindowStoreFactory<TStore>): void {
+  describeEntitlementWindowProcessorBehaviorContract(suiteName, async () => {
+    const harness = createEntitlementWindowProcessorHarness({ now: Date.now(), store: makeStore() })
+    await harness.processor.initialize()
+    return harness.processor
+  })
+
   describe(suiteName, () => {
-    it("enforces hard limits and seals the denial for stable retries", async () => {
-      const now = Date.now()
-      const harness = createEntitlementWindowProcessorHarness({ now, store: makeStore() })
-      await harness.processor.initialize()
-
-      const input = createLiveApplyInput(now, {
-        enforceLimit: true,
-        limit: 2,
-        idempotencyKey: "idem_port_denied",
-        event: { id: "evt_port_denied", properties: { amount: 3 } },
-      })
-
-      const denied = await harness.processor.apply(input)
-      expect(denied).toMatchObject({ allowed: false, deniedReason: "LIMIT_EXCEEDED" })
-
-      const replay = await harness.processor.apply(input)
-      expect(replay).toMatchObject({
-        allowed: false,
-        deniedReason: "LIMIT_EXCEEDED",
-        idempotencyStatus: "already_reported",
-      })
-      expect(
-        await harness.processor.getEnforcementState({
-          entitlement: input.entitlement,
-          grants: input.grants,
-          now,
-        })
-      ).toMatchObject({ usage: 0, limit: 2, isLimitReached: false })
-    })
-
     it("keeps committed state visible to a fresh processor over the same store", async () => {
       const now = Date.now()
       const first = createEntitlementWindowProcessorHarness({ now, store: makeStore() })
@@ -147,6 +148,42 @@ export function describeEntitlementWindowProcessorContract<
           now,
         })
       ).resolves.toMatchObject({ usage: 5 })
+    })
+  })
+}
+
+/** Runs backend-neutral public behavior against a processor or host adapter. */
+export function describeEntitlementWindowProcessorBehaviorContract(
+  suiteName: string,
+  makeTarget: EntitlementWindowProcessorContractTargetFactory
+): void {
+  describe(suiteName, () => {
+    it("enforces hard limits and seals the denial for stable retries", async () => {
+      const now = Date.now()
+      const target = await makeTarget()
+      const input = createLiveApplyInput(now, {
+        enforceLimit: true,
+        limit: 2,
+        idempotencyKey: "idem_port_denied",
+        event: { id: "evt_port_denied", properties: { amount: 3 } },
+      })
+
+      const denied = await target.apply(input)
+      expect(denied).toMatchObject({ allowed: false, deniedReason: "LIMIT_EXCEEDED" })
+
+      const replay = await target.apply(input)
+      expect(replay).toMatchObject({
+        allowed: false,
+        deniedReason: "LIMIT_EXCEEDED",
+        idempotencyStatus: "already_reported",
+      })
+      expect(
+        await target.getEnforcementState({
+          entitlement: input.entitlement,
+          grants: input.grants,
+          now,
+        })
+      ).toMatchObject({ usage: 0, limit: 2, isLimitReached: false })
     })
   })
 }

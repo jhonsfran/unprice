@@ -43,7 +43,8 @@ patterns. Keep it cheap to load and useful.
   `ports.ts` (state store + `atomically` boundary, scheduler, runtime, wallet provider, clock).
   Put new entitlement behavior in the processor, keep SQLite specifics in
   `entitlement-window-store.ts`, and check `processor.test.ts` for the in-memory store contract a
-  future Redis backend must satisfy; do not reintroduce storage or wallet calls into the DO class.
+  future Redis backend must satisfy; do not reintroduce storage or wallet calls into the DO class
+  or a hand-rolled Drizzle/SQLite interpreter into behavioral tests.
 
 - 2026-06-06: EntitlementWindowDO SQLite columns need the schema, contract snapshot, SQL migration,
   `drizzle/migrations.js`, and `drizzle/meta/_journal.json` updated together; otherwise existing

@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers"
 import { buildIngestionWindowName } from "@unprice/services/ingestion"
 import { afterEach, describe, expect, it } from "vitest"
 import { createApplyInput } from "./entitlement-window-test-fixtures"
+import { describeEntitlementWindowProcessorBehaviorContract } from "./testing/processor-contract"
 
 const WORKERS_NOW = Date.now()
 
@@ -46,6 +47,11 @@ function createWorkersApplyInput(overrides: Record<string, unknown> = {}) {
 afterEach(async () => {
   await reset()
 })
+
+describeEntitlementWindowProcessorBehaviorContract(
+  "EntitlementWindowProcessor (Durable Object SQLite contract)",
+  () => entitlementStub({})
+)
 
 describe("EntitlementWindowDO workers runtime invariants", () => {
   it("lazy-resets entitlement usage when the reset period changes", async () => {
