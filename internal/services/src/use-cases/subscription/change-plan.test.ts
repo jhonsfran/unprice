@@ -182,6 +182,62 @@ describe("changeSubscriptionPhasePlan", () => {
     })
   })
 
+  it("rejects the target plan version when its currency does not match expectedCurrency", async () => {
+    const { deps, createPhase } = createDeps()
+
+    const result = await changeSubscriptionPhasePlan(
+      deps as never,
+      { ...createInput("end_of_cycle"), expectedCurrency: "EUR" },
+      {
+        targetPlanVersion: {
+          id: "pv_target",
+          projectId,
+          active: true,
+          status: "published",
+          archived: false,
+          currency: "USD",
+          paymentProvider: "sandbox",
+          paymentMethodRequired: false,
+        } as never,
+      }
+    )
+
+    expect(result.err).toBeInstanceOf(SubscriptionChangePhasePlanError)
+    if (!(result.err instanceof SubscriptionChangePhasePlanError)) {
+      throw new Error("Expected SubscriptionChangePhasePlanError")
+    }
+    expect(result.err.code).toBe("SUBSCRIPTION_CHANGE_PLAN_TARGET_PLAN_WRONG_CURRENCY")
+    expect(createPhase).not.toHaveBeenCalled()
+  })
+
+  it("reuses an injected target plan version instead of fetching it again", async () => {
+    const { deps, getPlanVersionByIdRecord, createPhase } = createDeps()
+
+    const result = await changeSubscriptionPhasePlan(
+      deps as never,
+      { ...createInput("end_of_cycle"), expectedCurrency: "USD" },
+      {
+        targetPlanVersion: {
+          id: "pv_target",
+          projectId,
+          active: true,
+          status: "published",
+          archived: false,
+          currency: "USD",
+          paymentProvider: "sandbox",
+          paymentMethodRequired: false,
+        } as never,
+      }
+    )
+
+    if (result.err) {
+      throw result.err
+    }
+
+    expect(getPlanVersionByIdRecord).not.toHaveBeenCalled()
+    expect(createPhase).toHaveBeenCalled()
+  })
+
   it("rejects scheduling when a future phase already exists", async () => {
     const activePhase = createPhaseFixture({ endAt: currentCycleEndAt - 1 })
     const futurePhase = createPhaseFixture({
