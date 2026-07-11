@@ -301,6 +301,31 @@ describe("deriveMeterKey", () => {
   })
 })
 
+describe("computeMeterTransition", () => {
+  it("can intentionally defer timestamp validation without changing aggregation", () => {
+    const validationTimeMs = Date.UTC(2026, 2, 8, 10, 0, 0)
+    const meterConfig: MeterConfig = {
+      eventId: "meter_deferred_validation",
+      eventSlug: "purchase",
+      aggregationMethod: "sum",
+      aggregationField: "amount",
+    }
+    const event = createPurchaseEvent({
+      id: "evt_deferred_validation",
+      timestamp: validationTimeMs + 60_000,
+      amount: 3,
+    })
+
+    expect(computeMeterTransition({ currentState: null, event, meterConfig })?.fact).toMatchObject({
+      delta: 3,
+      valueAfter: 3,
+    })
+    expect(() =>
+      computeMeterTransition({ currentState: null, event, meterConfig, validationTimeMs })
+    ).toThrow(EventTimestampTooFarInFutureError)
+  })
+})
+
 describe("AsyncMeterAggregationEngine", () => {
   it.each([
     { aggregationMethod: "sum" as const, aggregationField: "amount", expectedDelta: 3 },

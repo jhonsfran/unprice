@@ -15,10 +15,13 @@ export function computeMeterTransition(params: {
   currentState: MeterStateSnapshot | null
   event: RawEvent
   meterConfig: MeterConfig
-  validationTimeMs: number
+  /** Omit only when the caller intentionally defers timestamp validation. */
+  validationTimeMs?: number
 }): MeterTransition | null {
   const { currentState, event, meterConfig, validationTimeMs } = params
-  validateEventTimestamp(event.timestamp, validationTimeMs)
+  if (validationTimeMs !== undefined) {
+    validateEventTimestamp(event.timestamp, validationTimeMs)
+  }
 
   if (meterConfig.eventSlug !== event.slug) {
     return null

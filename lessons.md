@@ -51,8 +51,9 @@ patterns. Keep it cheap to load and useful.
 - 2026-07-11: Keep entitlement pricing helpers store-free: pass readonly meter/grant snapshots,
   return next/touched grant states, and let processor transactions own all state reads and writes.
 - 2026-07-11: Meter transition semantics belong in `@unprice/services/entitlements`; engine writes
-  and entitlement cost projections must share the canonical pure transition, including the sync
-  path's ambient wall-clock timestamp validation.
+  and entitlement cost projections must share the canonical pure transition. Timestamp validation
+  stays caller-selected: single-event wallet bootstrap defers it to apply, batch/sync uses ambient
+  `Date.now()`, and async uses its injected clock.
 
 - 2026-06-06: EntitlementWindowDO SQLite columns need the schema, contract snapshot, SQL migration,
   `drizzle/migrations.js`, and `drizzle/meta/_journal.json` updated together; otherwise existing

@@ -1,5 +1,10 @@
 import { Ok } from "@unprice/error"
-import { DO_IDEMPOTENCY_TTL_MS, LATE_EVENT_GRACE_MS } from "@unprice/services/entitlements"
+import {
+  DO_IDEMPOTENCY_TTL_MS,
+  EventTimestampTooFarInFutureError,
+  LATE_EVENT_GRACE_MS,
+  MAX_FUTURE_EVENT_SKEW_MS,
+} from "@unprice/services/entitlements"
 import { describe, expect, it } from "vitest"
 import { createDeferred } from "../test-fixtures/race"
 import type { ApplyInput } from "./contracts"
@@ -586,6 +591,24 @@ describe("EntitlementWindowProcessor pricing behavior", () => {
     expect(wallet.createReservation).toHaveBeenCalledWith(
       expect.objectContaining({ currency: "EUR", requestedAmount: 103_100_000 })
     )
+  })
+
+  it("bootstraps a priced single event before the apply engine rejects its timestamp", async () => {
+    const wallet = createWalletHarness()
+    const store = new InMemoryEntitlementWindowStore()
+    const harness = createHarness({ now: BASE_NOW, store, wallet: wallet.provider })
+    await harness.processor.initialize()
+    const eventTimestamp = BASE_NOW + MAX_FUTURE_EVENT_SKEW_MS + 60_000
+    const input = createApplyInput({
+      creditLinePolicy: "capped",
+      periodEndAt: eventTimestamp + 60_000,
+      event: { timestamp: eventTimestamp },
+    })
+
+    await expect(harness.processor.apply(input)).rejects.toThrow(EventTimestampTooFarInFutureError)
+
+    expect(wallet.createReservation).toHaveBeenCalledOnce()
+    expect(store.walletRow?.reservationId).toBe("res_test")
   })
 })
 

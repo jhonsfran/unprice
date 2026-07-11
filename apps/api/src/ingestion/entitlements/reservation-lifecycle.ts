@@ -1515,7 +1515,6 @@ export class ReservationLifecycle {
       grantStates,
       meter,
       meterState,
-      validationTimeMs: Date.now(),
     })
   }
 

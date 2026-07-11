@@ -220,7 +220,8 @@ export function projectEventCostMinor(params: {
   grantStates: readonly GrantConsumptionSnapshot[]
   meter: MeterIdentity
   meterState: Readonly<MeterStateDraft>
-  validationTimeMs: number
+  /** Omit only when the caller intentionally defers timestamp validation. */
+  validationTimeMs?: number
 }): number {
   const transition = computeMeterTransition({
     currentState: params.meterState.exists
@@ -231,7 +232,7 @@ export function projectEventCostMinor(params: {
       : null,
     event: params.event,
     meterConfig: params.meter.config,
-    validationTimeMs: params.validationTimeMs,
+    ...(params.validationTimeMs === undefined ? {} : { validationTimeMs: params.validationTimeMs }),
   })
   if (!transition) {
     return 0
