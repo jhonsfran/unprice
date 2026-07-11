@@ -33,6 +33,9 @@ patterns. Keep it cheap to load and useful.
 
 ## CI And GitHub Actions
 
+- 2026-07-11: Node 24 GitHub Actions workflows should use `actions/checkout@v5`,
+  `actions/setup-node@v5`, `actions/cache@v5`, and `pnpm/action-setup@v4.4.0`; older action
+  majors trigger GitHub's forced Node 24 compatibility warning.
 - 2026-07-04: `job_build.yaml` requests `pull-requests: write` and `statuses: write`; callers
   that set workflow-level `permissions` must grant those scopes on the reusable-workflow job.
 - 2026-07-11: `neondatabase/schema-diff-action@v1` does not accept `username`; pass only its
@@ -230,6 +233,9 @@ patterns. Keep it cheap to load and useful.
 
 ## Next.js And Dashboard
 
+- 2026-07-11: Keep an explicit `/dashboard/page.tsx` terminal route because the root dashboard layout
+  has parallel slots but no content page; its parent layout already supplies `force-dynamic`, so do
+  not duplicate the segment flag on the page.
 - 2026-07-04: Onboarding step navigation must stay sequential even in development; avoid dev-only
   `goToStep` bypasses or "continue anyway" buttons that advance after an incomplete step.
 - 2026-07-04: OnboardJS `updateContext` is async and persists before notifying state; await it
