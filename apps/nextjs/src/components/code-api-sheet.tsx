@@ -18,7 +18,7 @@ import {
 import { LazyMotion, domAnimation, m, useReducedMotion } from "framer-motion"
 import { Code, FileCode2, KeyRound } from "lucide-react"
 import Link from "next/link"
-import { SDKDemo, type SDKExampleParams, type method } from "~/components/landing/sdk-examples"
+import { SDKDemo, type SDKExampleParams, type method } from "~/components/sdk-snippets/sdk-examples"
 import { toast } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
 

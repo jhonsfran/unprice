@@ -6,10 +6,12 @@ import { Progress } from "@unprice/ui/progress"
 import { cn } from "@unprice/ui/utils"
 import { ArrowUpRight, CalendarRange, KeyRound } from "lucide-react"
 import type { ReactNode } from "react"
-import { useMemo } from "react"
 import { FreshnessIndicator } from "~/components/analytics/freshness-indicator"
+import { formatBillingLabel } from "~/components/billing/format-billing-label"
 import { SectionIntro } from "~/components/layout/section-intro"
 import { SuperLink } from "~/components/super-link"
+import { capitalize } from "~/lib/capitalize"
+import { formatDate } from "~/lib/dates"
 
 export type CurrentAccessData = RouterOutputs["customers"]["getCurrentAccess"]
 export type CurrentAccessEntitlement = CurrentAccessData["entitlements"][number]
@@ -18,81 +20,6 @@ export type CurrentAccessWallet = RouterOutputs["customers"]["getWallet"]["walle
 type BillingConfig = NonNullable<
   NonNullable<CurrentAccessData["activePlan"]>["activePhase"]
 >["planVersion"]["billingConfig"]
-
-const SHORT_DATE_FORMAT = new Intl.DateTimeFormat(undefined, {
-  month: "short",
-  day: "numeric",
-})
-
-const LONG_DATE_FORMAT = new Intl.DateTimeFormat(undefined, {
-  month: "short",
-  day: "numeric",
-  year: "numeric",
-})
-
-type DateFormatterBundle = {
-  shortDate: Intl.DateTimeFormat
-  longDate: Intl.DateTimeFormat
-  shortDateTime: Intl.DateTimeFormat
-  longDateTime: Intl.DateTimeFormat
-}
-
-const SHORT_DATE_TIME_FORMAT = new Intl.DateTimeFormat(undefined, {
-  month: "short",
-  day: "numeric",
-  hour: "numeric",
-  minute: "2-digit",
-})
-
-const LONG_DATE_TIME_FORMAT = new Intl.DateTimeFormat(undefined, {
-  month: "short",
-  day: "numeric",
-  year: "numeric",
-  hour: "numeric",
-  minute: "2-digit",
-})
-
-function useDateFormatterBundle(timeZone?: string): DateFormatterBundle {
-  return useMemo(() => {
-    if (!timeZone) {
-      return {
-        shortDate: SHORT_DATE_FORMAT,
-        longDate: LONG_DATE_FORMAT,
-        shortDateTime: SHORT_DATE_TIME_FORMAT,
-        longDateTime: LONG_DATE_TIME_FORMAT,
-      }
-    }
-
-    return {
-      shortDate: new Intl.DateTimeFormat(undefined, {
-        month: "short",
-        day: "numeric",
-        timeZone,
-      }),
-      longDate: new Intl.DateTimeFormat(undefined, {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-        timeZone,
-      }),
-      shortDateTime: new Intl.DateTimeFormat(undefined, {
-        month: "short",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-        timeZone,
-      }),
-      longDateTime: new Intl.DateTimeFormat(undefined, {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-        timeZone,
-      }),
-    }
-  }, [timeZone])
-}
 
 export function CurrentAccessOverview({
   access,
@@ -121,7 +48,7 @@ export function CurrentAccessOverview({
   const activePhase = activePlan?.activePhase ?? null
   const walletAvailable = wallet.balances.purchased + wallet.balances.granted
   const walletHeld = wallet.balances.reserved
-  const dateFormatters = useDateFormatterBundle(activePlan?.timezone)
+  const timezone = activePlan?.timezone
 
   return (
     <section className="flex flex-col gap-4">
@@ -163,8 +90,7 @@ export function CurrentAccessOverview({
                     <p className="font-mono text-muted-foreground text-xs tabular-nums">
                       {formatPeriod(activePlan.currentCycleStartAt, activePlan.currentCycleEndAt, {
                         billingConfig: activePhase?.planVersion.billingConfig,
-                        dateFormatters,
-                        timezone: activePlan.timezone,
+                        timezone,
                       })}
                     </p>
                   </div>
@@ -172,24 +98,24 @@ export function CurrentAccessOverview({
                 </div>
 
                 <dl className="grid gap-3 text-sm">
-                  <PlanFact label="Status" value={formatStatus(activePlan.status)} />
+                  <PlanFact label="Status" value={formatStatusLabel(activePlan.status)} />
                   <PlanFact
                     label="Renews"
-                    value={formatDate(activePlan.renewAt ?? activePlan.currentCycleEndAt)}
+                    value={formatDate(
+                      activePlan.renewAt ?? activePlan.currentCycleEndAt,
+                      timezone,
+                      "MMM d, yyyy"
+                    )}
                   />
                   <PlanFact
                     label="Billing cadence"
                     value={
-                      activePhase
-                        ? formatBillingCadence(activePhase.planVersion.billingConfig)
-                        : "None"
+                      activePhase ? formatBillingLabel(activePhase.planVersion.billingConfig) : "None"
                     }
                   />
                   <PlanFact
                     label="Payment provider"
-                    value={
-                      activePhase ? formatPaymentProvider(activePhase.paymentProvider) : "None"
-                    }
+                    value={activePhase ? formatStatusLabel(activePhase.paymentProvider) : "None"}
                   />
                   <PlanFact
                     label="Wallet available"
@@ -248,8 +174,7 @@ export function CurrentAccessOverview({
                     key={entitlement.id}
                     entitlement={entitlement}
                     usageUnavailable={access.usageUnavailable}
-                    timezone={activePlan?.timezone}
-                    dateFormatters={dateFormatters}
+                    timezone={timezone}
                     action={renderEntitlementAction?.(entitlement)}
                   />
                 ))}
@@ -284,20 +209,18 @@ function EntitlementUsageRow({
   entitlement,
   usageUnavailable,
   timezone,
-  dateFormatters,
   action,
 }: {
   entitlement: CurrentAccessEntitlement
   usageUnavailable: boolean
   timezone?: string
-  dateFormatters: DateFormatterBundle
   action?: ReactNode
 }) {
   const hasMeasuredUsage = entitlement.currentUsage !== null && !usageUnavailable
   const hasFiniteLimit = entitlement.limit !== null && entitlement.limit > 0
   const usagePeriodLabel =
     hasMeasuredUsage && entitlement.usagePeriods.length > 0
-      ? formatUsagePeriods(entitlement.usagePeriods, dateFormatters, timezone)
+      ? formatUsagePeriods(entitlement.usagePeriods, timezone)
       : null
 
   return (
@@ -405,36 +328,36 @@ function formatFeatureType(type: CurrentAccessEntitlement["featureType"]): strin
   }
 }
 
+// Title-case a snake_case enum value (e.g. "past_due" -> "Past Due").
+function formatStatusLabel(value: string): string {
+  return capitalize(value.split("_").join(" ")) ?? value
+}
+
 function formatPeriod(
   start: number,
   end: number,
   options?: {
     billingConfig?: BillingConfig
     includeTime?: boolean
-    dateFormatters?: DateFormatterBundle
     timezone?: string
   }
 ): string {
   const includeTime = options?.includeTime ?? options?.billingConfig?.billingInterval === "minute"
-  const formatters = options?.dateFormatters ?? {
-    shortDate: SHORT_DATE_FORMAT,
-    longDate: LONG_DATE_FORMAT,
-    shortDateTime: SHORT_DATE_TIME_FORMAT,
-    longDateTime: LONG_DATE_TIME_FORMAT,
-  }
-  const startDate = new Date(start)
-  const endDate = new Date(end)
+  const timezone = options?.timezone
 
   if (!includeTime) {
-    return `${formatShortDate(startDate, formatters)} - ${formatLongDate(endDate, formatters)}`
+    return `${formatDate(start, timezone, "MMM d")} - ${formatDate(end, timezone, "MMM d, yyyy")}`
   }
 
-  return `${formatShortDateTime(startDate, formatters)} - ${formatLongDateTime(endDate, formatters)}`
+  return `${formatDate(start, timezone, "MMM d, h:mm a")} - ${formatDate(
+    end,
+    timezone,
+    "MMM d, yyyy, h:mm a"
+  )}`
 }
 
 function formatUsagePeriods(
   periods: CurrentAccessEntitlement["usagePeriods"],
-  dateFormatters: DateFormatterBundle,
   timezone?: string
 ): string | null {
   if (periods.length === 0) {
@@ -451,58 +374,11 @@ function formatUsagePeriods(
   }
 
   if (period.end >= Number.MAX_SAFE_INTEGER) {
-    return `Period since ${formatLongDate(new Date(period.start), dateFormatters)}`
+    return `Period since ${formatDate(period.start, timezone, "MMM d, yyyy")}`
   }
 
   return `Period ${formatPeriod(period.start, period.end, {
     includeTime: period.end - period.start < 2 * 24 * 60 * 60 * 1000,
     timezone,
-    dateFormatters,
   })}`
-}
-
-function formatDate(timestamp: number): string {
-  return LONG_DATE_FORMAT.format(new Date(timestamp))
-}
-
-function formatShortDate(date: Date, formatters: DateFormatterBundle): string {
-  return formatters.shortDate.format(date)
-}
-
-function formatLongDate(date: Date, formatters: DateFormatterBundle): string {
-  return formatters.longDate.format(date)
-}
-
-function formatShortDateTime(date: Date, formatters: DateFormatterBundle): string {
-  return formatters.shortDateTime.format(date)
-}
-
-function formatLongDateTime(date: Date, formatters: DateFormatterBundle): string {
-  return formatters.longDateTime.format(date)
-}
-
-function formatBillingCadence(config: BillingConfig): string {
-  if (config.billingInterval === "onetime") {
-    return "One-time"
-  }
-
-  if (config.billingIntervalCount === 1) {
-    return `Every ${config.billingInterval}`
-  }
-
-  return `Every ${config.billingIntervalCount} ${config.billingInterval}s`
-}
-
-function formatPaymentProvider(provider: string): string {
-  return provider
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ")
-}
-
-function formatStatus(status: string): string {
-  return status
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ")
 }

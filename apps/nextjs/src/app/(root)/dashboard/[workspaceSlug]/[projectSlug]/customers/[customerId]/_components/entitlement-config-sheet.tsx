@@ -16,13 +16,7 @@ import {
 import { Skeleton } from "@unprice/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { AlertCircle, Settings } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
-import {
-  useActiveFeature,
-  useActivePlan,
-  useActivePlanVersion,
-  usePlanFeaturesList,
-} from "~/hooks/use-features"
+import { useMemo, useState } from "react"
 import { useTRPC } from "~/trpc/client"
 import { FeatureConfigForm } from "../../../plans/[planSlug]/_components/feature-config-form"
 
@@ -38,10 +32,6 @@ export function EntitlementConfigSheet({
 }) {
   const [isOpen, setIsOpen] = useState(false)
   const trpc = useTRPC()
-  const [, setActiveFeature] = useActiveFeature()
-  const [, setActivePlan] = useActivePlan()
-  const [, setActivePlanVersion] = useActivePlanVersion()
-  const [, setPlanFeaturesList] = usePlanFeaturesList()
 
   const { data, error, isLoading, isFetching } = useQuery(
     trpc.planVersions.getById.queryOptions(
@@ -72,36 +62,8 @@ export function EntitlementConfigSheet({
     [entitlement.featureSlug, planVersion]
   )
 
-  useEffect(() => {
-    if (!isOpen || !planVersion || !activePlanVersion || !planVersionFeature) {
-      return
-    }
-
-    setPlanFeaturesList(planVersion.planFeatures)
-    setActivePlan(planVersion.plan)
-    setActivePlanVersion(activePlanVersion)
-    setActiveFeature(planVersionFeature)
-  }, [
-    activePlanVersion,
-    isOpen,
-    planVersion,
-    planVersionFeature,
-    setActiveFeature,
-    setActivePlan,
-    setActivePlanVersion,
-    setPlanFeaturesList,
-  ])
-
-  const handleOpenChange = (nextOpen: boolean) => {
-    setIsOpen(nextOpen)
-
-    if (!nextOpen) {
-      setActiveFeature(null)
-    }
-  }
-
   return (
-    <Sheet open={isOpen} onOpenChange={handleOpenChange}>
+    <Sheet open={isOpen} onOpenChange={setIsOpen}>
       <Tooltip>
         <TooltipTrigger asChild>
           <SheetTrigger asChild>
@@ -156,6 +118,7 @@ export function EntitlementConfigSheet({
                     className="pb-6"
                     defaultValues={planVersionFeature}
                     planVersion={activePlanVersion}
+                    planFeatures={planVersion.planFeatures}
                     setDialogOpen={setIsOpen}
                   />
                 </div>

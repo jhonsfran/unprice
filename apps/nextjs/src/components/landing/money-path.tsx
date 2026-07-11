@@ -4,6 +4,7 @@ import { cn } from "@unprice/ui/utils"
 import { Ban, Check } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { AnimatedCounter } from "./animated-counter"
+import { Leader } from "./station"
 
 // The signature visual: the money path, rendered as one request traced end to
 // end. The brand works when the buyer can see the commercial decision and the
@@ -240,15 +241,6 @@ function buildPass(root: HTMLElement, kind: PassKind): BuiltPass | null {
     offset: Math.min(1, p.t / duration),
   }))
   return { keyframes, duration, hits, sets }
-}
-
-function Leader() {
-  return (
-    <span
-      aria-hidden
-      className="mx-1 min-w-4 flex-1 self-center border-background-border border-b border-dotted"
-    />
-  )
 }
 
 function StationRow({

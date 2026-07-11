@@ -69,10 +69,7 @@ export function ProblemSection() {
                 <span className="font-medium font-mono text-background-textContrast text-xs">
                   {row.event}
                 </span>
-                <span
-                  aria-hidden
-                  className="mx-1 min-w-4 flex-1 self-center border-background-border border-b border-dotted"
-                />
+                <Leader />
                 <span className="whitespace-nowrap font-mono text-[11px] text-background-text">
                   {row.fact}
                 </span>
@@ -126,10 +123,7 @@ export function ProblemSection() {
               <div key={row.label} className="flex items-baseline gap-2 py-[5px]">
                 <StationDot variant="ghost" className="self-center" />
                 <span className="text-background-text text-sm">{row.label}</span>
-                <span
-                  aria-hidden
-                  className="mx-1 min-w-4 flex-1 self-center border-background-border border-b border-dotted"
-                />
+                <Leader />
                 <span className="whitespace-nowrap font-mono text-[11px] text-background-text">
                   {row.fact}
                 </span>

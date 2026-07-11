@@ -184,6 +184,21 @@ export default function SubscriptionPhaseFormField({
     setDialogOpen(true)
   }
 
+  // New subscription (no subscriptionId yet) with local phases: start the next phase right after
+  // the last one ends. Only reachable when the last phase already has an end date.
+  function openCreatePhaseAfterLast() {
+    const endAt = lastPhase?.endAt ?? Date.now()
+    const startAt = new Date(endAt).getTime() + 1
+
+    setSelectedPhase({
+      ...defaultValuesPhase,
+      customerId: selectedCustomer,
+      startAt,
+    })
+    setPhaseFormMode("create")
+    setDialogOpen(true)
+  }
+
   function onRemovePhase(phaseId: string, callback: () => void) {
     startTransition(() => {
       toast.promise(
@@ -279,114 +294,22 @@ export default function SubscriptionPhaseFormField({
               })}
 
               <div className="mt-6 flex justify-center">
-                {subscriptionId ? (
-                  canAddScheduledPhase || canAddPhaseAfterFuture ? (
-                    <Button
-                      size={"sm"}
-                      variant="outline"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        e.preventDefault()
-                        if (canAddPhaseAfterFuture) {
-                          openCreatePhaseAfterLastFuture()
-                          return
-                        }
-
-                        openSchedulePhase()
-                      }}
-                    >
-                      Add phase
-                    </Button>
-                  ) : (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          size={"sm"}
-                          variant="outline"
-                          className="cursor-not-allowed opacity-50"
-                          aria-disabled
-                          tabIndex={-1}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            e.preventDefault()
-                          }}
-                        >
-                          Add phase
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent className="w-64">
-                        {hasFuturePhase
-                          ? "Edit the last future phase and add an end date before adding another phase."
-                          : "Adding a phase requires an active phase."}
-                      </TooltipContent>
-                    </Tooltip>
-                  )
-                ) : fields.length > 0 && !fields[fields.length - 1]?.endAt ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        size={"sm"}
-                        variant="outline"
-                        className="cursor-not-allowed opacity-50"
-                        aria-disabled
-                        tabIndex={-1}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          e.preventDefault()
-                        }}
-                      >
-                        Add phase
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent className="w-56">
-                      You can't add a new phase if the last phase is not ended. Add an end date to
-                      the last phase
-                    </TooltipContent>
-                  </Tooltip>
-                ) : (
-                  <Button
-                    size={"sm"}
-                    variant="outline"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      e.preventDefault()
-
-                      if (fields.length > 0) {
-                        const lastPhase = fields[fields.length - 1]
-                        const endAt = lastPhase?.endAt ?? Date.now()
-                        const startAt = new Date(endAt).getTime() + 1
-
-                        if (lastPhase) {
-                          setSelectedPhase({
-                            ...defaultValuesPhase,
-                            customerId: selectedCustomer,
-                            // Continue immediately after the previous phase ends.
-                            startAt: startAt,
-                          })
-                          setPhaseFormMode("create")
-                        } else {
-                          setSelectedPhase({
-                            ...defaultValuesPhase,
-                            customerId: selectedCustomer,
-                            startAt: startAt,
-                          })
-                          setPhaseFormMode("create")
-                        }
-                      } else {
-                        setSelectedPhase({
-                          ...defaultValuesPhase,
-                          customerId: selectedCustomer,
-                        })
-                        form.clearErrors("customerId")
-                        setPhaseFormMode("create")
-                      }
-
-                      setDialogOpen(true)
-                    }}
-                  >
-                    Add phase
-                  </Button>
-                )}
+                <AddPhaseButton
+                  action={getAddPhaseAction(
+                    {
+                      hasSubscription: Boolean(subscriptionId),
+                      canAddScheduledPhase,
+                      canAddPhaseAfterFuture,
+                      hasFuturePhase,
+                      lastPhaseHasEndAt: Boolean(lastPhase?.endAt),
+                    },
+                    {
+                      schedulePhase: openSchedulePhase,
+                      createPhaseAfterFuture: openCreatePhaseAfterLastFuture,
+                      createPhaseAfterLast: openCreatePhaseAfterLast,
+                    }
+                  )}
+                />
               </div>
             </div>
           ) : (
@@ -461,5 +384,92 @@ export default function SubscriptionPhaseFormField({
         </Sheet>
       </PropagationStopper>
     </div>
+  )
+}
+
+type AddPhaseAction = { enabled: true; onClick: () => void } | { enabled: false; tooltip: string }
+
+// Pure decision for the single "Add phase" CTA. Replaces a nested-ternary tree; each branch
+// maps state -> whether the button is enabled and, if not, why (the tooltip copy).
+function getAddPhaseAction(
+  state: {
+    hasSubscription: boolean
+    canAddScheduledPhase: boolean
+    canAddPhaseAfterFuture: boolean
+    hasFuturePhase: boolean
+    lastPhaseHasEndAt: boolean
+  },
+  handlers: {
+    schedulePhase: () => void
+    createPhaseAfterFuture: () => void
+    createPhaseAfterLast: () => void
+  }
+): AddPhaseAction {
+  if (state.hasSubscription) {
+    if (state.canAddScheduledPhase || state.canAddPhaseAfterFuture) {
+      return {
+        enabled: true,
+        onClick: state.canAddPhaseAfterFuture
+          ? handlers.createPhaseAfterFuture
+          : handlers.schedulePhase,
+      }
+    }
+
+    return {
+      enabled: false,
+      tooltip: state.hasFuturePhase
+        ? "Edit the last future phase and add an end date before adding another phase."
+        : "Adding a phase requires an active phase.",
+    }
+  }
+
+  // No subscription yet (creating a brand-new subscription with locally-added phases).
+  if (!state.lastPhaseHasEndAt) {
+    return {
+      enabled: false,
+      tooltip:
+        "You can't add a new phase if the last phase is not ended. Add an end date to the last phase",
+    }
+  }
+
+  return { enabled: true, onClick: handlers.createPhaseAfterLast }
+}
+
+function AddPhaseButton({ action }: { action: AddPhaseAction }) {
+  if (action.enabled) {
+    return (
+      <Button
+        size={"sm"}
+        variant="outline"
+        onClick={(e) => {
+          e.stopPropagation()
+          e.preventDefault()
+          action.onClick()
+        }}
+      >
+        Add phase
+      </Button>
+    )
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          size={"sm"}
+          variant="outline"
+          className="cursor-not-allowed opacity-50"
+          aria-disabled
+          tabIndex={-1}
+          onClick={(e) => {
+            e.stopPropagation()
+            e.preventDefault()
+          }}
+        >
+          Add phase
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent className="w-64">{action.tooltip}</TooltipContent>
+    </Tooltip>
   )
 }

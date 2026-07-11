@@ -3,9 +3,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
 import {
   type CreditLinePolicy,
-  type InsertSubscriptionPhase,
   type PaymentProvider,
-  type SubscriptionChangePlan,
   type SubscriptionItem,
   type SubscriptionItemsConfig,
   type SubscriptionPhase,
@@ -21,6 +19,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { useParams, useRouter } from "next/navigation"
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { FieldPath, FieldValues, PathValue, UseFormReturn } from "react-hook-form"
+import type { z } from "zod"
 import { PaymentProviderFormField } from "~/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/plans/[planSlug]/_components/version-fields-form"
 import ConfigItemsFormField from "~/components/forms/items-fields"
 import PaymentMethodsFormField from "~/components/forms/payment-method-field"
@@ -50,6 +49,11 @@ type WhenToChangeOption = {
   label: string
 }
 
+// Concrete field shapes for each mode. Bound directly to the resolver schema, so field-name
+// access is type-checked and the boundary `as` casts the merged form used to require disappear.
+type SchedulePhaseFormValues = z.infer<typeof schedulePhaseSchema>
+type CreateEditPhaseFormValues = z.infer<typeof createPhaseSchema>
+
 interface SubscriptionPhaseFieldValues extends FieldValues {
   planVersionId: string
   paymentProvider?: PaymentProvider
@@ -67,7 +71,192 @@ interface SubscriptionPhaseFieldValues extends FieldValues {
   timezone?: string
 }
 
-export function SubscriptionPhaseForm({
+// Dispatcher: schedule mode is a different schema, different fields, and a different mutation, so
+// it gets its own concretely-typed form. create/edit/view share one.
+export function SubscriptionPhaseForm(props: {
+  setDialogOpen?: (open: boolean) => void
+  defaultValues: SubscriptionPhaseFormDefaultValues
+  mode?: SubscriptionPhaseFormMode
+  isReadOnly?: boolean
+  onSubmit: (data: SubscriptionPhaseFormSubmitValue) => void
+}) {
+  if (props.mode === "schedule") {
+    return <SchedulePhaseForm setDialogOpen={props.setDialogOpen} defaultValues={props.defaultValues} />
+  }
+
+  return <CreateEditPhaseForm {...props} />
+}
+
+function SchedulePhaseForm({
+  setDialogOpen,
+  defaultValues,
+}: {
+  setDialogOpen?: (open: boolean) => void
+  defaultValues: SubscriptionPhaseFormDefaultValues
+}) {
+  const trpc = useTRPC()
+  const router = useRouter()
+  const params = useParams()
+  const workspaceSlug = params.workspaceSlug as string
+  const projectSlug = params.projectSlug as string
+
+  const form = useZodForm({
+    schema: schedulePhaseSchema,
+    defaultValues: defaultValues as SchedulePhaseFormValues,
+  })
+  const nowMs = useMemo(() => Date.now(), [])
+
+  const changePhasePlan = useMutation(
+    trpc.subscriptions.changePhasePlan.mutationOptions({
+      onSuccess: () => {
+        toastAction("success")
+      },
+    })
+  )
+
+  const onSubmitForm = async (data: SchedulePhaseFormValues) => {
+    await changePhasePlan.mutateAsync(data)
+    setDialogOpen?.(false)
+    router.refresh()
+  }
+
+  // all this queries are deduplicated inside each form field
+  const { data: planVersions, isLoading } = useQuery(
+    trpc.planVersions.listByActiveProject.queryOptions({
+      onlyPublished: true,
+      onlyLatest: true,
+    })
+  )
+
+  const selectedPlanVersionId = form.watch("planVersionId")
+  const selectedPaymentProvider = form.watch("paymentProvider")
+  const paymentMethodRequired = form.watch("paymentMethodRequired")
+  const selectedPlanVersion =
+    planVersions?.planVersions.find((version) => version.id === selectedPlanVersionId) ??
+    (defaultValues.planVersion?.id === selectedPlanVersionId
+      ? defaultValues.planVersion
+      : undefined)
+  const selectedPlanVersionPaymentMethodRequired = selectedPlanVersion?.paymentMethodRequired
+  const selectedPlanVersionPaymentProvider = selectedPlanVersion?.paymentProvider ?? undefined
+  const selectedPlanVersionTrialUnits = selectedPlanVersion?.trialUnits
+  const selectedCurrency = selectedPlanVersion?.currency ?? "USD"
+  const creditLinePolicy = form.watch("creditLinePolicy")
+  const whenToChange = form.watch("whenToChange")
+  const planVersionOptions =
+    planVersions?.planVersions.filter(
+      (version) => version.id !== defaultValues.currentPlanVersionId
+    ) ?? []
+  const isCreditLinePolicyDisabled = !selectedPlanVersion
+  const trialUnitLabel = selectedPlanVersion
+    ? getTrialUnitLabel({
+        billingInterval: selectedPlanVersion.billingConfig.billingInterval,
+        units: form.watch("trialUnits"),
+      })
+    : "days"
+
+  // when plan is selected set defaults controlled by the plan version
+  useEffect(() => {
+    if (!selectedPlanVersionId || !selectedPlanVersionPaymentProvider) return
+
+    form.setValue("paymentMethodRequired", selectedPlanVersionPaymentMethodRequired ?? false)
+    form.setValue("paymentProvider", selectedPlanVersionPaymentProvider)
+    form.setValue("trialUnits", selectedPlanVersionTrialUnits ?? 0)
+    form.setValue("creditLinePolicy", form.getValues("creditLinePolicy") ?? "uncapped")
+    form.setValue("creditLineAmount", form.getValues("creditLineAmount") ?? null)
+  }, [
+    selectedPlanVersionId,
+    selectedPlanVersionPaymentMethodRequired,
+    selectedPlanVersionPaymentProvider,
+    selectedPlanVersionTrialUnits,
+    form,
+  ])
+
+  const whenToChangeOptions = useMemo(() => {
+    const timezone = defaultValues.timezone ?? "UTC"
+
+    const endOfCycleLabel = defaultValues.currentCycleEndAt
+      ? formatDate(defaultValues.currentCycleEndAt, timezone, "MMM d, hh:mm")
+      : formatDate(nowMs, timezone, "MMM d, hh:mm")
+
+    const immediateLabel = formatDate(nowMs, timezone, "MMM d, hh:mm")
+
+    return [
+      {
+        key: "end_of_cycle",
+        label: `End of cycle (${endOfCycleLabel})`,
+      },
+      {
+        key: "immediately",
+        label: `Immediately (${immediateLabel})`,
+      },
+    ] satisfies WhenToChangeOption[]
+  }, [defaultValues.currentCycleEndAt, defaultValues.timezone, nowMs])
+
+  const paymentProviderValue = selectedPaymentProvider ?? selectedPlanVersionPaymentProvider
+
+  return (
+    <Form {...form}>
+      <form className="space-y-6">
+        <PlanAndProviderFields
+          form={form}
+          persistedPhaseFieldsLocked={false}
+          isReadOnlyMode={false}
+          workspaceSlug={workspaceSlug}
+          projectSlug={projectSlug}
+          planVersionOptions={planVersionOptions}
+          selectedPlanVersionFallback={defaultValues.planVersion}
+          isLoading={isLoading}
+        />
+
+        <Separator />
+
+        <UsageCreditFields
+          form={form}
+          isCreditLinePolicyDisabled={isCreditLinePolicyDisabled}
+          selectedCurrency={selectedCurrency}
+          persistedPhaseFieldsLocked={false}
+          creditLinePolicy={creditLinePolicy}
+        />
+
+        <TimingAndTrialFields
+          form={form}
+          isScheduleMode={true}
+          persistedPhaseFieldsLocked={false}
+          isReadOnlyMode={false}
+          hasSelectedPlanVersion={Boolean(selectedPlanVersion)}
+          trialUnitLabel={trialUnitLabel}
+          whenToChangeOptions={whenToChangeOptions}
+        />
+
+        <PaymentMethodSection
+          form={form}
+          isReadOnlyMode={false}
+          paymentMethodRequired={paymentMethodRequired}
+          paymentProvider={paymentProviderValue}
+        />
+
+        <ConfigItemsSection
+          form={form}
+          persistedPhaseFieldsLocked={false}
+          isReadOnlyMode={false}
+          planVersionOptions={planVersionOptions}
+          isLoading={isLoading}
+        />
+
+        <SubscriptionPhaseFormActions
+          isReadOnlyMode={false}
+          isSubmitting={form.formState.isSubmitting}
+          isScheduleMode={true}
+          editMode={false}
+          whenToChange={whenToChange}
+          onSubmit={() => form.handleSubmit(onSubmitForm)()}
+        />
+      </form>
+    </Form>
+  )
+}
+
+function CreateEditPhaseForm({
   setDialogOpen,
   defaultValues,
   mode = "create",
@@ -85,27 +274,24 @@ export function SubscriptionPhaseForm({
   const params = useParams()
   const workspaceSlug = params.workspaceSlug as string
   const projectSlug = params.projectSlug as string
-  const isScheduleMode = mode === "schedule"
   const isReadOnlyMode = isReadOnly || mode === "view"
   const isFutureEditMode = mode === "edit"
-  const editMode = !isScheduleMode && defaultValues.id !== "" && defaultValues.id !== undefined
+  const editMode = defaultValues.id !== "" && defaultValues.id !== undefined
   const persistedPhaseFieldsLocked = editMode && !isFutureEditMode
 
-  const formSchema = isScheduleMode
-    ? schedulePhaseSchema
-    : editMode
-      ? editablePhaseSchema
-      : createPhaseSchema
+  // Both create and edit share the same field set; only the resolver schema differs at runtime.
+  // Anchoring the form's static type to createPhaseSchema keeps every field access concretely typed
+  // (the editable/insert ZodEffects don't structurally overlap, hence the unknown bridge).
+  const resolverSchema = (editMode ? editablePhaseSchema : createPhaseSchema) as unknown as typeof createPhaseSchema
 
   const form = useZodForm({
-    schema: formSchema,
-    defaultValues,
+    schema: resolverSchema,
+    defaultValues: defaultValues as CreateEditPhaseFormValues,
   })
   const previousPlanVersionIdRef = useRef<string | undefined | null>(null)
   if (previousPlanVersionIdRef.current === null) {
     previousPlanVersionIdRef.current = form.getValues("planVersionId")
   }
-  const nowMs = useMemo(() => Date.now(), [])
 
   const createPhase = useMutation(
     trpc.subscriptions.createPhase.mutationOptions({
@@ -123,27 +309,10 @@ export function SubscriptionPhaseForm({
     })
   )
 
-  const changePhasePlan = useMutation(
-    trpc.subscriptions.changePhasePlan.mutationOptions({
-      onSuccess: () => {
-        toastAction("success")
-      },
-    })
-  )
-
-  const onSubmitForm = async (
-    data: InsertSubscriptionPhase | Partial<SubscriptionPhase> | SubscriptionChangePlan
-  ) => {
-    if (isScheduleMode) {
-      await changePhasePlan.mutateAsync(data as SubscriptionChangePlan)
-      setDialogOpen?.(false)
-      router.refresh()
-      return
-    }
-
+  const onSubmitForm = async (data: CreateEditPhaseFormValues) => {
     // if subscription is not created yet no need to create phase
     if (!defaultValues.subscriptionId) {
-      onSubmit(data as InsertSubscriptionPhase)
+      onSubmit(data)
       setDialogOpen?.(false)
       return
     }
@@ -152,7 +321,7 @@ export function SubscriptionPhaseForm({
       const { phase } = await updatePhase.mutateAsync({
         ...data,
         id: defaultValues.id!,
-      } as SubscriptionPhase)
+      } as unknown as SubscriptionPhase)
 
       onSubmit({
         ...phase,
@@ -162,7 +331,7 @@ export function SubscriptionPhaseForm({
       // sync the server-rendered facts (cycle, renews) with the new phase
       router.refresh()
     } else {
-      const { phase } = await createPhase.mutateAsync(data as InsertSubscriptionPhase)
+      const { phase } = await createPhase.mutateAsync(data)
 
       onSubmit(phase as SubscriptionPhaseFormSubmitValue)
       setDialogOpen?.(false)
@@ -170,17 +339,17 @@ export function SubscriptionPhaseForm({
     }
   }
 
-  // all this querues are deduplicated inside each form field
+  // all this queries are deduplicated inside each form field
   const { data: planVersions, isLoading } = useQuery(
     trpc.planVersions.listByActiveProject.queryOptions({
       onlyPublished: true,
-      onlyLatest: isScheduleMode,
+      onlyLatest: false,
     })
   )
 
   const selectedPlanVersionId = form.watch("planVersionId")
-  const selectedPaymentProvider = form.watch("paymentProvider") as PaymentProvider | undefined
-  const paymentMethodRequired = form.watch("paymentMethodRequired") as boolean | undefined
+  const selectedPaymentProvider = form.watch("paymentProvider")
+  const paymentMethodRequired = form.watch("paymentMethodRequired")
   const selectedPlanVersion =
     planVersions?.planVersions.find((version) => version.id === selectedPlanVersionId) ??
     (defaultValues.planVersion?.id === selectedPlanVersionId
@@ -190,13 +359,8 @@ export function SubscriptionPhaseForm({
   const selectedPlanVersionPaymentProvider = selectedPlanVersion?.paymentProvider ?? undefined
   const selectedPlanVersionTrialUnits = selectedPlanVersion?.trialUnits
   const selectedCurrency = selectedPlanVersion?.currency ?? "USD"
-  const creditLinePolicy = form.watch("creditLinePolicy") as CreditLinePolicy | undefined
-  const whenToChange = form.watch("whenToChange") as string | undefined
-  const planVersionOptions = isScheduleMode
-    ? (planVersions?.planVersions.filter(
-        (version) => version.id !== defaultValues.currentPlanVersionId
-      ) ?? [])
-    : (planVersions?.planVersions ?? [])
+  const creditLinePolicy = form.watch("creditLinePolicy")
+  const planVersionOptions = planVersions?.planVersions ?? []
   const isCreditLinePolicyDisabled =
     persistedPhaseFieldsLocked || isReadOnlyMode || !selectedPlanVersion
   const trialUnitLabel = selectedPlanVersion
@@ -231,27 +395,6 @@ export function SubscriptionPhaseForm({
     editMode,
   ])
 
-  const whenToChangeOptions = useMemo(() => {
-    const timezone = defaultValues.timezone ?? "UTC"
-
-    const endOfCycleLabel = defaultValues.currentCycleEndAt
-      ? formatDate(defaultValues.currentCycleEndAt, timezone, "MMM d, hh:mm")
-      : formatDate(nowMs, timezone, "MMM d, hh:mm")
-
-    const immediateLabel = formatDate(nowMs, timezone, "MMM d, hh:mm")
-
-    return [
-      {
-        key: "end_of_cycle",
-        label: `End of cycle (${endOfCycleLabel})`,
-      },
-      {
-        key: "immediately",
-        label: `Immediately (${immediateLabel})`,
-      },
-    ] satisfies WhenToChangeOption[]
-  }, [defaultValues.currentCycleEndAt, defaultValues.timezone, nowMs])
-
   const paymentProviderValue = selectedPaymentProvider ?? selectedPlanVersionPaymentProvider
 
   return (
@@ -280,12 +423,12 @@ export function SubscriptionPhaseForm({
 
         <TimingAndTrialFields
           form={form}
-          isScheduleMode={isScheduleMode}
+          isScheduleMode={false}
           persistedPhaseFieldsLocked={persistedPhaseFieldsLocked}
           isReadOnlyMode={isReadOnlyMode}
           hasSelectedPlanVersion={Boolean(selectedPlanVersion)}
           trialUnitLabel={trialUnitLabel}
-          whenToChangeOptions={whenToChangeOptions}
+          whenToChangeOptions={[]}
         />
 
         <PaymentMethodSection
@@ -306,9 +449,8 @@ export function SubscriptionPhaseForm({
         <SubscriptionPhaseFormActions
           isReadOnlyMode={isReadOnlyMode}
           isSubmitting={form.formState.isSubmitting}
-          isScheduleMode={isScheduleMode}
+          isScheduleMode={false}
           editMode={editMode}
-          whenToChange={whenToChange}
           onSubmit={() => form.handleSubmit(onSubmitForm)()}
         />
       </form>

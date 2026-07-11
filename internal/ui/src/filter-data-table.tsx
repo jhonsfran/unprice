@@ -103,6 +103,45 @@ export interface FilterDataTableProps<TData, TValue> {
   onLoadMore?: () => void | Promise<void>
 }
 
+// Presentation-dependent classNames in one place. Each slot names a styling site; the boolean
+// forks that aren't classNames (ScrollArea hideScrollBar, Badge variant) still read isWorkbench.
+const PRESENTATION_CLASSES = {
+  default: {
+    root: "",
+    viewport: "h-[calc(80vh-3.5rem)]",
+    grid: "md:grid-cols-[260px_minmax(0,1fr)]",
+    aside: "bg-muted/30",
+    filtersHeader: "h-14 font-medium text-sm",
+    scroll: "",
+    scrollBody: "",
+    toolbar: "min-h-14 px-2 py-2",
+    searchInput: "h-10",
+    tableHeader: "",
+    headerRow: "",
+    row: "",
+    filterLabel: "text-sm",
+    filterOption: "rounded-sm py-1",
+    dateButton: "",
+  },
+  workbench: {
+    root: "border-border/60 bg-transparent",
+    viewport: "h-[560px]",
+    grid: "md:grid-cols-[228px_minmax(0,1fr)]",
+    aside: "bg-background/45",
+    filtersHeader: "h-12 font-medium text-muted-foreground text-xs",
+    scroll: "hide-scrollbar",
+    scrollBody: "hide-scrollbar bg-transparent",
+    toolbar: "h-12 bg-card/20 px-2 py-1.5",
+    searchInput: "h-8",
+    tableHeader: "bg-background-base/95",
+    headerRow: "bg-transparent hover:bg-transparent",
+    row: "bg-transparent",
+    filterLabel: "text-muted-foreground text-xs",
+    filterOption: "rounded-md py-1.5",
+    dateButton: "h-8",
+  },
+} as const
+
 export function FilterDataTable<TData, TValue>({
   columns,
   data,
@@ -211,7 +250,7 @@ export function FilterDataTable<TData, TValue>({
   const loadMoreRequestedRef = React.useRef(false)
   const canLoadMore = Boolean(hasMore && onLoadMore)
   const isWorkbench = presentation === "workbench"
-  const viewportClassName = isWorkbench ? "h-[560px]" : "h-[calc(80vh-3.5rem)]"
+  const classes = PRESENTATION_CLASSES[presentation]
   const selectedRows = table.getFilteredSelectedRowModel().rows.map((row) => row.original)
   const computedToolbarActions =
     typeof toolbarActions === "function"
@@ -220,6 +259,18 @@ export function FilterDataTable<TData, TValue>({
           selectedRows,
         })
       : toolbarActions
+
+  // Single guarded entry point shared by the IntersectionObserver and the "Load more" button.
+  const requestLoadMore = React.useCallback(() => {
+    if (loadMoreRequestedRef.current) {
+      return
+    }
+
+    loadMoreRequestedRef.current = true
+    void Promise.resolve(onLoadMore?.()).finally(() => {
+      loadMoreRequestedRef.current = false
+    })
+  }, [onLoadMore])
 
   React.useEffect(() => {
     const target = loadMoreRef.current
@@ -230,14 +281,11 @@ export function FilterDataTable<TData, TValue>({
     const observer = new IntersectionObserver(
       (entries) => {
         const entry = entries[0]
-        if (!entry?.isIntersecting || loadMoreRequestedRef.current) {
+        if (!entry?.isIntersecting) {
           return
         }
 
-        loadMoreRequestedRef.current = true
-        void Promise.resolve(onLoadMore?.()).finally(() => {
-          loadMoreRequestedRef.current = false
-        })
+        requestLoadMore()
       },
       {
         rootMargin: "240px",
@@ -246,47 +294,159 @@ export function FilterDataTable<TData, TValue>({
 
     observer.observe(target)
     return () => observer.disconnect()
-  }, [canLoadMore, isLoadingMore, onLoadMore])
+  }, [canLoadMore, isLoadingMore, requestLoadMore])
 
   return (
-    <div
-      className={cn(
-        "relative overflow-hidden rounded-md border bg-background",
-        isWorkbench && "border-border/60 bg-transparent"
-      )}
-    >
+    <div className={cn("relative overflow-hidden rounded-md border bg-background", classes.root)}>
       <div
         className={cn(
           "pointer-events-none absolute inset-x-0 top-0 z-10 h-px bg-gradient-to-r from-transparent via-primary/55 to-transparent transition-opacity duration-300",
           isRefreshing ? "opacity-100" : "opacity-0"
         )}
       />
-      <FilterDataTableLayout
-        table={table}
-        filters={filters}
-        presentation={presentation}
-        searchConfig={searchConfig}
-        isRefreshing={isRefreshing}
-        computedToolbarActions={computedToolbarActions}
-        isWorkbench={isWorkbench}
-        viewportClassName={viewportClassName}
-        loading={isLoading ? { label: loadingLabel, state: loadingState } : undefined}
-        loadMore={
-          canLoadMore
-            ? {
-                isLoadingMore,
-                onLoadMore,
-                ref: loadMoreRef,
-                requestedRef: loadMoreRequestedRef,
-              }
-            : undefined
-        }
-        columnsLength={columns.length}
-        emptyState={emptyState}
-        emptyTitle={emptyTitle}
-        emptyDescription={emptyDescription}
-        getRowClassName={getRowClassName}
-      />
+      <div
+        className={cn(
+          "grid min-h-[520px] transition-opacity duration-300 motion-reduce:transition-none",
+          classes.grid,
+          isRefreshing ? "opacity-90" : "opacity-100"
+        )}
+      >
+        <aside className={cn("hidden border-border md:block md:border-r", classes.aside)}>
+          <div className={cn("flex items-center border-b px-4", classes.filtersHeader)}>Filters</div>
+          <ScrollArea hideScrollBar={isWorkbench} className={cn(classes.viewport, classes.scroll)}>
+            <FilterList table={table} filters={filters} presentation={presentation} />
+          </ScrollArea>
+        </aside>
+        <section className="min-w-0">
+          <div
+            className={cn(
+              "flex shrink-0 flex-col gap-2 border-b sm:flex-row sm:items-center",
+              classes.toolbar
+            )}
+          >
+            <MobileFilterDrawer table={table} filters={filters} presentation={presentation} />
+            {searchConfig ? (
+              <div className="relative min-w-0 flex-1">
+                <Search className="-translate-y-1/2 absolute top-1/2 left-3 size-4 text-muted-foreground" />
+                <Input
+                  value={searchConfig.value}
+                  onChange={(event) => {
+                    const nextValue = event.target.value
+                    searchConfig.onChange(nextValue)
+                  }}
+                  placeholder={searchConfig.placeholder}
+                  className={cn("pl-9", classes.searchInput)}
+                />
+              </div>
+            ) : null}
+            {computedToolbarActions}
+          </div>
+          <ScrollArea hideScrollBar={isWorkbench} className={cn(classes.viewport, classes.scrollBody)}>
+            <Table className="[&_td:first-child]:px-4 [&_th:first-child]:px-4">
+              <TableHeader
+                className={cn(
+                  "sticky top-0 z-10 bg-background/95 backdrop-blur-sm",
+                  classes.tableHeader
+                )}
+              >
+                {table.getHeaderGroups().map((headerGroup) => (
+                  <TableRow key={headerGroup.id} className={cn(classes.headerRow)}>
+                    {headerGroup.headers.map((header) => {
+                      const headerContent = header.isPlaceholder
+                        ? null
+                        : flexRender(header.column.columnDef.header, header.getContext())
+                      const sorted = header.column.getIsSorted()
+
+                      return (
+                        <TableHead key={header.id} style={{ width: header.getSize() }}>
+                          {headerContent && header.column.getCanSort() ? (
+                            <button
+                              type="button"
+                              className="flex w-full cursor-pointer items-center gap-2 text-left font-medium"
+                              onClick={header.column.getToggleSortingHandler()}
+                            >
+                              {headerContent}
+                              {sorted ? (
+                                <span className="text-muted-foreground text-xs">
+                                  {sorted === "desc" ? "desc" : "asc"}
+                                </span>
+                              ) : null}
+                            </button>
+                          ) : (
+                            <div className="flex w-full items-center gap-2 text-left font-medium">
+                              {headerContent}
+                            </div>
+                          )}
+                        </TableHead>
+                      )
+                    })}
+                  </TableRow>
+                ))}
+              </TableHeader>
+              <TableBody>
+                {isLoading ? (
+                  <TableRow className={cn(classes.row)}>
+                    <TableCell colSpan={columns.length} className="h-48 p-4 text-center">
+                      {loadingState ?? (
+                        <div className="flex items-center justify-center gap-2 text-muted-foreground text-sm">
+                          <Loader2 className="size-4 animate-spin" />
+                          <span>{loadingLabel}</span>
+                        </div>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ) : table.getRowModel().rows.length > 0 ? (
+                  table.getRowModel().rows.map((row) => (
+                    <TableRow
+                      key={row.id}
+                      data-state={row.getIsSelected() && "selected"}
+                      className={cn(classes.row, getRowClassName?.(row.original))}
+                    >
+                      {row.getVisibleCells().map((cell) => (
+                        <TableCell key={cell.id}>
+                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))
+                ) : (
+                  <TableRow className={cn(classes.row)}>
+                    <TableCell colSpan={columns.length} className="h-48 p-4 text-center">
+                      {emptyState ?? (
+                        <div className="space-y-1">
+                          <p className="font-medium text-sm">{emptyTitle}</p>
+                          <p className="text-muted-foreground text-sm">{emptyDescription}</p>
+                        </div>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+            {canLoadMore ? (
+              <div
+                ref={loadMoreRef}
+                className={cn(
+                  "flex items-center justify-center border-t bg-background/80 px-4 py-3",
+                  classes.row
+                )}
+              >
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 gap-2 text-muted-foreground text-xs"
+                  disabled={isLoadingMore}
+                  onClick={() => requestLoadMore()}
+                >
+                  {isLoadingMore ? <Loader2 className="size-3 animate-spin" /> : null}
+                  {isLoadingMore ? "Loading more" : "Load more"}
+                </Button>
+              </div>
+            ) : null}
+          </ScrollArea>
+        </section>
+      </div>
     </div>
   )
 }
@@ -332,236 +492,6 @@ function withoutControlledSearchFilter(
 
 function getColumnFilterValue(filters: ColumnFiltersState, columnId: string): string {
   return String(filters.find((filter) => filter.id === columnId)?.value ?? "")
-}
-
-type FilterDataTableSearchConfig = {
-  value: string
-  placeholder: string
-  onChange: (value: string) => void
-}
-
-type FilterDataTableLoadingState = {
-  label: string
-  state?: React.ReactNode
-}
-
-type FilterDataTableLoadMoreState = {
-  isLoadingMore: boolean
-  onLoadMore?: () => void | Promise<void>
-  ref: React.RefObject<HTMLDivElement>
-  requestedRef: React.MutableRefObject<boolean>
-}
-
-function FilterDataTableLayout<TData>({
-  table,
-  filters,
-  presentation,
-  searchConfig,
-  computedToolbarActions,
-  isRefreshing,
-  isWorkbench,
-  viewportClassName,
-  loading,
-  loadMore,
-  columnsLength,
-  emptyState,
-  emptyTitle,
-  emptyDescription,
-  getRowClassName,
-}: {
-  table: TanStackTable<TData>
-  filters: FilterDataTableFilter[]
-  presentation: "default" | "workbench"
-  isRefreshing: boolean
-  searchConfig?: FilterDataTableSearchConfig
-  computedToolbarActions: React.ReactNode
-  isWorkbench: boolean
-  viewportClassName: string
-  loading?: FilterDataTableLoadingState
-  loadMore?: FilterDataTableLoadMoreState
-  columnsLength: number
-  emptyState?: React.ReactNode
-  emptyTitle: string
-  emptyDescription: string
-  getRowClassName?: (row: TData) => string | undefined
-}) {
-  return (
-    <div
-      className={cn(
-        "grid min-h-[520px] transition-opacity duration-300 motion-reduce:transition-none",
-        isWorkbench ? "md:grid-cols-[228px_minmax(0,1fr)]" : "md:grid-cols-[260px_minmax(0,1fr)]",
-        isRefreshing ? "opacity-90" : "opacity-100"
-      )}
-    >
-      <aside
-        className={cn(
-          "hidden border-border md:block md:border-r",
-          isWorkbench ? "bg-background/45" : "bg-muted/30"
-        )}
-      >
-        <div
-          className={cn(
-            "flex items-center border-b px-4",
-            isWorkbench
-              ? "h-12 font-medium text-muted-foreground text-xs"
-              : "h-14 font-medium text-sm"
-          )}
-        >
-          Filters
-        </div>
-        <ScrollArea
-          hideScrollBar={isWorkbench}
-          className={cn(viewportClassName, isWorkbench && "hide-scrollbar")}
-        >
-          <FilterList table={table} filters={filters} presentation={presentation} />
-        </ScrollArea>
-      </aside>
-      <section className="min-w-0">
-        <div
-          className={cn(
-            "flex shrink-0 flex-col gap-2 border-b sm:flex-row sm:items-center",
-            isWorkbench ? "h-12 bg-card/20 px-2 py-1.5" : "min-h-14 px-2 py-2"
-          )}
-        >
-          <MobileFilterDrawer table={table} filters={filters} presentation={presentation} />
-          {searchConfig ? (
-            <div className="relative min-w-0 flex-1">
-              <Search className="-translate-y-1/2 absolute top-1/2 left-3 size-4 text-muted-foreground" />
-              <Input
-                value={searchConfig.value}
-                onChange={(event) => {
-                  const nextValue = event.target.value
-                  searchConfig.onChange(nextValue)
-                }}
-                placeholder={searchConfig.placeholder}
-                className={cn("pl-9", isWorkbench ? "h-8" : "h-10")}
-              />
-            </div>
-          ) : null}
-          {computedToolbarActions}
-        </div>
-        <ScrollArea
-          hideScrollBar={isWorkbench}
-          className={cn(viewportClassName, isWorkbench && "hide-scrollbar bg-transparent")}
-        >
-          <Table className="[&_td:first-child]:px-4 [&_th:first-child]:px-4">
-            <TableHeader
-              className={cn(
-                "sticky top-0 z-10 bg-background/95 backdrop-blur-sm",
-                isWorkbench && "bg-background-base/95"
-              )}
-            >
-              {table.getHeaderGroups().map((headerGroup) => (
-                <TableRow
-                  key={headerGroup.id}
-                  className={isWorkbench ? "bg-transparent hover:bg-transparent" : undefined}
-                >
-                  {headerGroup.headers.map((header) => {
-                    const headerContent = header.isPlaceholder
-                      ? null
-                      : flexRender(header.column.columnDef.header, header.getContext())
-                    const sorted = header.column.getIsSorted()
-
-                    return (
-                      <TableHead key={header.id} style={{ width: header.getSize() }}>
-                        {headerContent && header.column.getCanSort() ? (
-                          <button
-                            type="button"
-                            className="flex w-full cursor-pointer items-center gap-2 text-left font-medium"
-                            onClick={header.column.getToggleSortingHandler()}
-                          >
-                            {headerContent}
-                            {sorted ? (
-                              <span className="text-muted-foreground text-xs">
-                                {sorted === "desc" ? "desc" : "asc"}
-                              </span>
-                            ) : null}
-                          </button>
-                        ) : (
-                          <div className="flex w-full items-center gap-2 text-left font-medium">
-                            {headerContent}
-                          </div>
-                        )}
-                      </TableHead>
-                    )
-                  })}
-                </TableRow>
-              ))}
-            </TableHeader>
-            <TableBody>
-              {loading ? (
-                <TableRow className={isWorkbench ? "bg-transparent" : undefined}>
-                  <TableCell colSpan={columnsLength} className="h-48 p-4 text-center">
-                    {loading.state ?? (
-                      <div className="flex items-center justify-center gap-2 text-muted-foreground text-sm">
-                        <Loader2 className="size-4 animate-spin" />
-                        <span>{loading.label}</span>
-                      </div>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ) : table.getRowModel().rows.length > 0 ? (
-                table.getRowModel().rows.map((row) => (
-                  <TableRow
-                    key={row.id}
-                    data-state={row.getIsSelected() && "selected"}
-                    className={cn(isWorkbench && "bg-transparent", getRowClassName?.(row.original))}
-                  >
-                    {row.getVisibleCells().map((cell) => (
-                      <TableCell key={cell.id}>
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                ))
-              ) : (
-                <TableRow className={isWorkbench ? "bg-transparent" : undefined}>
-                  <TableCell colSpan={columnsLength} className="h-48 p-4 text-center">
-                    {emptyState ?? (
-                      <div className="space-y-1">
-                        <p className="font-medium text-sm">{emptyTitle}</p>
-                        <p className="text-muted-foreground text-sm">{emptyDescription}</p>
-                      </div>
-                    )}
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-          {loadMore ? (
-            <div
-              ref={loadMore.ref}
-              className={cn(
-                "flex items-center justify-center border-t bg-background/80 px-4 py-3",
-                isWorkbench && "bg-transparent"
-              )}
-            >
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-8 gap-2 text-muted-foreground text-xs"
-                disabled={loadMore.isLoadingMore}
-                onClick={() => {
-                  if (loadMore.requestedRef.current) {
-                    return
-                  }
-
-                  loadMore.requestedRef.current = true
-                  void Promise.resolve(loadMore.onLoadMore?.()).finally(() => {
-                    loadMore.requestedRef.current = false
-                  })
-                }}
-              >
-                {loadMore.isLoadingMore ? <Loader2 className="size-3 animate-spin" /> : null}
-                {loadMore.isLoadingMore ? "Loading more" : "Load more"}
-              </Button>
-            </div>
-          ) : null}
-        </ScrollArea>
-      </section>
-    </div>
-  )
 }
 
 function FilterList<TData>({
@@ -622,7 +552,7 @@ function MobileFilterDrawer<TData>({
         </DrawerHeader>
         <ScrollArea
           hideScrollBar={presentation === "workbench"}
-          className={cn("max-h-[60vh]", presentation === "workbench" && "hide-scrollbar")}
+          className={cn("max-h-[60vh]", PRESENTATION_CLASSES[presentation].scroll)}
         >
           <FilterList table={table} filters={filters} presentation={presentation} />
         </ScrollArea>
@@ -641,6 +571,7 @@ function CheckboxFilter<TData>({
   presentation: "default" | "workbench"
 }) {
   const isWorkbench = presentation === "workbench"
+  const classes = PRESENTATION_CLASSES[presentation]
   const column = table.getColumn(filter.id)
   const selectedValues = new Set(
     filter.value ?? (column?.getFilterValue() as string[] | undefined) ?? []
@@ -665,14 +596,7 @@ function CheckboxFilter<TData>({
 
   return (
     <div className="border-border/60 border-b py-3">
-      <div
-        className={cn(
-          "mb-2 px-2 font-medium",
-          isWorkbench ? "text-muted-foreground text-xs" : "text-sm"
-        )}
-      >
-        {filter.label}
-      </div>
+      <div className={cn("mb-2 px-2 font-medium", classes.filterLabel)}>{filter.label}</div>
       <div className="flex flex-col gap-1">
         {options.length === 0 ? (
           <p className="px-2 py-1 text-muted-foreground text-sm">
@@ -686,7 +610,7 @@ function CheckboxFilter<TData>({
               type="button"
               className={cn(
                 "flex w-full items-center gap-2 px-2 text-left text-sm transition-colors hover:bg-muted/60 motion-reduce:transition-none",
-                isWorkbench ? "rounded-md py-1.5" : "rounded-sm py-1"
+                classes.filterOption
               )}
               onClick={() => {
                 const nextSelectedValues = new Set(selectedValues)
@@ -745,23 +669,16 @@ function DateFilter({
   filter: Extract<FilterDataTableFilter, { type: "date" }>
   presentation: "default" | "workbench"
 }) {
-  const isWorkbench = presentation === "workbench"
+  const classes = PRESENTATION_CLASSES[presentation]
 
   return (
     <div className="border-border/60 border-b py-3">
-      <div
-        className={cn(
-          "mb-2 px-2 font-medium",
-          isWorkbench ? "text-muted-foreground text-xs" : "text-sm"
-        )}
-      >
-        {filter.label}
-      </div>
+      <div className={cn("mb-2 px-2 font-medium", classes.filterLabel)}>{filter.label}</div>
       <Popover>
         <PopoverTrigger asChild>
           <Button
             variant="outline"
-            className={cn("mx-2 w-[calc(100%-1rem)] justify-start", isWorkbench && "h-8")}
+            className={cn("mx-2 w-[calc(100%-1rem)] justify-start", classes.dateButton)}
           >
             <CalendarDays className="mr-2 size-4" />
             {formatDateRange(filter.value)}

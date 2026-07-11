@@ -3,6 +3,10 @@ import type { IngestionQueryFilter } from "./ingestion-health-model"
 
 export const DEFAULT_INGESTION_HEALTH_WINDOW_MS = 60 * 60 * 1000
 
+// Matches the 30s analytics SWR freshness window (see lessons.md 2026-06-15). Shared by the
+// freshness indicator and the events panel's auto-refresh so the cadence stays in one place.
+export const ANALYTICS_REFRESH_INTERVAL_MS = 30_000
+
 export type IngestionStatusInput = RouterInputs["analytics"]["getIngestionStatus"]
 
 export function buildRollingIngestionWindow(
