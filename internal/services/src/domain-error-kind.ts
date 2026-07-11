@@ -8,6 +8,7 @@ import {
 } from "./subscriptions/errors"
 import { SubscriptionChangePhasePlanError } from "./use-cases/subscription/change-plan"
 import { WorkspaceChangePlanError } from "./use-cases/workspace/change-plan"
+import { GetWorkspaceBillingOverviewError } from "./use-cases/workspace/get-billing-overview"
 import { GetWorkspaceUpgradeOptionsError } from "./use-cases/workspace/get-upgrade-options"
 
 export type DomainErrorKind = "bad_request" | "precondition" | "conflict" | "not_found" | "internal"
@@ -23,5 +24,6 @@ export function resolveDomainErrorKind(error: unknown): DomainErrorKind | null {
   if (error instanceof WorkspaceChangePlanError) return error.kind
   if (error instanceof SubscriptionChangePhasePlanError) return error.kind
   if (error instanceof GetWorkspaceUpgradeOptionsError) return error.kind
+  if (error instanceof GetWorkspaceBillingOverviewError) return error.kind
   return null
 }

@@ -1,16 +1,10 @@
-import { TRPCError } from "@trpc/server"
 import { analyticsIntervalSchema } from "@unprice/analytics"
-import { paymentProviderSchema } from "@unprice/db/validators"
 import {
-  emptyUsageDashboardOutput,
-  getCustomerCurrentAccess,
-  getCustomerCurrentAccessOutputSchema,
-  getCustomerWallet,
-  getCustomerWalletOutputSchema,
-  getUsageDashboard,
-  getUsageDashboardOutputSchema,
+  getWorkspaceBillingOverview,
+  getWorkspaceBillingOverviewOutputSchema,
 } from "@unprice/services/use-cases"
 import { z } from "zod"
+import { domainErrorToTrpcError } from "#domain-error"
 import { protectedWorkspaceProcedure } from "#trpc"
 
 const getBillingOverviewInputSchema = z.object({
@@ -18,138 +12,29 @@ const getBillingOverviewInputSchema = z.object({
   range: analyticsIntervalSchema,
 })
 
-const getBillingOverviewOutputSchema = z.object({
-  customerId: z.string(),
-  billingProjectId: z.string(),
-  paymentProvider: paymentProviderSchema.nullable(),
-  access: getCustomerCurrentAccessOutputSchema,
-  customer: getCustomerWalletOutputSchema.shape.customer,
-  wallet: getCustomerWalletOutputSchema.shape.wallet,
-  usage: getUsageDashboardOutputSchema,
-})
-
 export const getBillingOverview = protectedWorkspaceProcedure
   .input(getBillingOverviewInputSchema)
-  .output(getBillingOverviewOutputSchema)
+  .output(getWorkspaceBillingOverviewOutputSchema)
   .query(async (opts) => {
-    const customerId = opts.ctx.workspace.unPriceCustomerId
-    const range = opts.input.range
-
-    if (!customerId) {
-      throw new TRPCError({
-        code: "BAD_REQUEST",
-        message: "Workspace billing customer not found",
-      })
-    }
-
-    const customerResult =
-      await opts.ctx.services.customers.getCustomerByIdAcrossProjects(customerId)
-
-    if (customerResult.err) {
-      throw new TRPCError({
-        code: "INTERNAL_SERVER_ERROR",
-        message: customerResult.err.message,
-      })
-    }
-
-    const customer = customerResult.val
-
-    if (!customer) {
-      throw new TRPCError({
-        code: "NOT_FOUND",
-        message: "Workspace billing customer not found",
-      })
-    }
-
-    const billingProjectId = customer.projectId
-
-    const [accessResult, walletResult, usageResult] = await Promise.all([
-      getCustomerCurrentAccess(
-        {
-          db: opts.ctx.db,
-          analytics: opts.ctx.analytics,
-          logger: opts.ctx.logger,
+    const result = await getWorkspaceBillingOverview(
+      {
+        services: {
+          customers: opts.ctx.services.customers,
+          wallet: opts.ctx.services.wallet,
         },
-        {
-          projectId: billingProjectId,
-          customerId,
-        }
-      ),
-      getCustomerWallet(
-        {
-          services: {
-            customers: opts.ctx.services.customers,
-            wallet: opts.ctx.services.wallet,
-          },
-          logger: opts.ctx.logger,
-        },
-        {
-          projectId: billingProjectId,
-          customerId,
-        }
-      ),
-      getUsageDashboard(
-        {
-          analytics: opts.ctx.analytics,
-          db: opts.ctx.db,
-        },
-        {
-          projectId: billingProjectId,
-          customerId,
-          range,
-        }
-      ),
-    ])
+        db: opts.ctx.db,
+        analytics: opts.ctx.analytics,
+        logger: opts.ctx.logger,
+      },
+      {
+        workspace: opts.ctx.workspace,
+        range: opts.input.range,
+      }
+    )
 
-    if (accessResult.err) {
-      throw new TRPCError({
-        code: "INTERNAL_SERVER_ERROR",
-        message: accessResult.err.message,
-      })
+    if (result.err) {
+      throw domainErrorToTrpcError(result.err, "Failed to fetch workspace billing overview")
     }
 
-    if (!accessResult.val) {
-      throw new TRPCError({
-        code: "NOT_FOUND",
-        message: "Workspace billing access not found",
-      })
-    }
-
-    if (walletResult.err) {
-      throw new TRPCError({
-        code: "INTERNAL_SERVER_ERROR",
-        message: walletResult.err.message,
-      })
-    }
-
-    if (!walletResult.val) {
-      throw new TRPCError({
-        code: "NOT_FOUND",
-        message: "Workspace billing wallet not found",
-      })
-    }
-
-    if (usageResult.err) {
-      opts.ctx.logger.error(usageResult.err, {
-        context: "workspace billing usage dashboard failed",
-        project_id: billingProjectId,
-        customer_id: customerId,
-        range,
-      })
-    }
-
-    return {
-      customerId,
-      billingProjectId,
-      paymentProvider: accessResult.val.activePlan?.activePhase?.paymentProvider ?? null,
-      access: accessResult.val,
-      customer: walletResult.val.customer,
-      wallet: walletResult.val.wallet,
-      usage:
-        usageResult.val ??
-        emptyUsageDashboardOutput(
-          range,
-          usageResult.err instanceof Error ? usageResult.err.message : "Failed to fetch usage"
-        ),
-    }
+    return result.val
   })

@@ -1,5 +1,16 @@
 export { changeWorkspacePlan } from "./change-plan"
+export { getWorkspaceBillingOverview } from "./get-billing-overview"
 export { getWorkspaceUpgradeOptions } from "./get-upgrade-options"
+export {
+  GetWorkspaceBillingOverviewError,
+  getWorkspaceBillingOverviewInputSchema,
+  getWorkspaceBillingOverviewOutputSchema,
+} from "./get-billing-overview"
+export type {
+  GetWorkspaceBillingOverviewDeps,
+  GetWorkspaceBillingOverviewInput,
+  GetWorkspaceBillingOverviewOutput,
+} from "./get-billing-overview"
 export {
   WorkspaceChangePlanError,
   workspaceChangePlanInputSchema,
