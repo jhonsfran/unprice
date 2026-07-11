@@ -1515,7 +1515,7 @@ export class ReservationLifecycle {
       grantStates,
       meter,
       meterState,
-      timestampValidationNow: null,
+      validationTimeMs: Date.now(),
     })
   }
 
@@ -1530,7 +1530,7 @@ export class ReservationLifecycle {
   }): number {
     return projectEventCostMinor({
       ...params,
-      timestampValidationNow: this.clock.now(),
+      validationTimeMs: Date.now(),
     })
   }
 }

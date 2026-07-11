@@ -5,10 +5,10 @@ import {
   type GrantConsumptionState,
   LATE_EVENT_GRACE_MS,
   computeGrantPeriodBucket,
+  computeMeterTransition,
   computeUsagePriceDeltaExplanation,
   consumeGrantsByPriority,
   resolveAvailableGrantUnits,
-  validateEventTimestamp,
 } from "@unprice/services/entitlements"
 import type {
   ActiveGrantInput,
@@ -18,7 +18,6 @@ import type {
   MeterIdentity,
   PricedFact,
 } from "./contracts"
-import { readNumericEventField } from "./meter-helpers"
 import type { MeterStateDraft } from "./meter-state-adapter"
 
 type GrantConsumptionSnapshot = Readonly<GrantConsumptionState>
@@ -221,17 +220,20 @@ export function projectEventCostMinor(params: {
   grantStates: readonly GrantConsumptionSnapshot[]
   meter: MeterIdentity
   meterState: Readonly<MeterStateDraft>
-  timestampValidationNow: number | null
+  validationTimeMs: number
 }): number {
-  if (params.timestampValidationNow !== null) {
-    validateEventTimestamp(params.event.timestamp, params.timestampValidationNow)
-  }
-  const fact = projectMeterFact({
+  const transition = computeMeterTransition({
+    currentState: params.meterState.exists
+      ? {
+          updatedAt: params.meterState.updatedAt ?? Number.NEGATIVE_INFINITY,
+          value: params.meterState.usage,
+        }
+      : null,
     event: params.event,
-    meter: params.meter,
-    meterState: params.meterState,
+    meterConfig: params.meter.config,
+    validationTimeMs: params.validationTimeMs,
   })
-  if (!fact) {
+  if (!transition) {
     return 0
   }
 
@@ -239,74 +241,11 @@ export function projectEventCostMinor(params: {
     activeGrants: params.activeGrants,
     entitlement: params.entitlement,
     eventTimestamp: params.eventTimestamp,
-    facts: [fact],
+    facts: [transition.fact],
     grantStates: params.grantStates,
   })
 
   return pricedFacts.reduce((sum, fact) => sum + fact.amountMinor, 0)
-}
-
-function projectMeterFact(params: {
-  event: ApplyInput["event"]
-  meter: MeterIdentity
-  meterState: Readonly<MeterStateDraft>
-}): Fact | null {
-  const { event, meter, meterState } = params
-  if (meter.config.eventSlug !== event.slug) {
-    return null
-  }
-
-  const previousValue = meterState.usage
-  const previousUpdatedAt =
-    meterState.updatedAt === null ? Number.NEGATIVE_INFINITY : meterState.updatedAt
-
-  switch (meter.config.aggregationMethod) {
-    case "count":
-      return {
-        eventId: event.id,
-        meterKey: meter.key,
-        delta: 1,
-        valueAfter: previousValue + 1,
-      }
-    case "sum": {
-      const numericValue = readNumericEventField(meter.config, event)
-      return {
-        eventId: event.id,
-        meterKey: meter.key,
-        delta: numericValue,
-        valueAfter: previousValue + numericValue,
-      }
-    }
-    case "max": {
-      const numericValue = readNumericEventField(meter.config, event)
-      const nextValue = meterState.exists ? Math.max(previousValue, numericValue) : numericValue
-      return {
-        eventId: event.id,
-        meterKey: meter.key,
-        delta: nextValue - previousValue,
-        valueAfter: nextValue,
-      }
-    }
-    case "latest": {
-      const numericValue = readNumericEventField(meter.config, event)
-      if (event.timestamp < previousUpdatedAt) {
-        return {
-          eventId: event.id,
-          meterKey: meter.key,
-          delta: 0,
-          valueAfter: previousValue,
-        }
-      }
-      return {
-        eventId: event.id,
-        meterKey: meter.key,
-        delta: numericValue - previousValue,
-        valueAfter: numericValue,
-      }
-    }
-    default:
-      return null
-  }
 }
 
 export function priceFactWithEntitlement(params: {

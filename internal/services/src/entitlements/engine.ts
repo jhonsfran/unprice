@@ -1,15 +1,10 @@
 import type { Fact, MeterConfig, RawEvent, StorageAdapter, SyncStorageAdapter } from "./domain"
 import { deriveMeterKey, validateEventTimestamp } from "./domain"
-
-interface MeterStateSnapshot {
-  value: number
-  updatedAt: number
-}
-
-interface PendingUpdate {
-  fact: Fact
-  nextState: MeterStateSnapshot
-}
+import {
+  type MeterStateSnapshot,
+  type MeterTransition,
+  computeMeterTransition,
+} from "./meter-transition"
 
 type ApplyEventOptions = {
   beforePersist?: (facts: Fact[]) => void | Promise<void>
@@ -49,7 +44,14 @@ export class AsyncMeterAggregationEngine {
       applicableMeters.map(async (meterConfig) => {
         const meterKey = deriveMeterKey(meterConfig)
         const currentState = await this.readCurrentState(meterKey)
-        return this.computePendingUpdate(meterConfig, meterKey, event, currentState)
+        return this.requireTransition(
+          computeMeterTransition({
+            currentState,
+            event,
+            meterConfig,
+            validationTimeMs: this.now,
+          })
+        )
       })
     )
 
@@ -69,7 +71,8 @@ export class AsyncMeterAggregationEngine {
   }
 
   applyEventSync(event: RawEvent, options?: ApplyEventSyncOptions): Fact[] {
-    validateEventTimestamp(event.timestamp, Date.now())
+    const validationTimeMs = Date.now()
+    validateEventTimestamp(event.timestamp, validationTimeMs)
 
     const applicableMeters = this.meterConfigs.filter(
       (meterConfig) => meterConfig.eventSlug === event.slug
@@ -82,7 +85,9 @@ export class AsyncMeterAggregationEngine {
     const pendingUpdates = applicableMeters.map((meterConfig) => {
       const meterKey = deriveMeterKey(meterConfig)
       const currentState = this.readCurrentStateSync(meterKey)
-      return this.computePendingUpdate(meterConfig, meterKey, event, currentState)
+      return this.requireTransition(
+        computeMeterTransition({ currentState, event, meterConfig, validationTimeMs })
+      )
     })
 
     const facts = pendingUpdates.map(({ fact }) => fact)
@@ -156,131 +161,11 @@ export class AsyncMeterAggregationEngine {
     return syncStorage as SyncStorageAdapter
   }
 
-  private computePendingUpdate(
-    meterConfig: MeterConfig,
-    meterKey: string,
-    event: RawEvent,
-    currentState: MeterStateSnapshot | null
-  ): PendingUpdate {
-    const previousValue = currentState?.value ?? 0
-    const previousUpdatedAt = currentState?.updatedAt ?? Number.NEGATIVE_INFINITY
-
-    switch (meterConfig.aggregationMethod) {
-      case "count": {
-        const nextValue = previousValue + 1
-
-        return {
-          fact: {
-            eventId: event.id,
-            meterKey,
-            delta: 1,
-            valueAfter: nextValue,
-          },
-          nextState: {
-            value: nextValue,
-            updatedAt: Math.max(previousUpdatedAt, event.timestamp),
-          },
-        }
-      }
-
-      case "sum": {
-        const numericValue = this.readNumericFieldValue(meterConfig, event)
-
-        const nextValue = previousValue + numericValue
-
-        return {
-          fact: {
-            eventId: event.id,
-            meterKey,
-            delta: numericValue,
-            valueAfter: nextValue,
-          },
-          nextState: {
-            value: nextValue,
-            updatedAt: Math.max(previousUpdatedAt, event.timestamp),
-          },
-        }
-      }
-
-      case "max": {
-        const numericValue = this.readNumericFieldValue(meterConfig, event)
-
-        const nextValue =
-          currentState === null ? numericValue : Math.max(previousValue, numericValue)
-
-        return {
-          fact: {
-            eventId: event.id,
-            meterKey,
-            delta: nextValue - previousValue,
-            valueAfter: nextValue,
-          },
-          nextState: {
-            value: nextValue,
-            updatedAt: Math.max(previousUpdatedAt, event.timestamp),
-          },
-        }
-      }
-
-      case "latest": {
-        const numericValue = this.readNumericFieldValue(meterConfig, event)
-
-        if (event.timestamp < previousUpdatedAt) {
-          return {
-            fact: {
-              eventId: event.id,
-              meterKey,
-              delta: 0,
-              valueAfter: previousValue,
-            },
-            nextState: currentState ?? {
-              value: previousValue,
-              updatedAt: previousUpdatedAt,
-            },
-          }
-        }
-
-        return {
-          fact: {
-            eventId: event.id,
-            meterKey,
-            delta: numericValue - previousValue,
-            valueAfter: numericValue,
-          },
-          nextState: {
-            value: numericValue,
-            updatedAt: event.timestamp,
-          },
-        }
-      }
-
-      default:
-        return this.assertUnsupportedAggregationMethod(meterConfig.aggregationMethod)
+  private requireTransition(transition: MeterTransition | null): MeterTransition {
+    if (!transition) {
+      throw new Error("Expected an applicable meter transition")
     }
-  }
-
-  private readNumericFieldValue(meterConfig: MeterConfig, event: RawEvent): number {
-    const field = meterConfig.aggregationField
-
-    if (!field) {
-      throw new Error(`Meter ${meterConfig.eventId} requires an aggregation field`)
-    }
-
-    const rawValue = event.properties[field]
-
-    const numericValue = parseFiniteNumericValue(rawValue)
-
-    if (numericValue === null) {
-      throw new Error(
-        `Meter ${meterConfig.eventId} requires a finite numeric value at properties.${field}`
-      )
-    }
-
-    return numericValue
-  }
-
-  private assertUnsupportedAggregationMethod(_aggregationMethod: never): never {
-    throw new Error("Unsupported aggregation method")
+    return transition
   }
 
   private makeStateKey(meterKey: string): string {
@@ -290,24 +175,4 @@ export class AsyncMeterAggregationEngine {
   private makeUpdatedAtKey(meterKey: string): string {
     return `${METER_STATE_UPDATED_AT_PREFIX}${meterKey}`
   }
-}
-
-function parseFiniteNumericValue(value: unknown): number | null {
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : null
-  }
-
-  if (typeof value !== "string") {
-    return null
-  }
-
-  const trimmedValue = value.trim()
-
-  if (trimmedValue.length === 0) {
-    return null
-  }
-
-  const parsedValue = Number(trimmedValue)
-
-  return Number.isFinite(parsedValue) ? parsedValue : null
 }
