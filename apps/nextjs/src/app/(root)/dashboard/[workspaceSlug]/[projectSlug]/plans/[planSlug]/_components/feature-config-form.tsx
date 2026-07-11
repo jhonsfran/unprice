@@ -65,17 +65,23 @@ export function FeatureConfigForm({
   setDialogOpen,
   defaultValues,
   planVersion,
+  planFeatures,
   className,
 }: {
   defaultValues: PlanVersionFeatureInsert | PlanVersionFeature | PlanVersionFeatureDragDrop
   planVersion: PlanVersion | null
+  // When provided (e.g. the customer entitlement sheet), the form runs standalone and does
+  // NOT mutate the shared plan-editor atoms. Left undefined on the plans page, where the atoms
+  // remain the source of truth for the inline editor's feature list.
+  planFeatures?: PlanVersionFeatureDragDrop[]
   setDialogOpen?: (open: boolean) => void
   className?: string
 }) {
   const router = useRouter()
-  const [_planFeatureList, setPlanFeatureList] = usePlanFeaturesList()
+  const [, setPlanFeatureList] = usePlanFeaturesList()
   const [isOnboarding] = useIsOnboarding()
   const [activeFeature] = useActiveFeature()
+  const isStandalone = planFeatures !== undefined
   const trpc = useTRPC()
   const queryClient = useQueryClient()
 
@@ -173,13 +179,17 @@ export function FeatureConfigForm({
   const updatePlanVersionFeatures = useMutation(
     trpc.planVersionFeatures.update.mutationOptions({
       onSuccess: ({ planVersionFeature }) => {
-        setPlanFeatureList((features) => {
-          const index = features.findIndex(
-            (feat) => feat.featureId === planVersionFeature.featureId
-          )
-          features[index] = planVersionFeature
-          return features
-        })
+        // Only the plans-page editor tracks the shared feature list; the standalone sheet
+        // must not clobber another page's plan-editor state.
+        if (!isStandalone) {
+          setPlanFeatureList((features) => {
+            const index = features.findIndex(
+              (feat) => feat.featureId === planVersionFeature.featureId
+            )
+            features[index] = planVersionFeature
+            return features
+          })
+        }
 
         form.reset(planVersionFeature)
         toastAction("saved")
@@ -413,7 +423,7 @@ export function FeatureConfigForm({
           <ConfigureFields
             form={form}
             currency={planVersion.currency}
-            unitOfMeasure={activeFeature?.unitOfMeasure ?? "units"}
+            unitOfMeasure={defaultValues.unitOfMeasure ?? activeFeature?.unitOfMeasure ?? "units"}
             isDisabled={isPublished}
             featureType={featureType}
             usageMode={usageMode}
