@@ -38,6 +38,42 @@ usage event slugs, the run sends `EVENTS * eventSlugCount` async usage events.
 The script also verifies every active entitlement on every iteration. Usage and verification
 requests are sent through SDK methods so API contract drift is caught by TypeScript before k6 runs.
 
+## Latency Benchmark
+
+The latency script measures what an integrator's code observes — SDK call round-trip per
+endpoint — and prints a percentile table plus one `LATENCY_SUMMARY_JSON` line for machines.
+It is a measurement harness, not a load test: no latency thresholds, endpoints run
+sequentially (warm-up → `access.check` → `usage.record` → `usage.consume`) so they never
+contend with each other.
+
+```bash
+pnpm --filter @unprice/k6 latency
+```
+
+Knobs (env or `.env`):
+
+```env
+RATE=20        # requests per second per scenario
+DURATION=60s   # measured window per scenario ("60s", "2m")
+FEATURE_SLUG=  # optional; defaults to the first usage-metered entitlement
+```
+
+Cold path (optional): signs up brand-new customers and times their first check — a new
+Durable Object plus a grant-context cache miss, the honest worst case. It creates real
+customers in the target project, so point it only at a disposable load-test project:
+
+```env
+COLD_SIGNUPS=20
+PLAN_SLUG=pro
+```
+
+Run the same command against preview and production by switching `BASE_URL` and
+`UNPRICE_TOKEN`. Latency depends on where the client runs: numbers from your laptop include
+your last mile, so for publishable results run from a stable region (a small VM) and pair
+every number with region + date + this harness. The claim boundaries in
+`docs/brand/PRODUCT.md` forbid latency numbers on marketing surfaces until they come from a
+reproducible run like this.
+
 ## Ingestion Failure Test
 
 The ingestion failure script sends valid usage events with the non-production failure-test header.

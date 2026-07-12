@@ -9,6 +9,7 @@ const CodeExample = dynamic(() => import("~/components/landing/code-example"))
 const AdoptionSection = dynamic(() =>
   import("~/components/landing/adoption").then((mod) => mod.AdoptionSection)
 )
+const FaqSection = dynamic(() => import("~/components/landing/faq").then((mod) => mod.FaqSection))
 const Cta = dynamic(() => import("~/components/landing/cta"))
 
 export default function Home() {
@@ -19,6 +20,7 @@ export default function Home() {
       <DecisionDemo />
       <CodeExample />
       <AdoptionSection />
+      <FaqSection />
       <Cta />
     </main>
   )

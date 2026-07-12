@@ -13,3 +13,7 @@ ingestion-failures:
 budgeted-runs:
 	pnpm build:budgeted-runs
 	sh ./scripts/run-k6.sh dist/budgeted-runs.js
+
+latency:
+	pnpm build:latency
+	sh ./scripts/run-k6.sh dist/latency.js

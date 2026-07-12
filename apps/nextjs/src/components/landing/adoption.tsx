@@ -5,7 +5,8 @@ import { StationHeader } from "./station-header"
 // The adoption path is the trust argument: a real sequence (so the rail and
 // the step order carry information), where each stage names what runs and —
 // more importantly — what it cannot touch. Enforcement is the last step and
-// it is opt-in.
+// it is opt-in. The objection Q&A that used to close this station moved to
+// its own FAQ station (faq.tsx) so each section does exactly one job.
 
 const stages = [
   {
@@ -19,7 +20,7 @@ const stages = [
   },
   {
     title: "Sandbox",
-    body: "Prove the path before a dollar moves. Model customers, plan versions, budgets, credits, etc.",
+    body: "Prove the path before a dollar moves — model customers, plans, and budgets.",
     facts: [
       { label: "processor", fact: "none · built-in Sandbox" },
       { label: "customers", fact: "simulated" },
@@ -34,34 +35,6 @@ const stages = [
       { label: "capture", fact: "your Stripe account" },
       { label: "unprice", fact: "never in the middle" },
     ],
-  },
-]
-
-const objections = [
-  {
-    question: "Why not just Stripe?",
-    answer:
-      "Keep Stripe for payment capture. Unprice owns the customer money path before and around the invoice: plan versions, entitlements, budgets, credits, ledger captures, and evidence.",
-  },
-  {
-    question: "Does Unprice touch the money?",
-    answer:
-      "No. Your app asks Unprice before paid work runs and gets an allow or deny with evidence attached. Your payment provider captures the payment — Stripe today, in your own account. Unprice owns the decision, the ledger, and the evidence; it never sits in your funds flow.",
-  },
-  {
-    question: "Why not an AI gateway?",
-    answer:
-      "Gateways cap provider spend. Unprice governs what your customer is allowed to spend and connects that decision to invoice evidence.",
-  },
-  {
-    question: "Is it safe enough for money logic?",
-    answer:
-      "Do not adopt it all at once. Read the source, run one request path in shadow, prove it on Sandbox, then enforce only when the evidence matches.",
-  },
-  {
-    question: "Do I need Cloudflare?",
-    answer:
-      "Today, yes. The runtime deploys to your own Cloudflare account — Workers, Durable Objects, Queues — because the spend decision needs fast per-customer state where requests run. Your account, your data, your keys.",
   },
 ]
 
@@ -123,15 +96,6 @@ export function AdoptionSection() {
             </li>
           ))}
         </Reveal>
-      </div>
-
-      <div className="mt-14 grid gap-x-8 border-background-border border-t md:grid-cols-2">
-        {objections.map((item) => (
-          <div key={item.question} className="border-background-border py-6 md:border-t-0">
-            <h3 className="font-medium text-background-textContrast text-sm">{item.question}</h3>
-            <p className="mt-2 text-background-text text-sm leading-6">{item.answer}</p>
-          </div>
-        ))}
       </div>
     </SectionShell>
   )

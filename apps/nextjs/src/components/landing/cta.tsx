@@ -24,13 +24,13 @@ export default function Cta() {
       innerClassName="flex flex-col items-center py-24 text-center sm:py-32"
     >
       <>
-        <StationHeader index="05" label="The offer" fact="free to prove · yours to keep" />
+        <StationHeader index="06" label="The offer" fact="AGPL-3.0 core · no card at signup" />
 
         <h2
           id="cta-title"
           className="mt-6 max-w-3xl font-primary text-background-textContrast text-display-2"
         >
-          <Balancer>The pricing is as explainable as yours will be.</Balancer>
+          <Balancer>Free to prove. Yours to keep.</Balancer>
         </h2>
         <p className="mt-5 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
           <Balancer>
