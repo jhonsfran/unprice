@@ -1,7 +1,7 @@
-import { Loader } from "lucide-react"
 import type React from "react"
 import type { SVGProps } from "react"
 
+import { UnpriceSpinner } from "./unprice"
 import { cn } from "./utils"
 
 type Props = React.ComponentProps<"div"> & {
@@ -12,10 +12,13 @@ export function LoadingAnimation({ className, variant = "default", ...props }: P
   return (
     <div className="m-auto flex justify-center align-middle" {...props}>
       {variant === "default" ? (
-        <Loader
-          className={cn("size-4 animate-spin", className)}
-          style={{ animationDuration: "1s" }}
-        />
+        // The brand mark's loading form, in monochrome: the whole mark rides
+        // currentColor exactly like the old lucide Loader, so it stays legible
+        // inside amber primaries, destructive buttons, and muted placeholders
+        // alike. The amber value is reserved for controlled surfaces — use
+        // UnpriceSpinner directly there. size="sm" keeps the historical 16px
+        // default; callers still override with size-* utilities via className.
+        <UnpriceSpinner theme="inherit" monochrome size="sm" className={className} />
       ) : (
         <LoadingDots className={cn("size-4", className)} />
       )}

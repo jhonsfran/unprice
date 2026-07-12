@@ -62,6 +62,18 @@ Clear space: at least the icon's own width on all sides. Minimum icon size: 16px
 favicon below that). The dot is the only place a decision color may appear — this mirrors the
 product law "emphasis only when it changes a decision" (`design-system-guidelines.md`).
 
+Loading state: `UnpriceSpinner` (same file) is the mark's loading form — the value bounces in its
+cradle: apex just clear of the gate mouth (it cannot pass; the dot is wider than the opening),
+contact kissing the base, one bounce per second. Fall accelerates (ease-in-quad), rise decelerates
+on `ease-out-quad`. Rigid ball, no squash. The brackets never move and never recolor; amber stays
+on the one element in motion, on its vertical axis. Under `prefers-reduced-motion` the dot rests
+in the cradle and breathes opacity. Sizes 16/20/32/48 (`sm`–`xl`), honoring the 16px minimum.
+`LoadingAnimation`'s default variant renders it in monochrome `theme="inherit"` (the whole mark
+rides `currentColor`, like the lucide Loader it replaced), so every existing loading state is
+branded and stays legible on any surface — amber primaries and destructive buttons included. The
+amber value (`theme="inherit"` non-monochrome steps amber-11 → amber-9 with `.dark`) is reserved
+for controlled surfaces where the background is known.
+
 Static favicon assets that must match the component:
 [`apps/nextjs/public/icon.svg`](/Users/jhonsfran/repos/unprice/apps/nextjs/public/icon.svg) and
 [`apps/nextjs/src/app/icon.svg`](/Users/jhonsfran/repos/unprice/apps/nextjs/src/app/icon.svg).
@@ -239,7 +251,26 @@ why `warning` is `orange` in `sunset`, not amber.
 
 ## Decision Log
 
-### 2026-07-08/09 — Light the ledger: elevation, display type, solid primary, motion tokens
+### 2026-07-12 — Logo optics settled; branded spinner (the value runs the path)
+
+Measured in a browser lab (screenshots at 16–96px, x-height probes against Geist), not eyeballed.
+
+- **Dot seats in the cradle**: cy moves 15.1 → 15.6 in the mark's 20-unit space (favicons 15 →
+  15.5). The old position left ~2× more air below the dot than above it, crowding the gate mouth;
+  the new one keeps a deliberate 0.4-unit optical lift above the cavity's geometric center.
+- **Lockup nudge**: flex-centering hung the icon ~0.02em high of the lowercase word's optical band
+  (measured against a 1ex probe at 56px); the icon now translates down `0.02em` in the full lockup.
+- **`UnpriceSpinner`**: loading is the brand's core moment — a decision in flight before paid work
+  runs — so the spinner is the value alive inside the brackets, not a rotating arc. The amber dot
+  bounces in the cradle (apex clear of the gate it cannot pass, contact on the base, 1s cycle,
+  gravity fall / `ease-out-quad` rise, rigid ball); brackets stay ink and static per the logo
+  color spec. Reduced motion swaps to the resting dot breathing opacity — so the pulse form exists
+  too, as the no-motion fallback. Concepts rejected in the lab: orbit around the cavity (v1;
+  review verdict: the value wandering the whole mark reads busy at button sizes — it stays on its
+  vertical axis), stroke-sweep/draw-on (breaks the mark's silhouette mid-cycle and puts motion on
+  the "calm infrastructure"), ring ping (invisible at 16px), trail ghosts (reads as multiple
+  values; there is one value), pulse-as-primary (no positional motion — reads as a status light,
+  not work in progress).
 
 Grounded in a measured teardown of linear.app, dub.co, and useautumn.com (computed styles and
 token dumps, not eyeballing). The verdict: the money-path concept was ahead of its execution —

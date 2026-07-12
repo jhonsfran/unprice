@@ -722,3 +722,5 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-07-05: Before starting any frontend/dev server, check whether the app is already running
   on its normal port; if a server is running, use it instead of starting another one, and ask the
   user before launching an additional server.
+- 2026-07-12: Run biome via `./node_modules/.bin/biome` — `npx biome` fetches a mismatched
+  version that dies OOM. The repo pin lives in node_modules.
