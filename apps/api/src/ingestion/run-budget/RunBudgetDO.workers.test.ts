@@ -1,7 +1,7 @@
 import { evictDurableObject, reset, runInDurableObject } from "cloudflare:test"
 import { env } from "cloudflare:workers"
 import { drizzle } from "drizzle-orm/durable-sqlite"
-import { afterEach, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import type { RunBudgetDO } from "./RunBudgetDO"
 import type {
   ApplyRunSyncEventInput,
@@ -12,10 +12,13 @@ import type {
 import * as schema from "./db/schema"
 import type { RunBudgetWalletOps } from "./ports"
 import { RunBudgetProcessor } from "./processor"
+import { RunBudgetRpcShell } from "./rpc-shell"
 import { RunBudgetStore } from "./run-budget-store"
-import { createRunBudgetMeterFact } from "./testing/harness"
+import { RUN_BUDGET_TEST_NOW, createRunBudgetMeterFact } from "./testing/harness"
 import {
   type RunBudgetProcessorContractTarget,
+  createRunBudgetApplyInput,
+  createRunBudgetStartInput,
   describeRunBudgetProcessorContract,
 } from "./testing/processor-contract"
 
@@ -148,3 +151,130 @@ describeRunBudgetProcessorContract(
     }
   }
 )
+
+describe("RunBudgetProcessor (Durable Object shared run concurrency)", () => {
+  it("does not overspend a shared run when concurrent consumes arrive", async () => {
+    const stub = env.runbudget.getByName(`test:run-budget-shared:${crypto.randomUUID()}`)
+    const wallet = {
+      createReservation: vi.fn(
+        async (_input: Parameters<RunBudgetWalletOps["createReservation"]>[0]) => ({
+          val: { reservationId: "res_workers_shared_123", allocationAmount: 5 },
+        })
+      ),
+      captureReservationUsage: vi.fn(
+        async (_input: Parameters<RunBudgetWalletOps["captureReservationUsage"]>[0]) => ({
+          val: { capturedAmount: 0 },
+        })
+      ),
+      releaseReservation: vi.fn(
+        async (_input: Parameters<RunBudgetWalletOps["releaseReservation"]>[0]) => ({
+          val: {
+            releasedAmount: 0,
+            restoredGrantedAmount: 0,
+            refundedPurchasedAmount: 0,
+          },
+        })
+      ),
+    } satisfies RunBudgetWalletOps
+    let alarmAt: number | null = null
+    let rpc: RunBudgetRpcShell | undefined
+
+    const invoke = async <T>(fn: (activeRpc: RunBudgetRpcShell) => Promise<T>): Promise<T> =>
+      runInDurableObject(stub, async (instance: RunBudgetDO, state) => {
+        await instance
+          .getRunStatus({ runId: "__shared_bootstrap__", customerId: "cus_1", projectId: "proj_1" })
+          .catch(() => undefined)
+
+        rpc ??= new RunBudgetRpcShell(
+          new RunBudgetProcessor({
+            clock: { now: () => RUN_BUDGET_TEST_NOW },
+            logger: { error: () => undefined },
+            pricing: {
+              apply: async (input) => {
+                const fact = createRunBudgetMeterFact({ amount: 1 })
+                return fact.amount > input.wallet.remainingAmount
+                  ? {
+                      allowed: false,
+                      deniedReason: "RUN_BUDGET_EXCEEDED",
+                      message: "Run budget exceeded",
+                      meterFacts: [],
+                    }
+                  : { allowed: true, meterFacts: [fact] }
+              },
+            },
+            scheduler: {
+              getAlarm: async () => alarmAt,
+              setAlarm: async (at) => {
+                alarmAt = at
+              },
+            },
+            store: new RunBudgetStore(drizzle(state.storage, { schema, logger: false })),
+            wallet: { create: async () => wallet },
+          }),
+          (mutation) => state.blockConcurrencyWhile(mutation)
+        )
+
+        return fn(rpc)
+      })
+
+    await invoke((activeRpc) => activeRpc.startRun(createRunBudgetStartInput({ budgetAmount: 5 })))
+    const inputs = Array.from({ length: 10 }, (_, index) =>
+      createRunBudgetApplyInput({
+        idempotencyKey: `idem_consume_shared_${index}`,
+        event: {
+          ...createRunBudgetApplyInput().event,
+          id: `evt_shared_${index}`,
+        },
+      })
+    )
+    const decisions = await Promise.all(
+      inputs.map((input) => invoke((activeRpc) => activeRpc.applySyncEvent(input)))
+    )
+    const accepted = inputs
+      .map((input, index) => ({ input, decision: decisions[index] }))
+      .filter(({ decision }) => decision.allowed)
+    const rejected = decisions.filter((decision) => !decision.allowed)
+
+    expect(accepted).toHaveLength(5)
+    expect(rejected).toHaveLength(5)
+    expect(rejected.every((decision) => decision.rejectionReason === "RUN_BUDGET_EXCEEDED")).toBe(
+      true
+    )
+    expect(decisions.every((decision) => decision.budget.remainingAmount >= 0)).toBe(true)
+    expect(
+      accepted.reduce(
+        (amount, { decision }) =>
+          amount + decision.meterFacts.reduce((sum, meterFact) => sum + meterFact.amount, 0),
+        0
+      )
+    ).toBeLessThanOrEqual(5)
+    expect(
+      Math.max(...decisions.map((decision) => decision.budget.consumedAmount))
+    ).toBeLessThanOrEqual(5)
+
+    await expect(
+      invoke((activeRpc) =>
+        activeRpc.getRunStatus({
+          runId: "run_1",
+          customerId: "cus_1",
+          projectId: "proj_1",
+        })
+      )
+    ).resolves.toMatchObject({ consumedAmount: 5, remainingAmount: 0 })
+
+    const acceptedPair = accepted[0]
+    if (!acceptedPair) throw new Error("Expected at least one accepted consume decision")
+    await expect(
+      invoke((activeRpc) => activeRpc.applySyncEvent(acceptedPair.input))
+    ).resolves.toEqual(acceptedPair.decision)
+    await expect(
+      invoke((activeRpc) =>
+        activeRpc.getRunStatus({
+          runId: "run_1",
+          customerId: "cus_1",
+          projectId: "proj_1",
+        })
+      )
+    ).resolves.toMatchObject({ consumedAmount: 5, remainingAmount: 0 })
+  })
+})
