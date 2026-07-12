@@ -74,6 +74,32 @@ every number with region + date + this harness. The claim boundaries in
 `docs/brand/PRODUCT.md` forbid latency numbers on marketing surfaces until they come from a
 reproducible run like this.
 
+## Shared-Run Overspend Proof
+
+This manual/nightly-only scenario creates one shared run, then issues concurrent, uniquely
+idempotent `usage.consume` attempts against it. Each decision must be either accepted or denied
+with `insufficient_budget`; any other result fails the test.
+
+Run it only with a funded, disposable customer and project. The final assertion reads the
+authoritative run currency totals: consumed minor units must not exceed the budget and remaining
+minor units must not be negative. It deliberately does not infer correctness from the number of
+accepted requests, because one event can cost more than one currency minor unit.
+
+```bash
+BASE_URL=https://preview-api.unprice.dev \
+UNPRICE_TOKEN=unprice_test_xxx \
+PROJECT_ID=proj_loadtest \
+CUSTOMER_ID=cus_loadtest \
+BUDGET_AMOUNT=100 \
+ATTEMPTS=200 \
+VUS=10 \
+corepack pnpm --filter @unprice/k6 overspend
+```
+
+The final output includes `OVERSPEND_SUMMARY_JSON` with the accepted, budget-denied, and
+unexpected-failure counts plus the invariant result. Local verification is limited to
+typechecking and bundling; running `overspend` sends requests to the configured target API.
+
 ## Ingestion Failure Test
 
 The ingestion failure script sends valid usage events with the non-production failure-test header.

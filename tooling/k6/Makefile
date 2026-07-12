@@ -17,3 +17,7 @@ budgeted-runs:
 latency:
 	pnpm build:latency
 	sh ./scripts/run-k6.sh dist/latency.js
+
+overspend:
+	pnpm build:overspend
+	sh ./scripts/run-k6.sh dist/overspend.js

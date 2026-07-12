@@ -10,11 +10,13 @@
     "typecheck": "../../node_modules/.bin/tsc --noEmit",
     "build:budgeted-runs": "pnpm typecheck && esbuild budgeted-runs.ts --bundle --platform=browser --format=esm --external:k6 --external:k6/* --outfile=dist/budgeted-runs.js",
     "build:latency": "pnpm typecheck && esbuild latency.ts --bundle --platform=browser --format=esm --external:k6 --external:k6/* --outfile=dist/latency.js",
+    "build:overspend": "pnpm typecheck && esbuild overspend.ts --bundle --platform=browser --format=esm --external:k6 --external:k6/* --outfile=dist/overspend.js",
     "baseline": "pnpm build:baseline && sh ./scripts/run-baseline.sh dist/baseline.js",
     "ingestion-failures": "pnpm build:ingestion-failures && sh ./scripts/run-k6.sh dist/ingestion-failures.js",
     "lifecycle": "pnpm build:lifecycle && docker run --env-file .env --rm --network=host -i grafana/k6 run - < dist/lifecycle.js",
     "budgeted-runs": "pnpm build:budgeted-runs && sh ./scripts/run-k6.sh dist/budgeted-runs.js",
-    "latency": "pnpm build:latency && sh ./scripts/run-k6.sh dist/latency.js"
+    "latency": "pnpm build:latency && sh ./scripts/run-k6.sh dist/latency.js",
+    "overspend": "pnpm build:overspend && sh ./scripts/run-k6.sh dist/overspend.js"
   },
   "keywords": [],
   "author": "",
