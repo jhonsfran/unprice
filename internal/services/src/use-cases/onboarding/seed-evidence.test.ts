@@ -439,6 +439,7 @@ describe("seedOnboardingEvidence", () => {
       expect.objectContaining({
         defaultCustomerId: "cus_123",
         isRoot: false,
+        expiresAt: Date.UTC(2026, 6, 4, 23, 59, 59, 999),
       })
     )
     expect(createSubscriptionRecord).toHaveBeenCalledWith(

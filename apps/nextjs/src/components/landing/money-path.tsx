@@ -596,17 +596,6 @@ export function MoneyPath({ className }: { className?: string }) {
       aria-label="The money path: one request traced end to end. A request hits the meter — 2,050 tokens — passes the entitlement check, resolves its pricing rule and plan version, then reaches the budget decision. With $4.10 of budget remaining the request is allowed with a 200: the wallet reserves $4.10, the ledger captures the movement, and the invoice line — 2,050 tokens at $0.002, $4.10 — is explained by the same decision. The reservation depletes the budget to $0.00, so the next identical request is denied with a 429 before any cost exists: the wallet is untouched, the ledger has no entry, and the invoice has no line."
       className={cn("mx-auto w-full max-w-3xl", className)}
     >
-      <style>{`
-        @keyframes mp-beacon {
-          0% { transform: scale(1); opacity: .55 }
-          70%, 100% { transform: scale(2.75); opacity: 0 }
-        }
-        .mp-beacon { animation: mp-beacon 2.6s cubic-bezier(.22,1,.36,1) infinite }
-        @media (prefers-reduced-motion: reduce) {
-          .mp-beacon { display: none }
-        }
-      `}</style>
-
       <figcaption className="mb-4 flex items-baseline justify-between gap-4 border-background-border border-b pb-3">
         <span className="font-mono text-background-text text-xs uppercase tracking-widest">
           The money path

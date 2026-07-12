@@ -7,7 +7,9 @@ import { steps } from "~/lib/onboarding-steps"
 import { createFunnelPageEventClaimer } from "~/lib/signup-funnel"
 import { useTRPC } from "~/trpc/client"
 
-const ONBOARDING_STORAGE_KEY = "unprice_onboarding_v2"
+// v3: the rail redesign renamed the step ids (welcome/project/build/receipt),
+// so stale v2 state must not resume into steps that no longer exist.
+const ONBOARDING_STORAGE_KEY = "unprice_onboarding_v3"
 const ONBOARDING_STARTED_EVENT = "funnel_onboarding_started"
 const isDevelopment = process.env.NODE_ENV === "development"
 const claimOnboardingStartEvent = createFunnelPageEventClaimer()

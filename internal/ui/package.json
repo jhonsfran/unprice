@@ -120,6 +120,7 @@
     "./table": "./src/table.tsx",
     "./tabs": "./src/tabs.tsx",
     "./tabs-navigation": "./src/tabs-navigation.tsx",
+    "./station": "./src/station.tsx",
     "./unprice": "./src/unprice.tsx"
   },
   "typesVersions": {

@@ -264,6 +264,30 @@
     -webkit-mask-image: linear-gradient(to bottom, black 30%, transparent 95%);
     mask-image: linear-gradient(to bottom, black 30%, transparent 95%);
   }
+
+  /* The live-station ping, shared by the landing money path and the app
+   * onboarding rail. Layer it behind a solid dot inside a relative wrapper. */
+  .mp-beacon {
+    animation: mp-beacon 2.6s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  }
+}
+
+@keyframes mp-beacon {
+  0% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  70%,
+  100% {
+    transform: scale(2.75);
+    opacity: 0;
+  }
+}
+
+@media screen and (prefers-reduced-motion: reduce) {
+  .mp-beacon {
+    display: none;
+  }
 }
 
 /* Entrance grammar: rows written into the ledger. Content is visible by

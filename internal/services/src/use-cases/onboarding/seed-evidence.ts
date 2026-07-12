@@ -10,6 +10,7 @@ import {
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { fromCurrencyMinor, toLedgerMinor } from "@unprice/money"
+import { fromZonedTime, toZonedTime } from "date-fns-tz"
 import { z } from "zod"
 import type { ServiceContext } from "../../context"
 import { createSubscription } from "../subscription/create"
@@ -132,6 +133,18 @@ function normalizeCurrency(currency?: Currency) {
   return currency === "EUR" || currency === "USD" ? currency : undefined
 }
 
+function endOfCurrentDayMs(date: Date, timezone = "UTC") {
+  try {
+    const endOfDay = toZonedTime(date, timezone)
+    endOfDay.setHours(23, 59, 59, 999)
+    return fromZonedTime(endOfDay, timezone).getTime()
+  } catch {
+    const endOfDay = new Date(date)
+    endOfDay.setUTCHours(23, 59, 59, 999)
+    return endOfDay.getTime()
+  }
+}
+
 async function closeStartedRunAfterFailure({
   apiClient,
   customerId,
@@ -204,6 +217,7 @@ export async function seedOnboardingEvidence(
   }
 
   const now = Date.now()
+  const apiExpiresAt = endOfCurrentDayMs(new Date(now), input.projectTimezone)
   const customerResult = await deps.services.customers.createCustomerRecord({
     projectId: input.projectId,
     name: "Onboarding Customer",
@@ -222,6 +236,7 @@ export async function seedOnboardingEvidence(
     name: `onboarding-${now}`,
     isRoot: input.workspaceIsMain,
     defaultCustomerId: customer.id,
+    expiresAt: apiExpiresAt,
   })
 
   if (apiKeyResult.err) {

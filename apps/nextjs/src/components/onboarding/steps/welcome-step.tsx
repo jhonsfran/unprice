@@ -1,25 +1,39 @@
+"use client"
+
 import { useOnboarding } from "@onboardjs/react"
 import { Button } from "@unprice/ui/button"
-import { Typography } from "@unprice/ui/typography"
-import { cn } from "@unprice/ui/utils"
-import Balancer from "react-wrap-balancer"
+import { ArrowRight } from "lucide-react"
+import { useParams } from "next/navigation"
 
-export function WelcomeStep({ className }: React.ComponentProps<"div">) {
+import { SuperLink } from "~/components/super-link"
+
+// The before-tableau: the rail beside this copy is all ghost stations, and
+// this moment's job is to make that absence legible. One amber CTA starts
+// the build; the quiet skip link leaves onboarding incomplete so the
+// dashboard's "Create project" action routes back here.
+
+export function WelcomeStep() {
   const { next } = useOnboarding()
-  return (
-    <div className={cn("flex w-full flex-col gap-6", className)}>
-      <div className="flex flex-col items-center gap-2 text-center">
-        <Typography variant="h1" className="animate-content">
-          <Balancer>Build one Sandbox paid action</Balancer>
-        </Typography>
-        <Typography variant="p" affects="removePaddingMargin" className="animate-content">
-          Create a Sandbox project, publish a plan version, assign a test customer, and generate
-          synthetic evidence for the paid action you want to protect.
-        </Typography>
+  const { workspaceSlug } = useParams<{ workspaceSlug: string }>()
 
-        <Button className="mt-8 animate-button" onClick={() => next()}>
+  return (
+    <div className="flex w-full max-w-md flex-col items-start gap-6">
+      <p className="text-background-text text-sm leading-6">
+        Every station on the rail starts empty — no plan version, no customer, no evidence. One
+        build settles all eight: publish plan versions, assign a test customer, generate synthetic
+        budget evidence, and check access in the request path.
+      </p>
+      <div className="flex flex-wrap items-center gap-4">
+        <Button className="gap-1.5" onClick={() => next()}>
           Build the Sandbox paid action
+          <ArrowRight aria-hidden className="size-3.5" />
         </Button>
+        <SuperLink
+          href={`/${workspaceSlug}`}
+          className="text-background-text text-xs transition-colors duration-quick ease-out-quad hover:text-background-textContrast"
+        >
+          Skip for now
+        </SuperLink>
       </div>
     </div>
   )
