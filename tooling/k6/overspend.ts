@@ -26,6 +26,7 @@ const ATTEMPTS = positiveInteger(__ENV.ATTEMPTS, Math.max(BUDGET_AMOUNT * 2, 2))
 const VUS = positiveInteger(__ENV.VUS, 10)
 
 type StartedRun = NonNullable<Awaited<ReturnType<K6SdkClient["runs"]["start"]>>["result"]>
+type ConsumeResult = Awaited<ReturnType<K6SdkClient["runs"]["consume"]>>
 
 type OverspendData = {
   event: UsageEventTarget
@@ -122,14 +123,24 @@ export async function setup(): Promise<OverspendData> {
 
 export default async function (data: OverspendData): Promise<void> {
   const key = `k6-overspend-${data.run.runId}-vu-${__VU}-iter-${__ITER}`
-  const result = await getSdk().runs.consume({
-    runId: data.run.runId,
-    featureSlug: data.event.featureSlug,
-    eventSlug: data.event.eventSlug,
-    id: `evt-${key}`,
-    idempotencyKey: key,
-    properties: buildProperties(data.event.propertyFields),
-  })
+  let result: ConsumeResult
+
+  try {
+    result = await getSdk().runs.consume({
+      runId: data.run.runId,
+      featureSlug: data.event.featureSlug,
+      eventSlug: data.event.eventSlug,
+      id: `evt-${key}`,
+      idempotencyKey: key,
+      properties: buildProperties(data.event.propertyFields),
+    })
+  } catch (_error) {
+    unexpectedFailures.add(1)
+    check(null, {
+      "overspend consume returns a decision": () => false,
+    })
+    return
+  }
 
   if (!result.result || result.error) {
     unexpectedFailures.add(1)
@@ -202,8 +213,8 @@ export async function teardown(data: OverspendData): Promise<void> {
     const finalRun = finalResult.result
     const finalStateExpected = check(finalRun, {
       "overspend final run is terminal": (run) => isTerminalStatus(run.status),
-      "overspend final consumed is within budget": (run) =>
-        run.consumedAmountMinor <= BUDGET_AMOUNT,
+      "overspend final consumed is non-negative and within budget": (run) =>
+        run.consumedAmountMinor >= 0 && run.consumedAmountMinor <= BUDGET_AMOUNT,
       "overspend final remaining is non-negative": (run) => run.remainingAmountMinor >= 0,
     })
 
