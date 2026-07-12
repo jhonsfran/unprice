@@ -22,7 +22,7 @@ runs:
         version: 10.28.0
         run_install: false
 
-    - uses: actions/setup-python@v5
+    - uses: actions/setup-python@v6
       if: ${{ inputs.python == 'true' }}
       with:
         python-version: "3.11"
