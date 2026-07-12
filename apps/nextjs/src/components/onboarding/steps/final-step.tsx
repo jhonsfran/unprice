@@ -33,12 +33,12 @@ export function FinalStep({ className }: React.ComponentProps<"div">) {
     <div className={cn("flex flex-col", className)}>
       <div className="flex flex-col items-center gap-2 text-center">
         <Typography variant="h1" className="animate-title">
-          Ready to inspect
+          Your Sandbox paid action is ready
         </Typography>
         <Typography variant="p" className="mb-8 w-[640px] max-w-[90vw] animate-title delay-300!">
           {seededMetrics
-            ? "Your Sandbox project now has published plans, a test customer, an active subscription, and budgeted run evidence ready to inspect."
-            : "Your Sandbox project is ready. Sample budgeted run evidence was not fully created, but you can still inspect the project and send usage when ready."}
+            ? "Your Sandbox project now has a published plan, test customer, active subscription, and synthetic budget evidence ready to inspect."
+            : "Your Sandbox project is ready. Synthetic budget evidence was not fully created, but you can still inspect the project and finish setup when ready."}
         </Typography>
 
         <Button

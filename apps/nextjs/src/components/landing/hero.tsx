@@ -1,8 +1,7 @@
-import { APP_DOMAIN } from "@unprice/config"
 import { buttonVariants } from "@unprice/ui/button"
 import { ArrowRight } from "lucide-react"
-import { Link } from "next-view-transitions"
 import Balancer from "react-wrap-balancer"
+import { AcquisitionLink } from "./acquisition-link"
 import { MoneyPath } from "./money-path"
 
 // The first viewport is the product truth: one request, one decision, both
@@ -12,7 +11,7 @@ import { MoneyPath } from "./money-path"
 const heroFacts = [
   { label: "License", value: "AGPL-3.0 open source" },
   { label: "Access", value: "Free during early access" },
-  { label: "Payments", value: "Your Stripe account" },
+  { label: "Any Payment Provider", value: "Start with stripe now" },
   { label: "Custody", value: "Funds stay with you" },
 ]
 
@@ -42,13 +41,14 @@ export default function Hero() {
           </p>
 
           <div className="mt-8 flex flex-wrap items-center gap-3">
-            <Link
-              href={`${APP_DOMAIN}`}
+            <AcquisitionLink
+              source="hero"
+              pendingLabel="Opening signup…"
               className={buttonVariants({ variant: "primary", className: "gap-1.5" })}
             >
               Start with one paid action
               <ArrowRight aria-hidden className="size-3.5" />
-            </Link>
+            </AcquisitionLink>
           </div>
 
           <dl className="mt-10 grid w-full max-w-xl grid-cols-2 gap-x-6 gap-y-4 border-background-border border-t pt-5">

@@ -26,15 +26,20 @@ type Station = {
   fact: string
 }
 
+// Narrative order, not dependency order: the event is measured first, then
+// the access question, then what it costs and under which plan — the same
+// journey the request actually makes toward the budget decision. The meter
+// reading (2,050 tokens) is the quantity the invoice line multiplies out
+// below, so the math is visible end to end: 2,050 × $0.002 = $4.10.
 const resolveStations: Station[] = [
-  { id: "plan-version", label: "Plan version", fact: "pro@v3" },
+  { id: "meter", label: "Meter", fact: "tokens_used · 2,050" },
+  { id: "entitlement", label: "Entitlement", fact: "has access? · yes" },
   { id: "pricing-rule", label: "Pricing rule", fact: "$0.002 / token" },
-  { id: "meter", label: "Meter", fact: "tokens_used" },
-  { id: "entitlement", label: "Entitlement", fact: "access.check · ok" },
+  { id: "plan-version", label: "Plan version", fact: "pro@v3" },
 ]
 
 const settleStations: Station[] = [
-  { id: "wallet", label: "Wallet", fact: "reserve −1 credit" },
+  { id: "wallet", label: "Wallet", fact: "reserve −$4.10" },
   { id: "ledger", label: "Ledger", fact: "capture · balanced" },
   { id: "invoice", label: "Invoice", fact: "line explained" },
 ]
@@ -158,7 +163,7 @@ function buildPass(root: HTMLElement, kind: PassKind): BuiltPass | null {
   hit(request)
   dwell(STATION_DWELL)
 
-  for (const name of ["plan-version", "pricing-rule", "meter", "entitlement"]) {
+  for (const name of ["meter", "entitlement", "pricing-rule", "plan-version"]) {
     const el = node(name)
     if (!el) continue
     const point = railPointOf(el)
@@ -535,7 +540,7 @@ function OutcomeFork() {
             </span>
           </div>
           <p className="mt-1 font-mono text-[10px] text-background-text leading-4">
-            pro@v3 · $0.002/token
+            2,050 tokens × $0.002 · pro@v3
           </p>
           <p className="font-mono text-[10px] text-background-text leading-4">
             reserve → capture · balanced
@@ -588,7 +593,7 @@ export function MoneyPath({ className }: { className?: string }) {
 
   return (
     <figure
-      aria-label="The money path: one request traced end to end. A request resolves its plan version, pricing rule, meter, and entitlement, then reaches the budget decision. With $4.10 of budget remaining the request is allowed with a 200: the wallet reserves credits, the ledger captures the movement, and the invoice line is explained by the same decision. The reservation depletes the budget to $0.00, so the next identical request is denied with a 429 before any cost exists: the wallet is untouched, the ledger has no entry, and the invoice has no line."
+      aria-label="The money path: one request traced end to end. A request hits the meter — 2,050 tokens — passes the entitlement check, resolves its pricing rule and plan version, then reaches the budget decision. With $4.10 of budget remaining the request is allowed with a 200: the wallet reserves $4.10, the ledger captures the movement, and the invoice line — 2,050 tokens at $0.002, $4.10 — is explained by the same decision. The reservation depletes the budget to $0.00, so the next identical request is denied with a 429 before any cost exists: the wallet is untouched, the ledger has no entry, and the invoice has no line."
       className={cn("mx-auto w-full max-w-3xl", className)}
     >
       <style>{`

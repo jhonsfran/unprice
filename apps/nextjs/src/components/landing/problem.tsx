@@ -91,8 +91,9 @@ export function ProblemSection() {
             <LedgerRow label="30 days later · invoice line" fact="$1,204.00" />
           </div>
 
-          {/* the dispute, as the artifact it actually arrives as */}
-          <div className="my-3 rounded-sm border border-background-border bg-surface-raised px-3 py-2.5">
+          {/* the dispute, as the artifact it actually arrives as — carrying
+              the danger tier the deny grammar uses elsewhere on the page */}
+          <div className="my-3 rounded-sm border border-danger-line bg-danger-bgSubtle px-3 py-2.5">
             <div className="flex items-baseline justify-between gap-3">
               <span className="font-mono text-[10px] text-background-text uppercase tracking-widest">
                 support · ticket #4812

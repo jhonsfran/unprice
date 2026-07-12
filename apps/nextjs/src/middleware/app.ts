@@ -12,6 +12,7 @@ import {
 import { isSlug } from "@unprice/db/utils"
 import { parse } from "~/lib/domains"
 import { getWorkspacesUser } from "~/lib/session"
+import { getSafeNextPath } from "~/lib/signup-funnel"
 
 /**
  * Copy cookies from the Set-Cookie header of the response to the Cookie header of the request,
@@ -37,23 +38,6 @@ function applySetCookie(req: NextAuthRequest, res: NextResponse) {
       res.headers.set(key, value)
     }
   })
-}
-
-export function getSafeNextPath(next: string | null) {
-  if (!next || !next.startsWith("/") || next.startsWith("//")) {
-    return null
-  }
-
-  try {
-    const normalized = decodeURIComponent(next).replace(/\\/g, "/")
-    if (normalized.startsWith("//")) {
-      return null
-    }
-  } catch {
-    return null
-  }
-
-  return next
 }
 
 export default function AppMiddleware(req: NextAuthRequest) {

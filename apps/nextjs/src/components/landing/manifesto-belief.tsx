@@ -1,8 +1,7 @@
-import { APP_DOMAIN } from "@unprice/config"
 import { buttonVariants } from "@unprice/ui/button"
 import { ArrowRight } from "lucide-react"
-import { Link } from "next-view-transitions"
 import Balancer from "react-wrap-balancer"
+import { AcquisitionLink } from "./acquisition-link"
 
 // The close: belief stated as three refusals, then the invitation. Same
 // bracket-corner containment motif as the landing close — one decision left
@@ -60,13 +59,14 @@ export default function ManifestoBelief() {
             aria-hidden
             className="absolute right-0 bottom-0 size-3 border-background-textContrast border-r-2 border-b-2"
           />
-          <Link
-            href={`${APP_DOMAIN}`}
+          <AcquisitionLink
+            source="manifesto"
+            pendingLabel="Opening signup…"
             className={buttonVariants({ variant: "primary", className: "gap-1.5" })}
           >
             Start with one paid action
             <ArrowRight aria-hidden className="size-3.5" />
-          </Link>
+          </AcquisitionLink>
         </div>
       </div>
     </section>

@@ -16,6 +16,7 @@
     "dev:local": "next dev --turbo --port 3001",
     "fmt": "pnpm biome format . --write && pnpm biome check . --write",
     "start": "next start",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -99,6 +100,7 @@
     "@unprice/tsconfig": "workspace:*",
     "autoprefixer": "^10.4.18",
     "tailwindcss": "^3.4.17",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "vitest": "^2.1.9"
   }
 }

@@ -2,33 +2,45 @@ import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
 
 import { getSession } from "@unprice/auth/server-rsc"
-import { APP_DOMAIN } from "@unprice/config"
+import { APP_DOMAIN, AUTH_ROUTES } from "@unprice/config"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
 import { cn } from "@unprice/ui/utils"
 import { env } from "~/env"
+import {
+  PRIVACY_URL,
+  TERMS_URL,
+  buildAuthHref,
+  getSafeNextPath,
+  getSignupIntent,
+  getSingleSearchParam,
+} from "~/lib/signup-funnel"
 import { SignInGithub } from "../_components/github-signin"
 import { SignInGoogle } from "../_components/google-signin"
 import { UpdateMarketingCookie } from "../_components/update-marketing-cookie"
 import { SignInCredentials } from "./credentials-signin"
 
 export default async function AuthenticationPage({
-  searchParams: { sessionId, next },
+  searchParams: { sessionId, intent, next },
 }: {
   searchParams: {
-    sessionId?: string
-    next?: string
+    sessionId?: string | string[]
+    intent?: string | string[]
+    next?: string | string[]
   }
 }) {
+  const singleSessionId = getSingleSearchParam(sessionId)
+  const signupIntent = getSignupIntent(intent)
+  const safeNext = getSafeNextPath(getSingleSearchParam(next))
   const session = await getSession()
   const lastUsedMethod = cookies().get("last-login-method")?.value
 
   if (session?.user?.id) {
-    redirect(APP_DOMAIN)
+    redirect(safeNext ?? APP_DOMAIN)
   }
 
   return (
     <div className={cn("flex flex-col gap-6")}>
-      <UpdateMarketingCookie sessionId={sessionId} />
+      <UpdateMarketingCookie sessionId={singleSessionId} />
       <Card>
         <CardHeader className="text-center">
           <CardTitle className="text-xl">Welcome back</CardTitle>
@@ -36,8 +48,14 @@ export default async function AuthenticationPage({
         </CardHeader>
         <CardContent className="flex flex-col gap-6">
           <div className="flex w-full flex-col items-center justify-between gap-4">
-            <SignInGithub redirectTo={next} isLastUsed={lastUsedMethod === "github"} />
-            <SignInGoogle redirectTo={next} isLastUsed={lastUsedMethod === "google"} />
+            <SignInGithub
+              redirectTo={safeNext ?? undefined}
+              isLastUsed={lastUsedMethod === "github"}
+            />
+            <SignInGoogle
+              redirectTo={safeNext ?? undefined}
+              isLastUsed={lastUsedMethod === "google"}
+            />
           </div>
           {env.NODE_ENV === "development" && (
             <>
@@ -46,11 +64,21 @@ export default async function AuthenticationPage({
                   Or continue with
                 </span>
               </div>
-              <SignInCredentials redirectTo={next} isLastUsed={lastUsedMethod === "credentials"} />
+              <SignInCredentials
+                redirectTo={safeNext ?? undefined}
+                isLastUsed={lastUsedMethod === "credentials"}
+              />
 
               <div className="text-center text-sm">
                 Don&apos;t have an account?{" "}
-                <a href="/auth/signup" className="underline underline-offset-4">
+                <a
+                  href={buildAuthHref(AUTH_ROUTES.SIGNUP, {
+                    sessionId: singleSessionId,
+                    intent: signupIntent,
+                    next: safeNext,
+                  })}
+                  className="underline underline-offset-4"
+                >
                   Sign up
                 </a>
               </div>
@@ -60,11 +88,11 @@ export default async function AuthenticationPage({
       </Card>
       <div className="text-balance text-center text-muted-foreground text-xs [&_a]:underline [&_a]:underline-offset-4 [&_a]:hover:text-primary ">
         By clicking continue, you agree to our{" "}
-        <a href="/terms" className="underline underline-offset-4 hover:text-primary">
+        <a href={TERMS_URL} className="underline underline-offset-4 hover:text-primary">
           Terms of Service
         </a>{" "}
         and{" "}
-        <a href="/privacy" className="underline underline-offset-4 hover:text-primary">
+        <a href={PRIVACY_URL} className="underline underline-offset-4 hover:text-primary">
           Privacy Policy
         </a>
         .

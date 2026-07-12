@@ -1,9 +1,8 @@
-import { APP_DOMAIN } from "@unprice/config"
 import { buttonVariants } from "@unprice/ui/button"
 import { GitHub } from "@unprice/ui/icons"
 import { cn } from "@unprice/ui/utils"
 import { ArrowRight } from "lucide-react"
-import { Link } from "next-view-transitions"
+import { AcquisitionLink } from "~/components/landing/acquisition-link"
 import { Logo } from "~/components/layout/logo"
 import { MainNav } from "~/components/layout/main-nav"
 import { siteConfig } from "~/constants/layout"
@@ -49,8 +48,9 @@ export default function HeaderMarketing() {
             {/* Outline here on purpose: the hero owns the solid amber primary.
                 One amber signal per viewport, same scarcity law as the money
                 path's decision dot. */}
-            <Link
-              href={`${APP_DOMAIN}`}
+            <AcquisitionLink
+              source="header"
+              pendingLabel="Opening signup…"
               className={buttonVariants({
                 variant: "primary",
                 className: "h-9 gap-1.5 whitespace-nowrap px-2.5 text-xs sm:px-3 sm:text-sm",
@@ -59,7 +59,7 @@ export default function HeaderMarketing() {
               <span className="sm:hidden">Start free</span>
               <span className="hidden sm:inline">Start with one paid action</span>
               <ArrowRight aria-hidden className="size-3.5" />
-            </Link>
+            </AcquisitionLink>
           </div>
         </div>
       </div>

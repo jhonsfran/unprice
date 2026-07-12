@@ -10,15 +10,15 @@ export function WelcomeStep({ className }: React.ComponentProps<"div">) {
     <div className={cn("flex w-full flex-col gap-6", className)}>
       <div className="flex flex-col items-center gap-2 text-center">
         <Typography variant="h1" className="animate-content">
-          <Balancer>Prove one customer money path</Balancer>
+          <Balancer>Build one Sandbox paid action</Balancer>
         </Typography>
         <Typography variant="p" affects="removePaddingMargin" className="animate-content">
-          Create a Sandbox project, publish a workflow plan version, assign a test customer, and
-          send usage evidence through the request path.
+          Create a Sandbox project, publish a plan version, assign a test customer, and generate
+          synthetic evidence for the paid action you want to protect.
         </Typography>
 
         <Button className="mt-8 animate-button" onClick={() => next()}>
-          Build the Sandbox money path
+          Build the Sandbox paid action
         </Button>
       </div>
     </div>

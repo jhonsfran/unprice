@@ -1,4 +1,6 @@
 "use client"
+
+import { AUTH_ROUTES } from "@unprice/config"
 import { Button } from "@unprice/ui/button"
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@unprice/ui/form"
 import { Input } from "@unprice/ui/input"
@@ -9,6 +11,7 @@ import { useRouter } from "next/navigation"
 import { useState } from "react"
 import { z } from "zod"
 import { signUpWithCredentials } from "~/actions/signupCredentials"
+import { type SignupIntent, buildAuthHref } from "~/lib/signup-funnel"
 import { useZodForm } from "~/lib/zod-form"
 
 export const SignupSchema = z
@@ -18,6 +21,8 @@ export const SignupSchema = z
     confirmPassword: z.string().min(6),
     name: z.string().min(3),
     sessionId: z.string().optional(),
+    next: z.string().optional(),
+    intent: z.enum(["paid-action"]).optional(),
   })
   .refine((data) => data.password === data.confirmPassword, {
     path: ["confirmPassword"],
@@ -27,7 +32,9 @@ export const SignupSchema = z
 export function SignUpCredentials({
   className,
   sessionId,
-}: { className?: string; sessionId?: string }) {
+  next,
+  intent,
+}: { className?: string; sessionId?: string; next?: string; intent?: SignupIntent }) {
   const router = useRouter()
   const [isLoading, setIsLoading] = useState(false)
   const form = useZodForm({
@@ -38,6 +45,8 @@ export function SignUpCredentials({
       name: "",
       confirmPassword: "",
       sessionId,
+      next,
+      intent,
     },
     reValidateMode: "onSubmit",
   })
@@ -53,12 +62,13 @@ export function SignUpCredentials({
     }
 
     if (res.redirect) {
-      // add sessionId to the redirect url the url is a path
-      let url = res.redirect
-      if (sessionId) {
-        url += `?sessionId=${sessionId}`
-      }
-      router.push(url)
+      router.push(
+        buildAuthHref(AUTH_ROUTES.SIGNIN, {
+          sessionId: data.sessionId,
+          intent: data.intent,
+          next: data.next,
+        })
+      )
       setIsLoading(false)
       return
     }

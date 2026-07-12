@@ -222,8 +222,8 @@ export function DecisionDemo({ className }: { className?: string }) {
           Watch paid work stop before it creates cost.
         </h2>
         <p className="mt-5 text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-          Click a paid action against the plan. Each request is allowed, flagged, or denied before
-          the work runs — and the same decision explains the invoice line later.
+          Click a paid action. Each request is allowed, flagged, or denied before the work runs —
+          and the same decision explains the invoice line later.
         </p>
       </div>
 

@@ -156,10 +156,10 @@ export function SeedMetricsStep({ className }: React.ComponentProps<"div"> & Ste
         <div className="flex size-10 animate-content items-center justify-center rounded-md bg-primary/10 delay-0!">
           <CheckCircle2 className="size-6 text-primary" />
         </div>
-        <h1 className="animate-content font-bold text-2xl delay-0!">Run workflow evidence</h1>
+        <h1 className="animate-content font-bold text-2xl delay-0!">Generate Sandbox evidence</h1>
         <p className="animate-content text-muted-foreground text-sm delay-0!">
-          We are preparing a test customer, assigning the plan version, starting a budgeted workflow
-          run, and checking access.
+          We are preparing a test customer, assigning the plan version, generating synthetic budget
+          evidence, and checking access.
         </p>
       </div>
 
