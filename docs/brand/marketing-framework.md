@@ -103,7 +103,8 @@ One offer everywhere, restated at every conversion point. Long-form owner:
 - Ad-ready compression: "Put a budget and an evidence trail around the expensive action in your
   product — one paid action, one afternoon, free during early access, open source. If the
   decisions never match your reality, delete one line and walk away."
-- Risk reversal: **The walk-away guarantee** (shipped on landing station 05). Shadow is read-only;
+- Risk reversal: **The walk-away guarantee** (shipped inside the landing's closing offer station,
+  08 as of 2026-07-18). Shadow is read-only;
   exit is deleting one line; nothing in the buyer's stack changes. Stated honestly: the only trace
   left behind is the one test customer signed up inside Unprice.
 - Price frame: free is explained, never bare — AGPL core in your own account, hosted cloud free

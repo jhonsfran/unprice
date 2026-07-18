@@ -29,7 +29,7 @@ const ownershipFacts = [
 
 export default function ManifestoOwnership() {
   return (
-    <SectionShell labelledBy="ownership-title" className="bg-surface-panel">
+    <SectionShell labelledBy="ownership-title" surface="panel">
       <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,28rem)] lg:gap-16">
         <div className="flex flex-col items-start">
           <StationHeader index="03" label="Ownership" fact="forkable · runs in your account" />

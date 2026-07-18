@@ -290,6 +290,18 @@
   }
 }
 
+/* Money path, stacked layout: the fork collapses to one outcome column that
+ * follows the live request — the choreography stamps data-mp-outcome on the
+ * stage per pass, so allow and deny swap in place instead of stacking as
+ * "success first, denial below". Desktop keeps both futures side by side;
+ * no-JS and reduced-motion never set the attribute, so both stay visible. */
+@media (max-width: 639px) {
+  [data-mp-outcome="allow"] [data-mp-branch="deny"],
+  [data-mp-outcome="deny"] [data-mp-branch="allow"] {
+    display: none;
+  }
+}
+
 /* Entrance grammar: rows written into the ledger. Content is visible by
  * default — SSR, no-JS, reduced-motion, and above-the-fold all render the
  * final state; reveal.tsx only arms elements that start below the fold. */

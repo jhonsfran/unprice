@@ -56,7 +56,7 @@ export default function HeaderMarketing() {
                 className: "h-9 gap-1.5 whitespace-nowrap px-2.5 text-xs sm:px-3 sm:text-sm",
               })}
             >
-              <span className="sm:hidden">Start free</span>
+              <span className="sm:hidden">Start now</span>
               <span className="hidden sm:inline">Start with one paid action</span>
               <ArrowRight aria-hidden className="size-3.5" />
             </AcquisitionLink>

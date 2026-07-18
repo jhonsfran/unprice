@@ -347,15 +347,34 @@ decoration.
 
 Implemented as a reusable component:
 [`apps/nextjs/src/components/landing/money-path.tsx`](/Users/jhonsfran/repos/unprice/apps/nextjs/src/components/landing/money-path.tsx)
-(`MoneyPath`), currently rendered in the "Built for the request path" section. It is token-driven
-and renders one request traced end to end: receipt-style stations with monospace facts, the budget
-decision framed by the logo's bracket motif, and a literal fork — the allow branch settles and
-explains while the deny branch shows the same stations untouched (no wallet movement, no ledger
-entry, no invoice line). Motion is the sanctioned request-path education: a dot walks the path in
-two alternating passes (denied first, then allowed through to the invoice), lighting each station
-title it touches in the live-request `info` color; it starts only in view and is removed under
-`prefers-reduced-motion`. Reuse this component rather than re-drawing the path; extend it for docs
-and empty states.
+(`MoneyPath`), rendered twice on the landing (2026-07-18): the hero carries `variant="compact"` —
+the gate only — and the full trace is its own proof-floor station (04, `#money-path`,
+`money-path-section.tsx`) that opens the proof floor: the first receipt after the divider promises
+receipts, answering station 01's broken DIY trace. (The business floor runs pain → thesis →
+outcomes — status quo at 01, why at 02, gains at 03 — reordered 2026-07-18: the pain section gives
+the reader tension before the value sections release it.) The full render is
+token-driven and traces one request end to end: receipt-style stations with monospace facts, the
+budget decision as a rail row with bracket ticks around the live balance, and a literal fork — the
+allow branch settles and explains while the deny branch shows the same stations untouched (no
+wallet movement, no ledger entry, no invoice line, no charge). The allow branch terminates at the
+buyer's own payment provider ("Payment · your own Stripe — the money never touches Unprice"): the
+funds boundary is a station, not a footnote. Motion is the sanctioned request-path education: a
+dot walks the path in a three-pass cycle on one shared budget (allow $10.00→$5.90, allow →$1.80,
+then a deny because $1.80 cannot cover $4.10), lighting each station title it touches in the
+live-request `info` color; it starts only in view and is removed under `prefers-reduced-motion`.
+Stacked (below `sm`) the fork collapses to one outcome column that follows the live pass — the
+choreography stamps `data-mp-outcome` on the stage and CSS shows only that branch, so allow and
+deny swap in place; no-JS and reduced-motion keep both branches visible. Reuse this component
+rather than re-drawing the path; extend it for docs and empty states.
+
+The compact hero variant (2026-07-18, from the "two centers of gravity" critique: the full
+diagram's lower accounting competed with the headline): request → price (the one collapsed fact
+the gate consumes, `2,050 tokens × $0.002 = $4.10`) → budget check → the two decision chips, same
+three-pass budget cycle with the reservation landing on the allow chip since there is no wallet
+station. Both chips stay side by side on desktop and reuse the stacked morph below `sm`. Its
+footer is the handoff, not the SDK line: "Allow settles. Deny costs nothing. · follow the full
+path ↓" anchoring to `#money-path`. First contact reads the decision moment in one glance; the
+accounting is one anchor away instead of above the fold.
 
 Companion visual — the system map (2026-07-06): where the money path answers "what happens?",
 the system map answers "where does Unprice sit?" in one glance. Implemented as
@@ -371,13 +390,27 @@ Terminal moment rule (2026-07-06): every money-path render should end in a recei
 terminates in an invoice line with an explain affordance (plan version, pricing rule, ledger
 capture); the deny pass terminates in a denial receipt — the same stations shown untouched: no
 wallet movement, no ledger entry, no invoice line. The receipt is the proof-in-hero moment; a path
-that ends in a checkmark is decoration.
+that ends in a checkmark is decoration. Amendment (2026-07-18): the hero's compact variant is the
+one sanctioned abridgment — it ends at the two decision chips (each a mini-receipt carrying the
+status code and the arithmetic that decided it, never a bare checkmark) plus an anchor to the full
+render at station 04, which carries the receipt the rule demands. An abridged render without that
+handoff still breaks the rule.
 
 Problem sections: render the pain as artifacts. Show the DIY stack as literal, recognizable
 artifacts — a support ticket asking "why was I charged?", a Slack thread pulling an engineer into
 invoice forensics, a cron route like `/api/cron/reset-usage`, a Redis counter snippet — then show
 the money path replacing them. This is the render-state-literally principle applied to the
 problem, not just the product. Keep artifacts plausible and calm; no fear adjectives.
+
+Gains sections: render the outcomes as artifacts too (2026-07-18, station 03). Each claim is shown
+as the state specimen it produces — a plan sheet carrying four pricing models at once, version
+pins with a ghost "migration · none ran" row, station 01's dispute ticket inverted (closed same
+day, answered by the line's own receipt, "assigned · no one"), and a deny landing in the builder's
+product as their upgrade prompt. The rule that keeps a specimen grid off the identical-card ban:
+every interior uses a different grammar (rate sheet / pin ledger / ticket / response-into-app),
+titles stay in the ledger-row grammar above each panel, and all specimens share the page's one
+fictional universe (pro@v3 at $0.002/token, the $4.10 request, acme-corp, ticket numbers in
+sequence) so cross-section callbacks compound instead of multiplying examples.
 
 Hero copy compression: the subheadline is one loss-framed sentence plus the category frame. Noun
 enumerations (versioned plans, separate entitlements, budgets, evidence) belong in the first
@@ -434,24 +467,19 @@ carries the arrival) — demo motion answers input, so it must stay under a quar
 Guardrail limits are demo-scale so the deny is reachable in a few clicks. Headlines never mutate
 with demo state — state lives on the receipt.
 
-Recommended hero concept:
+Shipped hero (2026-07-18) — the reference for future hero work:
 
-```mermaid
-flowchart LR
-  App["App request"] --> Unprice["Unprice runtime"]
-  Unprice --> Version["plan version"]
-  Version --> Budget["authorization check"]
-  Budget --> Decision["allow / deny before it runs"]
-  Unprice --> Evidence["usage + spend evidence"]
-  Evidence --> Invoice["invoice line"]
-```
-
-Recommended hero copy:
-
-- Headline: Authorize customer spend before paid work runs.
-- Subheadline: Open-source money path for usage-based SaaS. Keep plans versioned, entitlements
-  separate, customer budgets in the request path, and invoice evidence tied to the same decision
-  that allowed or denied the work.
+- Headline: "Sell credits and usage. Keep the margin." — two-tone: the business model in the text
+  step, the money gain in ink.
+- Subheadline, exactly one sentence (the compression rule above): "Approve or deny every paid
+  action against plan, credits, and budget — before usage becomes cost."
+- No eyebrow. The mechanism line the eyebrow used to carry ("denied before it costs you") is now
+  demonstrated literally by the compact money path beside the copy.
+- Visual: `MoneyPath variant="compact"` in the one lifted panel — the decision moment only.
+- Trust block: one dominant claim in ink ("Settles to your own Stripe — the money never touches
+  Unprice.") over one mono metadata line ("AGPL-3.0 open source · two calls to integrate ·
+  shadow-first"); the offer terms ("free during early access · no card at signup") ride the CTA
+  row as microcopy. One signal dominates; the rest stay metadata — four equal facts read as none.
 
 Hero copy should make the brand/product explicit. Prefer product screenshots, generated product
 scenes, or request-path visuals over generic SaaS illustrations.

@@ -37,6 +37,11 @@ const faqs: FaqItem[] = [
       "No. Your app asks Unprice before paid work runs and gets an allow or deny with evidence attached. Your payment provider captures the payment — Stripe today, in your own account. Unprice owns the decision, the ledger, and the evidence; it never sits in your funds flow.",
   },
   {
+    question: "What does my customer see when a request is denied?",
+    answer:
+      "Whatever you decide — the deny is an answer, not an outage. Your app receives an explicit deny with a machine-readable reason (over limit, plan expired, no entitlement) before any cost is created, so it can show the customer why and offer the upgrade path instead of failing silently. Every deny is recorded with its evidence, so you can see who keeps hitting limits and treat denials as upgrade conversations, not support tickets.",
+  },
+  {
     question: "What does the check add to my request latency?",
     answer:
       "One authorization request. A warm check is a cached read plus one Durable Object read; invoicing, analytics, and the ledger ride queues off the request path — never inside it. Numbers depend on where your traffic runs, so the repo ships a k6 harness instead of a marketing claim: point it at your own deployment and read the percentiles.",
@@ -84,13 +89,13 @@ const faqJsonLd = {
 
 export function FaqSection() {
   return (
-    <SectionShell labelledBy="faq-title">
+    <SectionShell labelledBy="faq-title" surface="panel">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }}
       />
       <div className="flex flex-col items-start">
-        <StationHeader index="05" label="The questions" fact="short answers · receipts attached" />
+        <StationHeader index="07" label="The questions" fact="short answers · receipts attached" />
         <h2
           id="faq-title"
           className="mt-6 max-w-2xl font-primary text-background-textContrast text-display-3"

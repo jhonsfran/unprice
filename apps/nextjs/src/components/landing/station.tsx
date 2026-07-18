@@ -15,19 +15,29 @@ export function SectionShell({
   labelledBy,
   className,
   innerClassName,
+  surface = "page",
   children,
 }: {
   id?: string
   labelledBy: string
   className?: string
   innerClassName?: string
+  /** Banded sections sit on the panel surface (the manifesto's alternating
+   * band). The registration ticks must match the section surface or they
+   * read as patches where they mask the rail crossing. */
+  surface?: "page" | "panel"
   children: ReactNode
 }) {
+  const tickBg = surface === "panel" ? "bg-surface-panel" : "bg-surface-page"
   return (
     <section
       id={id}
       aria-labelledby={labelledBy}
-      className={cn("w-full border-background-border border-t", className)}
+      className={cn(
+        "w-full border-background-border border-t",
+        surface === "panel" && "bg-surface-panel",
+        className
+      )}
     >
       {/* The content column carries hairline rails, so stacked sections read
           as cells of one continuous ledger sheet. The + ticks are
@@ -40,13 +50,19 @@ export function SectionShell({
       >
         <span
           aria-hidden
-          className="-top-[7px] -left-[4.5px] absolute hidden select-none bg-surface-page font-mono text-[11px] text-background-border leading-none lg:block"
+          className={cn(
+            "-top-[7px] -left-[4.5px] absolute hidden select-none font-mono text-[11px] text-background-border leading-none lg:block",
+            tickBg
+          )}
         >
           +
         </span>
         <span
           aria-hidden
-          className="-top-[7px] -right-[4.5px] absolute hidden select-none bg-surface-page font-mono text-[11px] text-background-border leading-none lg:block"
+          className={cn(
+            "-top-[7px] -right-[4.5px] absolute hidden select-none font-mono text-[11px] text-background-border leading-none lg:block",
+            tickBg
+          )}
         >
           +
         </span>

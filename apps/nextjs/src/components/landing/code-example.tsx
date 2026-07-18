@@ -11,10 +11,10 @@ import { StationHeader } from "./station-header"
 
 export default function CodeExample() {
   return (
-    <SectionShell labelledBy="code-example-title">
+    <SectionShell labelledBy="code-example-title" surface="panel">
       <div className="flex flex-col items-start">
         <StationHeader
-          index="03"
+          index="05"
           label="First integration"
           fact="two calls to gate · three to bill · four to cap"
         />
@@ -28,12 +28,12 @@ export default function CodeExample() {
           <code className="rounded-sm bg-background-bg px-1 py-px font-mono text-[13px] text-background-textContrast">
             customers.signUp
           </code>{" "}
-          once, at your own signup — it returns the customerId you store — then{" "}
+          once, at your own signup, then{" "}
           <code className="rounded-sm bg-background-bg px-1 py-px font-mono text-[13px] text-background-textContrast">
             access.check
           </code>{" "}
-          in front of the paid action on every request. One more call meters what ran. One more puts
-          a budget around a whole job or agent. Nothing has to block production traffic on day one.
+          in front of the paid action. One more call meters what ran; one more caps a whole job or
+          agent. Nothing blocks on day one.
         </p>
       </div>
 

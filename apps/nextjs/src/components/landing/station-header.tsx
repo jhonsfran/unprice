@@ -44,10 +44,13 @@ export function StationHeader({
 
   return (
     <div ref={ref} className="flex items-baseline gap-2.5">
+      {/* Section titles are the page's table of contents — sized to be read,
+          not decoded (management feedback 2026-07: the blue titles were too
+          small to structure the page). */}
       <span
         aria-hidden
         className={cn(
-          "size-[9px] shrink-0 self-center rounded-full transition-colors duration-regular ease-out-quad",
+          "size-[11px] shrink-0 self-center rounded-full transition-colors duration-regular ease-out-quad",
           lit
             ? "border border-info bg-info ring-2 ring-info-bg"
             : "border border-background-borderHover bg-surface-page"
@@ -56,7 +59,7 @@ export function StationHeader({
       {index ? (
         <span
           className={cn(
-            "whitespace-nowrap font-mono text-xs tabular-nums tracking-widest transition-colors duration-regular ease-out-quad",
+            "whitespace-nowrap font-mono text-sm tabular-nums tracking-widest transition-colors duration-regular ease-out-quad",
             lit ? "text-info-text" : "text-background-text"
           )}
         >
@@ -65,7 +68,7 @@ export function StationHeader({
       ) : null}
       <span
         className={cn(
-          "whitespace-nowrap font-mono text-xs uppercase tracking-widest transition-colors duration-regular ease-out-quad",
+          "whitespace-nowrap font-mono text-sm uppercase tracking-widest transition-colors duration-regular ease-out-quad",
           lit ? "text-info-text" : "text-background-text"
         )}
       >

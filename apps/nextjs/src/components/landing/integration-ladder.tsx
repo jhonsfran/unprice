@@ -152,7 +152,9 @@ export function IntegrationLadder() {
       aria-label="The integration ladder: step one signs up a customer to a plan and checks access before the paid action runs; step two records usage after the work so the invoice explains itself; step three reserves a budget for a whole run and consumes it step by step until the budget is spent."
       className="mt-12 max-w-3xl"
     >
-      <div className="rounded-lg border border-background-border bg-surface-panel shadow-ambient">
+      {/* The section sits on the panel band, so the ladder lifts one tier
+          higher — a panel on a panel disappears. */}
+      <div className="rounded-lg border border-background-border bg-surface-raised shadow-ambient">
         <div className="flex items-center justify-between gap-4 border-background-border border-b px-4 py-2 sm:px-5">
           <div
             role="tablist"

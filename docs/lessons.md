@@ -570,6 +570,11 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 
 ## UI And Dashboard
 - Tailwind v3 + Radix var tokens: opacity modifiers like bg-success-bg/40 don't reliably apply alpha (tokens are var(--…) strings). For emphasis ramps use Radix steps: bg → bgHover → bgActive.
+- 2026-07-15: When WAAPI choreography must react to layout that differs per state (MoneyPath's
+  stacked one-outcome column), stamp the state as a data attribute on the stage synchronously in
+  the same tick before measuring waypoints — React state set in the same function re-renders too
+  late for `getBoundingClientRect`. Keep both branches in the DOM (globals.css hides the inactive
+  one below `sm`) so no-JS and reduced-motion still render the full fork.
 - 2026-06-13: `@unprice/ui/checkbox` wraps Radix Checkbox and renders a button; do not nest it
   inside another button in filter rows or table actions, because React/Next will hydration-fail on
   invalid button descendants.
@@ -724,3 +729,10 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   user before launching an additional server.
 - 2026-07-12: Run biome via `./node_modules/.bin/biome` — `npx biome` fetches a mismatched
   version that dies OOM. The repo pin lives in node_modules.
+- 2026-07-13: Landing "Reveal"-wrapped content renders opacity-0 in Playwright fullPage
+  screenshots (IO never fires in stitched captures) and very tall fullPage shots can duplicate
+  the first viewport at the bottom; verify with stepped real scrolling + per-section viewport
+  shots instead.
+- 2026-07-13: A `curl --max-time 5` timeout against :3000 does not mean the port is free — the
+  user's dev server may be cold-compiling. If `next dev` reports "Port 3000 in use, trying
+  3001", the :3000 owner is another server; verify against the one serving the working tree.

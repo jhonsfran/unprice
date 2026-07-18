@@ -11,7 +11,7 @@ import { StationHeader } from "./station-header"
 const stages = [
   {
     title: "Shadow",
-    body: "Run the decision beside the logic you already trust. Compare answers in without changing behavior.",
+    body: "Run the decision beside the logic you already trust. Compare answers without changing behavior.",
     facts: [
       { label: "runs", fact: "access.check" },
       { label: "mutates", fact: "nothing · read-only" },
@@ -42,7 +42,7 @@ export function AdoptionSection() {
   return (
     <SectionShell labelledBy="adoption-title">
       <div className="flex flex-col items-start">
-        <StationHeader index="04" label="Adoption path" fact="shadow → sandbox → live" />
+        <StationHeader index="06" label="Adoption path" fact="shadow → sandbox → live" />
         <h2
           id="adoption-title"
           className="mt-6 max-w-2xl font-primary text-background-textContrast text-display-3"
