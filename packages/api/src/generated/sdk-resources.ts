@@ -11,7 +11,6 @@ export const sdkOperationIds = [
   "access.entitlements.list",
   "access.update",
   "analytics.charges.explain",
-  "analytics.usage.forecast",
   "analytics.usage.get",
   "customers.signUp",
   "features.list",
@@ -68,9 +67,6 @@ export type GeneratedSdkResources = {
       ) => Promise<ApiResult<OperationResponse<"analytics.charges.explain">>>
     }
     usage: {
-      forecast: (
-        req: OperationInput<"analytics.usage.forecast">
-      ) => Promise<ApiResult<OperationResponse<"analytics.usage.forecast">>>
       get: (
         req: OperationInput<"analytics.usage.get">
       ) => Promise<ApiResult<OperationResponse<"analytics.usage.get">>>
@@ -165,7 +161,6 @@ export function createGeneratedSdkResources(
         explain: (body) => toResult(openapi.POST("/v1/analytics/charges/explain", { body })),
       },
       usage: {
-        forecast: (body) => toResult(openapi.POST("/v1/analytics/usage/forecast", { body })),
         get: (body) => toResult(openapi.POST("/v1/analytics/usage/get", { body })),
       },
     },

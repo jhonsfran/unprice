@@ -106,14 +106,6 @@ type _ExplainChargeOptionalDefaultsInputCheck = AssertAssignable<
   OperationInput<"analytics.charges.explain">
 >
 
-type _ForecastUsageOptionalDefaultsInputCheck = AssertAssignable<
-  {
-    customer_id: string
-    feature_slug: string
-  },
-  OperationInput<"analytics.usage.forecast">
->
-
 type _IngestionStatusOptionalDefaultsInputCheck = AssertAssignable<
   {
     from_ts: number

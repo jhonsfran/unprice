@@ -27,9 +27,6 @@ describe("Unprice client", () => {
     expectTypeOf(client.analytics.charges.explain)
       .parameter(0)
       .toEqualTypeOf<OperationInput<"analytics.charges.explain">>()
-    expectTypeOf(client.analytics.usage.forecast)
-      .parameter(0)
-      .toEqualTypeOf<OperationInput<"analytics.usage.forecast">>()
     expectTypeOf(client.analytics.usage.get)
       .parameter(0)
       .toEqualTypeOf<OperationInput<"analytics.usage.get">>()
@@ -46,15 +43,6 @@ describe("Unprice client", () => {
       invoice_id: string
       entry_id: string
     }>().toMatchTypeOf<OperationInput<"analytics.charges.explain">>()
-    expectTypeOf<{
-      customer_id: string
-      feature_slug: string
-      horizon_days: number
-    }>().toMatchTypeOf<OperationInput<"analytics.usage.forecast">>()
-    expectTypeOf<{
-      customer_id: string
-      feature_slug: string
-    }>().toMatchTypeOf<OperationInput<"analytics.usage.forecast">>()
     expectTypeOf<{
       from_ts: number
       to_ts: number
@@ -81,7 +69,6 @@ describe("Unprice client", () => {
     expect(typeof client.paymentMethods.create).toBe("function")
     expect(typeof client.paymentMethods.list).toBe("function")
     expect(typeof client.analytics.charges.explain).toBe("function")
-    expect(typeof client.analytics.usage.forecast).toBe("function")
     expect(typeof client.analytics.usage.get).toBe("function")
     expect(typeof client.ingestionEvents.status).toBe("function")
     expect(typeof client.ingestionEvents.replay).toBe("function")

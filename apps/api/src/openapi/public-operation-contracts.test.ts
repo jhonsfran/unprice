@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import { route as accessUpdateRoute } from "~/routes/access/updateACLV1"
 import { route as analyticsChargesExplainRoute } from "~/routes/analytics/explainChargeV1"
-import { route as analyticsUsageForecastRoute } from "~/routes/analytics/forecastUsageV1"
 import { route as ingestionEventsStatusRoute } from "~/routes/analytics/getIngestionStatusV1"
 import { route as analyticsUsageRoute } from "~/routes/analytics/getUsageV1"
 import { route as billingReservationsFlushForInvoicingRoute } from "~/routes/billing/flushReservationsForInvoicingV1"
@@ -68,7 +67,6 @@ const routes = [
   invoicesGetRoute,
   analyticsUsageRoute,
   analyticsChargesExplainRoute,
-  analyticsUsageForecastRoute,
   ingestionEventsStatusRoute,
   ingestionEventsReplayRoute,
   entitlementWindowsStatusRoute,
@@ -102,7 +100,6 @@ const expectedRoutes = new Map<string, string>([
   ["invoices.get", "GET /v1/invoices/get/{invoiceId}"],
   ["analytics.usage.get", "POST /v1/analytics/usage/get"],
   ["analytics.charges.explain", "POST /v1/analytics/charges/explain"],
-  ["analytics.usage.forecast", "POST /v1/analytics/usage/forecast"],
   ["ingestionEvents.status", "POST /v1/ingestion-events/status"],
   ["ingestionEvents.replay", "POST /v1/ingestion-events/replay"],
   ["entitlementWindows.status", "GET /v1/internal/entitlement-windows/status"],
@@ -150,7 +147,6 @@ const expectedSdkPublicOperations = [
   "invoices.get",
   "analytics.usage.get",
   "analytics.charges.explain",
-  "analytics.usage.forecast",
   "ingestionEvents.status",
   "ingestionEvents.replay",
 ].sort()
