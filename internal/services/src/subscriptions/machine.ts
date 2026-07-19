@@ -557,10 +557,6 @@ export class SubscriptionMachine {
               target: "past_due",
               actions: "logStateTransition",
             },
-            CANCEL: {
-              target: "canceling",
-              actions: "logStateTransition",
-            },
           },
         },
         invoicing: {
@@ -711,10 +707,6 @@ export class SubscriptionMachine {
               target: "activating",
               actions: "logStateTransition",
             },
-            CANCEL: {
-              target: "canceling",
-              actions: "logStateTransition",
-            },
           },
         },
         active: {
@@ -723,14 +715,6 @@ export class SubscriptionMachine {
           on: {
             ACTIVATE: {
               target: "activating",
-              actions: "logStateTransition",
-            },
-            CANCEL: {
-              target: "canceling",
-              actions: "logStateTransition",
-            },
-            CHANGE: {
-              target: "changing",
               actions: "logStateTransition",
             },
             // if the subscription is on advance billing and can be renewed, renew the subscription
@@ -950,19 +934,6 @@ export class SubscriptionMachine {
               },
             ],
           },
-        },
-        // TODO: implement the rest of the states as they become relevant
-        canceling: {
-          tags: ["machine", "transition"],
-          description: "Canceling the subscription, update billing dates",
-        },
-        changing: {
-          tags: ["machine", "transition"],
-          description: "Changing the subscription, update billing dates",
-        },
-        expiring: {
-          tags: ["machine", "transition"],
-          description: "Subscription expired, no more payments will be made",
         },
         canceled: {
           tags: ["subscription", "final"],

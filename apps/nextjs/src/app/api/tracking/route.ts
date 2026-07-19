@@ -9,6 +9,7 @@ import { env } from "~/env"
 import { detectBot, getDomainWithoutWWW } from "~/lib/domains"
 import { LOCALHOST_GEO_DATA, LOCALHOST_IP } from "~/lib/localhost"
 import { getRequestLoggers, withEvlog } from "~/lib/observability"
+import { checkTrackingRateLimit } from "~/lib/tracking-rate-limit"
 import { setCorsHeaders } from "../_enableCors"
 
 export const runtime = "edge"
@@ -114,12 +115,13 @@ const trackPageHit = async (
 
 const bodySchema = z.object({
   action: z.enum(["page_hit", "plan_click"]),
-  session_id: z.string(),
-  project_id: z.string(),
-  payload: z.string(),
+  session_id: z.string().min(1).max(128),
+  project_id: z.string().min(1).max(64),
+  payload: z.string().max(8_192),
 })
 
-// TODO: protect this route with a credentials/rate-limit to prevent abuse
+const MAX_TRACKING_BODY_BYTES = 16_384
+
 export const POST = withEvlog(async (req: NextRequest) => {
   const requestId =
     req.headers.get("unprice-request-id") ||
@@ -133,7 +135,19 @@ export const POST = withEvlog(async (req: NextRequest) => {
     return new Response(JSON.stringify({ error: "Invalid method" }), { status: 400 })
   }
 
-  const body = await req.json()
+  const contentLength = Number(req.headers.get("content-length") ?? 0)
+  if (contentLength > MAX_TRACKING_BODY_BYTES) {
+    const response = new Response(JSON.stringify({ error: "Payload too large" }), { status: 413 })
+    setCorsHeaders(response, req.headers.get("origin"))
+    return response
+  }
+
+  let body: unknown
+  try {
+    body = await req.json()
+  } catch {
+    return new Response(JSON.stringify({ error: "Invalid JSON body" }), { status: 400 })
+  }
 
   const parsedBody = bodySchema.safeParse(body)
 
@@ -141,7 +155,23 @@ export const POST = withEvlog(async (req: NextRequest) => {
     return new Response(JSON.stringify({ error: parsedBody.error.message }), { status: 400 })
   }
 
-  const payload = JSON.parse(parsedBody.data.payload)
+  const rateLimit = await checkTrackingRateLimit({ req, action: parsedBody.data.action })
+  if (rateLimit.limited) {
+    const response = new Response(JSON.stringify({ error: "Too many requests" }), {
+      status: 429,
+      headers: { "Retry-After": String(rateLimit.retryAfterSeconds) },
+    })
+    setCorsHeaders(response, req.headers.get("origin"))
+    return response
+  }
+
+  // biome-ignore lint/suspicious/noExplicitAny: shape is validated downstream by schemaPageHit/schemaPlanClick
+  let payload: any
+  try {
+    payload = JSON.parse(parsedBody.data.payload)
+  } catch {
+    return new Response(JSON.stringify({ error: "Invalid payload JSON" }), { status: 400 })
+  }
 
   switch (parsedBody.data.action) {
     case "page_hit": {

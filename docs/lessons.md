@@ -425,6 +425,8 @@ patterns. Keep it cheap to load and useful.
   history.
 - 2026-05-06: Wallet bigint amounts are ledger-scale minor units; pgledger views are decimals.
 - 2026-05-06: `creditLineAmount` is period usage allowance, not plan fee or creditworthiness.
+- 2026-07-19: Billing activation grant derivation must receive the machine's current phase ID;
+  never select an unordered subscription phase when renewals or plan changes can retain old phases.
 - 2026-05-17: Public signup `creditLineAmountMinor` is currency minor units; convert to
   ledger-scale before saving subscription phases or customer sessions.
 - 2026-05-06: Arrears plans can derive allowance from finite priced usage limits; unlimited paid

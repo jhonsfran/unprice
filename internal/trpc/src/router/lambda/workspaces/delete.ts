@@ -3,6 +3,7 @@ import { workspaceSelectBase } from "@unprice/db/validators"
 import { z } from "zod"
 
 import { protectedWorkspaceProcedure } from "#trpc"
+import { signOutCustomer } from "#utils/shared"
 
 export const deleteWorkspace = protectedWorkspaceProcedure
   .input(workspaceSelectBase.pick({ id: true }))
@@ -10,7 +11,7 @@ export const deleteWorkspace = protectedWorkspaceProcedure
   .mutation(async (opts) => {
     const { id } = opts.input
     const workspace = opts.ctx.workspace
-    const { customers, projects, workspaces } = opts.ctx.services
+    const { projects, workspaces } = opts.ctx.services
 
     opts.ctx.verifyRole(["OWNER"])
 
@@ -51,22 +52,18 @@ export const deleteWorkspace = protectedWorkspaceProcedure
       })
     }
 
-    const { err: signOutErr, val: signOutResult } = await customers.signOut({
-      customerId: workspace.unPriceCustomerId,
-      projectId: mainProject.id,
+    const signOutResult = await signOutCustomer({
+      input: {
+        customerId: workspace.unPriceCustomerId,
+        projectId: mainProject.id,
+      },
+      ctx: opts.ctx,
     })
 
-    if (signOutErr) {
+    if (!signOutResult.success) {
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
-        message: signOutErr.message,
-      })
-    }
-
-    if (!signOutResult?.success) {
-      throw new TRPCError({
-        code: "INTERNAL_SERVER_ERROR",
-        message: signOutResult?.message ?? "Error signing out customer",
+        message: signOutResult.message ?? "Error signing out customer",
       })
     }
 

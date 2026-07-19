@@ -114,7 +114,6 @@ function createEntitlementService(db: unknown): EntitlementService {
     waitUntil: vi.fn(),
     cache: {
       accessControlList: {},
-      getCurrentUsage: {},
     } as never,
     metrics: {} as never,
     customerService: {} as never,
@@ -122,3 +121,79 @@ function createEntitlementService(db: unknown): EntitlementService {
     billingService: {} as never,
   })
 }
+
+describe("EntitlementService access control list", () => {
+  function createAclService({
+    customerRow,
+    subscriptionRow,
+  }: {
+    customerRow: { active: boolean; metadata: { usageLimitReached?: boolean } | null } | null
+    subscriptionRow: { status: string } | null
+  }) {
+    const limit = vi
+      .fn()
+      .mockResolvedValueOnce(customerRow ? [customerRow] : [])
+      .mockResolvedValueOnce(subscriptionRow ? [subscriptionRow] : [])
+    const where = vi.fn().mockReturnValue({ limit })
+    const from = vi.fn().mockReturnValue({ where })
+    const select = vi.fn().mockReturnValue({ from })
+
+    const cache = {
+      accessControlList: {
+        swr: vi.fn().mockImplementation(async (key: string, loader: (key: string) => unknown) => ({
+          val: await loader(key),
+        })),
+      },
+    }
+
+    const service = new EntitlementService({
+      db: { select } as never,
+      logger: { error: vi.fn(), set: vi.fn(), warn: vi.fn() } as never,
+      analytics: {} as never,
+      waitUntil: vi.fn(),
+      cache: cache as never,
+      metrics: {} as never,
+      customerService: {} as never,
+      grantsManager: {} as never,
+      billingService: {} as never,
+    })
+
+    return { service }
+  }
+
+  it("reads the durable usage-limit flag from customer metadata on rebuild", async () => {
+    const { service } = createAclService({
+      customerRow: { active: true, metadata: { usageLimitReached: true } },
+      subscriptionRow: { status: "active" },
+    })
+
+    const acl = await service.getAccessControlList({
+      customerId: "cus_123",
+      projectId: "proj_123",
+    })
+
+    expect(acl).toEqual({
+      customerUsageLimitReached: true,
+      customerDisabled: false,
+      subscriptionStatus: "active",
+    })
+  })
+
+  it("defaults the usage-limit flag to false when metadata has no flag", async () => {
+    const { service } = createAclService({
+      customerRow: { active: false, metadata: null },
+      subscriptionRow: null,
+    })
+
+    const acl = await service.getAccessControlList({
+      customerId: "cus_123",
+      projectId: "proj_123",
+    })
+
+    expect(acl).toEqual({
+      customerUsageLimitReached: false,
+      customerDisabled: true,
+      subscriptionStatus: null,
+    })
+  })
+})

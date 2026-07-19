@@ -1149,6 +1149,28 @@ export class CustomerService {
     projectId: string
     updates: Partial<NonNullable<CacheNamespaces["accessControlList"]>>
   }): Promise<void> {
+    // Persist the usage-limit flag on the customer row before touching the
+    // cache — the ACL rebuild reads it from there, so a cache-only write
+    // would be silently reset on the next rebuild. Read-modify-write on the
+    // json column matches how the rest of the codebase updates metadata.
+    if (typeof params.updates.customerUsageLimitReached === "boolean") {
+      const [customer] = await this.db
+        .select({ metadata: customers.metadata })
+        .from(customers)
+        .where(and(eq(customers.id, params.customerId), eq(customers.projectId, params.projectId)))
+        .limit(1)
+
+      await this.db
+        .update(customers)
+        .set({
+          metadata: {
+            ...(customer?.metadata ?? {}),
+            usageLimitReached: params.updates.customerUsageLimitReached,
+          },
+        })
+        .where(and(eq(customers.id, params.customerId), eq(customers.projectId, params.projectId)))
+    }
+
     const cacheKey = `${params.projectId}:${params.customerId}`
     const { val: currentAcl } = await this.cache.accessControlList.get(cacheKey)
 
@@ -1436,64 +1458,33 @@ export class CustomerService {
     return Ok(val)
   }
 
-  // TODO: to implement
-  // signout means cancel all subscriptions and deactivate the customer
-  // cancel all entitlements
-  public async signOut(opts: {
+  /**
+   * Deactivate the customer row and drop its cached ACL so the next access
+   * check sees the disabled status. Subscription cancellation is orchestrated
+   * by the signOutCustomer use case — call this only once the customer has no
+   * active subscriptions left.
+   */
+  public async deactivate(opts: {
     customerId: string
     projectId: string
-  }): Promise<Result<{ success: boolean; message?: string }, UnPriceCustomerError | FetchError>> {
+  }): Promise<Result<{ success: boolean }, FetchError>> {
     const { customerId, projectId } = opts
 
-    // cancel all subscriptions
-    const customerSubs = await this.db.query.subscriptions.findMany({
-      where: (subscription, { eq, and }) =>
-        and(eq(subscription.customerId, customerId), eq(subscription.projectId, projectId)),
-    })
-
-    // all this should be in a transaction
-    await this.db.transaction(async (tx) => {
-      const cancelSubs = await Promise.all(
-        customerSubs.map(async () => {
-          // TODO: cancel the subscription
-          return true
-        })
-      )
-        .catch((err) => {
-          return Err(
-            new FetchError({
-              message: err.message,
-              retry: false,
-            })
-          )
-        })
-        .then(() => true)
-
-      if (!cancelSubs) {
-        return Err(
-          new UnPriceCustomerError({
-            code: "SUBSCRIPTION_NOT_CANCELED",
-            message: "Error canceling subscription",
-          })
-        )
-      }
-
-      // Deactivate the customer
-      await tx
+    try {
+      await this.db
         .update(customers)
         .set({
           active: false,
         })
-        .where(eq(customers.id, customerId))
-        .catch((err) => {
-          return Err(
-            new FetchError({
-              message: err.message,
-              retry: false,
-            })
-          )
+        .where(and(eq(customers.id, customerId), eq(customers.projectId, projectId)))
+    } catch (err) {
+      return Err(
+        new FetchError({
+          message: err instanceof Error ? err.message : String(err),
+          retry: false,
         })
-    })
+      )
+    }
 
     // Invalidate the ACL cache so the next request fetches the disabled status
     await this.invalidateAccessControlList(customerId, projectId)

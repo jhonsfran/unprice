@@ -46,6 +46,9 @@ export interface InvoiceStatementLine {
   kind: string
   description: string | null
   quantity: number | null
+  servicePeriodStartAt: number | null
+  servicePeriodEndAt: number | null
+  prorationFactor: number | null
   amount: number
   amountDue: number
   amountIncluded: number
@@ -67,6 +70,7 @@ type BillingPeriodStatementRow = {
   type: "normal" | "trial"
   invoiceAt: number
   cycleStartAt: number
+  cycleEndAt: number
   subscriptionItem: {
     id: string
     units: number | null
@@ -133,6 +137,11 @@ function providerInvoiceItemKey(metadata: Record<string, unknown> | undefined): 
 function readMetadataString(metadata: Record<string, unknown>, key: string): string | null {
   const value = metadata[key]
   return typeof value === "string" && value.length > 0 ? value : null
+}
+
+function readMetadataNumber(metadata: Record<string, unknown>, key: string): number | null {
+  const value = metadata[key]
+  return typeof value === "number" && Number.isFinite(value) ? value : null
 }
 
 function invoiceLineGroupKey(line: InvoiceStatementLine): string {
@@ -2022,7 +2031,7 @@ export class BillingService {
                 interval: itemBillingConfig.billingInterval,
                 intervalCount: itemBillingConfig.billingIntervalCount,
                 planType: itemBillingConfig.planType,
-                anchor: phase.billingAnchor,
+                anchor: itemBillingConfig.billingAnchor ?? phase.billingAnchor,
               },
               count: 0,
             })
@@ -2183,6 +2192,9 @@ export class BillingService {
           kind: period.type === "trial" ? "trial" : "period",
           description: period.subscriptionItem.featurePlanVersion.feature.title,
           quantity: period.subscriptionItem.units ?? 0,
+          servicePeriodStartAt: period.cycleStartAt,
+          servicePeriodEndAt: period.cycleEndAt,
+          prorationFactor: null,
           amount: 0,
           amountDue: 0,
           amountIncluded: 0,
@@ -2217,6 +2229,12 @@ export class BillingService {
           (period?.subscriptionItem.featurePlanVersion.featureType === "usage"
             ? null
             : (period?.subscriptionItem.units ?? null)),
+        servicePeriodStartAt:
+          period?.cycleStartAt ??
+          (metadata ? readMetadataNumber(metadata, "cycle_start_at") : null),
+        servicePeriodEndAt:
+          period?.cycleEndAt ?? (metadata ? readMetadataNumber(metadata, "cycle_end_at") : null),
+        prorationFactor: metadata ? readMetadataNumber(metadata, "proration_factor") : null,
         amount: toLedgerMinor(line.amount),
         amountDue: line.amountDue,
         amountIncluded: line.amountIncluded,
@@ -2277,18 +2295,26 @@ export class BillingService {
 
     if (!invoice || invoice.status !== "paid") return 0
 
+    const prorationBillingConfig = {
+      ...billingConfig,
+      billingAnchor:
+        billingConfig.billingAnchor === "dayOfCreation"
+          ? billingConfig.billingAnchor
+          : billingAnchor,
+    }
+
     // Compute old (full period) and new (shortened) proration factors.
     const originalProration = calculateProration({
       serviceStart: period.cycleStartAt,
       serviceEnd: period.cycleEndAt,
       effectiveStartDate: phaseStartAt,
-      billingConfig: { ...billingConfig, billingAnchor },
+      billingConfig: prorationBillingConfig,
     })
     const newProration = calculateProration({
       serviceStart: period.cycleStartAt,
       serviceEnd: phaseEndAt,
       effectiveStartDate: phaseStartAt,
-      billingConfig: { ...billingConfig, billingAnchor },
+      billingConfig: prorationBillingConfig,
     })
 
     const oldFactor = originalProration.prorationFactor

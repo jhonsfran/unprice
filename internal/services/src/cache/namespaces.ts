@@ -8,7 +8,6 @@ import type {
 import type { budgetRuns } from "@unprice/db/schema"
 import type {
   ApiKeyExtended,
-  CurrentUsage,
   Customer,
   CustomerPaymentMethod,
   Feature,
@@ -69,7 +68,6 @@ export type CacheNamespaces = {
   getOverviewStats: Stats | null
   getUsage: Usage | null
   getUsageDashboard: GetUsageDashboardOutput | null
-  getCurrentUsage: CurrentUsage | null
   ingestionPreparedGrantContext: PreparedCustomerGrantContext
 }
 

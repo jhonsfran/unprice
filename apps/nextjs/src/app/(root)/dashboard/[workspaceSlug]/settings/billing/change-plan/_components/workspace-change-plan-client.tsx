@@ -325,6 +325,7 @@ function PlanChangeConfirmationDialog({
                 <div className="flex flex-col gap-3">
                   <p>{paymentMethodPrompt.message}</p>
                   <PaymentMethodButton
+                    variant={"info"}
                     customerId={customerId}
                     successUrl={currentUrl}
                     cancelUrl={currentUrl}

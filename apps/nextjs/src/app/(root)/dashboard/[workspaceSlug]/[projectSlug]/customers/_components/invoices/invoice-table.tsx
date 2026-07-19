@@ -10,6 +10,11 @@ import { ExplainChargeSheet } from "./explain-charge-sheet"
 
 type InvoiceLine = RouterOutputs["customers"]["getInvoiceById"]["invoice"]["lines"][number]
 
+const prorationFormatter = new Intl.NumberFormat(undefined, {
+  maximumFractionDigits: 2,
+  style: "percent",
+})
+
 const getLineStatus = (line: InvoiceLine) => {
   if (line.amount === 0 && !line.collectable) {
     return "No charge"
@@ -82,17 +87,45 @@ export function InvoiceTable({
             ) : (
               invoice.lines.map((line) => (
                 <TableRow key={line.entryId}>
-                  <TableCell className="space-y-2">
-                    <Typography variant="h6" affects="removePaddingMargin">
-                      {line.description ?? line.kind}
-                    </Typography>
-                    <span className="block font-light font-mono text-muted-foreground text-xs tabular-nums">
-                      {formatDate(
-                        new Date(line.createdAt).getTime(),
-                        invoice.subscription.timezone,
-                        "MMMM d, yyyy hh:mm a"
+                  <TableCell>
+                    <div className="flex flex-col gap-2">
+                      <Typography variant="h6" affects="removePaddingMargin">
+                        {line.description ?? line.kind}
+                      </Typography>
+                      {line.servicePeriodStartAt !== null && line.servicePeriodEndAt !== null ? (
+                        <div className="flex flex-col gap-1 font-light font-mono text-muted-foreground text-xs tabular-nums">
+                          <span>
+                            Service period{" "}
+                            {formatDate(
+                              line.servicePeriodStartAt,
+                              invoice.subscription.timezone,
+                              "MMM d, yyyy hh:mm a"
+                            )}{" "}
+                            –{" "}
+                            {formatDate(
+                              line.servicePeriodEndAt,
+                              invoice.subscription.timezone,
+                              "MMM d, yyyy hh:mm a"
+                            )}
+                          </span>
+                          {line.prorationFactor !== null && line.prorationFactor !== 1 ? (
+                            <span>
+                              Prorated · {prorationFormatter.format(line.prorationFactor)} of full
+                              period
+                            </span>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <span className="block font-light font-mono text-muted-foreground text-xs tabular-nums">
+                          Recorded{" "}
+                          {formatDate(
+                            new Date(line.createdAt).getTime(),
+                            invoice.subscription.timezone,
+                            "MMMM d, yyyy hh:mm a"
+                          )}
+                        </span>
                       )}
-                    </span>
+                    </div>
                   </TableCell>
                   <TableCell>
                     <Badge variant={getLineStatusVariant(line)}>{getLineStatus(line)}</Badge>

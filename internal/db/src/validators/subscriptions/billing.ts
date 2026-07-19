@@ -71,16 +71,22 @@ export function calculateCycleWindow(params: CalculateCycleWindowParams): CycleW
   // --- 3. Recurring Plan Validation and Setup (No changes needed) ---
   const { interval, intervalCount, anchor } = config
 
-  const normalizedEffectiveStartDate = normalizeBillingStartForInterval(
-    effectiveStartDate,
-    interval
-  )
+  // A `dayOfCreation` anchor is a subscription-relative cadence, not a
+  // calendar-midnight cadence. Keep the exact creation time so the first
+  // monthly/yearly period is a complete interval. Explicit numeric anchors
+  // remain calendar-bound and preserve their existing UTC-boundary behavior.
+  const preservesCreationTimestamp = anchor === "dayOfCreation"
+  const normalizedEffectiveStartDate = preservesCreationTimestamp
+    ? effectiveStartDate
+    : normalizeBillingStartForInterval(effectiveStartDate, interval)
   const anchorValue = getAnchor(normalizedEffectiveStartDate, interval, anchor)
 
   const rawPaidPeriodStart = trialEndsAt
     ? Math.max(effectiveStartDate, trialEndsAt)
     : effectiveStartDate
-  const paidPeriodStart = normalizeBillingStartForInterval(rawPaidPeriodStart, interval)
+  const paidPeriodStart = preservesCreationTimestamp
+    ? rawPaidPeriodStart
+    : normalizeBillingStartForInterval(rawPaidPeriodStart, interval)
 
   if (now < rawPaidPeriodStart) {
     return null
@@ -114,7 +120,9 @@ export function calculateCycleWindow(params: CalculateCycleWindowParams): CycleW
       break
     case "month":
     case "year":
-      firstPaidCycleStart = startOfUtcDay(setUtc(tempDate, { date: anchorValue }))
+      firstPaidCycleStart = preservesCreationTimestamp
+        ? setUtc(tempDate, { date: anchorValue })
+        : startOfUtcDay(setUtc(tempDate, { date: anchorValue }))
       break
     default:
       throw new Error(`Invalid billing interval: ${interval}`)
@@ -183,12 +191,12 @@ export interface CalculateNextCyclesParams {
   effectiveEndDate: number | null
   /** The date the trial ends, or null if there is no trial. */
   trialEndsAt: number | null
-  /** The recurring billing configuration with a required numeric anchor. */
+  /** The recurring billing configuration, including its calendar or creation-time anchor. */
   config: {
     name: BillingConfig["name"]
     interval: BillingConfig["billingInterval"]
     intervalCount: BillingConfig["billingIntervalCount"]
-    anchor: number
+    anchor: BillingConfig["billingAnchor"]
     planType: BillingConfig["planType"]
   }
   /** The total number of cycles to generate. */

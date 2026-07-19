@@ -24,17 +24,46 @@ export async function renewPeriod(opts: {
 
   if (!currentPhase) throw new Error("No active phase found")
 
+  const configuredAnchor = currentPhase.planVersion.billingConfig.billingAnchor
+  const cycleAnchor =
+    configuredAnchor === "dayOfCreation" &&
+    subscription.currentCycleEndAt > subscription.currentCycleStartAt
+      ? (() => {
+          const storedWindow = calculateCycleWindow({
+            now: subscription.currentCycleStartAt + 1,
+            trialEndsAt: currentPhase.trialEndsAt,
+            effectiveEndDate: currentPhase.endAt ?? null,
+            config: {
+              name: currentPhase.planVersion.billingConfig.name,
+              interval: currentPhase.planVersion.billingConfig.billingInterval,
+              intervalCount: currentPhase.planVersion.billingConfig.billingIntervalCount,
+              planType: currentPhase.planVersion.billingConfig.planType,
+              anchor: configuredAnchor,
+            },
+            effectiveStartDate: currentPhase.startAt,
+          })
+
+          return storedWindow &&
+            storedWindow.start === subscription.currentCycleStartAt &&
+            storedWindow.end === subscription.currentCycleEndAt
+            ? configuredAnchor
+            : currentPhase.billingAnchor
+        })()
+      : (configuredAnchor ?? currentPhase.billingAnchor)
+
+  const cycleConfig = {
+    name: currentPhase.planVersion.billingConfig.name,
+    interval: currentPhase.planVersion.billingConfig.billingInterval,
+    intervalCount: currentPhase.planVersion.billingConfig.billingIntervalCount,
+    planType: currentPhase.planVersion.billingConfig.planType,
+    anchor: cycleAnchor,
+  }
+
   const current = calculateCycleWindow({
     now: context.now,
     trialEndsAt: currentPhase.trialEndsAt,
     effectiveEndDate: currentPhase.endAt ?? null,
-    config: {
-      name: currentPhase.planVersion.billingConfig.name,
-      interval: currentPhase.planVersion.billingConfig.billingInterval,
-      intervalCount: currentPhase.planVersion.billingConfig.billingIntervalCount,
-      planType: currentPhase.planVersion.billingConfig.planType,
-      anchor: currentPhase.billingAnchor,
-    },
+    config: cycleConfig,
     effectiveStartDate: currentPhase.startAt,
   })
 
@@ -49,13 +78,7 @@ export async function renewPeriod(opts: {
     now: current.end + 1,
     trialEndsAt: currentPhase.trialEndsAt,
     effectiveEndDate: currentPhase.endAt ?? null,
-    config: {
-      name: currentPhase.planVersion.billingConfig.name,
-      interval: currentPhase.planVersion.billingConfig.billingInterval,
-      intervalCount: currentPhase.planVersion.billingConfig.billingIntervalCount,
-      planType: currentPhase.planVersion.billingConfig.planType,
-      anchor: currentPhase.billingAnchor,
-    },
+    config: cycleConfig,
     effectiveStartDate: currentPhase.startAt,
   })
 

@@ -44,6 +44,7 @@ type TestBillingConfig = {
   name: string
   billingInterval: TestBillingInterval
   billingIntervalCount: number
+  billingAnchor: number | "dayOfCreation"
   planType: "recurring" | "onetime"
 }
 type TestFeatureType = "flat" | "package" | "tier" | "usage"
@@ -82,12 +83,14 @@ function generateBillingPeriods(billing: BillingService, payload: GenerateBillin
 function makeBillingConfig(
   billingInterval: TestBillingInterval,
   name: string = billingInterval,
-  billingIntervalCount = 1
+  billingIntervalCount = 1,
+  billingAnchor: number | "dayOfCreation" = 1
 ): TestBillingConfig {
   return {
     name,
     billingInterval,
     billingIntervalCount,
+    billingAnchor,
     planType: "recurring",
   }
 }
@@ -126,6 +129,7 @@ function makePhase(overrides: Record<string, unknown> = {}) {
         name: "monthly",
         billingInterval: "month",
         billingIntervalCount: 1,
+        billingAnchor: 1,
         planType: "recurring",
       },
     },
@@ -369,6 +373,38 @@ describe("BillingService._generateBillingPeriods", () => {
       subscriptionPhaseId: "phase_1",
       subscriptionItemId: "item_1",
     })
+  })
+
+  it("keeps the creation timestamp for dayOfCreation monthly billing", async () => {
+    const lateStart = new Date("2026-07-18T22:04:46.665Z").getTime()
+    const billingConfig = makeBillingConfig("month", "monthly", 1, "dayOfCreation")
+    const phase = makePhase({
+      startAt: lateStart,
+      billingAnchor: 18,
+      planVersion: {
+        whenToBill: "pay_in_advance",
+        currency: "USD",
+        collectionMethod: "charge_automatically",
+        billingConfig,
+      },
+      items: [makeItem("item_1", { billingConfig })],
+    })
+    const { billing } = makeBillingService({ phases: [phase] })
+
+    const result = await generateBillingPeriods(billing, {
+      subscriptionId: "sub_1",
+      projectId: "proj_1",
+      now: lateStart,
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(createdPeriods()).toEqual([
+      expect.objectContaining({
+        cycleStartAt: lateStart,
+        cycleEndAt: new Date("2026-08-18T22:04:46.665Z").getTime(),
+        invoiceAt: lateStart,
+      }),
+    ])
   })
 
   it("starts a mid-cycle replacement phase at its actual start and gives it a separate statement", async () => {

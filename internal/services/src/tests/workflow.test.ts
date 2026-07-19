@@ -128,9 +128,6 @@ describe("Workflow - Billing and Subscriptions", () => {
           .fn()
           .mockImplementation(async (_key, fetcher) => ({ val: await fetcher(), fresh: true })),
       },
-      getCurrentUsage: {
-        remove: vi.fn(),
-      },
       accessControlList: {
         get: vi.fn().mockResolvedValue({ val: null }),
         set: vi.fn(),

@@ -108,3 +108,5 @@ docs/plans/**
 docs/superpowers/
 # positioning and R&D
 docs/brand/strategic
+.agents
+.codex

@@ -182,11 +182,11 @@ describe("calculateProration", () => {
     expect(prorationFactor).toBeCloseTo(1)
   })
 
-  it("prorates sub-day starts for monthly dayOfCreation billing", () => {
+  it("uses the creation timestamp as the full-cycle reference for monthly dayOfCreation billing", () => {
     const effectiveStart = utc("2026-05-07", "12:05:00.000")
     const serviceStart = utc("2026-05-07", "12:05:00.000")
-    const serviceEnd = utc("2026-06-07", "00:00:00.000")
-    const { prorationFactor } = calculateProration({
+    const serviceEnd = utc("2026-06-07", "12:05:00.000")
+    const { prorationFactor, referenceCycleEnd, referenceCycleStart } = calculateProration({
       serviceStart,
       serviceEnd,
       effectiveStartDate: effectiveStart,
@@ -198,10 +198,9 @@ describe("calculateProration", () => {
         planType: "recurring",
       },
     })
-    expect(prorationFactor).toBeCloseTo(
-      (serviceEnd - serviceStart) / (serviceEnd - utc("2026-05-07")),
-      5
-    )
+    expect(referenceCycleStart).toBe(serviceStart)
+    expect(referenceCycleEnd).toBe(serviceEnd)
+    expect(prorationFactor).toBeCloseTo(1)
   })
 
   it("computes stub fraction before first monthly anchor", () => {

@@ -88,7 +88,6 @@
       },
       "pipelines": [
         {
-          // TODO: replace with the real production PIPELINE_EVENTS id
           "pipeline": "a37a2645ecad43c7bc85d6981bcc8a09",
           "binding": "PIPELINE_EVENTS"
         }

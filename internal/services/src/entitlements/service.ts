@@ -2,7 +2,6 @@ import type { Analytics } from "@unprice/analytics"
 import { type Database, and, eq } from "@unprice/db"
 import { newId } from "@unprice/db/utils"
 import type {
-  CurrentUsage,
   CustomerEntitlement,
   CustomerEntitlementExtended,
   Grant,
@@ -10,13 +9,11 @@ import type {
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger, WideEventInput } from "@unprice/logs"
-import { formatMoney } from "@unprice/money"
 import type { BillingService } from "../billing"
 import type { CacheNamespaces } from "../cache/namespaces"
 import type { Cache } from "../cache/service"
 import type { CustomerService } from "../customers/service"
 import type { Metrics } from "../metrics"
-import { cachedQuery } from "../utils/cached-query"
 import { UnPriceEntitlementError } from "./errors"
 import type { GrantsManager } from "./grants"
 
@@ -532,52 +529,24 @@ export class EntitlementService {
   public async getAccessControlList(params: {
     customerId: string
     projectId: string
-    now?: number
   }): Promise<CacheNamespaces["accessControlList"]> {
-    const { customerId, projectId, now } = params
+    const { customerId, projectId } = params
     const cacheKey = `${projectId}:${customerId}`
     const { val: acl, err: aclErr } = await this.cache.accessControlList.swr(
       cacheKey,
       async (_key: string) => {
-        const { val: usage, err: usageErr } = await this.getCurrentUsage({
-          customerId,
-          projectId,
-          opts: {
-            now: now,
-          },
-        })
-
-        if (usageErr) {
-          this.logger.error(usageErr, {
-            customerId,
-            projectId,
-            context: "Failed to get current usage",
-          })
-          return null
-        }
-
-        // if any of the groups has a usage >= limit then the customer is blocked
-        // only for usage features with hard limits
-        const customerUsageLimitReached = usage.groups.some((group) =>
-          group.features.some(
-            (feature) =>
-              feature &&
-              feature.type === "usage" &&
-              feature.usageBar.limitType === "hard" &&
-              feature.usageBar.limit !== undefined &&
-              feature.usageBar.limit > 0 &&
-              feature.usageBar.current >= feature.usageBar.limit
-          )
-        )
-
-        // check if customer is disabled
+        // Read the disabled state and the durable usage-limit flag together.
+        // The flag is persisted on the customer row by updateAccessControlList;
+        // deriving it from anything ephemeral here would silently reset an
+        // operator-set value on every cache rebuild.
         const [customer] = await this.db
-          .select({ active: customers.active })
+          .select({ active: customers.active, metadata: customers.metadata })
           .from(customers)
           .where(and(eq(customers.id, customerId), eq(customers.projectId, projectId)))
           .limit(1)
 
         const customerDisabled = customer ? !customer.active : false
+        const customerUsageLimitReached = customer?.metadata?.usageLimitReached ?? false
 
         // check if customer has due invoices (past due subscription)
         const [subscription] = await this.db
@@ -614,111 +583,5 @@ export class EntitlementService {
     }
 
     return acl ?? null
-  }
-
-  public async getCurrentUsage({
-    customerId,
-    projectId,
-    opts,
-  }: {
-    customerId: string
-    projectId: string
-    opts?: {
-      skipCache?: boolean // skip cache to force revalidation
-      now?: number
-    }
-  }): Promise<Result<CurrentUsage, UnPriceEntitlementError | FetchError>> {
-    const cacheKey = `${projectId}:${customerId}`
-
-    // first try to get the entitlement from cache, if not found try to get it from DO,
-    const { val, err } = await cachedQuery({
-      skipCache: opts?.skipCache,
-      cache: this.cache.getCurrentUsage,
-      cacheKey,
-      load: () =>
-        this._getCurrentUsage({
-          customerId,
-          projectId,
-          now: opts?.now ?? Date.now(),
-        }),
-      wrapLoadError: (err) =>
-        new FetchError({
-          message: `unable to query usage from _getCurrentUsage - ${err.message}`,
-          retry: false,
-          context: {
-            error: err.message,
-            url: "",
-            customerId: customerId,
-            projectId: projectId,
-            method: "_getCurrentUsage",
-          },
-        }),
-    })
-
-    if (err) {
-      return Err(
-        new FetchError({
-          message: err.message,
-          retry: true,
-          cause: err,
-        })
-      )
-    }
-
-    // set the cache with the fresh value from DB
-    this.waitUntil(this.cache.getCurrentUsage.set(cacheKey, val ?? null))
-
-    if (!val) {
-      return Ok(this.buildEmptyUsageResponse("USD"))
-    }
-
-    return Ok(val)
-  }
-
-  /**
-   * Get current usage data
-   */
-  private async _getCurrentUsage({
-    customerId,
-    projectId,
-    now: _now,
-  }: {
-    customerId: string
-    projectId: string
-    now: number
-  }): Promise<CurrentUsage | null> {
-    // TODO: rebuild current usage from customer_entitlements plus the
-    // DO/analytics runtime. Customer access should not be derived by grouping
-    // grants.
-    const subscription = await this.db.query.subscriptions.findFirst({
-      where: (table, { and: andOp, eq: eqOp }) =>
-        andOp(
-          eqOp(table.projectId, projectId),
-          eqOp(table.customerId, customerId),
-          eqOp(table.active, true)
-        ),
-    })
-
-    return {
-      ...this.buildEmptyUsageResponse("USD"),
-      planName: subscription?.planSlug ?? "No Plan",
-    }
-  }
-
-  private buildEmptyUsageResponse(currency: string): CurrentUsage {
-    return {
-      planName: "No Plan",
-      billingPeriod: "monthly",
-      billingPeriodLabel: "mo",
-      currency,
-      groups: [],
-      priceSummary: {
-        totalPrice: formatMoney("0", currency),
-        flatTotal: formatMoney("0", currency),
-        tieredTotal: formatMoney("0", currency),
-        packageTotal: formatMoney("0", currency),
-        usageTotal: formatMoney("0", currency),
-      },
-    }
   }
 }

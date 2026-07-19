@@ -7,18 +7,26 @@ import { renewPeriod } from "./renew-period"
 // Helpers
 const JAN_1_2026 = new Date("2026-01-01T00:00:00Z").getTime()
 
-function makePhase(overrides?: { endAt?: number | null }) {
+function makePhase(overrides?: {
+  endAt?: number | null
+  startAt?: number
+  billingAnchor?: number
+  planBillingAnchor?: number | "dayOfCreation"
+}) {
   return {
     trialEndsAt: null,
     endAt: overrides?.endAt ?? null,
-    startAt: JAN_1_2026,
-    billingAnchor: JAN_1_2026,
+    startAt: overrides?.startAt ?? JAN_1_2026,
+    billingAnchor: overrides?.billingAnchor ?? JAN_1_2026,
     planVersion: {
       billingConfig: {
         name: "monthly",
         billingInterval: "month" as const,
         billingIntervalCount: 1,
         planType: "recurring" as const,
+        ...(overrides?.planBillingAnchor === undefined
+          ? {}
+          : { billingAnchor: overrides.planBillingAnchor }),
       },
       plan: { slug: "pro" },
     },
@@ -191,6 +199,133 @@ describe("renewPeriod", () => {
     expect(repo.updateSubscription).not.toHaveBeenCalled()
     expect(result.subscription).toBe(subscription)
     expect(result.renewAt).toBe(next.start)
+  })
+
+  it("preserves a legacy calendar schedule when its plan now says dayOfCreation", async () => {
+    const phaseStartAt = new Date("2026-01-01T22:00:00Z").getTime()
+    const phase = makePhase({
+      startAt: phaseStartAt,
+      billingAnchor: 1,
+      planBillingAnchor: "dayOfCreation",
+    })
+    const now = new Date("2026-01-15T12:00:00Z").getTime()
+    const legacyCurrent = calculateCycleWindow({
+      now,
+      trialEndsAt: null,
+      effectiveEndDate: null,
+      config: {
+        name: "monthly",
+        interval: "month",
+        intervalCount: 1,
+        planType: "recurring",
+        anchor: 1,
+      },
+      effectiveStartDate: phaseStartAt,
+    })!
+    const legacyNext = calculateCycleWindow({
+      now: legacyCurrent.end + 1,
+      trialEndsAt: null,
+      effectiveEndDate: null,
+      config: {
+        name: "monthly",
+        interval: "month",
+        intervalCount: 1,
+        planType: "recurring",
+        anchor: 1,
+      },
+      effectiveStartDate: phaseStartAt,
+    })!
+    const subscription = makeSubscription({
+      currentCycleStartAt: legacyCurrent.start,
+      currentCycleEndAt: legacyCurrent.end,
+      renewAt: legacyNext.start,
+    })
+    const repo = makeRepo()
+
+    await renewPeriod({
+      context: makeRenewContext({ subscription, currentPhase: phase, now }),
+      logger: makeLogger(),
+      customerService: makeCustomerService(),
+      repo,
+    })
+
+    expect(repo.updateSubscription).not.toHaveBeenCalled()
+  })
+
+  it("renews an exact dayOfCreation schedule from its stored timestamp", async () => {
+    const phaseStartAt = new Date("2026-01-01T22:00:00Z").getTime()
+    const phase = makePhase({
+      startAt: phaseStartAt,
+      billingAnchor: 1,
+      planBillingAnchor: "dayOfCreation",
+    })
+    const previousCycle = calculateCycleWindow({
+      now: new Date("2026-01-15T12:00:00Z").getTime(),
+      trialEndsAt: null,
+      effectiveEndDate: null,
+      config: {
+        name: "monthly",
+        interval: "month",
+        intervalCount: 1,
+        planType: "recurring",
+        anchor: "dayOfCreation",
+      },
+      effectiveStartDate: phaseStartAt,
+    })!
+    const nextCycle = calculateCycleWindow({
+      now: new Date("2026-02-02T12:00:00Z").getTime(),
+      trialEndsAt: null,
+      effectiveEndDate: null,
+      config: {
+        name: "monthly",
+        interval: "month",
+        intervalCount: 1,
+        planType: "recurring",
+        anchor: "dayOfCreation",
+      },
+      effectiveStartDate: phaseStartAt,
+    })!
+    const followingCycle = calculateCycleWindow({
+      now: nextCycle.end + 1,
+      trialEndsAt: null,
+      effectiveEndDate: null,
+      config: {
+        name: "monthly",
+        interval: "month",
+        intervalCount: 1,
+        planType: "recurring",
+        anchor: "dayOfCreation",
+      },
+      effectiveStartDate: phaseStartAt,
+    })!
+    const subscription = makeSubscription({
+      currentCycleStartAt: previousCycle.start,
+      currentCycleEndAt: previousCycle.end,
+      renewAt: nextCycle.start,
+    })
+    const repo = makeRepo({ id: "sub_1", projectId: "proj_1" })
+
+    await renewPeriod({
+      context: makeRenewContext({
+        subscription,
+        currentPhase: phase,
+        now: new Date("2026-02-02T12:00:00Z").getTime(),
+      }),
+      logger: makeLogger(),
+      customerService: makeCustomerService(),
+      repo,
+    })
+
+    expect(repo.updateSubscription).toHaveBeenCalledWith({
+      subscriptionId: "sub_1",
+      projectId: "proj_1",
+      data: {
+        planSlug: "pro",
+        renewAt: followingCycle.start,
+        currentCycleStartAt: nextCycle.start,
+        currentCycleEndAt: nextCycle.end,
+      },
+    })
   })
 
   it("throws when no active phase", async () => {

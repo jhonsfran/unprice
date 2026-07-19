@@ -88,6 +88,47 @@ describe("StripePaymentProvider", () => {
     )
   })
 
+  it("uses the registered callback route when creating a payment-method setup session", async () => {
+    await provider.createSession({
+      currency: "usd",
+      customerId: "cus_123",
+      projectId: "proj_123",
+      email: "customer@example.com",
+      successUrl: "https://example.com/success",
+      cancelUrl: "https://example.com/cancel",
+    })
+
+    expect(stripeMocks.checkoutSessionsCreate).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        success_url:
+          "http://localhost:8787/v1/payment-provider-callbacks/stripe/setup/{CHECKOUT_SESSION_ID}/proj_123",
+      }),
+      undefined
+    )
+  })
+
+  it("uses the registered callback route when creating a sign-up setup session", async () => {
+    await provider.signUp({
+      customer: {
+        id: "cus_123",
+        projectId: "proj_123",
+        email: "customer@example.com",
+        currency: "USD",
+      },
+      customerSessionId: "customer_session_123",
+      successUrl: "https://example.com/success",
+      cancelUrl: "https://example.com/cancel",
+    })
+
+    expect(stripeMocks.checkoutSessionsCreate).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        success_url:
+          "http://localhost:8787/v1/payment-provider-callbacks/stripe/sign-up/{CHECKOUT_SESSION_ID}/proj_123",
+      }),
+      undefined
+    )
+  })
+
   // -----------------------------------------------------------------------
   // Webhook normalizeWebhook — event type mapping
   // -----------------------------------------------------------------------

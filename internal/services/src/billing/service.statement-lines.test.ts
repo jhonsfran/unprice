@@ -95,6 +95,7 @@ function makeLedgerLine(overrides: Record<string, unknown> = {}) {
     metadata: {
       billing_period_id: "bp_1",
       subscription_id: "sub_1",
+      proration_factor: 0.970323079077061,
     },
     ...overrides,
   }
@@ -107,6 +108,7 @@ function makePeriodRow(overrides: Record<string, unknown> = {}) {
     type: "normal",
     invoiceAt: 1_700_000_000_000,
     cycleStartAt: 1_700_000_000_000,
+    cycleEndAt: 1_702_678_400_000,
     subscriptionItem: {
       id: "item_1",
       units: 10,
@@ -145,6 +147,9 @@ describe("BillingService.getInvoiceStatementLines", () => {
     expect(lines[0]!.kind).toBe("subscription")
     expect(lines[0]!.description).toBe("API Calls")
     expect(lines[0]!.quantity).toBe(10)
+    expect(lines[0]!.servicePeriodStartAt).toBe(1_700_000_000_000)
+    expect(lines[0]!.servicePeriodEndAt).toBe(1_702_678_400_000)
+    expect(lines[0]!.prorationFactor).toBeCloseTo(0.970323079077061)
     // Amount should be converted via toLedgerMinor
     expect(typeof lines[0]!.amount).toBe("number")
     expect(lines[0]!.amount).toBeGreaterThan(0)
@@ -280,6 +285,9 @@ describe("BillingService.getInvoiceStatementLines", () => {
     expect(zeroLine!.amount).toBe(0)
     expect(zeroLine!.description).toBe("Storage")
     expect(zeroLine!.quantity).toBe(5)
+    expect(zeroLine!.servicePeriodStartAt).toBe(1_700_000_000_000)
+    expect(zeroLine!.servicePeriodEndAt).toBe(1_702_678_400_000)
+    expect(zeroLine!.prorationFactor).toBeNull()
   })
 
   it("trial periods get kind 'trial' in zero lines", async () => {

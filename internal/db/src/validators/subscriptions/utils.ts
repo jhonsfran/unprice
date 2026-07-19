@@ -221,10 +221,12 @@ export function calculateProration(params: {
   }
 
   const { billingInterval, billingIntervalCount } = billingConfig
-  const normalizedEffectiveStartDate = normalizeBillingStartForInterval(
-    effectiveStartDate,
-    billingInterval
-  )
+  // `dayOfCreation` means the customer's creation timestamp is the recurring
+  // anchor. Numeric anchors remain aligned to their calendar UTC boundary.
+  const preservesCreationTimestamp = billingConfig.billingAnchor === "dayOfCreation"
+  const normalizedEffectiveStartDate = preservesCreationTimestamp
+    ? effectiveStartDate
+    : normalizeBillingStartForInterval(effectiveStartDate, billingInterval)
 
   if (serviceEnd <= serviceStart) {
     return {
@@ -260,7 +262,9 @@ export function calculateProration(params: {
       break
     case "month":
     case "year":
-      firstCycleStart = startOfUtcDay(setUtc(startRef, { date: anchor }))
+      firstCycleStart = preservesCreationTimestamp
+        ? setUtc(startRef, { date: anchor })
+        : startOfUtcDay(setUtc(startRef, { date: anchor }))
       break
     default:
       throw new Error(`Invalid billing interval: ${billingInterval}`)

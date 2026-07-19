@@ -1,5 +1,6 @@
 export { createPlan } from "./plan/create"
 export { signUp } from "./customer/sign-up"
+export { signOutCustomer } from "./customer/sign-out"
 export {
   getCustomerEconomicSummary,
   getCustomerEconomicSummaryInputSchema,

@@ -13,9 +13,6 @@ export type SusbriptionMachineStatus =
   | "success"
   | "restored"
   | "renewing" // the subscription is renewing
-  | "changing" // the subscription is changing
-  | "canceling" // the subscription is canceling
-  | "expiring" // the subscription is expiring
   | "invoicing" // the subscription is invoicing
   | "invoiced" // the subscription is invoiced, ready to be renewed
 
@@ -46,8 +43,6 @@ export type SubscriptionEvent =
   | { type: "PAYMENT_SUCCESS"; invoiceId: string }
   | { type: "INVOICE_SUCCESS"; invoiceId: string }
   | { type: "INVOICE_FAILURE"; invoiceId: string; error: string }
-  | { type: "CANCEL" }
-  | { type: "CHANGE" }
   | { type: "INVOICE" }
   | { type: "ACTIVATE" }
 

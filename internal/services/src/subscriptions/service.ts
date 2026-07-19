@@ -964,7 +964,7 @@ export class SubscriptionService {
         interval: versionData.billingConfig.billingInterval,
         intervalCount: versionData.billingConfig.billingIntervalCount,
         planType: versionData.billingConfig.planType,
-        anchor: billingAnchorToUse,
+        anchor: versionData.billingConfig.billingAnchor ?? billingAnchorToUse,
       },
     })
 
@@ -1574,6 +1574,23 @@ export class SubscriptionService {
     }
 
     return result
+  }
+
+  public async listActiveSubscriptions({
+    customerId,
+    projectId,
+  }: {
+    customerId: string
+    projectId: string
+  }): Promise<Subscription[]> {
+    return this.db.query.subscriptions.findMany({
+      where: (subscription, { and, eq }) =>
+        and(
+          eq(subscription.customerId, customerId),
+          eq(subscription.projectId, projectId),
+          eq(subscription.active, true)
+        ),
+    })
   }
 
   public async cancelSubscription({

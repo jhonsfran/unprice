@@ -19,7 +19,6 @@ export const bouncer = async (c: Context<HonoEnv>, customerId: string, projectId
   const acl = await entitlement.getAccessControlList({
     customerId,
     projectId,
-    now: Date.now(),
   })
 
   endTime(c, "bouncer")

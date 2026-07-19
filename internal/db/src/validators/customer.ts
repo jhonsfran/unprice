@@ -17,6 +17,9 @@ export const customerMetadataSchema = z.object({
   country: z.string().optional(),
   region: z.string().optional(),
   city: z.string().optional(),
+  // durable ACL flag set via /v1/access/update; the ACL cache rebuild reads it
+  // from the customer row so it survives cache invalidation
+  usageLimitReached: z.boolean().optional(),
 })
 
 export const customerSelectSchema = createSelectSchema(schema.customers, {

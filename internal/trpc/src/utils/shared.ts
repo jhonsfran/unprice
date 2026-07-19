@@ -1,3 +1,5 @@
+import { signOutCustomer as signOutCustomerUseCase } from "@unprice/services/use-cases"
+
 import type { Context } from "#trpc"
 
 export const signOutCustomer = async ({
@@ -6,15 +8,13 @@ export const signOutCustomer = async ({
 }: {
   input: { customerId: string; projectId: string }
   ctx: Context
-}) => {
+}): Promise<{ success: boolean; message?: string }> => {
   const { customerId, projectId } = input
 
-  const { customers } = ctx.services
-
-  const { err, val } = await customers.signOut({
-    customerId: customerId,
-    projectId: projectId,
-  })
+  const { err, val } = await signOutCustomerUseCase(
+    { services: ctx.services, logger: ctx.logger },
+    { customerId, projectId, now: Date.now() }
+  )
 
   if (err) {
     return {

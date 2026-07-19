@@ -121,6 +121,7 @@ describe("BillingService rating delegation", () => {
         type: "normal",
         invoiceAt: 1_768_000_000_000,
         cycleStartAt: 1_768_000_000_000,
+        cycleEndAt: 1_770_678_400_000,
         subscriptionItem: {
           units: 1,
           featurePlanVersion: {
@@ -160,6 +161,9 @@ describe("BillingService rating delegation", () => {
         quantity: 1,
         amount: 0,
         currency: "EUR",
+        servicePeriodStartAt: 1_768_000_000_000,
+        servicePeriodEndAt: 1_770_678_400_000,
+        prorationFactor: null,
       }),
     ])
   })

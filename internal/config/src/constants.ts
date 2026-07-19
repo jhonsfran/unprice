@@ -94,10 +94,10 @@ export const AUTH_ROUTES = {
 }
 
 // payment provider callback endpoints
-export const PAYMENT_PROVIDER_CALLBACK_PREFIX_URL = `${API_DOMAIN}v1/paymentProvider`
+export const PAYMENT_PROVIDER_CALLBACK_PREFIX_URL = `${API_DOMAIN}v1/payment-provider-callbacks`
 
 export const getPaymentProviderSignUpCallbackPrefixUrl = (provider: string) =>
-  `${PAYMENT_PROVIDER_CALLBACK_PREFIX_URL}/${provider}/signUp`
+  `${PAYMENT_PROVIDER_CALLBACK_PREFIX_URL}/${provider}/sign-up`
 
 export const getPaymentProviderSetupCallbackPrefixUrl = (provider: string) =>
   `${PAYMENT_PROVIDER_CALLBACK_PREFIX_URL}/${provider}/setup`
