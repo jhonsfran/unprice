@@ -314,6 +314,61 @@ describe("ApiKeysService customer binding", () => {
     expect(cache.apiKeyByHash.remove).toHaveBeenCalledWith(insertedApiKey.current.hash)
   })
 
+  it("createOrRollApiKey rolls the active key with the same project and name", async () => {
+    const db = {
+      query: {
+        apikeys: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: "api_123",
+            projectId: "proj_123",
+            name: "onboarding-plan_version_123",
+            hash: "old_hash",
+            defaultCustomerId: "cus_123",
+            isRoot: false,
+            revokedAt: null,
+          }),
+        },
+      },
+    } as unknown as Database
+    const service = new ApiKeysService({
+      cache,
+      metrics,
+      analytics,
+      logger,
+      db,
+      waitUntil,
+      hashCache,
+    })
+    const rollApiKey = vi.spyOn(service, "rollApiKey").mockResolvedValue(
+      Ok({
+        id: "api_123",
+        projectId: "proj_123",
+        hash: "new_hash",
+        newKey: "unprice_live_new",
+      } as never)
+    )
+
+    const result = await service.createOrRollApiKey({
+      projectId: "proj_123",
+      name: "onboarding-plan_version_123",
+      isRoot: false,
+      defaultCustomerId: "cus_123",
+      expiresAt: 1234,
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(result.val).toMatchObject({
+      id: "api_123",
+      key: "unprice_live_new",
+      state: "rolled",
+    })
+    expect(rollApiKey).toHaveBeenCalledWith({
+      keyHash: "old_hash",
+      projectId: "proj_123",
+      expiresAt: 1234,
+    })
+  })
+
   it("rollDefaultSdkExampleApiKey creates the reusable key when it is missing", async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date("2026-07-03T12:34:56.000Z"))
@@ -382,6 +437,8 @@ describe("ApiKeysService customer binding", () => {
         expiresAt: null,
         revokedAt: null,
         hash: "old_hash",
+        isRoot: false,
+        defaultCustomerId: null,
       })
       .mockResolvedValueOnce({
         id: "api_123",

@@ -2,8 +2,14 @@
 
 import { cn } from "@unprice/ui/utils"
 import { Ban, Check } from "lucide-react"
-import { type RefObject, useEffect, useRef, useState } from "react"
 import { AnimatedCounter } from "./animated-counter"
+import {
+  type MoneyPathBudget as Budget,
+  type MoneyPathRegistry,
+  type MoneyPathStation as Station,
+  useMoneyPathChoreography,
+  useMoneyPathRegistry,
+} from "./money-path-choreography"
 import { Leader } from "./station"
 
 // The signature visual: the money path, rendered as one request traced end to
@@ -34,12 +40,6 @@ import { Leader } from "./station"
 // trace with wallet, ledger, invoice receipt, and the payment terminus lives
 // at station 04. First contact reads the decision moment in one glance; the
 // accounting is one anchor away, not competing with the headline.
-
-type Station = {
-  id?: string
-  label: string
-  fact: string
-}
 
 // Narrative order, not dependency order: the event is measured first, then
 // the access question, then what it costs — the same journey the request
@@ -76,260 +76,29 @@ const ghostStations: Station[] = [
   { label: "Invoice", fact: "no line" },
 ]
 
-// ---------------------------------------------------------------------------
-// Request-path choreography. The dot walks measured waypoints along the rail
-// through a three-pass cycle on one budget (management feedback 2026-07: the
-// money story needs repetition to read) — $10.00 covers two $4.10 requests,
-// so the arithmetic of the deny is visible: allow at $10.00, allow at $5.90,
-// deny at $1.80. Highlights and the balance readout are driven from the same
-// clock as the dot; the cycle restarts as a fresh billing period.
-// ---------------------------------------------------------------------------
-
-const REQUEST_COST = 4.1
-const BUDGET_START = 10.0
-
-type PassKind = "deny" | "allow"
-
-type PassPlan = {
-  kind: PassKind
-  budgetStart: number
-  budgetAfterReserve?: number
-}
-
-const PASS_PLAN: PassPlan[] = [
-  { kind: "allow", budgetStart: BUDGET_START, budgetAfterReserve: BUDGET_START - REQUEST_COST },
-  {
-    kind: "allow",
-    budgetStart: BUDGET_START - REQUEST_COST,
-    budgetAfterReserve: BUDGET_START - 2 * REQUEST_COST,
-  },
-  { kind: "deny", budgetStart: BUDGET_START - 2 * REQUEST_COST },
-]
-
-// Deliberately slow (management feedback 2026-07: the previous tempo made the
-// changes too small and too fast to follow) — the dot is narration, not an
-// interaction echo, so the ambient-speed rule from the design guidelines
-// applies and legibility beats snappiness.
-const DOT_SIZE = 9
-const TRAVEL_SPEED = 0.34 // px per ms along the rail
-const FADE_MS = 200
-const STATION_DWELL = 300 // pause on each station ring
-const DECISION_DWELL = 650
-const HIT_LINGER = 700 // how long a title stays lit after the dot arrives
-const OUTCOME_LINGER = 1600
-const PASS_GAP = 1100
-const CYCLE_GAP = 1800 // extra beat before the budget refills for a new period
-const RAIL_OFFSET_X = 8
-const CHIP_CLEARANCE_Y = 6
-// Outcome chips keep their color until the next request spawns, so the story
-// so far stays readable between passes.
-const PERSIST = Number.POSITIVE_INFINITY
-
-type BuiltPass = {
-  keyframes: Keyframe[]
-  duration: number
-  hits: { el: HTMLElement; at: number; until: number }[]
-  // Budget updates on the same clock: the wallet reservation counts the
-  // remaining balance down mid-pass; a new cycle refills it.
-  sets: { at: number; value: number }[]
-}
-
-function buildPass(root: HTMLElement, plan: PassPlan, stations: Station[]): BuiltPass | null {
-  const rootBox = root.getBoundingClientRect()
-  if (rootBox.width === 0) return null
-
-  const node = (name: string) => root.querySelector<HTMLElement>(`[data-mp-node="${name}"]`)
-  const trace = root.querySelector<HTMLElement>("[data-mp-trace]")
-  const request = node("request")
-  const decision = node("decision")
-  if (!trace || !request || !decision) return null
-
-  // Measure the rendered rail dots themselves so the moving request stays
-  // centered even when marker sizes differ between stations.
-  const railDotCenter = (el: HTMLElement) => {
-    const dot = el.querySelector<HTMLElement>("[data-mp-rail-dot]")
-    if (!dot) return null
-    const b = dot.getBoundingClientRect()
-    return {
-      x: b.left - rootBox.left + b.width / 2,
-      y: b.top - rootBox.top + b.height / 2,
-      size: b.width,
-    }
-  }
-  const railPointOf = (el: HTMLElement) => {
-    const dot = railDotCenter(el)
-    if (dot) return dot
-    const b = el.getBoundingClientRect()
-    return {
-      x: b.left - rootBox.left + RAIL_OFFSET_X,
-      y: b.top - rootBox.top + b.height / 2,
-      size: DOT_SIZE,
-    }
-  }
-  const railXOf = (el: HTMLElement) =>
-    railDotCenter(el)?.x ?? el.getBoundingClientRect().left - rootBox.left + RAIL_OFFSET_X
-
-  const requestPoint = railPointOf(request)
-  const railX = requestPoint.x
-  const pts: { x: number; y: number; o: number; t: number; s: number }[] = []
-  const hits: BuiltPass["hits"] = []
-  const sets: BuiltPass["sets"] = []
-  let t = 0
-
-  const currentSize = () => pts[pts.length - 1]?.s ?? DOT_SIZE
-  const jump = (x: number, y: number, o: number, ms: number, size = currentSize()) => {
-    t += ms
-    pts.push({ x, y, o, t, s: size })
-  }
-  const move = (x: number, y: number, size = currentSize()) => {
-    const p = pts[pts.length - 1]
-    if (p) t += Math.hypot(x - p.x, y - p.y) / TRAVEL_SPEED
-    pts.push({ x, y, o: 1, t, s: size })
-  }
-  const dwell = (ms: number) => {
-    const p = pts[pts.length - 1]
-    if (!p) return
-    t += ms
-    pts.push({ x: p.x, y: p.y, o: p.o, t, s: p.s })
-  }
-  const hit = (el: HTMLElement | null, linger = HIT_LINGER) => {
-    if (el) hits.push({ el, at: t, until: t + linger })
-  }
-  const fadeOut = () => {
-    const p = pts[pts.length - 1]
-    if (p) jump(p.x, p.y, 0, FADE_MS)
-  }
-  const setBudget = (value: number) => {
-    sets.push({ at: t, value })
-  }
-
-  // The pass spawns with the balance the story left it: a new cycle refills
-  // it (a fresh billing period), a deny pass inherits a balance the request
-  // cost no longer fits — that is why it is denied.
-  setBudget(plan.budgetStart)
-
-  // Entry: the dot is emitted from the request station.
-  pts.push({ x: requestPoint.x, y: requestPoint.y, o: 0, t: 0, s: requestPoint.size })
-  jump(requestPoint.x, requestPoint.y, 1, FADE_MS, requestPoint.size)
-  hit(request)
-  dwell(STATION_DWELL)
-
-  for (const station of stations) {
-    const el = station.id ? node(station.id) : null
-    if (!el) continue
-    const point = railPointOf(el)
-    move(point.x, point.y, point.size)
-    hit(el)
-    dwell(STATION_DWELL)
-  }
-
-  const decisionPoint = railPointOf(decision)
-  move(decisionPoint.x, decisionPoint.y, decisionPoint.size)
-  hit(decision)
-  dwell(DECISION_DWELL)
-
-  if (plan.kind === "deny") {
-    const denyChip = node("deny-chip")
-    if (!denyChip) return null
-    const denyX = railXOf(denyChip)
-    const denyTop = denyChip.getBoundingClientRect().top - rootBox.top
-    const connector = root.querySelector<HTMLElement>("[data-mp-connector]")
-    const hasBranch = connector && getComputedStyle(connector).display !== "none"
-
-    if (hasBranch) {
-      // Follow the drawn dashed branch: down, then across. The dot fades out
-      // before entering the chip — the chip's own highlight carries the hit.
-      const branchY = connector.getBoundingClientRect().top - rootBox.top + 12
-      move(railX, branchY)
-      move(denyX, branchY)
-      move(denyX, denyTop - CHIP_CLEARANCE_Y)
-    } else {
-      // Stacked: the outcome column sits directly under the decision, so the
-      // deny walks the rail down to its chip the same way the allow does.
-      move(railX, denyTop - CHIP_CLEARANCE_Y)
-    }
-    // The dot never enters the chip; its highlight takes over and persists.
-    fadeOut()
-    hit(denyChip, PERSIST)
-    dwell(320)
-  } else {
-    const allowChip = node("allow-chip")
-    if (!allowChip) return null
-    // Fade out above the chip (the chip highlight is the signal), then
-    // re-emerge directly on the first settle station.
-    const chipBox = allowChip.getBoundingClientRect()
-    const chipTop = chipBox.top - rootBox.top
-    move(railX, chipTop - CHIP_CLEARANCE_Y)
-    fadeOut()
-    hit(allowChip, PERSIST)
-    // The compact rail has no wallet station, so the reservation lands where
-    // the story ends there: the balance drops the moment the allow lights.
-    if (plan.budgetAfterReserve !== undefined && !node("wallet")) {
-      setBudget(plan.budgetAfterReserve)
-    }
-    dwell(STATION_DWELL)
-
-    for (const [index, name] of ["wallet", "ledger", "invoice"].entries()) {
-      const el = node(name)
-      if (!el) continue
-      const point = railPointOf(el)
-      if (index === 0) {
-        jump(point.x, point.y, 0, 40, point.size)
-        jump(point.x, point.y, 1, FADE_MS, point.size)
-      } else {
-        move(point.x, point.y, point.size)
-      }
-      hit(el)
-      // The reservation is the moment the money moves: the balance drops as
-      // the wallet reserves, in plain sight.
-      if (name === "wallet" && plan.budgetAfterReserve !== undefined) {
-        setBudget(plan.budgetAfterReserve)
-      }
-      dwell(STATION_DWELL)
-    }
-
-    // The terminus: the money lands in the buyer's own provider account —
-    // the dot travels past the invoice receipt to where the funds settle.
-    const payment = node("payment")
-    if (payment) {
-      const point = railPointOf(payment)
-      move(point.x, point.y, point.size)
-      hit(payment, OUTCOME_LINGER)
-      dwell(320)
-    }
-    fadeOut()
-  }
-
-  const duration = t
-  if (duration <= 0) return null
-  const keyframes = pts.map((p) => ({
-    transform: `translate3d(${(p.x - p.s / 2).toFixed(1)}px, ${(p.y - p.s / 2).toFixed(1)}px, 0)`,
-    width: `${p.s}px`,
-    height: `${p.s}px`,
-    opacity: p.o,
-    offset: Math.min(1, p.t / duration),
-  }))
-  return { keyframes, duration, hits, sets }
-}
-
 function StationRow({
   id,
   label,
   fact,
   note,
+  registry,
   variant = "default",
-}: Station & { note?: string; variant?: "default" | "ghost" | "terminal" }) {
+}: Station & {
+  note?: string
+  registry: MoneyPathRegistry
+  variant?: "default" | "ghost" | "terminal"
+}) {
   return (
     <div
-      data-mp-node={id}
+      ref={id ? registry.waypointRefs[id] : undefined}
       className={cn("group relative py-[5px] pl-8", variant === "ghost" && "opacity-80")}
     >
       {/* The dot lives inside the title line so rows with a note keep it
           centered against the label, not the taller block. */}
       <div className="relative flex items-baseline gap-2">
         <span
+          ref={id ? registry.railDotRefs[id] : undefined}
           aria-hidden
-          data-mp-rail-dot
           className={cn(
             "-translate-x-1/2 -translate-y-1/2 -left-6 absolute top-1/2 size-[9px] rounded-full",
             variant === "default" && "border border-background-borderHover bg-surface-panel",
@@ -367,122 +136,6 @@ function StationRow({
   )
 }
 
-type Budget = { value: number; short: boolean }
-
-type Choreography = {
-  budget: Budget
-  /** 1-based number of the request currently walking the path; null until
-   * the choreography starts (and under reduced motion). */
-  passNumber: number | null
-}
-
-// The request-path choreography: watches the stage into view, then animates
-// the dot through the three-pass cycle and drives the balance readout and the
-// pass counter off the same clock. Lifted out of the component so MoneyPath
-// stays render-only.
-function useMoneyPathChoreography(
-  stageRef: RefObject<HTMLDivElement | null>,
-  stations: Station[]
-): Choreography {
-  const [budget, setBudget] = useState<Budget>({ value: BUDGET_START, short: false })
-  const [passNumber, setPassNumber] = useState<number | null>(null)
-
-  useEffect(() => {
-    const root = stageRef.current
-    if (!root) return
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return
-    const dot = root.querySelector<HTMLElement>("[data-mp-dot]")
-    if (!dot) return
-
-    let cancelled = false
-    let raf = 0
-    let timer: ReturnType<typeof setTimeout> | undefined
-    let anim: Animation | null = null
-    let hits: BuiltPass["hits"] = []
-    let sets: BuiltPass["sets"] = []
-    let setIndex = 0
-    let passIndex = 0
-
-    const clearHits = () => {
-      for (const h of hits) h.el.removeAttribute("data-mp-hit")
-    }
-
-    const tick = () => {
-      if (anim) {
-        const now = Number(anim.currentTime ?? 0)
-        for (const h of hits) {
-          if (now >= h.at && now <= h.until) h.el.setAttribute("data-mp-hit", "true")
-          else if (h.el.hasAttribute("data-mp-hit")) h.el.removeAttribute("data-mp-hit")
-        }
-        while (setIndex < sets.length && now >= (sets[setIndex]?.at ?? Number.POSITIVE_INFINITY)) {
-          const s = sets[setIndex]
-          if (s) setBudget({ value: s.value, short: s.value < REQUEST_COST })
-          setIndex += 1
-        }
-      }
-      raf = requestAnimationFrame(tick)
-    }
-
-    const runPass = () => {
-      if (cancelled) return
-      anim?.cancel()
-      clearHits()
-      const plan = PASS_PLAN[passIndex % PASS_PLAN.length]
-      if (!plan) return
-      // Stacked layouts render only the live pass's outcome branch — stamp it
-      // synchronously so buildPass measures the final layout.
-      root.setAttribute("data-mp-outcome", plan.kind)
-      setPassNumber((passIndex % PASS_PLAN.length) + 1)
-      passIndex += 1
-      const built = buildPass(root, plan, stations)
-      if (!built) return
-      hits = built.hits
-      sets = built.sets
-      setIndex = 0
-      anim = dot.animate(built.keyframes, {
-        duration: built.duration,
-        easing: "linear",
-        fill: "forwards",
-      })
-      anim.finished
-        .then(() => {
-          if (cancelled) return
-          // A finished deny closes the cycle: hold the beat a little longer
-          // before the budget refills as a new billing period.
-          const gap = passIndex % PASS_PLAN.length === 0 ? CYCLE_GAP : PASS_GAP
-          timer = setTimeout(runPass, gap)
-        })
-        .catch(() => {})
-    }
-
-    const io = new IntersectionObserver(
-      ([entry]) => {
-        if (entry?.isIntersecting) {
-          io.disconnect()
-          runPass()
-          raf = requestAnimationFrame(tick)
-        }
-      },
-      { threshold: 0.2 }
-    )
-    io.observe(root)
-
-    return () => {
-      cancelled = true
-      io.disconnect()
-      cancelAnimationFrame(raf)
-      if (timer) clearTimeout(timer)
-      anim?.cancel()
-      clearHits()
-      root.removeAttribute("data-mp-outcome")
-      setBudget({ value: BUDGET_START, short: false })
-      setPassNumber(null)
-    }
-  }, [stageRef, stations])
-
-  return { budget, passNumber }
-}
-
 // request → decision: one uninterrupted rail — the checks and the budget gate
 // read as one section. The balance is the one oversized fact on the rail, so
 // the money moving stays the most legible change on screen without the gate
@@ -492,23 +145,25 @@ function useMoneyPathChoreography(
 function RequestDecisionRail({
   budget,
   stations,
+  registry,
   compact = false,
 }: {
   budget: Budget
   stations: Station[]
+  registry: MoneyPathRegistry
   compact?: boolean
 }) {
   return (
-    <div data-mp-trace className="relative">
+    <div className="relative">
       <span
         aria-hidden
         className="-translate-x-1/2 absolute top-1 bottom-0 left-2 w-px bg-background-border"
       />
 
-      <div data-mp-node="request" className="group relative pb-3 pl-8">
+      <div ref={registry.waypointRefs.request} className="group relative pb-3 pl-8">
         <span
+          ref={registry.railDotRefs.request}
           aria-hidden
-          data-mp-rail-dot
           className="-translate-x-1/2 absolute top-[5px] left-2 size-2.5 rounded-full bg-info ring-2 ring-info-bg"
         />
         <div className="flex items-baseline gap-2">
@@ -526,7 +181,7 @@ function RequestDecisionRail({
       </div>
 
       {stations.map((station) => (
-        <StationRow key={station.label} {...station} />
+        <StationRow key={station.label} {...station} registry={registry} />
       ))}
 
       {/* The decision is a station like the others (simplification round
@@ -534,14 +189,14 @@ function RequestDecisionRail({
           special is small: the beacon dot, the bracket ticks around the
           balance (the logo echo at the exact deciding fact), and the number
           itself, sized to be watched counting down. */}
-      <div data-mp-node="decision" className="group relative mt-1 py-[5px] pl-8">
+      <div ref={registry.waypointRefs.decision} className="group relative mt-1 py-[5px] pl-8">
         {/* The beacon lives inside the title line and centers against it —
             the bracketed balance makes this line taller than a plain row, so
             a block-level offset drifts off the title (user-reported). */}
         <div className="relative flex items-center gap-2">
           <span
+            ref={registry.railDotRefs.decision}
             aria-hidden
-            data-mp-rail-dot
             className="-translate-x-1/2 -translate-y-1/2 -left-6 absolute top-1/2 block size-2.5"
           >
             <span className="mp-beacon absolute inset-0 rounded-full bg-warning-text" />
@@ -569,7 +224,6 @@ function RequestDecisionRail({
               className="absolute right-0 bottom-0 size-1.5 border-warning-text border-r border-b"
             />
             <span
-              data-mp-budget
               className={cn(
                 "font-medium font-mono text-lg leading-6 transition-colors duration-regular ease-out-quad",
                 budget.short ? "text-warning-text" : "text-background-textContrast"
@@ -592,11 +246,12 @@ function RequestDecisionRail({
 // feedback 2026-07), and the winning outcome stays lit until the next request
 // spawns. Shared by the full fork and the compact gate so both renders speak
 // one grammar: outcome, status code, and the arithmetic that decided it.
-function OutcomeChip({ kind }: { kind: "allow" | "deny" }) {
+function OutcomeChip({ kind, registry }: { kind: "allow" | "deny"; registry: MoneyPathRegistry }) {
   const allow = kind === "allow"
+  const waypointId = allow ? "allow-chip" : "deny-chip"
   return (
     <div
-      data-mp-node={allow ? "allow-chip" : "deny-chip"}
+      ref={registry.waypointRefs[waypointId]}
       className={cn(
         "group flex items-center gap-2.5 rounded-sm border border-background-border bg-surface-raised px-3 py-2 transition-colors duration-regular ease-out-quad",
         allow
@@ -648,18 +303,18 @@ function OutcomeChip({ kind }: { kind: "allow" | "deny" }) {
 // branch shows the same stations untouched — absence as proof. The
 // data-mp-branch attributes drive the stacked-layout morph (globals.css): on
 // mobile only the live pass's branch is shown.
-function OutcomeFork() {
+function OutcomeFork({ registry }: { registry: MoneyPathRegistry }) {
   return (
     <div className="grid grid-cols-1 gap-x-6 gap-y-6 sm:grid-cols-2">
       <div data-mp-branch="allow">
-        <OutcomeChip kind="allow" />
+        <OutcomeChip kind="allow" registry={registry} />
         <div className="relative mt-2">
           <span
             aria-hidden
             className="-top-2 -translate-x-1/2 absolute bottom-8 left-2 w-px bg-background-border"
           />
           {settleStations.map((station) => (
-            <StationRow key={station.label} {...station} />
+            <StationRow key={station.label} {...station} registry={registry} />
           ))}
           {/* Terminal receipt rule (design-system-guidelines.md): the allow
               pass ends in a literal invoice line with its explain chain, not
@@ -684,6 +339,7 @@ function OutcomeFork() {
               boundary stated as a station. */}
           <StationRow
             {...paymentStation}
+            registry={registry}
             variant="terminal"
             note="the money never touches Unprice"
           />
@@ -691,14 +347,14 @@ function OutcomeFork() {
       </div>
 
       <div data-mp-branch="deny">
-        <OutcomeChip kind="deny" />
+        <OutcomeChip kind="deny" registry={registry} />
         <div className="relative mt-2">
           <span
             aria-hidden
             className="-top-2 -translate-x-1/2 absolute bottom-4 left-2 w-0 border-background-border border-l border-dashed"
           />
           {ghostStations.map((station) => (
-            <StationRow key={station.label} {...station} variant="ghost" />
+            <StationRow key={station.label} {...station} registry={registry} variant="ghost" />
           ))}
           {/* The deny receipt is the same receipt, empty: absence as proof —
               plus the one thing a deny does return: its reason, to your app. */}
@@ -719,7 +375,7 @@ function OutcomeFork() {
               reason → your app · limit exceeded
             </p>
           </div>
-          <StationRow label="Payment" fact="no charge" variant="ghost" />
+          <StationRow label="Payment" fact="no charge" registry={registry} variant="ghost" />
         </div>
       </div>
     </div>
@@ -743,8 +399,8 @@ export function MoneyPath({
 }) {
   const compact = variant === "compact"
   const stations = compact ? gateStations : resolveStations
-  const stageRef = useRef<HTMLDivElement>(null)
-  const { budget, passNumber } = useMoneyPathChoreography(stageRef, stations)
+  const registry = useMoneyPathRegistry()
+  const { budget, passNumber } = useMoneyPathChoreography(registry, stations)
 
   return (
     <figure
@@ -760,12 +416,17 @@ export function MoneyPath({
         </span>
       </figcaption>
 
-      <div ref={stageRef} className="relative">
+      <div ref={registry.stageRef} className="relative">
         {/* request → decision */}
-        <RequestDecisionRail budget={budget} stations={stations} compact={compact} />
+        <RequestDecisionRail
+          budget={budget}
+          stations={stations}
+          registry={registry}
+          compact={compact}
+        />
 
         {/* fork connector (desktop) */}
-        <div aria-hidden data-mp-connector className="relative hidden h-9 sm:block">
+        <div ref={registry.connectorRef} aria-hidden className="relative hidden h-9 sm:block">
           <span className="-translate-x-1/2 absolute top-0 bottom-0 left-2 w-px bg-background-border" />
           <span className="absolute top-3 right-[calc(50%-20px)] bottom-0 left-2 rounded-tr-[10px] border-background-border border-t border-r border-dashed" />
         </div>
@@ -781,20 +442,20 @@ export function MoneyPath({
         {compact ? (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div data-mp-branch="allow">
-              <OutcomeChip kind="allow" />
+              <OutcomeChip kind="allow" registry={registry} />
             </div>
             <div data-mp-branch="deny">
-              <OutcomeChip kind="deny" />
+              <OutcomeChip kind="deny" registry={registry} />
             </div>
           </div>
         ) : (
-          <OutcomeFork />
+          <OutcomeFork registry={registry} />
         )}
 
         {/* the request in flight — driven by the choreography effect above */}
         <span
+          ref={registry.dotRef}
           aria-hidden
-          data-mp-dot
           className="pointer-events-none absolute top-0 left-0 size-[9px] rounded-full bg-info opacity-0 will-change-transform"
         />
       </div>

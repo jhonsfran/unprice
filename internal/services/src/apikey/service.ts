@@ -210,27 +210,51 @@ export class ApiKeysService {
     >
   > {
     const expiresAt = endOfCurrentDayMs(timezone)
+    return this.createOrRollApiKey({
+      projectId,
+      isRoot,
+      name: SDK_EXAMPLE_API_KEY_NAME,
+      expiresAt,
+      defaultCustomerId: null,
+    })
+  }
+
+  public async createOrRollApiKey({
+    projectId,
+    isRoot,
+    name,
+    expiresAt,
+    defaultCustomerId,
+  }: {
+    projectId: string
+    isRoot: boolean
+    name: string
+    expiresAt?: number | null
+    defaultCustomerId?: string | null
+  }): Promise<
+    Result<
+      ApiKey & { key: string; state: "created" | "rolled" },
+      SchemaError | FetchError | UnPriceApiKeyError
+    >
+  > {
     const { val: existingKey, err: existingKeyErr } = await wrapResult(
       this.db.query.apikeys.findFirst({
         where: (apikey, { and, eq, isNull }) =>
-          and(
-            eq(apikey.projectId, projectId),
-            eq(apikey.name, SDK_EXAMPLE_API_KEY_NAME),
-            isNull(apikey.revokedAt)
-          ),
+          and(eq(apikey.projectId, projectId), eq(apikey.name, name), isNull(apikey.revokedAt)),
         orderBy: (apikey, { desc }) => [desc(apikey.updatedAtM)],
       }),
       (error) =>
         new FetchError({
-          message: `error finding default SDK example api key: ${error.message}`,
+          message: `error finding reusable api key: ${error.message}`,
           retry: false,
         })
     )
 
     if (existingKeyErr) {
       this.logger.error(existingKeyErr, {
-        context: "error finding default SDK example api key",
+        context: "error finding reusable api key",
         projectId,
+        apiKeyName: name,
       })
       return Err(existingKeyErr)
     }
@@ -239,9 +263,9 @@ export class ApiKeysService {
       const createdKey = await this.createApiKey({
         projectId,
         isRoot,
-        name: SDK_EXAMPLE_API_KEY_NAME,
+        name,
         expiresAt,
-        defaultCustomerId: null,
+        defaultCustomerId,
       })
 
       if (createdKey.err) {
@@ -254,10 +278,22 @@ export class ApiKeysService {
       })
     }
 
+    if (
+      existingKey.isRoot !== isRoot ||
+      (existingKey.defaultCustomerId ?? null) !== (defaultCustomerId ?? null)
+    ) {
+      return Err(
+        new FetchError({
+          message: "Reusable API key binding does not match the requested binding",
+          retry: false,
+        })
+      )
+    }
+
     const rolledKey = await this.rollApiKey({
       keyHash: existingKey.hash,
       projectId,
-      expiresAt,
+      ...(expiresAt !== undefined ? { expiresAt } : {}),
     })
 
     if (rolledKey.err) {

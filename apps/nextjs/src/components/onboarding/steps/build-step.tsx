@@ -58,6 +58,7 @@ export function BuildStep() {
   const setProvider = useMutation(trpc.paymentProvider.setEnabled.mutationOptions())
   const applyPlanTemplate = useMutation(trpc.planVersions.applyTemplate.mutationOptions())
   const seedEvidence = useMutation(trpc.planVersions.seedEvidence.mutationOptions())
+  const isBuilding = setProvider.isPending || applyPlanTemplate.isPending || seedEvidence.isPending
 
   const failPhase = useCallback(
     async (phase: BuildPhase, error: unknown) => {
@@ -198,6 +199,7 @@ export function BuildStep() {
           </div>
           <div className="flex flex-wrap items-center gap-4">
             <Button
+              disabled={isBuilding}
               onClick={() => {
                 hasRunRef.current = true
                 void runBuild()

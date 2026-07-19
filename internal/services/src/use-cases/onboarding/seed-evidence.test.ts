@@ -214,10 +214,18 @@ function createSeedOnboardingEvidenceDeps({
       email: "onboarding+1783166400000@example.com",
     })
   )
+  const getCustomerByExternalId: ApiMock = vi.fn(async () => Ok(null))
   const createApiKey = vi.fn(async () =>
     Ok({
       id: "apikey_123",
       key: "unprice_dev_123",
+    })
+  )
+  const createOrRollApiKey = vi.fn(async () =>
+    Ok({
+      id: "apikey_123",
+      key: "unprice_dev_123",
+      state: "created" as const,
     })
   )
   const createSubscriptionRecord = vi.fn(async () =>
@@ -230,6 +238,9 @@ function createSeedOnboardingEvidenceDeps({
   const createPhase = vi.fn(async () => Ok({ id: "phase_123" }))
   const generateBillingPeriods = vi.fn(async () => Ok({ cyclesCreated: 1, phasesProcessed: 1 }))
   const getSubscriptionData = vi.fn(async () => ({ status: "active" }))
+  const getActiveSubscription: ApiMock = vi.fn(async () => ({
+    err: { code: "SUBSCRIPTION_NOT_FOUND", message: "subscription not found" },
+  }))
   const activateWallet = vi.fn(async () => Ok(undefined))
 
   return {
@@ -240,9 +251,12 @@ function createSeedOnboardingEvidenceDeps({
         },
         customers: {
           createCustomerRecord,
+          getCustomerByExternalId,
+          getActiveSubscription,
         },
         apikeys: {
           createApiKey,
+          createOrRollApiKey,
         },
         subscriptions: {
           createSubscription: createSubscriptionRecord,
@@ -265,7 +279,10 @@ function createSeedOnboardingEvidenceDeps({
       accessCheck: check,
       createApiClient,
       createApiKey,
+      createOrRollApiKey,
       createCustomerRecord,
+      getCustomerByExternalId,
+      getActiveSubscription,
       createPhase,
       createSubscriptionRecord,
       generateBillingPeriods,
@@ -355,13 +372,18 @@ describe("seedOnboardingEvidence", () => {
       Ok({
         id: "cus_123",
         name: "Onboarding Customer",
-        email: "onboarding+1783166400000@example.com",
+        email: "onboarding+plan_version_123@example.com",
       })
     )
-    const createApiKey = vi.fn(async () =>
+    const getCustomerByExternalId = vi.fn(async () => Ok(null))
+    const getActiveSubscription = vi.fn(async () => ({
+      err: { code: "SUBSCRIPTION_NOT_FOUND", message: "subscription not found" },
+    }))
+    const createOrRollApiKey = vi.fn(async () =>
       Ok({
         id: "apikey_123",
         key: "unprice_dev_123",
+        state: "created" as const,
       })
     )
     const createSubscriptionRecord = vi.fn(async () =>
@@ -384,9 +406,11 @@ describe("seedOnboardingEvidence", () => {
           },
           customers: {
             createCustomerRecord,
+            getCustomerByExternalId,
+            getActiveSubscription,
           },
           apikeys: {
-            createApiKey,
+            createOrRollApiKey,
           },
           subscriptions: {
             createSubscription: createSubscriptionRecord,
@@ -435,10 +459,11 @@ describe("seedOnboardingEvidence", () => {
       },
     })
     expect(createApiClient).toHaveBeenCalledWith("unprice_dev_123")
-    expect(createApiKey).toHaveBeenCalledWith(
+    expect(createOrRollApiKey).toHaveBeenCalledWith(
       expect.objectContaining({
         defaultCustomerId: "cus_123",
         isRoot: false,
+        name: "onboarding-plan_version_123",
         expiresAt: Date.UTC(2026, 6, 4, 23, 59, 59, 999),
       })
     )
@@ -487,6 +512,170 @@ describe("seedOnboardingEvidence", () => {
       })
     )
     expect(activateWallet).toHaveBeenCalled()
+  })
+
+  it("reuses onboarding resources when evidence is retried after a completed run", async () => {
+    const customer = {
+      id: "cus_123",
+      name: "Onboarding Customer",
+      email: "onboarding+plan_version_123@example.com",
+      active: true,
+    }
+    const runsStart = vi
+      .fn()
+      .mockResolvedValueOnce({
+        result: {
+          runId: "run_123",
+          status: "running" as const,
+          customerId: customer.id,
+          budgetAmountMinor: 5000,
+          consumedAmountMinor: 0,
+          remainingAmountMinor: 5000,
+          currency: "USD",
+          workloadType: "workflow" as const,
+          workloadId: "onboarding-workflow",
+          traceId: "onboarding_cus_123",
+          parentRunId: null,
+        },
+      })
+      .mockResolvedValueOnce({
+        result: {
+          runId: "run_123",
+          status: "completed" as const,
+          customerId: customer.id,
+          budgetAmountMinor: 5000,
+          consumedAmountMinor: 10,
+          remainingAmountMinor: 4990,
+          currency: "USD",
+          workloadType: "workflow" as const,
+          workloadId: "onboarding-workflow",
+          traceId: "onboarding_cus_123",
+          parentRunId: null,
+        },
+      })
+    const accessCheck = vi
+      .fn()
+      .mockResolvedValueOnce({ error: { message: "temporary outage", code: "unavailable" } })
+      .mockResolvedValueOnce({ result: { allowed: true, featureSlug: "run-history" } })
+    const { deps, mocks } = createSeedOnboardingEvidenceDeps({ accessCheck, runsStart })
+    mocks.getCustomerByExternalId
+      .mockResolvedValueOnce(Ok(null))
+      .mockResolvedValueOnce(Ok(customer))
+    mocks.getActiveSubscription
+      .mockResolvedValueOnce({
+        err: { code: "SUBSCRIPTION_NOT_FOUND", message: "subscription not found" },
+      })
+      .mockResolvedValueOnce(
+        Ok({
+          id: "sub_123",
+          active: true,
+          activePhase: { planVersion: { id: "plan_version_123" } },
+        })
+      )
+
+    const input = {
+      projectId: "proj_123",
+      planVersionId: "plan_version_123",
+      projectTimezone: "UTC",
+      projectDefaultCurrency: "USD" as const,
+      workspaceIsMain: false,
+    }
+    const first = await seedOnboardingEvidence(deps, input)
+    const second = await seedOnboardingEvidence(deps, input)
+
+    expect(first.err?.message).toContain("Access check failed")
+    expect(second.err).toBeUndefined()
+    expect(second.val?.subscription.id).toBe("sub_123")
+    expect(mocks.createCustomerRecord).toHaveBeenCalledTimes(1)
+    expect(mocks.createSubscriptionRecord).toHaveBeenCalledTimes(1)
+    expect(mocks.createOrRollApiKey).toHaveBeenCalledTimes(2)
+    expect(mocks.runsConsume).toHaveBeenCalledTimes(6)
+    expect(mocks.runsEnd).toHaveBeenCalledTimes(1)
+  })
+
+  it("starts a retry run without duplicating resources after a failed run", async () => {
+    const customer = {
+      id: "cus_123",
+      name: "Onboarding Customer",
+      email: "onboarding+plan_version_123@example.com",
+      active: true,
+    }
+    const runningRun = {
+      runId: "run_123",
+      status: "running" as const,
+      customerId: customer.id,
+      budgetAmountMinor: 5000,
+      consumedAmountMinor: 0,
+      remainingAmountMinor: 5000,
+      currency: "USD",
+      workloadType: "workflow" as const,
+      workloadId: "onboarding-workflow",
+      traceId: "onboarding_cus_123",
+      parentRunId: null,
+    }
+    const runsStart = vi
+      .fn()
+      .mockResolvedValueOnce({ result: runningRun })
+      .mockResolvedValueOnce({ result: { ...runningRun, status: "failed" as const } })
+      .mockResolvedValueOnce({ result: { ...runningRun, runId: "run_retry" } })
+    const acceptedConsumption = {
+      result: {
+        accepted: true,
+        reason: "accepted" as const,
+        run: { ...runningRun, runId: "run_retry" },
+      },
+    }
+    const runsConsume = vi
+      .fn()
+      .mockResolvedValueOnce({ error: { message: "temporary outage", code: "unavailable" } })
+      .mockResolvedValue(acceptedConsumption)
+    const runsEnd = vi
+      .fn()
+      .mockResolvedValueOnce({ result: { ...runningRun, status: "failed" as const } })
+      .mockResolvedValueOnce({
+        result: { ...runningRun, runId: "run_retry", status: "completed" as const },
+      })
+    const { deps, mocks } = createSeedOnboardingEvidenceDeps({
+      runsConsume,
+      runsEnd,
+      runsStart,
+    })
+    mocks.getCustomerByExternalId
+      .mockResolvedValueOnce(Ok(null))
+      .mockResolvedValueOnce(Ok(customer))
+    mocks.getActiveSubscription
+      .mockResolvedValueOnce({
+        err: { code: "SUBSCRIPTION_NOT_FOUND", message: "subscription not found" },
+      })
+      .mockResolvedValueOnce(
+        Ok({
+          id: "sub_123",
+          active: true,
+          activePhase: { planVersion: { id: "plan_version_123" } },
+        })
+      )
+    const input = {
+      projectId: "proj_123",
+      planVersionId: "plan_version_123",
+      projectTimezone: "UTC",
+      projectDefaultCurrency: "USD" as const,
+      workspaceIsMain: false,
+    }
+
+    const first = await seedOnboardingEvidence(deps, input)
+    const second = await seedOnboardingEvidence(deps, input)
+
+    expect(first.err?.message).toContain("Budgeted usage failed")
+    expect(second.err).toBeUndefined()
+    expect(mocks.createCustomerRecord).toHaveBeenCalledTimes(1)
+    expect(mocks.createSubscriptionRecord).toHaveBeenCalledTimes(1)
+    expect(mocks.createOrRollApiKey).toHaveBeenCalledTimes(2)
+    expect(runsStart).toHaveBeenCalledTimes(3)
+    expect(runsStart).toHaveBeenLastCalledWith(
+      expect.objectContaining({ idempotencyKey: expect.stringContaining("_retry_") })
+    )
+    expect(runsConsume).toHaveBeenCalledTimes(7)
+    expect(runsEnd).toHaveBeenCalledTimes(2)
   })
 
   it("closes a started budgeted run when usage consumption errors", async () => {

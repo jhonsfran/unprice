@@ -81,6 +81,16 @@ type UsageSeedTarget = {
   aggregationField?: string
 }
 
+type OnboardingCustomer = {
+  id: string
+  name?: string | null
+  email: string
+}
+
+type OnboardingSubscription = {
+  id: string
+}
+
 function seedError(message: string, context?: Record<string, unknown>) {
   return new FetchError({
     message,
@@ -143,6 +153,145 @@ function endOfCurrentDayMs(date: Date, timezone = "UTC") {
     endOfDay.setUTCHours(23, 59, 59, 999)
     return endOfDay.getTime()
   }
+}
+
+function onboardingExternalId(planVersionId: string) {
+  return `unprice-onboarding:${planVersionId}`
+}
+
+function isMissingActiveSubscription(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || !("code" in error)) return false
+  return error.code === "SUBSCRIPTION_NOT_FOUND" || error.code === "SUBSCRIPTION_NOT_ACTIVE"
+}
+
+async function getOrCreateOnboardingCustomer(
+  deps: SeedOnboardingEvidenceDeps,
+  input: z.infer<typeof seedOnboardingEvidenceInputSchema>
+): Promise<Result<OnboardingCustomer, FetchError>> {
+  const externalId = onboardingExternalId(input.planVersionId)
+  const existingResult = await deps.services.customers.getCustomerByExternalId(
+    input.projectId,
+    externalId,
+    { skipCache: true }
+  )
+
+  if (existingResult.err) {
+    return Err(seedError(`Customer lookup failed: ${existingResult.err.message}`))
+  }
+
+  if (existingResult.val) {
+    if (!existingResult.val.active) {
+      return Err(seedError("The onboarding customer exists but is inactive."))
+    }
+    return Ok(existingResult.val)
+  }
+
+  const createdResult = await deps.services.customers.createCustomerRecord({
+    projectId: input.projectId,
+    name: "Onboarding Customer",
+    email: `onboarding+${input.planVersionId}@example.com`,
+    externalId,
+    defaultCurrency: normalizeCurrency(input.projectDefaultCurrency),
+    timezone: input.projectTimezone,
+  })
+
+  if (!createdResult.err) {
+    return Ok(createdResult.val)
+  }
+
+  // A concurrent retry may have inserted the deterministic customer first.
+  const racedResult = await deps.services.customers.getCustomerByExternalId(
+    input.projectId,
+    externalId,
+    { skipCache: true }
+  )
+  if (!racedResult.err && racedResult.val?.active) {
+    return Ok(racedResult.val)
+  }
+
+  return Err(createdResult.err)
+}
+
+async function getOrCreateOnboardingSubscription({
+  customerId,
+  deps,
+  input,
+  now,
+  planVersion,
+}: {
+  customerId: string
+  deps: SeedOnboardingEvidenceDeps
+  input: z.infer<typeof seedOnboardingEvidenceInputSchema>
+  now: number
+  planVersion: { currency: Currency; trialUnits?: number | null }
+}): Promise<Result<OnboardingSubscription, FetchError>> {
+  const getActiveSubscription = () =>
+    deps.services.customers.getActiveSubscription({
+      customerId,
+      projectId: input.projectId,
+      now,
+      opts: { skipCache: true },
+    })
+  const activeResult = await getActiveSubscription()
+
+  if (!activeResult.err) {
+    if (activeResult.val.activePhase?.planVersion?.id !== input.planVersionId) {
+      return Err(
+        seedError("The onboarding customer already has a different active plan version.", {
+          customerId,
+          planVersionId: input.planVersionId,
+        })
+      )
+    }
+    return Ok({ id: activeResult.val.id })
+  }
+
+  if (!isMissingActiveSubscription(activeResult.err)) {
+    return Err(seedError(`Subscription lookup failed: ${activeResult.err.message}`))
+  }
+
+  const createdResult = await createSubscription(
+    {
+      services: deps.services,
+      db: deps.db,
+      logger: deps.logger,
+    },
+    {
+      projectId: input.projectId,
+      input: {
+        customerId,
+        timezone: input.projectTimezone,
+        phases: [
+          {
+            planVersionId: input.planVersionId,
+            startAt: now - 5 * 60 * 1000,
+            trialUnits: planVersion.trialUnits ?? 0,
+            creditLinePolicy: "capped",
+            creditLineAmount: toLedgerMinor(
+              fromCurrencyMinor(onboardingCreditLineAmountMinor, planVersion.currency)
+            ),
+          },
+        ],
+      },
+    }
+  )
+
+  if (!createdResult.err) {
+    return Ok({ id: createdResult.val.id })
+  }
+
+  // If another retry won the create race, reuse the active matching subscription.
+  const racedResult = await getActiveSubscription()
+  if (!racedResult.err && racedResult.val.activePhase?.planVersion?.id === input.planVersionId) {
+    return Ok({ id: racedResult.val.id })
+  }
+
+  return Err(
+    seedError(`Subscription setup failed: ${createdResult.err.message}`, {
+      customerId,
+      planVersionId: input.planVersionId,
+    })
+  )
 }
 
 async function closeStartedRunAfterFailure({
@@ -218,65 +367,36 @@ export async function seedOnboardingEvidence(
 
   const now = Date.now()
   const apiExpiresAt = endOfCurrentDayMs(new Date(now), input.projectTimezone)
-  const customerResult = await deps.services.customers.createCustomerRecord({
-    projectId: input.projectId,
-    name: "Onboarding Customer",
-    email: `onboarding+${now}@example.com`,
-    defaultCurrency: normalizeCurrency(input.projectDefaultCurrency),
-    timezone: input.projectTimezone,
-  })
+  const customerResult = await getOrCreateOnboardingCustomer(deps, input)
 
   if (customerResult.err) {
     return Err(customerResult.err)
   }
 
   const customer = customerResult.val
-  const apiKeyResult = await deps.services.apikeys.createApiKey({
+  const apiKeyResult = await deps.services.apikeys.createOrRollApiKey({
     projectId: input.projectId,
-    name: `onboarding-${now}`,
+    name: `onboarding-${input.planVersionId}`,
     isRoot: input.workspaceIsMain,
     defaultCustomerId: customer.id,
     expiresAt: apiExpiresAt,
   })
 
   if (apiKeyResult.err) {
-    return Err(apiKeyResult.err)
+    return Err(seedError(`API key setup failed: ${apiKeyResult.err.message}`))
   }
 
   const apiKey = apiKeyResult.val
-  const subscriptionResult = await createSubscription(
-    {
-      services: deps.services,
-      db: deps.db,
-      logger: deps.logger,
-    },
-    {
-      projectId: input.projectId,
-      input: {
-        customerId: customer.id,
-        timezone: input.projectTimezone,
-        phases: [
-          {
-            planVersionId: input.planVersionId,
-            startAt: now - 5 * 60 * 1000,
-            trialUnits: planVersion.trialUnits ?? 0,
-            creditLinePolicy: "capped",
-            creditLineAmount: toLedgerMinor(
-              fromCurrencyMinor(onboardingCreditLineAmountMinor, planVersion.currency)
-            ),
-          },
-        ],
-      },
-    }
-  )
+  const subscriptionResult = await getOrCreateOnboardingSubscription({
+    customerId: customer.id,
+    deps,
+    input,
+    now,
+    planVersion,
+  })
 
   if (subscriptionResult.err) {
-    return Err(
-      seedError(`Subscription setup failed: ${subscriptionResult.err.message}`, {
-        customerId: customer.id,
-        planVersionId: input.planVersionId,
-      })
-    )
+    return Err(subscriptionResult.err)
   }
 
   const apiClient = deps.createApiClient(apiKey.key)
@@ -284,18 +404,30 @@ export async function seedOnboardingEvidence(
   let eventsRecorded = 0
 
   if (usageTargets.length > 0) {
-    const runResult = await apiClient.runs.start({
-      customerId: customer.id,
-      budgetAmountMinor: onboardingRunBudgetAmountMinor,
-      idempotencyKey: `onboarding_${customer.id}_budgeted_run`,
-      workloadType: "workflow",
-      workloadId: "onboarding-workflow",
-      traceId: `onboarding_${customer.id}`,
-      metadata: {
-        onboarding: true,
-        planVersionId: input.planVersionId,
-      },
-    })
+    const runIdempotencyKey = `onboarding_${customer.id}_budgeted_run`
+    const startRun = (idempotencyKey: string) =>
+      apiClient.runs.start({
+        customerId: customer.id,
+        budgetAmountMinor: onboardingRunBudgetAmountMinor,
+        idempotencyKey,
+        workloadType: "workflow",
+        workloadId: "onboarding-workflow",
+        traceId: `onboarding_${customer.id}`,
+        metadata: {
+          onboarding: true,
+          planVersionId: input.planVersionId,
+        },
+      })
+
+    let runResult = await startRun(runIdempotencyKey)
+
+    if (
+      !runResult.error &&
+      runResult.result.status !== "running" &&
+      runResult.result.status !== "completed"
+    ) {
+      runResult = await startRun(`${runIdempotencyKey}_retry_${apiKey.updatedAtM ?? now}`)
+    }
 
     if (runResult.error) {
       return Err(
@@ -306,7 +438,9 @@ export async function seedOnboardingEvidence(
       )
     }
 
-    if (runResult.result.status !== "running") {
+    if (runResult.result.status === "completed") {
+      eventsRecorded = usageTargets.length * usageSeedValues.length
+    } else if (runResult.result.status !== "running") {
       return Err(
         seedError(`Budgeted workflow run did not start: ${runResult.result.status}`, {
           customerId: customer.id,
@@ -317,7 +451,7 @@ export async function seedOnboardingEvidence(
 
     const runId = runResult.result.runId
 
-    for (const target of usageTargets) {
+    for (const target of runResult.result.status === "running" ? usageTargets : []) {
       for (const [index, usage] of usageSeedValues.entries()) {
         const consumeResult = await apiClient.runs.consume({
           runId,
@@ -375,18 +509,20 @@ export async function seedOnboardingEvidence(
       }
     }
 
-    const endResult = await apiClient.runs.end({
-      runId,
-      status: "completed",
-    })
+    if (runResult.result.status === "running") {
+      const endResult = await apiClient.runs.end({
+        runId,
+        status: "completed",
+      })
 
-    if (endResult.error) {
-      return Err(
-        seedError(apiErrorMessage("Budgeted workflow run failed to close", endResult.error), {
-          customerId: customer.id,
-          runId,
-        })
-      )
+      if (endResult.error) {
+        return Err(
+          seedError(apiErrorMessage("Budgeted workflow run failed to close", endResult.error), {
+            customerId: customer.id,
+            runId,
+          })
+        )
+      }
     }
   }
 

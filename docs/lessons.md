@@ -720,6 +720,8 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   evidence and `POST /v1/usage/consume` for synchronous checks; `/v1/events/ingest*` is stale.
 - 2026-07-04: Onboarding evidence setup should call the generated API SDK from a backend
   use case exposed through tRPC; do not hardcode public API `fetch` URLs in onboarding UI.
+- 2026-07-19: Onboarding evidence retries must reuse deterministic customer, API-key, and
+  subscription identities; resume completed runs and start a fresh run only after a failed run.
 - 2026-07-04: For scheduled future subscription phases, pass request `now` into
   `subscriptions.createPhase`; passing the future `startAt` makes the service activate the phase
   immediately and can update subscription state before the effective boundary.
