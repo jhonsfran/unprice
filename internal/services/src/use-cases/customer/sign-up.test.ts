@@ -210,4 +210,108 @@ describe("customer signUp payment provider guard", () => {
       })
     )
   })
+
+  it("defaults the credit line policy to capped when the plan includes credits", async () => {
+    let insertCount = 0
+    const tx = {
+      insert: vi.fn(() => {
+        insertCount += 1
+        if (insertCount === 1) {
+          return {
+            values: vi.fn().mockReturnValue({
+              returning: vi.fn().mockResolvedValue([
+                {
+                  id: "cus_123",
+                },
+              ]),
+            }),
+          }
+        }
+
+        return {
+          values: vi.fn().mockResolvedValue(undefined),
+        }
+      }),
+    }
+    const db = {
+      query: {
+        versions: {
+          findFirst: vi.fn().mockResolvedValue({
+            ...createPlanVersion("sandbox"),
+            metadata: { includedCreditAmount: 2_000_000_000 },
+          }),
+        },
+        paymentProviderConfig: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: "ppc_123",
+            projectId: "proj_123",
+            paymentProvider: "sandbox",
+            active: true,
+            connectionType: "managed_connection",
+            mode: "test",
+            status: "active",
+            key: null,
+            keyIv: null,
+          }),
+        },
+      },
+      transaction: vi.fn(async (callback: (tx: Database) => Promise<unknown>) =>
+        callback(tx as unknown as Database)
+      ),
+    } as unknown as Database
+    const createSubscription = vi.fn().mockResolvedValue(Ok({ id: "sub_123" }))
+    const createPhase = vi.fn().mockResolvedValue(Ok({ id: "phase_123" }))
+    const generateBillingPeriods = vi
+      .fn()
+      .mockResolvedValue(Ok({ cyclesCreated: 1, phasesProcessed: 1 }))
+
+    const result = await signUp(
+      {
+        db,
+        logger: createLogger(),
+        analytics: {
+          getPlanClickBySessionId: vi.fn(),
+          ingestEvents: vi.fn().mockResolvedValue(undefined),
+        } as never,
+        waitUntil: vi.fn(),
+        services: {
+          customers: {
+            getCustomerByExternalId: vi.fn(),
+            getPaymentProvider: vi.fn(),
+          },
+          subscriptions: {
+            createSubscription,
+            createPhase,
+            getSubscriptionData: vi.fn().mockResolvedValue({ status: "inactive" }),
+            activateWallet: vi.fn().mockResolvedValue(undefined),
+          },
+          billing: {
+            generateBillingPeriods,
+          },
+          plans: {},
+        } as never,
+      },
+      {
+        projectId: "proj_123",
+        input: {
+          email: "customer@example.com",
+          planVersionId: "version_123",
+          successUrl: "https://example.com/success/{CUSTOMER_ID}",
+          cancelUrl: "https://example.com/cancel",
+          defaultCurrency: "USD",
+        } as never,
+      }
+    )
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.success).toBe(true)
+    expect(createPhase).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          creditLinePolicy: "capped",
+          creditLineAmount: null,
+        }),
+      })
+    )
+  })
 })

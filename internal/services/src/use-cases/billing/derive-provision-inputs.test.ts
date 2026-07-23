@@ -37,21 +37,26 @@ function createDb(phase: {
   creditLinePolicy: "capped" | "uncapped"
   creditLineAmount: number | null
   planVersion: {
+    metadata?: { includedCreditAmount?: number } | null
     planFeatures: Array<ReturnType<typeof usageUnitFeature>>
   }
-}): Database {
-  return {
+}) {
+  const findFirst = vi.fn(async (_query?: unknown) => ({
+    id: subscriptionId,
+    projectId,
+    customer: { id: "cus_abc", defaultCurrency: "USD" },
+    phases: [phase],
+  }))
+
+  const db = {
     query: {
       subscriptions: {
-        findFirst: vi.fn(async () => ({
-          id: subscriptionId,
-          projectId,
-          customer: { id: "cus_abc", defaultCurrency: "USD" },
-          phases: [phase],
-        })),
+        findFirst,
       },
     },
   } as unknown as Database
+
+  return { db, findFirst }
 }
 
 describe("derivePeriodUsageAllowanceAmount", () => {
@@ -118,16 +123,15 @@ describe("derivePeriodUsageAllowanceAmount", () => {
 
 describe("deriveActivationInputsFromPlan", () => {
   it("issues a credit_line grant for the derived period usage allowance", async () => {
-    const result = await deriveActivationInputsFromPlan(
-      createDb({
-        creditLinePolicy: "capped",
-        creditLineAmount: null,
-        planVersion: {
-          planFeatures: [usageUnitFeature({ amount: 50, limit: 10 })],
-        },
-      }),
-      { subscriptionId, projectId }
-    )
+    const { db } = createDb({
+      creditLinePolicy: "capped",
+      creditLineAmount: null,
+      planVersion: {
+        planFeatures: [usageUnitFeature({ amount: 50, limit: 10 })],
+      },
+    })
+
+    const result = await deriveActivationInputsFromPlan(db, { subscriptionId, projectId })
 
     expect(result?.grants).toEqual([
       {
@@ -139,20 +143,84 @@ describe("deriveActivationInputsFromPlan", () => {
   })
 
   it("returns the uncapped policy without issuing a credit_line grant", async () => {
-    const result = await deriveActivationInputsFromPlan(
-      createDb({
-        creditLinePolicy: "uncapped",
-        creditLineAmount: null,
-        planVersion: {
-          planFeatures: [usageUnitFeature({ amount: 50, limit: 10 })],
-        },
-      }),
-      { subscriptionId, projectId }
-    )
+    const { db } = createDb({
+      creditLinePolicy: "uncapped",
+      creditLineAmount: null,
+      planVersion: {
+        planFeatures: [usageUnitFeature({ amount: 50, limit: 10 })],
+      },
+    })
+
+    const result = await deriveActivationInputsFromPlan(db, { subscriptionId, projectId })
 
     expect(result).toEqual({
       creditLinePolicy: "uncapped",
       grants: [],
     })
+  })
+
+  it("issues a plan_included grant before the credit_line grant when the plan includes credits", async () => {
+    const { db } = createDb({
+      creditLinePolicy: "capped",
+      creditLineAmount: ledger("10"),
+      planVersion: {
+        metadata: { includedCreditAmount: ledger("5") },
+        planFeatures: [],
+      },
+    })
+
+    const result = await deriveActivationInputsFromPlan(db, { subscriptionId, projectId })
+
+    expect(result?.grants).toEqual([
+      {
+        amount: ledger("5"),
+        source: "plan_included",
+        reason: "Plan included credits",
+      },
+      {
+        amount: ledger("10"),
+        source: "credit_line",
+        reason: "Period usage allowance",
+      },
+    ])
+  })
+
+  it("issues no plan_included grant when the plan has no included credit config", async () => {
+    const { db } = createDb({
+      creditLinePolicy: "capped",
+      creditLineAmount: ledger("10"),
+      planVersion: {
+        metadata: null,
+        planFeatures: [],
+      },
+    })
+
+    const result = await deriveActivationInputsFromPlan(db, { subscriptionId, projectId })
+
+    expect(result?.grants.map((grant) => grant.source)).toEqual(["credit_line"])
+  })
+
+  it("filters phases by the provided phaseId", async () => {
+    const { db, findFirst } = createDb({
+      creditLinePolicy: "capped",
+      creditLineAmount: ledger("10"),
+      planVersion: {
+        metadata: null,
+        planFeatures: [],
+      },
+    })
+
+    await deriveActivationInputsFromPlan(db, { subscriptionId, projectId, phaseId: "phase_123" })
+    await deriveActivationInputsFromPlan(db, { subscriptionId, projectId })
+
+    const withPhaseId = findFirst.mock.calls[0]?.[0] as {
+      with: { phases: { where?: unknown } }
+    }
+    const withoutPhaseId = findFirst.mock.calls[1]?.[0] as {
+      with: { phases: { where?: unknown } }
+    }
+
+    expect(typeof withPhaseId.with.phases.where).toBe("function")
+    expect(withoutPhaseId.with.phases.where).toBeUndefined()
   })
 })

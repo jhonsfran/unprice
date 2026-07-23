@@ -27,6 +27,7 @@ import { BannerPublishedVersion } from "../[planVersionId]/_components/banner"
 import {
   CurrencyFormField,
   DescriptionFormField,
+  IncludedCreditsFormField,
   PaymentProviderFormField,
   TitleFormField,
 } from "./version-fields-form"
@@ -174,6 +175,8 @@ export function PlanVersionForm({
           <BillingConfigFormField form={form} isDisabled={isPublished} />
 
           <TrialUnitsFormField form={form} isDisabled={isPublished} unitLabel={trialUnitLabel} />
+
+          <IncludedCreditsFormField form={form} isDisabled={isPublished} />
 
           <WhenToBillFormField form={form} isDisabled={isPublished} />
 

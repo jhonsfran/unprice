@@ -17,6 +17,15 @@ export const planVersionMetadataSchema = z
       .describe(
         "External identifier for integrating with third-party systems (e.g., Stripe price ID). Useful for syncing plan versions with external billing providers"
       ),
+    includedCreditAmount: z
+      .number()
+      .int()
+      .positive()
+      .max(Number.MAX_SAFE_INTEGER)
+      .optional()
+      .describe(
+        "Credit money granted to the customer's wallet every billing period, in ledger minor units (scale 8; 1 USD = 100,000,000). Spent before any chargeable usage; unused credit expires at the end of the period"
+      ),
   })
   .describe(
     "Additional metadata for the plan version used for external integrations and custom data"

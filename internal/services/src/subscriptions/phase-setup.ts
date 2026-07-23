@@ -103,7 +103,24 @@ export async function resolvePhaseSetup(
   }
 
   const paymentProviderToUse = input.paymentProvider ?? versionData.paymentProvider
-  const creditLinePolicyToUse = input.creditLinePolicy ?? "uncapped"
+
+  // Plans with included credits need the capped policy: uncapped phases never
+  // open wallet reservations, so the granted credits would sit unused and
+  // expire while usage is invoiced at full price.
+  const includedCreditAmount = versionData.metadata?.includedCreditAmount ?? 0
+  const creditLinePolicyToUse =
+    input.creditLinePolicy ?? (includedCreditAmount > 0 ? "capped" : "uncapped")
+
+  if (includedCreditAmount > 0 && creditLinePolicyToUse === "uncapped") {
+    return Err(
+      new UnPriceSubscriptionError({
+        code: "CREDIT_POLICY_CONFLICT",
+        message:
+          "This plan includes credits, so the usage credit policy must be capped. Uncapped phases never spend wallet credits.",
+      })
+    )
+  }
+
   const creditLineAmountToUse =
     creditLinePolicyToUse === "uncapped" ? null : (input.creditLineAmount ?? null)
   const trialUnitsToUse = input.trialUnits ?? versionData.trialUnits ?? 0

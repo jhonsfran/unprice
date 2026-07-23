@@ -45,9 +45,13 @@ function normalizePhaseCreditLine(
     creditLinePolicy?: CustomerSignUp["creditLinePolicy"]
     creditLineAmountMinor?: CustomerSignUp["creditLineAmountMinor"]
   },
-  currency: string
+  currency: string,
+  // Plans with included credits default to capped: uncapped phases never
+  // spend wallet credits, so the plan's granted credits would expire unused.
+  includedCreditAmount: number
 ) {
-  const creditLinePolicy = input.creditLinePolicy ?? "uncapped"
+  const creditLinePolicy =
+    input.creditLinePolicy ?? (includedCreditAmount > 0 ? "capped" : "uncapped")
   const creditLineAmount =
     input.creditLineAmountMinor === null || input.creditLineAmountMinor === undefined
       ? null
@@ -313,7 +317,11 @@ async function handlePaymentRequiredFlow(
   const paymentProvider = planVersion.paymentProvider
   const paymentRequired = planVersion.paymentMethodRequired
   const currency = input.defaultCurrency ?? planVersion.project.defaultCurrency
-  const phaseCreditLine = normalizePhaseCreditLine(input, currency)
+  const phaseCreditLine = normalizePhaseCreditLine(
+    input,
+    currency,
+    planVersion.metadata?.includedCreditAmount ?? 0
+  )
 
   const { err: paymentProviderErr, val: paymentProviderService } =
     await deps.services.customers.getPaymentProvider({
@@ -432,7 +440,11 @@ async function handleDirectProvisioningFlow(
   const paymentProvider = planVersion.paymentProvider
 
   const currency = input.defaultCurrency ?? planVersion.project.defaultCurrency
-  const phaseCreditLine = normalizePhaseCreditLine(input, currency)
+  const phaseCreditLine = normalizePhaseCreditLine(
+    input,
+    currency,
+    planVersion.metadata?.includedCreditAmount ?? 0
+  )
   const customerMetadata = externalId ? { ...metadata, externalId } : metadata
 
   try {

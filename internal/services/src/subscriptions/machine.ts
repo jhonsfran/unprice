@@ -242,6 +242,7 @@ export class SubscriptionMachine {
             const derived = await deriveActivationInputsFromPlan(input.db, {
               subscriptionId: input.context.subscriptionId,
               projectId: input.context.projectId,
+              phaseId: input.context.currentPhase?.id,
             })
 
             if (!derived) {

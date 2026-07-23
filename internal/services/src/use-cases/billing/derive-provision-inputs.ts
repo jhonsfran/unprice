@@ -2,6 +2,7 @@ import type { Database } from "@unprice/db"
 import {
   type CreditLinePolicy,
   type PlanVersionFeature,
+  type PlanVersionMetadata,
   calculatePricePerFeature,
 } from "@unprice/db/validators"
 import { toLedgerMinor } from "@unprice/money"
@@ -15,6 +16,7 @@ type SubscriptionRow = {
     creditLinePolicy: CreditLinePolicy
     creditLineAmount: number | null
     planVersion: {
+      metadata: PlanVersionMetadata | null
       planFeatures: Array<Pick<PlanVersionFeature, "featureType" | "config" | "limit">>
     } | null
   }>
@@ -26,7 +28,11 @@ export interface DerivedActivationInputs {
 }
 
 /**
- * Derives the activation grant for a subscription's billing period.
+ * Derives the activation grants for a subscription's billing period.
+ *
+ * Plan-included credits come from the plan version
+ * (`metadata.includedCreditAmount`): the plan promises the same credit to
+ * every subscriber, re-issued each period and expiring at period end.
  *
  * Credit line policy is a subscription-phase decision, not a plan-version
  * default. A plan describes the public package; the phase describes the
@@ -49,8 +55,9 @@ export interface DerivedActivationInputs {
  */
 export async function deriveActivationInputsFromPlan(
   db: Database,
-  input: { subscriptionId: string; projectId: string }
+  input: { subscriptionId: string; projectId: string; phaseId?: string }
 ): Promise<DerivedActivationInputs | null> {
+  const phaseId = input.phaseId
   const sub = (await db.query.subscriptions.findFirst({
     with: {
       customer: { columns: { id: true, defaultCurrency: true } },
@@ -72,10 +79,11 @@ export async function deriveActivationInputsFromPlan(
             },
           },
         },
-        // Heuristic: first phase is the active one for a newly-created or
-        // newly-renewed subscription about to be activated. Multi-phase
-        // scenarios should call `activateSubscription` directly with explicit
-        // grants rather than relying on this derivation.
+        // The subscription machine passes its current phase id so renewals
+        // and plan changes derive from the phase that is actually active.
+        // Callers without a phase id keep the single-phase heuristic: the
+        // first phase is the active one for a newly-created subscription.
+        ...(phaseId ? { where: (p, { eq }) => eq(p.id, phaseId) } : {}),
         limit: 1,
       },
     },
@@ -88,6 +96,16 @@ export async function deriveActivationInputsFromPlan(
   if (!phase || !phase.planVersion) return null
 
   const grants: ActivationGrant[] = []
+
+  const includedCreditAmount = phase.planVersion.metadata?.includedCreditAmount ?? 0
+  if (includedCreditAmount > 0) {
+    grants.push({
+      amount: includedCreditAmount,
+      source: "plan_included",
+      reason: "Plan included credits",
+    })
+  }
+
   const allowanceAmount = derivePeriodUsageAllowanceAmount(phase)
 
   if (allowanceAmount > 0) {

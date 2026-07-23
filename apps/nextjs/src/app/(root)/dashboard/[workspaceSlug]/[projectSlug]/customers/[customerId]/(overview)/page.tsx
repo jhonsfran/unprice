@@ -6,8 +6,6 @@ import { HydrateClient, api, batchPrefetch, trpc } from "~/trpc/server"
 import { ANALYTICS_CONFIG_REALTIME } from "~/trpc/shared"
 import { CustomerCurrentAccess } from "../_components/customer-current-access"
 import {
-  CustomerEvidenceSummary,
-  CustomerEvidenceSummarySkeleton,
   CustomerMetricsPanel,
   CustomerMetricsPanelSkeleton,
 } from "../_components/usage/customer-metrics-panel"
@@ -29,10 +27,9 @@ export default async function CustomerUsagePage({
   const filter = intervalParams(searchParams)
   const baseUrl = `/${workspaceSlug}/${projectSlug}/customers/${customerId}`
 
-  const [{ customer }, walletResult, economicSummary, currentAccess] = await Promise.all([
+  const [{ customer }, walletResult, currentAccess] = await Promise.all([
     api.customers.getSubscriptions({ customerId }),
     api.customers.getWallet({ customerId }),
-    api.customers.getEconomicSummary({ customerId }),
     api.customers.getCurrentAccess({ customerId }),
   ])
 
@@ -55,14 +52,6 @@ export default async function CustomerUsagePage({
   return (
     <HydrateClient>
       <div className="flex flex-col gap-6 space-y-6">
-        <Suspense fallback={<CustomerEvidenceSummarySkeleton />}>
-          <CustomerEvidenceSummary
-            customerId={customerId}
-            baseUrl={baseUrl}
-            runCounts={economicSummary.runCounts}
-            invoiceCounts={economicSummary.invoiceCounts}
-          />
-        </Suspense>
         <CustomerCurrentAccess
           access={currentAccess}
           wallet={walletResult.wallet}

@@ -9,7 +9,6 @@ import {
   type SubscriptionPhase,
   getTrialUnitLabel,
 } from "@unprice/db/validators"
-import { fromLedgerAmount, fromLedgerMinor, toDecimal, toLedgerMinor } from "@unprice/money"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@unprice/ui/form"
 import { HelpCircle } from "@unprice/ui/icons"
@@ -17,15 +16,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@unprice/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { useParams, useRouter } from "next/navigation"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef } from "react"
 import type { FieldPath, FieldValues, PathValue, UseFormReturn } from "react-hook-form"
 import type { z } from "zod"
 import { PaymentProviderFormField } from "~/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/plans/[planSlug]/_components/version-fields-form"
 import ConfigItemsFormField from "~/components/forms/items-fields"
+import { LedgerAmountInput } from "~/components/forms/ledger-amount-input"
 import PaymentMethodsFormField from "~/components/forms/payment-method-field"
 import SelectPlanFormField from "~/components/forms/select-plan-field"
 import TrialUnitsFormField from "~/components/forms/trial-days-field"
-import { InputWithAddons } from "~/components/input-addons"
 import { SubmitButton } from "~/components/submit-button"
 import { formatDate } from "~/lib/dates"
 import { toastAction } from "~/lib/toast"
@@ -142,6 +141,7 @@ function SchedulePhaseForm({
   const selectedPlanVersionPaymentProvider = selectedPlanVersion?.paymentProvider ?? undefined
   const selectedPlanVersionTrialUnits = selectedPlanVersion?.trialUnits
   const selectedCurrency = selectedPlanVersion?.currency ?? "USD"
+  const selectedPlanIncludesCredits = (selectedPlanVersion?.metadata?.includedCreditAmount ?? 0) > 0
   const creditLinePolicy = form.watch("creditLinePolicy")
   const whenToChange = form.watch("whenToChange")
   const planVersionOptions =
@@ -163,13 +163,17 @@ function SchedulePhaseForm({
     form.setValue("paymentMethodRequired", selectedPlanVersionPaymentMethodRequired ?? false)
     form.setValue("paymentProvider", selectedPlanVersionPaymentProvider)
     form.setValue("trialUnits", selectedPlanVersionTrialUnits ?? 0)
-    form.setValue("creditLinePolicy", form.getValues("creditLinePolicy") ?? "uncapped")
+    form.setValue(
+      "creditLinePolicy",
+      selectedPlanIncludesCredits ? "capped" : (form.getValues("creditLinePolicy") ?? "uncapped")
+    )
     form.setValue("creditLineAmount", form.getValues("creditLineAmount") ?? null)
   }, [
     selectedPlanVersionId,
     selectedPlanVersionPaymentMethodRequired,
     selectedPlanVersionPaymentProvider,
     selectedPlanVersionTrialUnits,
+    selectedPlanIncludesCredits,
     form,
   ])
 
@@ -218,6 +222,7 @@ function SchedulePhaseForm({
           selectedCurrency={selectedCurrency}
           persistedPhaseFieldsLocked={false}
           creditLinePolicy={creditLinePolicy}
+          planIncludesCredits={selectedPlanIncludesCredits}
         />
 
         <TimingAndTrialFields
@@ -363,6 +368,7 @@ function CreateEditPhaseForm({
   const selectedPlanVersionPaymentProvider = selectedPlanVersion?.paymentProvider ?? undefined
   const selectedPlanVersionTrialUnits = selectedPlanVersion?.trialUnits
   const selectedCurrency = selectedPlanVersion?.currency ?? "USD"
+  const selectedPlanIncludesCredits = (selectedPlanVersion?.metadata?.includedCreditAmount ?? 0) > 0
   const creditLinePolicy = form.watch("creditLinePolicy")
   const planVersionOptions = planVersions?.planVersions ?? []
   const isCreditLinePolicyDisabled =
@@ -388,13 +394,17 @@ function CreateEditPhaseForm({
     form.setValue("paymentMethodRequired", selectedPlanVersionPaymentMethodRequired ?? false)
     form.setValue("paymentProvider", selectedPlanVersionPaymentProvider)
     form.setValue("trialUnits", selectedPlanVersionTrialUnits ?? 0)
-    form.setValue("creditLinePolicy", form.getValues("creditLinePolicy") ?? "uncapped")
+    form.setValue(
+      "creditLinePolicy",
+      selectedPlanIncludesCredits ? "capped" : (form.getValues("creditLinePolicy") ?? "uncapped")
+    )
     form.setValue("creditLineAmount", form.getValues("creditLineAmount") ?? null)
   }, [
     selectedPlanVersionId,
     selectedPlanVersionPaymentMethodRequired,
     selectedPlanVersionPaymentProvider,
     selectedPlanVersionTrialUnits,
+    selectedPlanIncludesCredits,
     form,
     editMode,
   ])
@@ -423,6 +433,7 @@ function CreateEditPhaseForm({
           selectedCurrency={selectedCurrency}
           persistedPhaseFieldsLocked={persistedPhaseFieldsLocked}
           creditLinePolicy={creditLinePolicy}
+          planIncludesCredits={selectedPlanIncludesCredits}
         />
 
         <TimingAndTrialFields
@@ -507,12 +518,14 @@ function UsageCreditFields<TFieldValues extends SubscriptionPhaseFieldValues>({
   selectedCurrency,
   persistedPhaseFieldsLocked,
   creditLinePolicy,
+  planIncludesCredits,
 }: {
   form: UseFormReturn<TFieldValues>
   isCreditLinePolicyDisabled: boolean
   selectedCurrency: string
   persistedPhaseFieldsLocked: boolean
   creditLinePolicy?: CreditLinePolicy
+  planIncludesCredits?: boolean
 }) {
   return (
     <div className="grid gap-4 lg:grid-cols-2">
@@ -553,7 +566,11 @@ function UsageCreditFields<TFieldValues extends SubscriptionPhaseFieldValues>({
               </FormControl>
               <SelectContent>
                 <SelectItem value="capped">Capped</SelectItem>
-                <SelectItem value="uncapped">Uncapped</SelectItem>
+                {/* Plans with included credits require capped: uncapped phases
+                    never spend wallet credits, so the backend rejects them. */}
+                <SelectItem value="uncapped" disabled={planIncludesCredits}>
+                  Uncapped
+                </SelectItem>
               </SelectContent>
             </Select>
             <FormMessage />
@@ -578,7 +595,7 @@ function UsageCreditFields<TFieldValues extends SubscriptionPhaseFieldValues>({
               </Tooltip>
             </div>
             <FormControl>
-              <CreditLineAmountInput
+              <LedgerAmountInput
                 value={field.value}
                 onChange={field.onChange}
                 currency={selectedCurrency}
@@ -769,57 +786,6 @@ function getSubmitLabel({
   return editMode ? "Update" : "Create"
 }
 
-function CreditLineAmountInput({
-  value,
-  onChange,
-  currency,
-  disabled,
-}: {
-  value: unknown
-  onChange: (value: number | null) => void
-  currency: string
-  disabled?: boolean
-}) {
-  const [displayValue, setDisplayValue] = useState(() =>
-    formatCreditLineAmount(normalizeCreditLineAmount(value), currency)
-  )
-
-  useEffect(() => {
-    setDisplayValue(formatCreditLineAmount(normalizeCreditLineAmount(value), currency))
-  }, [currency, value])
-
-  return (
-    <InputWithAddons
-      inputMode="decimal"
-      placeholder="Derived"
-      leading={currency}
-      value={displayValue}
-      disabled={disabled}
-      onChange={(event) => {
-        const nextValue = event.target.value
-        setDisplayValue(nextValue)
-
-        if (nextValue.trim() === "") {
-          onChange(null)
-          return
-        }
-
-        try {
-          const parsed = toLedgerMinor(fromLedgerAmount(nextValue, currency))
-          if (Number.isFinite(parsed) && parsed >= 0) {
-            onChange(parsed)
-          }
-        } catch {
-          return
-        }
-      }}
-      onBlur={() => {
-        setDisplayValue(formatCreditLineAmount(normalizeCreditLineAmount(value), currency))
-      }}
-    />
-  )
-}
-
 function getCreditLineAmountHelpText(
   fieldsLocked: boolean,
   creditLinePolicy: CreditLinePolicy | undefined
@@ -833,16 +799,4 @@ function getCreditLineAmountHelpText(
   }
 
   return "Leave empty to derive the cap from finite usage limits. Use 0 to allow no postpaid runway."
-}
-
-function normalizeCreditLineAmount(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null
-}
-
-function formatCreditLineAmount(value: number | null, currency: string): string {
-  return value === null
-    ? ""
-    : toDecimal(fromLedgerMinor(value, currency))
-        .replace(/(\.\d*?)0+$/, "$1")
-        .replace(/\.$/, "")
 }

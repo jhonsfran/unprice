@@ -1712,7 +1712,11 @@ export class WalletService {
   }
 
   /**
-   * Drain from `available.granted` FIFO by grant expiry. Updates
+   * Drain from `available.granted`: free sources first (`credit_line` always
+   * last), then FIFO by grant expiry. `credit_line` is the only granted
+   * source the customer pays for at capture, so it must not consume before
+   * included/promo/trial credits — an unused credit_line costs the customer
+   * nothing, while an unused free credit is lost value. Updates
    * `wallet_credits.remaining_amount` in the same tx as the ledger transfer,
    * preserving the invariant:
    *
@@ -1741,6 +1745,8 @@ export class WalletService {
         or(isNull(walletCredits.expiresAt), gt(walletCredits.expiresAt, effectiveAt))
       ),
       orderBy: [
+        // free money before the chargeable credit line
+        sql`CASE WHEN ${walletCredits.source} = 'credit_line' THEN 1 ELSE 0 END ASC`,
         // soonest-expiring first; never-expiring last
         sql`COALESCE(${walletCredits.expiresAt}, 'infinity'::timestamptz) ASC`,
         asc(walletCredits.createdAt),

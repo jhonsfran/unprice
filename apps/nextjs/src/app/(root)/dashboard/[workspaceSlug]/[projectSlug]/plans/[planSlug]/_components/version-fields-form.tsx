@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@unprice/ui/text-area"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { useParams } from "next/navigation"
+import { LedgerAmountInput } from "~/components/forms/ledger-amount-input"
 import { SuperLink } from "~/components/super-link"
 
 interface FormValues extends FieldValues {
@@ -160,6 +161,9 @@ export function PaymentProviderFormField<TFieldValues extends PaymentProviderFor
             <SelectContent>
               {PAYMENT_PROVIDERS.map((provider) => {
                 const disabled = provider === "square"
+
+                if (disabled) return
+
                 return (
                   <SelectItem key={provider} value={provider} disabled={disabled}>
                     {disabled ? `${provider} - coming soon` : provider}
@@ -168,6 +172,50 @@ export function PaymentProviderFormField<TFieldValues extends PaymentProviderFor
               })}
             </SelectContent>
           </Select>
+          <FormMessage />
+        </FormItem>
+      )}
+    />
+  )
+}
+
+export function IncludedCreditsFormField<TFieldValues extends FormValues>({
+  form,
+  isDisabled,
+}: {
+  form: UseFormReturn<TFieldValues>
+  isDisabled?: boolean
+}) {
+  const currency = form.watch("currency" as FieldPath<TFieldValues>) as Currency | undefined
+
+  return (
+    <FormField
+      control={form.control}
+      name={"metadata.includedCreditAmount" as FieldPath<TFieldValues>}
+      render={({ field }) => (
+        <FormItem className="flex flex-col justify-end">
+          <div className="flex items-center gap-1">
+            <FormLabel>Included credits</FormLabel>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <HelpCircle className="size-3.5 text-muted-foreground" />
+              </TooltipTrigger>
+              <TooltipContent side="right" className="max-w-[260px]">
+                Credit amount granted to each customer every billing period. Customers spend it
+                before any charged usage; unused credit expires at the end of the period. Leave
+                empty for none.
+              </TooltipContent>
+            </Tooltip>
+          </div>
+          <FormControl>
+            <LedgerAmountInput
+              value={field.value}
+              onChange={(value) => field.onChange(value ?? undefined)}
+              currency={currency ?? "USD"}
+              disabled={isDisabled}
+              placeholder="0.00"
+            />
+          </FormControl>
           <FormMessage />
         </FormItem>
       )}

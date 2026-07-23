@@ -407,6 +407,211 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
     expect(analytics.getUsageBillingFeatures).toHaveBeenCalledTimes(0)
   })
 
+  it("P0-B derives plan-included credits from plan metadata, spends them before the credit line, and splits the invoice", async () => {
+    const includedCreditAmount = 2_000_000_000
+    const dueUsageAmount = usageAmount - includedCreditAmount
+
+    // Bake included credits into the seeded plan version, as the dashboard
+    // plan editor would.
+    await db.execute(sql`
+      UPDATE unprice_plan_versions
+      SET metadata = '{"includedCreditAmount": 2000000000}'::json
+      WHERE id = 'pv_test_monthly_arrear' AND project_id = ${projectId}
+    `)
+
+    const logger = createLogger()
+    const ledger = new LedgerGateway({ db, logger })
+    const wallet = new WalletService({ db, logger, ledgerGateway: ledger })
+    const analytics = createAnalytics({ events: 1200 })
+    const rating = new RatingService({
+      logger,
+      analytics,
+      grantsManager: new GrantsManager({ db, logger }),
+    })
+    const repo = new DrizzleSubscriptionRepository(db)
+    const services = {
+      wallet,
+      ledger,
+      subscriptions: {},
+    } as unknown as Pick<ServiceContext, "wallet" | "ledger" | "subscriptions">
+
+    // Derivation reads the plan config: included credits first, then the
+    // credit-line runway derived from finite usage limits.
+    const activationInputs = await deriveActivationInputsFromPlan(db, { projectId, subscriptionId })
+    expect(activationInputs).toEqual({
+      creditLinePolicy: "capped",
+      grants: [
+        {
+          amount: includedCreditAmount,
+          reason: "Plan included credits",
+          source: "plan_included",
+        },
+        { amount: usageAmount, reason: "Period usage allowance", source: "credit_line" },
+      ],
+    })
+
+    const activation = await activateSubscription(
+      { services, db, logger },
+      {
+        subscriptionId,
+        projectId,
+        periodStartAt: new Date(jan1),
+        periodEndAt: new Date(feb1),
+        idempotencyKey: "p0-b-derived-2026-01",
+        grants: activationInputs?.grants,
+      }
+    )
+    expect(activation.err).toBeUndefined()
+    expect(activation.val?.grantsIssued).toEqual([
+      expect.objectContaining({ amount: includedCreditAmount, source: "plan_included" }),
+      expect.objectContaining({ amount: usageAmount, source: "credit_line" }),
+    ])
+
+    await expectWalletState(wallet, {
+      consumed: 0,
+      creditCount: 2,
+      granted: includedCreditAmount + usageAmount,
+      reserved: 0,
+    })
+
+    const reservation = await wallet.createReservation({
+      projectId,
+      customerId,
+      currency: "EUR",
+      entitlementId: eventsEntitlementId,
+      requestedAmount: usageAmount,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 0,
+      periodStartAt: new Date(jan1),
+      periodEndAt: new Date(feb1),
+      effectiveAt: new Date(jan1),
+      metadata: { owner: "p0-b-derived-integration" },
+      idempotencyKey: "reserve:p0-b-derived-2026-01:events",
+    })
+    expect(reservation.err).toBeUndefined()
+
+    const reservationId = reservation.val?.reservationId
+    expect(reservationId).toBeDefined()
+    if (!reservationId) return
+
+    // Included credits are fully drained before the chargeable credit line.
+    const fundingLegs = await db.execute<{
+      allocated_amount: number | string
+      grant_source: string
+    }>(sql`
+      SELECT grant_source, allocated_amount
+      FROM unprice_entitlement_reservation_funding_legs
+      WHERE project_id = ${projectId}
+        AND reservation_id = ${reservationId}
+      ORDER BY sequence ASC
+    `)
+    expect(
+      fundingLegs.rows.map((row) => ({
+        allocatedAmount: Number(row.allocated_amount),
+        grantSource: row.grant_source,
+      }))
+    ).toEqual([
+      { allocatedAmount: includedCreditAmount, grantSource: "plan_included" },
+      { allocatedAmount: dueUsageAmount, grantSource: "credit_line" },
+    ])
+
+    const flush = await flushReservationForTest(wallet, {
+      projectId,
+      customerId,
+      currency: "EUR",
+      reservationId,
+      flushSeq: 1,
+      flushAmount: usageAmount,
+      refillChunkAmount: 0,
+      statementKey,
+      final: true,
+      billingPeriodId: usageBillingPeriodId,
+      effectiveAt: new Date(feb1),
+      sourceId: `${usageBillingPeriodId}:${usageSubscriptionItemId}`,
+      metadata: {
+        feature_plan_version_item_id: usageSubscriptionItemId,
+        owner: "p0-b-derived-integration",
+      },
+    })
+    expect(flush.err).toBeUndefined()
+
+    const context = await loadSubscriptionContext()
+    const firstRun = await billPeriod({
+      context,
+      logger,
+      db,
+      repo,
+      ratingService: rating,
+      ledgerService: ledger,
+    })
+    expect(firstRun.phasesProcessed).toBe(1)
+
+    // Usage covered by included credits is free; the credit-line remainder
+    // and the fixed fee are due.
+    await expectInvoice({
+      amount_due: fixedAmount + dueUsageAmount,
+      amount_included: includedCreditAmount,
+      amount_paid: 0,
+      gross_amount: fixedAmount + usageAmount,
+    })
+
+    const lines = await ledger.getInvoiceLines({ projectId, statementKey })
+    expect(lines.err).toBeUndefined()
+    const usageLineSettlements = (lines.val ?? [])
+      .filter((line) => line.metadata?.kind === "usage")
+      .map((line) =>
+        classifyInvoiceLineSettlement({
+          amount: toLedgerMinor(line.amount),
+          metadata: line.metadata,
+        })
+      )
+      .sort((left, right) => left.amountDue - right.amountDue)
+    expect(usageLineSettlements).toEqual([
+      expect.objectContaining({
+        amountIncluded: includedCreditAmount,
+        collectable: false,
+        settlementSource: "plan_included",
+        settlementStatus: "included",
+      }),
+      expect.objectContaining({
+        amountDue: dueUsageAmount,
+        collectable: true,
+        settlementSource: "credit_line",
+        settlementStatus: "due",
+      }),
+    ])
+
+    // The next period re-issues the plan's included credit fresh.
+    const renewalInputs = await deriveActivationInputsFromPlan(db, { projectId, subscriptionId })
+    const renewal = await activateSubscription(
+      { services, db, logger },
+      {
+        subscriptionId,
+        projectId,
+        periodStartAt: new Date(feb1),
+        periodEndAt: new Date(Date.parse("2026-03-01T00:00:00.000Z")),
+        idempotencyKey: "p0-b-derived-2026-02",
+        grants: renewalInputs?.grants,
+      }
+    )
+    expect(renewal.err).toBeUndefined()
+    expect(renewal.val?.grantsIssued).toEqual([
+      expect.objectContaining({ amount: includedCreditAmount, source: "plan_included" }),
+      expect.objectContaining({ amount: usageAmount, source: "credit_line" }),
+    ])
+
+    // Consumed = captured usage + the fixed fee billPeriod settled.
+    // Granted = January's undrained credit-line remainder + February's fresh
+    // plan_included and credit_line grants (3 active credit rows).
+    const januaryCreditLineRemainder = usageAmount - dueUsageAmount
+    await expectWalletState(wallet, {
+      consumed: usageAmount + fixedAmount,
+      creditCount: 3,
+      granted: januaryCreditLineRemainder + includedCreditAmount + usageAmount,
+      reserved: 0,
+    })
+  })
+
   it("P0-B calls reservationFlushGateway before invoicing when provided", async () => {
     const logger = createLogger()
     const ledger = new LedgerGateway({ db, logger })

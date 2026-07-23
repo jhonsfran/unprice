@@ -307,6 +307,13 @@ patterns. Keep it cheap to load and useful.
 
 ## Billing, Wallets, And Invoices
 
+- 2026-07-19: Plan-included credits are configured on `plan_versions.metadata.includedCreditAmount`
+  (ledger scale) and derived into a `plan_included` activation grant in
+  `derive-provision-inputs.ts`; phases on such plans must use the `capped` policy
+  (`CREDIT_POLICY_CONFLICT` otherwise) because uncapped phases never open wallet reservations.
+- 2026-07-19: `drainGrantedFIFO` ranks `credit_line` last among granted credits (free money first),
+  then expiry, then `createdAt`; same-transaction grants share `created_at`, so never rely on
+  insertion order for drain priority.
 - 2026-07-04: `dayOfCreation` is a plan/reset config shorthand; subscription phases store the
   numeric anchor resolved with `getAnchor`, and subscription period windows must preserve
   `subscription_phases.start_at_m`.

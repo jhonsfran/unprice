@@ -175,7 +175,7 @@ describe("wallet credits and top-ups DB-backed lifecycle", () => {
     await seedTestDb({ db, fixtures })
   })
 
-  it("issues wallet credits, drains them FIFO into reservations, and releases unused granted funds without invoice credits", async () => {
+  it("issues wallet credits, drains free credits before credit_line into reservations, and releases unused granted funds without invoice credits", async () => {
     const { wallet } = createServices()
 
     const promo = await wallet.adjust({
@@ -262,16 +262,16 @@ describe("wallet credits and top-ups DB-backed lifecycle", () => {
     await expectReservationFundingLegs({
       expected: [
         {
-          allocatedAmount: 5 * euro,
-          grantSource: "credit_line",
-          source: "granted",
-          walletCreditId: creditLine.val?.grantId,
-        },
-        {
-          allocatedAmount: 1 * euro,
+          allocatedAmount: 3 * euro,
           grantSource: "promo",
           source: "granted",
           walletCreditId: promo.val?.grantId,
+        },
+        {
+          allocatedAmount: 3 * euro,
+          grantSource: "credit_line",
+          source: "granted",
+          walletCreditId: creditLine.val?.grantId,
         },
       ],
       reservationId: reservation.val?.reservationId,
@@ -279,7 +279,7 @@ describe("wallet credits and top-ups DB-backed lifecycle", () => {
 
     await expectWalletState(wallet, {
       consumed: 0,
-      creditIds: [promo.val?.grantId],
+      creditIds: [creditLine.val?.grantId],
       granted: 2 * euro,
       purchased: 0,
       reserved: 6 * euro,
@@ -288,13 +288,13 @@ describe("wallet credits and top-ups DB-backed lifecycle", () => {
       {
         id: creditLine.val?.grantId,
         issued_amount: 5 * euro,
-        remaining_amount: 0,
+        remaining_amount: 2 * euro,
         source: "credit_line",
       },
       {
         id: promo.val?.grantId,
         issued_amount: 3 * euro,
-        remaining_amount: 2 * euro,
+        remaining_amount: 0,
         source: "promo",
       },
     ])
@@ -305,7 +305,7 @@ describe("wallet credits and top-ups DB-backed lifecycle", () => {
       walletId: promo.val?.grantId ?? "",
     })
     expect(promoBalance.err).toBeUndefined()
-    expect(promoBalance.val?.remainingAmount).toBe(2 * euro)
+    expect(promoBalance.val?.remainingAmount).toBe(0)
 
     const reservationId = reservation.val?.reservationId
     expect(reservationId).toBeDefined()

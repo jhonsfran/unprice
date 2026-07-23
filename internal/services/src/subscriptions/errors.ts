@@ -20,6 +20,7 @@ export const subscriptionErrorCodes = [
   "PHASE_OVERLAP",
   "PHASE_NOT_CONSECUTIVE",
   "PAYMENT_PROVIDER_UNAVAILABLE",
+  "CREDIT_POLICY_CONFLICT",
   "SUBSCRIPTION_OPERATION_FAILED",
 ] as const
 
@@ -45,6 +46,7 @@ export const subscriptionErrorKinds: Record<SubscriptionErrorCode, DomainErrorKi
   PHASE_OVERLAP: "precondition",
   PHASE_NOT_CONSECUTIVE: "precondition",
   PAYMENT_PROVIDER_UNAVAILABLE: "precondition",
+  CREDIT_POLICY_CONFLICT: "precondition",
 }
 
 export class UnPriceCalculationError extends BaseError {
