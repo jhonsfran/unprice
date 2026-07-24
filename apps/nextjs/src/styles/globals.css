@@ -78,6 +78,12 @@
     @apply border-border;
   }
 
+  /* Keeps in-page anchor jumps (hero's scroll cue, "follow the full path")
+   * from landing a heading underneath the sticky marketing header. */
+  html {
+    scroll-padding-top: 4rem;
+  }
+
   /* default styles */
   h1 {
     @apply font-primary text-2xl font-extrabold;

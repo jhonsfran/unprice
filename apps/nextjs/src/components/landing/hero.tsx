@@ -21,7 +21,7 @@ export default function Hero() {
   return (
     <section
       aria-labelledby="hero-title"
-      className="ledger-dots mx-auto w-full max-w-6xl px-6 pt-12 pb-16 sm:pt-16 sm:pb-20 lg:pt-24"
+      className="ledger-dots mx-auto flex min-h-[calc(100svh-4rem)] w-full max-w-6xl flex-col justify-center px-6 py-12"
     >
       <div className="grid items-center gap-12 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] lg:gap-14 xl:grid-cols-[minmax(0,28rem)_minmax(0,1fr)]">
         <div className="flex flex-col items-start">
