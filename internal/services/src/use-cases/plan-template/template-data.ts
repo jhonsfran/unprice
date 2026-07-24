@@ -1,6 +1,8 @@
 import {
   type PlanVersionFeature,
   currencySchema,
+  eventInsertBaseSchema,
+  paidActionSchema,
   paymentProviderSchema,
 } from "@unprice/db/validators"
 import { z } from "zod"
@@ -14,11 +16,14 @@ export const ONBOARDING_USAGE_EVENT_NAME = "Workflow Runs"
 
 export const planTemplateKeySchema = z.enum([ONBOARDING_TEMPLATE_KEY])
 
+export { paidActionSchema }
+
 export const applyPlanTemplateRequestSchema = z.object({
   template: planTemplateKeySchema.default(ONBOARDING_TEMPLATE_KEY),
   currency: currencySchema.default("USD"),
   paymentProvider: paymentProviderSchema.default("sandbox"),
   publish: z.boolean().default(false),
+  paidAction: paidActionSchema.optional(),
 })
 
 export const applyPlanTemplateInputSchema = applyPlanTemplateRequestSchema.extend({
@@ -42,6 +47,7 @@ export const applyPlanTemplateOutputSchema = z.object({
 export type ApplyPlanTemplateRequest = z.input<typeof applyPlanTemplateRequestSchema>
 export type ApplyPlanTemplateInput = z.input<typeof applyPlanTemplateInputSchema>
 export type ApplyPlanTemplateOutput = z.infer<typeof applyPlanTemplateOutputSchema>
+export type PaidAction = z.infer<typeof paidActionSchema>
 
 const templateFeatureSchema = z.object({
   title: z.string(),
@@ -93,6 +99,8 @@ const templatePlanSchema = z.object({
     .optional(),
   usage: templateFeatureSchema.extend({
     config: usageConfigSchema,
+    eventSlug: eventInsertBaseSchema.shape.slug.optional(),
+    eventName: eventInsertBaseSchema.shape.name.optional(),
   }),
   flatFeatures: z.array(templateFeatureSchema),
 })
@@ -241,18 +249,63 @@ const SAAS_ONBOARDING_TEMPLATE = templatePlanSchema.array().parse([
   },
 ])
 
-export function resolveTemplate(template: z.infer<typeof planTemplateKeySchema>) {
+export function resolveTemplate(
+  template: z.infer<typeof planTemplateKeySchema>,
+  paidAction?: PaidAction
+) {
   switch (template) {
-    case ONBOARDING_TEMPLATE_KEY:
-      return SAAS_ONBOARDING_TEMPLATE
+    case ONBOARDING_TEMPLATE_KEY: {
+      if (!paidAction) {
+        return SAAS_ONBOARDING_TEMPLATE
+      }
+
+      const primaryTemplate = SAAS_ONBOARDING_TEMPLATE[0]
+      if (!primaryTemplate) {
+        throw new Error("SAAS_ONBOARDING_TEMPLATE must define a primary plan")
+      }
+
+      return templatePlanSchema.array().parse([
+        {
+          ...primaryTemplate,
+          baseFee: "0",
+          seatPack: undefined,
+          flatFeatures: [],
+          usage: {
+            title: paidAction.title,
+            slug: paidAction.featureSlug,
+            description: `${paidAction.title} is authorized in the request path before paid work runs.`,
+            unitOfMeasure: paidAction.unitOfMeasure,
+            eventSlug: paidAction.eventSlug,
+            eventName: `${paidAction.title} requested`,
+            config: {
+              mode: "unit",
+              price: paidAction.unitPrice,
+              aggregationMethod: "count",
+            },
+          },
+        },
+      ])
+    }
   }
 }
 
-export function getTemplateVersionTags(templateKey: string, templatePlanKey: string) {
-  return [
+export function getTemplateVersionTags(
+  templateKey: string,
+  templatePlanKey: string,
+  paidAction?: PaidAction
+) {
+  const tags = [
     `${TEMPLATE_SOURCE_TAG_PREFIX}${templateKey}`,
     `${TEMPLATE_PLAN_TAG_PREFIX}${templatePlanKey}`,
   ]
+
+  if (paidAction) {
+    tags.push(
+      `paid-action:${paidAction.featureSlug}:${paidAction.eventSlug}:${paidAction.unitPrice}`
+    )
+  }
+
+  return tags
 }
 
 export function getExpectedFeatureSlugs(template: TemplatePlan) {

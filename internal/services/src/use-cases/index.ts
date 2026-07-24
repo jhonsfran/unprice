@@ -108,12 +108,14 @@ export {
   applyPlanTemplateInputSchema,
   applyPlanTemplateOutputSchema,
   applyPlanTemplateRequestSchema,
+  paidActionSchema,
   planTemplateKeySchema,
 } from "./plan-template/apply"
 export type {
   ApplyPlanTemplateInput,
   ApplyPlanTemplateOutput,
   ApplyPlanTemplateRequest,
+  PaidAction,
 } from "./plan-template/apply"
 export {
   seedOnboardingEvidence,
@@ -126,6 +128,16 @@ export type {
   SeedOnboardingEvidenceOutput,
   SeedOnboardingEvidenceRequest,
 } from "./onboarding/seed-evidence"
+export {
+  runPaidActionProof,
+  runPaidActionProofOutputSchema,
+  runPaidActionProofRequestSchema,
+} from "./onboarding/prove-paid-action"
+export type {
+  RunPaidActionProofInput,
+  RunPaidActionProofOutput,
+  RunPaidActionProofRequest,
+} from "./onboarding/prove-paid-action"
 export * from "./workspace"
 export { transferToWorkspace } from "./project/transfer-to-workspace"
 export { transferToPersonal } from "./project/transfer-to-personal"

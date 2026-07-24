@@ -323,14 +323,24 @@ export async function getOrCreateEvent(
 
 async function buildMeterConfig(
   context: MaterializeContext,
-  { featureSlug, aggregationMethod }: { featureSlug: string; aggregationMethod: AggregationMethod }
+  {
+    featureSlug,
+    aggregationMethod,
+    eventSlug = ONBOARDING_USAGE_EVENT_SLUG,
+    eventName = ONBOARDING_USAGE_EVENT_NAME,
+  }: {
+    featureSlug: string
+    aggregationMethod: AggregationMethod
+    eventSlug?: string
+    eventName?: string
+  }
 ): Promise<Result<MeterConfig, FetchError>> {
   const aggregationField = AGGREGATION_METHODS_WITHOUT_FIELD.has(aggregationMethod)
     ? undefined
     : slugify(featureSlug).replace(/-/g, "_")
   const event = await getOrCreateEvent(context, {
-    slug: ONBOARDING_USAGE_EVENT_SLUG,
-    name: ONBOARDING_USAGE_EVENT_NAME,
+    slug: eventSlug,
+    name: eventName,
     availableProperties: aggregationField ? [aggregationField] : [],
   })
   if (event.err) return Err(event.err)
@@ -472,6 +482,8 @@ export async function materializeTemplatePlanFeatures(
   const usageMeterConfig = await buildMeterConfig(context, {
     featureSlug: usageFeature.val.slug,
     aggregationMethod: usageAggregationMethod,
+    eventSlug: template.usage.eventSlug,
+    eventName: template.usage.eventName,
   })
   if (usageMeterConfig.err) return Err(usageMeterConfig.err)
 

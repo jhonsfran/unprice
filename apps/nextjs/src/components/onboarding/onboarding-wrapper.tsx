@@ -7,9 +7,9 @@ import { steps } from "~/lib/onboarding-steps"
 import { createFunnelPageEventClaimer } from "~/lib/signup-funnel"
 import { useTRPC } from "~/trpc/client"
 
-// v3: the rail redesign renamed the step ids (welcome/project/build/receipt),
-// so stale v2 state must not resume into steps that no longer exist.
-const ONBOARDING_STORAGE_KEY = "unprice_onboarding_v3"
+// v4 replaces the setup rail with the paid-action proof. Keep persistence in
+// development too: reload and retry are part of the onboarding contract.
+const ONBOARDING_STORAGE_KEY = "unprice_onboarding_v4"
 const ONBOARDING_STARTED_EVENT = "funnel_onboarding_started"
 const isDevelopment = process.env.NODE_ENV === "development"
 const claimOnboardingStartEvent = createFunnelPageEventClaimer()
@@ -18,18 +18,10 @@ export function OnboardingWrapper({ children }: PropsWithChildren) {
   const trpc = useTRPC()
 
   const mutateSetOnboardingCompleted = useMutation(
-    trpc.auth.setOnboardingCompleted.mutationOptions({
-      onSuccess: () => {
-        console.info("Onboarding complete")
-      },
-    })
+    trpc.auth.setOnboardingCompleted.mutationOptions()
   )
 
   useEffect(() => {
-    if (isDevelopment) {
-      window.localStorage.removeItem(ONBOARDING_STORAGE_KEY)
-    }
-
     if (claimOnboardingStartEvent(ONBOARDING_STARTED_EVENT)) {
       track(ONBOARDING_STARTED_EVENT)
     }
@@ -40,21 +32,16 @@ export function OnboardingWrapper({ children }: PropsWithChildren) {
       steps={steps}
       onFlowComplete={async () => {
         if (isDevelopment) {
-          console.info("Onboarding complete")
           return
         }
 
         await mutateSetOnboardingCompleted.mutateAsync({ onboardingCompleted: true })
       }}
       debug={false}
-      localStoragePersistence={
-        isDevelopment
-          ? undefined
-          : {
-              key: ONBOARDING_STORAGE_KEY,
-              ttl: 1000 * 60 * 60 * 24 * 30, // 30 days
-            }
-      }
+      localStoragePersistence={{
+        key: ONBOARDING_STORAGE_KEY,
+        ttl: 1000 * 60 * 60 * 24 * 30,
+      }}
     >
       {children}
     </OnboardingProvider>

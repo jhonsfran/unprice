@@ -111,6 +111,203 @@ type CreatePlanVersionFeatureInput = Parameters<
 type UpdateEventInput = Parameters<ServiceContext["events"]["updateEvent"]>[0]
 
 describe("applyPlanTemplate", () => {
+  it("materializes one paid action with its saved feature, event, meter, and unit price", async () => {
+    let planVersionCount = 0
+    const createdEvents: Event[] = []
+    const createPlanVersionRecord = vi.fn(async (input: CreatePlanVersionInput) => {
+      planVersionCount += 1
+      return Ok({
+        state: "ok" as const,
+        planVersion: makePlanVersion(`plan_version_${planVersionCount}`, input),
+      })
+    })
+    const createPlanVersionFeatureRecord = vi.fn(async (input: CreatePlanVersionFeatureInput) =>
+      Ok({
+        state: "ok" as const,
+        planVersionFeature: {
+          id: `feature_version_${input.featureId}_${input.planVersionId}`,
+          ...input,
+        } as unknown as PlanVersionFeature,
+      })
+    )
+    const createFeatureRecord = vi.fn(
+      async (feature: { slug: string; title: string; unitOfMeasure?: string }) =>
+        Ok({
+          ...makeFeature(feature.slug),
+          title: feature.title,
+          unitOfMeasure: feature.unitOfMeasure,
+        } as Feature)
+    )
+    const createEvent = vi.fn(
+      async ({
+        availableProperties,
+        name,
+        slug,
+      }: {
+        availableProperties?: string[] | null
+        name: string
+        slug: string
+      }) => {
+        const event = {
+          id: `event_${slug}`,
+          slug,
+          name,
+          projectId: "proj_123",
+          availableProperties: availableProperties ?? [],
+        } as unknown as Event
+        createdEvents.push(event)
+        return Ok(event)
+      }
+    )
+
+    const result = await applyPlanTemplate(
+      {
+        services: {
+          plans: {
+            getPlanBySlug: vi.fn(async () => Ok(null)),
+            createPlanVersionRecord,
+            createPlanVersionFeatureRecord,
+          },
+          features: {
+            getFeatureBySlug: vi.fn(async () => Ok(null)),
+            createFeatureRecord,
+          },
+          events: {
+            listEventsByProject: vi.fn(async () => Ok([] as Event[])),
+            createEvent,
+            updateEvent: vi.fn(),
+          },
+          customers: {},
+        } as unknown as Pick<ServiceContext, "plans" | "features" | "events" | "customers">,
+        db: createDbMock(),
+        logger: createLogger(),
+        userId: "usr_123",
+      },
+      {
+        template: "saas_onboarding",
+        projectId: "proj_123",
+        workspaceUnPriceCustomerId: "cus_123",
+        currency: "USD",
+        paymentProvider: "sandbox",
+        publish: false,
+        paidAction: {
+          title: "AI generation",
+          featureSlug: "ai-generation",
+          eventSlug: "ai_generation",
+          unitOfMeasure: "action",
+          unitPrice: "4.10",
+        },
+      }
+    )
+
+    expect(result.err).toBeUndefined()
+    expect(result.val).toMatchObject({
+      state: "ok",
+      primaryPlanVersionId: "plan_version_1",
+      appliedTemplates: [{ key: "starter", planVersionId: "plan_version_1" }],
+    })
+    expect(createPlanVersionRecord).toHaveBeenCalledTimes(1)
+    expect(createPlanVersionRecord.mock.calls[0]?.[0].tags).toEqual([
+      "template:saas_onboarding",
+      "template-plan:starter",
+      "paid-action:ai-generation:ai_generation:4.10",
+    ])
+    expect(createFeatureRecord).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "AI generation",
+        slug: "ai-generation",
+        unitOfMeasure: "action",
+      })
+    )
+    const paidActionFeature = createPlanVersionFeatureRecord.mock.calls
+      .map(([feature]) => feature)
+      .find((feature) => feature.featureId === "feature_ai-generation")
+    expect(paidActionFeature).toMatchObject({
+      featureType: "usage",
+      config: {
+        usageMode: "unit",
+        price: {
+          displayAmount: "4.10",
+        },
+      },
+      meterConfig: {
+        eventSlug: "ai_generation",
+        aggregationMethod: "count",
+      },
+    })
+    expect(createdEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          slug: "ai_generation",
+          name: "AI generation requested",
+        }),
+      ])
+    )
+  })
+
+  it("does not reuse a paid-action version with a different action identity", async () => {
+    const existingVersion = {
+      id: "plan_version_ai_generation",
+      projectId: "proj_123",
+      planId: "plan_starter",
+      currency: "USD",
+      paymentProvider: "sandbox",
+      status: "published",
+      tags: [
+        "template:saas_onboarding",
+        "template-plan:starter",
+        "paid-action:ai-generation:ai_generation:4.10",
+      ],
+      createdAtM: 1,
+      planFeatures: [
+        makePlanVersionFeature("workflow-runtime-access"),
+        makePlanVersionFeature("ai-generation"),
+        makePlanVersionFeature("credits"),
+      ],
+    } as unknown as PlanVersion & {
+      planFeatures: Array<PlanVersionFeature & { feature: Feature }>
+    }
+    const context = {
+      deps: {
+        services: {} as Pick<ServiceContext, "plans" | "features" | "events">,
+        db: createDbMock({ existingPlanVersions: [existingVersion] }),
+        logger: createLogger(),
+      },
+      projectId: "proj_123",
+      caches: {
+        features: new Map(),
+        events: new Map(),
+        planVersionFeatureSlugs: new Map(),
+      },
+    }
+
+    const compatible = await getExistingTemplatePlanVersion(context, {
+      planId: "plan_starter",
+      tags: [
+        "template:saas_onboarding",
+        "template-plan:starter",
+        "paid-action:ai-generation:ai_generation:4.10",
+      ],
+      currency: "USD",
+      paymentProvider: "sandbox",
+      expectedFeatureSlugs: new Set(["workflow-runtime-access", "ai-generation", "credits"]),
+    })
+    const incompatible = await getExistingTemplatePlanVersion(context, {
+      planId: "plan_starter",
+      tags: [
+        "template:saas_onboarding",
+        "template-plan:starter",
+        "paid-action:video-render:video_render:4.10",
+      ],
+      currency: "USD",
+      paymentProvider: "sandbox",
+      expectedFeatureSlugs: new Set(["workflow-runtime-access", "video-render", "credits"]),
+    })
+
+    expect(compatible.val?.planVersion.id).toBe("plan_version_ai_generation")
+    expect(incompatible.val).toBeNull()
+  })
+
   it("does not resume a published version that is missing expected features", async () => {
     const incompletePublishedVersion = {
       id: "plan_version_starter_partial",

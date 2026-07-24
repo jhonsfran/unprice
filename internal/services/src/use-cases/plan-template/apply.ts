@@ -29,12 +29,14 @@ export {
   applyPlanTemplateInputSchema,
   applyPlanTemplateOutputSchema,
   applyPlanTemplateRequestSchema,
+  paidActionSchema,
   planTemplateKeySchema,
 } from "./template-data"
 export type {
   ApplyPlanTemplateInput,
   ApplyPlanTemplateOutput,
   ApplyPlanTemplateRequest,
+  PaidAction,
 } from "./template-data"
 
 type ApplyPlanTemplateFailureState =
@@ -63,7 +65,7 @@ export async function applyPlanTemplate(
   rawInput: ApplyPlanTemplateInput
 ): Promise<Result<ApplyPlanTemplateOutput | { state: ApplyPlanTemplateFailureState }, FetchError>> {
   const input = applyPlanTemplateInputSchema.parse(rawInput)
-  const templates = resolveTemplate(input.template)
+  const templates = resolveTemplate(input.template, input.paidAction)
   const caches: PlanTemplateMaterializeCaches = {
     features: new Map<string, Feature>(),
     events: new Map<string, Event>(),
@@ -93,7 +95,7 @@ export async function applyPlanTemplate(
     const plan = await getOrCreatePlan(context, template.plan)
     if (plan.err) return Err(plan.err)
 
-    const tags = getTemplateVersionTags(input.template, template.key)
+    const tags = getTemplateVersionTags(input.template, template.key, input.paidAction)
     const expectedFeatureSlugs = getExpectedFeatureSlugs(template)
     const existing = await getExistingTemplatePlanVersion(context, {
       planId: plan.val.id,
