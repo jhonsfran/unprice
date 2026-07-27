@@ -11,8 +11,8 @@ This is the app-level product source of truth. Detailed brand and design rules l
 ## Product Definition
 
 Unprice is the open-source customer money path for usage-based SaaS. It helps developer-led teams sell
-credits and usage-based plans without eating over-budget customer work: authorize in the request
-path, explain on the invoice, and own the money path in open source.
+credits and usage-based plans without eating the cost when a customer overspends: authorize in the
+request path, explain on the invoice, and own the money path in open source.
 
 PriceOps is the operating model behind that promise: plan versions, subscriptions, entitlements,
 meters, budgets, credits, usage evidence, and invoice evidence stay separate but connected.
@@ -78,14 +78,20 @@ operating model: plan versions, subscriptions, entitlements, meters, budgets, cr
 evidence, and invoice evidence stay separate but connected.
 
 One-liner: Unprice lets developer-led SaaS teams sell credits and usage-based plans without eating
-over-budget customer work: authorize in the request path, explain on the invoice, and own the money
-path in open source.
+the cost when a customer overspends: authorize in the request path, explain on the invoice, and own
+the money path in open source.
 
-Homepage headline: Authorize customer spend before paid work runs.
+Homepage headline (the h1): Sell credits and usage. Keep the margin.
 
-Homepage subheadline: Unprice is the open-source customer money path for usage-based SaaS. Keep plans
-versioned, entitlements separate, customer budgets in the request path, and invoice evidence tied to
-the same decision that allowed or denied the work.
+Homepage subheadline: Authorize customer spend before paid work runs. Open source, for SaaS that
+sells credits, API calls, or agent runs.
+
+Slot rule (2026-07-27): the mechanism sentence leads the subheadline verbatim rather than taking the
+h1. Launch traffic is link traffic, so the string in the HN title, `<title>`, and OG card has to be
+recognizable above the fold — but a benefit reads as a short declarative and degrades into a negative
+subordinate clause when the mechanism takes the headline slot. Keep plan versions, separated
+entitlements, request-path budgets, and invoice evidence for the first scroll section, not the first
+breath.
 
 Name meaning: "Unprice" means un-hardcoding pricing — moving plan logic, counters, and limits out of
 application code into one inspectable runtime — not removing price.

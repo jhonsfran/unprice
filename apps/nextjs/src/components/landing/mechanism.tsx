@@ -55,7 +55,7 @@ export function MechanismSection() {
                 <p className="font-medium text-background-textContrast text-sm">
                   any answer no · denied first
                 </p>
-                <p className="font-mono text-[11px] text-danger-text">429 LIMIT_EXCEEDED</p>
+                <p className="font-mono text-[11px] text-danger-text">LIMIT_EXCEEDED</p>
               </div>
             </div>
           </div>
@@ -75,9 +75,9 @@ export function MechanismSection() {
             decision can explain the invoice line later.
           </p>
           <p className="mt-4 max-w-xl text-background-text text-sm leading-6">
-            One decision, two futures. A deny is a{" "}
+            One decision, two futures. A deny comes back as{" "}
             <code className="rounded-sm bg-background-bg px-1 py-px font-mono text-[11px] text-background-textContrast">
-              429
+              LIMIT_EXCEEDED
             </code>{" "}
             before any cost exists — the wallet untouched, the ledger empty, the invoice clean. An
             allow keeps the evidence that explains the invoice line, from the same decision that let

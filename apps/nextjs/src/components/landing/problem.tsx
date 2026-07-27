@@ -43,8 +43,11 @@ export function ProblemSection() {
             By invoice time, the paid work already ran.
           </h2>
           <p className="mt-5 max-w-xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-            The expensive action runs, the counter notices later, and the invoice can&apos;t explain
-            itself — so when the customer disputes it, engineering becomes invoice support.
+            <span className="text-background-textContrast">
+              Your Redis counter is not a budget.
+            </span>{" "}
+            It notices usage after the expensive action already ran, and when the customer disputes
+            the invoice, engineering reconstructs the charge from logs by hand.
           </p>
         </div>
 

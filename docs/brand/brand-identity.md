@@ -8,8 +8,8 @@ Status: pre-validation refresh (July 2026 market audit). Lock after the customer
 ## Brand Core
 
 Unprice is the open-source customer money path for usage-based SaaS. It helps developer-led teams
-sell credits and usage-based plans without eating over-budget customer work: authorize in the
-request path, explain on the invoice, and own the money path in open source.
+sell credits and usage-based plans without eating the cost when a customer overspends: authorize in
+the request path, explain on the invoice, and own the money path in open source.
 
 The wedge is customer spend authorization with invoice evidence: decide whether a customer's paid
 work is commercially allowed before cost is created, and preserve the evidence needed to explain the

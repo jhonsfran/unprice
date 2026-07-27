@@ -5,6 +5,8 @@ import { Ban, Check } from "lucide-react"
 import { AnimatedCounter } from "./animated-counter"
 import {
   type MoneyPathBudget as Budget,
+  MONEY_PATH_GATE_PASS_PLAN,
+  MONEY_PATH_PASS_PLAN,
   type MoneyPathRegistry,
   type MoneyPathStation as Station,
   useMoneyPathChoreography,
@@ -22,24 +24,31 @@ import { Leader } from "./station"
 // ends at the buyer's own payment provider: funds settle in their Stripe
 // account, never in Unprice's — the boundary the money never crosses is a
 // station, not a footnote. Token-driven; motion is the sanctioned
-// request-path education: a dot walks the path in three passes that share one
-// budget — two identical requests are allowed and each wallet reservation
-// visibly reduces the balance, so the third request arrives at a balance that
-// cannot cover it and is denied. The outcome chips rest neutral and take
+// request-path education: a dot walks the path in passes that share one
+// budget — allowed requests each visibly reduce the balance, so a later
+// request arrives at a balance that cannot cover it and is rejected. A
+// rejection is a 200 carrying LIMIT_EXCEEDED, never a 429; the status codes
+// on this diagram are the ones the API actually returns. The chips rest
+// neutral and take
 // their color only when the request reaches them, and the winning outcome
 // stays lit until the next request spawns. Stacked (mobile) the fork
 // collapses to one outcome column that follows the live request — the
 // choreography stamps data-mp-outcome per pass and globals.css hides the
 // other branch, so allow and deny swap in place instead of reading as
-// "success first, denial later". Removed under prefers-reduced-motion (both
-// branches stay visible), started only when scrolled into view.
+// "success first, denial later". Under prefers-reduced-motion, no dot moves
+// and the loop never starts, but the sequence's final chip still lights so the
+// diagram never rests on nothing; otherwise it starts when scrolled into view.
 //
-// Two renders (2026-07-18): the hero carries variant="compact" — the gate
-// only (request → price → budget check → the two decision chips), the same
-// three-pass budget cycle, and a footer pointer to #money-path. The full
-// trace with wallet, ledger, invoice receipt, and the payment terminus lives
-// at station 04. First contact reads the decision moment in one glance; the
-// accounting is one anchor away, not competing with the headline.
+// Two renders, and they are deliberately two different calls (launch audit
+// 2026-07-27). The hero carries variant="compact": the read-only
+// `access.check` gate — request → price → budget check → the two decision
+// chips — playing one allow (so the reader has seen what "allowed" looks
+// like) then the deny that is the actual point. That is the call the
+// walk-away guarantee is written against, so the hero must not show a
+// mutating one. The full trace at station 02 is `usage.consume`: the
+// enforcing call that reserves the wallet, captures the ledger, explains the
+// invoice line, and settles in the buyer's own Stripe. Both loop, holding
+// longer on the denial at the end of each cycle than between passes.
 
 // Narrative order, not dependency order: the event is measured first, then
 // the access question, then what it costs — the same journey the request
@@ -171,8 +180,12 @@ function RequestDecisionRail({
             Request
           </span>
           <Leader />
+          {/* The two renders are two different calls, and the page must not
+              blur them: the gate is the read-only check the guarantee is
+              written against, the full trace is the enforcing call that
+              actually moves credits. */}
           <span className="whitespace-nowrap font-mono text-[11px] text-info-text">
-            POST /v1/consume
+            {compact ? "access.check" : "usage.consume"}
           </span>
         </div>
         {compact ? null : (
@@ -246,9 +259,19 @@ function RequestDecisionRail({
 // feedback 2026-07), and the winning outcome stays lit until the next request
 // spawns. Shared by the full fork and the compact gate so both renders speak
 // one grammar: outcome, status code, and the arithmetic that decided it.
-function OutcomeChip({ kind, registry }: { kind: "allow" | "deny"; registry: MoneyPathRegistry }) {
+function OutcomeChip({
+  kind,
+  registry,
+  compact = false,
+}: { kind: "allow" | "deny"; registry: MoneyPathRegistry; compact?: boolean }) {
   const allow = kind === "allow"
   const waypointId = allow ? "allow-chip" : "deny-chip"
+  // The real API answers with a decision in the body, not an HTTP failure: a
+  // denial is a 200 carrying allowed/accepted false and a machine-readable
+  // rejection reason. (429 is rate limiting — a different thing entirely, and
+  // showing it here would send engineers looking for a status code that never
+  // arrives.) The field name follows the call each render is making.
+  const verdict = allow ? (compact ? "allowed: true" : "accepted: true") : "LIMIT_EXCEEDED"
   return (
     <div
       ref={registry.waypointRefs[waypointId]}
@@ -286,7 +309,7 @@ function OutcomeChip({ kind, registry }: { kind: "allow" | "deny"; registry: Mon
                 : "group-data-[mp-hit=true]:text-danger-text"
             )}
           >
-            {allow ? "200" : "429"}
+            {verdict}
           </p>
         </div>
         {/* The deny arithmetic is the punchline of the whole demo: the third
@@ -383,10 +406,10 @@ function OutcomeFork({ registry }: { registry: MoneyPathRegistry }) {
 }
 
 const FULL_ARIA =
-  "The money path: three identical requests traced against one $10.00 budget. Each request hits the meter — 2,050 tokens — passes the access check, resolves its price — $0.002 per token on plan version pro@v3 — then reaches the budget check, which asks whether the balance covers the $4.10 this request costs. The first request is allowed with a 200: the wallet reserves $4.10, the ledger captures the movement, the invoice line — 2,050 tokens at $0.002, $4.10 — is explained by the same decision, and payment settles in your own Stripe account, leaving $5.90. Unprice never holds the funds. The second identical request is allowed the same way, leaving $1.80. The third request needs $4.10 but the balance is $1.80, so it is denied with a 429 before any cost exists: the wallet is untouched, the ledger has no entry, the invoice has no line, nothing is charged — and the deny reason is returned to your app."
+  "The money path: three identical usage.consume requests traced against one $10.00 budget. Each request hits the meter — 2,050 tokens — passes the access check, resolves its price — $0.002 per token on plan version pro@v3 — then reaches the budget check, which asks whether the balance covers the $4.10 this request costs. The first request is accepted: the wallet reserves $4.10, the ledger captures the movement, the invoice line — 2,050 tokens at $0.002, $4.10 — is explained by the same decision, and payment settles in your own Stripe account, leaving $5.90. Unprice never holds the funds. The second identical request is accepted the same way, leaving $1.80. The third request needs $4.10 but the balance is $1.80, so it is rejected with the reason LIMIT_EXCEEDED before any cost exists: the wallet is untouched, the ledger has no entry, the invoice has no line, nothing is charged — and the reason is returned to your app."
 
 const COMPACT_ARIA =
-  "The money path, abridged to the decision moment: three identical requests against one $10.00 budget. Each request is priced — 2,050 tokens at $0.002, $4.10 — then the budget check asks whether the balance covers it. The first two requests are allowed with a 200, at $10.00 and $5.90, each reserving $4.10. The third arrives at $1.80, cannot cover $4.10, and is denied with a 429 before any cost exists. The full path — wallet, ledger, invoice, and payment settling to your own Stripe — is traced further down the page."
+  "The decision moment, as read-only access.check calls against a $10.00 budget that already has one request behind it, at $5.90. This request is priced at 2,050 tokens times $0.002, $4.10, and is allowed, leaving $1.80. A second, identical request cannot be covered by $1.80, so it is denied with the reason LIMIT_EXCEEDED before any cost is created. Neither call mutates anything. The full path — meter, access, wallet, ledger, invoice, and payment settling to your own Stripe — is traced further down the page."
 
 export function MoneyPath({
   className,
@@ -399,8 +422,9 @@ export function MoneyPath({
 }) {
   const compact = variant === "compact"
   const stations = compact ? gateStations : resolveStations
+  const passPlan = compact ? MONEY_PATH_GATE_PASS_PLAN : MONEY_PATH_PASS_PLAN
   const registry = useMoneyPathRegistry()
-  const { budget, passNumber } = useMoneyPathChoreography(registry, stations)
+  const { budget, passNumber } = useMoneyPathChoreography(registry, stations, passPlan)
 
   return (
     <figure
@@ -409,11 +433,21 @@ export function MoneyPath({
     >
       <figcaption className="mb-4 flex items-baseline justify-between gap-4 border-background-border border-b pb-3">
         <span className="font-mono text-background-text text-xs uppercase tracking-widest">
-          The money path
+          {compact ? "The decision" : "The money path"}
         </span>
-        <span className="font-mono text-[10px] text-background-text">
-          {passNumber === null ? "three requests · one budget" : `request ${passNumber} of 3`}
-        </span>
+        {compact ? (
+          // The gate arrives mid-story on purpose: a balance already drawn
+          // down by an earlier request, so the denial has something to deny.
+          <span className="whitespace-nowrap font-mono text-[10px] text-background-text">
+            read-only · mutates nothing
+          </span>
+        ) : (
+          <span className="whitespace-nowrap font-mono text-[10px] text-background-text">
+            {passNumber === null
+              ? `${passPlan.length} requests · one budget`
+              : `request ${passNumber} of ${passPlan.length}`}
+          </span>
+        )}
       </figcaption>
 
       <div ref={registry.stageRef} className="relative">
@@ -442,10 +476,10 @@ export function MoneyPath({
         {compact ? (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div data-mp-branch="allow">
-              <OutcomeChip kind="allow" registry={registry} />
+              <OutcomeChip kind="allow" registry={registry} compact />
             </div>
             <div data-mp-branch="deny">
-              <OutcomeChip kind="deny" registry={registry} />
+              <OutcomeChip kind="deny" registry={registry} compact />
             </div>
           </div>
         ) : (

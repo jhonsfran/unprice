@@ -27,19 +27,22 @@ const faqs: FaqItem[] = [
     link: { href: "/manifesto", label: "The full argument" },
   },
   {
-    question: "Is it Stripe-only?",
+    // The real incumbent is not a competitor, it is the counter the reader
+    // already wrote (positioning-and-messaging.md). Answering the branded
+    // alternatives while ducking this one reads as evasion.
+    question: "Why not a Redis counter?",
     answer:
-      "Stripe today — your own account or Stripe Connect — plus the built-in Sandbox provider for proving the path without a processor. The provider layer is one interface: Stripe-first today, provider-extensible by design. No other provider is claimed until it ships.",
+      "For a single limit it is genuinely fine. It stops being fine when the counter has to agree with money: under concurrency a race lets over-budget work through, and the counter can tell you usage was high but not which budget was checked, which credits were reserved, why a request was denied, or how accepted usage became an invoice line. Unprice keeps the check, the reservation, and the explanation on one path.",
   },
   {
     question: "Does Unprice touch the money?",
     answer:
-      "No. Your app asks Unprice before paid work runs and gets an allow or deny with evidence attached. Your payment provider captures the payment — Stripe today, in your own account. Unprice owns the decision, the ledger, and the evidence; it never sits in your funds flow.",
+      "No. Your app asks Unprice before paid work runs and gets an allow or deny with evidence attached. Your payment provider captures the payment — Stripe today, your own account or Stripe Connect, plus the built-in Sandbox provider for proving the path without a processor. The provider layer is one interface: Stripe-first today, provider-extensible by design, and no other provider is claimed until it ships. Unprice owns the decision, the ledger, and the evidence; it never sits in your funds flow.",
   },
   {
     question: "What does my customer see when a request is denied?",
     answer:
-      "Whatever you decide — the deny is an answer, not an outage. Your app receives an explicit deny with a machine-readable reason (over limit, plan expired, no entitlement) before any cost is created, so it can show the customer why and offer the upgrade path instead of failing silently. Every deny is recorded with its evidence, so you can see who keeps hitting limits and treat denials as upgrade conversations, not support tickets.",
+      "Whatever you decide — the deny is an answer, not an outage, and not an HTTP error. The call returns 200 with allowed false and a machine-readable reason (LIMIT_EXCEEDED, plan expired, no entitlement) before any cost is created, so your app can show the customer why and offer the upgrade path instead of failing silently. Every deny is recorded with its evidence, so you can see who keeps hitting limits and treat denials as upgrade conversations, not support tickets.",
   },
   {
     question: "What does the check add to my request latency?",
@@ -90,18 +93,34 @@ const faqJsonLd = {
 export function FaqSection() {
   return (
     <SectionShell labelledBy="faq-title" surface="panel">
+      {/* JSON.stringify does not HTML-escape, so a `<` in any answer would
+          break out of the script element. The answers are authored here, not
+          user input, but escaping is free and keeps the rule honest. */}
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }}
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(faqJsonLd).replace(/</g, "\\u003c"),
+        }}
       />
       <div className="flex flex-col items-start">
-        <StationHeader index="07" label="The questions" fact="short answers · receipts attached" />
+        <StationHeader index="05" label="The questions" fact="short answers · receipts attached" />
         <h2
           id="faq-title"
           className="mt-6 max-w-2xl font-primary text-background-textContrast text-display-3"
         >
           Asked before you integrate.
         </h2>
+        {/* Qualification, stated plainly. Telling the wrong reader to leave is
+            the cheapest credibility a launch with no customers can buy, and
+            the disqualifier is canon (landing-page-grand-slam-offer.md). */}
+        <p className="mt-5 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
+          Unprice is for teams whose customers can trigger real cost — an LLM call, a data job, a
+          paid workflow. If your product is pure seat-based SaaS, Stripe Billing is enough and you
+          do not need this.
+        </p>
+        <p className="mt-4 font-mono text-[11px] text-background-text leading-5">
+          Cloudflare today · Stripe today · not tax, accounting, or revenue recognition
+        </p>
       </div>
 
       <dl className="mt-12 grid gap-x-8 border-background-border border-t md:grid-cols-2">

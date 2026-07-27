@@ -23,9 +23,10 @@ Do not re-derive these. Copy from here; if they change, change them here first.
   pinned to the plan version they bought while the team ships new pricing experiments.
 - Wedge: customer spend authorization with invoice evidence — authorize customer spend before paid
   work runs, then prove every allow, deny, charge, credit, and invoice line after.
-- Headline: Authorize customer spend before paid work runs.
-- Rallying cry: Authorize customer spend before paid work runs.
-- Promise line: Sell credits and usage-based plans without eating over-budget customer work.
+- Headline (landing h1): Sell credits and usage. Keep the margin.
+- Rallying cry / mechanism line: Authorize customer spend before paid work runs. Leads the landing
+  subheadline verbatim; owns the `<title>`, `og:title`, OG card, and HN submission title.
+- Promise line: Sell credits and usage-based plans without eating the cost when a customer overspends.
 - Name meaning: "Unprice" = un-hardcoding pricing from your codebase, not removing price.
 - Payments: Stripe-first today, provider-extensible by design. Unprice never sits in the buyer's
   funds flow.

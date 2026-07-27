@@ -1,21 +1,10 @@
 import { buttonVariants } from "@unprice/ui/button"
+import { cn } from "@unprice/ui/utils"
 import { ArrowRight } from "lucide-react"
 import Balancer from "react-wrap-balancer"
 import { AcquisitionLink } from "./acquisition-link"
 import { MoneyPath } from "./money-path"
-
-// The first viewport enters at money altitude — the door of the house speaks
-// founder, not code (marketing-framework.md). One center of gravity per
-// column: the headline sells the gain, the compact money path demonstrates
-// only the decision moment (request → price → budget check → allow/deny);
-// the accounting — wallet, ledger, invoice, payment — lives at station 04,
-// where the demo's footer points. Trust signals carry one dominant claim
-// (the funds boundary) and one metadata line; the offer terms ride the CTA
-// as microcopy instead of competing as a fourth fact.
-
-// Placeholder until the scheduling link exists — the mailto keeps the button
-// honest (it always works) and the swap is this one line.
-const FOUNDER_CALL_URL = "mailto:seb@unprice.dev?subject=Call%20with%20the%20founder"
+import { ProofLink } from "./proof-link"
 
 export default function Hero() {
   return (
@@ -25,18 +14,31 @@ export default function Hero() {
     >
       <div className="grid items-center gap-12 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] lg:gap-14 xl:grid-cols-[minmax(0,28rem)_minmax(0,1fr)]">
         <div className="flex flex-col items-start">
-          {/* Two-tone emphasis: the business model in text, the money gain in
-              ink — the payoff clause is the one a margin owner reads first. */}
+          {/* Two-tone emphasis: the business model in muted text, the money
+              payoff in ink — the clause a margin owner reads first. */}
           <h1 id="hero-title" className="font-primary text-background-textContrast text-display-1">
             <Balancer>
               <span className="text-background-text">Sell credits and usage.</span> Keep the margin.
             </Balancer>
           </h1>
-          <p className="mt-6 max-w-xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-            Approve or deny every paid action against plan, credits, and budget — before usage
-            becomes cost.
-          </p>
+          {/* The canonical mechanism sentence leads the subhead verbatim, so a
+              reader who clicked the HN post, the <title> or the OG card lands
+              on the string they clicked. Message-match needs the sentence
+              recognized above the fold, not occupying the h1 — and a benefit
+              reads better as a short declarative than as the negative clause
+              it becomes when the mechanism takes the headline slot.
 
+              Second sentence names three product shapes the avatar recognizes
+              instead of the coined category. "Customer money path" is canon and
+              stays — but it is earned at station 02, directly above the diagram
+              that defines it. Used here it also collides with the funds
+              boundary three rows below ("the money never touches Unprice"): a
+              reader meeting the phrase cold parses it as Unprice sitting in the
+              flow, which is the one misread that costs the most. */}
+          <p className="mt-6 max-w-xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
+            Authorize customer spend before paid work runs. Open source, for SaaS that sells
+            credits, API calls, or agent runs.
+          </p>
           <div className="mt-10 flex flex-wrap items-center gap-3">
             <AcquisitionLink
               source="hero"
@@ -46,16 +48,20 @@ export default function Hero() {
               Start with one paid action
               <ArrowRight aria-hidden className="size-3.5" />
             </AcquisitionLink>
-            <a href={FOUNDER_CALL_URL} className={buttonVariants({ variant: "outline" })}>
-              Book a call with the founder
-            </a>
+            <ProofLink
+              source="hero_demo"
+              href="#demo"
+              className={cn(buttonVariants({ variant: "outline" }))}
+            >
+              Watch it deny a request
+            </ProofLink>
           </div>
           <p className="mt-3.5 font-mono text-[11px] text-background-text">
             free during early access · no card at signup
           </p>
 
           {/* One dominant trust signal — the funds boundary, the reason to
-              believe "keep the margin" — then the rest as one metadata line. */}
+              believe the promise — then the rest as one metadata line. */}
           <div className="mt-12 w-full max-w-xl border-background-border border-t pt-6">
             <p className="font-medium text-background-textContrast text-base leading-7">
               Settles to your own Stripe

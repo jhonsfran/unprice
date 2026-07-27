@@ -203,7 +203,7 @@ Strong angles:
 
 - Authorize customer spend before paid work runs.
 - Prove every charge after it bills.
-- Sell credits and usage-based plans without eating over-budget customer work.
+- Sell credits and usage-based plans without eating the cost when a customer overspends.
 - Put a budget and evidence trail around the expensive action in your product.
 - Your Redis counter is not a budget: request-path enforcement beats a homegrown pre-check.
 - AI gateways cap provider spend; Unprice governs customer spend and invoice evidence.

@@ -54,6 +54,8 @@ const SETTLE_WAYPOINT_IDS: MoneyPathWaypointId[] = ["wallet", "ledger", "invoice
 const REQUEST_COST = 4.1
 const BUDGET_START = 10
 
+// The full trace teaches the whole arc: two allows draw the budget down so the
+// third request cannot be covered. It is the diagram a reader opts into.
 export const MONEY_PATH_PASS_PLAN: MoneyPathPassPlan[] = [
   { kind: "allow", budgetStart: BUDGET_START, budgetAfterReserve: BUDGET_START - REQUEST_COST },
   {
@@ -64,15 +66,33 @@ export const MONEY_PATH_PASS_PLAN: MoneyPathPassPlan[] = [
   { kind: "deny", budgetStart: BUDGET_START - 2 * REQUEST_COST },
 ]
 
+// The hero shows one allow — so the reader has seen what "allowed" looks
+// like before the denial means anything — then the deny that is the actual
+// point. These are the second and third requests of the same three-request
+// story the full trace tells below, arriving already drawn down so the
+// punchline lands in two short passes instead of three. The cycle loops.
+export const MONEY_PATH_GATE_PASS_PLAN: MoneyPathPassPlan[] = [
+  {
+    kind: "allow",
+    budgetStart: BUDGET_START - REQUEST_COST,
+    budgetAfterReserve: BUDGET_START - 2 * REQUEST_COST,
+  },
+  { kind: "deny", budgetStart: BUDGET_START - 2 * REQUEST_COST },
+]
+
 const DOT_SIZE = 9
-const TRAVEL_SPEED = 0.34
-const FADE_MS = 200
-const STATION_DWELL = 300
-const DECISION_DWELL = 650
-const HIT_LINGER = 700
-const OUTCOME_LINGER = 1600
-const PASS_GAP = 1100
-const CYCLE_GAP = 1800
+// Tuned faster on request (2026-07-27): the decision should read as
+// instant and automatic, not deliberate — that is the entire claim.
+const TRAVEL_SPEED = 0.46
+const FADE_MS = 160
+const STATION_DWELL = 220
+const DECISION_DWELL = 480
+const HIT_LINGER = 550
+const OUTCOME_LINGER = 1300
+const PASS_GAP = 600
+// The hold on the denial before the cycle restarts — the punchline needs to be
+// readable, not glimpsed.
+const CYCLE_GAP = 2000
 const RAIL_OFFSET_X = 8
 const CHIP_CLEARANCE_Y = 6
 const PERSIST = Number.POSITIVE_INFINITY
@@ -308,16 +328,36 @@ export function buildMoneyPathPass(
 
 export function useMoneyPathChoreography(
   registry: MoneyPathRegistry,
-  stations: readonly MoneyPathStation[]
+  stations: readonly MoneyPathStation[],
+  passPlan: readonly MoneyPathPassPlan[] = MONEY_PATH_PASS_PLAN
 ): MoneyPathChoreography {
-  const [budget, setBudget] = useState<MoneyPathBudget>({ value: BUDGET_START, short: false })
+  const openingBudget = passPlan[0]?.budgetStart ?? BUDGET_START
+  const [budget, setBudget] = useState<MoneyPathBudget>({
+    value: openingBudget,
+    short: openingBudget < REQUEST_COST,
+  })
   const [passNumber, setPassNumber] = useState<number | null>(null)
 
   useEffect(() => {
     const root = registry.stageRef.current
     const dot = registry.dotRef.current
     if (!root || !dot) return
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return
+
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      // Without motion, rest on the sequence's final decision instead of a
+      // diagram where nothing ever happened — the same state a motion viewer
+      // ends up resting on once the cycle plays through and stops.
+      const final = passPlan[passPlan.length - 1]
+      if (!final) return
+      const chip =
+        registry.waypointElements.current[final.kind === "deny" ? "deny-chip" : "allow-chip"]
+      root.setAttribute("data-mp-outcome", final.kind)
+      chip?.setAttribute("data-mp-hit", "true")
+      return () => {
+        root.removeAttribute("data-mp-outcome")
+        chip?.removeAttribute("data-mp-hit")
+      }
+    }
 
     let cancelled = false
     let animationFrame = 0
@@ -332,21 +372,24 @@ export function useMoneyPathChoreography(
       for (const hit of hits) hit.el.removeAttribute("data-mp-hit")
     }
 
-    const tick = () => {
-      if (animation) {
-        const now = Number(animation.currentTime ?? 0)
-        for (const hit of hits) {
-          if (now >= hit.at && now <= hit.until) hit.el.setAttribute("data-mp-hit", "true")
-          else if (hit.el.hasAttribute("data-mp-hit")) hit.el.removeAttribute("data-mp-hit")
-        }
-        while (setIndex < sets.length && now >= (sets[setIndex]?.at ?? Number.POSITIVE_INFINITY)) {
-          const nextBudget = sets[setIndex]
-          if (nextBudget) {
-            setBudget({ value: nextBudget.value, short: nextBudget.value < REQUEST_COST })
-          }
-          setIndex += 1
-        }
+    const applyHits = () => {
+      if (!animation) return
+      const now = Number(animation.currentTime ?? 0)
+      for (const hit of hits) {
+        if (now >= hit.at && now <= hit.until) hit.el.setAttribute("data-mp-hit", "true")
+        else if (hit.el.hasAttribute("data-mp-hit")) hit.el.removeAttribute("data-mp-hit")
       }
+      while (setIndex < sets.length && now >= (sets[setIndex]?.at ?? Number.POSITIVE_INFINITY)) {
+        const nextBudget = sets[setIndex]
+        if (nextBudget) {
+          setBudget({ value: nextBudget.value, short: nextBudget.value < REQUEST_COST })
+        }
+        setIndex += 1
+      }
+    }
+
+    const tick = () => {
+      applyHits()
       animationFrame = requestAnimationFrame(tick)
     }
 
@@ -354,10 +397,11 @@ export function useMoneyPathChoreography(
       if (cancelled) return
       animation?.cancel()
       clearHits()
-      const plan = MONEY_PATH_PASS_PLAN[passIndex % MONEY_PATH_PASS_PLAN.length]
+      const step = passIndex % passPlan.length
+      const plan = passPlan[step]
       if (!plan) return
       root.setAttribute("data-mp-outcome", plan.kind)
-      setPassNumber((passIndex % MONEY_PATH_PASS_PLAN.length) + 1)
+      setPassNumber(step + 1)
       passIndex += 1
       const built = buildMoneyPathPass(
         {
@@ -381,8 +425,12 @@ export function useMoneyPathChoreography(
       animation.finished
         .then(() => {
           if (cancelled) return
-          const gap = passIndex % MONEY_PATH_PASS_PLAN.length === 0 ? CYCLE_GAP : PASS_GAP
-          timer = setTimeout(runPass, gap)
+          // The cycle repeats. The gap after the last pass is longer than the
+          // gap between passes, so the denial — which the persisted outcome hit
+          // keeps lit — has time to land before the budget resets and the story
+          // starts over. Quick, quick, hold.
+          const cycleComplete = passIndex % passPlan.length === 0
+          timer = setTimeout(runPass, cycleComplete ? CYCLE_GAP : PASS_GAP)
         })
         .catch(() => {})
     }
@@ -406,10 +454,10 @@ export function useMoneyPathChoreography(
       animation?.cancel()
       clearHits()
       root.removeAttribute("data-mp-outcome")
-      setBudget({ value: BUDGET_START, short: false })
+      setBudget({ value: openingBudget, short: openingBudget < REQUEST_COST })
       setPassNumber(null)
     }
-  }, [registry, stations])
+  }, [registry, stations, passPlan, openingBudget])
 
   return { budget, passNumber }
 }

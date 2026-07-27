@@ -47,12 +47,14 @@ export default function HeaderMarketing() {
           <div className="flex shrink-0 items-center pl-2 md:pl-4">
             {/* Outline here on purpose: the hero owns the solid amber primary.
                 One amber signal per viewport, same scarcity law as the money
-                path's decision dot. */}
+                path's decision dot. (The comment said this before the code
+                did — launch audit 2026-07-27 found two competing primaries in
+                the first viewport.) */}
             <AcquisitionLink
               source="header"
               pendingLabel="Opening signup…"
               className={buttonVariants({
-                variant: "primary",
+                variant: "outline",
                 className: "h-9 gap-1.5 whitespace-nowrap px-2.5 text-xs sm:px-3 sm:text-sm",
               })}
             >

@@ -131,7 +131,11 @@ Invoice**):
 4. Is this request inside the **customer's budget**, and should **credits** be reserved or captured?
 5. Can this decision **explain the invoice line** later?
 
-Over-budget customer work is denied in the request path (`429`), before any cost is created.
+Over-budget customer work is denied in the request path, before any cost is created: the call
+returns `200` with `allowed`/`accepted` false and a machine-readable `rejectionReason` —
+`LIMIT_EXCEEDED`. Do not write the denial as a `429`; `429` is `TOO_MANY_REQUESTS` (rate limiting)
+and sends engineers looking for a status code that never arrives (verified against
+`apps/api/src/routes/entitlements/verifyV1.ts` and `.../events/ingestEventsSyncV1.ts`, 2026-07-27).
 Accepted usage settles credits and explains the invoice from the same money path.
 
 **Pick the right call (don't conflate them):**

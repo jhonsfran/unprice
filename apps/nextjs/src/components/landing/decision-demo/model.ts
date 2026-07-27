@@ -187,7 +187,9 @@ export const DECISION_COPY: Record<
   },
   deny: {
     title: "deny · before any cost",
-    code: "429",
+    // The API answers a denial with 200 + a rejection reason; 429 is rate
+    // limiting and belongs to a different failure entirely.
+    code: "LIMIT_EXCEEDED",
     next: "do not run · no cost created",
     value: "deny",
   },

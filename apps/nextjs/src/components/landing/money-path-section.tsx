@@ -2,19 +2,20 @@ import { MoneyPath } from "./money-path"
 import { SectionShell } from "./station"
 import { StationHeader } from "./station-header"
 
-// Station 04 opens the proof floor: the same paid action station 01's DIY
-// trace lost, traced through Unprice end to end — the first receipt after
-// the divider promises receipts. The hero shows this diagram abridged to the
-// decision moment and its footer anchors here (#money-path); this render
-// carries the terminal moments the hero defers: wallet, ledger, the invoice
-// line that explains itself, and payment settling in the buyer's own Stripe.
+// Station 02 answers station 01 directly: the same paid action the DIY trace
+// lost, traced through Unprice end to end. It sits immediately after the
+// incident because the signature proof should not wait behind two supporting
+// arguments (launch audit 2026-07-27). The hero shows only the read-only gate
+// and anchors here; this render is the enforcing call and carries what the
+// hero defers — wallet, ledger, the invoice line that explains itself, and
+// payment settling in the buyer's own Stripe.
 
 export function MoneyPathSection() {
   return (
     <SectionShell id="money-path" labelledBy="money-path-title">
       <div className="flex flex-col items-start">
         <StationHeader
-          index="04"
+          index="02"
           label="The money path"
           fact="allow settles · deny costs nothing"
         />
