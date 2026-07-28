@@ -1,5 +1,6 @@
 import { cn, focusRing } from "@unprice/ui/utils"
 import { ArrowRight, Play } from "lucide-react"
+import { DEMO_VIDEO } from "./demo-video"
 import { ProofLink } from "./proof-link"
 import { LedgerRow, SectionShell } from "./station"
 import { StationHeader } from "./station-header"
@@ -8,22 +9,46 @@ import { StationHeader } from "./station-header"
 // The diagram above is a claim about what the runtime does; this station is
 // where that claim gets checked by someone who does not trust us yet.
 //
-// TO SHIP THE VIDEO: set DEMO_VIDEO to the recording. Nothing else changes —
-// the placeholder frame below is replaced by the player and the poster still
-// carries the same receipt. Everything under it (source, benchmark) is true
-// and clickable today, so the station is never empty of proof while the
-// recording is outstanding.
+// The recording is the eventual centrepiece, but it is not the only proof and
+// it must not be the only thing here — a station whose entire content is a
+// "coming soon" frame reads as a shell, and the one reader who dug into the
+// repo trusted a concurrency test more than anything on the page. So the
+// receipts that are true and clickable *today* lead, and the video slots in
+// above them when it lands. Configuration lives in demo-video.ts.
 
 const REPO_URL = "https://github.com/jhonsfran1165/unprice"
+const DO_TEST_PATH = "apps/api/src/ingestion/entitlements/EntitlementWindowDO.workers.test.ts"
 
-// `captions` is required on purpose: a recording that ships without a caption
-// track is not finished, and making it part of the type means nobody has to
-// remember.
-const DEMO_VIDEO: { src: string; captions: string; poster?: string } | null = null
+// Proof that does not depend on us publishing anything. Every row is a real
+// artifact in the repo, and every one can be run by a reader who believes
+// nothing on this page. The first is the invariant a Redis counter breaks:
+// five concurrent over-limit writes, partitioned, in the real Workers runtime.
+const receipts = [
+  {
+    label: "concurrency",
+    fact: "5 concurrent over-limit writes → 2 accepted, 3 rejected",
+    href: `${REPO_URL}/blob/main/${DO_TEST_PATH}`,
+    linkLabel: "Read the test",
+    source: "demo_source" as const,
+  },
+  {
+    label: "latency",
+    fact: "k6 harness · run it against your own deployment",
+    href: `${REPO_URL}/tree/main/tooling/k6`,
+    linkLabel: "Run the benchmark",
+    source: "demo_benchmark" as const,
+  },
+  {
+    label: "the money path",
+    fact: "AGPL-3.0 · ledger, wallet, and decision in the open",
+    href: REPO_URL,
+    linkLabel: "Read the source",
+    source: "demo_source" as const,
+  },
+]
 
-// What the recording has to show, in order. This is also the shot list — the
-// video is the same five moments the reader just watched as a diagram, done
-// once, unedited, against a real Sandbox project.
+// What the recording shows, in order — the same five moments the reader just
+// watched as a diagram, done once, unedited, against a real Sandbox project.
 const shotList = [
   { label: "01", fact: "one plan version · created in the dashboard" },
   { label: "02", fact: "customers.signUp · one test customer" },
@@ -32,58 +57,10 @@ const shotList = [
   { label: "05", fact: "the ledger entry that never got written" },
 ]
 
-function VideoFrame() {
+function VideoBlock() {
   if (DEMO_VIDEO) {
     return (
-      <video
-        controls
-        preload="none"
-        poster={DEMO_VIDEO.poster}
-        src={DEMO_VIDEO.src}
-        className="aspect-video w-full rounded-sm bg-background-bg"
-      >
-        <track kind="captions" src={DEMO_VIDEO.captions} srcLang="en" label="English" default />
-      </video>
-    )
-  }
-
-  return (
-    <div className="flex aspect-video w-full flex-col items-center justify-center gap-3 rounded-sm border border-background-border border-dashed bg-background-bg">
-      <span
-        aria-hidden
-        className="flex size-10 items-center justify-center rounded-full border border-background-borderHover"
-      >
-        <Play className="size-4 translate-x-px text-background-text" />
-      </span>
-      <p className="px-6 text-center text-background-text text-sm leading-6">
-        One unedited run, recorded against a real Sandbox project.
-      </p>
-      <p className="font-mono text-[10px] text-background-text uppercase tracking-widest">
-        recording · not yet published
-      </p>
-    </div>
-  )
-}
-
-export function DemoSection() {
-  return (
-    <SectionShell id="demo" labelledBy="demo-title" surface="panel">
-      <div className="flex flex-col items-start">
-        <StationHeader index="03" label="See it run" fact="unedited · one take" />
-        <h2
-          id="demo-title"
-          className="mt-6 max-w-2xl font-primary text-background-textContrast text-display-3"
-        >
-          Watch a real request get denied.
-        </h2>
-        <p className="mt-5 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-          Everything above this line is drawn by us. This is the same path, run once against a real
-          Sandbox project — plan version, customer, check, denial, and the ledger entry that never
-          got written.
-        </p>
-      </div>
-
-      <figure className="mt-12 w-full max-w-3xl rounded-lg border border-background-border bg-surface-raised p-4 shadow-ambient sm:p-5">
+      <figure className="w-full max-w-3xl rounded-lg border border-background-border bg-surface-raised p-4 shadow-ambient sm:p-5">
         <figcaption className="mb-4 flex items-baseline justify-between gap-4 border-background-border border-b pb-3">
           <span className="font-mono text-background-text text-xs uppercase tracking-widest">
             One paid action · one afternoon
@@ -92,9 +69,15 @@ export function DemoSection() {
             sandbox · no processor
           </span>
         </figcaption>
-
-        <VideoFrame />
-
+        <video
+          controls
+          preload="none"
+          poster={DEMO_VIDEO.poster}
+          src={DEMO_VIDEO.src}
+          className="aspect-video w-full rounded-sm bg-background-bg"
+        >
+          <track kind="captions" src={DEMO_VIDEO.captions} srcLang="en" label="English" default />
+        </video>
         <div className="mt-4 flex flex-col border-background-border border-t pt-2">
           {shotList.map((row) => (
             <LedgerRow
@@ -107,42 +90,77 @@ export function DemoSection() {
           ))}
         </div>
       </figure>
+    )
+  }
 
-      {/* Proof that does not depend on a recording: both of these are true
-          and checkable right now, by a reader who trusts nothing on the page. */}
-      <div className="mt-8 flex flex-wrap items-center gap-x-8 gap-y-3">
-        <ProofLink
-          source="demo_source"
-          href={REPO_URL}
-          target="_blank"
-          rel="noreferrer"
-          className={cn(
-            "group inline-flex items-baseline gap-1.5 rounded-sm font-medium text-background-textContrast text-sm",
-            focusRing
-          )}
+  // No recording yet: say so in one quiet line rather than building a station
+  // around an empty player. The receipts below are the proof until it lands.
+  return (
+    <div className="flex w-full max-w-3xl items-baseline gap-3 rounded-lg border border-background-border border-dashed px-4 py-3">
+      <span
+        aria-hidden
+        className="flex size-5 shrink-0 items-center justify-center self-center rounded-full border border-background-borderHover"
+      >
+        <Play className="size-2.5 translate-x-px text-background-text" />
+      </span>
+      <p className="text-background-text text-sm leading-6">
+        A recorded walkthrough is coming. Until it does, the receipts below are the ones you can
+        check yourself — no account, no demo call.
+      </p>
+    </div>
+  )
+}
+
+export function DemoSection() {
+  return (
+    <SectionShell id="demo" labelledBy="demo-title" surface="panel">
+      <div className="flex flex-col items-start">
+        <StationHeader index="03" label="The receipts" fact="checkable · without us" />
+        <h2
+          id="demo-title"
+          className="mt-6 max-w-2xl font-primary text-background-textContrast text-display-3"
         >
-          Read the money-path source
-          <ArrowRight
-            aria-hidden
-            className="size-3 self-center transition-transform duration-quick ease-out-quad group-hover:translate-x-0.5"
-          />
-        </ProofLink>
-        <ProofLink
-          source="demo_benchmark"
-          href={`${REPO_URL}/tree/main/tooling/k6`}
-          target="_blank"
-          rel="noreferrer"
-          className={cn(
-            "group inline-flex items-baseline gap-1.5 rounded-sm font-medium text-background-textContrast text-sm",
-            focusRing
-          )}
-        >
-          Run the benchmark yourself
-          <ArrowRight
-            aria-hidden
-            className="size-3 self-center transition-transform duration-quick ease-out-quad group-hover:translate-x-0.5"
-          />
-        </ProofLink>
+          Proof you can check yourself.
+        </h2>
+        <p className="mt-5 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
+          Everything above this line is drawn by us. These are not: a test that proves the
+          concurrency guarantee, a benchmark you point at your own deployment, and the money-path
+          source. If the ledger does not balance, you will find it here first.
+        </p>
+      </div>
+
+      <div className="mt-12 flex flex-col gap-8">
+        <VideoBlock />
+
+        <div className="flex w-full max-w-3xl flex-col border-background-border border-t">
+          {receipts.map((row) => (
+            <div
+              key={row.label}
+              className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-background-border border-b py-4"
+            >
+              <span className="min-w-28 font-mono text-background-text text-xs uppercase tracking-widest">
+                {row.label}
+              </span>
+              <span className="flex-1 text-background-text text-sm leading-6">{row.fact}</span>
+              <ProofLink
+                source={row.source}
+                href={row.href}
+                target="_blank"
+                rel="noreferrer"
+                className={cn(
+                  "group inline-flex items-baseline gap-1.5 whitespace-nowrap rounded-sm font-medium text-background-textContrast text-sm",
+                  focusRing
+                )}
+              >
+                {row.linkLabel}
+                <ArrowRight
+                  aria-hidden
+                  className="size-3 self-center transition-transform duration-quick ease-out-quad group-hover:translate-x-0.5"
+                />
+              </ProofLink>
+            </div>
+          ))}
+        </div>
       </div>
     </SectionShell>
   )

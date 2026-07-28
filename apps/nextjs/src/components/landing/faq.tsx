@@ -27,6 +27,23 @@ const faqs: FaqItem[] = [
     link: { href: "/manifesto", label: "The full argument" },
   },
   {
+    // Moved to the top three (2026-07-27): this was the last of ten questions,
+    // and the previous answer — "Today, yes" — read as a hard infrastructure
+    // gate on the hosted product too. A reader on AWS closed the tab over a
+    // requirement that does not apply to them.
+    question: "Do I need Cloudflare?",
+    answer:
+      "Not to use it. The hosted cloud runs the runtime for you — install the SDK, call the API, nothing to deploy. Cloudflare is the self-run path: the open-source runtime deploys to your own Cloudflare account (Workers, Durable Objects, Queues) because the spend decision needs fast per-customer state where requests run. Self-run means your account, your data, your keys; hosted means no infrastructure at all. Both settle payments to your own Stripe.",
+  },
+  {
+    // Second, not seventh: this is the distinction that releases the wrong
+    // buyer. Arriving from "control AI spend", a reader recognises every
+    // artifact on this page before learning it solves the other direction.
+    question: "Why not an AI gateway?",
+    answer:
+      "Different direction of spend. Gateways cap what you spend with your providers — your OpenAI or Anthropic bill — and route models behind virtual keys. Unprice caps what your customer is allowed to spend with you, and connects that decision to plan versions, credits, and invoice evidence. If you want per-team attribution and a ceiling on your own provider bill, use a gateway; they are not competitors and you may well want both.",
+  },
+  {
     // The real incumbent is not a competitor, it is the counter the reader
     // already wrote (positioning-and-messaging.md). Answering the branded
     // alternatives while ducking this one reads as evasion.
@@ -60,20 +77,10 @@ const faqs: FaqItem[] = [
       "The check fails loud, never silent: you get an explicit error and your code owns the fallback — fail open and log, or fail closed for the expensive actions. Caches serve stale answers while they revalidate, and shadow mode blocks nothing by construction, so an outage during adoption costs you nothing.",
   },
   {
-    question: "Why not an AI gateway?",
-    answer:
-      "Gateways cap provider spend. Unprice governs what your customer is allowed to spend and connects that decision to invoice evidence.",
-  },
-  {
     question: "Is it safe enough for money logic?",
     answer:
       "Do not adopt it all at once. Read the source, run one request path in shadow, prove it on Sandbox, then enforce only when the evidence matches.",
     link: { href: REPO_URL, label: "Read the source", external: true },
-  },
-  {
-    question: "Do I need Cloudflare?",
-    answer:
-      "Today, yes. The runtime deploys to your own Cloudflare account — Workers, Durable Objects, Queues — because the spend decision needs fast per-customer state where requests run. Your account, your data, your keys.",
   },
 ]
 
@@ -112,14 +119,20 @@ export function FaqSection() {
         </h2>
         {/* Qualification, stated plainly. Telling the wrong reader to leave is
             the cheapest credibility a launch with no customers can buy, and
-            the disqualifier is canon (landing-page-grand-slam-offer.md). */}
+            the disqualifier is canon (landing-page-grand-slam-offer.md). Both
+            wrong buyers get named, and each gets sent somewhere real: the
+            seat-based one to Stripe Billing, the provider-cost one to a
+            gateway. The second was missing, so that reader read the whole page
+            before finding out. */}
         <p className="mt-5 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
           Unprice is for teams whose customers can trigger real cost — an LLM call, a data job, a
-          paid workflow. If your product is pure seat-based SaaS, Stripe Billing is enough and you
-          do not need this.
+          paid workflow. If your product is pure seat-based SaaS, Stripe Billing is enough. If what
+          you need to cap is your own provider bill rather than what your customers spend, you want
+          an AI gateway, not this.
         </p>
         <p className="mt-4 font-mono text-[11px] text-background-text leading-5">
-          Cloudflare today · Stripe today · not tax, accounting, or revenue recognition
+          Stripe today · hosted or your own Cloudflare account · not tax, accounting, or revenue
+          recognition
         </p>
       </div>
 

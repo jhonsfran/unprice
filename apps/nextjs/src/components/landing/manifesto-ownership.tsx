@@ -94,7 +94,13 @@ export default function ManifestoOwnership() {
               ))}
             </div>
             <div className="mt-4 border-background-border border-t pt-3">
-              <LedgerRow label="independent metering-first vendors" fact="none remaining" />
+              {/* "none remaining" was false and falsifiable in one click —
+                  Lago is independent, open-source and metering-first, and an
+                  evaluator with it open in another tab discards the whole
+                  timeline over the one absolute it can disprove. The precise
+                  claim is the one that survives: the vendors that took venture
+                  money to own this layer were bought. */}
+              <LedgerRow label="venture-backed metering vendors" fact="acquired or pivoted" />
               <LedgerRow
                 label="your money path"
                 fact="yours · AGPL-3.0"

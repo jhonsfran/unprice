@@ -3,6 +3,7 @@ import { cn } from "@unprice/ui/utils"
 import { ArrowRight } from "lucide-react"
 import Balancer from "react-wrap-balancer"
 import { AcquisitionLink } from "./acquisition-link"
+import { hasDemoVideo } from "./demo-video"
 import { MoneyPath } from "./money-path"
 import { ProofLink } from "./proof-link"
 
@@ -36,8 +37,8 @@ export default function Hero() {
               reader meeting the phrase cold parses it as Unprice sitting in the
               flow, which is the one misread that costs the most. */}
           <p className="mt-6 max-w-xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-            Authorize customer spend before paid work runs. Open source, for SaaS that sells
-            credits, API calls, or agent runs.
+            Authorize customer spend before paid work runs — what your customers spend, not your own
+            provider bill. Open source, for SaaS that sells credits, API calls, or agent runs.
           </p>
           <div className="mt-10 flex flex-wrap items-center gap-3">
             <AcquisitionLink
@@ -48,12 +49,15 @@ export default function Hero() {
               Start with one paid action
               <ArrowRight aria-hidden className="size-3.5" />
             </AcquisitionLink>
+            {/* Label follows the artifact. Offering to play a recording that
+                does not exist yet is the fastest way to read as a shell — and
+                it was, to every reader who clicked it. */}
             <ProofLink
               source="hero_demo"
               href="#demo"
               className={cn(buttonVariants({ variant: "outline" }))}
             >
-              Watch it deny a request
+              {hasDemoVideo ? "Watch it deny a request" : "See the receipts"}
             </ProofLink>
           </div>
           <p className="mt-3.5 font-mono text-[11px] text-background-text">
@@ -70,8 +74,13 @@ export default function Hero() {
                 — the money never touches Unprice.
               </span>
             </p>
+            {/* "nothing to deploy" is here because its absence cost a signup:
+                the FAQ's "Do I need Cloudflare? Today, yes" read as a hard
+                infrastructure gate on the hosted product too, and a reader on
+                AWS bounced rather than ask. Cloudflare is the self-run path
+                only. */}
             <p className="mt-2 font-mono text-[11px] text-background-text leading-5">
-              AGPL-3.0 open source · two calls to integrate · shadow-first
+              AGPL-3.0 open source · two calls to integrate · nothing to deploy
             </p>
           </div>
         </div>

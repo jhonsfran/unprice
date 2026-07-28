@@ -14,12 +14,26 @@ import { StationHeader } from "./station-header"
 // The snippet is the honest two calls and nothing else. It used to be
 // thirty-eight lines directly under the sentence "the first integration is
 // two calls" — the claim and its evidence disagreeing inside one viewport
-// (launch audit 2026-07-27). Error handling, redirect URLs and the metering
-// and budget rungs all still exist; they live in the SDK reference, one link
-// away, where a reader who has already decided goes looking for them.
+// (launch audit 2026-07-27).
 //
-// Every line here is real SDK surface validated against the route schemas. If
-// the API changes, this changes with it.
+// Two corrections from reading the page as a skeptical engineer (2026-07-27):
+//
+// 1. `access.check` is NOT shown as an enforcement gate any more. It is
+//    read-only and reserves nothing, so `check` → run-the-work is a
+//    time-of-check/time-of-use race: two concurrent requests both pass. That
+//    is the same race this page criticises a Redis counter for, so shipping it
+//    as the enforcement example was indefensible. The snippet now logs the
+//    shadow decision, which is what a read-only call is actually for, and the
+//    atomic primitives are named directly beneath it.
+// 2. Budgeted runs are back on the page. They were a subordinate clause
+//    ("capping a whole job or agent, are one more call each") — and they are
+//    the primitive the sharpest slice of the ICP arrives searching for, because
+//    an agent burning a budget overnight is one workload, not many requests.
+//    A per-request check never saves that reader.
+//
+// Every line here is real SDK surface validated against the route schemas
+// (startRunV1.ts, applyRunSyncEventV1.ts, budget-runs.ts). If the API changes,
+// this changes with it.
 
 const GATE_SNIPPET = `import { Unprice } from "@unprice/api"
 
@@ -32,14 +46,29 @@ const { result: customer } = await unprice.customers.signUp({
   planSlug: "pro",
 })
 
-// Before the paid action, every time.
+// Day one: read-only. Log what Unprice would have decided
+// next to the answer your own logic gave.
 const { result } = await unprice.access.check({
   customerId: customer.customerId,
   featureSlug: "tokens",
 })
 
-if (!result.allowed) return denied(result.rejectionReason)
+log({ unprice: result.allowed, mine: myExistingCheck() })
 `
+
+// The enforcing calls. Named here, in the open, because "which one goes in
+// front of my LLM call?" is the question the shadow snippet deliberately does
+// not answer — and guessing wrong is the race.
+const enforcingCalls = [
+  {
+    call: "usage.consume",
+    fact: "one request · ingests and denies atomically at the limit",
+  },
+  {
+    call: "runs.start / consume / end",
+    fact: "one workload · reserves a budget up front, stops itself when spent",
+  },
+]
 
 // A real sequence, and the order is the argument: enforcement is last and it
 // is opt-in. Each stage names what runs and — the part that actually reduces
@@ -64,11 +93,11 @@ const stages = [
     ],
   },
   {
-    title: "Your own Stripe",
-    body: "Go live in your own account. Unprice owns the money path; your provider still captures the payment.",
+    title: "Enforce, in your own Stripe",
+    body: "Switch to a call that reserves, and go live in your own account. Unprice owns the decision; your provider still captures the payment.",
     facts: [
+      { label: "enforces", fact: "usage.consume · runs.*" },
       { label: "funds flow", fact: "yours · always" },
-      { label: "capture", fact: "your Stripe account" },
       { label: "unprice", fact: "never in the middle" },
     ],
   },
@@ -78,7 +107,7 @@ export function LaunchPathSection() {
   return (
     <SectionShell labelledBy="launch-path-title">
       <div className="flex flex-col items-start">
-        <StationHeader index="04" label="First integration" fact="two calls · nothing blocks" />
+        <StationHeader index="04" label="First integration" fact="shadow first · enforce later" />
         <h2
           id="launch-path-title"
           className="mt-6 max-w-2xl font-primary text-background-textContrast text-display-3"
@@ -93,8 +122,8 @@ export function LaunchPathSection() {
           <code className="rounded-sm bg-background-bg px-1 py-px font-mono text-[13px] text-background-textContrast">
             access.check
           </code>{" "}
-          in front of the paid action. The check is read-only, so on day one it decides nothing — it
-          just tells you what it would have decided.
+          beside the logic you already trust. The check is read-only — it decides nothing, it just
+          tells you what it would have decided.
         </p>
       </div>
 
@@ -110,10 +139,35 @@ export function LaunchPathSection() {
             <CodeEditor codeBlock={GATE_SNIPPET} language="typescript" />
           </div>
         </div>
-        <figcaption className="mt-5 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 border-background-border border-t pt-3 text-background-text text-xs leading-6">
+        {/* The enforcement answer, stated rather than left to inference. A
+            read-only check reserves nothing, so gating on it and then running
+            the work lets two concurrent requests through — the reader has to
+            be told which call is atomic, or they will ship the race. */}
+        <div className="mt-6 border-background-border border-t pt-4">
+          <p className="text-background-text text-sm leading-6">
+            When the shadow decision matches reality, enforce with a call that reserves. Never gate
+            on{" "}
+            <code className="rounded-sm bg-background-bg px-1 py-px font-mono text-[12px] text-background-textContrast">
+              access.check
+            </code>{" "}
+            alone — it reserves nothing, so two concurrent requests both pass it.
+          </p>
+          <div className="mt-3 flex flex-col">
+            {enforcingCalls.map((row) => (
+              <LedgerRow
+                key={row.call}
+                label={row.call}
+                labelClassName="font-mono text-xs"
+                fact={row.fact}
+              />
+            ))}
+          </div>
+        </div>
+
+        <figcaption className="mt-6 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 border-background-border border-t pt-3 text-background-text text-xs leading-6">
           <span className="max-w-xl">
-            This is the integration the walk-away guarantee is written against. Metering what ran,
-            and capping a whole job or agent, are one more call each.
+            The two calls above are the integration the walk-away guarantee is written against —
+            read-only, blocking nothing.
           </span>
           <ProofLink
             source="integration_sdk"
