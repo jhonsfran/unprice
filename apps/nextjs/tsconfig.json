@@ -7,9 +7,7 @@
     "baseUrl": ".",
     "paths": {
       "~/*": ["./src/*"],
-      "#*": ["../../internal/trpc/src/*"],
-      "@unprice/react": ["../../packages/react/src/index.ts"],
-      "@unprice/react/*": ["../../packages/react/src/*"]
+      "#*": ["../../internal/trpc/src/*"]
     },
     "plugins": [
       {

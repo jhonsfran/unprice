@@ -1,3 +1,4 @@
+import { name, version } from "../package.json"
 import type { UnpriceOptions } from "./client"
 
 export interface Telemetry {
@@ -21,8 +22,7 @@ export interface Telemetry {
 export function getTelemetry(opts: UnpriceOptions): Telemetry | null {
   let platform = "unknown"
   let runtime = "unknown"
-  // TODO: add version and change this for unprice/api
-  const sdkVersions = ["@unprice/api@0.0.1"]
+  const sdkVersions = [`${name}@${version}`]
 
   try {
     if (typeof process !== "undefined") {

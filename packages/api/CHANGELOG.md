@@ -1,20 +1,22 @@
-# @jhonsfran/unprice
+# @unprice/api
 
-## 0.4.1
+## Legacy history (`@jhonsfran/unprice`)
 
-### Patch Changes
+### 0.4.1
+
+#### Patch Changes
 
 - building again
 
-## 0.4.0
+### 0.4.0
 
-### Minor Changes
+#### Minor Changes
 
 - changing headers
 
-## 0.3.0
+### 0.3.0
 
-### Minor Changes
+#### Minor Changes
 
 - fix: add authorization header
 - c790eb7: republishing

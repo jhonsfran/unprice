@@ -1,5 +1,6 @@
 {
   "name": "api",
+  "private": true,
   "scripts": {
     "scripts:queues": "./scripts/configure-queues.sh",
     "scripts:r2-delete-bucket": "./scripts/delete-r2-bucket.sh",

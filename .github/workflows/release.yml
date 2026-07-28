@@ -1,0 +1,47 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release API package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/install
+        name: Install dependencies
+        with:
+          ts: "true"
+          python: "false"
+
+      - name: Verify npm supports trusted publishing
+        shell: bash
+        run: |
+          npm_version="$(npm --version)"
+          node -e 'const [major, minor, patch] = process.argv[1].split(".").map(Number); if (major < 11 || (major === 11 && (minor < 5 || (minor === 5 && patch < 1)))) { throw new Error(`npm ${process.argv[1]} does not support trusted publishing; expected >= 11.5.1`) }' "$npm_version"
+          echo "npm $npm_version supports trusted publishing"
+
+      - name: Create release pull request or publish
+        id: changesets
+        uses: changesets/action@v1
+        with:
+          version: pnpm bump-versions
+          publish: pnpm release
+          title: "chore: release API package"
+          commit: "chore: release API package"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

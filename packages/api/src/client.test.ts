@@ -1,4 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "vitest"
+import { version } from "../package.json"
 import { Unprice } from "./client"
 import type { OperationInput, OperationResponse } from "./operation-types"
 
@@ -174,6 +175,26 @@ describe("Unprice client", () => {
     expect(requests[0]?.url).toBe("https://example.com/v1/invoices/get/inv_123")
     expect(requests[0]?.headers.get("authorization")).toBe("Bearer test-token")
     expect(requests[0]?.headers.get("unprice-request-source")).toMatch(/^sdk@/)
+  })
+
+  it("reports the package version in SDK headers", async () => {
+    const requests: Request[] = []
+    const client = new Unprice({
+      token: "test-token",
+      baseUrl: "https://example.com",
+      retry: { attempts: 0 },
+      fetch: async (request) => {
+        requests.push(request.clone())
+        return createJsonResponse({ features: [] })
+      },
+    })
+
+    const { error } = await client.features.list()
+
+    expect(error).toBeUndefined()
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.headers.get("unprice-request-source")).toBe(`sdk@${version}`)
+    expect(requests[0]?.headers.get("unprice-telemetry-sdk")).toBe(`@unprice/api@${version}`)
   })
 
   it("serializes wallet credit balance paths and query params", async () => {

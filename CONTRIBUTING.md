@@ -28,7 +28,7 @@ before writing code. This is money-path logic; correctness and evidence trails o
 | `apps/api` | The runtime API — Hono on Cloudflare Workers (entitlements, metering, runs, ingestion) |
 | `apps/nextjs` | Dashboard and marketing site (Next.js App Router) |
 | `apps/docs` | Documentation site (Mintlify) |
-| `packages/api`, `packages/react` | Published client SDKs (`@unprice/api`, `@unprice/react`) — MIT |
+| `packages/api` | Published TypeScript SDK (`@unprice/api`) — MIT |
 | `internal/*` | Core engine: `db`, `services` (billing), `stripe`, `analytics`, `jobs`, `money`, `trpc`, … |
 | `tooling/*` | Shared configs and dev tools |
 
@@ -72,9 +72,11 @@ need them — the test suites use local fakes and the Sandbox payment provider.
 
 6. Commit with conventional commits — `pnpm commit` walks you through it. Husky + lint-staged run
    `pnpm validate` on commit.
-7. If your change affects a published package (`packages/api`, `packages/react`), add a changeset:
-   `pnpm changeset`. SDK surface is generated from the OpenAPI contract — from `packages/api`, run
-   `pnpm generate` then `pnpm build` rather than hand-writing path types.
+7. If your change affects the published package (`packages/api`), add a changeset:
+   `pnpm changeset`. Use a patch for compatible fixes, a minor for new functionality or a
+   pre-1.0 breaking change, and include migration guidance for breaking changes. SDK surface is
+   generated from the OpenAPI contract — from `packages/api`, run `pnpm generate` then
+   `pnpm build` rather than hand-writing path types.
 8. Open a pull request. Explain the money-path behavior that changes, not just the code. Link the
    issue. CI must be green.
 
@@ -86,8 +88,8 @@ expected failures), and logging patterns (`no console.log`; use the existing log
 
 ## Licensing Of Contributions
 
-Unprice's core is dual-licensed: [AGPL-3.0](LICENSE) plus a Commercial License. The client SDKs
-(`@unprice/api`, `@unprice/react`) are MIT.
+Unprice's core is dual-licensed: [AGPL-3.0](LICENSE) plus a Commercial License. The `@unprice/api`
+client SDK is MIT.
 
 By submitting a contribution you agree that:
 

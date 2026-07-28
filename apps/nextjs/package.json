@@ -42,7 +42,6 @@
     "@unprice/logs": "workspace:^",
     "@unprice/money": "workspace:^",
     "@unprice/observability": "workspace:^",
-    "@unprice/react": "workspace:^",
     "@unprice/services": "workspace:^",
     "@unprice/stripe": "workspace:^",
     "@unprice/trpc": "workspace:^",

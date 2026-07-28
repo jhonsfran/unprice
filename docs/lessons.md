@@ -34,6 +34,9 @@ patterns. Keep it cheap to load and useful.
 
 ## CI And GitHub Actions
 
+- 2026-07-28: Changesets uses the root `package.json` workspace list before
+  `pnpm-workspace.yaml`; mark every non-published app/package in that list as `private: true` and
+  fail release unless `@unprice/api` is the only publishable workspace.
 - 2026-07-11: Node 24 GitHub Actions workflows should use `actions/checkout@v5`,
   `actions/setup-node@v5`, `actions/cache@v5`, and `pnpm/action-setup@v4.4.0`; older action
   majors trigger GitHub's forced Node 24 compatibility warning.

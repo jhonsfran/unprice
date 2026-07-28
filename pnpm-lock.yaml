@@ -260,9 +260,6 @@ importers:
       '@unprice/observability':
         specifier: workspace:^
         version: link:../../internal/observability
-      '@unprice/react':
-        specifier: workspace:^
-        version: link:../../packages/react
       '@unprice/services':
         specifier: workspace:^
         version: link:../../internal/services
@@ -1154,31 +1151,6 @@ importers:
       vitest:
         specifier: ^2.1.9
         version: 2.1.9(@types/node@24.13.2)(terser@5.46.0)
-
-  packages/react:
-    dependencies:
-      '@unprice/api':
-        specifier: ^0.1.4
-        version: 0.1.4
-    devDependencies:
-      '@types/react':
-        specifier: ^18.3.1
-        version: 18.3.28
-      '@types/react-dom':
-        specifier: ^18.3.1
-        version: 18.3.7(@types/react@18.3.28)
-      react:
-        specifier: 18.3.1
-        version: 18.3.1
-      react-dom:
-        specifier: 18.3.1
-        version: 18.3.1(react@18.3.1)
-      tsup:
-        specifier: ^8.4.0
-        version: 8.5.1(jiti@2.7.0)(postcss@8.5.6)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.9.0)
-      typescript:
-        specifier: ^5.3.3
-        version: 5.9.3
 
   tooling/k6:
     devDependencies:
@@ -6198,9 +6170,6 @@ packages:
 
   '@unkey/error@0.2.0':
     resolution: {integrity: sha512-DFGb4A7SrusZPP0FYuRIF0CO+Gi4etLUAEJ6EKc+TKYmscL0nEJ2Pr38FyX9MvjI4Wx5l35Wc9KsBjMm9Ybh7w==}
-
-  '@unprice/api@0.1.4':
-    resolution: {integrity: sha512-ybfZ3cm+4TpnjlBcJ9MYiFPuh6D+n1THEpcDFCWqHycsAoCctIIFFftHghzrbkwI/qJMFawpeer8TmbYWBvP7g==}
 
   '@upstash/redis@1.36.2':
     resolution: {integrity: sha512-C0Yt8hc12vLaQYRG1fMci8iPrLtnTdbJG0HR5T8vKnvEP/1RdMMblsOJs5/jp0JXZJ1oSzMnQz4J9EVezNpI6A==}
@@ -18384,8 +18353,6 @@ snapshots:
   '@unkey/error@0.2.0':
     dependencies:
       zod: 3.25.76
-
-  '@unprice/api@0.1.4': {}
 
   '@upstash/redis@1.36.2':
     dependencies:

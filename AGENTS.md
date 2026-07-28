@@ -35,7 +35,7 @@ contain compatible background; keep them aligned when changing architecture rule
 - `internal/error`: `Result`, `Ok`, `Err`, and shared error primitives.
 - `internal/observability`, `internal/logs`, `internal/metrics`: logging, wide events, and
   metrics.
-- `packages/api` and `packages/react`: public package surfaces.
+- `packages/api`: public TypeScript SDK package surface.
 - `tooling/*`: repo tooling and operational utilities.
 - `docs/brand`: brand, positioning, and marketing source of truth. For any marketing, copy,
   landing-page, or campaign work, start with `docs/brand/README.md` and follow

@@ -28,7 +28,8 @@
     "manypkg:fix": "pnpm manypkg fix",
     "commit": "cz",
     "bump-versions": "pnpm changeset version && pnpm install",
-    "release": "pnpm build && pnpm changeset publish",
+    "release:check-packages": "node tooling/scripts/assert-publishable-packages.mjs",
+    "release": "pnpm release:check-packages && pnpm --filter @unprice/api test && pnpm --filter @unprice/api typecheck && pnpm --filter @unprice/api build && pnpm --filter @unprice/api exec npm pack --dry-run --json && pnpm changeset publish",
     "prepare": "husky",
     "preinstall": "npx only-allow pnpm",
     "doctor": "react-doctor . --scope changed --blocking error --no-score"
