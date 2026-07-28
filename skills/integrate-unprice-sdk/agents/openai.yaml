@@ -1,0 +1,4 @@
+interface:
+  display_name: "Integrate Unprice SDK"
+  short_description: "Add safe Unprice SDK money-path integrations"
+  default_prompt: "Use $integrate-unprice-sdk to integrate Unprice into this project's paid action safely."

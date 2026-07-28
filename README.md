@@ -94,6 +94,21 @@ Unprice runs on:
 
 [Visit our documentation](https://docs.unprice.dev) for a 5-minute quickstart guide.
 
+## Agent Skill
+
+Install the Unprice SDK integration playbook in Codex, Claude Code, Cursor, and other
+skills-compatible agents:
+
+```bash
+npx skills add https://github.com/jhonsfran/unprice --skill integrate-unprice-sdk
+```
+
+The same skill is available through the documentation site:
+
+```bash
+npx skills add https://docs.unprice.dev --skill integrate-unprice-sdk
+```
+
 ---
 
 *Unprice is open source. We welcome feedback, bug reports, and feature suggestions that make the
