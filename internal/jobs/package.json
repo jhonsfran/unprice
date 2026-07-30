@@ -33,6 +33,6 @@
     "@unprice/tsconfig": "workspace:*",
     "typescript": "^5.3.3",
     "tsx": "^4.7.2",
-    "vitest": "^2.1.9"
+    "vitest": "^4.1.10"
   }
 }
