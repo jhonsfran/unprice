@@ -6,7 +6,6 @@ export default defineConfig({
     include: ["src/**/*.integration.test.ts"],
     fileParallelism: false,
     maxWorkers: 1,
-    minWorkers: 1,
     maxConcurrency: 1,
     testTimeout: 10000,
     alias: {

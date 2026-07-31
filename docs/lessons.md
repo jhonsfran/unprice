@@ -37,6 +37,8 @@ patterns. Keep it cheap to load and useful.
 - 2026-07-31: `tooling/scripts/audit-high.mjs` must give `spawnSync` enough output buffer for
   the full npm audit report; `GHSA-mh99-v99m-4gvg` falsely flags patched
   `brace-expansion` v1/v2 lines because its vulnerable range has no lower bound.
+- 2026-07-31: Vitest 4 supports `maxWorkers` but removed `minWorkers`; remove that option from
+  integration scripts and configs or the CI command exits before loading tests.
 - 2026-07-28: Changesets uses the root `package.json` workspace list before
   `pnpm-workspace.yaml`; mark every non-published app/package in that list as `private: true` and
   fail release unless `@unprice/api` is the only publishable workspace.
