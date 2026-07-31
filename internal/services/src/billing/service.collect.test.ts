@@ -20,6 +20,7 @@ vi.mock("../subscriptions/withLockedMachine", () => ({
   withLockedMachine: vi.fn(async (args: { run: (m: SubscriptionMachine) => Promise<unknown> }) => {
     return args.run({} as unknown as SubscriptionMachine)
   }),
+  LockLostError: class LockLostError extends Error {},
 }))
 
 type RepoCalls = {
@@ -65,10 +66,10 @@ const findInvoiceByIdMock = vi.fn(async (input: { invoiceId: string; projectId: 
 })
 
 vi.mock("./repository.drizzle", () => ({
-  DrizzleBillingRepository: vi.fn().mockImplementation(() => ({
-    updateInvoice: updateInvoiceMock,
-    findInvoiceById: findInvoiceByIdMock,
-  })),
+  DrizzleBillingRepository: class {
+    updateInvoice = updateInvoiceMock
+    findInvoiceById = findInvoiceByIdMock
+  },
 }))
 
 const settleMock = vi.hoisted(() => vi.fn())

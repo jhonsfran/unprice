@@ -34,6 +34,9 @@ patterns. Keep it cheap to load and useful.
 
 ## CI And GitHub Actions
 
+- 2026-07-31: `tooling/scripts/audit-high.mjs` must give `spawnSync` enough output buffer for
+  the full npm audit report; `GHSA-mh99-v99m-4gvg` falsely flags patched
+  `brace-expansion` v1/v2 lines because its vulnerable range has no lower bound.
 - 2026-07-28: Changesets uses the root `package.json` workspace list before
   `pnpm-workspace.yaml`; mark every non-published app/package in that list as `private: true` and
   fail release unless `@unprice/api` is the only publishable workspace.
@@ -751,3 +754,9 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-07-13: A `curl --max-time 5` timeout against :3000 does not mean the port is free — the
   user's dev server may be cold-compiling. If `next dev` reports "Port 3000 in use, trying
   3001", the :3000 owner is another server; verify against the one serving the working tree.
+- 2026-07-31: Period-boundary entitlement tests must freeze `Date.now()`; single-event metering
+  validates event age against ambient time rather than the request's `now` field.
+- 2026-07-31: Vitest 4 mocks used with `new` must be classes or regular-function implementations;
+  arrow-function `vi.fn()` implementations are not constructible.
+- 2026-07-31: `@cloudflare/vitest-pool-workers` v0.20 uses an ESM `.mts` Vitest config and the
+  `cloudflareTest` plugin; the old `/config` helper is no longer exported.

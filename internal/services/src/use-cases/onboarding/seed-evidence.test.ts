@@ -274,7 +274,7 @@ function createSeedOnboardingEvidenceDeps({
       >,
       db: createDbMock(),
       logger: createLogger(),
-      createApiClient,
+      createApiClient: createApiClient as never,
     },
     mocks: {
       createApiClient,

@@ -54,12 +54,12 @@ const runBudgetMocks = vi.hoisted(() => ({
 }))
 
 vi.mock("~/ingestion/run-budget/client", () => ({
-  CloudflareRunBudgetClient: vi.fn().mockImplementation(() => ({
-    startRun: vi.fn(),
-    applySyncEvent: vi.fn(),
-    endRun: vi.fn(),
-    getRunStatus: runBudgetMocks.getRunStatus,
-  })),
+  CloudflareRunBudgetClient: class {
+    startRun = vi.fn()
+    applySyncEvent = vi.fn()
+    endRun = vi.fn()
+    getRunStatus = runBudgetMocks.getRunStatus
+  },
 }))
 
 // --- Verified key fixtures ---

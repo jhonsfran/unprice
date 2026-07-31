@@ -407,6 +407,7 @@ describe("Workflow - Billing and Subscriptions", () => {
           // biome-ignore lint/suspicious/noExplicitAny: test double shape
         }) as any
     )
+    insertSpy.mockClear()
 
     return {
       allInsertValues,

@@ -9,6 +9,7 @@ const baseline = new Set(JSON.parse(readFileSync(baselinePath, "utf8")))
 
 const audit = spawnSync("pnpm", ["audit", "--json", "--audit-level", "high"], {
   encoding: "utf8",
+  maxBuffer: 16 * 1024 * 1024,
   stdio: ["ignore", "pipe", "pipe"],
 })
 

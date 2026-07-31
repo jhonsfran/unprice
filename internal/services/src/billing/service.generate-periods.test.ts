@@ -22,13 +22,13 @@ const createPeriodsBatchMock = vi.fn().mockResolvedValue(undefined)
 const shortenBillingPeriodMock = vi.fn().mockResolvedValue(undefined)
 
 vi.mock("./repository.drizzle", () => ({
-  DrizzleBillingRepository: vi.fn().mockImplementation(() => ({
-    capPendingPeriodsAtPhaseEnd: capPendingPeriodsAtPhaseEndMock,
-    listInvoicedPeriodsExceedingPhaseEnd: listInvoicedPeriodsExceedingPhaseEndMock,
-    getLastPeriodForItem: getLastPeriodForItemMock,
-    createPeriodsBatch: createPeriodsBatchMock,
-    shortenBillingPeriod: shortenBillingPeriodMock,
-  })),
+  DrizzleBillingRepository: class {
+    capPendingPeriodsAtPhaseEnd = capPendingPeriodsAtPhaseEndMock
+    listInvoicedPeriodsExceedingPhaseEnd = listInvoicedPeriodsExceedingPhaseEndMock
+    getLastPeriodForItem = getLastPeriodForItemMock
+    createPeriodsBatch = createPeriodsBatchMock
+    shortenBillingPeriod = shortenBillingPeriodMock
+  },
 }))
 
 // --- Helpers ---

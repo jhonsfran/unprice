@@ -41,7 +41,12 @@ export const parse = (req: NextAuthRequest | NextRequest) => {
   // }
 
   const subdomain = domain.split(".")[0] === domain ? null : domain.split(".")[0]
-  const ip = req.ip ?? "127.0.0.1"
+  const forwardedFor = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+  const ip =
+    req.headers.get("x-real-ip")?.trim() ||
+    req.headers.get("cf-connecting-ip")?.trim() ||
+    forwardedFor ||
+    "127.0.0.1"
   const path = req.nextUrl.pathname
 
   // fullPath is the full URL path (along with search params)

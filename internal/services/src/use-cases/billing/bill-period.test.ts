@@ -39,7 +39,7 @@ let txRepoInstance: RepoInstance
 
 let repoCallCount = 0
 vi.mock("../../billing/repository.drizzle", () => ({
-  DrizzleBillingRepository: vi.fn().mockImplementation(() => {
+  DrizzleBillingRepository: vi.fn(function DrizzleBillingRepository() {
     repoCallCount++
     return repoCallCount === 1 ? outerRepoInstance : txRepoInstance
   }),

@@ -14,7 +14,7 @@ export default async function NewPage(props: {
   }
 }) {
   const { workspace_id } = props.searchParams
-  const cookieStore = cookies()
+  const cookieStore = await cookies()
   const sessionId = cookieStore.get(COOKIES_APP.SESSION)?.value
 
   if (!sessionId) {

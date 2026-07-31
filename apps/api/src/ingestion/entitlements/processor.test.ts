@@ -5,7 +5,7 @@ import {
   LATE_EVENT_GRACE_MS,
   MAX_FUTURE_EVENT_SKEW_MS,
 } from "@unprice/services/entitlements"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { createDeferred } from "../test-fixtures/race"
 import type { ApplyInput } from "./contracts"
 import type { WalletReservationSnapshot } from "./contracts"
@@ -301,67 +301,74 @@ describe("EntitlementWindowProcessor apply behavior", () => {
   })
 
   it("resets period usage, assigns boundary events, and isolates late prior-period usage", async () => {
-    const nowDate = new Date(BASE_NOW)
-    const periodBStart = Date.UTC(nowDate.getUTCFullYear(), nowDate.getUTCMonth(), 1)
-    const periodAStart = Date.UTC(nowDate.getUTCFullYear(), nowDate.getUTCMonth() - 1, 1)
-    const harness = createHarness({
-      now: periodBStart,
-      store: new InMemoryEntitlementWindowStore(),
-    })
-    await harness.processor.initialize()
-    const base = createApplyInput({
-      creditLinePolicy: "uncapped",
-      enforceLimit: true,
-      limit: 4,
-      periodStartAt: periodAStart,
-      periodEndAt: Date.UTC(nowDate.getUTCFullYear(), nowDate.getUTCMonth() + 1, 1),
-      resetConfig: { resetInterval: "month", resetIntervalCount: 1 },
-    })
+    vi.useFakeTimers()
+    vi.setSystemTime(Date.UTC(2026, 6, 15))
 
-    const previous = await harness.processor.apply({
-      ...base,
-      idempotencyKey: "idem_period_previous",
-      now: periodBStart - 1,
-      event: {
-        ...base.event,
-        id: "evt_period_previous",
-        properties: { amount: 3 },
-        timestamp: periodBStart - 1,
-      },
-    })
-    const current = await harness.processor.apply({
-      ...base,
-      idempotencyKey: "idem_period_current",
-      now: periodBStart,
-      event: {
-        ...base.event,
-        id: "evt_period_current",
-        properties: { amount: 1 },
-        timestamp: periodBStart,
-      },
-    })
-    const replay = await harness.processor.apply({
-      ...base,
-      idempotencyKey: "idem_period_previous",
-      now: periodBStart,
-      event: {
-        ...base.event,
-        id: "evt_period_previous",
-        properties: { amount: 3 },
-        timestamp: periodBStart - 1,
-      },
-    })
-
-    expect(previous.meterFacts?.[0]?.period_key).toBe(`month:${periodAStart}`)
-    expect(current.meterFacts?.[0]?.period_key).toBe(`month:${periodBStart}`)
-    expect(replay).toMatchObject({ allowed: true, idempotencyStatus: "already_reported" })
-    await expect(
-      harness.processor.getEnforcementState({
-        entitlement: base.entitlement,
-        grants: base.grants,
+    try {
+      const nowDate = new Date()
+      const periodBStart = Date.UTC(nowDate.getUTCFullYear(), nowDate.getUTCMonth(), 1)
+      const periodAStart = Date.UTC(nowDate.getUTCFullYear(), nowDate.getUTCMonth() - 1, 1)
+      const harness = createHarness({
         now: periodBStart,
+        store: new InMemoryEntitlementWindowStore(),
       })
-    ).resolves.toMatchObject({ usage: 1, limit: 4, isLimitReached: false })
+      await harness.processor.initialize()
+      const base = createApplyInput({
+        creditLinePolicy: "uncapped",
+        enforceLimit: true,
+        limit: 4,
+        periodStartAt: periodAStart,
+        periodEndAt: Date.UTC(nowDate.getUTCFullYear(), nowDate.getUTCMonth() + 1, 1),
+        resetConfig: { resetInterval: "month", resetIntervalCount: 1 },
+      })
+
+      const previous = await harness.processor.apply({
+        ...base,
+        idempotencyKey: "idem_period_previous",
+        now: periodBStart - 1,
+        event: {
+          ...base.event,
+          id: "evt_period_previous",
+          properties: { amount: 3 },
+          timestamp: periodBStart - 1,
+        },
+      })
+      const current = await harness.processor.apply({
+        ...base,
+        idempotencyKey: "idem_period_current",
+        now: periodBStart,
+        event: {
+          ...base.event,
+          id: "evt_period_current",
+          properties: { amount: 1 },
+          timestamp: periodBStart,
+        },
+      })
+      const replay = await harness.processor.apply({
+        ...base,
+        idempotencyKey: "idem_period_previous",
+        now: periodBStart,
+        event: {
+          ...base.event,
+          id: "evt_period_previous",
+          properties: { amount: 3 },
+          timestamp: periodBStart - 1,
+        },
+      })
+
+      expect(previous.meterFacts?.[0]?.period_key).toBe(`month:${periodAStart}`)
+      expect(current.meterFacts?.[0]?.period_key).toBe(`month:${periodBStart}`)
+      expect(replay).toMatchObject({ allowed: true, idempotencyStatus: "already_reported" })
+      await expect(
+        harness.processor.getEnforcementState({
+          entitlement: base.entitlement,
+          grants: base.grants,
+          now: periodBStart,
+        })
+      ).resolves.toMatchObject({ usage: 1, limit: 4, isLimitReached: false })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("preserves sub-cent pricing across repeated events", async () => {

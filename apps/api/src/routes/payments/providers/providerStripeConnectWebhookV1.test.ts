@@ -25,9 +25,9 @@ vi.mock("@unprice/services/use-cases", () => ({
 }))
 
 vi.mock("@unprice/services/payment-provider", () => ({
-  StripePaymentProvider: vi.fn().mockImplementation(() => ({
-    verifyWebhook: providerMocks.verifyWebhook,
-  })),
+  StripePaymentProvider: class {
+    verifyWebhook = providerMocks.verifyWebhook
+  },
 }))
 
 beforeEach(() => {

@@ -103,7 +103,7 @@ function createResolver(params: {
       warn: vi.fn(),
     },
     subscriptionCatchUp: {
-      catchUpForPreparedGroup: params.catchUpForPreparedGroup,
+      catchUpForPreparedGroup: params.catchUpForPreparedGroup as never,
     },
   })
 }

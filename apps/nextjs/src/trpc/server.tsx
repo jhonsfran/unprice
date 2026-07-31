@@ -18,9 +18,10 @@ import { createQueryClient } from "./shared"
  * handling a tRPC call from a React Server Component.
  */
 const createContext = cache(async () => {
-  const heads = new Headers(headers())
-  const activeWorkspaceSlug = cookies().get(COOKIES_APP.WORKSPACE)?.value ?? ""
-  const activeProjectSlug = cookies().get(COOKIES_APP.PROJECT)?.value ?? ""
+  const [requestHeaders, cookieStore] = await Promise.all([headers(), cookies()])
+  const heads = new Headers(requestHeaders)
+  const activeWorkspaceSlug = cookieStore.get(COOKIES_APP.WORKSPACE)?.value ?? ""
+  const activeProjectSlug = cookieStore.get(COOKIES_APP.PROJECT)?.value ?? ""
   const requestId = newId("request")
   const ip = heads.get("x-real-ip") || heads.get("x-forwarded-for") || "unknown"
 

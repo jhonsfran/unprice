@@ -31,8 +31,8 @@ export default async function AuthenticationPage({
   const singleSessionId = getSingleSearchParam(sessionId)
   const signupIntent = getSignupIntent(intent)
   const safeNext = getSafeNextPath(getSingleSearchParam(next))
-  const session = await getSession()
-  const lastUsedMethod = cookies().get("last-login-method")?.value
+  const [session, cookieStore] = await Promise.all([getSession(), cookies()])
+  const lastUsedMethod = cookieStore.get("last-login-method")?.value
 
   if (session?.user?.id) {
     redirect(safeNext ?? APP_DOMAIN)

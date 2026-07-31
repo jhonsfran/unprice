@@ -562,25 +562,24 @@ function createProcessor(
   return new IngestionCustomerGroupProcessor({
     enableTestFailureInjection: overrides.enableTestFailureInjection,
     entitlementContext: {
-      prepareCustomerMessageGroup:
-        overrides.prepareCustomerMessageGroup ?? vi.fn().mockResolvedValue(preparedGroup),
+      prepareCustomerMessageGroup: (overrides.prepareCustomerMessageGroup ??
+        vi.fn().mockResolvedValue(preparedGroup)) as never,
     },
     logger,
     messageOutcomes: new IngestionMessageOutcomes({ logger, now: () => TEST_NOW }),
     preparedMessageProcessor: {
-      process:
-        overrides.preparedProcess ??
+      process: (overrides.preparedProcess ??
         vi.fn().mockResolvedValue(
           preparedGroup.messages.map((message) => ({
             message,
             outcome: { state: "processed" },
           }))
-        ),
+        )) as never,
     },
     reportingDispatcher: {
-      enqueueOutcomes: overrides.enqueueOutcomes ?? vi.fn().mockResolvedValue(undefined),
+      enqueueOutcomes: (overrides.enqueueOutcomes ?? vi.fn().mockResolvedValue(undefined)) as never,
     },
-    subscriptionCatchUp: overrides.subscriptionCatchUp,
+    subscriptionCatchUp: overrides.subscriptionCatchUp as never,
   })
 }
 

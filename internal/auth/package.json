@@ -22,15 +22,15 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@auth/core": "^0.34.1",
-    "@auth/drizzle-adapter": "1.8.0",
+    "@auth/core": "0.41.3",
+    "@auth/drizzle-adapter": "1.11.3",
     "@t3-oss/env-core": "^0.12.0",
     "@unprice/db": "workspace:^",
     "@unprice/error": "workspace:^",
     "@unprice/analytics": "workspace:^",
     "evlog": "2.4.1",
-    "next": "14.2.35",
-    "next-auth": "5.0.0-beta.20",
+    "next": "15.5.21",
+    "next-auth": "5.0.0-beta.32",
     "zod": "^3.24.2"
   },
   "devDependencies": {
@@ -40,6 +40,6 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "typescript": "^5.3.3",
-    "vitest": "^2.0.5"
+    "vitest": "^4.1.10"
   }
 }

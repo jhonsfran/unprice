@@ -24,6 +24,7 @@ vi.mock("../subscriptions/withLockedMachine", () => ({
   withLockedMachine: vi.fn(async (args: { run: (m: SubscriptionMachine) => Promise<unknown> }) => {
     return args.run(machineMocks as unknown as SubscriptionMachine)
   }),
+  LockLostError: class LockLostError extends Error {},
 }))
 
 const repoMocks = vi.hoisted(() => ({
@@ -33,7 +34,9 @@ const repoMocks = vi.hoisted(() => ({
 }))
 
 vi.mock("./repository.drizzle", () => ({
-  DrizzleBillingRepository: vi.fn().mockImplementation(() => repoMocks),
+  DrizzleBillingRepository: vi.fn(function DrizzleBillingRepository() {
+    return repoMocks
+  }),
 }))
 
 const settleMock = vi.hoisted(() => vi.fn())

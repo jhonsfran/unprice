@@ -411,8 +411,8 @@ function createProcessor(
   }
   return new IngestionSyncProcessor({
     entitlementContext: {
-      prepareCustomerGrantContext:
-        overrides.prepareCustomerGrantContext ?? vi.fn().mockResolvedValue(preparedContext),
+      prepareCustomerGrantContext: (overrides.prepareCustomerGrantContext ??
+        vi.fn().mockResolvedValue(preparedContext)) as never,
     },
     entitlementRouter: new IngestionEntitlementRouter({ logger }),
     entitlementWindowApplier: {
@@ -421,7 +421,7 @@ function createProcessor(
     messageOutcomes: new IngestionMessageOutcomes({ logger, now: () => TEST_NOW }),
     now: () => TEST_NOW,
     reportingDispatcher: {
-      enqueueOutcomes: overrides.enqueueOutcomes ?? vi.fn().mockResolvedValue(undefined),
+      enqueueOutcomes: (overrides.enqueueOutcomes ?? vi.fn().mockResolvedValue(undefined)) as never,
     },
     subscriptionCatchUp: overrides.subscriptionCatchUp as never,
   })

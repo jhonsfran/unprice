@@ -20,7 +20,7 @@ export async function updateContextCookies(
   const session = await getSession()
   if (!session?.user) redirect("/auth/signin")
 
-  const cookieStore = cookies()
+  const cookieStore = await cookies()
 
   const cookieOptions = {
     path: "/",

@@ -7,16 +7,16 @@ const stripeMocks = vi.hoisted(() => ({
 }))
 
 vi.mock("@unprice/stripe", () => ({
-  Stripe: vi.fn().mockImplementation(() => ({
-    checkout: {
+  Stripe: class {
+    checkout = {
       sessions: {
         create: stripeMocks.checkoutSessionsCreate,
       },
-    },
-    webhooks: {
+    }
+    webhooks = {
       constructEvent: vi.fn(),
-    },
-  })),
+    }
+  },
 }))
 
 function createMockLogger(): Logger {

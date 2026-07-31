@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@auth/core": "^0.34.1",
+    "@auth/core": "0.41.3",
     "@t3-oss/env-core": "^0.12.0",
     "@unprice/observability": "workspace:^",
     "evlog": "2.4.1",

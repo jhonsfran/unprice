@@ -43,8 +43,8 @@ function normalizeEmailForRateLimit(email: string): string {
   return email.trim().toLowerCase().slice(0, 320) || "unknown"
 }
 
-function resolveClientIp(): string {
-  const requestHeaders = headers()
+async function resolveClientIp(): Promise<string> {
+  const requestHeaders = await headers()
   const forwardedFor = requestHeaders.get("x-forwarded-for")?.split(",")[0]?.trim()
 
   return (
@@ -106,7 +106,7 @@ export async function checkCredentialsActionRateLimit({
   action: CredentialsAction
   email: string
 }): Promise<{ limited: false } | { limited: true; message: string }> {
-  const ip = resolveClientIp()
+  const ip = await resolveClientIp()
   const rules = buildCredentialsRateLimitRules({ action, email, ip })
 
   for (const rule of rules) {

@@ -77,9 +77,9 @@ const updateInvoiceMock = vi.fn(
   }
 )
 vi.mock("./repository.drizzle", () => ({
-  DrizzleBillingRepository: vi.fn().mockImplementation(() => ({
-    updateInvoice: updateInvoiceMock,
-  })),
+  DrizzleBillingRepository: class {
+    updateInvoice = updateInvoiceMock
+  },
 }))
 
 const usd = dineroCurrencies.USD

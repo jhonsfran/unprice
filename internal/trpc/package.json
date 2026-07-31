@@ -54,7 +54,7 @@
     "@unprice/error": "workspace:^",
     "@unprice/tsconfig": "workspace:^",
     "typescript": "^5.3.3",
-    "vitest": "^2.0.5"
+    "vitest": "^4.1.10"
   },
   "overrides": {
     "@trpc/server": "11.4.4"

@@ -123,7 +123,8 @@ export const authConfig: NextAuthConfig = {
   callbacks: {
     signIn: async ({ account }) => {
       if (account?.provider) {
-        cookies().set("last-login-method", account.provider, {
+        const cookieStore = await cookies()
+        cookieStore.set("last-login-method", account.provider, {
           path: "/",
           maxAge: 31536000, // 1 year
           sameSite: "lax",
