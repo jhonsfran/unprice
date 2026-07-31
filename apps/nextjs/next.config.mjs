@@ -27,19 +27,18 @@ const nextConfig = {
     "@unprice/tailwind-config",
   ],
   output: process.env.NEXT_OUTPUT_STANDALONE === "1" ? "standalone" : undefined,
+  outputFileTracingRoot: path.join(__dirname, "../../"),
   pageExtensions: ["ts", "tsx", "mdx"],
   images: {
     domains: ["images.unsplash.com"],
   },
-  swcMinify: true,
   allowedDevOrigins: ["localhost", "app.localhost", "*.localhost"],
+  turbopack: {},
   // Optimize CSS loading
   compiler: {
     removeConsole: process.env.NODE_ENV === "production" ? { exclude: ["error", "warn"] } : false,
   },
   experimental: {
-    turbo: {},
-    outputFileTracingRoot: path.join(__dirname, "../../"),
     // ppr: true, // TODO: activate later
     mdxRs: true,
     optimizePackageImports: [
