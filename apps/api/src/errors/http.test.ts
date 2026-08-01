@@ -88,6 +88,63 @@ describe("handleError", () => {
     })
   })
 
+  // A 5XX message is replaced with a generic one, so its structured detail has to
+  // go with it — otherwise the detail becomes the leak the message replacement
+  // prevents. These two run as a pair on purpose: the 5XX case alone would pass
+  // just as well if `details` were never emitted at all, so the 4XX case is the
+  // control that proves the field does propagate and only the guard suppresses it.
+  it("drops structured details from 5xx responses", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
+
+    const response = await fetchErrorResponse(
+      new UnpriceApiError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "planVersionFeatures.configHash violates not-null",
+        details: {
+          kind: "invalid_config",
+          issues: [{ path: "config.plans[0].slug", message: "internal detail" }],
+        },
+      })
+    )
+
+    expect(response.status).toBe(500)
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INTERNAL_SERVER_ERROR",
+        docs: "https://docs.unprice.dev/api-reference/errors/code/INTERNAL_SERVER_ERROR",
+        message: "Internal server error",
+        requestId,
+      },
+    })
+  })
+
+  it("keeps structured details on 4xx responses", async () => {
+    const response = await fetchErrorResponse(
+      new UnpriceApiError({
+        code: "BAD_REQUEST",
+        message: "The monetization configuration document is not valid",
+        details: {
+          kind: "invalid_config",
+          issues: [{ path: "config.plans[0].slug", message: "Required" }],
+        },
+      })
+    )
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "BAD_REQUEST",
+        docs: "https://docs.unprice.dev/api-reference/errors/code/BAD_REQUEST",
+        message: "The monetization configuration document is not valid",
+        requestId,
+        details: {
+          kind: "invalid_config",
+          issues: [{ path: "config.plans[0].slug", message: "Required" }],
+        },
+      },
+    })
+  })
+
   it("returns generic messages for unhandled errors", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined)
 

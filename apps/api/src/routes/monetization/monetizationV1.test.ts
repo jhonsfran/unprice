@@ -238,7 +238,26 @@ describe("monetization route contracts", () => {
 })
 
 describe("monetization.apply", () => {
-  it("takes the project from the token and ignores a project in the body", async () => {
+  it("takes the project from the token, never from the request", async () => {
+    const harness = createHarness()
+
+    const response = await harness.fetch({
+      path: "/v1/monetization/apply",
+      method: "POST",
+      body: { config: validConfig() },
+    })
+
+    expect(response.status).toBe(200)
+    expect(useCaseMocks.applyMonetizationConfig).toHaveBeenCalledTimes(1)
+    expect(useCaseMocks.applyMonetizationConfig.mock.calls[0]?.[1]).toMatchObject({
+      projectId: "proj_123",
+    })
+  })
+
+  // The project could never have come from the body, but silently dropping the
+  // key would let a plausible mistake — `{ config, plans }`, since the document
+  // itself has a `plans` key — return 200 with the extra ignored.
+  it("rejects an unknown top-level key instead of ignoring it", async () => {
     const harness = createHarness()
 
     const response = await harness.fetch({
@@ -247,11 +266,23 @@ describe("monetization.apply", () => {
       body: { projectId: "proj_attacker", config: validConfig() },
     })
 
-    expect(response.status).toBe(200)
-    expect(useCaseMocks.applyMonetizationConfig).toHaveBeenCalledTimes(1)
-    expect(useCaseMocks.applyMonetizationConfig.mock.calls[0]?.[1]).toMatchObject({
-      projectId: "proj_123",
+    expect(response.status).toBe(400)
+    const body = (await response.json()) as {
+      error: { details: { kind: string; issues: Array<{ path: string; message: string }> } }
+    }
+
+    expect(body.error.details.kind).toBe("invalid_config")
+    // the offending key is addressable as a path, not just named in prose:
+    // an agent acts on `path`, and Zod reports unrecognized keys against the
+    // containing object, whose top-level path is empty
+    expect(body.error.details.issues).toContainEqual({
+      path: "projectId",
+      message: 'Unrecognized key "projectId"',
     })
+    expect(body.error.details.issues.every((issue) => issue.path !== "")).toBe(true)
+    expect(useCaseMocks.applyMonetizationConfig).not.toHaveBeenCalled()
+    // and the smuggled value is never echoed back
+    expect(JSON.stringify(body)).not.toContain("proj_attacker")
   })
 
   it("returns the use case outcomes with a review url for the first created draft", async () => {

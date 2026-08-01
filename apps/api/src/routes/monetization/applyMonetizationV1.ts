@@ -22,13 +22,21 @@ import * as HttpStatusCodes from "~/util/http-status-codes"
 const tags = ["monetization"]
 
 /**
- * The project is never in the body — it comes from the bearer token. An unknown
- * top-level key is dropped rather than honoured, which is what makes a
- * `projectId` smuggled into the body inert instead of authoritative.
+ * The project is never in the body — it comes from the bearer token, so a
+ * `projectId` smuggled in here can never be authoritative.
+ *
+ * `.strict()` decides what happens to it after that. Dropping unknown keys
+ * silently would let an agent send `{ config, plans: [...] }` — a very plausible
+ * mistake, since the document itself has a `plans` key — and get a 200 back with
+ * its `plans` ignored. Telling it the key was inert is strictly more useful than
+ * saying nothing, and it matches `monetizationConfigSchema`, which is `.strict()`
+ * one level down; the asymmetry was the surprising part.
  */
-const applyMonetizationRequestSchema = z.object({
-  config: monetizationConfigSchema,
-})
+const applyMonetizationRequestSchema = z
+  .object({
+    config: monetizationConfigSchema,
+  })
+  .strict()
 
 const applyOkSchema = applyMonetizationConfigOutputSchema.options[0]
 
@@ -105,16 +113,35 @@ function issuePath(issue: ZodIssue): string {
   }, "")
 }
 
+/**
+ * Zod reports an unrecognized key against the object that contains it, so the
+ * issue's own path points at the container and is empty at the top level. An
+ * agent acts on `path`, and `""` tells it nothing, so the offending keys — which
+ * Zod hands over separately — are expanded into one issue each at the path the
+ * caller actually has to remove.
+ */
+function issuesFromZodError(error: ZodError): Array<{ path: string; message: string }> {
+  return error.issues.flatMap((issue) => {
+    if (issue.code === "unrecognized_keys") {
+      const container = issuePath(issue)
+
+      return issue.keys.map((key) => ({
+        path: container === "" ? key : `${container}.${key}`,
+        message: `Unrecognized key "${key}"`,
+      }))
+    }
+
+    return [{ path: issuePath(issue), message: issue.message }]
+  })
+}
+
 function invalidConfigError(error: ZodError): UnpriceApiError {
   return new UnpriceApiError({
     code: "BAD_REQUEST",
     message: "The monetization configuration document is not valid",
     details: {
       kind: "invalid_config",
-      issues: error.issues.map((issue) => ({
-        path: issuePath(issue),
-        message: issue.message,
-      })),
+      issues: issuesFromZodError(error),
     },
   })
 }
@@ -183,6 +210,17 @@ function applyFailureToApiError(failure: ApplyFailure): UnpriceApiError {
  *
  * A link is a courtesy, not the result: when it cannot be built the outcomes
  * still come back and `reviewUrl` is null.
+ *
+ * Known limitation, preview only: `APP_DOMAIN` is right in development (the
+ * `localhost:3000` schema default) and in production (`app.unprice.dev`, which
+ * reads no env var), but preview builds the host from `NEXT_PUBLIC_APP_DOMAIN`,
+ * and one shared preview worker at `preview-api.unprice.dev` serves N per-PR
+ * dashboards at `app-pr-<n>-unprice.vercel.app`. No static value is correct
+ * there: setting one makes every PR link to whichever PR deployed last, and a
+ * reviewer can follow a plausible link into another project's plan page without
+ * noticing. The current `https://app-localhost:3000/` fails loudly instead,
+ * which is the right behaviour for a value that cannot be known. Do not "fix"
+ * this by adding a var; the real fix is per-PR worker deployment.
  */
 function resolveReviewUrl(
   c: Context<HonoEnv>,
