@@ -8,6 +8,11 @@ description: Integrate and troubleshoot the @unprice/api TypeScript SDK in serve
 Build the smallest correct Unprice integration at the boundary that owns the paid action. Preserve
 the host project's architecture and use the installed SDK types as the exact contract.
 
+Route the request first. Defining or changing the project's plans, prices, features, or limits is
+configuration: read [configuration-workflow.md](references/configuration-workflow.md) and stop at
+`reviewUrl`. Checking access, enforcing, or recording usage at runtime: read
+[operation-selection.md](references/operation-selection.md) and follow the workflow below.
+
 ## Workflow
 
 1. Inspect the project before editing.
