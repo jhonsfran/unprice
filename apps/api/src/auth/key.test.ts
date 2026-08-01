@@ -162,7 +162,7 @@ function createKeyAuthApp(opts: {
 
   app.get("/v1/protected", async (c) => {
     const key = await keyAuth(c, opts.requireType ? { requireType: opts.requireType } : undefined)
-    return c.json({ id: key.id })
+    return c.json({ id: key.id, type: key.type })
   })
 
   const request = () =>
@@ -186,7 +186,7 @@ describe("keyAuth key type boundary", () => {
     const response = await request()
 
     expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toEqual({ id: "apikey_123" })
+    await expect(response.json()).resolves.toEqual({ id: "apikey_123", type: "runtime" })
   })
 
   it("accepts a config key when the route requires config", async () => {
@@ -250,10 +250,32 @@ describe("keyAuth key type boundary", () => {
     expect(loggerSet).toHaveBeenCalledWith(
       expect.objectContaining({
         business: expect.objectContaining({
-          apikey_id: "apikey_123",
-          apikey_type: "config",
+          api_key_id: "apikey_123",
+          api_key_type: "config",
         }),
       })
     )
+  })
+
+  it("resolves an untyped cached key to runtime for downstream callers", async () => {
+    const { request } = createKeyAuthApp({ key: verifiedKey() })
+
+    // the returned key is what routes and resolveOwnedCustomer consume, so the deploy-window
+    // gap has to be closed here rather than re-derived at every call site
+    await expect(request().then((response) => response.json())).resolves.toEqual({
+      id: "apikey_123",
+      type: "runtime",
+    })
+  })
+
+  it("tags the opaque rejection so operators can tell it apart from other 403s", async () => {
+    const { request, loggerSet } = createKeyAuthApp({
+      key: verifiedKey("runtime"),
+      requireType: "config",
+    })
+
+    await request()
+
+    expect(loggerSet).toHaveBeenCalledWith({ error: { type: "INSUFFICIENT_PERMISSIONS" } })
   })
 })

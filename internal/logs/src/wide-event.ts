@@ -32,8 +32,10 @@ export interface BusinessFields {
   is_internal?: boolean
   unprice_customer_id?: string
   operation?: string
-  apikey_id?: string
-  apikey_type?: string
+  // spelled to match `api_key_id` on the analytics fact schemas, so one identifier has one
+  // spelling across wide events and ingestion facts
+  api_key_id?: string
+  api_key_type?: string
 }
 
 export interface ErrorFields {

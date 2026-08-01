@@ -1,11 +1,12 @@
 "use client"
 
 import { add, endOfDay, format } from "date-fns"
-import { type Dispatch, type SetStateAction, useState } from "react"
+import { type Dispatch, type SetStateAction, useId, useState } from "react"
 import type { UseFormReturn } from "react-hook-form"
+import type { z } from "zod"
 
 import type { ApiKeyType, CreateApiKey } from "@unprice/db/validators"
-import { createApiKeySchema } from "@unprice/db/validators"
+import { DEFAULT_API_KEY_TYPE, apiKeyTypeSchema, createApiKeySchema } from "@unprice/db/validators"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
 import { Calendar } from "@unprice/ui/calendar"
@@ -52,7 +53,9 @@ type CreateApiKeyFormProps = {
   isOnboarding?: boolean
   setDialogOpen?: (open: boolean) => void
   onSuccess?: (key: string) => void
-  defaultValues?: CreateApiKey
+  // the schema's input type: fields with a `.default()` stay optional, which is what a
+  // caller supplying *some* defaults actually has
+  defaultValues?: z.input<typeof createApiKeySchema>
   skip?: boolean
   onSkip?: () => void
 }
@@ -60,25 +63,25 @@ type CreateApiKeyFormProps = {
 type CreateApiKeyFormState = UseFormReturn<CreateApiKey>
 type CustomerOption = RouterOutputs["customers"]["listByActiveProject"]["customers"][number]
 
-const API_KEY_TYPE_OPTIONS: { value: ApiKeyType; label: string; description: string }[] = [
-  {
-    value: "runtime",
+// keyed by ApiKeyType so a new member of API_KEY_TYPES is a compile error here, not a
+// silently missing option in the UI
+const API_KEY_TYPE_OPTIONS: Record<ApiKeyType, { label: string; description: string }> = {
+  runtime: {
     label: "Runtime",
     description: "Checks access, records usage, and starts budgeted runs from your application.",
   },
-  {
-    value: "config",
+  config: {
     label: "Config",
     description: "Reads and applies your monetization configuration. Never touches the money path.",
   },
-]
+}
 
 export default function CreateApiKeyForm(props: CreateApiKeyFormProps) {
   const trpc = useTRPC()
 
   const [show, setShow] = useState(false)
-  const [key, setKey] = useState<string | null>(null)
-  const [createdKeyType, setCreatedKeyType] = useState<ApiKeyType>("runtime")
+  // one value: the secret is only meaningful together with the type it was issued as
+  const [created, setCreated] = useState<{ key: string; type: ApiKeyType } | null>(null)
   const params = useParams()
   const searchParams = useSearchParams()
 
@@ -98,7 +101,7 @@ export default function CreateApiKeyForm(props: CreateApiKeyFormProps) {
       name: props.defaultValues?.name ?? "",
       expiresAt: props.defaultValues?.expiresAt ?? null,
       defaultCustomerId: props.defaultValues?.defaultCustomerId ?? null,
-      type: props.defaultValues?.type ?? "runtime",
+      type: props.defaultValues?.type ?? DEFAULT_API_KEY_TYPE,
     },
   })
 
@@ -121,16 +124,14 @@ export default function CreateApiKeyForm(props: CreateApiKeyFormProps) {
     trpc.apikeys.create.mutationOptions({
       onSuccess: (data) => {
         toastAction("success")
-        setKey(data.apikey.key ?? null)
-        setCreatedKeyType(data.apikey.type)
+        setCreated(data.apikey.key ? { key: data.apikey.key, type: data.apikey.type } : null)
         props.onSuccess?.(data.apikey.key ?? "")
       },
     })
   )
 
   const resetForm = () => {
-    setKey(null)
-    setCreatedKeyType("runtime")
+    setCreated(null)
     form.reset()
     props.setDialogOpen?.(false)
     props.onSuccess?.("")
@@ -150,16 +151,16 @@ export default function CreateApiKeyForm(props: CreateApiKeyFormProps) {
         )}
         className="space-y-6"
       >
-        {key && (
+        {created && (
           <ApiKeyCreatedSecret
-            apiKey={key}
-            keyType={createdKeyType}
+            apiKey={created.key}
+            keyType={created.type}
             customerId={defaultCustomerId ?? undefined}
             show={show}
             onShowChange={setShow}
           />
         )}
-        {!key && (
+        {!created && (
           <CreateApiKeyFields
             form={form}
             customers={customers}
@@ -173,7 +174,7 @@ export default function CreateApiKeyForm(props: CreateApiKeyFormProps) {
         )}
 
         <CreateApiKeyFormActions
-          hasCreatedKey={Boolean(key)}
+          hasCreatedKey={Boolean(created)}
           skip={props.skip}
           isSubmitting={form.formState.isSubmitting}
           onSkip={() => {
@@ -330,40 +331,51 @@ function ApiKeyNameField({ form }: { form: CreateApiKeyFormState }) {
 }
 
 function ApiKeyTypeField({ form }: { form: CreateApiKeyFormState }) {
+  // FormLabel renders `<label for>`, which cannot name the `div[role=radiogroup]` FormControl
+  // stamps its id onto, so the group is named explicitly. FormControl still supplies
+  // aria-describedby for the description below.
+  const labelId = useId()
+  const itemId = useId()
+
   return (
     <FormField
       control={form.control}
       name="type"
       render={({ field }) => (
         <FormItem className="flex flex-col">
-          <FormLabel>Type</FormLabel>
+          <FormLabel id={labelId}>Type</FormLabel>
           <FormDescription>
             A key is either a runtime key or a config key, never both.
           </FormDescription>
           <FormControl>
             <RadioGroup
+              aria-labelledby={labelId}
               onValueChange={field.onChange}
               value={field.value}
               className="grid gap-2 pt-2 sm:grid-cols-2"
             >
-              {API_KEY_TYPE_OPTIONS.map((option) => (
-                <Label
-                  key={option.value}
-                  htmlFor={`apikey-type-${option.value}`}
-                  className={cn(
-                    "flex cursor-pointer flex-col gap-2 rounded-md border-2 border-muted p-4 font-normal hover:border-background-bgActive",
-                    field.value === option.value && "border-primary-border"
-                  )}
-                >
-                  <div className="flex items-center gap-2">
-                    <RadioGroupItem id={`apikey-type-${option.value}`} value={option.value} />
-                    <span className="font-medium text-sm">{option.label}</span>
-                  </div>
-                  <span className="text-muted-foreground text-xs leading-5">
-                    {option.description}
-                  </span>
-                </Label>
-              ))}
+              {apiKeyTypeSchema.options.map((value) => {
+                const option = API_KEY_TYPE_OPTIONS[value]
+
+                return (
+                  <Label
+                    key={value}
+                    htmlFor={`${itemId}-${value}`}
+                    className={cn(
+                      "flex cursor-pointer flex-col gap-2 rounded-md border-2 border-muted p-4 font-normal hover:border-background-bgActive",
+                      field.value === value && "border-primary-border"
+                    )}
+                  >
+                    <div className="flex items-center gap-2">
+                      <RadioGroupItem id={`${itemId}-${value}`} value={value} />
+                      <span className="font-medium text-sm">{option.label}</span>
+                    </div>
+                    <span className="text-muted-foreground text-xs leading-5">
+                      {option.description}
+                    </span>
+                  </Label>
+                )
+              })}
             </RadioGroup>
           </FormControl>
           <FormMessage />

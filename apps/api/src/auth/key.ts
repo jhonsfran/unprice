@@ -1,4 +1,5 @@
 import type { ApiKeyExtended, ApiKeyType, Customer } from "@unprice/db/validators"
+import { DEFAULT_API_KEY_TYPE } from "@unprice/db/validators"
 import { SchemaError } from "@unprice/error"
 import { UnPriceApiKeyError } from "@unprice/services/apikey"
 import type { Context } from "hono"
@@ -34,13 +35,19 @@ export function shouldBypassApiKeyRateLimit(path: string): boolean {
 /**
  * keyAuth takes the bearer token from the request and verifies the key
  *
- * if the key doesnt exist, isn't valid or isn't a root key, an error is thrown, which gets handled
- * automatically by hono
+ * if the key doesnt exist or isn't valid, an error is thrown, which gets handled automatically
+ * by hono
  *
- * `opts.requireType` picks the key type the route accepts. It defaults to `runtime`, so every
- * existing route keeps rejecting config keys without changing its call.
+ * `opts.requireType` picks the operation surface the route belongs to. It defaults to `runtime`,
+ * so every existing route keeps rejecting config keys without changing its call.
+ *
+ * This is also where a cached key that predates the `type` column gets resolved, so callers
+ * always receive a fully typed `ApiKeyExtended`.
  */
-export async function keyAuth(c: Context<HonoEnv>, opts?: { requireType?: ApiKeyType }) {
+export async function keyAuth(
+  c: Context<HonoEnv>,
+  opts?: { requireType?: ApiKeyType }
+): Promise<ApiKeyExtended> {
   const authHeader = c.req.header("authorization")?.trim()
   const authorization = authHeader?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim()
 
@@ -130,10 +137,10 @@ export async function keyAuth(c: Context<HonoEnv>, opts?: { requireType?: ApiKey
   // don't rate limit important workspaces
   const shouldSkipRateLimit = key.project.isInternal || key.project.isMain
 
-  // Keys created before the type column existed - and cache entries serialized before this
-  // deploy - carry no type. They are runtime keys.
-  const keyType: ApiKeyType = key.type ?? "runtime"
-  const requiredType: ApiKeyType = opts?.requireType ?? "runtime"
+  // A cache entry serialized before the `type` column shipped carries no type (see ApiKeyCache).
+  // Those are runtime keys. This is the only place that resolves it.
+  const keyType: ApiKeyType = key.type ?? DEFAULT_API_KEY_TYPE
+  const requiredType: ApiKeyType = opts?.requireType ?? DEFAULT_API_KEY_TYPE
 
   c.set("isMain", key.project.isMain ?? false)
   c.set("isInternal", key.project.isInternal ?? false)
@@ -148,8 +155,8 @@ export async function keyAuth(c: Context<HonoEnv>, opts?: { requireType?: ApiKey
       is_main: key.project.isMain ?? false,
       is_internal: key.project.isInternal ?? false,
       unprice_customer_id: key.project.workspace.unPriceCustomerId,
-      apikey_id: key.id,
-      apikey_type: keyType,
+      api_key_id: key.id,
+      api_key_type: keyType,
     },
   })
 
@@ -188,15 +195,17 @@ export async function keyAuth(c: Context<HonoEnv>, opts?: { requireType?: ApiKey
   }
 
   // The message is identical in both directions on purpose: the caller must not learn which
-  // key type this route wants.
+  // key type this route wants. Because the rejection is opaque to the caller, it has to be
+  // legible to us — a bare 403 is indistinguishable from every other FORBIDDEN in the logs.
   if (keyType !== requiredType) {
+    logger.set({ error: { type: "INSUFFICIENT_PERMISSIONS" } })
     throw new UnpriceApiError({
       code: "INSUFFICIENT_PERMISSIONS",
       message: "this key is not allowed to call this operation",
     })
   }
 
-  return key
+  return { ...key, type: keyType }
 }
 
 /**

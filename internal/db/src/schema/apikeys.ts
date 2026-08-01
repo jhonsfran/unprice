@@ -18,8 +18,15 @@ import { projects } from "./projects"
 /**
  * Runtime keys drive the money path (access checks, usage, runs). Config keys only
  * reach the monetization configuration operations. A key is one or the other.
+ *
+ * This is orthogonal to `isRoot`: `isRoot` widens *reach* (a root key may act across projects
+ * in its workspace), `type` selects *which operation surface* the key can call at all. A key
+ * can be root and config, or root and runtime; the two are checked independently.
  */
 export const API_KEY_TYPES = ["runtime", "config"] as const
+
+/** Every key predating the column, and every key created without an explicit choice. */
+export const DEFAULT_API_KEY_TYPE = "runtime" satisfies (typeof API_KEY_TYPES)[number]
 
 export const apikeys = pgTableProject(
   "apikeys",
@@ -30,7 +37,7 @@ export const apikeys = pgTableProject(
     lastUsed: bigint("last_used_m", { mode: "number" }),
     revokedAt: bigint("revoked_at_m", { mode: "number" }),
     isRoot: boolean("is_root").notNull().default(false),
-    type: text("type", { enum: API_KEY_TYPES }).notNull().default("runtime"),
+    type: text("type", { enum: API_KEY_TYPES }).notNull().default(DEFAULT_API_KEY_TYPE),
     name: text("name").notNull(),
     hash: text("hash").notNull().default(""),
     defaultCustomerId: cuid("default_customer_id"),

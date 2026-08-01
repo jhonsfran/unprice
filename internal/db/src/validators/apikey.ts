@@ -5,6 +5,8 @@ import * as schema from "../schema"
 import { projectExtendedSelectSchema } from "./project"
 
 export const apiKeyTypeSchema = z.enum(schema.API_KEY_TYPES)
+// re-exported so every layer above the db reaches the default through one import path
+export const DEFAULT_API_KEY_TYPE = schema.DEFAULT_API_KEY_TYPE
 
 export const insertApiKeySchema = createInsertSchema(schema.apikeys, {
   name: z.string().min(1),
@@ -18,7 +20,7 @@ export const createApiKeySchema = insertApiKeySchema
     defaultCustomerId: true,
   })
   .extend({
-    type: apiKeyTypeSchema.default("runtime"),
+    type: apiKeyTypeSchema.default(DEFAULT_API_KEY_TYPE),
     projectSlug: z.string().optional(),
     workspaceSlug: z.string().optional(),
     key: z.string().optional(),

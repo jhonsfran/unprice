@@ -6,6 +6,7 @@ import type {
   ApiKeyType,
   SearchParamsDataTable,
 } from "@unprice/db/validators"
+import { DEFAULT_API_KEY_TYPE } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, type SchemaError, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { Cache } from "@unprice/services/cache"
@@ -16,6 +17,7 @@ import type { Database } from "@unprice/db"
 import { and, count, eq, getTableColumns, ilike, inArray, isNull } from "@unprice/db"
 import { apikeys } from "@unprice/db/schema"
 import { withDateFilters, withPagination } from "@unprice/db/utils"
+import type { ApiKeyCache } from "../cache/namespaces"
 import { cachedQuery } from "../utils/cached-query"
 import { toErrorContext } from "../utils/log-context"
 import { UnPriceApiKeyError } from "./errors"
@@ -143,7 +145,7 @@ export class ApiKeysService {
     name,
     expiresAt,
     defaultCustomerId,
-    type = "runtime",
+    type = DEFAULT_API_KEY_TYPE,
   }: {
     projectId: string
     isRoot: boolean
@@ -466,7 +468,8 @@ export class ApiKeysService {
     opts: {
       skipCache?: boolean
     }
-  ): Promise<Result<ApiKeyExtended, SchemaError | FetchError | UnPriceApiKeyError>> {
+    // ApiKeyCache, not ApiKeyExtended: a cache hit may predate the `type` column.
+  ): Promise<Result<ApiKeyCache, SchemaError | FetchError | UnPriceApiKeyError>> {
     const keyHash = await this.hash(req.key)
 
     if (opts?.skipCache) {
@@ -524,7 +527,7 @@ export class ApiKeysService {
 
   public async verifyApiKey(req: {
     key: string
-  }): Promise<Result<ApiKeyExtended, UnPriceApiKeyError | FetchError | SchemaError>> {
+  }): Promise<Result<ApiKeyCache, UnPriceApiKeyError | FetchError | SchemaError>> {
     try {
       const { key } = req
       let retriedWithoutCache = false

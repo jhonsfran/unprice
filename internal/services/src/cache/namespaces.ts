@@ -8,6 +8,7 @@ import type {
 import type { budgetRuns } from "@unprice/db/schema"
 import type {
   ApiKeyExtended,
+  ApiKeyType,
   Customer,
   CustomerPaymentMethod,
   Feature,
@@ -44,8 +45,21 @@ export type CustomersProjectCache = Pick<Customer, "id" | "name" | "email" | "pr
 
 export type BudgetRunCache = typeof budgetRuns.$inferSelect
 
+/**
+ * What the api key cache actually holds, which is not what the table holds.
+ *
+ * `apikeys.type` is NOT NULL in the database, but cache entries are stored as plain JSON and
+ * are never re-parsed on read, so entries serialized before the column shipped come back with
+ * no `type` at all. `type` is optional here on purpose: it forces every reader to resolve the
+ * missing value (`keyAuth` does, to `runtime`) instead of trusting a field the deploy window
+ * cannot guarantee. Do not "simplify" this to `ApiKeyExtended` — the compiler would stop
+ * catching the omission and every cached runtime key would start failing authorization until
+ * its TTL expired.
+ */
+export type ApiKeyCache = Omit<ApiKeyExtended, "type"> & { type?: ApiKeyType }
+
 export type CacheNamespaces = {
-  apiKeyByHash: ApiKeyExtended | null
+  apiKeyByHash: ApiKeyCache | null
   budgetRun: BudgetRunCache | null
   customersProject: CustomersProjectCache[] | null
   customerSubscription: SubscriptionCache | null

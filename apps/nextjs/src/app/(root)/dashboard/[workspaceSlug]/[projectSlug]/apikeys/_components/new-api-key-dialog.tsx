@@ -45,7 +45,6 @@ export default function NewApiKeyDialog() {
             name: "",
             expiresAt: null,
             defaultCustomerId: null,
-            type: "runtime",
           }}
         />
       </DialogContent>
