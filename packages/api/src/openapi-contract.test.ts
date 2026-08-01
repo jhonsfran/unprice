@@ -85,6 +85,20 @@ describe("OpenAPI SDK contract", () => {
     expect([...sdkOperationIds].sort()).toEqual(openApiSdkOperationIds)
   })
 
+  // The equality assertion above passes when both sides are missing the same
+  // operation, which is exactly what regenerating from a stale `apps/docs/openapi.json`
+  // produces. Name the configuration operations explicitly so a spec that never
+  // reached the live API fails here instead of shipping a silently smaller SDK.
+  it("exposes the monetization configuration operations in the checked-in OpenAPI document", () => {
+    const paths = getPaths(readOpenApiDocument())
+
+    expect(collectOpenApiSdkOperationIds(paths)).toEqual(
+      expect.arrayContaining(["monetization.apply", "monetization.get"])
+    )
+    expect(isRecord(paths["/v1/monetization/apply"])).toBe(true)
+    expect(isRecord(paths["/v1/monetization/get"])).toBe(true)
+  })
+
   it("does not expose stale removed operations in the OpenAPI SDK surface", () => {
     const sdkOperationIds = collectOpenApiSdkOperationIds(getPaths(readOpenApiDocument()))
 

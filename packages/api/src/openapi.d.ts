@@ -261,6 +261,46 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/v1/monetization/apply": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * apply monetization configuration
+     * @description Turn one configuration document into draft plan versions for this project. Nothing is published: a human reviews and publishes the drafts from the dashboard.
+     */
+    post: operations["monetization.apply"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/v1/monetization/get": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * get monetization configuration
+     * @description Read this project's monetization configuration in the shape monetization.apply accepts, plus what the document cannot state and what it is silent about.
+     */
+    get: operations["monetization.get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/v1/payment-methods/list": {
     parameters: {
       query?: never
@@ -485,6 +525,23 @@ export interface components {
          * @example req_1234
          */
         requestId: string
+        details?: {
+          /**
+           * @description What kind of failure this is. Currently only the monetization configuration operations set it
+           * @example invalid_config
+           * @enum {string}
+           */
+          kind: "invalid_config" | "slug_conflict" | "unresolved_reference"
+          /** @description Per-location detail, when the failure has locations */
+          issues?: {
+            /**
+             * @description JSON path into the submitted document
+             * @example config.plans[0].version.features[1].featureSlug
+             */
+            path: string
+            message: string
+          }[]
+        }
       }
     }
     ErrUnauthorized: {
@@ -507,6 +564,23 @@ export interface components {
          * @example req_1234
          */
         requestId: string
+        details?: {
+          /**
+           * @description What kind of failure this is. Currently only the monetization configuration operations set it
+           * @example invalid_config
+           * @enum {string}
+           */
+          kind: "invalid_config" | "slug_conflict" | "unresolved_reference"
+          /** @description Per-location detail, when the failure has locations */
+          issues?: {
+            /**
+             * @description JSON path into the submitted document
+             * @example config.plans[0].version.features[1].featureSlug
+             */
+            path: string
+            message: string
+          }[]
+        }
       }
     }
     ErrForbidden: {
@@ -529,6 +603,23 @@ export interface components {
          * @example req_1234
          */
         requestId: string
+        details?: {
+          /**
+           * @description What kind of failure this is. Currently only the monetization configuration operations set it
+           * @example invalid_config
+           * @enum {string}
+           */
+          kind: "invalid_config" | "slug_conflict" | "unresolved_reference"
+          /** @description Per-location detail, when the failure has locations */
+          issues?: {
+            /**
+             * @description JSON path into the submitted document
+             * @example config.plans[0].version.features[1].featureSlug
+             */
+            path: string
+            message: string
+          }[]
+        }
       }
     }
     ErrNotFound: {
@@ -551,6 +642,23 @@ export interface components {
          * @example req_1234
          */
         requestId: string
+        details?: {
+          /**
+           * @description What kind of failure this is. Currently only the monetization configuration operations set it
+           * @example invalid_config
+           * @enum {string}
+           */
+          kind: "invalid_config" | "slug_conflict" | "unresolved_reference"
+          /** @description Per-location detail, when the failure has locations */
+          issues?: {
+            /**
+             * @description JSON path into the submitted document
+             * @example config.plans[0].version.features[1].featureSlug
+             */
+            path: string
+            message: string
+          }[]
+        }
       }
     }
     ErrConflict: {
@@ -573,6 +681,23 @@ export interface components {
          * @example req_1234
          */
         requestId: string
+        details?: {
+          /**
+           * @description What kind of failure this is. Currently only the monetization configuration operations set it
+           * @example invalid_config
+           * @enum {string}
+           */
+          kind: "invalid_config" | "slug_conflict" | "unresolved_reference"
+          /** @description Per-location detail, when the failure has locations */
+          issues?: {
+            /**
+             * @description JSON path into the submitted document
+             * @example config.plans[0].version.features[1].featureSlug
+             */
+            path: string
+            message: string
+          }[]
+        }
       }
     }
     ErrPreconditionFailed: {
@@ -595,6 +720,62 @@ export interface components {
          * @example req_1234
          */
         requestId: string
+        details?: {
+          /**
+           * @description What kind of failure this is. Currently only the monetization configuration operations set it
+           * @example invalid_config
+           * @enum {string}
+           */
+          kind: "invalid_config" | "slug_conflict" | "unresolved_reference"
+          /** @description Per-location detail, when the failure has locations */
+          issues?: {
+            /**
+             * @description JSON path into the submitted document
+             * @example config.plans[0].version.features[1].featureSlug
+             */
+            path: string
+            message: string
+          }[]
+        }
+      }
+    }
+    ErrPayloadTooLarge: {
+      error: {
+        /**
+         * @description A machine readable error code.
+         * @example PAYLOAD_TOO_LARGE
+         * @enum {string}
+         */
+        code: "PAYLOAD_TOO_LARGE"
+        /**
+         * @description A link to our documentation with more details about this error code
+         * @example https://docs.unprice.dev/api-reference/errors/code/PAYLOAD_TOO_LARGE
+         */
+        docs: string
+        /** @description A human readable explanation of what went wrong */
+        message: string
+        /**
+         * @description Please always include the requestId in your error report
+         * @example req_1234
+         */
+        requestId: string
+        details?: {
+          /**
+           * @description What kind of failure this is. Currently only the monetization configuration operations set it
+           * @example invalid_config
+           * @enum {string}
+           */
+          kind: "invalid_config" | "slug_conflict" | "unresolved_reference"
+          /** @description Per-location detail, when the failure has locations */
+          issues?: {
+            /**
+             * @description JSON path into the submitted document
+             * @example config.plans[0].version.features[1].featureSlug
+             */
+            path: string
+            message: string
+          }[]
+        }
       }
     }
     ErrTooManyRequests: {
@@ -617,6 +798,23 @@ export interface components {
          * @example req_1234
          */
         requestId: string
+        details?: {
+          /**
+           * @description What kind of failure this is. Currently only the monetization configuration operations set it
+           * @example invalid_config
+           * @enum {string}
+           */
+          kind: "invalid_config" | "slug_conflict" | "unresolved_reference"
+          /** @description Per-location detail, when the failure has locations */
+          issues?: {
+            /**
+             * @description JSON path into the submitted document
+             * @example config.plans[0].version.features[1].featureSlug
+             */
+            path: string
+            message: string
+          }[]
+        }
       }
     }
     ErrInternalServerError: {
@@ -639,6 +837,23 @@ export interface components {
          * @example req_1234
          */
         requestId: string
+        details?: {
+          /**
+           * @description What kind of failure this is. Currently only the monetization configuration operations set it
+           * @example invalid_config
+           * @enum {string}
+           */
+          kind: "invalid_config" | "slug_conflict" | "unresolved_reference"
+          /** @description Per-location detail, when the failure has locations */
+          issues?: {
+            /**
+             * @description JSON path into the submitted document
+             * @example config.plans[0].version.features[1].featureSlug
+             */
+            path: string
+            message: string
+          }[]
+        }
       }
     }
   }
@@ -746,6 +961,15 @@ export interface operations {
           "application/json": components["schemas"]["ErrPreconditionFailed"]
         }
       }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
+        }
+      }
       /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
       429: {
         headers: {
@@ -807,15 +1031,18 @@ export interface operations {
             /** @description Authoritative run terminal timestamp in epoch milliseconds; null while running. */
             endedAt?: number | null
             customerId: string
-            budgetAmountMinor: number
-            consumedAmountMinor: number
-            remainingAmountMinor: number
             currency: string
             /** @enum {string|null} */
             workloadType: "agent" | "workflow" | "job" | "tool" | "custom" | null
             workloadId: string | null
             traceId: string | null
             parentRunId: string | null
+            /** @description Budget in currency minor units (cents). */
+            budgetAmountMinor: number
+            /** @description Consumed in currency minor units (cents). */
+            consumedAmountMinor: number
+            /** @description Remaining in currency minor units (cents). */
+            remainingAmountMinor: number
           }
         }
       }
@@ -871,6 +1098,15 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
         }
       }
       /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
@@ -947,15 +1183,18 @@ export interface operations {
               /** @description Authoritative run terminal timestamp in epoch milliseconds; null while running. */
               endedAt?: number | null
               customerId: string
-              budgetAmountMinor: number
-              consumedAmountMinor: number
-              remainingAmountMinor: number
               currency: string
               /** @enum {string|null} */
               workloadType: "agent" | "workflow" | "job" | "tool" | "custom" | null
               workloadId: string | null
               traceId: string | null
               parentRunId: string | null
+              /** @description Budget in currency minor units (cents). */
+              budgetAmountMinor: number
+              /** @description Consumed in currency minor units (cents). */
+              consumedAmountMinor: number
+              /** @description Remaining in currency minor units (cents). */
+              remainingAmountMinor: number
             }
           }
         }
@@ -1014,6 +1253,15 @@ export interface operations {
           "application/json": components["schemas"]["ErrPreconditionFailed"]
         }
       }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
+        }
+      }
       /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
       429: {
         headers: {
@@ -1069,15 +1317,18 @@ export interface operations {
             /** @description Authoritative run terminal timestamp in epoch milliseconds; null while running. */
             endedAt?: number | null
             customerId: string
-            budgetAmountMinor: number
-            consumedAmountMinor: number
-            remainingAmountMinor: number
             currency: string
             /** @enum {string|null} */
             workloadType: "agent" | "workflow" | "job" | "tool" | "custom" | null
             workloadId: string | null
             traceId: string | null
             parentRunId: string | null
+            /** @description Budget in currency minor units (cents). */
+            budgetAmountMinor: number
+            /** @description Consumed in currency minor units (cents). */
+            consumedAmountMinor: number
+            /** @description Remaining in currency minor units (cents). */
+            remainingAmountMinor: number
           }
         }
       }
@@ -1133,6 +1384,15 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
         }
       }
       /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
@@ -1181,15 +1441,18 @@ export interface operations {
             /** @description Authoritative run terminal timestamp in epoch milliseconds; null while running. */
             endedAt?: number | null
             customerId: string
-            budgetAmountMinor: number
-            consumedAmountMinor: number
-            remainingAmountMinor: number
             currency: string
             /** @enum {string|null} */
             workloadType: "agent" | "workflow" | "job" | "tool" | "custom" | null
             workloadId: string | null
             traceId: string | null
             parentRunId: string | null
+            /** @description Budget in currency minor units (cents). */
+            budgetAmountMinor: number
+            /** @description Consumed in currency minor units (cents). */
+            consumedAmountMinor: number
+            /** @description Remaining in currency minor units (cents). */
+            remainingAmountMinor: number
           }
         }
       }
@@ -1245,6 +1508,15 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
         }
       }
       /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
@@ -1307,7 +1579,7 @@ export interface operations {
            */
           billingInterval?: "month" | "year" | "week" | "day" | "minute" | "onetime"
           /**
-           * @description If the plan id is not provided, you can pass a plan slug and the system will intelligently pick the lastest plan for that slug and sign up the customer for it
+           * @description If provided, the system will intelligently pick the latest plan version for that slug and sign up the customer for it. If omitted with planVersionId, the default plan is used.
            * @example PRO
            */
           planSlug?: string
@@ -1405,6 +1677,7 @@ export interface operations {
             country?: string
             region?: string
             city?: string
+            usageLimitReached?: boolean
           }
         }
       }
@@ -1488,6 +1761,15 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
         }
       }
       /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
@@ -2104,6 +2386,15 @@ export interface operations {
           "application/json": components["schemas"]["ErrPreconditionFailed"]
         }
       }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
+        }
+      }
       /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
       429: {
         headers: {
@@ -2283,6 +2574,15 @@ export interface operations {
           "application/json": components["schemas"]["ErrPreconditionFailed"]
         }
       }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
+        }
+      }
       /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
       429: {
         headers: {
@@ -2420,6 +2720,15 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
         }
       }
       /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
@@ -2598,6 +2907,15 @@ export interface operations {
           "application/json": components["schemas"]["ErrPreconditionFailed"]
         }
       }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
+        }
+      }
       /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
       429: {
         headers: {
@@ -2699,6 +3017,15 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
         }
       }
       /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
@@ -2818,6 +3145,15 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
         }
       }
       /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
@@ -2968,6 +3304,580 @@ export interface operations {
           "application/json": components["schemas"]["ErrPreconditionFailed"]
         }
       }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
+        }
+      }
+      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+      429: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrTooManyRequests"]
+        }
+      }
+      /** @description The server has encountered a situation it does not know how to handle. */
+      500: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrInternalServerError"]
+        }
+      }
+    }
+  }
+  "monetization.apply": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The desired monetization configuration for the project the key belongs to */
+    requestBody: {
+      content: {
+        "application/json": {
+          /** @description The whole desired monetization configuration for a project */
+          config: {
+            /** @default [] */
+            events?: {
+              /** @description Project-scoped SDK event slug. Example: 'llm_completion' or 'storage_snapshot' */
+              slug: string
+              /** @description Human-readable event name. Example: 'AI Completion' */
+              name: string
+              /** @description Optional list of numeric payload properties available for aggregation. Example: ['input_tokens', 'output_tokens'] */
+              availableProperties?: string[] | null
+            }[]
+            /** @default [] */
+            features?: {
+              /** @description URL-friendly unique identifier for the feature. Must be lowercase with hyphens only. Used for API lookups and references. Example: 'api-calls', 'storage-gb', 'team-members' */
+              slug: string
+              /** @description Human-readable name for the feature displayed to users. Must contain only letters, numbers, and spaces. Example: 'API Calls', 'Storage GB', 'Team Members' */
+              title: string
+              /** @description Detailed explanation of what the feature provides or enables. Helps users understand the feature's purpose and value. Example: 'Number of API requests allowed per billing period' */
+              description?: string | null
+              /**
+               * @description Unit of measurement for the feature. Describes what is being counted or measured. Examples: 'calls', 'GB', 'seats', 'tokens', 'requests', 'minutes'. Defaults to 'units' if not specified
+               * @default units
+               */
+              unitOfMeasure?: string
+            }[]
+            plans: {
+              /** @description URL-friendly plan identifier (lowercase, hyphens). Examples: 'starter', 'pro', 'enterprise'. This becomes the parent for all plan versions. */
+              slug: string
+              /** @description Human-readable plan title (1-50 chars). Will be UPPERCASED. Examples: 'Starter', 'Pro', 'Enterprise' */
+              title: string
+              /** @description Description of the plan explaining its target audience and value proposition */
+              description?: string
+              /** @description Whether this is the default plan shown to new users (only one plan can be default). Use for your 'Starter' or 'Free' tier. */
+              defaultPlan?: boolean | null
+              version: {
+                /**
+                 * @description Required. ISO 4217 currency code. Examples: 'USD', 'EUR'. Determines the currency for all pricing in this version
+                 * @enum {string}
+                 */
+                currency: "USD" | "EUR"
+                /** @enum {string} */
+                paymentProvider: "stripe" | "square" | "sandbox"
+                /** @description Billing cadence for the plan version. The server derives billingAnchor and planType from it */
+                billingConfig: {
+                  /** @description Human-readable cadence name. Example: 'monthly' */
+                  name: string
+                  /**
+                   * @description Billing interval. Example: 'month'
+                   * @enum {string}
+                   */
+                  interval: "month" | "year" | "week" | "day" | "minute" | "onetime"
+                  /** @description Number of intervals per billing period */
+                  intervalCount: number
+                }
+                features: {
+                  /** @description Slug of a feature declared in this document */
+                  featureSlug: string
+                  /**
+                   * @description 'flat', 'tier', 'package', or 'usage'
+                   * @enum {string}
+                   */
+                  featureType: "flat" | "tier" | "package" | "usage"
+                  /** @description Pricing configuration. Prices cross the boundary as decimal strings, never as Dinero */
+                  config: {
+                    /** @description Price as a decimal string. Example: '0.000002' */
+                    price?: string
+                    /**
+                     * @description How usage is calculated and billed: 'unit' (per-unit pricing), 'tier' (volume-based tiers), or 'package' (bundle of units)
+                     * @enum {string}
+                     */
+                    usageMode?: "tier" | "package" | "unit"
+                    /**
+                     * @description Tier calculation method when usageMode is 'tier': 'volume' or 'graduated'. Only applicable when usageMode is 'tier'
+                     * @enum {string}
+                     */
+                    tierMode?: "volume" | "graduated"
+                    /** @description Pricing tiers, decimal strings */
+                    tiers?: {
+                      /** @description Price per unit inside this tier, as a decimal string */
+                      unitPrice: string
+                      /** @description Fixed price for entering this tier, as a decimal string */
+                      flatPrice: string
+                      /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
+                      firstUnit: number
+                      /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
+                      lastUnit: number | null
+                      /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
+                      label?: string
+                    }[]
+                    /** @description Number of units in a package when usageMode is 'package'. Required for package mode. Example: 100 API calls per package */
+                    units?: number
+                  }
+                  /** @description How usage is measured from a declared event */
+                  meterConfig?: {
+                    eventSlug: string
+                    /**
+                     * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
+                     * @enum {string}
+                     */
+                    aggregationMethod: "sum" | "count" | "max" | "latest"
+                    aggregationField?: string
+                  }
+                  /** @description Maximum usage per reset window. Omit for unlimited */
+                  limit?: number | string
+                  /** @description When usage counters reset. Omit to reset on the billing cadence */
+                  resetConfig?: {
+                    /**
+                     * @description Reset interval. Example: 'day'
+                     * @enum {string}
+                     */
+                    interval: "month" | "year" | "week" | "day" | "minute" | "onetime"
+                    /**
+                     * @description Number of intervals per reset window. Defaults to 1
+                     * @default 1
+                     */
+                    intervalCount?: number
+                  }
+                }[]
+              }
+            }[]
+          }
+        }
+      }
+    }
+    responses: {
+      /** @description Per-plan outcomes, drafts left behind by earlier documents, what the application has to call at runtime, and a dashboard link to the first draft created for review */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": {
+            /** @description One outcome per plan, in the same order as the `plans` of the submitted document */
+            plans: {
+              slug: string
+              planVersionId: string
+              /**
+               * @description 'created' when this apply wrote or finished a draft, 'unchanged' when a complete draft already matched, 'published' when a live version already matches
+               * @enum {string}
+               */
+              status: "created" | "unchanged" | "published"
+            }[]
+            /** @description Drafts made by an earlier, now-superseded document, plus same-hash duplicates left by a concurrent apply. Reported, never deleted */
+            staleDrafts: {
+              /** @description Slug of the plan the draft belongs to */
+              slug: string
+              planVersionId: string
+            }[]
+            /** @description What the application has to call at runtime for this configuration to work */
+            integrationContract: {
+              defaultPlan: {
+                slug: string
+                planVersionId: string
+                note: string
+              }
+              events: {
+                slug: string
+                name: string
+                /** @description Numeric payload properties the application must send for the meters to work */
+                requiredProperties: string[]
+              }[]
+              features: {
+                slug: string
+                /**
+                 * @description How the application integrates the feature: entitlement check only ('flat-access'), synchronous allowance check before the work ('usage-gate'), usage reported after the work ('usage-evidence'), or work executed inside a budgeted run ('run-budget')
+                 * @enum {string}
+                 */
+                kind: "flat-access" | "usage-gate" | "usage-evidence" | "run-budget"
+                eventSlug: string | null
+                planSlugs: string[]
+              }[]
+              warnings: {
+                featureSlug: string
+                /** @enum {string} */
+                code: "usage_unknown_before_work"
+                message: string
+              }[]
+            }
+            /**
+             * Format: uri
+             * @description Dashboard link to the first draft this apply created, for a human to review and publish. Null when no draft was created — every plan was already unchanged or published — and also null when the link could not be built, so a null here does not prove nothing was created; read `plans` for that
+             */
+            reviewUrl: string | null
+          }
+        }
+      }
+      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrBadRequest"]
+        }
+      }
+      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+      401: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrUnauthorized"]
+        }
+      }
+      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+      403: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrForbidden"]
+        }
+      }
+      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrNotFound"]
+        }
+      }
+      /** @description This response is sent when a request conflicts with the current state of the server. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrConflict"]
+        }
+      }
+      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+      412: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
+        }
+      }
+      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+      429: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrTooManyRequests"]
+        }
+      }
+      /** @description The server has encountered a situation it does not know how to handle. */
+      500: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrInternalServerError"]
+        }
+      }
+    }
+  }
+  "monetization.get": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description The project's configuration document, its per-plan version state, and everything the document could not carry */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": {
+            /** @description A project's monetization configuration, in the shape monetization.apply accepts. Empty when the project has no plans */
+            config: {
+              /** @default [] */
+              events?: {
+                /** @description Project-scoped SDK event slug. Example: 'llm_completion' or 'storage_snapshot' */
+                slug: string
+                /** @description Human-readable event name. Example: 'AI Completion' */
+                name: string
+                /** @description Optional list of numeric payload properties available for aggregation. Example: ['input_tokens', 'output_tokens'] */
+                availableProperties?: string[] | null
+              }[]
+              /** @default [] */
+              features?: {
+                /** @description URL-friendly unique identifier for the feature. Must be lowercase with hyphens only. Used for API lookups and references. Example: 'api-calls', 'storage-gb', 'team-members' */
+                slug: string
+                /** @description Human-readable name for the feature displayed to users. Must contain only letters, numbers, and spaces. Example: 'API Calls', 'Storage GB', 'Team Members' */
+                title: string
+                /** @description Detailed explanation of what the feature provides or enables. Helps users understand the feature's purpose and value. Example: 'Number of API requests allowed per billing period' */
+                description?: string | null
+                /**
+                 * @description Unit of measurement for the feature. Describes what is being counted or measured. Examples: 'calls', 'GB', 'seats', 'tokens', 'requests', 'minutes'. Defaults to 'units' if not specified
+                 * @default units
+                 */
+                unitOfMeasure?: string
+              }[]
+              plans: {
+                /** @description URL-friendly plan identifier (lowercase, hyphens). Examples: 'starter', 'pro', 'enterprise'. This becomes the parent for all plan versions. */
+                slug: string
+                /** @description Human-readable plan title (1-50 chars). Will be UPPERCASED. Examples: 'Starter', 'Pro', 'Enterprise' */
+                title: string
+                /** @description Description of the plan explaining its target audience and value proposition */
+                description?: string
+                /** @description Whether this is the default plan shown to new users (only one plan can be default). Use for your 'Starter' or 'Free' tier. */
+                defaultPlan?: boolean | null
+                version: {
+                  /**
+                   * @description Required. ISO 4217 currency code. Examples: 'USD', 'EUR'. Determines the currency for all pricing in this version
+                   * @enum {string}
+                   */
+                  currency: "USD" | "EUR"
+                  /** @enum {string} */
+                  paymentProvider: "stripe" | "square" | "sandbox"
+                  /** @description Billing cadence for the plan version. The server derives billingAnchor and planType from it */
+                  billingConfig: {
+                    /** @description Human-readable cadence name. Example: 'monthly' */
+                    name: string
+                    /**
+                     * @description Billing interval. Example: 'month'
+                     * @enum {string}
+                     */
+                    interval: "month" | "year" | "week" | "day" | "minute" | "onetime"
+                    /** @description Number of intervals per billing period */
+                    intervalCount: number
+                  }
+                  features: {
+                    /** @description Slug of a feature declared in this document */
+                    featureSlug: string
+                    /**
+                     * @description 'flat', 'tier', 'package', or 'usage'
+                     * @enum {string}
+                     */
+                    featureType: "flat" | "tier" | "package" | "usage"
+                    /** @description Pricing configuration. Prices cross the boundary as decimal strings, never as Dinero */
+                    config: {
+                      /** @description Price as a decimal string. Example: '0.000002' */
+                      price?: string
+                      /**
+                       * @description How usage is calculated and billed: 'unit' (per-unit pricing), 'tier' (volume-based tiers), or 'package' (bundle of units)
+                       * @enum {string}
+                       */
+                      usageMode?: "tier" | "package" | "unit"
+                      /**
+                       * @description Tier calculation method when usageMode is 'tier': 'volume' or 'graduated'. Only applicable when usageMode is 'tier'
+                       * @enum {string}
+                       */
+                      tierMode?: "volume" | "graduated"
+                      /** @description Pricing tiers, decimal strings */
+                      tiers?: {
+                        /** @description Price per unit inside this tier, as a decimal string */
+                        unitPrice: string
+                        /** @description Fixed price for entering this tier, as a decimal string */
+                        flatPrice: string
+                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
+                        firstUnit: number
+                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
+                        lastUnit: number | null
+                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
+                        label?: string
+                      }[]
+                      /** @description Number of units in a package when usageMode is 'package'. Required for package mode. Example: 100 API calls per package */
+                      units?: number
+                    }
+                    /** @description How usage is measured from a declared event */
+                    meterConfig?: {
+                      eventSlug: string
+                      /**
+                       * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
+                       * @enum {string}
+                       */
+                      aggregationMethod: "sum" | "count" | "max" | "latest"
+                      aggregationField?: string
+                    }
+                    /** @description Maximum usage per reset window. Omit for unlimited */
+                    limit?: number | string
+                    /** @description When usage counters reset. Omit to reset on the billing cadence */
+                    resetConfig?: {
+                      /**
+                       * @description Reset interval. Example: 'day'
+                       * @enum {string}
+                       */
+                      interval: "month" | "year" | "week" | "day" | "minute" | "onetime"
+                      /**
+                       * @description Number of intervals per reset window. Defaults to 1
+                       * @default 1
+                       */
+                      intervalCount?: number
+                    }
+                  }[]
+                }
+              }[]
+            }
+            /** @description Version state per plan, in the same order as `config.plans` */
+            plans: {
+              slug: string
+              /** @description The version customers are on right now, or null while the plan is unpublished */
+              publishedVersionId: string | null
+              /** @description Every unpublished version of this plan, most recently created first */
+              draftVersionIds: string[]
+            }[]
+            /** @description Plans this project has that the document cannot describe. Reported, never hidden */
+            unrepresentablePlans: {
+              slug: string
+              /** @enum {string} */
+              reason:
+                | "no_version"
+                | "no_features"
+                | "unsupported_billing_config"
+                | "invalid_version"
+              message: string
+            }[]
+            /** @description Stored configuration the emitted document is silent about */
+            warnings: {
+              planSlug: string
+              /** @description Null for a warning about the plan version itself */
+              featureSlug: string | null
+              /** @enum {string} */
+              code:
+                | "enforcement_settings_dropped"
+                | "version_settings_dropped"
+                | "feature_settings_dropped"
+                | "meter_fields_dropped"
+              message: string
+            }[]
+            /** @description Null when the project has no plans to integrate against */
+            integrationContract: {
+              defaultPlan: {
+                slug: string
+                planVersionId: string
+                note: string
+              }
+              events: {
+                slug: string
+                name: string
+                /** @description Numeric payload properties the application must send for the meters to work */
+                requiredProperties: string[]
+              }[]
+              features: {
+                slug: string
+                /**
+                 * @description How the application integrates the feature: entitlement check only ('flat-access'), synchronous allowance check before the work ('usage-gate'), usage reported after the work ('usage-evidence'), or work executed inside a budgeted run ('run-budget')
+                 * @enum {string}
+                 */
+                kind: "flat-access" | "usage-gate" | "usage-evidence" | "run-budget"
+                eventSlug: string | null
+                planSlugs: string[]
+              }[]
+              warnings: {
+                featureSlug: string
+                /** @enum {string} */
+                code: "usage_unknown_before_work"
+                message: string
+              }[]
+            } | null
+          }
+        }
+      }
+      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrBadRequest"]
+        }
+      }
+      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+      401: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrUnauthorized"]
+        }
+      }
+      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+      403: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrForbidden"]
+        }
+      }
+      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrNotFound"]
+        }
+      }
+      /** @description This response is sent when a request conflicts with the current state of the server. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrConflict"]
+        }
+      }
+      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+      412: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
+        }
+      }
       /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
       429: {
         headers: {
@@ -3087,6 +3997,15 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
         }
       }
       /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
@@ -3222,6 +4141,15 @@ export interface operations {
           "application/json": components["schemas"]["ErrPreconditionFailed"]
         }
       }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
+        }
+      }
       /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
       429: {
         headers: {
@@ -3310,9 +4238,12 @@ export interface operations {
               metadata: {
                 /** @description External identifier for integrating with third-party systems (e.g., Stripe price ID). Useful for syncing plan versions with external billing providers */
                 externalId?: string
+                /** @description Credit money granted to the customer's wallet every billing period, in ledger minor units (scale 8; 1 USD = 100,000,000). Spent before any chargeable usage; unused credit expires at the end of the period */
+                includedCreditAmount?: number
               } | null
               paymentMethodRequired: boolean
               version: number
+              configHash: string | null
               /** @description The plan information */
               plan: {
                 id: string
@@ -3865,6 +4796,15 @@ export interface operations {
           "application/json": components["schemas"]["ErrPreconditionFailed"]
         }
       }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
+        }
+      }
       /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
       429: {
         headers: {
@@ -3990,9 +4930,12 @@ export interface operations {
               metadata: {
                 /** @description External identifier for integrating with third-party systems (e.g., Stripe price ID). Useful for syncing plan versions with external billing providers */
                 externalId?: string
+                /** @description Credit money granted to the customer's wallet every billing period, in ledger minor units (scale 8; 1 USD = 100,000,000). Spent before any chargeable usage; unused credit expires at the end of the period */
+                includedCreditAmount?: number
               } | null
               paymentMethodRequired: boolean
               version: number
+              configHash: string | null
               /** @description The plan information */
               plan: {
                 id: string
@@ -4543,6 +5486,15 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
         }
       }
       /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
@@ -4771,9 +5723,12 @@ export interface operations {
                 metadata: {
                   /** @description External identifier for integrating with third-party systems (e.g., Stripe price ID). Useful for syncing plan versions with external billing providers */
                   externalId?: string
+                  /** @description Credit money granted to the customer's wallet every billing period, in ledger minor units (scale 8; 1 USD = 100,000,000). Spent before any chargeable usage; unused credit expires at the end of the period */
+                  includedCreditAmount?: number
                 } | null
                 paymentMethodRequired: boolean
                 version: number
+                configHash: string | null
               }
             }
           }
@@ -4831,6 +5786,15 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
         }
       }
       /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
@@ -5041,6 +6005,15 @@ export interface operations {
           "application/json": components["schemas"]["ErrPreconditionFailed"]
         }
       }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
+        }
+      }
       /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
       429: {
         headers: {
@@ -5136,6 +6109,14 @@ export interface operations {
               eventSlug: string
               sourceType: string
               sourceId: string
+              /** @enum {string|null} */
+              ingestionMode: "async" | "sync" | "run"
+              runId: string | null
+              traceId: string | null
+              parentRunId: string | null
+              /** @enum {string|null} */
+              workloadType: "agent" | "workflow" | "job" | "tool" | "custom"
+              workloadId: string | null
               /** @enum {string} */
               state: "processed" | "rejected" | "failed"
               rejectionReason: string | null
@@ -5147,6 +6128,29 @@ export interface operations {
               receivedAt: number
               handledAt: number
             }[]
+            facets: {
+              states: {
+                /** @enum {string} */
+                value: "processed" | "rejected" | "failed"
+                count: number
+              }[]
+              eventSlugs: {
+                value: string
+                count: number
+              }[]
+              sourceTypes: {
+                value: string
+                count: number
+              }[]
+              rejectionReasons: {
+                value: string
+                count: number
+              }[]
+              customers: {
+                value: string
+                count: number
+              }[]
+            }
             nextCursor: {
               handledAt: number
               canonicalAuditId: string
@@ -5226,6 +6230,15 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
         }
       }
       /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
@@ -5352,6 +6365,15 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
         }
       }
       /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
@@ -5489,6 +6511,15 @@ export interface operations {
           "application/json": components["schemas"]["ErrPreconditionFailed"]
         }
       }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
+        }
+      }
       /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
       429: {
         headers: {
@@ -5610,6 +6641,15 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
         }
       }
       /** @description The user has sent too many requests in a given amount of time ("rate limiting") */

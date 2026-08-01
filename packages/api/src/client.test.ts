@@ -1,6 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest"
 import { version } from "../package.json"
 import { Unprice } from "./client"
+import { sdkOperationIds } from "./generated/sdk-resources"
 import type { OperationInput, OperationResponse } from "./operation-types"
 
 const createJsonResponse = (body: unknown, init?: ResponseInit) =>
@@ -77,6 +78,8 @@ describe("Unprice client", () => {
     expect(typeof client.wallet.balance).toBe("function")
     expect(typeof client.walletCredits.balance).toBe("function")
     expect(typeof client.invoices.get).toBe("function")
+    expect(typeof client.monetization.apply).toBe("function")
+    expect(typeof client.monetization.get).toBe("function")
 
     expect("entitlements" in clientRecord).toBe(false)
     expect("events" in clientRecord).toBe(false)
@@ -131,6 +134,115 @@ describe("Unprice client", () => {
     expectTypeOf<OperationResponse<"runs.get">["endedAt"]>().toEqualTypeOf<
       number | null | undefined
     >()
+  })
+
+  it("exposes exactly the two generated monetization configuration operations", () => {
+    const client = createClient()
+    const monetization = client.monetization as unknown as Record<string, unknown>
+
+    expect(sdkOperationIds).toContain("monetization.apply")
+    expect(sdkOperationIds).toContain("monetization.get")
+    expect(typeof client.monetization.apply).toBe("function")
+    expect(typeof client.monetization.get).toBe("function")
+    // Publishing a draft is a human decision made in the dashboard. If a publish
+    // or preview method ever reaches the SDK, this test is where it gets caught.
+    expect(Object.keys(monetization).sort()).toEqual(["apply", "get"])
+
+    expectTypeOf(client.monetization.apply)
+      .parameter(0)
+      .toEqualTypeOf<OperationInput<"monetization.apply">>()
+    // `monetization.get` takes the project from the key, so it has no input at all.
+    expectTypeOf(client.monetization.get).parameters.toEqualTypeOf<[]>()
+
+    expectTypeOf<{
+      config: {
+        plans: [
+          {
+            slug: string
+            title: string
+            version: {
+              currency: "USD"
+              paymentProvider: "stripe"
+              billingConfig: { name: string; interval: "month"; intervalCount: number }
+              features: [{ featureSlug: string; featureType: "flat"; config: { price: string } }]
+            }
+          },
+        ]
+      }
+    }>().toMatchTypeOf<OperationInput<"monetization.apply">>()
+
+    expectTypeOf<OperationResponse<"monetization.apply">["reviewUrl"]>().toEqualTypeOf<
+      string | null
+    >()
+    expectTypeOf<OperationResponse<"monetization.get">["warnings"][number]["code"]>().toEqualTypeOf<
+      | "enforcement_settings_dropped"
+      | "version_settings_dropped"
+      | "feature_settings_dropped"
+      | "meter_fields_dropped"
+    >()
+  })
+
+  it("sends monetization configuration over the typed OpenAPI transport", async () => {
+    const requests: Request[] = []
+    const client = createClient(async (request) => {
+      requests.push(request.clone())
+
+      if (request.method === "GET") {
+        return createJsonResponse({
+          config: { events: [], features: [], plans: [] },
+          plans: [],
+          unrepresentablePlans: [],
+          warnings: [],
+          integrationContract: null,
+        })
+      }
+
+      return createJsonResponse({
+        plans: [
+          {
+            slug: "pro",
+            status: "created",
+            planId: "plan_123",
+            planVersionId: "pv_123",
+            version: 1,
+          },
+        ],
+        staleDrafts: [],
+        integrationContract: null,
+        reviewUrl: "https://app.unprice.dev/acme/acme-api/plans/pro/pv_123",
+      })
+    })
+
+    const config: OperationInput<"monetization.apply">["config"] = {
+      plans: [
+        {
+          slug: "pro",
+          title: "Pro",
+          version: {
+            currency: "USD",
+            paymentProvider: "stripe",
+            billingConfig: { name: "monthly", interval: "month", intervalCount: 1 },
+            features: [{ featureSlug: "tokens", featureType: "flat", config: { price: "10.00" } }],
+          },
+        },
+      ],
+    }
+
+    const applied = await client.monetization.apply({ config })
+
+    expect(applied.error).toBeUndefined()
+    expect(applied.result?.reviewUrl).toBe("https://app.unprice.dev/acme/acme-api/plans/pro/pv_123")
+    expect(requests[0]?.method).toBe("POST")
+    expect(requests[0]?.url).toBe("https://example.com/v1/monetization/apply")
+    expect(requests[0]?.headers.get("authorization")).toBe("Bearer test-token")
+    await expect(requests[0]?.json()).resolves.toEqual({ config })
+
+    const read = await client.monetization.get()
+
+    expect(read.error).toBeUndefined()
+    expect(read.result?.warnings).toEqual([])
+    expect(requests[1]?.method).toBe("GET")
+    expect(requests[1]?.url).toBe("https://example.com/v1/monetization/get")
   })
 
   it("uses openapi-fetch path params, query params, body, and auth headers", async () => {

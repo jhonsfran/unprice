@@ -141,6 +141,7 @@ export class Unprice implements GeneratedSdkResources {
   public readonly invoices: GeneratedSdkResources["invoices"]
   public readonly analytics: GeneratedSdkResources["analytics"]
   public readonly ingestionEvents: GeneratedSdkResources["ingestionEvents"]
+  public readonly monetization: GeneratedSdkResources["monetization"]
   public readonly retry: {
     attempts: number
     backoff: (retryCount: number) => number
@@ -194,6 +195,7 @@ export class Unprice implements GeneratedSdkResources {
     this.invoices = resources.invoices
     this.analytics = resources.analytics
     this.ingestionEvents = resources.ingestionEvents
+    this.monetization = resources.monetization
   }
 
   private getHeaders(): Record<string, string> {

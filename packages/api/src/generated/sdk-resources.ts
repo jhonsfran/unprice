@@ -17,6 +17,8 @@ export const sdkOperationIds = [
   "ingestionEvents.replay",
   "ingestionEvents.status",
   "invoices.get",
+  "monetization.apply",
+  "monetization.get",
   "paymentMethods.create",
   "paymentMethods.list",
   "planVersions.get",
@@ -92,6 +94,12 @@ export type GeneratedSdkResources = {
     get: (
       req: OperationInput<"invoices.get">
     ) => Promise<ApiResult<OperationResponse<"invoices.get">>>
+  }
+  monetization: {
+    apply: (
+      req: OperationInput<"monetization.apply">
+    ) => Promise<ApiResult<OperationResponse<"monetization.apply">>>
+    get: () => Promise<ApiResult<OperationResponse<"monetization.get">>>
   }
   paymentMethods: {
     create: (
@@ -177,6 +185,10 @@ export function createGeneratedSdkResources(
     invoices: {
       get: ({ invoiceId }) =>
         toResult(openapi.GET("/v1/invoices/get/{invoiceId}", { params: { path: { invoiceId } } })),
+    },
+    monetization: {
+      apply: (body) => toResult(openapi.POST("/v1/monetization/apply", { body })),
+      get: () => toResult(openapi.GET("/v1/monetization/get", {})),
     },
     paymentMethods: {
       create: (body) => toResult(openapi.POST("/v1/payment-methods/create", { body })),
