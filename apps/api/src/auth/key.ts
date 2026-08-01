@@ -1,4 +1,4 @@
-import type { ApiKeyExtended, Customer } from "@unprice/db/validators"
+import type { ApiKeyExtended, ApiKeyType, Customer } from "@unprice/db/validators"
 import { SchemaError } from "@unprice/error"
 import { UnPriceApiKeyError } from "@unprice/services/apikey"
 import type { Context } from "hono"
@@ -36,8 +36,11 @@ export function shouldBypassApiKeyRateLimit(path: string): boolean {
  *
  * if the key doesnt exist, isn't valid or isn't a root key, an error is thrown, which gets handled
  * automatically by hono
+ *
+ * `opts.requireType` picks the key type the route accepts. It defaults to `runtime`, so every
+ * existing route keeps rejecting config keys without changing its call.
  */
-export async function keyAuth(c: Context<HonoEnv>) {
+export async function keyAuth(c: Context<HonoEnv>, opts?: { requireType?: ApiKeyType }) {
   const authHeader = c.req.header("authorization")?.trim()
   const authorization = authHeader?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim()
 
@@ -127,6 +130,11 @@ export async function keyAuth(c: Context<HonoEnv>) {
   // don't rate limit important workspaces
   const shouldSkipRateLimit = key.project.isInternal || key.project.isMain
 
+  // Keys created before the type column existed - and cache entries serialized before this
+  // deploy - carry no type. They are runtime keys.
+  const keyType: ApiKeyType = key.type ?? "runtime"
+  const requiredType: ApiKeyType = opts?.requireType ?? "runtime"
+
   c.set("isMain", key.project.isMain ?? false)
   c.set("isInternal", key.project.isInternal ?? false)
   c.set("workspaceId", key.project.workspaceId)
@@ -140,6 +148,8 @@ export async function keyAuth(c: Context<HonoEnv>) {
       is_main: key.project.isMain ?? false,
       is_internal: key.project.isInternal ?? false,
       unprice_customer_id: key.project.workspace.unPriceCustomerId,
+      apikey_id: key.id,
+      apikey_type: keyType,
     },
   })
 
@@ -175,6 +185,15 @@ export async function keyAuth(c: Context<HonoEnv>) {
       },
     })
     throw new UnpriceApiError({ code: "RATE_LIMITED", message: "apikey rate limit exceeded" })
+  }
+
+  // The message is identical in both directions on purpose: the caller must not learn which
+  // key type this route wants.
+  if (keyType !== requiredType) {
+    throw new UnpriceApiError({
+      code: "INSUFFICIENT_PERMISSIONS",
+      message: "this key is not allowed to call this operation",
+    })
   }
 
   return key

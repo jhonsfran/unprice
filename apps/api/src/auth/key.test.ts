@@ -1,8 +1,14 @@
-import type { ApiKeyExtended } from "@unprice/db/validators"
-import { describe, expect, it } from "vitest"
+import { OpenAPIHono } from "@hono/zod-openapi"
+import type { ApiKeyExtended, ApiKeyType } from "@unprice/db/validators"
+import { Ok } from "@unprice/error"
+import type { ExecutionContext } from "hono"
+import { timing } from "hono/timing"
+import { describe, expect, it, vi } from "vitest"
 import { UnpriceApiError } from "~/errors"
+import type { HonoEnv } from "~/hono/env"
 import {
   isValidApiKeyShape,
+  keyAuth,
   shouldBypassApiKeyRateLimit,
   validateIsAllowedToAccessProject,
 } from "./key"
@@ -107,5 +113,147 @@ describe("shouldBypassApiKeyRateLimit", () => {
 
   it("does not keep the old entitlement verify route as the bypass path", () => {
     expect(shouldBypassApiKeyRateLimit("/v1/entitlements/verify")).toBe(false)
+  })
+})
+
+// A verified key as `verifyApiKey` returns it. `type` is left off deliberately in
+// some cases to model rows created before the column existed and cache entries
+// serialized before this deploy.
+const verifiedKey = (type?: ApiKeyType) => ({
+  id: "apikey_123",
+  projectId: "proj_123",
+  defaultCustomerId: null,
+  ...(type ? { type } : {}),
+  project: {
+    id: "proj_123",
+    workspaceId: "ws_123",
+    isMain: false,
+    isInternal: false,
+    workspace: {
+      unPriceCustomerId: "cus_unprice",
+      isMain: false,
+    },
+  },
+})
+
+function createKeyAuthApp(opts: {
+  key: ReturnType<typeof verifiedKey>
+  requireType?: ApiKeyType
+}) {
+  const app = new OpenAPIHono<HonoEnv>()
+  const verifyApiKey = vi.fn().mockResolvedValue(Ok(opts.key as unknown as ApiKeyExtended))
+  const loggerSet = vi.fn()
+
+  app.use(timing())
+
+  app.onError((error, c) => {
+    if (error instanceof UnpriceApiError) {
+      return c.json({ code: error.code, message: error.message }, error.status)
+    }
+
+    throw error
+  })
+
+  app.use("*", async (c, next) => {
+    c.set("services", { apikey: { verifyApiKey } } as never)
+    c.set("logger", { set: loggerSet, error: vi.fn() } as never)
+    await next()
+  })
+
+  app.get("/v1/protected", async (c) => {
+    const key = await keyAuth(c, opts.requireType ? { requireType: opts.requireType } : undefined)
+    return c.json({ id: key.id })
+  })
+
+  const request = () =>
+    app.fetch(
+      new Request("https://example.com/v1/protected", {
+        method: "GET",
+        headers: { authorization: "Bearer unprice_live_123456789ABCDEFGHJKLMN" },
+      }),
+      // development skips key-shape and rate-limit checks
+      { APP_ENV: "development" },
+      { passThroughOnException: vi.fn(), waitUntil: vi.fn() } as unknown as ExecutionContext
+    )
+
+  return { request, loggerSet }
+}
+
+describe("keyAuth key type boundary", () => {
+  it("accepts a runtime key on a route that does not ask for a type", async () => {
+    const { request } = createKeyAuthApp({ key: verifiedKey("runtime") })
+
+    const response = await request()
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({ id: "apikey_123" })
+  })
+
+  it("accepts a config key when the route requires config", async () => {
+    const { request } = createKeyAuthApp({
+      key: verifiedKey("config"),
+      requireType: "config",
+    })
+
+    const response = await request()
+
+    expect(response.status).toBe(200)
+  })
+
+  it("rejects a runtime key on a config route with INSUFFICIENT_PERMISSIONS", async () => {
+    const { request } = createKeyAuthApp({
+      key: verifiedKey("runtime"),
+      requireType: "config",
+    })
+
+    const response = await request()
+
+    expect(response.status).toBe(403)
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({ code: "INSUFFICIENT_PERMISSIONS" })
+    )
+  })
+
+  it("rejects a config key on an existing runtime route with the same opaque failure", async () => {
+    const runtimeOnConfig = await createKeyAuthApp({
+      key: verifiedKey("runtime"),
+      requireType: "config",
+    }).request()
+    const configOnRuntime = await createKeyAuthApp({ key: verifiedKey("config") }).request()
+
+    expect(configOnRuntime.status).toBe(403)
+    // the caller must not be able to tell which type it is missing
+    await expect(configOnRuntime.json()).resolves.toEqual(await runtimeOnConfig.json())
+  })
+
+  it("treats a key row without a type as a runtime key", async () => {
+    const { request } = createKeyAuthApp({ key: verifiedKey() })
+
+    const response = await request()
+
+    expect(response.status).toBe(200)
+  })
+
+  it("does not let an untyped key reach a config route", async () => {
+    const { request } = createKeyAuthApp({ key: verifiedKey(), requireType: "config" })
+
+    const response = await request()
+
+    expect(response.status).toBe(403)
+  })
+
+  it("records the key id and resolved type in business context", async () => {
+    const { request, loggerSet } = createKeyAuthApp({ key: verifiedKey("config") })
+
+    await request()
+
+    expect(loggerSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        business: expect.objectContaining({
+          apikey_id: "apikey_123",
+          apikey_type: "config",
+        }),
+      })
+    )
   })
 })

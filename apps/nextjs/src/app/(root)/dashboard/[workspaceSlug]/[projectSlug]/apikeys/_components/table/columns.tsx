@@ -4,6 +4,7 @@ import type { ColumnDef } from "@tanstack/react-table"
 
 import type { RouterOutputs } from "@unprice/trpc/routes"
 
+import { Badge } from "@unprice/ui/badge"
 import { Typography } from "@unprice/ui/typography"
 import { DataTableColumnHeader } from "~/components/data-table/data-table-column-header"
 import { formatDate } from "~/lib/dates"
@@ -19,6 +20,17 @@ export const columns: ColumnDef<ApiKey>[] = [
     enableSorting: true,
     enableHiding: false,
     enableResizing: true,
+  },
+  {
+    accessorKey: "type",
+    header: ({ column }) => <DataTableColumnHeader column={column} title="Type" />,
+    cell: ({ row }) => (
+      <Badge variant={row.original.type === "config" ? "info" : "secondary"}>
+        {row.original.type}
+      </Badge>
+    ),
+    enableSorting: false,
+    enableHiding: true,
   },
   {
     accessorKey: "defaultCustomerId",

@@ -13,7 +13,7 @@ export const create = protectedProjectProcedure
     })
   )
   .mutation(async (opts) => {
-    const { name, expiresAt, defaultCustomerId } = opts.input
+    const { name, expiresAt, defaultCustomerId, type } = opts.input
     const project = opts.ctx.project
     const isRoot = project.workspace.isMain
     const { apikeys, customers } = opts.ctx.services
@@ -48,6 +48,7 @@ export const create = protectedProjectProcedure
       name,
       expiresAt,
       defaultCustomerId,
+      type,
     })
 
     if (err) {

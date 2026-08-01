@@ -4,7 +4,7 @@ import { add, endOfDay, format } from "date-fns"
 import { type Dispatch, type SetStateAction, useState } from "react"
 import type { UseFormReturn } from "react-hook-form"
 
-import type { CreateApiKey } from "@unprice/db/validators"
+import type { ApiKeyType, CreateApiKey } from "@unprice/db/validators"
 import { createApiKeySchema } from "@unprice/db/validators"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
@@ -29,8 +29,10 @@ import {
 } from "@unprice/ui/form"
 import { Calendar as CalendarIcon, Eye, EyeOff } from "@unprice/ui/icons"
 import { Input } from "@unprice/ui/input"
+import { Label } from "@unprice/ui/label"
 import { LoadingAnimation } from "@unprice/ui/loading-animation"
 import { Popover, PopoverContent, PopoverTrigger } from "@unprice/ui/popover"
+import { RadioGroup, RadioGroupItem } from "@unprice/ui/radio-group"
 
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { cn } from "@unprice/ui/utils"
@@ -58,11 +60,25 @@ type CreateApiKeyFormProps = {
 type CreateApiKeyFormState = UseFormReturn<CreateApiKey>
 type CustomerOption = RouterOutputs["customers"]["listByActiveProject"]["customers"][number]
 
+const API_KEY_TYPE_OPTIONS: { value: ApiKeyType; label: string; description: string }[] = [
+  {
+    value: "runtime",
+    label: "Runtime",
+    description: "Checks access, records usage, and starts budgeted runs from your application.",
+  },
+  {
+    value: "config",
+    label: "Config",
+    description: "Reads and applies your monetization configuration. Never touches the money path.",
+  },
+]
+
 export default function CreateApiKeyForm(props: CreateApiKeyFormProps) {
   const trpc = useTRPC()
 
   const [show, setShow] = useState(false)
   const [key, setKey] = useState<string | null>(null)
+  const [createdKeyType, setCreatedKeyType] = useState<ApiKeyType>("runtime")
   const params = useParams()
   const searchParams = useSearchParams()
 
@@ -82,6 +98,7 @@ export default function CreateApiKeyForm(props: CreateApiKeyFormProps) {
       name: props.defaultValues?.name ?? "",
       expiresAt: props.defaultValues?.expiresAt ?? null,
       defaultCustomerId: props.defaultValues?.defaultCustomerId ?? null,
+      type: props.defaultValues?.type ?? "runtime",
     },
   })
 
@@ -105,6 +122,7 @@ export default function CreateApiKeyForm(props: CreateApiKeyFormProps) {
       onSuccess: (data) => {
         toastAction("success")
         setKey(data.apikey.key ?? null)
+        setCreatedKeyType(data.apikey.type)
         props.onSuccess?.(data.apikey.key ?? "")
       },
     })
@@ -112,6 +130,7 @@ export default function CreateApiKeyForm(props: CreateApiKeyFormProps) {
 
   const resetForm = () => {
     setKey(null)
+    setCreatedKeyType("runtime")
     form.reset()
     props.setDialogOpen?.(false)
     props.onSuccess?.("")
@@ -134,6 +153,7 @@ export default function CreateApiKeyForm(props: CreateApiKeyFormProps) {
         {key && (
           <ApiKeyCreatedSecret
             apiKey={key}
+            keyType={createdKeyType}
             customerId={defaultCustomerId ?? undefined}
             show={show}
             onShowChange={setShow}
@@ -169,11 +189,13 @@ export default function CreateApiKeyForm(props: CreateApiKeyFormProps) {
 
 function ApiKeyCreatedSecret({
   apiKey,
+  keyType,
   customerId,
   show,
   onShowChange,
 }: {
   apiKey: string
+  keyType: ApiKeyType
   customerId?: string
   show: boolean
   onShowChange: (show: boolean) => void
@@ -216,26 +238,36 @@ function ApiKeyCreatedSecret({
           <CopyButton value={apiKey} className="size-4 opacity-70" />
         </div>
       </motion.div>
-      <div className="flex flex-col gap-3 rounded-md border border-border/60 bg-card/70 p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex min-w-0 flex-col gap-1">
-          <p className="font-medium">First request-path call</p>
+      {keyType === "config" ? (
+        <div className="flex min-w-0 flex-col gap-1 rounded-md border border-border/60 bg-card/70 p-3 text-sm">
+          <p className="font-medium">Store it as UNPRICE_CONFIG_TOKEN</p>
           <p className="text-muted-foreground text-xs">
-            Use this key from your server to check access, record usage, or start a budgeted run.
+            Put it in the environment your coding agent reads. A config key only reads and applies
+            your monetization configuration, so it cannot check access, record usage, or spend.
           </p>
         </div>
-        <CodeApiSheet
-          defaultMethod="checkAccess"
-          exampleParams={{
-            apiToken: apiKey,
-            customerId,
-          }}
-        >
-          <Button type="button" variant="link" size="sm" className="shrink-0">
-            <Code className="mr-2 size-4" />
-            Open SDK example
-          </Button>
-        </CodeApiSheet>
-      </div>
+      ) : (
+        <div className="flex flex-col gap-3 rounded-md border border-border/60 bg-card/70 p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 flex-col gap-1">
+            <p className="font-medium">First request-path call</p>
+            <p className="text-muted-foreground text-xs">
+              Use this key from your server to check access, record usage, or start a budgeted run.
+            </p>
+          </div>
+          <CodeApiSheet
+            defaultMethod="checkAccess"
+            exampleParams={{
+              apiToken: apiKey,
+              customerId,
+            }}
+          >
+            <Button type="button" variant="link" size="sm" className="shrink-0">
+              <Code className="mr-2 size-4" />
+              Open SDK example
+            </Button>
+          </CodeApiSheet>
+        </div>
+      )}
     </>
   )
 }
@@ -262,6 +294,7 @@ function CreateApiKeyFields({
   return (
     <div className="space-y-8">
       <ApiKeyNameField form={form} />
+      <ApiKeyTypeField form={form} />
       <DefaultCustomerField
         form={form}
         customers={customers}
@@ -288,6 +321,50 @@ function ApiKeyNameField({ form }: { form: CreateApiKeyFormState }) {
           </FormDescription>
           <FormControl>
             <Input {...field} placeholder="api-key-prod" />
+          </FormControl>
+          <FormMessage />
+        </FormItem>
+      )}
+    />
+  )
+}
+
+function ApiKeyTypeField({ form }: { form: CreateApiKeyFormState }) {
+  return (
+    <FormField
+      control={form.control}
+      name="type"
+      render={({ field }) => (
+        <FormItem className="flex flex-col">
+          <FormLabel>Type</FormLabel>
+          <FormDescription>
+            A key is either a runtime key or a config key, never both.
+          </FormDescription>
+          <FormControl>
+            <RadioGroup
+              onValueChange={field.onChange}
+              value={field.value}
+              className="grid gap-2 pt-2 sm:grid-cols-2"
+            >
+              {API_KEY_TYPE_OPTIONS.map((option) => (
+                <Label
+                  key={option.value}
+                  htmlFor={`apikey-type-${option.value}`}
+                  className={cn(
+                    "flex cursor-pointer flex-col gap-2 rounded-md border-2 border-muted p-4 font-normal hover:border-background-bgActive",
+                    field.value === option.value && "border-primary-border"
+                  )}
+                >
+                  <div className="flex items-center gap-2">
+                    <RadioGroupItem id={`apikey-type-${option.value}`} value={option.value} />
+                    <span className="font-medium text-sm">{option.label}</span>
+                  </div>
+                  <span className="text-muted-foreground text-xs leading-5">
+                    {option.description}
+                  </span>
+                </Label>
+              ))}
+            </RadioGroup>
           </FormControl>
           <FormMessage />
         </FormItem>

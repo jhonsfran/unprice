@@ -1,0 +1,1 @@
+ALTER TABLE "unprice_apikeys" ADD COLUMN "type" text DEFAULT 'runtime' NOT NULL;

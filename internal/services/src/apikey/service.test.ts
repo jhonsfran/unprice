@@ -314,6 +314,115 @@ describe("ApiKeysService customer binding", () => {
     expect(cache.apiKeyByHash.remove).toHaveBeenCalledWith(insertedApiKey.current.hash)
   })
 
+  it("createApiKey persists runtime as the default type", async () => {
+    const insertedApiKey: { current?: Record<string, unknown> } = {}
+    const db = {} as Database
+    db.insert = vi.fn().mockReturnValue({
+      values: vi.fn((value: Record<string, unknown>) => {
+        insertedApiKey.current = value
+        return {
+          returning: vi.fn().mockResolvedValue([value]),
+        }
+      }),
+    })
+    const service = new ApiKeysService({
+      cache,
+      metrics,
+      analytics,
+      logger,
+      db,
+      waitUntil,
+      hashCache,
+    })
+
+    const result = await service.createApiKey({
+      projectId: "proj_123",
+      isRoot: false,
+      name: "local test key",
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(insertedApiKey.current?.type).toBe("runtime")
+    expect(result.val?.type).toBe("runtime")
+  })
+
+  it("createApiKey persists the requested config type", async () => {
+    const insertedApiKey: { current?: Record<string, unknown> } = {}
+    const db = {} as Database
+    db.insert = vi.fn().mockReturnValue({
+      values: vi.fn((value: Record<string, unknown>) => {
+        insertedApiKey.current = value
+        return {
+          returning: vi.fn().mockResolvedValue([value]),
+        }
+      }),
+    })
+    const service = new ApiKeysService({
+      cache,
+      metrics,
+      analytics,
+      logger,
+      db,
+      waitUntil,
+      hashCache,
+    })
+
+    const result = await service.createApiKey({
+      projectId: "proj_123",
+      isRoot: false,
+      name: "agent config key",
+      type: "config",
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(insertedApiKey.current?.type).toBe("config")
+    expect(result.val?.type).toBe("config")
+  })
+
+  it("getApiKey reads the type column so routes can enforce the boundary", async () => {
+    type FindFirstConfig = { columns?: Record<string, boolean> }
+    const capturedColumns: { current?: Record<string, boolean> } = {}
+    const db = {
+      query: {
+        apikeys: {
+          findFirst: vi.fn(async (config: FindFirstConfig) => {
+            capturedColumns.current = config.columns
+            return {
+              id: "api_123",
+              projectId: "proj_123",
+              expiresAt: null,
+              revokedAt: null,
+              hash: "hash_123",
+              defaultCustomerId: null,
+              type: "config",
+              project: { id: "proj_123", enabled: true, workspace: { enabled: true } },
+            }
+          }),
+        },
+      },
+      update: vi.fn().mockReturnValue({
+        set: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue(undefined),
+        }),
+      }),
+    } as unknown as Database
+    const service = new ApiKeysService({
+      cache,
+      metrics,
+      analytics,
+      logger,
+      db,
+      waitUntil,
+      hashCache,
+    })
+
+    const result = await service.getApiKey({ key: "unprice_live_123" }, { skipCache: true })
+
+    expect(result.err).toBeUndefined()
+    expect(capturedColumns.current?.type).toBe(true)
+    expect(result.val?.type).toBe("config")
+  })
+
   it("createOrRollApiKey rolls the active key with the same project and name", async () => {
     const db = {
       query: {
@@ -573,5 +682,50 @@ describe("ApiKeysService customer binding", () => {
     expect(eq).toHaveBeenCalledWith("project_id_column", "proj_123")
     expect(and).toHaveBeenCalledTimes(1)
     expect(updateWhere).toHaveBeenCalledTimes(2)
+  })
+
+  it("rollApiKey keeps the key type when the secret is rotated", async () => {
+    const existingRow = {
+      id: "api_123",
+      projectId: "proj_123",
+      expiresAt: null,
+      revokedAt: null,
+      hash: "old_hash",
+      defaultCustomerId: null,
+      type: "config",
+      project: { id: "proj_123", enabled: true, workspace: { enabled: true } },
+    }
+    // model UPDATE ... RETURNING: the stored row merged with the update payload
+    const set = vi.fn((updates: Record<string, unknown>) => ({
+      where: vi.fn().mockReturnValue({
+        returning: vi.fn().mockResolvedValue([{ ...existingRow, ...updates }]),
+      }),
+    }))
+    const db = {
+      query: {
+        apikeys: {
+          findFirst: vi.fn().mockResolvedValue(existingRow),
+        },
+      },
+      update: vi.fn().mockReturnValue({ set }),
+    } as unknown as Database
+
+    const service = new ApiKeysService({
+      cache,
+      metrics,
+      analytics,
+      logger,
+      db,
+      waitUntil,
+      hashCache,
+    })
+
+    const result = await service.rollApiKey({
+      keyHash: "old_hash",
+      projectId: "proj_123",
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.type).toBe("config")
   })
 })

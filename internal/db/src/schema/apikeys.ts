@@ -15,6 +15,12 @@ import { projectID } from "../utils/sql"
 import { customers } from "./customers"
 import { projects } from "./projects"
 
+/**
+ * Runtime keys drive the money path (access checks, usage, runs). Config keys only
+ * reach the monetization configuration operations. A key is one or the other.
+ */
+export const API_KEY_TYPES = ["runtime", "config"] as const
+
 export const apikeys = pgTableProject(
   "apikeys",
   {
@@ -24,6 +30,7 @@ export const apikeys = pgTableProject(
     lastUsed: bigint("last_used_m", { mode: "number" }),
     revokedAt: bigint("revoked_at_m", { mode: "number" }),
     isRoot: boolean("is_root").notNull().default(false),
+    type: text("type", { enum: API_KEY_TYPES }).notNull().default("runtime"),
     name: text("name").notNull(),
     hash: text("hash").notNull().default(""),
     defaultCustomerId: cuid("default_customer_id"),

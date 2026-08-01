@@ -1,6 +1,11 @@
 import type { Analytics } from "@unprice/analytics"
 import { hashStringSHA256, newApiKeySecret, newId } from "@unprice/db/utils"
-import type { ApiKey, ApiKeyExtended, SearchParamsDataTable } from "@unprice/db/validators"
+import type {
+  ApiKey,
+  ApiKeyExtended,
+  ApiKeyType,
+  SearchParamsDataTable,
+} from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, type SchemaError, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { Cache } from "@unprice/services/cache"
@@ -138,12 +143,14 @@ export class ApiKeysService {
     name,
     expiresAt,
     defaultCustomerId,
+    type = "runtime",
   }: {
     projectId: string
     isRoot: boolean
     name: string
     expiresAt?: number | null
     defaultCustomerId?: string | null
+    type?: ApiKeyType
   }): Promise<Result<ApiKey & { key: string }, FetchError>> {
     const apiKey = newApiKeySecret()
     const apiKeyId = newId("apikey")
@@ -160,6 +167,7 @@ export class ApiKeysService {
           projectId,
           isRoot,
           defaultCustomerId,
+          type,
         })
         .returning()
         .then((rows) => rows[0] ?? null),
@@ -415,6 +423,7 @@ export class ApiKeysService {
           revokedAt: true,
           hash: true,
           defaultCustomerId: true,
+          type: true,
         },
         where: (apikey, { and, eq }) =>
           projectId

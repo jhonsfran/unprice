@@ -32,6 +32,8 @@ export interface BusinessFields {
   is_internal?: boolean
   unprice_customer_id?: string
   operation?: string
+  apikey_id?: string
+  apikey_type?: string
 }
 
 export interface ErrorFields {
