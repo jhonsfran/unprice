@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto"
 import { describe, expect, it } from "vitest"
 import {
   type MonetizationConfig,
@@ -6,7 +5,7 @@ import {
   computeConfigHash,
   integrationContractSchema,
   monetizationConfigSchema,
-  sha256Hex,
+  monetizationVersionSchema,
 } from "./monetization"
 
 // Two features, declared in an order that differs from their sorted order, so
@@ -41,7 +40,7 @@ const config: MonetizationConfig = {
               aggregationField: "input_tokens",
             },
             limit: 20,
-            resetConfig: { interval: "day" },
+            resetConfig: { interval: "day", intervalCount: 1 },
           },
           {
             featureSlug: "chat-messages",
@@ -94,7 +93,25 @@ describe("monetizationConfigSchema", () => {
         ...config,
         plans: [{ ...config.plans[0]!, version: { ...config.plans[0]!.version, planId: "pl_1" } }],
       })
-    ).toThrow()
+    ).toThrow(/Unrecognized key\(s\) in object: 'planId'/)
+  })
+
+  // An agent repairs its own document, so it navigates by path, not by prose.
+  it("points at the offending node with a usable path", () => {
+    const invalid = structuredClone(config)
+    invalid.plans[0]!.version.features[0]!.meterConfig!.eventSlug = "nope"
+    const result = monetizationConfigSchema.safeParse(invalid)
+
+    expect(result.success).toBe(false)
+    expect(result.error?.issues[0]?.path).toEqual([
+      "plans",
+      0,
+      "version",
+      "features",
+      0,
+      "meterConfig",
+      "eventSlug",
+    ])
   })
 
   it("rejects a non-count aggregation without a field", () => {
@@ -112,19 +129,105 @@ describe("monetizationConfigSchema", () => {
   it("rejects zero or more than one default plan", () => {
     const none = structuredClone(config)
     none.plans[0]!.defaultPlan = false
-    expect(() => monetizationConfigSchema.parse(none)).toThrow(/default/i)
-  })
+    expect(() => monetizationConfigSchema.parse(none)).toThrow(/found 0/)
 
-  it("rejects two plans claiming the default", () => {
     const two = structuredClone(config)
     two.plans.push({ ...structuredClone(two.plans[0]!), slug: "pro", title: "Pro" })
-    expect(() => monetizationConfigSchema.parse(two)).toThrow(/default/i)
+    expect(() => monetizationConfigSchema.parse(two)).toThrow(/found 2/)
   })
 
   it("rejects a priced feature that is not declared in the document", () => {
     const invalid = structuredClone(config)
     invalid.plans[0]!.version.features[0]!.featureSlug = "unknown-feature"
     expect(() => monetizationConfigSchema.parse(invalid)).toThrow(/unknown-feature/)
+  })
+
+  // Duplicate slugs are a realistic mistake when an agent regenerates a document,
+  // and every downstream slug-to-id map assumes they cannot happen.
+  //
+  // Asserted on the unescaped issue message: ZodError.message is a JSON dump, so
+  // a regex containing quotes would never match the escaped form.
+  it.each([
+    [
+      "a duplicate event slug",
+      (invalid: MonetizationConfig) => {
+        invalid.events.push({ ...invalid.events[0]! })
+      },
+      'Duplicate slug "ai_completion" in events',
+    ],
+    [
+      "a duplicate feature slug",
+      (invalid: MonetizationConfig) => {
+        invalid.features.push({ ...invalid.features[0]! })
+      },
+      'Duplicate slug "input-tokens" in features',
+    ],
+    [
+      "a duplicate plan slug",
+      (invalid: MonetizationConfig) => {
+        invalid.plans.push({ ...structuredClone(invalid.plans[0]!), defaultPlan: false })
+      },
+      'Duplicate slug "free" in plans',
+    ],
+    [
+      "the same feature priced twice in one plan",
+      (invalid: MonetizationConfig) => {
+        invalid.plans[0]!.version.features.push(
+          structuredClone(invalid.plans[0]!.version.features[0]!)
+        )
+      },
+      'Feature "input-tokens" is priced twice in plan "free"',
+    ],
+  ])("rejects %s", (_label, mutate, message) => {
+    const invalid = structuredClone(config)
+    mutate(invalid)
+    const result = monetizationConfigSchema.safeParse(invalid)
+
+    expect(result.success).toBe(false)
+    expect(result.error?.issues.map((issue) => issue.message)).toContain(message)
+  })
+
+  it("rejects one feature metering different events across plans", () => {
+    const invalid = structuredClone(config)
+    const second = structuredClone(invalid.plans[0]!)
+    second.slug = "pro"
+    second.defaultPlan = false
+    second.version.features[0]!.meterConfig!.eventSlug = "chat_request"
+    invalid.plans.push(second)
+
+    const result = monetizationConfigSchema.safeParse(invalid)
+
+    expect(result.success).toBe(false)
+    expect(result.error?.issues.map((issue) => issue.message)).toContain(
+      'Feature "input-tokens" meters event "ai_completion" in another plan; one feature must meter one event'
+    )
+  })
+
+  // filters, groupBy and windowSize are "TODO: implement this later" in shared.ts.
+  it.each(["filters", "groupBy", "windowSize"])(
+    "rejects the unimplemented meter field %s",
+    (field) => {
+      const invalid = structuredClone(config) as unknown as {
+        plans: { version: { features: { meterConfig: Record<string, unknown> }[] } }[]
+      }
+      invalid.plans[0]!.version.features[0]!.meterConfig[field] =
+        field === "groupBy" ? ["a"] : field === "windowSize" ? "HOUR" : { a: "b" }
+
+      expect(() => monetizationConfigSchema.parse(invalid)).toThrow(
+        new RegExp(`Unrecognized key\\(s\\) in object: '${field}'`)
+      )
+    }
+  )
+
+  it("rejects an unknown key inside a price config", () => {
+    const invalid = structuredClone(config) as unknown as {
+      plans: { version: { features: { config: Record<string, unknown> }[] } }[]
+    }
+    invalid.plans[0]!.version.features[0]!.config.discount = "0.5"
+
+    expect(() => monetizationConfigSchema.parse(invalid)).toThrow(
+      /Unrecognized key\(s\) in object: 'discount'/
+    )
   })
 
   // The pricing rules below all come from `planVersionFeatureInsertBaseSchema`;
@@ -197,21 +300,41 @@ describe("monetizationConfigSchema", () => {
     expect(() => monetizationConfigSchema.parse(withFirstFeature(feature))).toThrow(message)
   })
 
-  it("accepts a zero limit, as the internal schema does", () => {
-    const zeroed = structuredClone(config)
-    zeroed.plans[0]!.version.features[0]!.limit = 0
-    expect(() => monetizationConfigSchema.parse(zeroed)).not.toThrow()
-  })
-
-  // `null` is how the database spells unlimited, and z.coerce.number() would
-  // turn it into a zero allowance that denies everything.
-  it("rejects a null limit instead of coercing it to zero", () => {
-    const nulled = structuredClone(config) as unknown as {
+  // Blanket coercion would turn all of these into a silent zero allowance that
+  // denies everything, or into a negative one. `limit` is a money-path field, so
+  // it takes an accept-list rather than whatever Number() makes of the input.
+  it.each([
+    [0, 0],
+    [20, 20],
+    ["20", 20],
+  ])("accepts the limit %j as %i", (input, expected) => {
+    const limited = structuredClone(config) as unknown as {
       plans: { version: { features: Record<string, unknown>[] } }[]
     }
-    nulled.plans[0]!.version.features[0]!.limit = null
+    limited.plans[0]!.version.features[0]!.limit = input
 
-    expect(() => monetizationConfigSchema.parse(nulled)).toThrow(/limit must be omitted/)
+    expect(monetizationConfigSchema.parse(limited).plans[0]!.version.features[0]!.limit).toBe(
+      expected
+    )
+  })
+
+  it.each([
+    [null, /limit must be omitted/],
+    [false, /limit/],
+    [true, /limit/],
+    ["", /limit/],
+    [" ", /limit/],
+    [[], /limit/],
+    ["1e3", /limit/],
+    [-5, /limit/],
+    [1.5, /limit/],
+  ])("rejects the limit %j", (input, message) => {
+    const invalid = structuredClone(config) as unknown as {
+      plans: { version: { features: Record<string, unknown>[] } }[]
+    }
+    invalid.plans[0]!.version.features[0]!.limit = input
+
+    expect(() => monetizationConfigSchema.parse(invalid)).toThrow(message)
   })
 
   it("rejects a Dinero snapshot where a decimal string is expected", () => {
@@ -325,6 +448,40 @@ describe("computeConfigHash", () => {
     expect(computeConfigHash(config.plans[0]!)).toMatch(/^[0-9a-f]{64}$/)
   })
 
+  // Guards against the hash and the schema drifting into two independent field
+  // lists: a version field that stops affecting the hash lets two different
+  // configurations collide onto one plan version.
+  it("covers every field monetizationVersionSchema declares", () => {
+    for (const field of Object.keys(monetizationVersionSchema.shape)) {
+      const changed = structuredClone(config)
+      const version = changed.plans[0]!.version as unknown as Record<string, unknown>
+
+      if (field === "features") {
+        version.features = (version.features as unknown[]).slice(0, 1)
+      } else {
+        delete version[field]
+      }
+
+      expect(computeConfigHash(changed.plans[0]!), `${field} must affect the hash`).not.toBe(
+        computeConfigHash(config.plans[0]!)
+      )
+    }
+  })
+
+  // resetConfig.intervalCount defaults to 1, so an omitted count and an explicit
+  // one are the same cadence and must not produce two draft versions.
+  it("treats an omitted resetConfig.intervalCount as the explicit default", () => {
+    const omitted = structuredClone(config) as unknown as {
+      plans: { version: { features: { resetConfig: Record<string, unknown> }[] } }[]
+    }
+    // An absent key, which is what an agent that never read the default writes.
+    delete omitted.plans[0]!.version.features[0]!.resetConfig.intervalCount
+
+    expect(computeConfigHash(monetizationConfigSchema.parse(omitted).plans[0]!)).toBe(
+      computeConfigHash(monetizationConfigSchema.parse(config).plans[0]!)
+    )
+  })
+
   it("hashes an omitted limit stably, and differently from a set one", () => {
     const omitted = structuredClone(config)
     // An absent key, not an undefined one: that is what an agent actually writes.
@@ -332,9 +489,6 @@ describe("computeConfigHash", () => {
     const parsed = monetizationConfigSchema.parse(omitted)
 
     expect(parsed.plans[0]!.version.features[0]!.limit).toBeUndefined()
-    expect(computeConfigHash(parsed.plans[0]!)).toBe(
-      computeConfigHash(monetizationConfigSchema.parse(omitted).plans[0]!)
-    )
     expect(computeConfigHash(parsed.plans[0]!)).not.toBe(computeConfigHash(config.plans[0]!))
 
     // An explicitly undefined limit is the same configuration, not a third one.
@@ -375,49 +529,23 @@ describe("computeConfigHash", () => {
   })
 })
 
-describe("sha256Hex", () => {
-  // Known-answer vectors: empty input, a single-block input, and an input long
-  // enough to force a second padding block.
-  it.each([
-    ["", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"],
-    ["abc", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"],
-    [
-      "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq",
-      "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1",
-    ],
-  ])("hashes %j", (input, expected) => {
-    expect(sha256Hex(input)).toBe(expected)
-  })
-
-  // The runtime digest is hand-rolled because it has to stay synchronous in
-  // Workers and browser bundles; cross-check it against a reference
-  // implementation over multi-byte and multi-block inputs.
-  it("matches node crypto for utf-8 and multi-block inputs", () => {
-    const inputs = [
-      "",
-      "a",
-      "ü — üñïçôdé",
-      "x".repeat(55),
-      "x".repeat(56),
-      "x".repeat(64),
-      "x".repeat(1000),
-      JSON.stringify(config),
-    ]
-
-    for (const input of inputs) {
-      expect(sha256Hex(input)).toBe(createHash("sha256").update(input, "utf8").digest("hex"))
-    }
-  })
-})
-
 describe("buildIntegrationContract", () => {
-  const contractConfig: MonetizationConfig = {
+  // Parsed, not hand-built: the function documents its input as a validated
+  // configuration, and a fixture that never parses cannot prove that holds.
+  //
+  // Two plans on purpose. `chat-messages` is a synchronous gate on free and a
+  // budgeted run on pro, so the "most demanding plan wins" rule has to fire;
+  // `input-tokens` is priced on both, so the warning has to be deduplicated;
+  // and `ai_completion` collects one aggregation field from each plan, so the
+  // required-property ordering has to be sorted rather than insertion-ordered.
+  const contractConfig = monetizationConfigSchema.parse({
     events: [
       { slug: "ai_completion", name: "AI completion" },
       { slug: "chat_request", name: "Chat request" },
     ],
     features: [
       { slug: "input-tokens", title: "Input tokens", unitOfMeasure: "token" },
+      { slug: "output-tokens", title: "Output tokens", unitOfMeasure: "token" },
       { slug: "chat-messages", title: "Chat messages", unitOfMeasure: "message" },
       { slug: "reasoning-model", title: "Reasoning model", unitOfMeasure: "access" },
       { slug: "audit-log", title: "Audit log", unitOfMeasure: "log" },
@@ -465,42 +593,121 @@ describe("buildIntegrationContract", () => {
           ],
         },
       },
+      {
+        slug: "pro",
+        title: "Pro",
+        version: {
+          currency: "USD",
+          paymentProvider: "sandbox",
+          billingConfig: { name: "monthly", interval: "month", intervalCount: 1 },
+          features: [
+            {
+              featureSlug: "input-tokens",
+              featureType: "usage",
+              config: { usageMode: "unit", price: "0.000002" },
+              meterConfig: {
+                eventSlug: "ai_completion",
+                aggregationMethod: "sum",
+                aggregationField: "input_tokens",
+              },
+              limit: 2000,
+            },
+            {
+              featureSlug: "output-tokens",
+              featureType: "usage",
+              config: { usageMode: "unit", price: "0.000004" },
+              meterConfig: {
+                eventSlug: "ai_completion",
+                aggregationMethod: "sum",
+                aggregationField: "completion_tokens",
+              },
+            },
+            {
+              featureSlug: "chat-messages",
+              featureType: "usage",
+              config: { usageMode: "unit", price: "0.01" },
+              meterConfig: {
+                eventSlug: "chat_request",
+                aggregationMethod: "sum",
+                aggregationField: "tokens",
+              },
+              limit: 5000,
+            },
+          ],
+        },
+      },
     ],
-  }
+  })
+
+  const resolved = { free: "pv_free", pro: "pv_pro" }
 
   it("classifies every priced feature and skips unpriced declarations", () => {
-    const contract = buildIntegrationContract(contractConfig, { free: "pv_free" })
+    const contract = buildIntegrationContract(contractConfig, resolved)
 
     expect(contract.features).toEqual([
-      { slug: "input-tokens", kind: "run-budget", eventSlug: "ai_completion", planSlugs: ["free"] },
-      { slug: "chat-messages", kind: "usage-gate", eventSlug: "chat_request", planSlugs: ["free"] },
+      {
+        slug: "input-tokens",
+        kind: "run-budget",
+        eventSlug: "ai_completion",
+        planSlugs: ["free", "pro"],
+      },
+      {
+        slug: "output-tokens",
+        kind: "usage-evidence",
+        eventSlug: "ai_completion",
+        planSlugs: ["pro"],
+      },
+      // A gate on free and a budgeted run on pro: the integration has to satisfy
+      // the more demanding plan, so run-budget wins.
+      {
+        slug: "chat-messages",
+        kind: "run-budget",
+        eventSlug: "chat_request",
+        planSlugs: ["free", "pro"],
+      },
       { slug: "reasoning-model", kind: "flat-access", eventSlug: null, planSlugs: ["free"] },
       { slug: "audit-log", kind: "usage-evidence", eventSlug: "chat_request", planSlugs: ["free"] },
     ])
   })
 
-  it("reports each event with the numeric properties its meters aggregate", () => {
-    const contract = buildIntegrationContract(contractConfig, { free: "pv_free" })
+  it("reports each event with the numeric properties its meters aggregate, sorted", () => {
+    const contract = buildIntegrationContract(contractConfig, resolved)
 
     expect(contract.events).toEqual([
-      { slug: "ai_completion", name: "AI completion", requiredProperties: ["input_tokens"] },
-      { slug: "chat_request", name: "Chat request", requiredProperties: [] },
+      {
+        slug: "ai_completion",
+        name: "AI completion",
+        requiredProperties: ["completion_tokens", "input_tokens"],
+      },
+      { slug: "chat_request", name: "Chat request", requiredProperties: ["tokens"] },
     ])
   })
 
   it("resolves the default plan version and warns about usage unknown before the work runs", () => {
-    const contract = buildIntegrationContract(contractConfig, { free: "pv_free" })
+    const contract = buildIntegrationContract(contractConfig, resolved)
 
     expect(contract.defaultPlan.slug).toBe("free")
     expect(contract.defaultPlan.planVersionId).toBe("pv_free")
     expect(contract.defaultPlan.note).toMatch(/signUp/)
-    expect(contract.warnings).toHaveLength(1)
-    expect(contract.warnings[0]?.featureSlug).toBe("input-tokens")
+
+    // One warning per feature, not per plan that prices it.
+    expect(contract.warnings.map((warning) => warning.featureSlug)).toEqual([
+      "input-tokens",
+      "output-tokens",
+      "chat-messages",
+    ])
     expect(contract.warnings[0]?.message).toMatch(/usage\.record/)
     expect(() => integrationContractSchema.parse(contract)).not.toThrow()
   })
 
   it("throws when a plan has no resolved plan version", () => {
-    expect(() => buildIntegrationContract(contractConfig, {})).toThrow(/free/)
+    expect(() => buildIntegrationContract(contractConfig, { pro: "pv_pro" })).toThrow(/free/)
+  })
+
+  it("throws when no plan is the default", () => {
+    const orphaned = structuredClone(contractConfig)
+    orphaned.plans[0]!.defaultPlan = false
+
+    expect(() => buildIntegrationContract(orphaned, resolved)).toThrow(/no default plan/)
   })
 })

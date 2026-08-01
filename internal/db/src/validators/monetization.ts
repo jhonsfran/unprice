@@ -21,6 +21,7 @@
  */
 import * as z from "zod"
 
+import { sha256HexSync } from "../utils/sha256-sync"
 import { eventInsertBaseSchema } from "./events"
 import { featureInsertBaseSchema } from "./features"
 import {
@@ -78,8 +79,11 @@ export const monetizationBillingConfigSchema = z
 export const monetizationResetConfigSchema = z
   .object({
     interval: billingIntervalSchema.describe("Reset interval. Example: 'day'"),
+    // `.default(1)` rather than `.optional()`: the default has to be materialized
+    // into parse output, or an omitted count and an explicit 1 are the same
+    // cadence with two different hashes.
     intervalCount: billingIntervalCountSchema
-      .optional()
+      .default(1)
       .describe("Number of intervals per reset window. Defaults to 1"),
   })
   .strict()
@@ -118,6 +122,11 @@ export const monetizationPriceConfigSchema = configUsageSchema
  * `meterConfigSchema` with `eventId` removed: the boundary points at an event by
  * slug and the server resolves it once the events exist.
  *
+ * `filters`, `groupBy`, and `windowSize` are removed too. They are marked
+ * "TODO: implement this later" in `shared.ts` and nothing reads them, so at the
+ * boundary they would be accepted, hashed into a new draft version, and change
+ * no behaviour. Add them back here when they do something.
+ *
  * `.omit()` drops the shared schema's refinement, but nothing is restated to
  * compensate: `validateAgainstInternalFeature` sends the meter back through
  * `meterConfigSchema` with its refinement intact, which is what enforces
@@ -125,7 +134,7 @@ export const monetizationPriceConfigSchema = configUsageSchema
  */
 export const monetizationMeterConfigSchema = meterConfigSchema
   .innerType()
-  .omit({ eventId: true })
+  .omit({ eventId: true, filters: true, groupBy: true, windowSize: true })
   .strict()
   .describe("How usage is measured from a declared event")
 
@@ -141,28 +150,36 @@ const monetizationVersionFeatureBaseSchema = z
     // off `.shape` because that schema is a `ZodEffects`. A zero allowance is a
     // valid configuration internally, so the boundary must not reject it.
     //
-    // One deliberate divergence: `null` is rejected instead of coerced. The
-    // database stores null for "unlimited", but `z.coerce.number()` turns null
-    // into 0, which is a zero allowance that denies everything — a silent
-    // money-path corruption, and `limit: null` is a natural way to hand-write
-    // "unlimited". Internal keeps the coercion because it is not the
-    // agent-facing boundary. Unlimited has exactly one spelling here — omit the
-    // field — because two spellings would hash differently and break
-    // idempotency. Do not "align" this back to internal.
+    // One deliberate divergence: internal is `z.coerce.number().int()`, and
+    // blanket coercion is a money-path hazard here. `Number(null)`,
+    // `Number(false)`, `Number("")`, and `Number([])` are all 0 — a zero
+    // allowance that denies everything — and `limit: null` is a natural way to
+    // hand-write "unlimited". So this takes an explicit accept-list of a number
+    // or a digit string, rejects negatives, and names null in its message.
+    // Unlimited has exactly one spelling — omit the field — because two
+    // spellings would hash differently and break idempotency. Internal keeps the
+    // coercion because it is not the agent-facing boundary. Do not "align" this
+    // back to internal.
     limit: z
-      .preprocess((value, ctx) => {
-        if (value === null) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: "limit must be omitted to mean unlimited, it cannot be null",
-            fatal: true,
-          })
+      .preprocess(
+        (value, ctx) => {
+          if (value === null) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "limit must be omitted to mean unlimited, it cannot be null",
+              fatal: true,
+            })
 
-          return z.NEVER
-        }
+            return z.NEVER
+          }
 
-        return value
-      }, z.coerce.number().int().optional())
+          return value
+        },
+        z
+          .union([z.number(), z.string().regex(/^\d+$/)])
+          .pipe(z.coerce.number().int().nonnegative())
+          .optional()
+      )
       .describe("Maximum usage per reset window. Omit for unlimited"),
     resetConfig: monetizationResetConfigSchema.optional(),
   })
@@ -218,13 +235,6 @@ function toInternalConfig(config: MonetizationPriceConfig) {
   }
 }
 
-/** Zod nests `config.price` style paths as a single dotted string; split them. */
-function toBoundaryPath(path: (string | number)[]): (string | number)[] {
-  return path.flatMap<string | number>((segment) =>
-    typeof segment === "string" ? segment.split(".").filter(Boolean) : segment
-  )
-}
-
 /**
  * Which config schema each featureType uses. `validatePlanVersionFeatureMutation`
  * owns this mapping but is not exported, and the exported `parseFeaturesConfig`
@@ -263,7 +273,7 @@ function validateAgainstInternalFeature(
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: issue.message,
-        path: ["config", ...toBoundaryPath(issue.path)],
+        path: ["config", ...issue.path],
       })
     }
   }
@@ -282,7 +292,7 @@ function validateAgainstInternalFeature(
     resetConfig: feature.resetConfig && {
       name: INTERNAL_PLACEHOLDER_BILLING_CONFIG.name,
       resetInterval: feature.resetConfig.interval,
-      resetIntervalCount: feature.resetConfig.intervalCount ?? 1,
+      resetIntervalCount: feature.resetConfig.intervalCount,
       resetAnchor: INTERNAL_PLACEHOLDER_BILLING_CONFIG.billingAnchor,
       planType: INTERNAL_PLACEHOLDER_BILLING_CONFIG.planType,
     },
@@ -297,7 +307,7 @@ function validateAgainstInternalFeature(
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: issue.message,
-        path: toBoundaryPath(issue.path),
+        path: issue.path,
       })
     }
 
@@ -318,13 +328,18 @@ function validateAgainstInternalFeature(
   // this document — `monetization.get` above all — must emit configs already
   // normalized for their featureType, or the round trip fails here.
   const applied = result.data.config ?? {}
+  // Naming the usage mode matters: tiers do apply to usage features, just not in
+  // unit mode, and "does not apply to a usage feature" would read as a lie.
+  const scope = feature.config.usageMode
+    ? `${feature.featureType} feature in ${feature.config.usageMode} mode`
+    : `${feature.featureType} feature`
 
   for (const [key, value] of Object.entries(feature.config)) {
     if (value === undefined || key in applied) continue
 
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: `"${key}" does not apply to a ${feature.featureType} feature`,
+      message: `"${key}" does not apply to a ${scope}`,
       path: ["config", key],
     })
   }
@@ -396,6 +411,7 @@ export const monetizationConfigSchema = z
     }
 
     let defaultPlans = 0
+    const meteredEvents = new Map<string, string>()
 
     config.plans.forEach((plan, planIndex) => {
       if (plan.defaultPlan) defaultPlans += 1
@@ -423,10 +439,30 @@ export const monetizationConfigSchema = z
 
         const eventSlug = feature.meterConfig?.eventSlug
 
-        if (eventSlug && !eventSlugs.has(eventSlug)) {
+        if (!eventSlug) return
+
+        if (!eventSlugs.has(eventSlug)) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
             message: `Meter references event "${eventSlug}", which is not declared in this document's events`,
+            path: [...featurePath, "meterConfig", "eventSlug"],
+          })
+        }
+
+        // The integration contract reports one event per feature, so a feature
+        // metering different events in different plans would tell the
+        // application to send one of them and silently under-report the other.
+        const meteredEvent = meteredEvents.get(feature.featureSlug)
+
+        if (meteredEvent === undefined) {
+          meteredEvents.set(feature.featureSlug, eventSlug)
+          return
+        }
+
+        if (meteredEvent !== eventSlug) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Feature "${feature.featureSlug}" meters event "${meteredEvent}" in another plan; one feature must meter one event`,
             path: [...featurePath, "meterConfig", "eventSlug"],
           })
         }
@@ -458,110 +494,6 @@ export type MonetizationConfigInput = z.input<typeof monetizationConfigSchema>
 // Canonical hashing
 // ---------------------------------------------------------------------------
 
-const SHA256_INITIAL_STATE = Uint32Array.from([
-  0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
-])
-
-const SHA256_ROUND_CONSTANTS = Uint32Array.from([
-  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
-])
-
-function rotateRight32(value: number, bits: number): number {
-  return (value >>> bits) | (value << (32 - bits))
-}
-
-/**
- * Synchronous SHA-256 over the UTF-8 encoding of `message`, as lowercase hex.
- *
- * Not `hashStringSHA256` from `../utils/hash.ts`: that one is async and returns
- * base64, and `computeConfigHash` has to stay synchronous.
- *
- * `crypto.subtle.digest` is async and `node:crypto` cannot be imported here:
- * `@unprice/db/validators` is bundled for Cloudflare Workers and for Next.js
- * client components. This implementation only uses `TextEncoder` and typed
- * arrays, so it runs unchanged in all three. Correctness is pinned by
- * known-answer vectors and a cross-check against `node:crypto` in the tests.
- */
-export function sha256Hex(message: string): string {
-  const bytes = new TextEncoder().encode(message)
-  const padded = new Uint8Array(Math.ceil((bytes.length + 9) / 64) * 64)
-  padded.set(bytes)
-  padded[bytes.length] = 0x80
-
-  const view = new DataView(padded.buffer)
-  const bitLength = bytes.length * 8
-  view.setUint32(padded.length - 8, Math.floor(bitLength / 0x100000000))
-  view.setUint32(padded.length - 4, bitLength >>> 0)
-
-  const hash = Uint32Array.from(SHA256_INITIAL_STATE)
-  const schedule = new Uint32Array(64)
-
-  for (let block = 0; block < padded.length; block += 64) {
-    for (let index = 0; index < 16; index++) {
-      schedule[index] = view.getUint32(block + index * 4)
-    }
-
-    for (let index = 16; index < 64; index++) {
-      const previous = schedule[index - 15]!
-      const recent = schedule[index - 2]!
-      const s0 = rotateRight32(previous, 7) ^ rotateRight32(previous, 18) ^ (previous >>> 3)
-      const s1 = rotateRight32(recent, 17) ^ rotateRight32(recent, 19) ^ (recent >>> 10)
-      schedule[index] = (schedule[index - 16]! + s0 + schedule[index - 7]! + s1) >>> 0
-    }
-
-    let a = hash[0]!
-    let b = hash[1]!
-    let c = hash[2]!
-    let d = hash[3]!
-    let e = hash[4]!
-    let f = hash[5]!
-    let g = hash[6]!
-    let h = hash[7]!
-
-    for (let index = 0; index < 64; index++) {
-      const s1 = rotateRight32(e, 6) ^ rotateRight32(e, 11) ^ rotateRight32(e, 25)
-      const choose = (e & f) ^ (~e & g)
-      const temp1 = (h + s1 + choose + SHA256_ROUND_CONSTANTS[index]! + schedule[index]!) >>> 0
-      const s0 = rotateRight32(a, 2) ^ rotateRight32(a, 13) ^ rotateRight32(a, 22)
-      const majority = (a & b) ^ (a & c) ^ (b & c)
-      const temp2 = (s0 + majority) >>> 0
-
-      h = g
-      g = f
-      f = e
-      e = (d + temp1) >>> 0
-      d = c
-      c = b
-      b = a
-      a = (temp1 + temp2) >>> 0
-    }
-
-    hash[0] = (hash[0]! + a) >>> 0
-    hash[1] = (hash[1]! + b) >>> 0
-    hash[2] = (hash[2]! + c) >>> 0
-    hash[3] = (hash[3]! + d) >>> 0
-    hash[4] = (hash[4]! + e) >>> 0
-    hash[5] = (hash[5]! + f) >>> 0
-    hash[6] = (hash[6]! + g) >>> 0
-    hash[7] = (hash[7]! + h) >>> 0
-  }
-
-  let digest = ""
-
-  for (const word of hash) {
-    digest += word.toString(16).padStart(8, "0")
-  }
-
-  return digest
-}
-
 function compareStrings(left: string, right: string): number {
   if (left === right) return 0
   return left < right ? -1 : 1
@@ -589,8 +521,13 @@ function canonicalJson(value: unknown): string {
 }
 
 /**
- * Content address of a plan's desired version: currency, payment provider,
- * billing cadence, and the featureSlug-sorted feature list.
+ * Content address of a plan's desired version: every field
+ * `monetizationVersionSchema` declares, with the features sorted by slug.
+ *
+ * The whole version is spread rather than hand-listed, so the schema is the only
+ * definition of what a version is. A hand-written field list would silently stop
+ * hashing any field added later, and two different configurations would then
+ * collide onto one plan version.
  *
  * Hashes the boundary form (slugs and decimal strings), never resolved ids or
  * Dinero snapshots, so the same document hashes identically in every project.
@@ -598,21 +535,18 @@ function canonicalJson(value: unknown): string {
  * plan-row fields and never justify a new plan version.
  *
  * MUST be called on `monetizationConfigSchema` output, never on a raw request
- * body. Several boundary fields coerce (`priceSchema` is `z.coerce.string()`,
- * `billingIntervalCountSchema` is `z.coerce.number()`), so `price: 2` and
- * `price: "2"` are the same configuration but hash differently before parsing.
- * Idempotency is derived from this hash, so hashing unparsed input would create
- * duplicate draft versions for identical configurations.
+ * body. Several boundary fields coerce or default (`priceSchema` is
+ * `z.coerce.string()`, `resetConfig.intervalCount` defaults to 1), so
+ * `price: 2` and `price: "2"`, or an omitted and an explicit `intervalCount`,
+ * are the same configuration but hash differently before parsing. Idempotency is
+ * derived from this hash, so hashing unparsed input would create duplicate draft
+ * versions for identical configurations.
  */
 export function computeConfigHash(plan: MonetizationPlanConfig): string {
-  const { currency, paymentProvider, billingConfig, features } = plan.version
-
-  return sha256Hex(
+  return sha256HexSync(
     canonicalJson({
-      currency,
-      paymentProvider,
-      billingConfig,
-      features: [...features].sort((left, right) =>
+      ...plan.version,
+      features: [...plan.version.features].sort((left, right) =>
         compareStrings(left.featureSlug, right.featureSlug)
       ),
     })
@@ -744,13 +678,17 @@ export function buildIntegrationContract(
 
     if (occurrences.length === 0) return []
 
-    const kinds = new Set(occurrences.map(({ feature }) => classifyFeature(feature)))
-
     return [
       {
         slug: declared.slug,
         // The integration has to satisfy the most demanding plan that prices it.
-        kind: KIND_PRECEDENCE.find((kind) => kinds.has(kind)) ?? "flat-access",
+        // Reduced rather than searched so the result is total by construction —
+        // a `find` would need a fallback branch that can never run.
+        kind: occurrences
+          .map(({ feature }) => classifyFeature(feature))
+          .reduce((left, right) =>
+            KIND_PRECEDENCE.indexOf(left) <= KIND_PRECEDENCE.indexOf(right) ? left : right
+          ),
         eventSlug:
           occurrences.find(({ feature }) => feature.meterConfig)?.feature.meterConfig?.eventSlug ??
           null,
