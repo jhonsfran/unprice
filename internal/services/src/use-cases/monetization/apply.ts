@@ -470,6 +470,7 @@ export async function resolvePlanDraft(
       },
       currency: plan.version.currency,
       paymentProvider: plan.version.paymentProvider,
+      paymentMethodRequired: plan.version.paymentMethodRequired,
       tags: [],
       configHash,
     })

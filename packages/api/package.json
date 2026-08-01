@@ -2,7 +2,7 @@
   "name": "@unprice/api",
   "description": "Unprice TypeScript SDK — open-source customer money path for usage-based SaaS. Authorize customer spend before paid work runs.",
   "private": false,
-  "version": "0.1.6",
+  "version": "0.1.7",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",

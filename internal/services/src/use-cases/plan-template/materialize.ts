@@ -205,6 +205,7 @@ export async function createTemplatePlanVersion(
     template,
     currency,
     paymentProvider,
+    paymentMethodRequired = true,
     tags,
     configHash,
   }: {
@@ -223,6 +224,7 @@ export async function createTemplatePlanVersion(
     }
     currency: Currency
     paymentProvider: PlanVersion["paymentProvider"]
+    paymentMethodRequired?: boolean
     tags: string[]
     configHash?: string
   }
@@ -234,7 +236,7 @@ export async function createTemplatePlanVersion(
     description: template.plan.description,
     currency,
     paymentProvider,
-    paymentMethodRequired: true,
+    paymentMethodRequired,
     whenToBill: "pay_in_advance",
     autoRenew: true,
     trialUnits: 0,

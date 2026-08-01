@@ -100,7 +100,7 @@ export function createConnection(opts: ConnectionDatabaseOptions): Database {
     }
 
     const primary = drizzleNeon(
-      new Pool(poolConfig).on("error", (err) => {
+      new Pool(poolConfig).on("error", (err: unknown) => {
         console.error("Database error:", err)
       }),
       {

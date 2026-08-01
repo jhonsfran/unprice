@@ -54,6 +54,7 @@ function validConfig(): MonetizationConfigInput {
         version: {
           currency: "USD",
           paymentProvider: "stripe",
+          paymentMethodRequired: false,
           billingConfig: { name: "monthly", interval: "month", intervalCount: 1 },
           features: [{ featureSlug: "support", featureType: "flat", config: { price: "0.00" } }],
         },
@@ -251,6 +252,7 @@ describe("monetization.apply", () => {
     expect(useCaseMocks.applyMonetizationConfig).toHaveBeenCalledTimes(1)
     expect(useCaseMocks.applyMonetizationConfig.mock.calls[0]?.[1]).toMatchObject({
       projectId: "proj_123",
+      config: { plans: [{ version: { paymentMethodRequired: false } }] },
     })
   })
 

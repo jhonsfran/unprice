@@ -3386,6 +3386,11 @@ export interface operations {
                 currency: "USD" | "EUR"
                 /** @enum {string} */
                 paymentProvider: "stripe" | "square" | "sandbox"
+                /**
+                 * @description Whether a customer must provide a payment method before starting this plan. Defaults to true
+                 * @default true
+                 */
+                paymentMethodRequired?: boolean
                 /** @description Billing cadence for the plan version. The server derives billingAnchor and planType from it */
                 billingConfig: {
                   /** @description Human-readable cadence name. Example: 'monthly' */
@@ -3671,6 +3676,11 @@ export interface operations {
                   currency: "USD" | "EUR"
                   /** @enum {string} */
                   paymentProvider: "stripe" | "square" | "sandbox"
+                  /**
+                   * @description Whether a customer must provide a payment method before starting this plan. Defaults to true
+                   * @default true
+                   */
+                  paymentMethodRequired?: boolean
                   /** @description Billing cadence for the plan version. The server derives billingAnchor and planType from it */
                   billingConfig: {
                     /** @description Human-readable cadence name. Example: 'monthly' */

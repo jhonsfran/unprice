@@ -28,6 +28,7 @@ const config: MonetizationConfig = {
       version: {
         currency: "USD",
         paymentProvider: "sandbox",
+        paymentMethodRequired: true,
         billingConfig: { name: "monthly", interval: "month", intervalCount: 1 },
         features: [
           {
@@ -496,6 +497,8 @@ describe("computeConfigHash", () => {
 
       if (field === "features") {
         version.features = (version.features as unknown[]).slice(0, 1)
+      } else if (field === "paymentMethodRequired") {
+        version[field] = false
       } else {
         delete version[field]
       }
@@ -504,6 +507,23 @@ describe("computeConfigHash", () => {
         computeConfigHash(config.plans[0]!)
       )
     }
+  })
+
+  it("keeps the default payment-method setting hash-compatible with older documents", () => {
+    const legacy = structuredClone(config) as unknown as {
+      plans: { version: Record<string, unknown> }[]
+    }
+    delete legacy.plans[0]!.version.paymentMethodRequired
+
+    const paymentMethodOptional = structuredClone(config)
+    paymentMethodOptional.plans[0]!.version.paymentMethodRequired = false
+
+    expect(computeConfigHash(monetizationConfigSchema.parse(legacy).plans[0]!)).toBe(
+      computeConfigHash(config.plans[0]!)
+    )
+    expect(computeConfigHash(paymentMethodOptional.plans[0]!)).not.toBe(
+      computeConfigHash(config.plans[0]!)
+    )
   })
 
   // An omitted resetConfig is resolved downstream as a copy of the billing

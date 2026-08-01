@@ -26,6 +26,7 @@
     "@auth/drizzle-adapter": "1.11.3",
     "@t3-oss/env-core": "^0.12.0",
     "@unprice/db": "workspace:^",
+    "@unprice/config": "workspace:^",
     "@unprice/error": "workspace:^",
     "@unprice/analytics": "workspace:^",
     "evlog": "2.4.1",

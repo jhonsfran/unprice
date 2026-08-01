@@ -394,6 +394,14 @@ export const monetizationVersionSchema = z
   .object({
     currency: versionInsertBaseSchema.shape.currency,
     paymentProvider: versionInsertBaseSchema.shape.paymentProvider,
+    // This is commercial policy, not a dashboard-only implementation detail:
+    // it decides whether a customer may start on a plan without payment details.
+    // Materializing the default keeps omitted and explicit `true` equivalent.
+    paymentMethodRequired: versionInsertBaseSchema.shape.paymentMethodRequired
+      .default(true)
+      .describe(
+        "Whether a customer must provide a payment method before starting this plan. Defaults to true"
+      ),
     billingConfig: monetizationBillingConfigSchema,
     features: z.array(monetizationVersionFeatureSchema).min(1),
   })
@@ -621,14 +629,14 @@ function effectiveResetConfig(
 }
 
 /**
- * Content address of a plan's desired version: every field
+ * Content address of a plan's desired version: every material version field
  * `monetizationVersionSchema` declares, with the features sorted by slug and
  * their reset cadence normalized to what the server will store.
  *
- * The whole version is spread rather than hand-listed, so the schema is the only
- * definition of what a version is. A hand-written field list would silently stop
- * hashing any field added later, and two different configurations would then
- * collide onto one plan version.
+ * The version is spread rather than hand-listed. The one exception is the
+ * default `paymentMethodRequired: true`: it is deliberately omitted so documents
+ * written before that field existed retain their content address. A `false`
+ * value is included because it changes who can subscribe to the plan.
  *
  * Hashes the boundary form (slugs and decimal strings), never resolved ids or
  * Dinero snapshots, so the same document hashes identically in every project.
@@ -644,11 +652,13 @@ function effectiveResetConfig(
  * versions for identical configurations.
  */
 export function computeConfigHash(plan: MonetizationPlanConfig): string {
+  const { paymentMethodRequired, ...version } = plan.version
   const { billingConfig } = plan.version
 
   return sha256HexSync(
     canonicalJson({
-      ...plan.version,
+      ...version,
+      ...(paymentMethodRequired ? {} : { paymentMethodRequired }),
       features: [...plan.version.features]
         .sort((left, right) => compareStrings(left.featureSlug, right.featureSlug))
         .map((feature) => ({

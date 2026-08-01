@@ -1,4 +1,3 @@
-import { RequestCookies, ResponseCookies } from "next/dist/compiled/@edge-runtime/cookies"
 import { NextResponse } from "next/server"
 
 import type { NextAuthRequest } from "@unprice/auth"
@@ -13,32 +12,6 @@ import { isSlug } from "@unprice/db/utils"
 import { parse } from "~/lib/domains"
 import { getWorkspacesUser } from "~/lib/session"
 import { getSafeNextPath } from "~/lib/signup-funnel"
-
-/**
- * Copy cookies from the Set-Cookie header of the response to the Cookie header of the request,
- * so that it will appear to SSR/RSC as if the user already has the new cookies.
- */
-function applySetCookie(req: NextAuthRequest, res: NextResponse) {
-  // 1. Parse Set-Cookie header from the response
-  const setCookies = new ResponseCookies(res.headers)
-
-  // 2. Construct updated Cookie header for the request
-  const newReqHeaders = new Headers(req.headers)
-  const newReqCookies = new RequestCookies(newReqHeaders)
-  setCookies.getAll().forEach((cookie) => newReqCookies.set(cookie))
-
-  // 3. Set up the “request header overrides” (see https://github.com/vercel/next.js/pull/41380)
-  //    on a dummy response
-  // NextResponse.next will set x-middleware-override-headers / x-middleware-request-* headers
-  const dummyRes = NextResponse.next({ request: { headers: newReqHeaders } })
-
-  // 4. Copy the “request header overrides” headers from our dummy response to the real response
-  dummyRes.headers.forEach((value, key) => {
-    if (key === "x-middleware-override-headers" || key.startsWith("x-middleware-request-")) {
-      res.headers.set(key, value)
-    }
-  })
-}
 
 export default function AppMiddleware(req: NextAuthRequest) {
   const url = new URL(req.nextUrl.origin)
@@ -95,30 +68,40 @@ export default function AppMiddleware(req: NextAuthRequest) {
   // check jwt claim for the workspace
   const isUserMemberWorkspace = userBelongsToWorkspace(currentWorkspaceSlug)
 
-  const response = NextResponse.rewrite(
-    new URL(`/dashboard${fullPath === "/" ? "" : fullPath}`, req.url)
-  )
-
   // if the user is not a member of the workspace redirect to root path to be handled by the middleware again
   if (!isUserMemberWorkspace) {
     url.pathname = "/"
+    const response = NextResponse.redirect(url)
 
     // clear the cookies
     response.cookies.set(COOKIES_APP.PROJECT, "")
     response.cookies.set(COOKIES_APP.WORKSPACE, "")
 
-    // Apply those cookies to the request
-    applySetCookie(req, response)
-
-    return NextResponse.redirect(url)
+    return response
   }
 
-  // we use this cookies to forward them to the API on RSC calls
-  // client calls are handled by the UpdateClientCookie component
   const cookieWorkspace = req.cookies.get(COOKIES_APP.WORKSPACE)?.value
+  const shouldSetWorkspaceCookie =
+    currentWorkspaceSlug !== cookieWorkspace && isSlug(currentWorkspaceSlug)
 
-  if (currentWorkspaceSlug !== cookieWorkspace && isSlug(currentWorkspaceSlug)) {
-    // set cookies if the user has access to the workspace
+  if (shouldSetWorkspaceCookie) {
+    req.cookies.set(COOKIES_APP.WORKSPACE, currentWorkspaceSlug)
+  }
+
+  const currentProjectSlug = decodeURIComponent(path.split("/")[2] ?? "")
+  const cookieProject = req.cookies.get(COOKIES_APP.PROJECT)?.value
+  const shouldSetProjectCookie = currentProjectSlug !== cookieProject && isSlug(currentProjectSlug)
+
+  if (shouldSetProjectCookie) {
+    req.cookies.set(COOKIES_APP.PROJECT, currentProjectSlug)
+  }
+
+  const response = NextResponse.rewrite(
+    new URL(`/dashboard${fullPath === "/" ? "" : fullPath}`, req.url),
+    { request: { headers: req.headers } }
+  )
+
+  if (shouldSetWorkspaceCookie) {
     response.cookies.set(COOKIES_APP.WORKSPACE, currentWorkspaceSlug, {
       httpOnly: true,
       sameSite: "lax",
@@ -127,13 +110,7 @@ export default function AppMiddleware(req: NextAuthRequest) {
     })
   }
 
-  const currentProjectSlug = decodeURIComponent(path.split("/")[2] ?? "")
-
-  // check if the current project slug is a valid slug
-  const cookieProject = req.cookies.get(COOKIES_APP.PROJECT)?.value
-
-  if (currentProjectSlug !== cookieProject && isSlug(currentProjectSlug)) {
-    // cookie for calling the api
+  if (shouldSetProjectCookie) {
     response.cookies.set(COOKIES_APP.PROJECT, currentProjectSlug, {
       httpOnly: true,
       sameSite: "lax",
@@ -141,9 +118,6 @@ export default function AppMiddleware(req: NextAuthRequest) {
       path: "/",
     })
   }
-
-  // Apply those cookies to the request
-  applySetCookie(req, response)
 
   return response
 }

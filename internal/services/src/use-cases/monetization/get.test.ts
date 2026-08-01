@@ -789,6 +789,50 @@ describe("getMonetizationConfig", () => {
     }
   })
 
+  it("round-trips a published plan that does not require a payment method", async () => {
+    const harness = createHarness()
+    const config = baseConfig()
+    const free = config.plans[0]
+    if (!free) throw new Error("fixture changed: no free plan")
+    ;(
+      free.version as typeof free.version & { paymentMethodRequired?: boolean }
+    ).paymentMethodRequired = false
+
+    const applied = await applyMonetizationConfig(harness.applyDeps, {
+      projectId: PROJECT_ID,
+      config,
+    })
+    if (applied.val?.state !== "ok") {
+      throw new Error(`seeding failed: ${JSON.stringify(applied.val ?? applied.err)}`)
+    }
+
+    for (const outcome of applied.val.plans) {
+      const version = versionOf(harness.store, outcome.planVersionId)
+      version.status = "published"
+      version.latest = true
+    }
+    for (const spy of Object.values(harness.writeSpies)) spy.mockClear()
+
+    const read = expectRead(await getMonetizationConfig(harness.getDeps, { projectId: PROJECT_ID }))
+    const readFree = read.config.plans.find(({ slug }) => slug === "free")
+    expect(readFree?.version.paymentMethodRequired).toBe(false)
+
+    const reapplied = await applyMonetizationConfig(harness.applyDeps, {
+      projectId: PROJECT_ID,
+      config: read.config,
+    })
+
+    if (reapplied.val?.state !== "ok") {
+      throw new Error(`re-apply failed: ${JSON.stringify(reapplied.val)}`)
+    }
+    expect(reapplied.val.plans.map(({ status }) => status)).toEqual(["published", "published"])
+    expect(harness.store.versions).toHaveLength(2)
+
+    for (const [name, spy] of Object.entries(harness.writeSpies)) {
+      expect(`${name}:${spy.mock.calls.length}`).toBe(`${name}:0`)
+    }
+  })
+
   it("reads only the caller's project", async () => {
     const harness = createHarness()
     await seedProject(harness)
@@ -898,6 +942,7 @@ describe("getMonetizationConfig", () => {
     expect(read.config.plans[0]?.version).toEqual({
       currency: "EUR",
       paymentProvider: "stripe",
+      paymentMethodRequired: true,
       billingConfig: { name: "monthly", interval: "month", intervalCount: 1 },
       features: [
         {

@@ -10,7 +10,7 @@
   "author": "Sebastian Franco",
   "license": "AGPL-3.0",
   "dependencies": {
-    "@neondatabase/serverless": "^0.10.4",
+    "@neondatabase/serverless": "^1.1.0",
     "@unprice/config": "workspace:^",
     "@unprice/db": "workspace:^",
     "drizzle-orm": "^0.44.5",

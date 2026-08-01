@@ -222,6 +222,7 @@ describe("Unprice client", () => {
           version: {
             currency: "USD",
             paymentProvider: "stripe",
+            paymentMethodRequired: false,
             billingConfig: { name: "monthly", interval: "month", intervalCount: 1 },
             features: [{ featureSlug: "tokens", featureType: "flat", config: { price: "10.00" } }],
           },

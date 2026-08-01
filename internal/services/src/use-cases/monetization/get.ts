@@ -245,7 +245,6 @@ const SERVER_VERSION_DEFAULTS = {
   whenToBill: "pay_in_advance",
   collectionMethod: "charge_automatically",
   dueBehaviour: "cancel",
-  paymentMethodRequired: true,
   autoRenew: true,
   trialUnits: 0,
   gracePeriod: 0,
@@ -664,6 +663,7 @@ function projectPlan(
     version: {
       currency: current.currency,
       paymentProvider: current.paymentProvider,
+      paymentMethodRequired: current.paymentMethodRequired,
       billingConfig: {
         name: current.billingConfig.name,
         interval: current.billingConfig.billingInterval,

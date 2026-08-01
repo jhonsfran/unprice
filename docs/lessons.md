@@ -242,6 +242,12 @@ patterns. Keep it cheap to load and useful.
 
 ## Next.js And Dashboard
 
+- 2026-08-01: Auth.js sessions are host-only; redirect base-host `/auth/*` entries to `APP_DOMAIN`
+  before sign-in and allow final auth redirects only on that canonical origin instead of sharing the
+  session cookie with the marketing host.
+- 2026-08-01: When middleware derives dashboard scope from the URL, set the corresponding
+  `NextRequest` cookies before `NextResponse.rewrite` and forward its request headers; the
+  private response-header copying workaround can leave the first Next 15 RSC render on stale scope.
 - 2026-07-11: Keep an explicit `/dashboard/page.tsx` terminal route because the root dashboard layout
   has parallel slots but no content page; its parent layout already supplies `force-dynamic`, so do
   not duplicate the segment flag on the page.

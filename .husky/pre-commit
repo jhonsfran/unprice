@@ -18,6 +18,6 @@ TB_VERSION_WARNING=0 tb build
 cd ../../
 
 echo "Running react-doctor (errors only)"
-npx react-doctor@0.4.0 --project nextjs --no-warnings --no-score
+npx react-doctor@0.5.8 --project nextjs --no-warnings --no-score
 
 echo "Pre-commit hook completed"

@@ -5005,6 +5005,11 @@
                                   "type": "string",
                                   "enum": ["stripe", "square", "sandbox"]
                                 },
+                                "paymentMethodRequired": {
+                                  "type": "boolean",
+                                  "default": true,
+                                  "description": "Whether a customer must provide a payment method before starting this plan. Defaults to true"
+                                },
                                 "billingConfig": {
                                   "type": "object",
                                   "properties": {
@@ -5582,6 +5587,11 @@
                                   "paymentProvider": {
                                     "type": "string",
                                     "enum": ["stripe", "square", "sandbox"]
+                                  },
+                                  "paymentMethodRequired": {
+                                    "type": "boolean",
+                                    "default": true,
+                                    "description": "Whether a customer must provide a payment method before starting this plan. Defaults to true"
                                   },
                                   "billingConfig": {
                                     "type": "object",

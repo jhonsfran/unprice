@@ -8,7 +8,7 @@ import AppMiddleware from "~/middleware/app"
 import SitesMiddleware from "~/middleware/sites"
 
 export default auth((req) => {
-  const { domain, path } = parse(req)
+  const { domain, fullPath, path } = parse(req)
   const subdomain = getValidSubdomain(domain) ?? ""
 
   // Bypass Vercel's required endpoint
@@ -28,6 +28,12 @@ export default auth((req) => {
 
   // 3. validate subdomains www and empty (landing page)
   if (subdomain === "" || subdomain === "www") {
+    // Auth creates host-only session cookies. Always begin auth on the app host so
+    // the callback returns where the browser can send that session cookie.
+    if (path === "/auth" || path.startsWith("/auth/")) {
+      return NextResponse.redirect(new URL(fullPath, APP_DOMAIN))
+    }
+
     // If the user is logged in, we redirect them to the app
     if (req.auth?.user && path === "/") {
       return NextResponse.redirect(new URL(APP_DOMAIN, req.url))
