@@ -1,8 +1,9 @@
-import { relations } from "drizzle-orm"
+import { relations, sql } from "drizzle-orm"
 import {
   bigint,
   boolean,
   foreignKey,
+  index,
   integer,
   json,
   primaryKey,
@@ -100,6 +101,11 @@ export const versions = pgTableProject(
     metadata: json("metadata").$type<PlanVersionMetadata>(),
     paymentMethodRequired: boolean("payment_method_required").default(false).notNull(),
     version: integer("version").default(1).notNull(),
+
+    // content address of the configuration document that produced this version,
+    // set only by `monetization.apply`. Null for versions authored in the
+    // dashboard or by a plan template, which have no document behind them.
+    configHash: text("config_hash"),
   },
   (table) => ({
     planfk: foreignKey({
@@ -111,6 +117,12 @@ export const versions = pgTableProject(
       columns: [table.id, table.projectId],
       name: "plan_versions_plan_id_fkey",
     }),
+    // Deliberately not unique: nothing in the apply path runs in a transaction,
+    // so a concurrent collision has to surface as a duplicate row the next apply
+    // can reconcile, not as an untyped database error.
+    configHashIdx: index("plan_versions_config_hash_idx")
+      .on(table.projectId, table.planId, table.configHash)
+      .where(sql`${table.configHash} IS NOT NULL`),
   })
 )
 

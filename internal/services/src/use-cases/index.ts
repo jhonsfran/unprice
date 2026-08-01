@@ -118,6 +118,19 @@ export type {
   PaidAction,
 } from "./plan-template/apply"
 export {
+  applyMonetizationConfig,
+  applyMonetizationConfigFailureStateSchema,
+  applyMonetizationConfigInputSchema,
+  applyMonetizationConfigOutputSchema,
+  monetizationPlanOutcomeSchema,
+} from "./monetization/apply"
+export type {
+  ApplyMonetizationConfigDeps,
+  ApplyMonetizationConfigInput,
+  ApplyMonetizationConfigOutput,
+  MonetizationPlanOutcome,
+} from "./monetization/apply"
+export {
   seedOnboardingEvidence,
   seedOnboardingEvidenceInputSchema,
   seedOnboardingEvidenceOutputSchema,

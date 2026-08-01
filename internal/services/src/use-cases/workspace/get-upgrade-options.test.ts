@@ -94,6 +94,7 @@ function createPlanVersion(overrides: Partial<PlanVersionApi> = {}): PlanVersion
     metadata: null,
     paymentMethodRequired: false,
     version: 1,
+    configHash: null,
     plan,
     planFeatures: [],
     flatPrice: "$0.00",

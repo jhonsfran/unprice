@@ -1,0 +1,2 @@
+ALTER TABLE "unprice_plan_versions" ADD COLUMN "config_hash" text;--> statement-breakpoint
+CREATE INDEX "plan_versions_config_hash_idx" ON "unprice_plan_versions" USING btree ("project_id","plan_id","config_hash") WHERE "unprice_plan_versions"."config_hash" IS NOT NULL;

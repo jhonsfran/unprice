@@ -1236,6 +1236,7 @@ export class PlanService {
     collectionMethod,
     dueBehaviour,
     paymentMethodRequired,
+    configHash,
   }: {
     projectId: string
     planId: string
@@ -1256,6 +1257,7 @@ export class PlanService {
     collectionMethod?: PlanVersion["collectionMethod"]
     dueBehaviour?: PlanVersion["dueBehaviour"]
     paymentMethodRequired?: PlanVersion["paymentMethodRequired"]
+    configHash?: PlanVersion["configHash"]
   }): Promise<
     Result<{ state: "plan_not_found" } | { state: "ok"; planVersion: PlanVersion }, FetchError>
   > {
@@ -1302,6 +1304,7 @@ export class PlanService {
             paymentMethodRequired: paymentMethodRequired ?? false,
             metadata,
             version: Number(countVersionsPlan) + 1,
+            configHash: configHash ?? null,
           })
           .returning()
           .then((rows) => rows[0] ?? null)
