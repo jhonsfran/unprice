@@ -27,6 +27,34 @@ const ErrorCode = z.enum([
   "DELETE_PROTECTED",
 ])
 
+/**
+ * Structured, machine-readable detail for the monetization configuration
+ * operations. A configuration document is a tree, so "which part of it is
+ * wrong" cannot survive being flattened into a sentence — an agent needs the
+ * failure kind and the JSON paths to act on. Optional everywhere: only the
+ * routes that can say something precise populate it.
+ */
+export const monetizationErrorDetailsSchema = z.object({
+  kind: z.enum(["invalid_config", "slug_conflict", "unresolved_reference"]).openapi({
+    description: "What kind of configuration failure this is",
+    example: "invalid_config",
+  }),
+  issues: z
+    .array(
+      z.object({
+        path: z.string().openapi({
+          description: "JSON path into the submitted document",
+          example: "config.plans[0].version.features[1].featureSlug",
+        }),
+        message: z.string(),
+      })
+    )
+    .optional()
+    .openapi({ description: "Per-location detail, when the failure has locations" }),
+})
+
+export type MonetizationErrorDetails = z.infer<typeof monetizationErrorDetailsSchema>
+
 // biome-ignore lint/suspicious/noExplicitAny: <explanation>
 export function errorSchemaFactory(code: z.ZodEnum<any>) {
   return z.object({
@@ -46,6 +74,7 @@ export function errorSchemaFactory(code: z.ZodEnum<any>) {
         description: "Please always include the requestId in your error report",
         example: "req_1234",
       }),
+      details: monetizationErrorDetailsSchema.optional(),
     }),
   })
 }
@@ -65,6 +94,7 @@ export const ErrorSchema = z.object({
       description: "Please always include the requestId in your error report",
       example: "req_1234",
     }),
+    details: monetizationErrorDetailsSchema.optional(),
   }),
 })
 
@@ -131,9 +161,21 @@ function statusToCode(status: StatusCode): z.infer<typeof ErrorCode> {
 
 export class UnpriceApiError extends HTTPException {
   public readonly code: z.infer<typeof ErrorCode>
-  constructor({ code, message }: { code: z.infer<typeof ErrorCode>; message: string }) {
+  /** Optional machine-readable detail. Absent unless the thrower can be precise. */
+  public readonly details?: MonetizationErrorDetails
+
+  constructor({
+    code,
+    message,
+    details,
+  }: {
+    code: z.infer<typeof ErrorCode>
+    message: string
+    details?: MonetizationErrorDetails
+  }) {
     super(codeToStatus(code) as ContentfulStatusCode, { message })
     this.code = code
+    this.details = details
   }
 }
 
@@ -242,6 +284,8 @@ export function handleError(err: Error, c: Context<HonoEnv>): Response {
           docs: `https://docs.unprice.dev/api-reference/errors/code/${err.code}`,
           message: clientErrorMessage(err.status, err.message),
           requestId: c.get("requestId"),
+          // a 5XX message is replaced with a generic one, so its detail goes with it
+          ...(err.details && err.status < 500 ? { details: err.details } : {}),
         },
       },
       { status: err.status }

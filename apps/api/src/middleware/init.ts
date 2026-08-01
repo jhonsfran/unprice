@@ -217,6 +217,8 @@ export function init(): MiddlewareHandler<HonoEnv> {
       apikey,
       customer: svcCtx.customers,
       plans: svcCtx.plans,
+      features: svcCtx.features,
+      events: svcCtx.events,
       ledger: svcCtx.ledger,
       wallet: svcCtx.wallet,
       billing: svcCtx.billing,

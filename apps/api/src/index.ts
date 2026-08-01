@@ -25,6 +25,8 @@ import { registerIngestEventsSyncV1 } from "./routes/events/ingestEventsSyncV1"
 import { registerIngestEventsV1 } from "./routes/events/ingestEventsV1"
 import { registerReplayIngestionEventsV1 } from "./routes/events/replayIngestionEventsV1"
 import { registerGetFeaturesV1 } from "./routes/features/getFeaturesV1"
+import { registerApplyMonetizationV1 } from "./routes/monetization/applyMonetizationV1"
+import { registerGetMonetizationV1 } from "./routes/monetization/getMonetizationV1"
 import { registerCreatePaymentMethodV1 } from "./routes/payments/methods/createPaymentMethodV1"
 import { registerListPaymentMethodsV1 } from "./routes/payments/methods/listPaymentMethodsV1"
 import { registerProviderSetupV1 } from "./routes/payments/providers/providerSetupV1"
@@ -185,6 +187,10 @@ registerGetFeaturesV1(app)
 
 // Invoice routes
 registerGetInvoiceV1(app)
+
+// Monetization configuration routes
+registerApplyMonetizationV1(app)
+registerGetMonetizationV1(app)
 
 // Payment routes
 registerListPaymentMethodsV1(app)

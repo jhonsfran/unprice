@@ -13,6 +13,8 @@ import { route as usageRecordRoute } from "~/routes/events/ingestEventsV1"
 import { route as ingestionEventsReplayRoute } from "~/routes/events/replayIngestionEventsV1"
 import { route as featuresListRoute } from "~/routes/features/getFeaturesV1"
 import { route as invoicesGetRoute } from "~/routes/invoices/getInvoiceV1"
+import { route as monetizationApplyRoute } from "~/routes/monetization/applyMonetizationV1"
+import { route as monetizationGetRoute } from "~/routes/monetization/getMonetizationV1"
 import { route as paymentMethodsCreateRoute } from "~/routes/payments/methods/createPaymentMethodV1"
 import { route as paymentMethodsListRoute } from "~/routes/payments/methods/listPaymentMethodsV1"
 import { route as paymentProviderCallbacksSetupRoute } from "~/routes/payments/providers/providerSetupV1"
@@ -65,6 +67,8 @@ const routes = [
   walletCreditBalanceRoute,
   walletRoute,
   invoicesGetRoute,
+  monetizationApplyRoute,
+  monetizationGetRoute,
   analyticsUsageRoute,
   analyticsChargesExplainRoute,
   ingestionEventsStatusRoute,
@@ -98,6 +102,8 @@ const expectedRoutes = new Map<string, string>([
   ["walletCredits.balance", "GET /v1/wallet-credits/balance/{walletId}"],
   ["wallet.internalGet", "GET /v1/internal/wallet/get"],
   ["invoices.get", "GET /v1/invoices/get/{invoiceId}"],
+  ["monetization.apply", "POST /v1/monetization/apply"],
+  ["monetization.get", "GET /v1/monetization/get"],
   ["analytics.usage.get", "POST /v1/analytics/usage/get"],
   ["analytics.charges.explain", "POST /v1/analytics/charges/explain"],
   ["ingestionEvents.status", "POST /v1/ingestion-events/status"],
@@ -145,6 +151,8 @@ const expectedSdkPublicOperations = [
   "wallet.balance",
   "walletCredits.balance",
   "invoices.get",
+  "monetization.apply",
+  "monetization.get",
   "analytics.usage.get",
   "analytics.charges.explain",
   "ingestionEvents.status",

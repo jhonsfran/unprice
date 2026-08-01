@@ -8,6 +8,8 @@ import type { BudgetRunService } from "@unprice/services/budget-runs"
 import type { Cache } from "@unprice/services/cache"
 import type { CustomerService } from "@unprice/services/customers"
 import type { EntitlementService } from "@unprice/services/entitlements"
+import type { EventService } from "@unprice/services/events"
+import type { FeatureService } from "@unprice/services/features"
 import type { RawIngestionQueueClient } from "@unprice/services/ingestion"
 import type { LedgerGateway } from "@unprice/services/ledger"
 import type { Metrics } from "@unprice/services/metrics"
@@ -28,6 +30,8 @@ export type DomainServiceContext = {
   subscription: SubscriptionService
   entitlement: EntitlementService
   plans: PlanService
+  features: FeatureService
+  events: EventService
   ingestion: IngestionService
   project: ProjectService
   apikey: ApiKeysService
