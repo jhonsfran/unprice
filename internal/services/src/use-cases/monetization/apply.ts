@@ -525,12 +525,16 @@ export async function resolvePlanDraft(
  * makes money. Called immediately before the new holder is written: a project
  * with no default plan cannot answer a `customers.signUp` that omits `planSlug`,
  * so that window is kept to two adjacent writes.
+ *
+ * Returns the row it demoted, because the caller is holding plan rows it read
+ * before this ran: a stale copy still claiming the flag makes the very next
+ * `updatePlanRecord` ask for a default that is already taken.
  */
 async function releaseDefaultPlan(
   deps: ApplyMonetizationConfigDeps,
   projectId: string,
   planId: string
-): Promise<Result<{ state: "ok" } | ApplyFailure, FetchError>> {
+): Promise<Result<{ state: "ok"; released: Plan | null } | ApplyFailure, FetchError>> {
   const currentDefault = await wrapResult(
     deps.db.query.plans.findFirst({
       where: (plan, { and, eq }) => and(eq(plan.projectId, projectId), eq(plan.defaultPlan, true)),
@@ -544,7 +548,7 @@ async function releaseDefaultPlan(
   if (currentDefault.err) return Err(currentDefault.err)
 
   const holder = (currentDefault.val as Plan | undefined) ?? null
-  if (!holder || holder.id === planId) return Ok({ state: "ok" })
+  if (!holder || holder.id === planId) return Ok({ state: "ok", released: null })
 
   const released = await deps.services.plans.updatePlanRecord({
     projectId,
@@ -562,14 +566,16 @@ async function releaseDefaultPlan(
     return Err(
       new FetchError({
         message: `could not release the default plan from "${holder.slug}": ${released.val.state}`,
-        // Something else moved a flag underneath us; the same document sent
-        // again converges.
-        retry: true,
+        // This call asks for `defaultPlan: false`, so neither default conflict
+        // can fire and the only state left is enterprise_plan_exists: the
+        // project already holds two enterprise plans. The service picks between
+        // them with an unordered findFirst, so re-running lands nowhere new.
+        retry: false,
       })
     )
   }
 
-  return Ok({ state: "ok" })
+  return Ok({ state: "ok", released: released.val.plan })
 }
 
 /**
@@ -736,6 +742,17 @@ async function runApply(
       const released = await releaseDefaultPlan(deps, projectId, row.id)
       if (released.err) return Err(released.err)
       if (released.val.state !== "ok") return Ok(released.val)
+
+      // The row that just lost the flag may be a plan further down this
+      // document. Its snapshot here was read before the release and still claims
+      // the flag, and `nextDefaultPlan` would then ask for a default that is
+      // already taken — which is exactly what updatePlanRecord refuses.
+      const demoted = released.val.released
+      if (demoted) {
+        for (const [slug, candidate] of planRows) {
+          if (candidate.id === demoted.id) planRows.set(slug, demoted)
+        }
+      }
     }
 
     const updated = await deps.services.plans.updatePlanRecord({
@@ -760,9 +777,12 @@ async function runApply(
       return Err(
         new FetchError({
           message: `could not update plan "${plan.slug}": ${updated.val.state}`,
-          // Another writer holds an exclusivity flag; the same document sent
-          // again after it settles converges.
-          retry: true,
+          // default_plan_exists means another writer took the flag between the
+          // release and this write, and the same document sent again converges.
+          // enterprise_plan_exists means the project already holds two
+          // enterprise plans; the service picks between them with an unordered
+          // findFirst, so no number of retries settles it.
+          retry: updated.val.state === "default_plan_exists",
         })
       )
     }

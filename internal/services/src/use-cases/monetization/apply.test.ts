@@ -9,13 +9,20 @@ import {
   type PlanVersion,
   type PlanVersionFeature,
   type ResetConfig,
+  computeConfigHash,
   isResetCadenceAtMostBilling,
+  monetizationConfigSchema,
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { describe, expect, it, vi } from "vitest"
 import type { ServiceContext } from "../../context"
-import { type ApplyMonetizationConfigOutput, applyMonetizationConfig } from "./apply"
+import type { MaterializeContext } from "../plan-template/materialize"
+import {
+  type ApplyMonetizationConfigOutput,
+  applyMonetizationConfig,
+  resolvePlanDraft,
+} from "./apply"
 
 const PROJECT_ID = "proj_123"
 
@@ -113,6 +120,18 @@ function createLogger() {
   }
 }
 
+/**
+ * Every row leaving the fake database is detached from the store, exactly as a
+ * real query result is.
+ *
+ * Handing back the live object makes anything the caller kept magically fresh,
+ * which is the one thing a fake must never do: read-then-write staleness is
+ * invisible in the test and real in production.
+ */
+function detach<T>(row: T): T {
+  return { ...row }
+}
+
 // ---------------------------------------------------------------------------
 // In-memory project. Every fake mirrors the real service's observable contract,
 // including the states that make this use case hard: `plan_version_published`
@@ -154,18 +173,24 @@ function createHarness() {
   const db = {
     query: {
       versions: {
-        findMany: vi.fn(async (args?: QueryArgs) => runQuery(store.versions, args)),
+        // `planFeatures` stays shared by reference: a real `with` join re-reads
+        // the rows, so a feature written since is visible either way.
+        findMany: vi.fn(async (args?: QueryArgs) => runQuery(store.versions, args).map(detach)),
       },
       plans: {
-        findFirst: vi.fn(async (args?: QueryArgs) => runQuery(store.plans, args)[0]),
+        findFirst: vi.fn(async (args?: QueryArgs) => {
+          const plan = runQuery(store.plans, args)[0]
+          return plan && detach(plan)
+        }),
       },
     },
     insert,
   } as unknown as Database
 
-  const getPlanBySlug = vi.fn(async ({ slug }: { slug: string }) =>
-    Ok(store.plans.find((plan) => plan.slug === slug) ?? null)
-  )
+  const getPlanBySlug = vi.fn(async ({ slug }: { slug: string }) => {
+    const plan = store.plans.find((candidate) => candidate.slug === slug)
+    return Ok(plan ? detach(plan) : null)
+  })
 
   const updatePlanRecord = vi.fn(async (input: UpdatePlanInput) => {
     const plan = store.plans.find(({ id }) => id === input.id)
@@ -186,7 +211,7 @@ function createHarness() {
     plan.enterprisePlan = input.enterprisePlan ?? false
     defaultHolders.push(store.plans.filter(({ defaultPlan }) => defaultPlan).length)
 
-    return Ok({ state: "ok" as const, plan })
+    return Ok({ state: "ok" as const, plan: detach(plan) })
   })
 
   const createPlanVersionRecord = vi.fn(async (input: CreatePlanVersionInput) => {
@@ -224,7 +249,7 @@ function createHarness() {
     } as unknown as StoredPlanVersion
 
     store.versions.push(planVersion)
-    return Ok({ state: "ok" as const, planVersion })
+    return Ok({ state: "ok" as const, planVersion: detach(planVersion) })
   })
 
   const updatePlanVersionRecord = vi.fn(async (input: UpdatePlanVersionInput) => {
@@ -234,7 +259,7 @@ function createHarness() {
     if (input.title !== undefined) planVersion.title = input.title
     if (input.description !== undefined) planVersion.description = input.description
 
-    return Ok({ state: "ok" as const, planVersion })
+    return Ok({ state: "ok" as const, planVersion: detach(planVersion) })
   })
 
   const createPlanVersionFeatureRecord = vi.fn(async (input: CreatePlanVersionFeatureInput) => {
@@ -319,12 +344,13 @@ function createHarness() {
       planVersionFeature.unitOfMeasure = input.unitOfMeasure
     }
 
-    return Ok({ state: "ok" as const, planVersionFeature })
+    return Ok({ state: "ok" as const, planVersionFeature: detach(planVersionFeature) })
   })
 
-  const getFeatureBySlug = vi.fn(async ({ slug }: { slug: string }) =>
-    Ok(store.features.find((feature) => feature.slug === slug) ?? null)
-  )
+  const getFeatureBySlug = vi.fn(async ({ slug }: { slug: string }) => {
+    const feature = store.features.find((candidate) => candidate.slug === slug)
+    return Ok(feature ? detach(feature) : null)
+  })
 
   const createFeatureRecord = vi.fn(async (input: CreateFeatureInput) => {
     const feature = {
@@ -338,7 +364,7 @@ function createHarness() {
     } as unknown as Feature
 
     store.features.push(feature)
-    return Ok(feature)
+    return Ok(detach(feature))
   })
 
   const updateFeatureRecord = vi.fn(async (input: UpdateFeatureInput) => {
@@ -351,10 +377,10 @@ function createHarness() {
     // caller has to hand the current value back.
     feature.unitOfMeasure = input.unitOfMeasure ?? ""
 
-    return Ok({ state: "ok" as const, feature })
+    return Ok({ state: "ok" as const, feature: detach(feature) })
   })
 
-  const listEventsByProject = vi.fn(async () => Ok(store.events))
+  const listEventsByProject = vi.fn(async () => Ok(store.events.map(detach)))
 
   const createEvent = vi.fn(async (input: CreateEventInput) => {
     const event = {
@@ -366,7 +392,7 @@ function createHarness() {
     } as unknown as Event
 
     store.events.push(event)
-    return Ok(event)
+    return Ok(detach(event))
   })
 
   const updateEvent = vi.fn(async (input: UpdateEventInput) => {
@@ -379,7 +405,7 @@ function createHarness() {
       )
     }
 
-    return Ok({ state: "ok" as const, event })
+    return Ok({ state: "ok" as const, event: detach(event) })
   })
 
   const services = {
@@ -484,6 +510,124 @@ function expectApplied(
 function versionsOfPlan(store: ReturnType<typeof createHarness>["store"], slug: string) {
   const plan = store.plans.find((candidate) => candidate.slug === slug)
   return store.versions.filter((version) => version.planId === plan?.id)
+}
+
+// ---------------------------------------------------------------------------
+// Draft resolution on its own. `resolvePlanDraft` decides which existing version
+// a content address maps to, and the interesting states — two drafts with one
+// hash, a live version, a half-written draft — are all seeded, not produced by
+// arranging several full applies.
+// ---------------------------------------------------------------------------
+
+/** The document's free plan, as parse output. The hash is only defined on that. */
+function parsedFreePlan(mutate?: (config: MonetizationConfigInput) => void) {
+  const config = baseConfig()
+  mutate?.(config)
+  const plan = monetizationConfigSchema.parse(config).plans[0]
+  if (!plan) throw new Error("fixture changed")
+  return plan
+}
+
+function seedDraftContext(harness: ReturnType<typeof createHarness>) {
+  const { store, deps } = harness
+  const planRow = {
+    id: "plan_free",
+    projectId: PROJECT_ID,
+    slug: "free",
+    title: "Free",
+    description: "",
+    active: true,
+    defaultPlan: true,
+    enterprisePlan: false,
+  } as unknown as Plan
+
+  store.plans.push(planRow)
+  store.features.push(
+    {
+      id: "feature_support",
+      projectId: PROJECT_ID,
+      slug: "support",
+      title: "Support",
+      description: "",
+      unitOfMeasure: "access",
+      meterConfig: null,
+    } as unknown as Feature,
+    {
+      id: "feature_chat-messages",
+      projectId: PROJECT_ID,
+      slug: "chat-messages",
+      title: "Chat messages",
+      description: "",
+      unitOfMeasure: "message",
+      meterConfig: null,
+    } as unknown as Feature
+  )
+  store.events.push({
+    id: "event_chat_request",
+    projectId: PROJECT_ID,
+    slug: "chat_request",
+    name: "Chat request",
+    availableProperties: [],
+  } as unknown as Event)
+
+  return {
+    planRow,
+    context: {
+      deps,
+      projectId: PROJECT_ID,
+      caches: {
+        features: new Map(store.features.map((feature) => [feature.slug, feature])),
+        events: new Map(store.events.map((event) => [event.slug, event])),
+        planVersionFeatureSlugs: new Map<string, Set<string>>(),
+      },
+    } as MaterializeContext,
+  }
+}
+
+function seedVersion(
+  store: ReturnType<typeof createHarness>["store"],
+  {
+    id,
+    configHash,
+    createdAtM,
+    status = "draft",
+    featureSlugs,
+  }: {
+    id: string
+    configHash: string
+    createdAtM: number
+    status?: "draft" | "published"
+    featureSlugs: string[]
+  }
+) {
+  const version = {
+    id,
+    projectId: PROJECT_ID,
+    planId: "plan_free",
+    title: "Free",
+    description: "",
+    currency: "USD",
+    paymentProvider: "stripe",
+    status,
+    configHash,
+    createdAtM,
+    billingConfig: {
+      name: "monthly",
+      billingInterval: "month",
+      billingIntervalCount: 1,
+      billingAnchor: "dayOfCreation",
+      planType: "recurring",
+    },
+    planFeatures: featureSlugs.map((slug) => ({
+      id: `feature_version_${id}_${slug}`,
+      featureId: `feature_${slug}`,
+      unitOfMeasure: slug === "support" ? "access" : "message",
+      feature: store.features.find((feature) => feature.slug === slug),
+    })),
+  } as unknown as StoredPlanVersion
+
+  store.versions.push(version)
+  return version
 }
 
 describe("applyMonetizationConfig", () => {
@@ -891,6 +1035,35 @@ describe("applyMonetizationConfig", () => {
     expect(second.integrationContract.defaultPlan.slug).toBe("pro")
   })
 
+  it("renames the outgoing default plan when it is listed after the new one", async () => {
+    const { deps, store, spies } = createHarness()
+
+    await applyMonetizationConfig(deps, { projectId: PROJECT_ID, config: baseConfig() })
+
+    const moved = baseConfig()
+    const [free, pro] = moved.plans
+    if (!free || !pro) throw new Error("fixture changed")
+    pro.defaultPlan = true
+    free.defaultPlan = false
+    // The outgoing holder is written after the flag has already moved, and it
+    // has a label change of its own so it cannot be skipped. Its row was read
+    // before the release, so anything computed off that snapshot is stale.
+    free.title = "Free Tier"
+    moved.plans = [pro, free]
+
+    const second = expectApplied(
+      await applyMonetizationConfig(deps, { projectId: PROJECT_ID, config: moved })
+    )
+
+    expect(store.plans.find(({ slug }) => slug === "free")).toMatchObject({
+      title: "Free Tier",
+      defaultPlan: false,
+    })
+    expect(store.plans.find(({ slug }) => slug === "pro")?.defaultPlan).toBe(true)
+    expect(second.plans.map(({ status }) => status)).toEqual(["unchanged", "unchanged"])
+    expect(spies.createPlanVersionRecord).toHaveBeenCalledTimes(2)
+  })
+
   it("takes the default from a plan the document does not mention", async () => {
     const { deps, store } = createHarness()
 
@@ -1157,5 +1330,101 @@ describe("applyMonetizationConfig", () => {
       unchanged: 0,
       published: 2,
     })
+  })
+})
+
+describe("resolvePlanDraft", () => {
+  it("reuses the newest of two drafts sharing a content address", async () => {
+    const harness = createHarness()
+    const { context, planRow } = seedDraftContext(harness)
+    const plan = parsedFreePlan()
+    const configHash = computeConfigHash(plan)
+
+    seedVersion(harness.store, {
+      id: "pv_older",
+      configHash,
+      createdAtM: 1,
+      featureSlugs: ["support", "chat-messages"],
+    })
+    seedVersion(harness.store, {
+      id: "pv_newer",
+      configHash,
+      createdAtM: 2,
+      featureSlugs: ["support", "chat-messages"],
+    })
+
+    const resolved = await resolvePlanDraft(context, { plan, planRow })
+
+    expect(resolved.err).toBeUndefined()
+    expect(resolved.val).toMatchObject({
+      state: "ok",
+      origin: "unchanged",
+      configHash,
+      outcome: { slug: "free", planVersionId: "pv_newer", status: "unchanged" },
+      staleDrafts: [{ slug: "free", planVersionId: "pv_older" }],
+    })
+    expect(harness.spies.createPlanVersionRecord).not.toHaveBeenCalled()
+    expect(harness.spies.createPlanVersionFeatureRecord).not.toHaveBeenCalled()
+  })
+
+  it("short circuits on a live version without touching it", async () => {
+    const harness = createHarness()
+    const { context, planRow } = seedDraftContext(harness)
+    const plan = parsedFreePlan()
+    const configHash = computeConfigHash(plan)
+
+    // Deliberately incomplete: a published version is reported as it stands, not
+    // finished, so completeness must not be consulted on this branch.
+    seedVersion(harness.store, {
+      id: "pv_live",
+      configHash,
+      createdAtM: 1,
+      status: "published",
+      featureSlugs: ["support"],
+    })
+
+    const resolved = await resolvePlanDraft(context, { plan, planRow })
+
+    expect(resolved.val).toMatchObject({
+      state: "ok",
+      origin: "published",
+      outcome: { planVersionId: "pv_live", status: "published" },
+      staleDrafts: [],
+    })
+    expect(harness.spies.createPlanVersionFeatureRecord).not.toHaveBeenCalled()
+    expect(harness.spies.updatePlanVersionRecord).not.toHaveBeenCalled()
+    expect(harness.spies.updatePlanVersionFeatureRecord).not.toHaveBeenCalled()
+  })
+
+  it("finishes a half-written draft in place and reports it as created", async () => {
+    const harness = createHarness()
+    const { context, planRow } = seedDraftContext(harness)
+    const plan = parsedFreePlan()
+    const configHash = computeConfigHash(plan)
+
+    const partial = seedVersion(harness.store, {
+      id: "pv_partial",
+      configHash,
+      createdAtM: 1,
+      featureSlugs: ["support"],
+    })
+
+    const resolved = await resolvePlanDraft(context, { plan, planRow })
+
+    expect(resolved.val).toMatchObject({
+      state: "ok",
+      origin: "resumed",
+      outcome: { planVersionId: "pv_partial", status: "created" },
+      staleDrafts: [],
+    })
+    expect(harness.spies.createPlanVersionRecord).not.toHaveBeenCalled()
+    expect(partial.planFeatures.map(({ feature }) => feature.slug)).toEqual([
+      "support",
+      "chat-messages",
+    ])
+    // Only the missing feature is written, and it continues the existing order.
+    expect(harness.spies.createPlanVersionFeatureRecord.mock.calls.map(([input]) => input)).toEqual(
+      [expect.objectContaining({ featureId: "feature_chat-messages", order: 2048 })]
+    )
   })
 })
