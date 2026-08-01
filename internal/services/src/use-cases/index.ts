@@ -139,6 +139,8 @@ export {
   getMonetizationConfigOutputSchema,
   monetizationConfigDocumentSchema,
   monetizationPlanStateSchema,
+  monetizationWarningCodeSchema,
+  monetizationWarningSchema,
   unrepresentablePlanReasonSchema,
   unrepresentablePlanSchema,
 } from "./monetization/get"
@@ -148,6 +150,7 @@ export type {
   GetMonetizationConfigOutput,
   MonetizationConfigDocument,
   MonetizationPlanState,
+  MonetizationWarning,
   UnrepresentablePlan,
 } from "./monetization/get"
 export {

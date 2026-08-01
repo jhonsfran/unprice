@@ -14,7 +14,11 @@ import type { Logger } from "@unprice/logs"
 import { describe, expect, it, vi } from "vitest"
 import type { ServiceContext } from "../../context"
 import { applyMonetizationConfig } from "./apply"
-import { type GetMonetizationConfigOutput, getMonetizationConfig } from "./get"
+import {
+  type GetMonetizationConfigOutput,
+  getMonetizationConfig,
+  monetizationConfigDocumentSchema,
+} from "./get"
 
 const PROJECT_ID = "proj_123"
 const OTHER_PROJECT_ID = "proj_other"
@@ -34,6 +38,8 @@ type UpdateEventInput = Parameters<ServiceContext["events"]["updateEvent"]>[0]
 type StoredPlanVersion = PlanVersion & {
   planFeatures: Array<PlanVersionFeature & { feature: Feature }>
 }
+
+const USD = { code: "USD", base: 10, exponent: 2 } as const
 
 const RECURRING_BILLING_CONFIG: BillingConfig = {
   name: "monthly",
@@ -229,8 +235,14 @@ function createHarness() {
       ...input,
       id: `feature_version_${input.planVersionId}_${feature.slug}`,
       unitOfMeasure: input.unitOfMeasure ?? feature.unitOfMeasure ?? "units",
-      // The real writer stores a zero allowance as NULL and derives the reset
-      // cadence for a non-usage feature away. Both are load-bearing for `get`.
+      // Mirrors `plans/service.ts` exactly, including the `limit === 0 -> null`
+      // coercion. That branch is unreachable *through the boundary* now that it
+      // rejects a zero limit, and it stays anyway: this fake models the
+      // collaborator's behaviour, not the caller's current constraints. The
+      // dashboard and direct SQL still reach the real writer, and rows carrying
+      // that coercion are exactly the population `unrepresentablePlans` exists
+      // to absorb. Narrowing it to today's boundary would stop it catching the
+      // thing it was built to catch.
       limit: input.limit === 0 ? null : (input.limit ?? null),
       resetConfig: input.featureType === "usage" ? (input.resetConfig ?? null) : null,
       meterConfig: input.featureType === "usage" ? (input.meterConfig ?? null) : null,
@@ -354,6 +366,8 @@ function baseConfig(): MonetizationConfigInput {
         unitOfMeasure: "message",
       },
       { slug: "storage", title: "Storage", description: "Stored data", unitOfMeasure: "GB" },
+      { slug: "seats", title: "Seats", description: "Team seats", unitOfMeasure: "seats" },
+      { slug: "bandwidth", title: "Bandwidth", description: "Data transfer", unitOfMeasure: "GB" },
     ],
     plans: [
       {
@@ -413,6 +427,24 @@ function baseConfig(): MonetizationConfigInput {
               featureType: "usage",
               config: { usageMode: "unit", price: "0.005" },
               meterConfig: { eventSlug: "chat_request", aggregationMethod: "count" },
+            },
+            // `package` and `tier` are here so every pricing mode makes the
+            // get -> apply trip, not only flat and the two usage modes.
+            {
+              featureSlug: "seats",
+              featureType: "package",
+              config: { price: "10.00", units: 5 },
+            },
+            {
+              featureSlug: "bandwidth",
+              featureType: "tier",
+              config: {
+                tierMode: "volume",
+                tiers: [
+                  { firstUnit: 1, lastUnit: 100, unitPrice: "0.02", flatPrice: "5.00" },
+                  { firstUnit: 101, lastUnit: null, unitPrice: "0.01", flatPrice: "0" },
+                ],
+              },
             },
           ],
         },
@@ -485,14 +517,40 @@ describe("getMonetizationConfig", () => {
     // Title, description, and unit come from the feature row, which is the only
     // thing that owns them.
     expect(read.config.features).toEqual([
+      { slug: "bandwidth", title: "Bandwidth", description: "Data transfer", unitOfMeasure: "GB" },
       {
         slug: "chat-messages",
         title: "Chat messages",
         description: "Messages exchanged with the assistant",
         unitOfMeasure: "message",
       },
+      { slug: "seats", title: "Seats", description: "Team seats", unitOfMeasure: "seats" },
       { slug: "storage", title: "Storage", description: "Stored data", unitOfMeasure: "GB" },
       { slug: "support", title: "Support", description: "Human support", unitOfMeasure: "access" },
+    ])
+    // Package and tier survive the projection with exactly the keys their
+    // feature type keeps.
+    expect(read.config.plans[1]?.version.features).toEqual([
+      { featureSlug: "support", featureType: "flat", config: { price: "20.00" } },
+      {
+        featureSlug: "chat-messages",
+        featureType: "usage",
+        config: { usageMode: "unit", price: "0.005" },
+        meterConfig: { eventSlug: "chat_request", aggregationMethod: "count" },
+        resetConfig: { interval: "month", intervalCount: 1 },
+      },
+      { featureSlug: "seats", featureType: "package", config: { price: "10.00", units: 5 } },
+      {
+        featureSlug: "bandwidth",
+        featureType: "tier",
+        config: {
+          tierMode: "volume",
+          tiers: [
+            { firstUnit: 1, lastUnit: 100, unitPrice: "0.02", flatPrice: "5.00" },
+            { firstUnit: 101, lastUnit: null, unitPrice: "0.01", flatPrice: "0" },
+          ],
+        },
+      },
     ])
     expect(read.config.plans.map(({ slug }) => slug)).toEqual(["free", "pro"])
 
@@ -793,7 +851,7 @@ describe("getMonetizationConfig", () => {
     const support = version.planFeatures[0]
     if (!support) throw new Error("fixture changed")
     support.featureType = "tier"
-    const usd = { code: "USD", base: 10, exponent: 2 }
+    const usd = USD
     support.config = {
       tierMode: "volume",
       tiers: [
@@ -977,18 +1035,281 @@ describe("getMonetizationConfig", () => {
     ])
   })
 
-  it("writes nothing", async () => {
+  it("writes nothing, and never backfills a content address onto a version without one", async () => {
     const harness = createHarness()
-    await seedProject(harness)
+    const applied = await seedProject(harness)
+
+    // A version with no content address behind it. Asserting that every version
+    // still *has* a hash would pass no matter what this code does, because
+    // `apply` wrote one onto all of them — the invariant only bites on a version
+    // that starts out null.
+    const unhashed = versionOf(harness.store, applied.plans[1]?.planVersionId ?? "")
+    unhashed.configHash = null
 
     await getMonetizationConfig(harness.getDeps, { projectId: PROJECT_ID })
 
     for (const [name, spy] of Object.entries(harness.writeSpies)) {
       expect(`${name}:${spy.mock.calls.length}`).toBe(`${name}:0`)
     }
-    // Reading must not backfill a content address onto a version that has none.
-    expect(harness.store.versions.every(({ configHash }) => typeof configHash === "string")).toBe(
-      true
-    )
+    expect(unhashed.configHash).toBeNull()
+  })
+
+  it("re-applying a dashboard-authored plan mints a draft, because apply matches only by hash", async () => {
+    const harness = createHarness()
+    const applied = await seedProject(harness)
+
+    // Exactly what a version authored in the dashboard looks like.
+    const dashboardVersion = versionOf(harness.store, applied.plans[1]?.planVersionId ?? "")
+    dashboardVersion.configHash = null
+
+    const read = expectRead(await getMonetizationConfig(harness.getDeps, { projectId: PROJECT_ID }))
+    const versionsBefore = harness.store.versions.length
+
+    const reapplied = await applyMonetizationConfig(harness.applyDeps, {
+      projectId: PROJECT_ID,
+      config: read.config,
+    })
+    if (reapplied.val?.state !== "ok") {
+      throw new Error(`re-apply failed: ${JSON.stringify(reapplied.val)}`)
+    }
+
+    // This is the documented cost of never backfilling a hash on read, not a bug.
+    expect(reapplied.val.plans.map(({ slug, status }) => [slug, status])).toEqual([
+      ["free", "unchanged"],
+      ["pro", "created"],
+    ])
+    expect(harness.store.versions).toHaveLength(versionsBefore + 1)
+    // The version that was already content-addressed is still reused untouched.
+    expect(dashboardVersion.configHash).toBeNull()
+  })
+
+  it("excludes a plan whose stored limit is a zero allowance", async () => {
+    const harness = createHarness()
+    const applied = await seedProject(harness)
+
+    // Not reachable through the boundary any more, but the dashboard and direct
+    // SQL still write it, and a zero limit is stored as null by the real writer.
+    const version = versionOf(harness.store, applied.plans[1]?.planVersionId ?? "")
+    const metered = version.planFeatures[1]
+    if (!metered) throw new Error("fixture changed")
+    metered.limit = 0
+
+    const read = expectRead(await getMonetizationConfig(harness.getDeps, { projectId: PROJECT_ID }))
+
+    expect(read.config.plans.map(({ slug }) => slug)).toEqual(["free"])
+    expect(read.unrepresentablePlans).toEqual([
+      { slug: "pro", reason: "invalid_version", message: expect.any(String) },
+    ])
+    // The rejection comes from the boundary itself, carried through verbatim:
+    // `planVersionFeatureInsertBaseSchema` coerces and would accept 0, so it is
+    // the plan-level parse that catches it.
+    expect(read.unrepresentablePlans[0]?.message).toContain("limit cannot be 0")
+  })
+
+  it("skips an empty newer draft and reads the newest draft that prices something", async () => {
+    const harness = createHarness()
+    const applied = await seedProject(harness)
+
+    const older = versionOf(harness.store, applied.plans[1]?.planVersionId ?? "")
+    harness.store.versions.push({
+      ...older,
+      id: "plan_version_pro_empty",
+      configHash: "another-hash",
+      createdAtM: 999,
+      planFeatures: [],
+    })
+
+    const read = expectRead(await getMonetizationConfig(harness.getDeps, { projectId: PROJECT_ID }))
+
+    // The half-built draft is progress, not a configuration.
+    expect(read.config.plans.map(({ slug }) => slug)).toEqual(["free", "pro"])
+    expect(read.config.plans[1]?.version.features).toHaveLength(4)
+    // It is still reported, newest first, so nothing is hidden.
+    expect(read.plans[1]?.draftVersionIds).toEqual(["plan_version_pro_empty", older.id])
+  })
+
+  it("drops a stale reset cadence left on a feature that is no longer usage", async () => {
+    const harness = createHarness()
+    const applied = await seedProject(harness)
+
+    // `plans/service.ts` only writes resetConfig when the incoming feature type
+    // is usage, so converting a usage feature to flat leaves the old row value
+    // behind. The boundary rejects resetConfig on a non-usage feature.
+    const version = versionOf(harness.store, applied.plans[1]?.planVersionId ?? "")
+    const converted = version.planFeatures[1]
+    if (!converted) throw new Error("fixture changed")
+    expect(converted.resetConfig).not.toBeNull()
+    converted.featureType = "flat"
+    converted.config = {
+      price: { dinero: { amount: 500, currency: USD, scale: 2 }, displayAmount: "5.00" },
+    } as unknown as PlanVersionFeature["config"]
+    converted.meterConfig = null
+
+    const read = expectRead(await getMonetizationConfig(harness.getDeps, { projectId: PROJECT_ID }))
+
+    expect(read.unrepresentablePlans).toEqual([])
+    expect(read.config.plans[1]?.version.features[1]).toEqual({
+      featureSlug: "chat-messages",
+      featureType: "flat",
+      config: { price: "5.00" },
+    })
+  })
+
+  it("warns about inert meter fields instead of dropping them silently", async () => {
+    const harness = createHarness()
+    const applied = await seedProject(harness)
+
+    const version = versionOf(harness.store, applied.plans[0]?.planVersionId ?? "")
+    const metered = version.planFeatures[1]
+    if (!metered) throw new Error("fixture changed")
+    metered.meterConfig = {
+      ...metered.meterConfig,
+      windowSize: "HOUR",
+      groupBy: ["region"],
+    } as unknown as PlanVersionFeature["meterConfig"]
+
+    const read = expectRead(await getMonetizationConfig(harness.getDeps, { projectId: PROJECT_ID }))
+
+    // The plan is still emitted: the document is silent about these, not wrong.
+    expect(read.unrepresentablePlans).toEqual([])
+    expect(read.config.plans[0]?.version.features[1]?.meterConfig).toEqual({
+      eventSlug: "chat_request",
+      aggregationMethod: "count",
+    })
+    expect(read.warnings).toEqual([
+      {
+        planSlug: "free",
+        featureSlug: "chat-messages",
+        code: "meter_fields_dropped",
+        message: expect.stringContaining("groupBy, windowSize"),
+      },
+    ])
+  })
+
+  it("warns about plan version settings the document cannot carry", async () => {
+    const harness = createHarness()
+    const applied = await seedProject(harness)
+
+    // All dashboard-editable, all money-path: when the customer is first charged
+    // and how much wallet credit they are granted every period.
+    const version = versionOf(harness.store, applied.plans[0]?.planVersionId ?? "")
+    version.trialUnits = 14
+    version.whenToBill = "pay_in_arrear"
+    version.metadata = { includedCreditAmount: 500_000_000 }
+
+    const read = expectRead(await getMonetizationConfig(harness.getDeps, { projectId: PROJECT_ID }))
+
+    expect(read.unrepresentablePlans).toEqual([])
+    expect(read.warnings).toEqual([
+      {
+        planSlug: "free",
+        featureSlug: null,
+        code: "version_settings_dropped",
+        message: expect.stringContaining("whenToBill, trialUnits, metadata"),
+      },
+    ])
+  })
+
+  it("warns about feature settings the document cannot carry", async () => {
+    const harness = createHarness()
+    const applied = await seedProject(harness)
+
+    const version = versionOf(harness.store, applied.plans[0]?.planVersionId ?? "")
+    const metered = version.planFeatures[1]
+    if (!metered) throw new Error("fixture changed")
+    // A real dashboard row materializes every metadata default, so this also
+    // proves the fields sitting at their defaults stay quiet. `overageStrategy:
+    // "always"` bypasses limit enforcement entirely, so losing it silently would
+    // turn a capped feature into an uncapped one.
+    metered.metadata = {
+      realtime: false,
+      notifyUsageThreshold: 95,
+      blockCustomer: false,
+      overageStrategy: "always",
+      hidden: true,
+    }
+    metered.defaultQuantity = 5
+
+    const read = expectRead(await getMonetizationConfig(harness.getDeps, { projectId: PROJECT_ID }))
+
+    expect(read.unrepresentablePlans).toEqual([])
+    expect(read.warnings).toEqual([
+      {
+        planSlug: "free",
+        featureSlug: "chat-messages",
+        code: "feature_settings_dropped",
+        message: expect.stringContaining(
+          "metadata.overageStrategy, metadata.hidden, defaultQuantity"
+        ),
+      },
+    ])
+  })
+
+  it("reports no warnings for a project apply wrote end to end", async () => {
+    const harness = createHarness()
+    await seedProject(harness)
+
+    const read = expectRead(await getMonetizationConfig(harness.getDeps, { projectId: PROJECT_ID }))
+
+    expect(read.warnings).toEqual([])
+  })
+})
+
+describe("monetizationConfigDocumentSchema", () => {
+  function document(overrides: (config: MonetizationConfigInput) => void): unknown {
+    const config = baseConfig()
+    overrides(config)
+    return config
+  }
+
+  it("accepts a document with no plans at all", () => {
+    const parsed = monetizationConfigDocumentSchema.safeParse({
+      events: [],
+      features: [],
+      plans: [],
+    })
+
+    expect(parsed.success).toBe(true)
+  })
+
+  it("accepts what apply accepts", () => {
+    expect(monetizationConfigDocumentSchema.safeParse(baseConfig()).success).toBe(true)
+  })
+
+  // The whole point of relaxing only `plans.min(1)`: this schema is exported and
+  // is the `config` field of the output, so whatever it advertises is what a
+  // caller will believe `apply` accepts.
+  it.each([
+    [
+      "two default plans",
+      (config: MonetizationConfigInput) => {
+        const pro = config.plans[1]
+        if (pro) pro.defaultPlan = true
+      },
+    ],
+    [
+      "a duplicate feature slug",
+      (config: MonetizationConfigInput) => {
+        const first = config.features?.[0]
+        if (first) config.features?.push({ ...first })
+      },
+    ],
+    [
+      "a plan pricing a feature the document does not declare",
+      (config: MonetizationConfigInput) => {
+        const priced = config.plans[0]?.version.features[0]
+        if (priced) priced.featureSlug = "not-declared"
+      },
+    ],
+    [
+      "a duplicate event slug in a plan-less document",
+      (config: MonetizationConfigInput) => {
+        const first = config.events?.[0]
+        if (first) config.events?.push({ ...first })
+        config.plans = []
+      },
+    ],
+  ])("rejects %s, exactly as apply does", (_label, mutate) => {
+    expect(monetizationConfigDocumentSchema.safeParse(document(mutate)).success).toBe(false)
   })
 })
