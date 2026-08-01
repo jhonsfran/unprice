@@ -203,6 +203,17 @@ describe("monetizationConfigSchema", () => {
     expect(() => monetizationConfigSchema.parse(zeroed)).not.toThrow()
   })
 
+  // `null` is how the database spells unlimited, and z.coerce.number() would
+  // turn it into a zero allowance that denies everything.
+  it("rejects a null limit instead of coercing it to zero", () => {
+    const nulled = structuredClone(config) as unknown as {
+      plans: { version: { features: Record<string, unknown>[] } }[]
+    }
+    nulled.plans[0]!.version.features[0]!.limit = null
+
+    expect(() => monetizationConfigSchema.parse(nulled)).toThrow(/limit must be omitted/)
+  })
+
   it("rejects a Dinero snapshot where a decimal string is expected", () => {
     const invalid = structuredClone(config)
     expect(() =>
@@ -312,6 +323,26 @@ describe("computeConfigHash", () => {
 
   it("returns a lowercase hex sha-256 digest", () => {
     expect(computeConfigHash(config.plans[0]!)).toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  it("hashes an omitted limit stably, and differently from a set one", () => {
+    const omitted = structuredClone(config)
+    // An absent key, not an undefined one: that is what an agent actually writes.
+    delete omitted.plans[0]!.version.features[0]!.limit
+    const parsed = monetizationConfigSchema.parse(omitted)
+
+    expect(parsed.plans[0]!.version.features[0]!.limit).toBeUndefined()
+    expect(computeConfigHash(parsed.plans[0]!)).toBe(
+      computeConfigHash(monetizationConfigSchema.parse(omitted).plans[0]!)
+    )
+    expect(computeConfigHash(parsed.plans[0]!)).not.toBe(computeConfigHash(config.plans[0]!))
+
+    // An explicitly undefined limit is the same configuration, not a third one.
+    const explicit = structuredClone(config)
+    explicit.plans[0]!.version.features[0]!.limit = undefined
+    expect(computeConfigHash(monetizationConfigSchema.parse(explicit).plans[0]!)).toBe(
+      computeConfigHash(parsed.plans[0]!)
+    )
   })
 
   // The hash must be taken from parse output, never from a raw request body:

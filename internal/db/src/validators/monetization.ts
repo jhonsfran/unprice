@@ -140,10 +140,29 @@ const monetizationVersionFeatureBaseSchema = z
     // Mirrors `planVersionFeatureInsertBaseSchema.limit`, which cannot be read
     // off `.shape` because that schema is a `ZodEffects`. A zero allowance is a
     // valid configuration internally, so the boundary must not reject it.
-    limit: z.coerce
-      .number()
-      .int()
-      .optional()
+    //
+    // One deliberate divergence: `null` is rejected instead of coerced. The
+    // database stores null for "unlimited", but `z.coerce.number()` turns null
+    // into 0, which is a zero allowance that denies everything — a silent
+    // money-path corruption, and `limit: null` is a natural way to hand-write
+    // "unlimited". Internal keeps the coercion because it is not the
+    // agent-facing boundary. Unlimited has exactly one spelling here — omit the
+    // field — because two spellings would hash differently and break
+    // idempotency. Do not "align" this back to internal.
+    limit: z
+      .preprocess((value, ctx) => {
+        if (value === null) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "limit must be omitted to mean unlimited, it cannot be null",
+            fatal: true,
+          })
+
+          return z.NEVER
+        }
+
+        return value
+      }, z.coerce.number().int().optional())
       .describe("Maximum usage per reset window. Omit for unlimited"),
     resetConfig: monetizationResetConfigSchema.optional(),
   })
