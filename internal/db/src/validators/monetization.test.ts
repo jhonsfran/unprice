@@ -334,11 +334,12 @@ describe("monetizationConfigSchema", () => {
     expect(() => monetizationConfigSchema.parse(withFirstFeature(feature))).toThrow(message)
   })
 
-  // Blanket coercion would turn all of these into a silent zero allowance that
-  // denies everything, or into a negative one. `limit` is a money-path field, so
-  // it takes an accept-list rather than whatever Number() makes of the input.
+  // Blanket coercion would turn most of these into a silent zero allowance, and
+  // a zero allowance is itself unstorable: plans/service.ts writes
+  // `limit === 0 ? null : limit`, and null means unlimited. `limit` is a
+  // money-path field, so it takes an accept-list rather than whatever Number()
+  // makes of the input.
   it.each([
-    [0, 0],
     [20, 20],
     ["20", 20],
   ])("accepts the limit %j as %i", (input, expected) => {
@@ -354,6 +355,10 @@ describe("monetizationConfigSchema", () => {
 
   it.each([
     [null, /limit must be omitted/],
+    // A stored 0 reads back as unlimited, so it would mint a draft on every
+    // apply and grant everything where the agent asked to grant nothing.
+    [0, /limit cannot be 0/],
+    ["0", /limit cannot be 0/],
     [false, /limit/],
     [true, /limit/],
     ["", /limit/],

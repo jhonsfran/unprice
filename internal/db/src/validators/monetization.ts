@@ -153,16 +153,27 @@ const monetizationVersionFeatureBaseSchema = z
     // off `.shape` because that schema is a `ZodEffects`. A zero allowance is a
     // valid configuration internally, so the boundary must not reject it.
     //
-    // One deliberate divergence: internal is `z.coerce.number().int()`, and
-    // blanket coercion is a money-path hazard here. `Number(null)`,
-    // `Number(false)`, `Number("")`, and `Number([])` are all 0 — a zero
-    // allowance that denies everything — and `limit: null` is a natural way to
-    // hand-write "unlimited". So this takes an explicit accept-list of a number
-    // or a digit string, rejects negatives, and names null in its message.
-    // Unlimited has exactly one spelling — omit the field — because two
-    // spellings would hash differently and break idempotency. Internal keeps the
-    // coercion because it is not the agent-facing boundary. Do not "align" this
-    // back to internal.
+    // Deliberately narrower than internal's `z.coerce.number().int()`, because
+    // blanket coercion is a money-path hazard here and because two of the values
+    // it would accept cannot survive a round trip.
+    //
+    // `null`: rejected. It is a natural way to hand-write "unlimited", but
+    // `Number(null)` is 0, which would land as a zero allowance.
+    //
+    // `0`: rejected, and this is not the boundary being fussy. `plans/service.ts`
+    // (~:2168) writes `limit === 0 ? null : limit`, and null means unlimited — so
+    // a stored 0 reads back as unlimited, minting a fresh draft on every apply
+    // and granting everything where the agent asked to grant nothing. That
+    // coercion cannot be dropped either: the dashboard's limit field is a text
+    // input whose "leave empty for unlimited" produces `""`, and it is what stops
+    // every untouched field from becoming a total denial. A stored 0 has no
+    // agreed meaning anyway — enforcement, rating, credit provisioning, and three
+    // display sites all read it differently. Do not "fix" this back.
+    //
+    // `false`, `""`, `[]`, `" "` would all coerce to 0 as well, so the input is
+    // an explicit accept-list rather than whatever `Number()` makes of it.
+    // Unlimited has exactly one spelling — omit the field — because two spellings
+    // would hash differently and break idempotency.
     limit: z
       .preprocess(
         (value, ctx) => {
@@ -181,6 +192,10 @@ const monetizationVersionFeatureBaseSchema = z
         z
           .union([z.number(), z.string().regex(/^\d+$/)])
           .pipe(z.coerce.number().int().nonnegative())
+          .refine((limit) => limit !== 0, {
+            message:
+              "limit cannot be 0: a zero allowance is stored as null, which means unlimited. Omit limit for unlimited, or leave the feature out of the plan to make it unavailable",
+          })
           .optional()
       )
       .describe("Maximum usage per reset window. Omit for unlimited"),
