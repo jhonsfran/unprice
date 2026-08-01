@@ -75,7 +75,10 @@ export const monetizationBillingConfigSchema = z
     "Billing cadence for the plan version. The server derives billingAnchor and planType from it"
   )
 
-/** Usage reset cadence. Defaults to the billing cadence when omitted. */
+/**
+ * Reset cadence for a usage feature. Omitting it means the billing cadence, and
+ * `computeConfigHash` normalizes the two spellings to the same value.
+ */
 export const monetizationResetConfigSchema = z
   .object({
     interval: billingIntervalSchema.describe("Reset interval. Example: 'day'"),
@@ -181,6 +184,8 @@ const monetizationVersionFeatureBaseSchema = z
           .optional()
       )
       .describe("Maximum usage per reset window. Omit for unlimited"),
+    // Usage features only — `validateAgainstInternalFeature` rejects it on the
+    // others, which the server would silently discard.
     resetConfig: monetizationResetConfigSchema.optional(),
   })
   .strict()
@@ -254,17 +259,41 @@ const INTERNAL_CONFIG_SCHEMAS: Record<z.infer<typeof typeFeatureSchema>, z.ZodTy
   usage: configUsageSchema,
 }
 
+/** How a feature is described in "does not apply" errors. */
+function featureScope(feature: z.infer<typeof monetizationVersionFeatureBaseSchema>): string {
+  // Naming the usage mode matters: tiers do apply to usage features, just not in
+  // unit mode, and "does not apply to a usage feature" would read as a lie.
+  return feature.config.usageMode
+    ? `${feature.featureType} feature in ${feature.config.usageMode} mode`
+    : `${feature.featureType} feature`
+}
+
 /**
  * Runs the priced feature through the featureType's own config schema and then
  * through `planVersionFeatureInsertBaseSchema`, the canonical owner of the
  * feature-level pricing contract. Between them they reject an empty config,
  * unit-mode usage without a price, tiers with a gap, a flat feature carrying a
  * meterConfig, and a usage feature without one — none of which are restated here.
+ *
+ * Also rejects the fields the server would accept and then discard: a config key
+ * the normalizer strips, and a `resetConfig` on a non-usage feature.
  */
 function validateAgainstInternalFeature(
   feature: z.infer<typeof monetizationVersionFeatureBaseSchema>,
   ctx: z.RefinementCtx
 ) {
+  // `resolveResetConfigForFeature` in `internal/services/src/plans/service.ts`
+  // returns null for every non-usage feature, so a reset cadence written on one
+  // is discarded — but not before it changes the hash and mints a draft version
+  // that behaves identically to the one before it.
+  if (feature.featureType !== "usage" && feature.resetConfig) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `"resetConfig" does not apply to a ${featureScope(feature)}`,
+      path: ["resetConfig"],
+    })
+  }
+
   const internalConfig = toInternalConfig(feature.config)
   const configResult = INTERNAL_CONFIG_SCHEMAS[feature.featureType].safeParse(internalConfig)
 
@@ -328,18 +357,13 @@ function validateAgainstInternalFeature(
   // this document — `monetization.get` above all — must emit configs already
   // normalized for their featureType, or the round trip fails here.
   const applied = result.data.config ?? {}
-  // Naming the usage mode matters: tiers do apply to usage features, just not in
-  // unit mode, and "does not apply to a usage feature" would read as a lie.
-  const scope = feature.config.usageMode
-    ? `${feature.featureType} feature in ${feature.config.usageMode} mode`
-    : `${feature.featureType} feature`
 
   for (const [key, value] of Object.entries(feature.config)) {
     if (value === undefined || key in applied) continue
 
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: `"${key}" does not apply to a ${scope}`,
+      message: `"${key}" does not apply to a ${featureScope(feature)}`,
       path: ["config", key],
     })
   }
@@ -521,8 +545,34 @@ function canonicalJson(value: unknown): string {
 }
 
 /**
+ * The reset cadence the server will actually store for a feature, mirroring
+ * `resolveResetConfigForFeature` and `resetConfigFromBillingConfig` in
+ * `internal/services/src/plans/service.ts`: only usage features get one, and an
+ * omitted one is a copy of the billing cadence.
+ *
+ * Normalized here rather than with a Zod `.default()` because the value depends
+ * on a sibling field. Without it, omitting `resetConfig` and writing out the
+ * billing cadence are the same configuration with two different hashes, and
+ * every regeneration that flips the spelling mints a spurious draft version.
+ */
+function effectiveResetConfig(
+  feature: MonetizationVersionFeatureConfig,
+  billingConfig: MonetizationVersionConfig["billingConfig"]
+): MonetizationVersionFeatureConfig["resetConfig"] {
+  if (feature.featureType !== "usage") return undefined
+
+  return (
+    feature.resetConfig ?? {
+      interval: billingConfig.interval,
+      intervalCount: billingConfig.intervalCount,
+    }
+  )
+}
+
+/**
  * Content address of a plan's desired version: every field
- * `monetizationVersionSchema` declares, with the features sorted by slug.
+ * `monetizationVersionSchema` declares, with the features sorted by slug and
+ * their reset cadence normalized to what the server will store.
  *
  * The whole version is spread rather than hand-listed, so the schema is the only
  * definition of what a version is. A hand-written field list would silently stop
@@ -543,12 +593,17 @@ function canonicalJson(value: unknown): string {
  * versions for identical configurations.
  */
 export function computeConfigHash(plan: MonetizationPlanConfig): string {
+  const { billingConfig } = plan.version
+
   return sha256HexSync(
     canonicalJson({
       ...plan.version,
-      features: [...plan.version.features].sort((left, right) =>
-        compareStrings(left.featureSlug, right.featureSlug)
-      ),
+      features: [...plan.version.features]
+        .sort((left, right) => compareStrings(left.featureSlug, right.featureSlug))
+        .map((feature) => ({
+          ...feature,
+          resetConfig: effectiveResetConfig(feature, billingConfig),
+        })),
     })
   )
 }
@@ -606,12 +661,19 @@ export type ResolvedPlanVersions = Readonly<Record<string, string>>
 const DEFAULT_PLAN_NOTE =
   "Customers created with customers.signUp and no planSlug are assigned this plan"
 
-const KIND_PRECEDENCE: readonly IntegrationFeatureKind[] = [
-  "run-budget",
-  "usage-gate",
-  "usage-evidence",
-  "flat-access",
-]
+/**
+ * Lower wins when one feature is classified differently by different plans. A
+ * `Record` rather than an ordered array so a kind added to
+ * `integrationFeatureKindSchema` without a rank here is a compile error: an
+ * array lookup would miss it, and a missing `indexOf` returns -1, which would
+ * silently outrank everything.
+ */
+const KIND_PRECEDENCE: Record<IntegrationFeatureKind, number> = {
+  "run-budget": 0,
+  "usage-gate": 1,
+  "usage-evidence": 2,
+  "flat-access": 3,
+}
 
 /**
  * Usage is knowable before the work runs only when the meter counts events. Any
@@ -687,7 +749,7 @@ export function buildIntegrationContract(
         kind: occurrences
           .map(({ feature }) => classifyFeature(feature))
           .reduce((left, right) =>
-            KIND_PRECEDENCE.indexOf(left) <= KIND_PRECEDENCE.indexOf(right) ? left : right
+            KIND_PRECEDENCE[left] <= KIND_PRECEDENCE[right] ? left : right
           ),
         eventSlug:
           occurrences.find(({ feature }) => feature.meterConfig)?.feature.meterConfig?.eventSlug ??

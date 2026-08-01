@@ -219,6 +219,40 @@ describe("monetizationConfigSchema", () => {
     }
   )
 
+  // resolveResetConfigForFeature discards it for every non-usage feature, so
+  // accepting it would hash a field that changes nothing.
+  it.each(["flat", "tier", "package"])("rejects a resetConfig on a %s feature", (featureType) => {
+    const configs: Record<string, unknown> = {
+      flat: { price: "1" },
+      tier: {
+        tierMode: "volume",
+        tiers: [{ firstUnit: 1, lastUnit: null, unitPrice: "1", flatPrice: "0" }],
+      },
+      package: { price: "10", units: 5 },
+    }
+    const result = monetizationConfigSchema.safeParse(
+      withFirstFeature({
+        featureSlug: "input-tokens",
+        featureType,
+        config: configs[featureType],
+        resetConfig: { interval: "day", intervalCount: 1 },
+      })
+    )
+
+    expect(result.success).toBe(false)
+    expect(result.error?.issues.map((issue) => issue.message)).toContain(
+      `"resetConfig" does not apply to a ${featureType} feature`
+    )
+    expect(result.error?.issues[0]?.path).toEqual([
+      "plans",
+      0,
+      "version",
+      "features",
+      0,
+      "resetConfig",
+    ])
+  })
+
   it("rejects an unknown key inside a price config", () => {
     const invalid = structuredClone(config) as unknown as {
       plans: { version: { features: { config: Record<string, unknown> }[] } }[]
@@ -386,10 +420,9 @@ describe("computeConfigHash", () => {
   it("is stable when nested object keys are reordered", () => {
     const rekeyed = withReversedKeys(config.plans[0]) as MonetizationConfig["plans"][number]
 
-    // The version's own keys never reach canonicalJson — computeConfigHash
-    // rebuilds that level as a fixed object literal, so it is order-insensitive
-    // by construction. The four nested levels below are what exercise the
-    // recursive key sort.
+    // computeConfigHash spreads the version, which preserves source key order,
+    // so every level below is order-insensitive only because canonicalJson sorts
+    // keys recursively.
     expect(Object.keys(rekeyed.version)).not.toEqual(Object.keys(config.plans[0]!.version))
     expect(Object.keys(rekeyed.version.billingConfig)).not.toEqual(
       Object.keys(config.plans[0]!.version.billingConfig)
@@ -466,6 +499,29 @@ describe("computeConfigHash", () => {
         computeConfigHash(config.plans[0]!)
       )
     }
+  })
+
+  // An omitted resetConfig is resolved downstream as a copy of the billing
+  // cadence, so writing that cadence out is the same configuration and must not
+  // produce a second draft version.
+  it("treats an omitted resetConfig as the billing cadence", () => {
+    const omitted = structuredClone(config) as unknown as {
+      plans: { version: { features: Record<string, unknown>[] } }[]
+    }
+    delete omitted.plans[0]!.version.features[0]!.resetConfig
+
+    const spelledOut = structuredClone(config)
+    spelledOut.plans[0]!.version.features[0]!.resetConfig = { interval: "month", intervalCount: 1 }
+
+    expect(computeConfigHash(monetizationConfigSchema.parse(omitted).plans[0]!)).toBe(
+      computeConfigHash(monetizationConfigSchema.parse(spelledOut).plans[0]!)
+    )
+
+    // A cadence that is genuinely different still changes the hash: the fixture
+    // resets daily on a monthly plan.
+    expect(computeConfigHash(monetizationConfigSchema.parse(omitted).plans[0]!)).not.toBe(
+      computeConfigHash(monetizationConfigSchema.parse(config).plans[0]!)
+    )
   })
 
   // resetConfig.intervalCount defaults to 1, so an omitted count and an explicit
