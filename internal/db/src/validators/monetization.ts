@@ -13,25 +13,32 @@
  *
  * Every object is `.strict()`, so the internal forms (row ids, project ids,
  * Dinero snapshots) are rejected instead of silently ignored. Pricing-mode
- * semantics (tier consecutiveness, "price required for unit mode", "meterConfig
- * only for usage features") stay owned by `planVersionFeatureInsertBaseSchema`,
- * which the server runs after it converts prices and resolves slugs.
+ * semantics (which config fields each featureType needs, tier consecutiveness,
+ * "price required for unit mode", the meterConfig/usage pairing) are not
+ * restated: the boundary validates every priced feature against
+ * `planVersionFeatureInsertBaseSchema` itself, so a malformed shape fails here
+ * rather than several steps later inside the server.
  */
 import * as z from "zod"
 
 import { eventInsertBaseSchema } from "./events"
 import { featureInsertBaseSchema } from "./features"
-import { priceSchema, tiersSchema } from "./planVersionFeatures"
+import {
+  configFlatSchema,
+  configPackageSchema,
+  configTierSchema,
+  configUsageSchema,
+  planVersionFeatureInsertBaseSchema,
+  priceSchema,
+  tiersSchema,
+} from "./planVersionFeatures"
 import { versionInsertBaseSchema } from "./planVersions"
 import { planInsertBaseSchema } from "./plans"
 import {
   billingIntervalCountSchema,
   billingIntervalSchema,
   meterConfigSchema,
-  tierModeSchema,
   typeFeatureSchema,
-  unitSchema,
-  usageModeSchema,
 } from "./shared"
 
 /** Declared SDK event. `eventInsertBaseSchema` minus the row/project identifiers. */
@@ -87,18 +94,23 @@ export const monetizationTierSchema = tiersSchema
   .strict()
 
 /**
- * Pricing configuration with decimal-string prices. The featureType decides
- * which fields apply; `planVersionFeatureInsertBaseSchema` enforces that after
- * the server converts the prices to Dinero snapshots.
+ * Pricing configuration with decimal-string prices.
+ *
+ * The field model comes from `configUsageSchema`, whose shape is the superset of
+ * all four internal config schemas (flat, tier, package, usage all use these same
+ * five keys), with only the documented price substitution applied. `usageMode` is
+ * relaxed to optional because it is required for usage features only; which
+ * fields a given featureType actually requires is decided by the internal
+ * schemas, through `validateAgainstInternalFeature` below. A union of the four
+ * would type better but report every failure four times, once per branch.
  */
-export const monetizationPriceConfigSchema = z
-  .object({
+export const monetizationPriceConfigSchema = configUsageSchema
+  .innerType()
+  .extend({
     price: priceSchema.optional().describe("Price as a decimal string. Example: '0.000002'"),
-    usageMode: usageModeSchema.optional().describe("Usage pricing mode for usage features"),
-    tierMode: tierModeSchema.optional().describe("Tier calculation mode when usageMode is 'tier'"),
     tiers: z.array(monetizationTierSchema).optional().describe("Pricing tiers, decimal strings"),
-    units: unitSchema.optional().describe("Units per package when usageMode is 'package'"),
   })
+  .partial({ usageMode: true })
   .strict()
   .describe("Pricing configuration. Prices cross the boundary as decimal strings, never as Dinero")
 
@@ -123,8 +135,7 @@ export const monetizationMeterConfigSchema = meterConfigSchema
   })
   .describe("How usage is measured from a declared event")
 
-/** A feature priced inside a plan version, referenced by slug. */
-export const monetizationVersionFeatureSchema = z
+const monetizationVersionFeatureBaseSchema = z
   .object({
     featureSlug: featureInsertBaseSchema.shape.slug.describe(
       "Slug of a feature declared in this document"
@@ -132,15 +143,177 @@ export const monetizationVersionFeatureSchema = z
     featureType: typeFeatureSchema.describe("'flat', 'tier', 'package', or 'usage'"),
     config: monetizationPriceConfigSchema,
     meterConfig: monetizationMeterConfigSchema.optional(),
-    limit: z
+    // Mirrors `planVersionFeatureInsertBaseSchema.limit`, which cannot be read
+    // off `.shape` because that schema is a `ZodEffects`. A zero allowance is a
+    // valid configuration internally, so the boundary must not reject it.
+    limit: z.coerce
       .number()
       .int()
-      .positive()
       .optional()
       .describe("Maximum usage per reset window. Omit for unlimited"),
     resetConfig: monetizationResetConfigSchema.optional(),
   })
   .strict()
+
+/**
+ * Placeholders for the values the server resolves after validation. The internal
+ * schema requires them but constrains none of them, so fixed values are enough
+ * to reuse it as the boundary's pricing authority.
+ */
+const INTERNAL_PLACEHOLDER_ID = "boundary_placeholder"
+
+const INTERNAL_PLACEHOLDER_BILLING_CONFIG = {
+  name: "boundary_placeholder",
+  billingInterval: "month",
+  billingIntervalCount: 1,
+  billingAnchor: "dayOfCreation",
+  planType: "recurring",
+} as const
+
+/**
+ * `dineroSchema` recomputes the snapshot from `displayAmount` and reads nothing
+ * from the input snapshot except the currency code, so one placeholder currency
+ * validates any decimal string. The real conversion happens server-side with the
+ * plan version's own currency, in `toDineroPrice()`.
+ */
+const INTERNAL_PLACEHOLDER_CURRENCY = { code: "USD", base: 10, exponent: 2 } as const
+
+function toInternalPrice(amount: string) {
+  return {
+    dinero: {
+      amount: 0,
+      currency: INTERNAL_PLACEHOLDER_CURRENCY,
+      scale: INTERNAL_PLACEHOLDER_CURRENCY.exponent,
+    },
+    displayAmount: amount,
+  }
+}
+
+function toInternalConfig(config: MonetizationPriceConfig) {
+  return {
+    ...config,
+    ...(config.price === undefined ? {} : { price: toInternalPrice(config.price) }),
+    ...(config.tiers === undefined
+      ? {}
+      : {
+          tiers: config.tiers.map((tier) => ({
+            ...tier,
+            unitPrice: toInternalPrice(tier.unitPrice),
+            flatPrice: toInternalPrice(tier.flatPrice),
+          })),
+        }),
+  }
+}
+
+/** Zod nests `config.price` style paths as a single dotted string; split them. */
+function toBoundaryPath(path: (string | number)[]): (string | number)[] {
+  return path.flatMap<string | number>((segment) =>
+    typeof segment === "string" ? segment.split(".").filter(Boolean) : segment
+  )
+}
+
+/**
+ * Which config schema each featureType uses. `validatePlanVersionFeatureMutation`
+ * owns this mapping but is not exported, and the exported `parseFeaturesConfig`
+ * throws for package features. Only the mapping is repeated; every pricing rule
+ * stays inside the schemas named here.
+ *
+ * Needed because `planVersionFeatureInsertBaseSchema` parses `config` through the
+ * `configFeatureSchema` union first, and a union failure aborts the object parse
+ * with "Invalid input" before the schema's own superRefine can say which rule
+ * broke. Checking the featureType's schema first turns that into the real
+ * message.
+ */
+const INTERNAL_CONFIG_SCHEMAS: Record<z.infer<typeof typeFeatureSchema>, z.ZodTypeAny> = {
+  flat: configFlatSchema,
+  tier: configTierSchema,
+  package: configPackageSchema,
+  usage: configUsageSchema,
+}
+
+/**
+ * Runs the priced feature through the featureType's own config schema and then
+ * through `planVersionFeatureInsertBaseSchema`, the canonical owner of the
+ * feature-level pricing contract. Between them they reject an empty config,
+ * unit-mode usage without a price, tiers with a gap, a flat feature carrying a
+ * meterConfig, and a usage feature without one — none of which are restated here.
+ */
+function validateAgainstInternalFeature(
+  feature: z.infer<typeof monetizationVersionFeatureBaseSchema>,
+  ctx: z.RefinementCtx
+) {
+  const internalConfig = toInternalConfig(feature.config)
+  const configResult = INTERNAL_CONFIG_SCHEMAS[feature.featureType].safeParse(internalConfig)
+
+  if (!configResult.success) {
+    for (const issue of configResult.error.issues) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: issue.message,
+        path: ["config", ...toBoundaryPath(issue.path)],
+      })
+    }
+  }
+
+  const result = planVersionFeatureInsertBaseSchema.safeParse({
+    planVersionId: INTERNAL_PLACEHOLDER_ID,
+    featureId: INTERNAL_PLACEHOLDER_ID,
+    featureType: feature.featureType,
+    // Omitted once it has already failed, so the union does not report a second,
+    // vaguer issue for the same problem. `config` is optional internally.
+    config: configResult.success ? internalConfig : undefined,
+    order: 0,
+    defaultQuantity: 1,
+    limit: feature.limit,
+    billingConfig: INTERNAL_PLACEHOLDER_BILLING_CONFIG,
+    resetConfig: feature.resetConfig && {
+      name: INTERNAL_PLACEHOLDER_BILLING_CONFIG.name,
+      resetInterval: feature.resetConfig.interval,
+      resetIntervalCount: feature.resetConfig.intervalCount ?? 1,
+      resetAnchor: INTERNAL_PLACEHOLDER_BILLING_CONFIG.billingAnchor,
+      planType: INTERNAL_PLACEHOLDER_BILLING_CONFIG.planType,
+    },
+    meterConfig: feature.meterConfig && {
+      ...feature.meterConfig,
+      eventId: INTERNAL_PLACEHOLDER_ID,
+    },
+  })
+
+  if (!result.success) {
+    for (const issue of result.error.issues) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: issue.message,
+        path: toBoundaryPath(issue.path),
+      })
+    }
+
+    return
+  }
+
+  if (!configResult.success) return
+
+  // `normalizePlanVersionFeatureMutation` strips the config fields that do not
+  // apply to the featureType. Surfacing that as an error keeps the boundary
+  // honest instead of silently dropping what the agent wrote, and the internal
+  // normalizer stays the only definition of which fields apply.
+  const applied = result.data.config ?? {}
+
+  for (const [key, value] of Object.entries(feature.config)) {
+    if (value === undefined || key in applied) continue
+
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `"${key}" does not apply to a ${feature.featureType} feature`,
+      path: ["config", key],
+    })
+  }
+}
+
+/** A feature priced inside a plan version, referenced by slug. */
+export const monetizationVersionFeatureSchema = monetizationVersionFeatureBaseSchema.superRefine(
+  validateAgainstInternalFeature
+)
 
 /** The desired plan version. Content-addressed by `computeConfigHash`. */
 export const monetizationVersionSchema = z
@@ -287,6 +460,9 @@ function rotateRight32(value: number, bits: number): number {
 /**
  * Synchronous SHA-256 over the UTF-8 encoding of `message`, as lowercase hex.
  *
+ * Not `hashStringSHA256` from `../utils/hash.ts`: that one is async and returns
+ * base64, and `computeConfigHash` has to stay synchronous.
+ *
  * `crypto.subtle.digest` is async and `node:crypto` cannot be imported here:
  * `@unprice/db/validators` is bundled for Cloudflare Workers and for Next.js
  * client components. This implementation only uses `TextEncoder` and typed
@@ -400,6 +576,13 @@ function canonicalJson(value: unknown): string {
  * Dinero snapshots, so the same document hashes identically in every project.
  * Plan `title`, `description`, and `defaultPlan` are excluded: they are mutable
  * plan-row fields and never justify a new plan version.
+ *
+ * MUST be called on `monetizationConfigSchema` output, never on a raw request
+ * body. Several boundary fields coerce (`priceSchema` is `z.coerce.string()`,
+ * `billingIntervalCountSchema` is `z.coerce.number()`), so `price: 2` and
+ * `price: "2"` are the same configuration but hash differently before parsing.
+ * Idempotency is derived from this hash, so hashing unparsed input would create
+ * duplicate draft versions for identical configurations.
  */
 export function computeConfigHash(plan: MonetizationPlanConfig): string {
   const { currency, paymentProvider, billingConfig, features } = plan.version

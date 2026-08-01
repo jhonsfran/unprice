@@ -9,13 +9,22 @@ import {
   sha256Hex,
 } from "./monetization"
 
+// Two features, declared in an order that differs from their sorted order, so
+// the hash's featureSlug sort is actually exercised by the reordering test.
 const config: MonetizationConfig = {
-  events: [{ slug: "ai_completion", name: "AI completion" }],
-  features: [{ slug: "input-tokens", title: "Input tokens", unitOfMeasure: "token" }],
+  events: [
+    { slug: "ai_completion", name: "AI completion" },
+    { slug: "chat_request", name: "Chat request" },
+  ],
+  features: [
+    { slug: "input-tokens", title: "Input tokens", unitOfMeasure: "token" },
+    { slug: "chat-messages", title: "Chat messages", unitOfMeasure: "message" },
+  ],
   plans: [
     {
       slug: "free",
       title: "Free",
+      description: "Free tier",
       defaultPlan: true,
       version: {
         currency: "USD",
@@ -34,10 +43,44 @@ const config: MonetizationConfig = {
             limit: 20,
             resetConfig: { interval: "day" },
           },
+          {
+            featureSlug: "chat-messages",
+            featureType: "usage",
+            config: { usageMode: "unit", price: "0" },
+            meterConfig: { eventSlug: "chat_request", aggregationMethod: "count" },
+            limit: 20,
+            resetConfig: { interval: "day", intervalCount: 1 },
+          },
         ],
       },
     },
   ],
+}
+
+const countMeter = { eventSlug: "ai_completion", aggregationMethod: "count" }
+
+/** Replaces the first priced feature, for cases the boundary must reject. */
+function withFirstFeature(feature: unknown) {
+  const invalid = structuredClone(config) as unknown as {
+    plans: { version: { features: unknown[] } }[]
+  }
+  invalid.plans[0]!.version.features[0] = feature
+  return invalid
+}
+
+/** Rebuilds every object with its keys in the opposite order. */
+function withReversedKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withReversedKeys)
+
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .reverse()
+        .map(([key, entry]) => [key, withReversedKeys(entry)])
+    )
+  }
+
+  return value
 }
 
 describe("monetizationConfigSchema", () => {
@@ -84,6 +127,82 @@ describe("monetizationConfigSchema", () => {
     expect(() => monetizationConfigSchema.parse(invalid)).toThrow(/unknown-feature/)
   })
 
+  // The pricing rules below all come from `planVersionFeatureInsertBaseSchema`;
+  // the boundary delegates to it rather than restating them.
+  it.each([
+    [
+      "an empty config",
+      { featureSlug: "input-tokens", featureType: "usage", config: {}, meterConfig: countMeter },
+      /usageMode/i,
+    ],
+    [
+      "a flat feature carrying a meterConfig",
+      {
+        featureSlug: "input-tokens",
+        featureType: "flat",
+        config: { price: "1" },
+        meterConfig: countMeter,
+      },
+      /meter config is only supported for usage/i,
+    ],
+    [
+      "unit-mode usage without a price",
+      {
+        featureSlug: "input-tokens",
+        featureType: "usage",
+        config: { usageMode: "unit" },
+        meterConfig: countMeter,
+      },
+      /price is required/i,
+    ],
+    [
+      "tiers with a gap",
+      {
+        featureSlug: "input-tokens",
+        featureType: "usage",
+        config: {
+          usageMode: "tier",
+          tierMode: "graduated",
+          tiers: [
+            { firstUnit: 1, lastUnit: 10, unitPrice: "1", flatPrice: "0" },
+            { firstUnit: 20, lastUnit: null, unitPrice: "1", flatPrice: "0" },
+          ],
+        },
+        meterConfig: countMeter,
+      },
+      /consecutive/i,
+    ],
+    [
+      "a usage feature without a meter",
+      {
+        featureSlug: "input-tokens",
+        featureType: "usage",
+        config: { usageMode: "unit", price: "1" },
+      },
+      /meter config is required/i,
+    ],
+    [
+      "a config field that does not apply to the feature type",
+      {
+        featureSlug: "input-tokens",
+        featureType: "flat",
+        config: {
+          price: "1",
+          tiers: [{ firstUnit: 1, lastUnit: null, unitPrice: "1", flatPrice: "0" }],
+        },
+      },
+      /tiers.*does not apply to a flat feature/,
+    ],
+  ])("rejects %s", (_label, feature, message) => {
+    expect(() => monetizationConfigSchema.parse(withFirstFeature(feature))).toThrow(message)
+  })
+
+  it("accepts a zero limit, as the internal schema does", () => {
+    const zeroed = structuredClone(config)
+    zeroed.plans[0]!.version.features[0]!.limit = 0
+    expect(() => monetizationConfigSchema.parse(zeroed)).not.toThrow()
+  })
+
   it("rejects a Dinero snapshot where a decimal string is expected", () => {
     const invalid = structuredClone(config)
     expect(() =>
@@ -122,12 +241,37 @@ describe("computeConfigHash", () => {
   it("is stable across feature and key ordering", () => {
     const reordered = structuredClone(config)
     reordered.plans[0]!.version.features.push(reordered.plans[0]!.version.features.shift()!)
+
+    // Guard against the fixture silently making this a no-op again.
+    expect(reordered.plans[0]!.version.features.map((feature) => feature.featureSlug)).not.toEqual(
+      config.plans[0]!.version.features.map((feature) => feature.featureSlug)
+    )
     expect(computeConfigHash(reordered.plans[0]!)).toBe(computeConfigHash(config.plans[0]!))
+  })
+
+  it("is stable when object keys are reordered at every level", () => {
+    const rekeyed = withReversedKeys(config.plans[0]) as MonetizationConfig["plans"][number]
+
+    expect(Object.keys(rekeyed.version)).not.toEqual(Object.keys(config.plans[0]!.version))
+    expect(Object.keys(rekeyed.version.billingConfig)).not.toEqual(
+      Object.keys(config.plans[0]!.version.billingConfig)
+    )
+    expect(Object.keys(rekeyed.version.features[0]!.config)).not.toEqual(
+      Object.keys(config.plans[0]!.version.features[0]!.config)
+    )
+    expect(Object.keys(rekeyed.version.features[0]!.meterConfig!)).not.toEqual(
+      Object.keys(config.plans[0]!.version.features[0]!.meterConfig!)
+    )
+    expect(Object.keys(rekeyed.version.features[1]!.resetConfig!)).not.toEqual(
+      Object.keys(config.plans[0]!.version.features[1]!.resetConfig!)
+    )
+    expect(computeConfigHash(rekeyed)).toBe(computeConfigHash(config.plans[0]!))
   })
 
   it("ignores plan title and description", () => {
     const renamed = structuredClone(config)
     renamed.plans[0]!.title = "Free forever"
+    renamed.plans[0]!.description = "Renamed and re-described"
     expect(computeConfigHash(renamed.plans[0]!)).toBe(computeConfigHash(config.plans[0]!))
   })
 
@@ -164,6 +308,30 @@ describe("computeConfigHash", () => {
 
   it("returns a lowercase hex sha-256 digest", () => {
     expect(computeConfigHash(config.plans[0]!)).toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  // The hash must be taken from parse output, never from a raw request body:
+  // priceSchema and billingIntervalCountSchema coerce, so these two documents
+  // are the same configuration but differ byte-for-byte before validation.
+  it("agrees across coerced and already-typed input once parsed", () => {
+    const coerced = structuredClone(config) as unknown as {
+      plans: {
+        version: {
+          billingConfig: Record<string, unknown>
+          features: Record<string, unknown>[]
+        }
+      }[]
+    }
+    const version = coerced.plans[0]!.version
+    const feature = version.features[0]!
+
+    version.billingConfig.intervalCount = "1"
+    feature.limit = "20"
+    ;(feature.config as Record<string, unknown>).price = 0.000002
+
+    expect(computeConfigHash(monetizationConfigSchema.parse(coerced).plans[0]!)).toBe(
+      computeConfigHash(monetizationConfigSchema.parse(config).plans[0]!)
+    )
   })
 })
 
