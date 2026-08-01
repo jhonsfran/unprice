@@ -116,23 +116,17 @@ export const monetizationPriceConfigSchema = configUsageSchema
 
 /**
  * `meterConfigSchema` with `eventId` removed: the boundary points at an event by
- * slug and the server resolves it once the events exist. The aggregation rule is
- * repeated here because the shared schema is a `ZodEffects` and cannot be
- * `.omit()`-ed with its refinement intact.
+ * slug and the server resolves it once the events exist.
+ *
+ * `.omit()` drops the shared schema's refinement, but nothing is restated to
+ * compensate: `validateAgainstInternalFeature` sends the meter back through
+ * `meterConfigSchema` with its refinement intact, which is what enforces
+ * "aggregationField is required unless the method is count".
  */
 export const monetizationMeterConfigSchema = meterConfigSchema
   .innerType()
   .omit({ eventId: true })
   .strict()
-  .superRefine((data, ctx) => {
-    if (data.aggregationMethod !== "count" && !data.aggregationField) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "aggregationField is required unless the aggregation method is count",
-        path: ["aggregationField"],
-      })
-    }
-  })
   .describe("How usage is measured from a declared event")
 
 const monetizationVersionFeatureBaseSchema = z
@@ -297,6 +291,13 @@ function validateAgainstInternalFeature(
   // apply to the featureType. Surfacing that as an error keeps the boundary
   // honest instead of silently dropping what the agent wrote, and the internal
   // normalizer stays the only definition of which fields apply.
+  //
+  // Deliberately stricter than internal, and not a bug: internal accepts and
+  // silently strips these (a `tier` feature carrying `price` or `usageMode`, a
+  // `flat` feature carrying `tiers`), while the boundary rejects them so the
+  // agent learns its document does not mean what it wrote. Anything emitting
+  // this document — `monetization.get` above all — must emit configs already
+  // normalized for their featureType, or the round trip fails here.
   const applied = result.data.config ?? {}
 
   for (const [key, value] of Object.entries(feature.config)) {

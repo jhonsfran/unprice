@@ -249,9 +249,13 @@ describe("computeConfigHash", () => {
     expect(computeConfigHash(reordered.plans[0]!)).toBe(computeConfigHash(config.plans[0]!))
   })
 
-  it("is stable when object keys are reordered at every level", () => {
+  it("is stable when nested object keys are reordered", () => {
     const rekeyed = withReversedKeys(config.plans[0]) as MonetizationConfig["plans"][number]
 
+    // The version's own keys never reach canonicalJson — computeConfigHash
+    // rebuilds that level as a fixed object literal, so it is order-insensitive
+    // by construction. The four nested levels below are what exercise the
+    // recursive key sort.
     expect(Object.keys(rekeyed.version)).not.toEqual(Object.keys(config.plans[0]!.version))
     expect(Object.keys(rekeyed.version.billingConfig)).not.toEqual(
       Object.keys(config.plans[0]!.version.billingConfig)
@@ -328,6 +332,11 @@ describe("computeConfigHash", () => {
     version.billingConfig.intervalCount = "1"
     feature.limit = "20"
     ;(feature.config as Record<string, unknown>).price = 0.000002
+
+    // The hazard the doc comment warns about: unparsed, the two disagree.
+    expect(
+      computeConfigHash(coerced.plans[0] as unknown as MonetizationConfig["plans"][number])
+    ).not.toBe(computeConfigHash(config.plans[0]!))
 
     expect(computeConfigHash(monetizationConfigSchema.parse(coerced).plans[0]!)).toBe(
       computeConfigHash(monetizationConfigSchema.parse(config).plans[0]!)
