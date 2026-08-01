@@ -1184,6 +1184,11 @@ describe("getMonetizationConfig", () => {
         message: expect.stringContaining("groupBy, windowSize"),
       },
     ])
+    // The message must not tell the reader the warning is safe to skip. Severity
+    // lives in the code, where a caller can act on it, and the fact that nothing
+    // reads these fields today is context for a human in the skill doc, not
+    // permission for an agent to move on.
+    expect(read.warnings[0]?.message).not.toContain("behaviour is unchanged")
   })
 
   it("warns about plan version settings the document cannot carry", async () => {
@@ -1205,12 +1210,16 @@ describe("getMonetizationConfig", () => {
         planSlug: "free",
         featureSlug: null,
         code: "version_settings_dropped",
-        message: expect.stringContaining("whenToBill, trialUnits, metadata"),
+        message: expect.stringContaining(
+          "whenToBill, trialUnits, metadata.includedCreditAmount (wallet credit granted every billing period)"
+        ),
       },
     ])
+    // A human deciding whether to approve needs to know the live version is safe.
+    expect(read.warnings[0]?.message).toContain("The version you read stays exactly as it is")
   })
 
-  it("warns about feature settings the document cannot carry", async () => {
+  it("separates enforcement-changing feature settings from cosmetic ones", async () => {
     const harness = createHarness()
     const applied = await seedProject(harness)
 
@@ -1218,9 +1227,7 @@ describe("getMonetizationConfig", () => {
     const metered = version.planFeatures[1]
     if (!metered) throw new Error("fixture changed")
     // A real dashboard row materializes every metadata default, so this also
-    // proves the fields sitting at their defaults stay quiet. `overageStrategy:
-    // "always"` bypasses limit enforcement entirely, so losing it silently would
-    // turn a capped feature into an uncapped one.
+    // proves the fields sitting at their defaults stay quiet.
     metered.metadata = {
       realtime: false,
       notifyUsageThreshold: 95,
@@ -1233,14 +1240,44 @@ describe("getMonetizationConfig", () => {
     const read = expectRead(await getMonetizationConfig(harness.getDeps, { projectId: PROJECT_ID }))
 
     expect(read.unrepresentablePlans).toEqual([])
+
+    // Two warnings, not one: a caller decides whether to stop by reading the
+    // code, so a limit-enforcement bypass must never share a code with a display
+    // flag. `overageStrategy: "always"` skips the limit check entirely and
+    // `defaultQuantity` is the allowance a subscription starts with.
+    const enforcement = read.warnings.find(({ code }) => code === "enforcement_settings_dropped")
+    expect(enforcement?.message).toContain("metadata.overageStrategy")
+    expect(enforcement?.message).toContain("defaultQuantity")
+    expect(enforcement?.message).not.toContain("metadata.hidden")
+
+    const cosmetic = read.warnings.find(({ code }) => code === "feature_settings_dropped")
+    expect(cosmetic?.message).toContain("metadata.hidden")
+    expect(cosmetic?.message).not.toContain("overageStrategy")
+    expect(cosmetic?.message).not.toContain("defaultQuantity")
+
+    expect(read.warnings.map(({ code }) => code).sort()).toEqual([
+      "enforcement_settings_dropped",
+      "feature_settings_dropped",
+    ])
+  })
+
+  it("reports an enforcement change alone when nothing cosmetic is set", async () => {
+    const harness = createHarness()
+    const applied = await seedProject(harness)
+
+    const version = versionOf(harness.store, applied.plans[0]?.planVersionId ?? "")
+    const metered = version.planFeatures[1]
+    if (!metered) throw new Error("fixture changed")
+    metered.defaultQuantity = 5
+
+    const read = expectRead(await getMonetizationConfig(harness.getDeps, { projectId: PROJECT_ID }))
+
     expect(read.warnings).toEqual([
       {
         planSlug: "free",
         featureSlug: "chat-messages",
-        code: "feature_settings_dropped",
-        message: expect.stringContaining(
-          "metadata.overageStrategy, metadata.hidden, defaultQuantity"
-        ),
+        code: "enforcement_settings_dropped",
+        message: expect.stringContaining("defaultQuantity"),
       },
     ])
   })

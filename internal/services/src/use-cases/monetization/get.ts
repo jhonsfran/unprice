@@ -127,6 +127,15 @@ export const monetizationPlanStateSchema = z.object({
     .describe("Every unpublished version of this plan, most recently created first"),
 })
 
+/**
+ * Classification rule, so a new dropped field gets a test applied to it rather
+ * than a precedent pattern-matched: a plan is **unrepresentable** when the
+ * emitted document would *misstate* something it actually says. `billingConfig`
+ * is emitted, so emitting a cadence for a version anchored to day 15 describes
+ * that version wrongly. When the document is merely *silent* about a stored
+ * setting it never claimed, that is a `warnings` entry and the plan is still
+ * emitted. Misstatement is fatal; omission is reported.
+ */
 export const unrepresentablePlanReasonSchema = z.enum([
   "no_version",
   "no_features",
@@ -143,20 +152,30 @@ export const unrepresentablePlanSchema = z
   .describe("A plan left out of the document because the boundary cannot state its configuration")
 
 /**
- * Settings a stored row carries that the document has no field for. Unlike
- * `unrepresentablePlans` these are not fatal: the document does not *misstate*
- * them, it is silent about them, and dropping a whole plan over a setting the
- * document never claimed would hide the plan from the agent — which is the worse
- * failure, because the agent's next move is to re-add it from defaults.
+ * Classification rule (the other half of the one on
+ * `unrepresentablePlanReasonSchema`): a stored setting the document is merely
+ * *silent* about is warned, not excluded. Dropping a whole plan over a setting
+ * the document never claimed would hide the plan from the agent, and the agent's
+ * next move is to re-add it from defaults — the worse failure.
  *
- * All three fire almost exclusively for dashboard-authored versions, which
+ * The code is the severity. Severity is a property of the *field*, not of the
+ * warning instance, which is why it is encoded here rather than as a parallel
+ * axis a caller would have to string-match a message to resolve:
+ *
+ * - `enforcement_settings_dropped` and `version_settings_dropped` are
+ *   commercial changes. A caller must stop and get a human decision.
+ * - `feature_settings_dropped` and `meter_fields_dropped` are cosmetic or inert
+ *   today. Report them; do not block on them.
+ *
+ * All of them fire almost exclusively for dashboard-authored versions, which
  * cannot round-trip without a write anyway. `apply` writes the server defaults
  * these are compared against, so a version it created never warns.
  */
 export const monetizationWarningCodeSchema = z.enum([
-  "meter_fields_dropped",
+  "enforcement_settings_dropped",
   "version_settings_dropped",
   "feature_settings_dropped",
+  "meter_fields_dropped",
 ])
 
 export const monetizationWarningSchema = z
@@ -245,17 +264,34 @@ const SERVER_VERSION_DEFAULTS = {
 } as const
 
 /**
- * `planVersionFeatureMetadataSchema`'s own defaults. `apply` passes no metadata
- * at all, so a feature it wrote carries only the two server-derived cadence
- * flags and never reaches these.
+ * `planVersionFeatureMetadataSchema`'s defaults for the settings that change
+ * nothing a customer is charged for. `hidden` is live but display-only: it keeps
+ * a feature off the public pricing page.
+ *
+ * `apply` passes no metadata at all, so a feature it wrote carries only the two
+ * server-derived cadence flags and never reaches these.
  */
-const FEATURE_METADATA_DEFAULTS = {
+const COSMETIC_FEATURE_METADATA_DEFAULTS = {
   realtime: false,
   notifyUsageThreshold: 95,
-  overageStrategy: "none",
   blockCustomer: false,
   hidden: false,
 } as const
+
+/**
+ * The default `overageStrategy`, kept separate because it is the one metadata
+ * field that decides whether a limit is enforced at all: `"always"` bypasses the
+ * limit check entirely (`apps/api/src/ingestion/entitlements/pricing.ts`).
+ *
+ * Losing it can only move enforcement in the *stricter* direction, since the
+ * default is the strict one — so the failure is a customer being denied, which
+ * is loud, rather than a silent overspend. That is what keeps this a warning
+ * instead of an exclusion.
+ */
+const DEFAULT_OVERAGE_STRATEGY = "none"
+
+/** The `defaultQuantity` the writer applies when the document does not say. */
+const DEFAULT_QUANTITY = 1
 
 /** Meter keys the boundary drops because nothing reads them yet. */
 const INERT_METER_KEYS = ["filters", "groupBy", "windowSize"] as const
@@ -271,25 +307,57 @@ function droppedVersionSettings(planVersion: StoredPlanVersion): string[] {
     .filter(([key, expected]) => columns[key] !== expected)
     .map(([key]) => key)
 
-  if (planVersion.metadata && Object.keys(planVersion.metadata).length > 0) {
-    dropped.push("metadata")
+  // Named down to the sub-field: "metadata" tells a human nothing, and the
+  // interesting member is money.
+  if (planVersion.metadata?.includedCreditAmount !== undefined) {
+    dropped.push("metadata.includedCreditAmount (wallet credit granted every billing period)")
+  }
+  if (planVersion.metadata?.externalId !== undefined) {
+    dropped.push("metadata.externalId (the payment provider's own identifier)")
   }
   if ((planVersion.tags ?? []).length > 0) dropped.push("tags")
 
   return dropped
 }
 
+/**
+ * The two dropped feature settings that decide whether a limit is enforced and
+ * how much allowance a customer gets, separated from the cosmetic ones so a
+ * caller can key on the code instead of parsing a message.
+ *
+ * `defaultQuantity` is in here rather than with the cosmetic settings because it
+ * becomes both `units` and `limit` on the subscription item
+ * (`validators/subscriptions/subscription.ts`) and feeds
+ * `getPhaseGrantAllowance` — losing it changes a customer's allowance.
+ */
+function droppedEnforcementSettings(planFeature: StoredPlanVersionFeature): string[] {
+  const metadata = (planFeature.metadata ?? {}) as Record<string, unknown>
+  const dropped: string[] = []
+
+  if (
+    metadata.overageStrategy !== undefined &&
+    metadata.overageStrategy !== DEFAULT_OVERAGE_STRATEGY
+  ) {
+    dropped.push("metadata.overageStrategy (whether usage past the limit is allowed and billed)")
+  }
+  // `null` is how the writer stores "ask for the quantity at subscription time",
+  // which the document is equally silent about but is also what it produces.
+  if (
+    typeof planFeature.defaultQuantity === "number" &&
+    planFeature.defaultQuantity !== DEFAULT_QUANTITY
+  ) {
+    dropped.push("defaultQuantity (the allowance a subscription starts with)")
+  }
+
+  return dropped
+}
+
 function droppedFeatureSettings(planFeature: StoredPlanVersionFeature): string[] {
   const metadata = (planFeature.metadata ?? {}) as Record<string, unknown>
-  const dropped = Object.entries(FEATURE_METADATA_DEFAULTS)
+  const dropped = Object.entries(COSMETIC_FEATURE_METADATA_DEFAULTS)
     .filter(([key, expected]) => metadata[key] !== undefined && metadata[key] !== expected)
     .map(([key]) => `metadata.${key}`)
 
-  // `null` is how the writer stores "ask for the quantity at subscription time",
-  // which the document is equally silent about but is also what it produces.
-  if (typeof planFeature.defaultQuantity === "number" && planFeature.defaultQuantity !== 1) {
-    dropped.push("defaultQuantity")
-  }
   if (planFeature.type && planFeature.type !== "feature") dropped.push("type")
 
   return dropped
@@ -516,7 +584,7 @@ function projectPlan(plan: StoredPlan): PlanProjection {
       planSlug: plan.slug,
       featureSlug: null,
       code: "version_settings_dropped",
-      message: `Plan version ${current.id} sets ${droppedSettings.join(", ")}, which this document cannot carry. Re-applying it would create a draft using the server defaults instead`,
+      message: `Plan version ${current.id} sets ${droppedSettings.join(", ")}. Applying this document creates a new draft without them, falling back to the server defaults — a commercial change a human has to approve. The version you read stays exactly as it is`,
     })
   }
 
@@ -547,7 +615,18 @@ function projectPlan(plan: StoredPlan): PlanProjection {
         planSlug: plan.slug,
         featureSlug,
         code: "meter_fields_dropped",
-        message: `The meter for "${featureSlug}" sets ${droppedMeter.join(", ")}, which this document cannot carry. Nothing reads them today, so behaviour is unchanged`,
+        message: `The meter for "${featureSlug}" sets ${droppedMeter.join(", ")}. Applying this document creates a new draft without them. The version you read stays exactly as it is`,
+      })
+    }
+
+    const droppedEnforcement = droppedEnforcementSettings(planFeature)
+
+    if (droppedEnforcement.length > 0) {
+      warnings.push({
+        planSlug: plan.slug,
+        featureSlug,
+        code: "enforcement_settings_dropped",
+        message: `"${featureSlug}" sets ${droppedEnforcement.join(", ")}. Applying this document creates a new draft without them, falling back to the server defaults, which changes what a customer is allowed to consume — a human has to approve that. The version you read stays exactly as it is`,
       })
     }
 
@@ -558,7 +637,7 @@ function projectPlan(plan: StoredPlan): PlanProjection {
         planSlug: plan.slug,
         featureSlug,
         code: "feature_settings_dropped",
-        message: `"${featureSlug}" sets ${droppedFeature.join(", ")}, which this document cannot carry. Re-applying it would create a draft using the server defaults instead`,
+        message: `"${featureSlug}" sets ${droppedFeature.join(", ")}. Applying this document creates a new draft without them, falling back to the server defaults. The version you read stays exactly as it is`,
       })
     }
   }
