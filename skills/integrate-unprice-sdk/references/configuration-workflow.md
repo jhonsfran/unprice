@@ -83,9 +83,21 @@ message; message text is not a contract.
 | `feature_settings_dropped` | Cosmetic or inert today | Report and continue |
 | `meter_fields_dropped` | Cosmetic or inert today | Report and continue |
 
-The blocking set is exported as `MONETIZATION_BLOCKING_WARNING_CODES`. Prefer it over a hand-copied
-list wherever the installed contract exposes it: a hardcoded copy drifts silently in the direction
-that matters, treating a newly added commercial warning as cosmetic.
+**This table is the contract for which codes block.** The blocking subset has no SDK representation
+— it is not a named schema in the OpenAPI document, and the server-side constant
+`MONETIZATION_BLOCKING_WARNING_CODES` ships from a package that is never published. Do not go
+looking for an import; take the two blocking values from the table above.
+
+The four code *values* do reach the installed types, so a typo fails to compile instead of silently
+missing a warning. The union is inline, so the reference is the whole path rather than a named
+component:
+
+```ts
+type WarningCode =
+  operations["monetization.get"]["responses"][200]["content"]["application/json"]["warnings"][number]["code"]
+// "enforcement_settings_dropped" | "version_settings_dropped"
+//   | "feature_settings_dropped" | "meter_fields_dropped"
+```
 
 Warnings fire almost exclusively for versions authored in the dashboard. A version `apply` created
 never warns.
