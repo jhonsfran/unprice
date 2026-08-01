@@ -260,10 +260,16 @@ describe("monetization.apply", () => {
   it("rejects an unknown top-level key instead of ignoring it", async () => {
     const harness = createHarness()
 
+    const config = validConfig()
+    // A nested typo is the likelier agent mistake, and it is the only case where
+    // the container prefix does any work: Zod reports the key against its parent
+    // object, so the top-level case alone cannot tell a correct prefix from none.
+    ;(config.plans[0] as unknown as Record<string, unknown>).trialDays = 14
+
     const response = await harness.fetch({
       path: "/v1/monetization/apply",
       method: "POST",
-      body: { projectId: "proj_attacker", config: validConfig() },
+      body: { projectId: "proj_attacker", config },
     })
 
     expect(response.status).toBe(400)
@@ -272,12 +278,14 @@ describe("monetization.apply", () => {
     }
 
     expect(body.error.details.kind).toBe("invalid_config")
-    // the offending key is addressable as a path, not just named in prose:
-    // an agent acts on `path`, and Zod reports unrecognized keys against the
-    // containing object, whose top-level path is empty
+    // the offending key is addressable as a path, not just named in prose
     expect(body.error.details.issues).toContainEqual({
       path: "projectId",
       message: 'Unrecognized key "projectId"',
+    })
+    expect(body.error.details.issues).toContainEqual({
+      path: "config.plans[0].trialDays",
+      message: 'Unrecognized key "trialDays"',
     })
     expect(body.error.details.issues.every((issue) => issue.path !== "")).toBe(true)
     expect(useCaseMocks.applyMonetizationConfig).not.toHaveBeenCalled()
@@ -337,6 +345,53 @@ describe("monetization.apply", () => {
 
     expect(new URL(reviewUrl).pathname).toBe("/acme-workspace/acme-api/plans/pro/pv_pro")
     expect(new URL(reviewUrl).origin).toBe(new URL(APP_DOMAIN).origin)
+  })
+
+  // A plan slug is caller-supplied and echoed back from the document, and is only
+  // validated for length. An unencoded "/" would not break the link, it would add
+  // a path segment — silently addressing a different, possibly real, plan page.
+  it("encodes slugs so a separator in one cannot add a path segment", async () => {
+    useCaseMocks.applyMonetizationConfig.mockResolvedValue(
+      applyOk([{ slug: "a b/c", planVersionId: "pv_1", status: "created" }])
+    )
+    const harness = createHarness()
+
+    const response = await harness.fetch({
+      path: "/v1/monetization/apply",
+      method: "POST",
+      body: { config: validConfig() },
+    })
+
+    const { reviewUrl } = (await response.json()) as { reviewUrl: string }
+    const segments = new URL(reviewUrl).pathname.split("/")
+
+    // ["", workspace, project, "plans", slug, planVersionId] — six, never seven
+    expect(segments).toHaveLength(6)
+    expect(decodeURIComponent(segments[4] ?? "")).toBe("a b/c")
+    expect(segments[5]).toBe("pv_1")
+  })
+
+  // `encodeURIComponent` throws URIError on a lone surrogate. The drafts are
+  // already written by this point, and apply is idempotent by hash, so a throw
+  // here would make every retry of the same document reproduce the same 500 and
+  // the caller could never obtain the outcomes for work the server did.
+  it("still returns the outcomes when a slug cannot be encoded", async () => {
+    useCaseMocks.applyMonetizationConfig.mockResolvedValue(
+      applyOk([{ slug: "pro\ud800", planVersionId: "pv_1", status: "created" }])
+    )
+    const harness = createHarness()
+
+    const response = await harness.fetch({
+      path: "/v1/monetization/apply",
+      method: "POST",
+      body: { config: validConfig() },
+    })
+
+    expect(response.status).toBe(200)
+    const body = (await response.json()) as { reviewUrl: string | null; plans: unknown[] }
+
+    expect(body.reviewUrl).toBeNull()
+    expect(body.plans).toHaveLength(1)
   })
 
   it("returns a null review url when nothing was created", async () => {
@@ -521,9 +576,17 @@ describe("monetization.apply", () => {
     })
 
     expect(response.status).toBe(500)
-    const raw = await response.text()
-    expect(raw).not.toContain("chat_request")
-    expect(raw).not.toContain("billingConfig")
+    // Pinned exactly rather than by absence: asserting the document is missing
+    // passes for any body that happens not to contain those strings, including
+    // one that leaks `plan_not_found (plan "pro")`. The whole body is the claim.
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INTERNAL_SERVER_ERROR",
+        docs: "https://docs.unprice.dev/api-reference/errors/code/INTERNAL_SERVER_ERROR",
+        message: "Internal server error",
+        requestId: "req_test",
+      },
+    })
   })
 
   it("maps a transport failure to an internal error, distinct from any configuration outcome", async () => {

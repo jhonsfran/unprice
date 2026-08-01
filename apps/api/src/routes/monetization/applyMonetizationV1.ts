@@ -41,12 +41,17 @@ const applyMonetizationRequestSchema = z
 const applyOkSchema = applyMonetizationConfigOutputSchema.options[0]
 
 const applyMonetizationResponseSchema = applyOkSchema.omit({ state: true }).extend({
+  // Stated here rather than assumed: the route reports the *first* created draft,
+  // which is only meaningful because the outcomes keep the document's order.
+  plans: applyOkSchema.shape.plans.describe(
+    "One outcome per plan, in the same order as the `plans` of the submitted document"
+  ),
   reviewUrl: z
     .string()
     .url()
     .nullable()
     .describe(
-      "Dashboard link to the first draft this apply created, for a human to review and publish. Null when every plan was already unchanged or published"
+      "Dashboard link to the first draft this apply created, for a human to review and publish. Null when no draft was created — every plan was already unchanged or published — and also null when the link could not be built, so a null here does not prove nothing was created; read `plans` for that"
     ),
 })
 
@@ -69,7 +74,7 @@ export const route = createRoute(
       responses: {
         [HttpStatusCodes.OK]: jsonContent(
           applyMonetizationResponseSchema,
-          "Per-plan outcomes, drafts left behind by earlier documents, and what the application has to call at runtime"
+          "Per-plan outcomes, drafts left behind by earlier documents, what the application has to call at runtime, and a dashboard link to the first draft created for review"
         ),
         ...openApiErrorResponses,
       },
@@ -233,10 +238,9 @@ function resolveReviewUrl(
     return null
   }
 
-  const workspaceSlug: string | undefined = key.project.workspace.slug
-
-  if (!workspaceSlug) {
+  const unavailable = (reason: string): null => {
     c.get("logger").warn("monetization.apply could not resolve a review url", {
+      reason,
       projectId: key.projectId,
       workspaceId: key.project.workspaceId,
       planVersionId: created.planVersionId,
@@ -245,11 +249,29 @@ function resolveReviewUrl(
     return null
   }
 
-  const path = [workspaceSlug, key.project.slug, "plans", created.slug, created.planVersionId]
-    .map((segment) => encodeURIComponent(segment))
-    .join("/")
+  // See `ApiKeyCache` in @unprice/services/cache: the cached key may predate this
+  // field. Not unreachable — do not delete this as dead code.
+  const workspaceSlug: string | undefined = key.project.workspace.slug
 
-  return new URL(`/${path}`, APP_DOMAIN).toString()
+  if (!workspaceSlug) {
+    return unavailable("workspace_slug_missing")
+  }
+
+  try {
+    // `encodeURIComponent` throws `URIError` on a lone surrogate, and a plan slug
+    // is caller-supplied and echoed back from the document rather than read from
+    // the database. Throwing here would lose `plans`, `staleDrafts`, and the
+    // integration contract for drafts that are already written — and since apply
+    // is idempotent by hash, every retry of that document would reproduce the
+    // same 500, leaving the caller permanently unable to see completed work.
+    const path = [workspaceSlug, key.project.slug, "plans", created.slug, created.planVersionId]
+      .map((segment) => encodeURIComponent(segment))
+      .join("/")
+
+    return new URL(`/${path}`, APP_DOMAIN).toString()
+  } catch {
+    return unavailable("unencodable_segment")
+  }
 }
 
 export const registerApplyMonetizationV1 = (app: App) =>
@@ -259,12 +281,13 @@ export const registerApplyMonetizationV1 = (app: App) =>
       const { config } = c.req.valid("json")
 
       const key = await keyAuth(c, { requireType: "config" })
+      const { plans, features, events } = c.get("services")
 
       startTime(c, "applyMonetizationConfig")
 
       const { err, val } = await applyMonetizationConfig(
         {
-          services: c.get("services"),
+          services: { plans, features, events },
           db: c.get("db"),
           logger: c.get("logger"),
         },

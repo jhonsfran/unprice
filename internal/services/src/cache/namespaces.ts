@@ -55,6 +55,15 @@ export type BudgetRunCache = typeof budgetRuns.$inferSelect
  * cannot guarantee. Do not "simplify" this to `ApiKeyExtended` — the compiler would stop
  * catching the omission and every cached runtime key would start failing authorization until
  * its TTL expired.
+ *
+ * `project.workspace.slug` has the same property and is NOT expressed in this type. It was
+ * added to the api key query later than the entries already in the cache, so for the full
+ * stale window (24h, see CACHE_STALENESS_TIME_MS) a served key can carry `undefined` there
+ * while the compiler insists it is a `string`. Any reader building a URL or a lookup key from
+ * it must treat it as possibly absent — `monetization.apply` does, and returns a null review
+ * link rather than emitting `/undefined/…`. Widening it here would ripple into every
+ * `ApiKeyExtended` consumer, so the obligation is documented rather than typed; if a second
+ * reader appears, prefer typing it over repeating the check.
  */
 export type ApiKeyCache = Omit<ApiKeyExtended, "type"> & { type?: ApiKeyType }
 

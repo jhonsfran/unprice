@@ -59,7 +59,7 @@ type GetFailure = Exclude<GetOutput, { state: "ok" }>
 /**
  * These are states of the project, not of the request. Two default plans is a
  * genuine conflict in the stored data; the other two say a precondition for
- * emitting a document is not met. None of them are `MonetizationErrorDetails`
+ * emitting a document is not met. None of them are `ApiErrorDetails`
  * kinds, so none of them carry structured detail — the use case's message
  * already names what is wrong.
  */

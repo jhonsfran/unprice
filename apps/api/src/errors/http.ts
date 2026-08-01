@@ -28,15 +28,21 @@ const ErrorCode = z.enum([
 ])
 
 /**
- * Structured, machine-readable detail for the monetization configuration
- * operations. A configuration document is a tree, so "which part of it is
- * wrong" cannot survive being flattened into a sentence — an agent needs the
- * failure kind and the JSON paths to act on. Optional everywhere: only the
- * routes that can say something precise populate it.
+ * Structured, machine-readable detail on an error response. Some failures are
+ * about a tree — a configuration document, say — and "which part of it is wrong"
+ * cannot survive being flattened into a sentence; an agent needs a failure kind
+ * and JSON paths to act on.
+ *
+ * This is shared across every error response because `openApiErrorResponses` is,
+ * so it is named for the layer that carries it rather than for its first
+ * consumer. It is optional everywhere and today only the `monetization.*`
+ * operations populate it; every other route omits it. A new kind from another
+ * domain belongs in this same enum rather than in a second parallel field.
  */
-export const monetizationErrorDetailsSchema = z.object({
+export const apiErrorDetailsSchema = z.object({
   kind: z.enum(["invalid_config", "slug_conflict", "unresolved_reference"]).openapi({
-    description: "What kind of configuration failure this is",
+    description:
+      "What kind of failure this is. Currently only the monetization configuration operations set it",
     example: "invalid_config",
   }),
   issues: z
@@ -53,7 +59,7 @@ export const monetizationErrorDetailsSchema = z.object({
     .openapi({ description: "Per-location detail, when the failure has locations" }),
 })
 
-export type MonetizationErrorDetails = z.infer<typeof monetizationErrorDetailsSchema>
+export type ApiErrorDetails = z.infer<typeof apiErrorDetailsSchema>
 
 // biome-ignore lint/suspicious/noExplicitAny: <explanation>
 export function errorSchemaFactory(code: z.ZodEnum<any>) {
@@ -74,7 +80,7 @@ export function errorSchemaFactory(code: z.ZodEnum<any>) {
         description: "Please always include the requestId in your error report",
         example: "req_1234",
       }),
-      details: monetizationErrorDetailsSchema.optional(),
+      details: apiErrorDetailsSchema.optional(),
     }),
   })
 }
@@ -94,7 +100,7 @@ export const ErrorSchema = z.object({
       description: "Please always include the requestId in your error report",
       example: "req_1234",
     }),
-    details: monetizationErrorDetailsSchema.optional(),
+    details: apiErrorDetailsSchema.optional(),
   }),
 })
 
@@ -162,7 +168,7 @@ function statusToCode(status: StatusCode): z.infer<typeof ErrorCode> {
 export class UnpriceApiError extends HTTPException {
   public readonly code: z.infer<typeof ErrorCode>
   /** Optional machine-readable detail. Absent unless the thrower can be precise. */
-  public readonly details?: MonetizationErrorDetails
+  public readonly details?: ApiErrorDetails
 
   constructor({
     code,
@@ -171,7 +177,7 @@ export class UnpriceApiError extends HTTPException {
   }: {
     code: z.infer<typeof ErrorCode>
     message: string
-    details?: MonetizationErrorDetails
+    details?: ApiErrorDetails
   }) {
     super(codeToStatus(code) as ContentfulStatusCode, { message })
     this.code = code
