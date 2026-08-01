@@ -1,6 +1,6 @@
 ---
 name: integrate-unprice-sdk
-description: Integrate and troubleshoot the @unprice/api TypeScript SDK in server-side Node.js, Next.js, Hono, or edge applications. Use when onboarding Unprice customers, checking access, enforcing or recording usage, reserving budgets for multi-step workloads, handling Unprice API results, reviewing an existing Unprice integration, or adding customer-spend authorization before paid work runs.
+description: Integrate and troubleshoot the @unprice/api TypeScript SDK in server-side Node.js, Next.js, Hono, or edge applications. Use when onboarding Unprice customers, checking access, enforcing or recording usage, reserving budgets for multi-step workloads, handling Unprice API results, reviewing an existing Unprice integration, adding customer-spend authorization before paid work runs, or writing a project's plan, feature, price, and limit configuration into Unprice.
 ---
 
 # Integrate the Unprice SDK
