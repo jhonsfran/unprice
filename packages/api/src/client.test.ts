@@ -1,6 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest"
 import { version } from "../package.json"
 import { Unprice } from "./client"
+import type { ApiError, ErrorResponse } from "./errors"
 import { sdkOperationIds } from "./generated/sdk-resources"
 import type { OperationInput, OperationResponse } from "./operation-types"
 
@@ -532,6 +533,76 @@ describe("Unprice client", () => {
       message: "Invoice not found",
       requestId: "req_123",
     })
+  })
+
+  it("covers every documented error status in the error response union", async () => {
+    // The union is derived from the generated components, so a status added to the
+    // API's shared error responses lands here on the next regeneration. It was
+    // previously hand-listed and missed 413 entirely.
+    expectTypeOf<ApiError["code"]>().toEqualTypeOf<
+      | "BAD_REQUEST"
+      | "UNAUTHORIZED"
+      | "FORBIDDEN"
+      | "NOT_FOUND"
+      | "CONFLICT"
+      | "PRECONDITION_FAILED"
+      | "PAYLOAD_TOO_LARGE"
+      | "TOO_MANY_REQUESTS"
+      | "INTERNAL_SERVER_ERROR"
+      | "FETCH_ERROR"
+    >()
+    expectTypeOf<{
+      error: {
+        code: "PAYLOAD_TOO_LARGE"
+        message: string
+        docs: string
+        requestId: string
+      }
+    }>().toMatchTypeOf<ErrorResponse>()
+
+    const client = createClient(async () =>
+      createJsonResponse(
+        {
+          error: {
+            code: "PAYLOAD_TOO_LARGE",
+            message: "Request payload is too large",
+            docs: "https://docs.unprice.dev/api-reference/errors/code/PAYLOAD_TOO_LARGE",
+            requestId: "req_413",
+          },
+        },
+        { status: 413 }
+      )
+    )
+
+    const { result, error } = await client.invoices.get({ invoiceId: "inv_123" })
+
+    expect(result).toBeUndefined()
+    expect(error).toMatchObject({ code: "PAYLOAD_TOO_LARGE", requestId: "req_413" })
+  })
+
+  it("carries the optional details field on error responses", () => {
+    // `details` is spliced into the shared error factory, so it is optional on every
+    // error component; `kind` is the only required member when it is present.
+    expectTypeOf<{
+      error: {
+        code: "BAD_REQUEST"
+        message: string
+        docs: string
+        requestId: string
+        details: {
+          kind: "invalid_config"
+          issues: { path: string; message: string }[]
+        }
+      }
+    }>().toMatchTypeOf<ErrorResponse>()
+    expectTypeOf<{
+      error: {
+        code: "BAD_REQUEST"
+        message: string
+        docs: string
+        requestId: string
+      }
+    }>().toMatchTypeOf<ErrorResponse>()
   })
 
   it("retries server errors inside the OpenAPI transport", async () => {
