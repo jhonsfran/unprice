@@ -17,10 +17,11 @@ import TabsDashboard from "../_components/tabs-dashboard"
 export const dynamic = "force-dynamic"
 
 export default async function DashboardPlans(props: {
-  params: { workspaceSlug: string; projectSlug: string }
-  searchParams: SearchParams
+  params: Promise<{ workspaceSlug: string; projectSlug: string }>
+  searchParams: Promise<SearchParams>
 }) {
-  const { projectSlug, workspaceSlug } = props.params
+  const [params, searchParams] = await Promise.all([props.params, props.searchParams])
+  const { projectSlug, workspaceSlug } = params
   const isPagesEnabled = await entitlementFlag(FEATURE_SLUGS.PAGES.SLUG)
 
   if (!isPagesEnabled) {
@@ -36,7 +37,7 @@ export default async function DashboardPlans(props: {
   }
 
   const baseUrl = `/${workspaceSlug}/${projectSlug}`
-  const filter = intervalParams(props.searchParams)
+  const filter = intervalParams(searchParams)
   const interval = prepareInterval(filter.intervalFilter)
 
   // prefetch
@@ -61,7 +62,9 @@ export default async function DashboardPlans(props: {
     <DashboardShell>
       <div className="flex flex-col gap-8 md:flex-row md:items-center md:justify-between">
         <TabsDashboard baseUrl={baseUrl} activeTab="plans" />
-        <IntervalFilter className="ml-auto" />
+        <Suspense fallback={<div className="h-9 w-44" />}>
+          <IntervalFilter className="ml-auto" />
+        </Suspense>
       </div>
       <HydrateClient>
         <Suspense fallback={<PlansStatsSkeleton isLoading={true} />}>

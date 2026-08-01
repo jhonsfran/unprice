@@ -16,15 +16,14 @@ import { PlanActions } from "../../_components/plan-actions"
 import { PlanVersionDialog } from "../_components/plan-version-dialog"
 import { columns } from "../_components/table-versions/columns"
 
-export default async function PlanPage({
-  params,
-}: {
-  params: {
+export default async function PlanPage(props: {
+  params: Promise<{
     workspaceSlug: string
     projectSlug: string
     planSlug: string
-  }
+  }>
 }) {
+  const params = await props.params
   const { planSlug, workspaceSlug, projectSlug } = params
   const baseUrl = `/${workspaceSlug}/${projectSlug}/plans/${planSlug}`
   const { getVersionsBySlug } = api.plans

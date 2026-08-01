@@ -5,10 +5,11 @@ import { ProjectSettingsHeader } from "./_components/project-settings-header"
 
 export default async function ProjectSettingsLayout(props: {
   children: React.ReactNode
-  params: { workspaceSlug: string; projectSlug: string }
+  params: Promise<{ workspaceSlug: string; projectSlug: string }>
 }) {
+  const { projectSlug } = await props.params
   const { project } = await api.projects.getBySlug({
-    slug: props.params.projectSlug,
+    slug: projectSlug,
   })
 
   if (!project) {

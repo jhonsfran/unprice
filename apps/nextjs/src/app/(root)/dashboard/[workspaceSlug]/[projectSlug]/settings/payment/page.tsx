@@ -10,11 +10,10 @@ const PROVIDER_META: Record<string, { disabled?: boolean }> = {
   },
 }
 
-export default async function ProjectPaymentSettingsPage({
-  params,
-}: {
-  params: { workspaceSlug: string; projectSlug: string }
+export default async function ProjectPaymentSettingsPage(props: {
+  params: Promise<{ workspaceSlug: string; projectSlug: string }>
 }) {
+  const params = await props.params
   const enabledProviders = PAYMENT_PROVIDERS.filter((p) => !PROVIDER_META[p]?.disabled)
 
   const configs = await Promise.all(

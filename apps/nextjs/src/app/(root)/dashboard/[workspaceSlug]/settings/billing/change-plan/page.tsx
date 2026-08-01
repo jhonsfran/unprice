@@ -9,13 +9,11 @@ import { WorkspaceChangePlanClient } from "./_components/workspace-change-plan-c
 
 export const dynamic = "force-dynamic"
 
-export default async function ChangePlanPage({
-  params,
-  searchParams,
-}: {
-  params: { workspaceSlug: string }
-  searchParams: SearchParams
+export default async function ChangePlanPage(props: {
+  params: Promise<{ workspaceSlug: string }>
+  searchParams: Promise<SearchParams>
 }) {
+  const [params, searchParams] = await Promise.all([props.params, props.searchParams])
   const { workspaceSlug } = params
   const parsedSearchParams = toUrlSearchParams(searchParams)
   const intent = parseWorkspaceUpgradeIntent(parsedSearchParams)

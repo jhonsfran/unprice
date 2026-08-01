@@ -6,16 +6,17 @@ import { WORKSPACE_NAV, WORKSPACE_SHORTCUTS } from "~/constants/workspaces"
 import type { DashboardRoute, Shortcut } from "~/types"
 
 export default async function DashboardNavigationDesktopSlot(props: {
-  params: {
+  params: Promise<{
     all: string[]
-  }
-  searchParams: {
+  }>
+  searchParams: Promise<{
     workspaceSlug: string
     projectSlug: string
-  }
+  }>
 }) {
-  const { all } = props.params
-  const { workspaceSlug, projectSlug } = props.searchParams
+  const [params, searchParams] = await Promise.all([props.params, props.searchParams])
+  const all = [...params.all]
+  const { workspaceSlug, projectSlug } = searchParams
 
   // delete first segment because it's always "/app" for the redirection from the middleware
   all.shift()

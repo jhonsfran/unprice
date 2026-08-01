@@ -5,16 +5,15 @@ import { InvoiceActions } from "../../../_components/invoices/invoice-actions"
 import { InvoiceDetails } from "../../../_components/invoices/invoice-details"
 import { InvoiceTable } from "../../../_components/invoices/invoice-table"
 
-export default async function InvoicePage({
-  params,
-}: {
-  params: {
+export default async function InvoicePage(props: {
+  params: Promise<{
     workspaceSlug: string
     projectSlug: string
     customerId: string
     invoiceId: string
-  }
+  }>
 }) {
+  const params = await props.params
   const { invoice } = await api.customers.getInvoiceById({
     customerId: params.customerId,
     invoiceId: params.invoiceId,

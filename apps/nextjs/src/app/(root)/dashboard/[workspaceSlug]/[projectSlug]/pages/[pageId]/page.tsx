@@ -11,11 +11,10 @@ import { generatePreviewToken } from "~/lib/preview"
 import { api } from "~/trpc/server"
 import { PageActions } from "../_components/page-actions"
 
-export default async function PageEditor({
-  params: { pageId },
-}: {
-  params: { workspaceSlug: string; projectSlug: string; pageId: string }
+export default async function PageEditor(props: {
+  params: Promise<{ workspaceSlug: string; projectSlug: string; pageId: string }>
 }) {
+  const { pageId } = await props.params
   const { page } = await api.pages.getById({
     id: pageId,
   })

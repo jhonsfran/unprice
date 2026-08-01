@@ -9,12 +9,11 @@ import NewWorkspaceForm from "../_components/new-workspace-form"
 import Redirect from "./_components/redirect"
 
 export default async function NewPage(props: {
-  searchParams: {
+  searchParams: Promise<{
     workspace_id?: string
-  }
+  }>
 }) {
-  const { workspace_id } = props.searchParams
-  const cookieStore = await cookies()
+  const [{ workspace_id }, cookieStore] = await Promise.all([props.searchParams, cookies()])
   const sessionId = cookieStore.get(COOKIES_APP.SESSION)?.value
 
   if (!sessionId) {

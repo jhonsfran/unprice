@@ -1,20 +1,10 @@
 import { Link } from "next-view-transitions"
-import dynamic from "next/dynamic"
 
 import { Button } from "@unprice/ui/button"
 import { GitHub, Twitter } from "@unprice/ui/icons"
-import { Skeleton } from "@unprice/ui/skeleton"
 import { cn } from "@unprice/ui/utils"
 import { siteConfig } from "~/constants/layout"
-
-const ThemeToggle = dynamic(() => import("~/components/layout/theme-toggle"), {
-  ssr: false,
-  loading: () => (
-    <Button variant="ghost" size="sm" className="button-ghost">
-      <Skeleton className="h-6 w-6 rounded-full" />
-    </Button>
-  ),
-})
+import ThemeToggle from "./theme-toggle"
 
 export default function Footer(props: { className?: string }) {
   return (

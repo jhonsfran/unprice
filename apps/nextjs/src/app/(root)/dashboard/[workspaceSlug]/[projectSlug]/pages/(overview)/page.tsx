@@ -14,12 +14,12 @@ import { PageCard, PageCardSkeleton } from "../_components/page-card"
 import { PageDialog } from "../_components/page-dialog"
 
 export default async function PageOverviewPage(props: {
-  params: { workspaceSlug: string; projectSlug: string }
-  searchParams: Record<string, string | string[] | undefined>
+  params: Promise<{ workspaceSlug: string; projectSlug: string }>
 }) {
-  const { projectSlug, workspaceSlug } = props.params
-
-  const isPagesEnabled = await entitlementFlag(FEATURE_SLUGS.PAGES.SLUG)
+  const [{ projectSlug, workspaceSlug }, isPagesEnabled] = await Promise.all([
+    props.params,
+    entitlementFlag(FEATURE_SLUGS.PAGES.SLUG),
+  ])
 
   if (!isPagesEnabled) {
     return (

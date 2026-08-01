@@ -12,12 +12,12 @@ import { api } from "~/trpc/server"
 import { PlanDialog } from "../_components/plan-dialog"
 import { PlanCard, PlanCardSkeleton } from "./_components/plan-card"
 export default async function PlansPage(props: {
-  params: { workspaceSlug: string; projectSlug: string }
-  searchParams: Record<string, string | string[] | undefined>
+  params: Promise<{ workspaceSlug: string; projectSlug: string }>
 }) {
-  const { projectSlug, workspaceSlug } = props.params
-
-  const isPlansEnabled = await entitlementFlag(FEATURE_SLUGS.PLANS.SLUG)
+  const [{ projectSlug, workspaceSlug }, isPlansEnabled] = await Promise.all([
+    props.params,
+    entitlementFlag(FEATURE_SLUGS.PLANS.SLUG),
+  ])
 
   if (!isPlansEnabled) {
     return (

@@ -1,20 +1,9 @@
 import { DOCS_DOMAIN } from "@unprice/config"
-import { Button } from "@unprice/ui/button"
-import { Skeleton } from "@unprice/ui/skeleton"
 import { Link } from "next-view-transitions"
-import dynamic from "next/dynamic"
 import { LedgerRow } from "~/components/landing/station"
 import { Logo } from "~/components/layout/logo"
+import ThemeToggle from "~/components/layout/theme-toggle"
 import { siteConfig } from "~/constants/layout"
-
-const ThemeToggle = dynamic(() => import("~/components/layout/theme-toggle"), {
-  ssr: false,
-  loading: () => (
-    <Button variant="ghost" size="sm" className="button-ghost">
-      <Skeleton className="h-6 w-6 rounded-full" />
-    </Button>
-  ),
-})
 
 // The footer is the page's colophon, set in the same receipt grammar as the
 // sections above it: the mechanism sentence, three true facts as ledger rows,

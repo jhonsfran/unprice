@@ -18,10 +18,12 @@ import { DomainDialog } from "./_components/domain-dialog"
 import { VerifyDomainButton } from "./_components/domain-verify-button"
 
 export default async function PageDomains(props: {
-  params: { workspaceSlug: string }
+  params: Promise<{ workspaceSlug: string }>
 }) {
-  const { workspaceSlug } = props.params
-  const isDomainsEnabled = await entitlementFlag(FEATURE_SLUGS.DOMAINS.SLUG)
+  const [{ workspaceSlug }, isDomainsEnabled] = await Promise.all([
+    props.params,
+    entitlementFlag(FEATURE_SLUGS.DOMAINS.SLUG),
+  ])
 
   if (!isDomainsEnabled) {
     return (

@@ -18,7 +18,7 @@ export default function ErrorOnboarding({
 }) {
   useEffect(() => {
     // Log the error to an error reporting service
-    void logError(error)
+    void logError(error.message, { digest: error.digest, name: error.name })
   }, [error])
 
   return (

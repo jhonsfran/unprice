@@ -621,10 +621,15 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   `.filter().map()` chains into `for...of` loops (js-combine-iterations), destructure
   `useQuery`/`useInfiniteQuery` results (query-destructure-result), and split 300+ line components
   (no-giant-component).
-- 2026-06-13: Every `next/dynamic` or `React.lazy()` component must include a `loading` fallback
-  that matches the component's layout dimensions (e.g., a `<Skeleton>` with the same height/width).
-  Without it, the page content shifts when the chunk arrives, causing visible flicker. Follow the
-  same pattern as `ThemeToggle` in `src/components/layout/footer.tsx`.
+- 2026-06-13: Every client-side `next/dynamic` or `React.lazy()` component must include a `loading`
+  fallback that matches the component's layout dimensions (e.g., a `<Skeleton>` with the same
+  height/width). Without it, the page content shifts when the chunk arrives, causing visible flicker.
+- 2026-08-01: Server Components can render a `"use client"` component directly; do not wrap it in
+  `next/dynamic({ ssr: false })`, which Next 15 rejects during the build.
+- 2026-08-01: In Next 15 App Router pages, `params` and `searchParams` are promises; await them
+  before reading route fields or passing query state into `nuqs` loaders.
+- 2026-08-01: Let `src/app/icon.svg` own `/icon.svg`; a matching `public/icon.svg` makes normal
+  page loads fail with Next's conflicting-public-file 500.
 - 2026-06-15: Use `EmptyPlaceholder` with `isLoading` prop for loading states instead of inline
   spinners; use `EmptyPlaceholder` with Icon/Title/Description for empty states. This keeps the UI
   consistent across tables, charts, and panels. The component lives in
@@ -635,6 +640,8 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 
 ## Tests, Tooling, And Docs
 
+- 2026-07-31: The audit override upgrades `tar@^6` to v7; keep `apps/docs` on
+  Mint `^4.2.770` or newer, because Mint 4.2.354 default-imports `tar` and crashes on Node 24.
 - 2026-06-22: `millionco/react-doctor@v2` passes `--scope` during PR scans; keep its
   `version` input on `react-doctor` 0.5.x or newer. The repo now pins Node 24.17.0, so keep the
   root `doctor` script and the action on the same Node 24 toolchain. Keep the root script on the

@@ -9,14 +9,14 @@ import { api } from "~/trpc/server"
 import { columns as invoicesColumns } from "../../_components/invoices/table-invoices/columns"
 
 export default async function CustomerPage(props: {
-  params: {
+  params: Promise<{
     workspaceSlug: string
     projectSlug: string
     customerId: string
-  }
-  searchParams: SearchParams
+  }>
+  searchParams: Promise<SearchParams>
 }) {
-  const { params, searchParams } = props
+  const [params, searchParams] = await Promise.all([props.params, props.searchParams])
   const { customerId } = params
   const filters = dataTableParams(searchParams)
 

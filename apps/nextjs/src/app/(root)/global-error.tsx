@@ -19,7 +19,7 @@ export default function GlobalError({
   const router = useRouter()
 
   useEffect(() => {
-    void logError(error)
+    void logError(error.message, { name: error.name })
   }, [error])
 
   const description = error.message

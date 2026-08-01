@@ -14,19 +14,17 @@ import { WorkspaceBillingOverview } from "./_components/workspace-billing-overvi
 
 export const dynamic = "force-dynamic"
 
-export default async function BillingPage({
-  params,
-  searchParams,
-}: {
-  params: { workspaceSlug: string }
-  searchParams: SearchParams
+export default async function BillingPage(props: {
+  params: Promise<{ workspaceSlug: string }>
+  searchParams: Promise<SearchParams>
 }) {
+  const [params, searchParams] = await Promise.all([props.params, props.searchParams])
   const { workspaceSlug } = params
   const session = await getSession()
   const atw = session?.user.workspaces.find((workspace) => workspace.slug === workspaceSlug)
   const isMainWorkspace = atw?.isMain
   const customerId = atw?.unPriceCustomerId ?? ""
-  const filter = await intervalParams(searchParams)
+  const filter = intervalParams(searchParams)
 
   if (isMainWorkspace) {
     return (

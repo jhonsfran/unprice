@@ -5,12 +5,10 @@ import { api } from "~/trpc/server"
 import { DeleteWorkspace } from "./_components/delete-workspace"
 import { WorkspaceName } from "./_components/workspace-name"
 
-export default async function WorkspaceSettingsPage({
-  params,
-}: {
-  params: { workspaceSlug: string }
+export default async function WorkspaceSettingsPage(props: {
+  params: Promise<{ workspaceSlug: string }>
 }) {
-  const { workspaceSlug } = params
+  const { workspaceSlug } = await props.params
   const { workspace } = await api.workspaces.getBySlug({
     slug: workspaceSlug,
   })

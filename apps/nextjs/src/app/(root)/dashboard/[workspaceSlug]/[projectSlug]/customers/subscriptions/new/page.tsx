@@ -2,13 +2,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unpr
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import { SubscriptionForm } from "../../_components/subscriptions/subscription-form"
 
-export default async function NewSubscriptionPage({
-  searchParams,
-}: {
-  searchParams: {
+export default async function NewSubscriptionPage(props: {
+  searchParams: Promise<{
     customerId?: string
-  }
+  }>
 }) {
+  const searchParams = await props.searchParams
   return (
     <DashboardShell>
       <div className="flex flex-col items-center justify-center">

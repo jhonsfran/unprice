@@ -6,15 +6,14 @@ import { DataTableSkeleton } from "~/components/data-table/data-table-skeleton"
 import { api } from "~/trpc/server"
 import { columns } from "../../_components/subscriptions/table-subscriptions/columns"
 
-export default async function CustomerPage({
-  params,
-}: {
-  params: {
+export default async function CustomerPage(props: {
+  params: Promise<{
     workspaceSlug: string
     projectSlug: string
     customerId: string
-  }
+  }>
 }) {
+  const params = await props.params
   const { customerId } = params
 
   const { customer } = await api.customers.getSubscriptions({

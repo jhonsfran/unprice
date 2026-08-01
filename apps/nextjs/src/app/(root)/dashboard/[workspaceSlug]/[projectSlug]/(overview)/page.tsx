@@ -2,9 +2,10 @@ import { redirect } from "next/navigation"
 import type { SearchParams } from "nuqs/server"
 
 export default async function ProjectOverviewPage(props: {
-  params: { workspaceSlug: string; projectSlug: string }
-  searchParams: SearchParams
+  params: Promise<{ workspaceSlug: string; projectSlug: string }>
+  searchParams: Promise<SearchParams>
 }) {
+  const { workspaceSlug, projectSlug } = await props.params
   // redirect to dashboard
-  redirect(`/${props.params.workspaceSlug}/${props.params.projectSlug}/dashboard`)
+  redirect(`/${workspaceSlug}/${projectSlug}/dashboard`)
 }

@@ -18,10 +18,11 @@ import TabsDashboard from "../_components/tabs-dashboard"
 export const dynamic = "force-dynamic"
 
 export default async function DashboardPages(props: {
-  params: { workspaceSlug: string; projectSlug: string }
-  searchParams: SearchParams
+  params: Promise<{ workspaceSlug: string; projectSlug: string }>
+  searchParams: Promise<SearchParams>
 }) {
-  const { projectSlug, workspaceSlug } = props.params
+  const [params, searchParams] = await Promise.all([props.params, props.searchParams])
+  const { projectSlug, workspaceSlug } = params
   const isPagesEnabled = await entitlementFlag(FEATURE_SLUGS.PAGES.SLUG)
 
   if (!isPagesEnabled) {
@@ -35,8 +36,8 @@ export default async function DashboardPages(props: {
   }
 
   const baseUrl = `/${workspaceSlug}/${projectSlug}`
-  const intervalFilter = intervalParams(props.searchParams)
-  const pageFilter = pageParams(props.searchParams)
+  const intervalFilter = intervalParams(searchParams)
+  const pageFilter = pageParams(searchParams)
 
   const interval = prepareInterval(intervalFilter.intervalFilter)
   const page = preparePage(pageFilter.pageId)
@@ -80,7 +81,9 @@ export default async function DashboardPages(props: {
         <TabsDashboard baseUrl={baseUrl} activeTab="pages" />
         <div className="flex items-center gap-2">
           <IntervalFilter className="md:ml-auto" />
-          <PageFilter className="ml-auto" pagesPromise={api.pages.listByActiveProject({})} />
+          <Suspense fallback={<div className="h-9 w-44" />}>
+            <PageFilter className="ml-auto" pagesPromise={api.pages.listByActiveProject({})} />
+          </Suspense>
         </div>
       </div>
       <HydrateClient>

@@ -14,12 +14,11 @@ import { UsageStats, UsageStatsSkeleton } from "./_components/usage-stats"
 export const dynamic = "force-dynamic"
 
 export default async function DashboardOverview(props: {
-  params: { workspaceSlug: string; projectSlug: string }
-  searchParams: SearchParams
+  params: Promise<{ workspaceSlug: string; projectSlug: string }>
+  searchParams: Promise<SearchParams>
 }) {
-  // const { projectSlug, workspaceSlug } = props.params
-  // const baseUrl = `/${workspaceSlug}/${projectSlug}`
-  const filter = intervalParams(props.searchParams)
+  const searchParams = await props.searchParams
+  const filter = intervalParams(searchParams)
   const now = Date.now()
   const interval = prepareInterval(filter.intervalFilter)
   const healthInput = buildIngestionHealthInput({ now, intervalMs: interval.intervalMs })
@@ -49,9 +48,6 @@ export default async function DashboardOverview(props: {
         />
       }
     >
-      {/* <div className="flex flex-col gap-8 md:flex-row md:items-center md:justify-between">
-        <TabsDashboard baseUrl={baseUrl} activeTab="overview" />
-      </div> */}
       <HydrateClient>
         <div className="min-h-[170px]">
           <Suspense fallback={<OperationalHealthSkeleton />}>

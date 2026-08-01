@@ -15,23 +15,27 @@ import { columns } from "./_components/table/columns"
 export const dynamic = "force-dynamic"
 
 export default async function ApiKeysPage(props: {
-  params: { projectSlug: string; workspaceSlug: string }
-  searchParams: SearchParams
+  params: Promise<{ projectSlug: string; workspaceSlug: string }>
+  searchParams: Promise<SearchParams>
 }) {
-  const isApiKeysEnabled = await entitlementFlag(FEATURE_SLUGS.API_KEYS.SLUG)
+  const [params, searchParams, isApiKeysEnabled] = await Promise.all([
+    props.params,
+    props.searchParams,
+    entitlementFlag(FEATURE_SLUGS.API_KEYS.SLUG),
+  ])
 
   if (!isApiKeysEnabled) {
     return (
       <UpgradePlanError
-        workspaceSlug={props.params.workspaceSlug}
+        workspaceSlug={params.workspaceSlug}
         blockedFeatureSlug={FEATURE_SLUGS.API_KEYS.SLUG}
-        returnTo={`/${props.params.workspaceSlug}/${props.params.projectSlug}/apikeys`}
+        returnTo={`/${params.workspaceSlug}/${params.projectSlug}/apikeys`}
       />
     )
   }
 
-  const filters = dataTableParams(props.searchParams)
-  const { workspaceSlug, projectSlug } = props.params
+  const filters = dataTableParams(searchParams)
+  const { workspaceSlug, projectSlug } = params
   const { apikeys, pageCount } = await api.apikeys.listByActiveProject({
     ...filters,
     workspaceSlug,

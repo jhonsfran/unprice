@@ -3,17 +3,18 @@ import BreadcrumbsApp from "~/components/layout/breadcrumbs"
 import { api } from "~/trpc/server"
 
 export default async function Page(props: {
-  params: {
+  params: Promise<{
     all: string[]
-  }
-  searchParams: {
+  }>
+  searchParams: Promise<{
     workspaceSlug?: string
     projectSlug?: string
     customerId?: string
-  }
+  }>
 }) {
-  const all = [...props.params.all]
-  const { workspaceSlug, projectSlug, customerId } = props.searchParams
+  const [params, searchParams] = await Promise.all([props.params, props.searchParams])
+  const all = [...params.all]
+  const { workspaceSlug, projectSlug, customerId } = searchParams
 
   // delete the first segment, which is always "/app"
   all.shift()

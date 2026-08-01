@@ -14,17 +14,15 @@ import { dataTableParams } from "~/lib/searchParams"
 import { api } from "~/trpc/server"
 import { columns } from "../../_components/subscriptions/table-subscriptions/columns"
 
-export default async function PlanSubscriptionsPage({
-  params,
-  searchParams,
-}: {
-  params: {
+export default async function PlanSubscriptionsPage(props: {
+  params: Promise<{
     workspaceSlug: string
     projectSlug: string
     customerId: string
-  }
-  searchParams: SearchParams
+  }>
+  searchParams: Promise<SearchParams>
 }) {
+  const [params, searchParams] = await Promise.all([props.params, props.searchParams])
   const { workspaceSlug, projectSlug } = params
   const baseUrl = `/${workspaceSlug}/${projectSlug}/customers`
   const filters = dataTableParams(searchParams)

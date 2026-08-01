@@ -18,12 +18,13 @@ import { api } from "~/trpc/server"
 import { CustomerDialog } from "../_components/customers/customer-dialog"
 
 export default async function ProjectUsersPage(props: {
-  params: { workspaceSlug: string; projectSlug: string; customerId: string }
-  searchParams: SearchParams
+  params: Promise<{ workspaceSlug: string; projectSlug: string; customerId: string }>
+  searchParams: Promise<SearchParams>
 }) {
-  const { workspaceSlug, projectSlug } = props.params
+  const [params, searchParams] = await Promise.all([props.params, props.searchParams])
+  const { workspaceSlug, projectSlug } = params
   const baseUrl = `/${workspaceSlug}/${projectSlug}/customers`
-  const filters = dataTableParams(props.searchParams)
+  const filters = dataTableParams(searchParams)
 
   const isCustomersEnabled = await entitlementFlag(FEATURE_SLUGS.CUSTOMERS.SLUG)
 

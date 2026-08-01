@@ -2,14 +2,15 @@
 
 import { getRequestLoggers, withEvlog } from "~/lib/observability"
 
-export const logError = withEvlog(async (error: Error | string, errorInfo?: unknown) => {
-  const message = typeof error === "string" ? error : error.message
-  const requestId = `global-error-${Date.now().toString()}`
-  const { logger } = getRequestLoggers(requestId)
+export const logError = withEvlog(
+  async (message: string, errorInfo?: { digest?: string; name?: string }) => {
+    const requestId = `global-error-${Date.now().toString()}`
+    const { logger } = getRequestLoggers(requestId)
 
-  logger.error(message, {
-    errorInfo: errorInfo as Record<string, unknown> | undefined,
-  })
+    logger.error(message, {
+      errorInfo,
+    })
 
-  await logger.flush()
-})
+    await logger.flush()
+  }
+)

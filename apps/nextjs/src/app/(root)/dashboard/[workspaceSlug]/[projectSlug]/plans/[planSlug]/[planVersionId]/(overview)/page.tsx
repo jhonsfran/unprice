@@ -12,16 +12,15 @@ import { FeatureList } from "../../_components/feature-list"
 import { PlanFeatureList } from "../../_components/plan-feature-list"
 import { PlanWorkspaceRail } from "../_components/plan-workspace-rail"
 
-export default async function OverviewVersionPage({
-  params,
-}: {
-  params: {
+export default async function OverviewVersionPage(props: {
+  params: Promise<{
     workspaceSlug: string
     projectSlug: string
     planSlug: string
     planVersionId: string
-  }
+  }>
 }) {
+  const params = await props.params
   const { planVersion } = await api.planVersions.getById({
     id: params.planVersionId,
   })

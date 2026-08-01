@@ -4,10 +4,9 @@ import { OnboardingShell } from "~/components/onboarding/onboarding-shell"
 import { OnboardingWrapper } from "~/components/onboarding/onboarding-wrapper"
 
 export default async function OnboardingPage(props: {
-  params: { workspaceSlug: string }
+  params: Promise<{ workspaceSlug: string }>
 }) {
-  const { workspaceSlug } = props.params
-  const session = await getSession()
+  const [{ workspaceSlug }, session] = await Promise.all([props.params, getSession()])
   const onboardingCompleted = session?.user?.onboardingCompleted ?? false
   const isDevelopment = process.env.NODE_ENV === "development"
 

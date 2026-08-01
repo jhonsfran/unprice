@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation"
+import { Suspense } from "react"
 
 import { getSession } from "@unprice/auth/server-rsc"
 import { APP_DOMAIN, AUTH_ROUTES } from "@unprice/config"
@@ -19,15 +20,17 @@ import { SignInGoogle } from "../_components/google-signin"
 import { UpdateMarketingCookie } from "../_components/update-marketing-cookie"
 import { SignUpCredentials } from "./credentials-signin"
 
-export default async function AuthenticationPage({
-  searchParams: { sessionId, intent, next },
-}: {
-  searchParams: {
+// This page reads the request's session and query string to select the authentication flow.
+export const dynamic = "force-dynamic"
+
+export default async function AuthenticationPage(props: {
+  searchParams: Promise<{
     sessionId?: string | string[]
     intent?: string | string[]
     next?: string | string[]
-  }
+  }>
 }) {
+  const { sessionId, intent, next } = await props.searchParams
   const singleSessionId = getSingleSearchParam(sessionId)
   const signupIntent = getSignupIntent(intent)
   const safeNext = getSafeNextPath(getSingleSearchParam(next))
@@ -40,7 +43,9 @@ export default async function AuthenticationPage({
   return (
     <div className={cn("flex flex-col gap-6")}>
       <UpdateMarketingCookie sessionId={singleSessionId} />
-      <FunnelPageEvent next={safeNext} />
+      <Suspense fallback={null}>
+        <FunnelPageEvent next={safeNext} />
+      </Suspense>
       <Card>
         <CardHeader className="text-center">
           <CardTitle className="text-xl">

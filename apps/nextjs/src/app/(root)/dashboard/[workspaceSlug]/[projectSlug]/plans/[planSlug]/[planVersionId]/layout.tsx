@@ -15,17 +15,18 @@ import { VersionContextStrip } from "./_components/version-context-strip"
 
 export default async function PlanVersionLayout(props: {
   children: React.ReactNode
-  params: {
+  params: Promise<{
     workspaceSlug: string
     projectSlug: string
     planSlug: string
     planVersionId: string
-  }
+  }>
 }) {
+  const params = await props.params
   const { getVersionsBySlug } = api.plans
   const [{ planVersion }, { plan }] = await Promise.all([
-    api.planVersions.getById({ id: props.params.planVersionId }),
-    getVersionsBySlug({ slug: props.params.planSlug }),
+    api.planVersions.getById({ id: params.planVersionId }),
+    getVersionsBySlug({ slug: params.planSlug }),
   ])
 
   if (!planVersion) {
@@ -36,7 +37,7 @@ export default async function PlanVersionLayout(props: {
   const active = planVersion.active ?? true
   const headerLabel = !active ? "inactive" : status
   const description = planVersion.description ?? planVersion.plan.description ?? undefined
-  const baseHref = `/${props.params.workspaceSlug}/${props.params.projectSlug}/plans/${props.params.planSlug}`
+  const baseHref = `/${params.workspaceSlug}/${params.projectSlug}/plans/${params.planSlug}`
   const listPlanVersionsExampleParams = {
     listPlanVersions: {
       planVersionIds: [planVersion.id],

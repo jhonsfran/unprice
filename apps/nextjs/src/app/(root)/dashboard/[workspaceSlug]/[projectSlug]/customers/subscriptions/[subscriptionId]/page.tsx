@@ -22,15 +22,14 @@ function SubscriptionFact({ label, value }: { label: string; value: ReactNode })
   )
 }
 
-export default async function SubscriptionPage({
-  params,
-}: {
-  params: {
+export default async function SubscriptionPage(props: {
+  params: Promise<{
     workspaceSlug: string
     projectSlug: string
     subscriptionId: string
-  }
+  }>
 }) {
+  const params = await props.params
   const { workspaceSlug, projectSlug } = params
   const { subscription } = await api.subscriptions.getById({
     id: params.subscriptionId,

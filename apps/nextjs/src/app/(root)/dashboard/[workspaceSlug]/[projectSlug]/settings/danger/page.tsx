@@ -6,10 +6,11 @@ import { TransferProjectToPersonal } from "./_components/transfer-to-personal"
 import { TransferProjectToTeam } from "./_components/transfer-to-team"
 
 export default async function DangerZonePage(props: {
-  params: { workspaceSlug: string; projectSlug: string }
+  params: Promise<{ workspaceSlug: string; projectSlug: string }>
 }) {
+  const { workspaceSlug, projectSlug } = await props.params
   // get the project and the workspace
-  const { project } = await api.projects.getBySlug({ slug: props.params.projectSlug })
+  const { project } = await api.projects.getBySlug({ slug: projectSlug })
 
   if (!project) {
     notFound()
@@ -18,19 +19,16 @@ export default async function DangerZonePage(props: {
   // ordered by severity: transfers are recoverable, delete is not
   return (
     <Fragment>
-      <TransferProjectToPersonal
-        projectSlug={props.params.projectSlug}
-        isMain={project.isMain ?? false}
-      />
+      <TransferProjectToPersonal projectSlug={projectSlug} isMain={project.isMain ?? false} />
       <TransferProjectToTeam
         workspacesPromise={api.workspaces.listWorkspacesByActiveUser()}
-        workspaceSlug={props.params.workspaceSlug}
-        projectSlug={props.params.projectSlug}
+        workspaceSlug={workspaceSlug}
+        projectSlug={projectSlug}
         isMain={project.isMain ?? false}
       />
       <DeleteProject
-        projectSlug={props.params.projectSlug}
-        workspaceSlug={props.params.workspaceSlug}
+        projectSlug={projectSlug}
+        workspaceSlug={workspaceSlug}
         isMain={project.isMain ?? false}
       />
     </Fragment>

@@ -1,5 +1,4 @@
 import { Skeleton } from "@unprice/ui/skeleton"
-import type { SearchParams } from "nuqs/server"
 import { Suspense } from "react"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
@@ -9,10 +8,7 @@ import { IngestionEventsPanel } from "./_components/ingestion-events-panel"
 
 export const dynamic = "force-dynamic"
 
-export default async function ProjectEventsPage(_props: {
-  params: { workspaceSlug: string; projectSlug: string }
-  searchParams: SearchParams
-}) {
+export default async function ProjectEventsPage() {
   return (
     <DashboardShell
       header={

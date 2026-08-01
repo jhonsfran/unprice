@@ -15,15 +15,14 @@ export const dynamic = "force-dynamic"
 
 const walletCreditStatuses = ["active", "consumed", "expired"] as const
 
-export default async function CustomerWalletPage({
-  params,
-}: {
-  params: {
+export default async function CustomerWalletPage(props: {
+  params: Promise<{
     workspaceSlug: string
     projectSlug: string
     customerId: string
-  }
+  }>
 }) {
+  const params = await props.params
   const { customerId } = params
   const { customer, wallet } = await api.customers.getWallet({
     customerId,

@@ -12,17 +12,15 @@ import {
 
 export const dynamic = "force-dynamic"
 
-export default async function CustomerUsagePage({
-  params,
-  searchParams,
-}: {
-  params: {
+export default async function CustomerUsagePage(props: {
+  params: Promise<{
     workspaceSlug: string
     projectSlug: string
     customerId: string
-  }
-  searchParams: SearchParams
+  }>
+  searchParams: Promise<SearchParams>
 }) {
+  const [params, searchParams] = await Promise.all([props.params, props.searchParams])
   const { workspaceSlug, projectSlug, customerId } = params
   const filter = intervalParams(searchParams)
   const baseUrl = `/${workspaceSlug}/${projectSlug}/customers/${customerId}`

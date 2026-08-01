@@ -14,14 +14,14 @@ import { columns as runsColumns } from "../../_components/runs/table-runs/column
 export const dynamic = "force-dynamic"
 
 export default async function CustomerRunsPage(props: {
-  params: {
+  params: Promise<{
     workspaceSlug: string
     projectSlug: string
     customerId: string
-  }
-  searchParams: SearchParams
+  }>
+  searchParams: Promise<SearchParams>
 }) {
-  const { params, searchParams } = props
+  const [params, searchParams] = await Promise.all([props.params, props.searchParams])
   const { customerId } = params
   const filters = dataTableParams(searchParams)
 

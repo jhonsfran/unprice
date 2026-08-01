@@ -33,16 +33,17 @@ const prefetchWorkspaces = cache(() => {
 })
 
 export default async function Page(props: {
-  params: {
+  params: Promise<{
     all: string[]
-  }
-  searchParams: {
+  }>
+  searchParams: Promise<{
     workspaceSlug: string
     projectSlug: string
-  }
+  }>
 }) {
-  const { all } = props.params
-  const { workspaceSlug: ws, projectSlug: ps } = props.searchParams
+  const [params, searchParams] = await Promise.all([props.params, props.searchParams])
+  const all = [...params.all]
+  const { workspaceSlug: ws, projectSlug: ps } = searchParams
 
   // delete first segment because it's always "/app" for the redirection from the middleware
   all.shift()
