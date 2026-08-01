@@ -407,6 +407,7 @@ export class ApiKeysService {
             with: {
               workspace: {
                 columns: {
+                  slug: true,
                   enabled: true,
                   unPriceCustomerId: true,
                   isPersonal: true,

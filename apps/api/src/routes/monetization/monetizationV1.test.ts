@@ -62,8 +62,12 @@ function validConfig(): MonetizationConfigInput {
   }
 }
 
-/** A verified key exactly as `verifyApiKey` returns it. */
-function verifiedKey(type: ApiKeyType) {
+/**
+ * A verified key exactly as `verifyApiKey` returns it. `workspaceSlug: null`
+ * models a cache entry serialized before `workspace.slug` was selected — plain
+ * JSON, never re-parsed, servable for the full 24h stale window after a deploy.
+ */
+function verifiedKey(type: ApiKeyType, workspaceSlug: string | null = "acme-workspace") {
   return {
     id: "apikey_123",
     projectId: "proj_123",
@@ -77,6 +81,7 @@ function verifiedKey(type: ApiKeyType) {
       isInternal: false,
       defaultCurrency: "USD",
       workspace: {
+        ...(workspaceSlug === null ? {} : { slug: workspaceSlug }),
         unPriceCustomerId: "cus_unprice",
         enabled: true,
         isMain: false,
@@ -87,30 +92,26 @@ function verifiedKey(type: ApiKeyType) {
 
 type Harness = {
   fetch: (input: { path: string; method: "GET" | "POST"; body?: unknown }) => Promise<Response>
-  getProjectBySlugInWorkspace: ReturnType<typeof vi.fn>
 }
 
 function createHarness(
   opts: {
     keyType?: ApiKeyType
     workspaceSlug?: string | null
-    projectLookupError?: Error
   } = {}
 ): Harness {
   const app = new OpenAPIHono<HonoEnv>()
 
-  const verifyApiKey = vi.fn().mockResolvedValue(Ok(verifiedKey(opts.keyType ?? "config")))
-  const getProjectBySlugInWorkspace = vi.fn().mockResolvedValue(
-    opts.projectLookupError
-      ? { err: opts.projectLookupError, val: undefined }
-      : {
-          err: undefined,
-          val:
-            opts.workspaceSlug === null
-              ? null
-              : { id: "proj_123", workspace: { slug: opts.workspaceSlug ?? "acme-workspace" } },
-        }
-  )
+  const verifyApiKey = vi
+    .fn()
+    .mockResolvedValue(
+      Ok(
+        verifiedKey(
+          opts.keyType ?? "config",
+          opts.workspaceSlug === undefined ? "acme-workspace" : opts.workspaceSlug
+        )
+      )
+    )
 
   app.use(timing())
   app.onError(handleError)
@@ -122,7 +123,6 @@ function createHarness(
     c.set("db", {} as never)
     c.set("services", {
       apikey: { verifyApiKey },
-      project: { getProjectBySlugInWorkspace },
       plans: {},
       features: {},
       events: {},
@@ -143,7 +143,6 @@ function createHarness(
   registerIngestEventsSyncV1(app)
 
   return {
-    getProjectBySlugInWorkspace,
     fetch: ({ path, method, body }) =>
       app.fetch(
         new Request(`https://api.example.com${path}`, {
@@ -307,10 +306,6 @@ describe("monetization.apply", () => {
 
     expect(new URL(reviewUrl).pathname).toBe("/acme-workspace/acme-api/plans/pro/pv_pro")
     expect(new URL(reviewUrl).origin).toBe(new URL(APP_DOMAIN).origin)
-    expect(harness.getProjectBySlugInWorkspace).toHaveBeenCalledWith({
-      workspaceId: "ws_123",
-      slug: "acme-api",
-    })
   })
 
   it("returns a null review url when nothing was created", async () => {
@@ -330,14 +325,14 @@ describe("monetization.apply", () => {
 
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toMatchObject({ reviewUrl: null })
-    // nothing to review means the workspace slug is never looked up
-    expect(harness.getProjectBySlugInWorkspace).not.toHaveBeenCalled()
   })
 
-  it("returns a null review url rather than failing when the workspace cannot be resolved", async () => {
-    const harness = createHarness({
-      projectLookupError: new FetchError({ message: "db down", retry: false }),
-    })
+  // The deploy-window case the compiler cannot see: a key served from a cache
+  // entry written before `workspace.slug` was selected. Emitting the outcomes
+  // with a null link beats emitting `/undefined/acme-api/plans/...`, which looks
+  // real and resolves to nothing, for the 24h the stale entry stays servable.
+  it("returns a null review url for a cached key that predates the workspace slug", async () => {
+    const harness = createHarness({ workspaceSlug: null })
 
     const response = await harness.fetch({
       path: "/v1/monetization/apply",
@@ -346,7 +341,23 @@ describe("monetization.apply", () => {
     })
 
     expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toMatchObject({ reviewUrl: null })
+    const body = (await response.json()) as { reviewUrl: string | null; plans: unknown[] }
+
+    expect(body.reviewUrl).toBeNull()
+    // the outcomes are still the result; only the courtesy link is missing
+    expect(body.plans).toEqual([{ slug: "free", planVersionId: "pv_1", status: "created" }])
+  })
+
+  it("never emits a review url containing an unresolved path segment", async () => {
+    const harness = createHarness({ workspaceSlug: null })
+
+    const response = await harness.fetch({
+      path: "/v1/monetization/apply",
+      method: "POST",
+      body: { config: validConfig() },
+    })
+
+    expect(await response.text()).not.toContain("undefined")
   })
 
   it("rejects an invalid document with JSON paths an agent can act on", async () => {

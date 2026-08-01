@@ -54,6 +54,7 @@ export const projectExtendedSelectSchema = projectSelectBaseSchema
   })
   .extend({
     workspace: workspaceSelectBase.pick({
+      slug: true,
       unPriceCustomerId: true,
       enabled: true,
       isPersonal: true,

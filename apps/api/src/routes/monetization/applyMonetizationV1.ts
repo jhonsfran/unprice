@@ -170,32 +170,34 @@ function applyFailureToApiError(failure: ApplyFailure): UnpriceApiError {
 }
 
 /**
- * The dashboard page a human opens to review what this apply wrote.
+ * The dashboard page a human opens to review what this apply wrote. Both slugs
+ * come off the verified key, so the link costs no extra read.
  *
- * `projectSlug` is on the verified key. `workspaceSlug` is not, so it is read
- * back through the project service — and only when there is something to
- * review, so the common re-apply of an unchanged document pays nothing for it.
- * A link is a courtesy, not the result: if it cannot be built, the outcomes
+ * The `string | undefined` on the workspace slug is deliberate and is not
+ * redundant with its declared type. A verified key can come from a cache entry
+ * serialized before `workspace.slug` was selected: those entries are plain JSON
+ * and are never re-parsed on read (see `ApiKeyCache`), and they stay servable
+ * for the full 24h stale window after a deploy. Trusting the compiler's
+ * `string` there would emit `/undefined/acme-api/plans/...` — a link that looks
+ * real and resolves to nothing — for a day after release.
+ *
+ * A link is a courtesy, not the result: when it cannot be built the outcomes
  * still come back and `reviewUrl` is null.
  */
-async function resolveReviewUrl(
+function resolveReviewUrl(
   c: Context<HonoEnv>,
   key: ApiKeyExtended,
   plans: MonetizationPlanOutcome[]
-): Promise<string | null> {
+): string | null {
   const created = plans.find((plan) => plan.status === "created")
 
   if (!created) {
     return null
   }
 
-  const { project } = c.get("services")
-  const { val, err } = await project.getProjectBySlugInWorkspace({
-    workspaceId: key.project.workspaceId,
-    slug: key.project.slug,
-  })
+  const workspaceSlug: string | undefined = key.project.workspace.slug
 
-  if (err || !val) {
+  if (!workspaceSlug) {
     c.get("logger").warn("monetization.apply could not resolve a review url", {
       projectId: key.projectId,
       workspaceId: key.project.workspaceId,
@@ -205,7 +207,7 @@ async function resolveReviewUrl(
     return null
   }
 
-  const path = [val.workspace.slug, key.project.slug, "plans", created.slug, created.planVersionId]
+  const path = [workspaceSlug, key.project.slug, "plans", created.slug, created.planVersionId]
     .map((segment) => encodeURIComponent(segment))
     .join("/")
 
@@ -250,7 +252,7 @@ export const registerApplyMonetizationV1 = (app: App) =>
           plans: val.plans,
           staleDrafts: val.staleDrafts,
           integrationContract: val.integrationContract,
-          reviewUrl: await resolveReviewUrl(c, key, val.plans),
+          reviewUrl: resolveReviewUrl(c, key, val.plans),
         },
         HttpStatusCodes.OK
       )
