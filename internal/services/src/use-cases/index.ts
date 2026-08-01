@@ -133,6 +133,7 @@ export type {
   MonetizationStaleDraft,
 } from "./monetization/apply"
 export {
+  MONETIZATION_BLOCKING_WARNING_CODES,
   getMonetizationConfig,
   getMonetizationConfigFailureStateSchema,
   getMonetizationConfigInputSchema,
@@ -151,7 +152,9 @@ export type {
   MonetizationConfigDocument,
   MonetizationPlanState,
   MonetizationWarning,
+  MonetizationWarningCode,
   UnrepresentablePlan,
+  UnrepresentablePlanReason,
 } from "./monetization/get"
 export {
   seedOnboardingEvidence,

@@ -424,14 +424,30 @@ function collectDuplicates(slugs: readonly string[]): { index: number; slug: str
   return duplicates
 }
 
-export const monetizationConfigSchema = z
+/**
+ * The document's shape without the "at least one plan" rule. `apply` requires a
+ * plan; `monetization.get` has to be able to answer "this project has none".
+ * Both schemas below are built from this one object and share one refinement, so
+ * a rule can never hold for the write path and quietly not for the read path.
+ */
+const monetizationConfigObjectSchema = z
   .object({
     events: z.array(monetizationEventSchema).default([]),
     features: z.array(monetizationFeatureSchema).default([]),
-    plans: z.array(monetizationPlanSchema).min(1),
+    plans: z.array(monetizationPlanSchema),
   })
   .strict()
-  .superRefine((config, ctx) => {
+
+/**
+ * Every cross-plan rule the document has. Written once and attached to both
+ * schemas: the read document previously restated the duplicate-slug checks and
+ * silently dropped everything else this does.
+ */
+function refineMonetizationConfig(
+  config: z.infer<typeof monetizationConfigObjectSchema>,
+  ctx: z.RefinementCtx
+) {
+  {
     const eventSlugs = new Set(config.events.map((event) => event.slug))
     const featureSlugs = new Set(config.features.map((feature) => feature.slug))
 
@@ -508,15 +524,34 @@ export const monetizationConfigSchema = z
       })
     })
 
-    if (defaultPlans !== 1) {
+    // Guarded on there being plans at all, so the same refinement serves the
+    // read document. `monetizationConfigSchema` keeps `.min(1)`, so for it the
+    // guard is always true and the rule is unchanged.
+    if (config.plans.length > 0 && defaultPlans !== 1) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: `Exactly one plan must set defaultPlan: true, found ${defaultPlans}`,
         path: ["plans"],
       })
     }
-  })
+  }
+}
+
+export const monetizationConfigSchema = monetizationConfigObjectSchema
+  .extend({ plans: z.array(monetizationPlanSchema).min(1) })
+  .superRefine(refineMonetizationConfig)
   .describe("The whole desired monetization configuration for a project")
+
+/**
+ * What `monetization.get` returns: `monetizationConfigSchema` with exactly one
+ * rule relaxed, because a project with no plans is a normal answer to a read.
+ * Every other rule is the same function object.
+ */
+export const monetizationConfigDocumentSchema = monetizationConfigObjectSchema
+  .superRefine(refineMonetizationConfig)
+  .describe(
+    "A project's monetization configuration, in the shape monetization.apply accepts. Empty when the project has no plans"
+  )
 
 export type MonetizationEventConfig = z.infer<typeof monetizationEventSchema>
 export type MonetizationFeatureConfig = z.infer<typeof monetizationFeatureSchema>
@@ -526,6 +561,7 @@ export type MonetizationVersionFeatureConfig = z.infer<typeof monetizationVersio
 export type MonetizationVersionConfig = z.infer<typeof monetizationVersionSchema>
 export type MonetizationPlanConfig = z.infer<typeof monetizationPlanSchema>
 export type MonetizationConfig = z.infer<typeof monetizationConfigSchema>
+export type MonetizationConfigDocument = z.infer<typeof monetizationConfigDocumentSchema>
 /** What callers send. Arrays with defaults may be omitted. */
 export type MonetizationConfigInput = z.input<typeof monetizationConfigSchema>
 

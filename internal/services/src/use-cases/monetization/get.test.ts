@@ -41,6 +41,14 @@ type StoredPlanVersion = PlanVersion & {
 
 const USD = { code: "USD", base: 10, exponent: 2 } as const
 
+const RECURRING_RESET_CONFIG = {
+  name: "monthly",
+  resetInterval: "month",
+  resetIntervalCount: 1,
+  resetAnchor: "dayOfCreation",
+  planType: "recurring",
+} as const
+
 const RECURRING_BILLING_CONFIG: BillingConfig = {
   name: "monthly",
   billingInterval: "month",
@@ -87,6 +95,10 @@ const operators = {
     (column: Column): Predicate =>
     (row) =>
       row[column.column] !== null && row[column.column] !== undefined,
+  inArray:
+    (column: Column, values: readonly unknown[]): Predicate =>
+    (row) =>
+      values.includes(row[column.column]),
 }
 
 type QueryArgs = {
@@ -144,11 +156,37 @@ function createHarness() {
       },
       plans: {
         findFirst: vi.fn(async (args?: QueryArgs) => runQuery(store.plans, args)[0]),
+        // `get` asks for each version's feature *ids* only, so the fake hands
+        // back exactly that. Returning the full rows here would let a regression
+        // that reads features straight off the plan query pass, when the real
+        // query no longer carries them.
         findMany: vi.fn(async (args?: QueryArgs) =>
           runQuery(store.plans, args).map((plan) => ({
             ...plan,
-            versions: store.versions.filter((version) => version.planId === plan.id),
+            versions: store.versions
+              .filter((version) => version.planId === plan.id)
+              .map((version) => ({
+                ...version,
+                planFeatures: version.planFeatures.map(({ id }) => ({ id })),
+              })),
           }))
+        ),
+      },
+      planVersionFeatures: {
+        findMany: vi.fn(async (args?: QueryArgs) =>
+          runQuery(
+            // A feature row belongs to exactly one version in the database, so
+            // the parent's id wins. Tests that clone a version by spreading it
+            // carry the original's `planVersionId` on the copied rows, which
+            // would otherwise return one row under two versions.
+            store.versions.flatMap((version) =>
+              version.planFeatures.map((planFeature) => ({
+                ...planFeature,
+                planVersionId: version.id,
+              }))
+            ),
+            args
+          )
         ),
       },
       features: {
@@ -272,6 +310,30 @@ function createHarness() {
     Ok(store.features.find((feature) => feature.slug === slug) ?? null)
   )
 
+  const updateFeatureRecord = vi.fn(
+    async (input: { projectId: string; id: string; title?: string; description?: string }) => {
+      const feature = store.features.find(({ id }) => id === input.id)
+      if (!feature) return Ok({ state: "not_found" as const })
+
+      if (input.title !== undefined) feature.title = input.title
+      if (input.description !== undefined) feature.description = input.description
+
+      return Ok({ state: "ok" as const, feature })
+    }
+  )
+
+  const updatePlanVersionRecord = vi.fn(
+    async (input: { projectId: string; id: string; title?: string; description?: string }) => {
+      const planVersion = store.versions.find(({ id }) => id === input.id)
+      if (!planVersion) return Ok({ state: "not_found" as const })
+
+      if (input.title !== undefined) planVersion.title = input.title
+      if (input.description !== undefined) planVersion.description = input.description
+
+      return Ok({ state: "ok" as const, planVersion })
+    }
+  )
+
   const createFeatureRecord = vi.fn(async (input: CreateFeatureInput) => {
     const feature = {
       id: `feature_${input.slug}`,
@@ -322,8 +384,9 @@ function createHarness() {
       createPlanVersionRecord,
       createPlanVersionFeatureRecord,
       updatePlanVersionFeatureRecord,
+      updatePlanVersionRecord,
     },
-    features: { getFeatureBySlug, createFeatureRecord },
+    features: { getFeatureBySlug, createFeatureRecord, updateFeatureRecord },
     events: { listEventsByProject, createEvent, updateEvent },
   } as unknown as Pick<ServiceContext, "plans" | "features" | "events">
 
@@ -334,14 +397,23 @@ function createHarness() {
     applyDeps: { services, db, logger },
     getDeps: { db, logger },
     logger,
-    /** Every way this project can be written to. The round trip touches none. */
+    /**
+     * Every way this project can be written to. The round trip touches none.
+     *
+     * `updateFeatureRecord` and `updatePlanVersionRecord` are here because
+     * `apply` calls both to reconcile unversioned labels; without them a
+     * regression that started writing through either would throw a `TypeError`
+     * rather than be caught by the assertion that names them.
+     */
     writeSpies: {
       insert,
       updatePlanRecord,
+      updatePlanVersionRecord,
       createPlanVersionRecord,
       createPlanVersionFeatureRecord,
       updatePlanVersionFeatureRecord,
       createFeatureRecord,
+      updateFeatureRecord,
       createEvent,
       updateEvent,
     },
@@ -953,6 +1025,79 @@ describe("getMonetizationConfig", () => {
     ])
   })
 
+  it("excludes a plan that is not a recurring plan version", async () => {
+    const harness = createHarness()
+    const applied = await seedProject(harness)
+
+    // The dashboard offers "Onetime" as a billing interval in production. The
+    // document has no field for plan type, so it would round-trip to recurring.
+    versionOf(harness.store, applied.plans[1]?.planVersionId ?? "").billingConfig = {
+      ...RECURRING_BILLING_CONFIG,
+      planType: "onetime",
+    }
+
+    const read = expectRead(await getMonetizationConfig(harness.getDeps, { projectId: PROJECT_ID }))
+
+    expect(read.config.plans.map(({ slug }) => slug)).toEqual(["free"])
+    expect(read.unrepresentablePlans).toEqual([
+      { slug: "pro", reason: "unsupported_billing_config", message: expect.any(String) },
+    ])
+    expect(read.unrepresentablePlans[0]?.message).toContain("onetime")
+  })
+
+  it("excludes a plan whose usage feature resets on its own anchor", async () => {
+    const harness = createHarness()
+    const applied = await seedProject(harness)
+
+    const version = versionOf(harness.store, applied.plans[1]?.planVersionId ?? "")
+    const metered = version.planFeatures[1]
+    if (!metered) throw new Error("fixture changed")
+    expect(metered.featureType).toBe("usage")
+    metered.resetConfig = {
+      ...(metered.resetConfig ?? RECURRING_RESET_CONFIG),
+      resetAnchor: 15,
+    }
+
+    const read = expectRead(await getMonetizationConfig(harness.getDeps, { projectId: PROJECT_ID }))
+
+    expect(read.config.plans.map(({ slug }) => slug)).toEqual(["free"])
+    expect(read.unrepresentablePlans).toEqual([
+      { slug: "pro", reason: "unsupported_billing_config", message: expect.any(String) },
+    ])
+  })
+
+  it("keeps a plan whose stale reset anchor sits on a feature that is no longer usage", async () => {
+    const harness = createHarness()
+    const applied = await seedProject(harness)
+
+    // The writer preserves the old reset cadence when a feature is converted
+    // away from usage, and then ignores it. `toBoundaryFeature` drops it, so
+    // excluding the plan over it would hide a describable plan — and if it were
+    // the default plan, the whole project with it.
+    const version = versionOf(harness.store, applied.plans[1]?.planVersionId ?? "")
+    const converted = version.planFeatures[1]
+    if (!converted) throw new Error("fixture changed")
+    converted.featureType = "flat"
+    converted.config = {
+      price: { dinero: { amount: 500, currency: USD, scale: 2 }, displayAmount: "5.00" },
+    } as unknown as PlanVersionFeature["config"]
+    converted.meterConfig = null
+    converted.resetConfig = {
+      ...(converted.resetConfig ?? RECURRING_RESET_CONFIG),
+      resetAnchor: 15,
+    }
+
+    const read = expectRead(await getMonetizationConfig(harness.getDeps, { projectId: PROJECT_ID }))
+
+    expect(read.unrepresentablePlans).toEqual([])
+    expect(read.config.plans.map(({ slug }) => slug)).toEqual(["free", "pro"])
+    expect(read.config.plans[1]?.version.features[1]).toEqual({
+      featureSlug: "chat-messages",
+      featureType: "flat",
+      config: { price: "5.00" },
+    })
+  })
+
   it("excludes a plan whose feature bills on its own cadence", async () => {
     const harness = createHarness()
     const applied = await seedProject(harness)
@@ -998,6 +1143,30 @@ describe("getMonetizationConfig", () => {
 
     expect(result.val).toMatchObject({ state: "no_default_plan" })
     expect(result.val && "message" in result.val ? result.val.message : "").toContain("free")
+  })
+
+  it("fails the same way whether or not one describable plan survives", async () => {
+    // A project with plans and no expressible default has one answer, not two.
+    // Previously "no describable plans at all" short-circuited to an ok result
+    // with an empty config, while "one describable plan plus an unrepresentable
+    // default" reported no_default_plan — near-identical situations, two states.
+    const everyPlanBroken = createHarness()
+    const brokenApplied = await seedProject(everyPlanBroken)
+    for (const outcome of brokenApplied.plans) {
+      versionOf(everyPlanBroken.store, outcome.planVersionId).planFeatures = []
+    }
+
+    const onlyDefaultBroken = createHarness()
+    const partialApplied = await seedProject(onlyDefaultBroken)
+    versionOf(onlyDefaultBroken.store, partialApplied.plans[0]?.planVersionId ?? "").planFeatures =
+      []
+
+    const both = await Promise.all([
+      getMonetizationConfig(everyPlanBroken.getDeps, { projectId: PROJECT_ID }),
+      getMonetizationConfig(onlyDefaultBroken.getDeps, { projectId: PROJECT_ID }),
+    ])
+
+    expect(both.map((result) => result.val?.state)).toEqual(["no_default_plan", "no_default_plan"])
   })
 
   it("fails when two plans claim the default", async () => {
@@ -1280,6 +1449,42 @@ describe("getMonetizationConfig", () => {
         message: expect.stringContaining("defaultQuantity"),
       },
     ])
+  })
+
+  it("warns about tags and an external id, which the document also cannot carry", async () => {
+    const harness = createHarness()
+    const applied = await seedProject(harness)
+
+    const version = versionOf(harness.store, applied.plans[0]?.planVersionId ?? "")
+    version.tags = ["popular"]
+    version.metadata = { externalId: "price_abc123" }
+
+    const read = expectRead(await getMonetizationConfig(harness.getDeps, { projectId: PROJECT_ID }))
+
+    const message = read.warnings[0]?.message ?? ""
+    expect(read.warnings[0]?.code).toBe("version_settings_dropped")
+    expect(message).toContain("metadata.externalId")
+    expect(message).toContain("tags")
+    // The credit branch is a different key and must not fire for an externalId.
+    expect(message).not.toContain("includedCreditAmount")
+  })
+
+  it("does not call an absent defaultQuantity an enforcement change", async () => {
+    const harness = createHarness()
+    const applied = await seedProject(harness)
+
+    // `null` is how the writer spells "ask for the quantity at subscription
+    // time" — the document produces the same thing, so there is nothing to warn
+    // about. Treating it as a change would raise the one code that stops an
+    // agent, on a plan where nothing was lost.
+    const version = versionOf(harness.store, applied.plans[0]?.planVersionId ?? "")
+    const metered = version.planFeatures[1]
+    if (!metered) throw new Error("fixture changed")
+    metered.defaultQuantity = null as unknown as PlanVersionFeature["defaultQuantity"]
+
+    const read = expectRead(await getMonetizationConfig(harness.getDeps, { projectId: PROJECT_ID }))
+
+    expect(read.warnings).toEqual([])
   })
 
   it("reports no warnings for a project apply wrote end to end", async () => {

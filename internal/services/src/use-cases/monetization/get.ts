@@ -49,6 +49,7 @@ import {
   type PlanVersionFeature,
   buildIntegrationContract,
   integrationContractSchema,
+  monetizationConfigDocumentSchema,
   monetizationConfigSchema,
   monetizationPlanSchema,
   planVersionFeatureInsertBaseSchema,
@@ -67,54 +68,12 @@ export const getMonetizationConfigInputSchema = z.object({
 })
 
 /**
- * The zero-plan document. Reaching for `.innerType()` drops the whole top-level
- * `superRefine`, which is where the cross-plan rules live, so everything it
- * still owns for a plan-less document is restated here — which is only the
- * duplicate-slug checks; every other rule it applies is per-plan or cross-plan
- * and vacuous with no plans.
+ * Re-exported so callers of this use case get the whole contract from one place.
+ * It is owned by `@unprice/db/validators`, next to `monetizationConfigSchema`,
+ * and shares its refinement function — an earlier version of this file rebuilt
+ * it here from `.innerType()`, which silently discarded every cross-plan rule.
  */
-const emptyMonetizationConfigSchema = monetizationConfigSchema
-  .innerType()
-  .extend({ plans: z.array(monetizationPlanSchema).max(0) })
-  .superRefine((config, ctx) => {
-    for (const [key, slugs] of [
-      ["events", config.events.map((event) => event.slug)],
-      ["features", config.features.map((feature) => feature.slug)],
-    ] as const) {
-      const seen = new Set<string>()
-
-      slugs.forEach((slug, index) => {
-        if (seen.has(slug)) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: `Duplicate slug "${slug}" in ${key}`,
-            path: [key, index, "slug"],
-          })
-          return
-        }
-        seen.add(slug)
-      })
-    }
-  })
-
-/**
- * What `get` returns: `monetizationConfigSchema` with exactly one rule relaxed —
- * a project with no plans is a normal answer to a read, while `apply` requires
- * at least one plan.
- *
- * A union rather than an `.innerType()` with a widened `plans`, because
- * `monetizationConfigSchema` is a `ZodEffects` whose `superRefine` owns the
- * exactly-one-default rule, the duplicate-slug checks, and every cross-reference
- * check — and `.innerType()` discards all of them silently. This schema is
- * exported and is the `config` field of the output, so it is what an OpenAPI
- * response contract would be generated from: anything it advertises is what a
- * caller will believe `apply` accepts.
- */
-export const monetizationConfigDocumentSchema = z
-  .union([monetizationConfigSchema, emptyMonetizationConfigSchema])
-  .describe(
-    "The project's monetization configuration, in the shape monetization.apply accepts. Empty when the project has no plans"
-  )
+export { monetizationConfigDocumentSchema }
 
 export const monetizationPlanStateSchema = z.object({
   slug: z.string(),
@@ -188,6 +147,21 @@ export const monetizationWarningSchema = z
   .describe("Configuration this document is silent about. Emitted anyway, never silently dropped")
 
 /**
+ * The codes a caller must stop on rather than report and continue. Exported
+ * because the split is a property of the contract, not a note in a docblock: a
+ * caller that hardcodes its own copy of this set drifts the first time a code is
+ * added, and the drift is silent in the direction that matters — a new
+ * commercial warning treated as cosmetic.
+ *
+ * `satisfies` rather than a plain annotation so a code renamed in the enum fails
+ * to compile here instead of quietly dropping out of the blocking set.
+ */
+export const MONETIZATION_BLOCKING_WARNING_CODES = [
+  "enforcement_settings_dropped",
+  "version_settings_dropped",
+] as const satisfies readonly MonetizationWarningCode[]
+
+/**
  * `no_default_plan` also covers a project whose default plan exists but is
  * itself unrepresentable: the document would then name a different plan as the
  * default, and applying it would move the flag on a live project.
@@ -226,11 +200,25 @@ export type GetMonetizationConfigOutput = z.infer<typeof getMonetizationConfigOu
 export type MonetizationConfigDocument = z.infer<typeof monetizationConfigDocumentSchema>
 export type MonetizationPlanState = z.infer<typeof monetizationPlanStateSchema>
 export type UnrepresentablePlan = z.infer<typeof unrepresentablePlanSchema>
+export type UnrepresentablePlanReason = z.infer<typeof unrepresentablePlanReasonSchema>
 export type MonetizationWarning = z.infer<typeof monetizationWarningSchema>
+export type MonetizationWarningCode = z.infer<typeof monetizationWarningCodeSchema>
 
 type StoredPlanVersionFeature = PlanVersionFeature & { feature: Feature }
 type StoredPlanVersion = PlanVersion & { planFeatures: StoredPlanVersionFeature[] }
-type StoredPlan = Plan & { versions: StoredPlanVersion[] }
+
+/**
+ * A plan version carrying only its feature *ids*. The read loads every version
+ * of every plan — it has to, to pick the current one — but only one version per
+ * plan is ever emitted, and version count grows on the happy path: a
+ * dashboard-authored plan mints a fresh draft on every apply and `apply` only
+ * reports stale drafts, never prunes them. Loading each version's full feature
+ * rows with their config blobs and joined feature would make the payload
+ * O(plans x versions x features) for a result that is O(plans x features).
+ */
+type LightPlanVersion = PlanVersion & { planFeatures: { id: string }[] }
+type LightPlan = Plan & { versions: LightPlanVersion[] }
+type VersionSelection = ReturnType<typeof selectVersions>
 
 type PlanProjection =
   | {
@@ -261,7 +249,7 @@ const SERVER_VERSION_DEFAULTS = {
   autoRenew: true,
   trialUnits: 0,
   gracePeriod: 0,
-} as const
+} as const satisfies Partial<PlanVersion>
 
 /**
  * `planVersionFeatureMetadataSchema`'s defaults for the settings that change
@@ -276,7 +264,7 @@ const COSMETIC_FEATURE_METADATA_DEFAULTS = {
   notifyUsageThreshold: 95,
   blockCustomer: false,
   hidden: false,
-} as const
+} as const satisfies Partial<NonNullable<PlanVersionFeature["metadata"]>>
 
 /**
  * The default `overageStrategy`, kept separate because it is the one metadata
@@ -302,9 +290,10 @@ function compareStrings(left: string, right: string): number {
 }
 
 function droppedVersionSettings(planVersion: StoredPlanVersion): string[] {
-  const columns = planVersion as unknown as Record<string, unknown>
   const dropped = Object.entries(SERVER_VERSION_DEFAULTS)
-    .filter(([key, expected]) => columns[key] !== expected)
+    .filter(
+      ([key, expected]) => planVersion[key as keyof typeof SERVER_VERSION_DEFAULTS] !== expected
+    )
     .map(([key]) => key)
 
   // Named down to the sub-field: "metadata" tells a human nothing, and the
@@ -331,11 +320,11 @@ function droppedVersionSettings(planVersion: StoredPlanVersion): string[] {
  * `getPhaseGrantAllowance` — losing it changes a customer's allowance.
  */
 function droppedEnforcementSettings(planFeature: StoredPlanVersionFeature): string[] {
-  const metadata = (planFeature.metadata ?? {}) as Record<string, unknown>
+  const metadata = planFeature.metadata
   const dropped: string[] = []
 
   if (
-    metadata.overageStrategy !== undefined &&
+    metadata?.overageStrategy !== undefined &&
     metadata.overageStrategy !== DEFAULT_OVERAGE_STRATEGY
   ) {
     dropped.push("metadata.overageStrategy (whether usage past the limit is allowed and billed)")
@@ -353,9 +342,12 @@ function droppedEnforcementSettings(planFeature: StoredPlanVersionFeature): stri
 }
 
 function droppedFeatureSettings(planFeature: StoredPlanVersionFeature): string[] {
-  const metadata = (planFeature.metadata ?? {}) as Record<string, unknown>
+  const metadata = planFeature.metadata
   const dropped = Object.entries(COSMETIC_FEATURE_METADATA_DEFAULTS)
-    .filter(([key, expected]) => metadata[key] !== undefined && metadata[key] !== expected)
+    .filter(([key, expected]) => {
+      const value = metadata?.[key as keyof typeof COSMETIC_FEATURE_METADATA_DEFAULTS]
+      return value !== undefined && value !== expected
+    })
     .map(([key]) => `metadata.${key}`)
 
   if (planFeature.type && planFeature.type !== "feature") dropped.push("type")
@@ -414,8 +406,15 @@ function unsupportedBillingConfig(planVersion: StoredPlanVersion): string | null
       return `prices "${planFeature.feature.slug}" on its own billing cadence`
     }
 
+    // Must agree with `toBoundaryFeature`, which drops `resetConfig` on a
+    // non-usage feature: the writer preserves a stale reset cadence when a
+    // feature is converted away from usage (`shouldPreserveExistingReset` in
+    // `plans/service.ts`), and the server then ignores it. Excluding a plan over
+    // a value neither the document states nor the server reads would take a
+    // whole plan out of the read — and if it is the default plan, the entire
+    // project with it.
     const { resetConfig } = planFeature
-    if (!resetConfig) continue
+    if (!resetConfig || planFeature.featureType !== "usage") continue
 
     if (
       resetConfig.resetAnchor !== billingConfig.billingAnchor ||
@@ -530,8 +529,14 @@ function toBoundaryFeature(
  * an apply that crashed mid-materialization or a version half-built in the
  * dashboard — it is progress, not a configuration, so it is skipped here and
  * still reported in `draftVersionIds`.
+ *
+ * The `active` filter is deliberately asymmetric. `deactivatePlanVersion`
+ * refuses to run on anything that is not published, so a draft can never be
+ * inactive and filtering them would be dead code that also hid drafts from
+ * `draftVersionIds`. `archived` is ignored for the stronger reason that nothing
+ * in the codebase ever sets it — the column exists, the writer does not.
  */
-function selectVersions(plan: StoredPlan) {
+function selectVersions(plan: LightPlan) {
   const published = plan.versions
     .filter((version) => version.status === "published" && version.active !== false)
     .sort(
@@ -551,11 +556,18 @@ function selectVersions(plan: StoredPlan) {
   return { published: published[0] ?? null, drafts, current }
 }
 
-function projectPlan(plan: StoredPlan): PlanProjection {
-  const { published, drafts, current } = selectVersions(plan)
-
-  if (!current) {
+function projectPlan(
+  plan: LightPlan,
+  { published, drafts, current: selected }: VersionSelection,
+  featuresByVersion: Map<string, StoredPlanVersionFeature[]>
+): PlanProjection {
+  if (!selected) {
     return unrepresentable(plan.slug, "no_version", `Plan "${plan.slug}" has no plan version`)
+  }
+
+  const current: StoredPlanVersion = {
+    ...selected,
+    planFeatures: featuresByVersion.get(selected.id) ?? [],
   }
 
   if (current.planFeatures.length === 0) {
@@ -704,9 +716,11 @@ function toBoundaryFeatureDeclaration(feature: Feature): MonetizationFeatureConf
     slug: feature.slug,
     title: feature.title,
     // `description` is nullable in the database and the boundary takes a string
-    // or nothing, so only a missing one is omitted. An empty one is emitted as
-    // written: `apply` compares the declaration against the row it already has,
-    // and turning "" into an absent key is a difference it would act on.
+    // or nothing, so a missing one has to be omitted — `null` would be rejected.
+    // An empty one is emitted as written purely to stay a faithful read; `apply`
+    // normalizes `declared.description ?? ""` and compares
+    // `(existing.description ?? "") === description`, so "" and an absent key
+    // are already the same to it and neither spelling would make it write.
     ...(feature.description === null || feature.description === undefined
       ? {}
       : { description: feature.description }),
@@ -727,10 +741,19 @@ export async function getMonetizationConfig(
     },
   })
 
+  // Phase one: enough to decide which version of each plan is the current one.
+  // `planFeatures` comes back as bare ids because `selectVersions` only needs to
+  // know whether a draft prices anything; the rows themselves are fetched in
+  // phase two for the handful of versions that survive.
+  //
+  // The version columns are deliberately not narrowed with `columns`:
+  // `droppedVersionSettings` compares almost all of them, and a column missing
+  // from an explicit list would read as `undefined` and emit a *spurious*
+  // money-path warning rather than failing loudly.
   const stored = await wrapResult(
     Promise.all([
       deps.db.query.plans.findMany({
-        with: { versions: { with: { planFeatures: { with: { feature: true } } } } },
+        with: { versions: { with: { planFeatures: { columns: { id: true } } } } },
         where: (plan, { eq }) => eq(plan.projectId, projectId),
       }),
       deps.db.query.features.findMany({
@@ -755,7 +778,7 @@ export async function getMonetizationConfig(
     return Err(stored.err)
   }
 
-  const [planRows, featureRows, eventRows] = stored.val as [StoredPlan[], Feature[], Event[]]
+  const [planRows, featureRows, eventRows] = stored.val as [LightPlan[], Feature[], Event[]]
 
   // Sorted by slug throughout: the agent diffs this document locally, and a
   // stable order is the difference between a diff and a rewrite. None of these
@@ -767,9 +790,50 @@ export async function getMonetizationConfig(
     .sort((left, right) => compareStrings(left.slug, right.slug))
     .map(toBoundaryFeatureDeclaration)
 
-  const projections = [...planRows]
-    .sort((left, right) => compareStrings(left.slug, right.slug))
-    .map(projectPlan)
+  const sortedPlans = [...planRows].sort((left, right) => compareStrings(left.slug, right.slug))
+  const selections = sortedPlans.map(selectVersions)
+  const currentVersionIds = selections
+    .map(({ current }) => current?.id)
+    .filter((id): id is string => id !== undefined)
+
+  // Phase two: the priced features, for the one version per plan being emitted.
+  const featureRowsByVersion = new Map<string, StoredPlanVersionFeature[]>()
+
+  if (currentVersionIds.length > 0) {
+    const planFeatures = await wrapResult(
+      deps.db.query.planVersionFeatures.findMany({
+        with: { feature: true },
+        where: (planFeature, { and, eq, inArray }) =>
+          and(
+            eq(planFeature.projectId, projectId),
+            inArray(planFeature.planVersionId, currentVersionIds)
+          ),
+      }),
+      (error) =>
+        new FetchError({
+          message: `error reading the priced features of the current plan versions: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (planFeatures.err) {
+      deps.logger.error(planFeatures.err, {
+        context: "error reading the priced features of the current plan versions",
+        projectId,
+      })
+      return Err(planFeatures.err)
+    }
+
+    for (const planFeature of planFeatures.val as StoredPlanVersionFeature[]) {
+      const existing = featureRowsByVersion.get(planFeature.planVersionId) ?? []
+      existing.push(planFeature)
+      featureRowsByVersion.set(planFeature.planVersionId, existing)
+    }
+  }
+
+  const projections = sortedPlans.map((plan, index) =>
+    projectPlan(plan, selections[index] as VersionSelection, featureRowsByVersion)
+  )
 
   const representable = projections.filter(
     (projection): projection is Extract<PlanProjection, { state: "ok" }> =>
@@ -782,7 +846,12 @@ export async function getMonetizationConfig(
     )
     .map(({ slug, reason, message }) => ({ slug, reason, message }))
 
-  if (representable.length === 0) {
+  // Only a project with no plans at all short-circuits. A project that *has*
+  // plans but can describe none of them still goes through the default-plan
+  // checks below, so it reports the same state as a project with one describable
+  // plan and an unrepresentable default — two spellings of "this project has
+  // plans and no expressible default" used to return two different answers.
+  if (planRows.length === 0) {
     // Nothing to be the default of, and nothing to integrate against. The
     // events and features still go through the schema, so an empty project's
     // document is parse output on the same terms as every other one.
