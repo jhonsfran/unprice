@@ -20,6 +20,7 @@
  * `base-project.sql`. No customer, subscription, usage, or payment is created.
  */
 import type { Analytics } from "@unprice/analytics"
+import * as schema from "@unprice/db/schema"
 import type { MonetizationConfigInput } from "@unprice/db/validators"
 import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
@@ -338,6 +339,40 @@ describe("monetization apply lifecycle against the database", () => {
     expect(afterStale.map((version) => version.id)).toContain(repricedVersionId)
     expect(afterStale.find((version) => version.id === repricedVersionId)?.status).toBe("draft")
     expect(afterStale.find((version) => version.id === proVersionId)?.status).toBe("published")
+
+    // ---- a dashboard-authored draft is never this document's to call stale ---
+    // It carries no content address. In SQL `configHash <> $1` against NULL is
+    // NULL rather than true, so the row cannot match the superseded query even
+    // before the isNotNull guard — the two predicates agree here, and a
+    // JavaScript `!==` fake would disagree with both and report it as stale.
+    const liveRow = afterStale.find((version) => version.id === proVersionId)
+    if (!liveRow) throw new Error("expected the published version to still be readable")
+
+    const { planFeatures: _planFeatures, ...liveColumns } = liveRow
+
+    await db.insert(schema.versions).values({
+      ...liveColumns,
+      id: "pv_dashboard_authored",
+      status: "draft",
+      configHash: null,
+      latest: false,
+      publishedAt: null,
+      publishedBy: null,
+    })
+
+    const fifth = await applyMonetizationConfig(deps, {
+      projectId,
+      config: buildConfig({ seatPrice: "15.00" }),
+    })
+
+    expect(fifth.err).toBeUndefined()
+    if (fifth.val?.state !== "ok") throw new Error(`expected ok, got ${fifth.val?.state}`)
+
+    const reportedStale = fifth.val.staleDrafts.map((draft) => draft.planVersionId)
+    expect(reportedStale).not.toContain("pv_dashboard_authored")
+    // The hashed draft from the 12.00 document is still reported, so the
+    // assertion above is an exclusion and not an empty list.
+    expect(reportedStale).toContain(repricedVersionId)
   })
 
   it("resumes a draft left half-materialized by a crash instead of creating a second version", async () => {
