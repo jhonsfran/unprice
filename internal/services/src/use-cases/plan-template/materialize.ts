@@ -52,7 +52,7 @@ export type MaterializeContext = {
  * The minimum a feature has to describe for `getOrCreateFeature` to resolve it.
  * `TemplateFeature` and the monetization document's feature both satisfy it.
  */
-export type MaterializableFeature = {
+type MaterializableFeature = {
   slug: string
   title: string
   description?: Feature["description"]

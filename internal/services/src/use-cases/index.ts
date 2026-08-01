@@ -123,12 +123,14 @@ export {
   applyMonetizationConfigInputSchema,
   applyMonetizationConfigOutputSchema,
   monetizationPlanOutcomeSchema,
+  monetizationStaleDraftSchema,
 } from "./monetization/apply"
 export type {
   ApplyMonetizationConfigDeps,
   ApplyMonetizationConfigInput,
   ApplyMonetizationConfigOutput,
   MonetizationPlanOutcome,
+  MonetizationStaleDraft,
 } from "./monetization/apply"
 export {
   getMonetizationConfig,

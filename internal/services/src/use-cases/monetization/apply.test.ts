@@ -1,12 +1,15 @@
 import type { Database } from "@unprice/db"
 import * as dbSchema from "@unprice/db/schema"
-import type {
-  Event,
-  Feature,
-  MonetizationConfigInput,
-  Plan,
-  PlanVersion,
-  PlanVersionFeature,
+import {
+  type BillingConfig,
+  type Event,
+  type Feature,
+  type MonetizationConfigInput,
+  type Plan,
+  type PlanVersion,
+  type PlanVersionFeature,
+  type ResetConfig,
+  isResetCadenceAtMostBilling,
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
@@ -17,6 +20,7 @@ import { type ApplyMonetizationConfigOutput, applyMonetizationConfig } from "./a
 const PROJECT_ID = "proj_123"
 
 type CreatePlanVersionInput = Parameters<ServiceContext["plans"]["createPlanVersionRecord"]>[0]
+type UpdatePlanVersionInput = Parameters<ServiceContext["plans"]["updatePlanVersionRecord"]>[0]
 type CreatePlanVersionFeatureInput = Parameters<
   ServiceContext["plans"]["createPlanVersionFeatureRecord"]
 >[0]
@@ -25,8 +29,20 @@ type UpdatePlanVersionFeatureInput = Parameters<
 >[0]
 type UpdatePlanInput = Parameters<ServiceContext["plans"]["updatePlanRecord"]>[0]
 type CreateFeatureInput = Parameters<ServiceContext["features"]["createFeatureRecord"]>[0]
+type UpdateFeatureInput = Parameters<ServiceContext["features"]["updateFeatureRecord"]>[0]
 type CreateEventInput = Parameters<ServiceContext["events"]["createEvent"]>[0]
 type UpdateEventInput = Parameters<ServiceContext["events"]["updateEvent"]>[0]
+
+/** Mirrors `resetConfigFromBillingConfig` in the plan service. */
+function resetConfigFromBilling(billingConfig: BillingConfig): ResetConfig {
+  return {
+    name: billingConfig.name,
+    resetInterval: billingConfig.billingInterval,
+    resetIntervalCount: billingConfig.billingIntervalCount,
+    resetAnchor: billingConfig.billingAnchor,
+    planType: billingConfig.planType,
+  }
+}
 
 type StoredPlanVersion = PlanVersion & {
   planFeatures: Array<PlanVersionFeature & { feature: Feature }>
@@ -81,15 +97,20 @@ function runQuery<T extends Row>(rows: T[], args?: QueryArgs): T[] {
   return rows.filter((row) => predicate(row))
 }
 
-function createLogger(): Logger {
+function createLogger() {
+  const info = vi.fn()
+
   return {
-    set: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn(),
-    info: vi.fn(),
-    flush: vi.fn(),
-  } as unknown as Logger
+    info,
+    logger: {
+      set: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+      info,
+      flush: vi.fn(),
+    } as unknown as Logger,
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -110,6 +131,12 @@ function createHarness() {
   const control = {
     failFeatureWrite: null as null | ((input: CreatePlanVersionFeatureInput) => FetchError | null),
   }
+  /**
+   * How many plans hold the default flag after each `updatePlanRecord`. A
+   * project with no default plan cannot answer `customers.signUp` without a
+   * `planSlug`, so the length of that window is the thing under test.
+   */
+  const defaultHolders: number[] = []
   let planVersionSequence = 0
 
   const insert = vi.fn((table: unknown) => ({
@@ -157,6 +184,7 @@ function createHarness() {
     if (input.description !== undefined) plan.description = input.description
     plan.defaultPlan = input.defaultPlan ?? false
     plan.enterprisePlan = input.enterprisePlan ?? false
+    defaultHolders.push(store.plans.filter(({ defaultPlan }) => defaultPlan).length)
 
     return Ok({ state: "ok" as const, plan })
   })
@@ -199,6 +227,16 @@ function createHarness() {
     return Ok({ state: "ok" as const, planVersion })
   })
 
+  const updatePlanVersionRecord = vi.fn(async (input: UpdatePlanVersionInput) => {
+    const planVersion = store.versions.find(({ id }) => id === input.id)
+    if (!planVersion) return Ok({ state: "not_found" as const })
+
+    if (input.title !== undefined) planVersion.title = input.title
+    if (input.description !== undefined) planVersion.description = input.description
+
+    return Ok({ state: "ok" as const, planVersion })
+  })
+
   const createPlanVersionFeatureRecord = vi.fn(async (input: CreatePlanVersionFeatureInput) => {
     const failure = control.failFeatureWrite?.(input)
     if (failure) return Err(failure)
@@ -210,10 +248,39 @@ function createHarness() {
     const feature = store.features.find(({ id }) => id === input.featureId)
     if (!feature) return Ok({ state: "feature_not_found" as const })
 
+    // The real writer decides the billing/reset/meter snapshot; a fake that just
+    // echoed the input would hide every mistake in what we hand it.
+    const billingConfig =
+      input.featureType === "usage" ? input.billingConfig : planVersion.billingConfig
+    const resetConfig =
+      input.featureType === "usage"
+        ? (input.resetConfig ?? resetConfigFromBilling(billingConfig))
+        : null
+    const meterConfig =
+      input.featureType !== "usage"
+        ? null
+        : input.hasMeterConfigOverride
+          ? (input.meterConfig ?? null)
+          : (feature.meterConfig ?? null)
+
+    if (input.featureType === "usage" && !meterConfig) {
+      return Ok({ state: "usage_meter_config_required" as const })
+    }
+    if (
+      input.featureType === "usage" &&
+      resetConfig &&
+      !isResetCadenceAtMostBilling(resetConfig, billingConfig)
+    ) {
+      return Ok({ state: "invalid_reset_config" as const })
+    }
+
     const planVersionFeature = {
       ...input,
       id: `feature_version_${input.planVersionId}_${feature.slug}`,
       unitOfMeasure: input.unitOfMeasure ?? feature.unitOfMeasure ?? "units",
+      billingConfig,
+      resetConfig,
+      meterConfig,
       feature,
     } as unknown as PlanVersionFeature & { feature: Feature }
 
@@ -229,6 +296,25 @@ function createHarness() {
     const planVersionFeature = planVersion.planFeatures.find(({ id }) => id === input.id)
     if (!planVersionFeature) return Ok({ state: "plan_version_feature_not_found" as const })
 
+    // Mirrors the real writer: it only touches the meter when told to, and
+    // demands one whenever it does touch a usage feature's.
+    const featureType = input.featureType ?? planVersionFeature.featureType
+    const shouldUpdateMeterConfig =
+      input.hasMeterConfigOverride ||
+      input.featureId !== undefined ||
+      input.featureType !== undefined
+    const meterConfig =
+      featureType !== "usage"
+        ? null
+        : input.hasMeterConfigOverride
+          ? (input.meterConfig ?? null)
+          : (planVersionFeature.feature.meterConfig ?? null)
+
+    if (featureType === "usage" && shouldUpdateMeterConfig && !meterConfig) {
+      return Ok({ state: "usage_meter_config_required" as const })
+    }
+
+    if (shouldUpdateMeterConfig) planVersionFeature.meterConfig = meterConfig
     if (input.unitOfMeasure !== undefined) {
       planVersionFeature.unitOfMeasure = input.unitOfMeasure
     }
@@ -253,6 +339,19 @@ function createHarness() {
 
     store.features.push(feature)
     return Ok(feature)
+  })
+
+  const updateFeatureRecord = vi.fn(async (input: UpdateFeatureInput) => {
+    const feature = store.features.find(({ id }) => id === input.id)
+    if (!feature) return Ok({ state: "not_found" as const })
+
+    feature.title = input.title
+    feature.description = input.description ?? ""
+    // The real writer stores `unitOfMeasure ?? ""`, which is exactly why the
+    // caller has to hand the current value back.
+    feature.unitOfMeasure = input.unitOfMeasure ?? ""
+
+    return Ok({ state: "ok" as const, feature })
   })
 
   const listEventsByProject = vi.fn(async () => Ok(store.events))
@@ -288,25 +387,33 @@ function createHarness() {
       getPlanBySlug,
       updatePlanRecord,
       createPlanVersionRecord,
+      updatePlanVersionRecord,
       createPlanVersionFeatureRecord,
       updatePlanVersionFeatureRecord,
     },
-    features: { getFeatureBySlug, createFeatureRecord },
+    features: { getFeatureBySlug, createFeatureRecord, updateFeatureRecord },
     events: { listEventsByProject, createEvent, updateEvent },
   } as unknown as Pick<ServiceContext, "plans" | "features" | "events">
+
+  const { logger, info: wideEvent } = createLogger()
 
   return {
     store,
     control,
-    deps: { services, db, logger: createLogger() },
+    defaultHolders,
+    wideEvent,
+    deps: { services, db, logger },
     spies: {
       insert,
       getPlanBySlug,
       updatePlanRecord,
       createPlanVersionRecord,
+      updatePlanVersionRecord,
       createPlanVersionFeatureRecord,
       updatePlanVersionFeatureRecord,
+      getFeatureBySlug,
       createFeatureRecord,
+      updateFeatureRecord,
       createEvent,
       updateEvent,
     },
@@ -559,8 +666,16 @@ describe("applyMonetizationConfig", () => {
     expect(store.versions).toHaveLength(1)
     expect(store.versions[0]?.planFeatures.map(({ feature }) => feature.slug)).toEqual(["support"])
 
+    // Order is not hashed, so a reordered document legitimately matches the same
+    // half-written draft. Numbering the remainder from the document index would
+    // land the second feature on top of the first.
+    const reordered = baseConfig()
+    for (const plan of reordered.plans) {
+      plan.version.features.reverse()
+    }
+
     const resumed = expectApplied(
-      await applyMonetizationConfig(deps, { projectId: PROJECT_ID, config: baseConfig() })
+      await applyMonetizationConfig(deps, { projectId: PROJECT_ID, config: reordered })
     )
 
     // The half-materialized draft is finished in place: two plans, two versions.
@@ -570,6 +685,7 @@ describe("applyMonetizationConfig", () => {
       "support",
       "chat-messages",
     ])
+    expect(store.versions[0]?.planFeatures.map(({ order }) => order)).toEqual([1024, 2048])
     expect(
       spies.createPlanVersionFeatureRecord.mock.calls.filter(
         ([input]) =>
@@ -586,8 +702,20 @@ describe("applyMonetizationConfig", () => {
     const first = expectApplied(
       await applyMonetizationConfig(deps, { projectId: PROJECT_ID, config: baseConfig() })
     )
+    const freeVersion = store.versions.find(({ id }) => id === first.plans[0]?.planVersionId)
+    if (!freeVersion) throw new Error("fixture changed")
+
+    // A draft left over from a concurrent apply, then the human publishes the
+    // other one. The leftover now describes something already live.
+    store.versions.push({
+      ...freeVersion,
+      id: "plan_version_twin",
+      createdAtM: (freeVersion.createdAtM ?? 0) + 5,
+      planFeatures: [...freeVersion.planFeatures],
+    } as unknown as StoredPlanVersion)
+
     for (const version of store.versions) {
-      version.status = "published"
+      if (version.id !== "plan_version_twin") version.status = "published"
     }
 
     spies.createPlanVersionRecord.mockClear()
@@ -599,11 +727,14 @@ describe("applyMonetizationConfig", () => {
 
     expect(spies.createPlanVersionRecord).not.toHaveBeenCalled()
     expect(spies.createPlanVersionFeatureRecord).not.toHaveBeenCalled()
-    expect(store.versions).toHaveLength(2)
+    expect(store.versions).toHaveLength(3)
     expect(second.plans).toEqual([
       { slug: "free", planVersionId: first.plans[0]?.planVersionId, status: "published" },
       { slug: "pro", planVersionId: first.plans[1]?.planVersionId, status: "published" },
     ])
+    // The live version wins even though the draft is newer, and the draft is
+    // handed back as something to clean up.
+    expect(second.staleDrafts).toEqual([{ slug: "free", planVersionId: "plan_version_twin" }])
   })
 
   it("reports superseded drafts in staleDrafts without deleting them", async () => {
@@ -623,11 +754,79 @@ describe("applyMonetizationConfig", () => {
       await applyMonetizationConfig(deps, { projectId: PROJECT_ID, config: repriced })
     )
 
-    expect(second.staleDrafts).toEqual([supersededId])
+    expect(second.staleDrafts).toEqual([{ slug: "free", planVersionId: supersededId }])
     // The draft that pro still points at is current, not stale.
-    expect(second.staleDrafts).not.toContain(first.plans[1]?.planVersionId)
+    expect(second.staleDrafts.map(({ planVersionId }) => planVersionId)).not.toContain(
+      first.plans[1]?.planVersionId
+    )
     expect(store.versions.map(({ id }) => id)).toContain(supersededId)
     expect(versionsOfPlan(store, "free")).toHaveLength(2)
+  })
+
+  it("leaves a dashboard-authored draft out of staleDrafts", async () => {
+    const { deps, store } = createHarness()
+
+    const first = expectApplied(
+      await applyMonetizationConfig(deps, { projectId: PROJECT_ID, config: baseConfig() })
+    )
+    const freePlan = store.plans.find(({ slug }) => slug === "free")
+
+    // A draft somebody started in the dashboard. It carries no content address,
+    // so no document ever superseded it and apply must not call it stale.
+    store.versions.push({
+      id: "plan_version_handmade",
+      projectId: PROJECT_ID,
+      planId: freePlan?.id,
+      status: "draft",
+      configHash: null,
+      createdAtM: 99,
+      planFeatures: [],
+    } as unknown as StoredPlanVersion)
+
+    const repriced = baseConfig()
+    const flatFeature = repriced.plans[0]?.version.features[0]
+    if (!flatFeature) throw new Error("fixture changed")
+    flatFeature.config.price = "1.00"
+
+    const second = expectApplied(
+      await applyMonetizationConfig(deps, { projectId: PROJECT_ID, config: repriced })
+    )
+
+    expect(second.staleDrafts).toEqual([
+      { slug: "free", planVersionId: first.plans[0]?.planVersionId },
+    ])
+  })
+
+  it("keeps the newest of two same-hash drafts and reports the twin", async () => {
+    const { deps, store, spies } = createHarness()
+
+    const first = expectApplied(
+      await applyMonetizationConfig(deps, { projectId: PROJECT_ID, config: baseConfig() })
+    )
+    const original = store.versions.find(({ id }) => id === first.plans[0]?.planVersionId)
+    if (!original) throw new Error("fixture changed")
+
+    // What a second apply racing the first would have left behind: the same
+    // content address on a second row, because the index is not unique.
+    store.versions.push({
+      ...original,
+      id: "plan_version_twin",
+      createdAtM: (original.createdAtM ?? 0) - 1,
+      planFeatures: [...original.planFeatures],
+    } as unknown as StoredPlanVersion)
+
+    spies.createPlanVersionRecord.mockClear()
+    const second = expectApplied(
+      await applyMonetizationConfig(deps, { projectId: PROJECT_ID, config: baseConfig() })
+    )
+
+    expect(spies.createPlanVersionRecord).not.toHaveBeenCalled()
+    expect(second.plans[0]).toMatchObject({
+      planVersionId: original.id,
+      status: "unchanged",
+    })
+    expect(second.staleDrafts).toEqual([{ slug: "free", planVersionId: "plan_version_twin" }])
+    expect(store.versions.map(({ id }) => id)).toContain("plan_version_twin")
   })
 
   it("fails with slug_conflict before any write when a feature slug has another unitOfMeasure", async () => {
@@ -762,5 +961,201 @@ describe("applyMonetizationConfig", () => {
         ([input]) => input.planVersionId === publishedVersion.id
       )
     ).toHaveLength(0)
+  })
+
+  it("relabels renamed features and plans instead of reporting unchanged over stale rows", async () => {
+    const { deps, store } = createHarness()
+
+    const first = expectApplied(
+      await applyMonetizationConfig(deps, { projectId: PROJECT_ID, config: baseConfig() })
+    )
+
+    const relabelled = baseConfig()
+    const declaredFeature = relabelled.features?.find(({ slug }) => slug === "support")
+    const declaredPlan = relabelled.plans[0]
+    if (!declaredFeature || !declaredPlan) throw new Error("fixture changed")
+    declaredFeature.title = "Premium Support"
+    declaredFeature.description = "24/7 support"
+    declaredPlan.title = "Free Forever"
+    declaredPlan.description = "The starting plan"
+
+    const second = expectApplied(
+      await applyMonetizationConfig(deps, { projectId: PROJECT_ID, config: relabelled })
+    )
+
+    // Labels are unversioned, so nothing new is created — but nothing is dropped
+    // on the floor either.
+    expect(second.plans.map(({ status }) => status)).toEqual(["unchanged", "unchanged"])
+    expect(store.versions).toHaveLength(2)
+
+    const feature = store.features.find(({ slug }) => slug === "support")
+    expect(feature).toMatchObject({
+      title: "Premium Support",
+      description: "24/7 support",
+      // The unit was never in the document's drift, and must survive the write.
+      unitOfMeasure: "access",
+    })
+
+    expect(store.plans.find(({ slug }) => slug === "free")).toMatchObject({
+      title: "Free Forever",
+      description: "The starting plan",
+    })
+
+    const draft = store.versions.find(({ id }) => id === first.plans[0]?.planVersionId)
+    expect(draft).toMatchObject({ title: "Free Forever", description: "The starting plan" })
+  })
+
+  it("never leaves the project without a default plan, even with the default listed last", async () => {
+    const { deps, store, defaultHolders } = createHarness()
+
+    const threePlans = (): MonetizationConfigInput => {
+      const config = baseConfig()
+      const [free, pro] = config.plans
+      if (!free || !pro) throw new Error("fixture changed")
+      config.plans = [free, pro, { ...pro, slug: "scale", title: "Scale", defaultPlan: false }]
+      return config
+    }
+
+    await applyMonetizationConfig(deps, { projectId: PROJECT_ID, config: threePlans() })
+    expect(store.plans.find(({ slug }) => slug === "free")?.defaultPlan).toBe(true)
+
+    const moved = threePlans()
+    const [free, pro, scale] = moved.plans
+    if (!free || !pro || !scale) throw new Error("fixture changed")
+    free.defaultPlan = false
+    // Last in the document, with two unrelated plan writes ahead of it.
+    scale.defaultPlan = true
+    free.title = "Free Tier"
+    pro.title = "Pro Tier"
+
+    defaultHolders.length = 0
+    expectApplied(await applyMonetizationConfig(deps, { projectId: PROJECT_ID, config: moved }))
+
+    expect(store.plans.find(({ slug }) => slug === "free")?.defaultPlan).toBe(false)
+    expect(store.plans.find(({ slug }) => slug === "scale")?.defaultPlan).toBe(true)
+    // The flag may be in flight across the release/claim pair and no longer.
+    expect(
+      defaultHolders.filter((count, index) => count === 0 && defaultHolders[index + 1] === 0)
+    ).toEqual([])
+    expect(defaultHolders.at(-1)).toBe(1)
+  })
+
+  it("refuses to demote an enterprise plan into the default plan", async () => {
+    const { deps, store } = createHarness()
+
+    store.plans.push({
+      id: "plan_free",
+      projectId: PROJECT_ID,
+      slug: "free",
+      title: "Free",
+      description: "",
+      active: true,
+      defaultPlan: false,
+      enterprisePlan: true,
+    } as unknown as Plan)
+
+    const result = await applyMonetizationConfig(deps, {
+      projectId: PROJECT_ID,
+      config: baseConfig(),
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(result.val).toEqual({ state: "default_enterprise_conflict", planSlug: "free" })
+    expect(store.plans.find(({ slug }) => slug === "free")?.enterprisePlan).toBe(true)
+    expect(store.versions).toHaveLength(0)
+  })
+
+  it("keeps the billing cadence name when the document restates it as the reset cadence", async () => {
+    const { deps, store } = createHarness()
+
+    const config = baseConfig()
+    const metered = config.plans[0]?.version.features[1]
+    if (!metered) throw new Error("fixture changed")
+    // Same cadence as billing, spelled out rather than omitted. Both spellings
+    // have to store the cadence the writer derives, not a second name for it.
+    metered.resetConfig = { interval: "month", intervalCount: 1 }
+
+    expectApplied(await applyMonetizationConfig(deps, { projectId: PROJECT_ID, config }))
+
+    const stored = store.versions[0]?.planFeatures.find(
+      ({ feature }) => feature.slug === "chat-messages"
+    )
+    expect(stored?.resetConfig).toMatchObject({
+      name: "monthly",
+      resetInterval: "month",
+      resetIntervalCount: 1,
+    })
+  })
+
+  it("says which plan and feature a write failure came from", async () => {
+    const { deps, store, wideEvent } = createHarness()
+
+    const config = baseConfig()
+    const plan = config.plans[0]
+    const metered = plan?.version.features[1]
+    if (!plan || !metered) throw new Error("fixture changed")
+    // The boundary validates the reset cadence against a monthly placeholder, so
+    // a monthly reset on a daily plan parses clean and only fails at write time.
+    plan.version.billingConfig = { name: "daily", interval: "day", intervalCount: 1 }
+    metered.resetConfig = { interval: "month", intervalCount: 1 }
+
+    const result = await applyMonetizationConfig(deps, { projectId: PROJECT_ID, config })
+
+    expect(result.err).toBeUndefined()
+    expect(result.val).toEqual({
+      state: "invalid_reset_config",
+      planSlug: "free",
+      featureSlug: "chat-messages",
+    })
+    expect(store.versions[0]?.planFeatures.map(({ feature }) => feature.slug)).toEqual(["support"])
+    // The failing run is the one worth reading, so it still emits the event.
+    expect(wideEvent).toHaveBeenCalledTimes(1)
+    expect(wideEvent.mock.calls[0]?.[1]).toMatchObject({
+      outcome: "invalid_reset_config",
+      stoppedAt: "free",
+    })
+  })
+
+  it("records per-plan hashes and how each version was obtained", async () => {
+    const { deps, store, wideEvent } = createHarness()
+
+    await applyMonetizationConfig(deps, { projectId: PROJECT_ID, config: baseConfig() })
+    const created = wideEvent.mock.calls[0]?.[1] as Record<string, unknown>
+
+    expect(created).toMatchObject({
+      outcome: "ok",
+      created: 2,
+      resumed: 0,
+      unchanged: 0,
+      published: 0,
+      staleDrafts: 0,
+    })
+    expect(created.plans).toEqual([
+      {
+        slug: "free",
+        planVersionId: "plan_version_1",
+        status: "created",
+        configHash: store.versions[0]?.configHash,
+      },
+      {
+        slug: "pro",
+        planVersionId: "plan_version_2",
+        status: "created",
+        configHash: store.versions[1]?.configHash,
+      },
+    ])
+
+    for (const version of store.versions) {
+      version.status = "published"
+    }
+    await applyMonetizationConfig(deps, { projectId: PROJECT_ID, config: baseConfig() })
+
+    expect(wideEvent.mock.calls[1]?.[1]).toMatchObject({
+      outcome: "ok",
+      created: 0,
+      resumed: 0,
+      unchanged: 0,
+      published: 2,
+    })
   })
 })
