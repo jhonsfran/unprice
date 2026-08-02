@@ -2021,6 +2021,198 @@
         }
       }
     },
+    "/v1/customers/change-plan": {
+      "post": {
+        "operationId": "customers.changePlan",
+        "summary": "change a customer's active plan",
+        "description": "Move a customer to a published plan version immediately. Returns the payment provider that must collect a payment method before the change when one is required. A capped replacement phase can receive an explicit wallet credit cap.",
+        "tags": ["customers"],
+        "x-unprice": {
+          "audience": "public",
+          "category": "configuration",
+          "docs": {
+            "expose": true
+          },
+          "sdk": {
+            "path": ["customers", "changePlan"]
+          }
+        },
+        "requestBody": {
+          "description": "The plan change request",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "customerId": {
+                    "type": "string",
+                    "description": "The Unprice customer whose active subscription will change",
+                    "example": "cus_1234567890"
+                  },
+                  "planVersionId": {
+                    "type": "string",
+                    "description": "The published target plan version",
+                    "example": "pv_1234567890"
+                  },
+                  "creditLinePolicy": {
+                    "type": "string",
+                    "enum": ["capped", "uncapped"],
+                    "description": "Usage credit policy for the replacement phase. Required when creditLineAmountMinor is provided.",
+                    "example": "capped"
+                  },
+                  "creditLineAmountMinor": {
+                    "type": "integer",
+                    "nullable": true,
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991,
+                    "description": "Optional replacement-phase credit cap in currency minor units. For USD/EUR, 1000 means $10.00.",
+                    "example": 1000
+                  }
+                },
+                "required": ["customerId", "planVersionId"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The plan change result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": ["changed"]
+                        },
+                        "subscriptionId": {
+                          "type": "string"
+                        },
+                        "phaseId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["status", "subscriptionId", "phaseId"]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": ["requires_payment_method"]
+                        },
+                        "paymentProvider": {
+                          "type": "string",
+                          "enum": ["stripe", "square", "sandbox"]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["status", "paymentProvider", "message"]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrBadRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Although the HTTP standard specifies \"unauthorized\", semantically this response means \"unauthenticated\". That is, the client must authenticate itself to get the requested response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrUnauthorized"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrForbidden"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrNotFound"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "This response is sent when a request conflicts with the current state of the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrConflict"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrPreconditionFailed"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request payload is larger than the server is willing to process.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrPayloadTooLarge"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The user has sent too many requests in a given amount of time (\"rate limiting\")",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrTooManyRequests"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server has encountered a situation it does not know how to handle.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrInternalServerError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/access/entitlements/list": {
       "post": {
         "operationId": "access.entitlements.list",

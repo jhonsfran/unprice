@@ -78,7 +78,11 @@ describe("getCustomerCurrentAccess", () => {
           expectedPeriodKey!,
           [
             periodRow({ feature_slug: "events", usage: 42 }),
-            periodRow({ feature_slug: "customers", usage: 7 }),
+            periodRow({
+              customer_entitlement_id: "ce_customers",
+              feature_slug: "customers",
+              usage: 7,
+            }),
           ],
         ],
       ]),
@@ -174,7 +178,16 @@ describe("getCustomerCurrentAccess", () => {
       nowAt: currentNow,
       periodRowsByPeriodKey: new Map([
         [eventsPeriod!.periodKey, [periodRow({ feature_slug: "events", usage: 4 })]],
-        [customersPeriod!.periodKey, [periodRow({ feature_slug: "customers", usage: 9 })]],
+        [
+          customersPeriod!.periodKey,
+          [
+            periodRow({
+              customer_entitlement_id: "ce_customers",
+              feature_slug: "customers",
+              usage: 9,
+            }),
+          ],
+        ],
       ]),
     })
 
@@ -271,6 +284,45 @@ describe("getCustomerCurrentAccess", () => {
       result.val?.entitlements.find((entitlement) => entitlement.featureSlug === "events")
         ?.currentUsage
     ).toBe(12)
+  })
+
+  it("does not add usage from an expired entitlement with the same feature and reset period", async () => {
+    const events = usageEntitlement({
+      featureSlug: "events",
+      featureTitle: "Events",
+      grantId: "grant_events",
+    })
+    const expectedPeriod = computeGrantPeriodBucket(
+      {
+        cadenceEffectiveAt: entitlementEffectiveAt,
+        cadenceExpiresAt: null,
+        effectiveAt: entitlementEffectiveAt,
+        expiresAt: null,
+        grantId: "grant_events",
+        resetConfig: resetEveryFiveMinutes,
+      },
+      now
+    )
+
+    expect(expectedPeriod).toBeDefined()
+
+    const { deps } = makeDeps({
+      entitlements: [events],
+      periodRowsByPeriodKey: new Map([
+        [
+          expectedPeriod!.periodKey,
+          [
+            periodRow({ customer_entitlement_id: "ce_events", usage: 2 }),
+            periodRow({ customer_entitlement_id: "ce_expired_events", usage: 3 }),
+          ],
+        ],
+      ]),
+    })
+
+    const result = await getCustomerCurrentAccess(deps, { projectId, customerId })
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.entitlements[0]?.currentUsage).toBe(2)
   })
 
   it("does not call usage analytics when no measured usage entitlement is active", async () => {
@@ -517,6 +569,7 @@ function periodRow(overrides: Partial<FeatureUsagePeriodRow>): FeatureUsagePerio
   return {
     project_id: projectId,
     customer_id: customerId,
+    customer_entitlement_id: "ce_events",
     feature_slug: "events",
     usage: 1,
     amount_after: 0,

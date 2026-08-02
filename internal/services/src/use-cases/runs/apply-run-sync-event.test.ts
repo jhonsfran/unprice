@@ -119,6 +119,21 @@ describe("applyRunSyncEvent", () => {
     ])
   })
 
+  it("stops before entitlement resolution when the run customer is denied", async () => {
+    const accessDenied = new Error("customer disabled")
+    const { deps, entitlementResolver, runBudget } = createDeps()
+    deps.assertCustomerCanConsume.mockRejectedValueOnce(accessDenied)
+
+    await expect(applyRunSyncEvent(deps, createInput())).rejects.toThrow(accessDenied)
+
+    expect(deps.assertCustomerCanConsume).toHaveBeenCalledWith({
+      customerId: "cus_123",
+      projectId: "proj_123",
+    })
+    expect(entitlementResolver.resolveForFeature).not.toHaveBeenCalled()
+    expect(runBudget.applySyncEvent).not.toHaveBeenCalled()
+  })
+
   it("reports entitlement-resolution rejections without calling RunBudgetDO", async () => {
     const run = createRun({
       workloadType: "workflow",
@@ -337,6 +352,7 @@ function createDeps(
   const enqueueOutcomes = vi
     .fn<IngestionReportingOutcomeDispatcher["enqueueOutcomes"]>()
     .mockResolvedValue(undefined)
+  const assertCustomerCanConsume = vi.fn().mockResolvedValue(undefined)
 
   return {
     deps: {
@@ -355,7 +371,12 @@ function createDeps(
       reportingDispatcher: {
         enqueueOutcomes,
       },
+      assertCustomerCanConsume,
     },
+    entitlementResolver: {
+      resolveForFeature,
+    },
+    assertCustomerCanConsume,
     enqueueOutcomes,
     runBudget: {
       applySyncEvent,

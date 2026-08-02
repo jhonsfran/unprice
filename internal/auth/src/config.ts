@@ -54,7 +54,8 @@ export const authConfig: NextAuthConfig = {
     //   // send email to user
     // },
   },
-  debug: process.env.NODE_ENV === "development",
+  // Auth.js debug metadata includes provider credentials and OAuth tokens.
+  debug: false,
   adapter: {
     // @ts-expect-error - Type mismatch between DrizzleAdapter and the database connection
     ...DrizzleAdapter(db.$primary, {

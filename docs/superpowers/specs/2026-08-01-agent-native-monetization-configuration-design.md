@@ -2,768 +2,334 @@
 
 Date: 2026-08-01
 
-Status: approved in conversation
+Status: approved in conversation. Supersedes the declarative-manifest version of this document,
+recoverable with `git show 36548ad43:docs/superpowers/specs/2026-08-01-agent-native-monetization-configuration-design.md`.
 
 ## Goal
 
-Make Unprice the monetization control plane for agent-built applications.
+Let a coding agent configure a project's monetization through the public SDK, then integrate the
+application's runtime money path — without a dashboard round trip for the modelling work, and
+without the agent ever publishing money-affecting configuration on its own.
 
-A coding agent should be able to inspect an application, express how it makes money in one
-reviewable `unprice.yaml` file, preview the commercial consequences, configure Unprice through the
-public TypeScript SDK, and integrate the application's runtime money path. The human remains the
-authority for applying and publishing monetary behavior.
+> Describe how your app makes money; Unprice turns it into reviewable draft pricing.
 
-The product promise is:
+## Design in one paragraph
 
-> Describe how your app makes money; Unprice turns it into safe, enforceable billing.
+Two public operations. `monetization.get` returns the project's current configuration.
+`monetization.apply` takes the whole desired configuration as one JSON object and creates or reuses
+**draft** plan versions, content-addressed so re-sending the same object is a no-op. Publishing
+stays where it already is: the dashboard. `apply` returns a deep link to the draft so a human
+reviews the real UI and clicks publish. There is no configuration file, no revision protocol, no
+deployment journal, no drift engine, and no client-held state between calls.
 
-## Success Criteria
+## Why not a declarative manifest
 
-- An agent can describe events, features, meters, plans, limits, and prices in one versioned
-  manifest without using database IDs.
-- The agent can preview a semantic diff before any mutation.
-- Reapplying an identical manifest is a no-op.
-- Retrying a timed-out or partially failed apply or publish resumes the same operation without
-  creating duplicate resources or plan versions.
-- Applying configuration creates drafts; publishing remains a separate, explicit action.
-- Published plan versions are never modified in place.
-- The SDK accepts a plain manifest object and has no dependency on YAML, filesystems, or agent
-  runtimes.
-- The agent skill owns YAML parsing, local validation, diff presentation, and approval workflow.
-- Configuration credentials and deployed runtime credentials have distinct permissions.
-- The API returns stable slugs and an integration contract that tells the agent which runtime SDK
-  calls to add.
-- A future MCP server can expose the same operations and JSON Schema without changing the domain,
-  API, or SDK.
-- The AI chatbot proves the complete story as a follow-on slice: customer provisioning, dynamic
-  model access, pre-cost usage denial, and token-spend evidence.
+The v1 design proposed `unprice.yaml` as the authoritative desired state, reconciled by a
+revision-aware server engine. It was rejected for three reasons.
 
-## First Principles
+**The domain cannot reconcile.** A desired-state engine earns its complexity by converging in both
+directions. Unprice never deletes events, features, or plans, and never edits a published plan
+version. An engine that can only create is `get-or-create` with a diff report bolted on, but it
+still pays the full price: hashes, base revisions, a deployment state machine, drift detection,
+adoption semantics, and a `delete candidate` classification that resolves to a warning.
 
-### Desired state, not remote-control clicks
+**Preview duplicates the draft.** Terraform needs plan/apply because apply is destructive and
+immediate. Applying here creates unpublished drafts that no customer can see. The draft *is* the
+dry run, and the dashboard already renders it properly through `plan-version-form.tsx`,
+`feature-config-form.tsx`, and `version-context-strip.tsx`. A server-side preview would be a second
+implementation of "what would change" that must stay consistent with the first one forever.
 
-Raw CRUD exposes storage mechanics. An agent needs to express a commercial outcome. Unprice should
-accept one desired-state document, calculate the dependency graph, and converge the project toward
-that state.
+**The approval gate was theatre.** v1 conceded that a CLI confirmation string "is not presented as
+cryptographic proof of human intent." Correct — so it should not be built. `planVersions.publish`
+already enforces `verifyRole(["OWNER","ADMIN"])` and already surfaces `payment_provider_error`,
+`no_features`, and `price_calculation_error` in a UI that shows the consequences.
 
-### One authoritative engine
+### Industry precedent
 
-The API owns business validation, canonicalization, diffing, idempotency, dependency ordering, and
-publication safety. SDKs, skills, CLIs, dashboards, and MCP servers are adapters; none reimplement
-the monetization engine.
+Three standards exist, selected by whether resources can be deleted.
 
-### Human-readable source, transport-neutral contract
+| Standard | Example | Requires |
+| --- | --- | --- |
+| Desired-state reconciliation | LaunchDarkly Terraform provider | mutable + deletable resources; a state file; and telling customers not to edit in the UI |
+| Replace-and-archive reconciliation | Stripe Terraform provider (`create_before_destroy` on immutable Prices) | archive-as-delete, plus a logical-name-to-ID state mapping |
+| Ordered idempotent recipe | Stripe CLI fixtures | nothing; it is a sequence of API calls, not a reconciler |
 
-`unprice.yaml` is the reviewed repository artifact. YAML is only an authoring format. The public
-contract is a versioned JSON-compatible `MonetizationManifest`, sent through the SDK and validated
-again by the API.
+Stripe ships both the second and the third for the same objects, because "my catalog in a
+reviewable file" and "converge my account" are different problems. v1 took the machinery of the
+first, over a domain shaped like the second with archive explicitly out of scope, to get the
+ergonomics of the third.
 
-### Stable names at the boundary
+For agent-facing writes the 2026 convention is a narrow write surface with explicit human
+confirmation in the vendor's own surface — Stripe's MCP server puts a `human_confirmation` object
+on money-moving tools. Nobody ships "agent writes the file, agent applies it, agent publishes it."
 
-The manifest references events, features, and plans by project-scoped slugs. Unprice resolves and
-returns internal IDs. Agents never persist internal database IDs in application configuration.
-
-### Money mutations require an explicit boundary
-
-Reading and previewing are safe. Applying drafts and publishing monetary behavior are separate
-operations with separate approvals, expected revisions, idempotency keys, and audit records.
-
-## Current State
-
-The repository already contains most of the domain behavior required behind the new boundary:
-
-- `@unprice/api` is an OpenAPI-generated TypeScript SDK with explicit `{ result, error }` results;
-- the public SDK can list features and plan versions, provision customers, check access, consume or
-  record usage, manage budgeted runs, and inspect money-path evidence;
-- the public API does not expose creation of events, features, plans, plan versions, prices, or
-  publication;
-- the dashboard performs those mutations through internal tRPC procedures;
-- `applyPlanTemplate` already creates or reuses events, features, plans, and versions, detects
-  compatible tagged versions, resumes incomplete materialization, and optionally publishes;
-- the API-key model supports project keys, an `isRoot` flag, expiry, revocation, and optional
-  customer binding, but it has no explicit configuration/runtime scopes;
-- `skills/integrate-unprice-sdk` currently guides runtime integration only and intentionally tells
-  agents not to invent missing product configuration.
-
-This design extends the existing skill and SDK rather than creating a parallel billing client or
-duplicating dashboard tRPC procedures as public APIs.
-
-## Scope Decomposition
-
-The initiative has three implementation tracks with explicit boundaries:
-
-1. **Configuration control plane:** manifest schema, desired-state service, durable deployment
-   state, API endpoints, key scopes, OpenAPI, and generated SDK methods.
-2. **Agent experience:** `unprice.yaml`, the bundled skill script, workflow references, approval
-   rules, local diagnostics, and runtime-integration handoff.
-3. **Proof application:** configure and integrate the AI chatbot using only the public skill and
-   SDK.
-
-Tracks 1 and 2 belong to the Unprice repository and form the first implementation plan. Track 3 is
-a separate implementation plan in the AI chatbot repository after the new SDK version is
-available. A future MCP adapter is intentionally deferred.
-
-## Considered Approaches
-
-### Raw configuration CRUD
-
-Expose create/update/delete methods for every event, feature, plan, plan version, meter, and price.
-
-Trade-off: maximum low-level flexibility, but poor agent reliability. A multi-call sequence can
-fail halfway, retries can duplicate immutable versions, the tool surface is large, and a future MCP
-would expose too many dangerous tools.
-
-### Declarative desired state — selected
-
-Expose `get`, `preview`, `apply`, and `publish` around one `MonetizationManifest`.
-
-Trade-off: the server must own a real diff and reconciliation engine, but callers receive a small,
-idempotent, auditable surface. SDK, skill, CI, and MCP all reuse the same contract.
-
-### Recipes only
-
-Offer presets such as AI credits, per-seat SaaS, or workflow runs.
-
-Trade-off: excellent first-run speed but insufficient flexibility. Recipes may be added as
-client-side helpers that compile to the same manifest; they are not a second configuration model.
-The first release may include one AI-app recipe only after the manifest contract is stable.
-
-### TypeScript or JSON as the repository file
-
-TypeScript provides autocomplete but executes code, couples configuration to Node.js, and is
-awkward for MCP and non-TypeScript clients. JSON is deterministic but unpleasant for humans and
-agents to author. YAML is selected for the repository artifact, with a restricted parser and
-server-side JSON as the actual transport.
-
-## Architecture
-
-```mermaid
-flowchart LR
-    Y["unprice.yaml"] --> S["Agent skill script<br/>parse + local validation"]
-    S --> SDK["@unprice/api<br/>typed transport"]
-    MCP["Future MCP<br/>JSON tool input"] -.-> SDK
-    SDK --> API["Public configuration API"]
-    API --> E["Desired-state engine"]
-    E --> D["Events + features + plans<br/>draft versions + prices"]
-    E --> O["Deployment state<br/>revision + progress + audit"]
-    D --> C["Integration contract<br/>canonical slugs + runtime operations"]
-```
-
-The layers have one-way ownership:
-
-- The skill owns repository discovery, YAML ergonomics, local diagnostics, and agent approvals.
-- The SDK owns authentication, retries, typed transport, and result/error normalization.
-- The API owns authorization and maps HTTP operations to the desired-state service.
-- The desired-state service owns all commercial validation and reconciliation.
-- Existing event, feature, plan, publication, and payment-provider use cases remain the mutation
-  primitives.
-- Durable deployment state makes retries and partial recovery observable.
-
-## Manifest Contract
-
-### Canonical shape
-
-The public manifest is JSON-compatible and versioned independently from the SDK:
-
-```yaml
-apiVersion: unprice.dev/v1alpha1
-kind: Monetization
-
-metadata:
-  name: ai-chatbot
-
-events:
-  chat_request:
-    name: Chat request
-
-  ai_completion:
-    name: AI completion
-    properties:
-      input_tokens: number
-      output_tokens: number
-
-features:
-  chat-messages:
-    title: Chat messages
-    unit: message
-    meter:
-      event: chat_request
-      aggregate: count
-
-  reasoning-model:
-    title: Reasoning model
-    unit: access
-
-  input-tokens:
-    title: Input tokens
-    unit: token
-    meter:
-      event: ai_completion
-      aggregate: sum
-      field: input_tokens
-
-plans:
-  free:
-    title: Free
-    default: true
-    version:
-      currency: USD
-      interval: month
-      features:
-        chat-messages:
-          type: usage
-          limit: 20
-          reset: day
-          unitPrice: "0.00"
-
-  pro:
-    title: Pro
-    version:
-      currency: USD
-      interval: month
-      features:
-        chat-messages:
-          type: usage
-          limit: 1000
-          reset: month
-          unitPrice: "0.01"
-        reasoning-model:
-          type: flat
-          included: true
-        input-tokens:
-          type: usage
-          unitPrice: "0.000002"
-```
-
-This example defines the hierarchy and user vocabulary. The implementation schema must map onto
-the current Unprice validators for billing configuration, `flat`, `usage`, `package`, and tiered
-prices rather than creating a second internal pricing model.
-
-### Contract rules
-
-- `apiVersion` and `kind` are required.
-- The project is derived from the configuration token and never appears in the manifest.
-- Map keys are stable slugs; duplicate YAML keys are rejected.
-- Internal IDs, Dinero objects, generated timestamps, and publication status are not accepted.
-- Monetary values are canonical decimal strings, never binary floating-point numbers.
-- Events declare the numeric properties available for aggregation.
-- Usage features reference events by slug and declare `count`, `sum`, `max`, or `latest` using the
-  existing meter rules. Aggregations other than `count` require a field.
-- Plan features use a discriminated union matching the existing Unprice pricing types.
-- Exactly one plan must be the default when customer signup is expected to omit `planSlug`.
-- References must resolve inside the same manifest or to compatible resources already owned by the
-  project.
-- Unknown fields fail validation for `v1alpha1`; they are not silently discarded.
-
-### YAML safety profile
-
-The skill parser accepts a restricted YAML subset:
-
-- duplicate mapping keys fail;
-- anchors, aliases, merge keys, and custom tags fail;
-- implicit timestamps are disabled;
-- scalar coercion is deterministic;
-- document count is exactly one;
-- file size, alias expansion, and nesting depth are bounded;
-- diagnostics include the YAML line/column and manifest JSON path.
-
-After parsing, the script validates the object against the generated manifest JSON Schema. The API
-repeats validation with the authoritative application schema.
+If customers later demand real config-as-code with CI and drift, the answer is a Terraform
+provider over a clean API, not a proprietary manifest format. That path stays open; this design
+does not close it.
 
 ## API Surface
 
-The public API adds four operations. The exact request and response types are generated into
-`@unprice/api` from OpenAPI.
-
 ### `monetization.get`
 
-Returns the current normalized manifest, configuration revision, publication state, managed
-resource mappings, and detected drift for the token's project.
-
-This is a read operation. It does not infer that manually created resources are managed by a
-manifest unless they were explicitly adopted by a successful apply.
-
-### `monetization.preview`
-
-Input:
-
-- the normalized manifest.
-
-Output:
-
-- `manifestHash`: SHA-256 of canonical manifest JSON;
-- `baseRevision`: revision of the current successfully applied configuration;
-- structured semantic changes grouped by events, features, plans, prices, and publication;
-- human-readable summaries and warnings;
-- conflicts that must be resolved before apply;
-- a proposed integration contract containing canonical slugs and runtime operation guidance.
-
-Preview is side-effect free. The API recalculates every value; it does not trust a client-provided
-hash or diff.
+Returns the project's current configuration in the same shape `apply` accepts, plus each plan's
+current published and draft version IDs. Read-only. Lets an agent inspect before it writes and diff
+locally if it wants to.
 
 ### `monetization.apply`
 
-Input:
+Input: the whole configuration object. No hash, no revision, no idempotency key, no deployment ID.
 
-- the full manifest;
-- the previewed `manifestHash`;
-- `baseRevision`;
-- a stable idempotency key.
+Behaviour:
 
-Behavior:
-
-- recanonicalize and verify the hash;
-- reject a stale base revision before starting a new operation;
-- resume the existing deployment when the same idempotency key and manifest hash are retried;
-- reject reuse of the idempotency key for a different manifest;
-- materialize or adopt events, features, plans, draft versions, meters, and prices in deterministic
-  dependency order;
-- never edit a published plan version;
-- stop at a fully validated draft configuration.
+1. Validate the document and resolve every cross-reference.
+2. `get-or-create` events by slug, then features by slug. Incompatible existing slug is a conflict.
+3. `get-or-create` plans by slug; set exactly one `defaultPlan`.
+4. For each plan, compute `configHash` over the canonical desired version — currency, billing
+   config, payment provider, and the slug-sorted feature list with prices.
+5. If a version with that `configHash` already exists on the plan, reuse it. If that version is a
+   published one, report `published`. If it is a complete draft, report `unchanged`. If it is an
+   incomplete draft, resume materializing it.
+6. Otherwise create a new draft version and materialize its features and prices.
+7. Never touch a published version.
 
 Output:
 
-- deployment ID and state;
-- applied draft revision;
-- created, reused, adopted, and unchanged resource mappings;
-- draft plan-version IDs;
-- integration contract.
-
-### `monetization.publish`
-
-Input:
-
-- deployment ID;
-- expected draft revision;
-- a stable publication idempotency key.
-
-Behavior:
-
-- require explicit `monetization:publish` authority;
-- require a completely applied and validated draft deployment;
-- rerun publication and payment-provider preconditions;
-- publish each plan version through the existing publication use case;
-- persist progress after every published plan version;
-- resume the same deployment on retry.
-
-Publication across several plans cannot honestly be described as one atomic database transaction
-because payment-provider validation may be external and published versions are immutable. A
-partial publish is recorded explicitly, blocks unrelated publication for the project, and is
-resumed with the same deployment and idempotency key. It is never rolled back by mutating an
-already published version.
-
-Output:
-
-- deployment and publication state;
-- published configuration revision;
-- published plan-version IDs;
-- final integration contract.
-
-## Desired-State Reconciliation
-
-The server performs these steps:
-
-1. Parse the typed request and validate cross-resource references.
-2. Canonicalize maps, decimal values, optional defaults, and ordering.
-3. Compute the manifest hash and current project revision.
-4. Build a dependency graph: events, features, plans, draft versions, then plan-feature prices.
-5. Classify every resource as create, reuse, adopt, replace-by-new-version, unchanged, conflict, or
-   delete candidate.
-6. Reject conflicts and destructive removals that lack an explicit acknowledgement.
-7. Persist or resume the deployment record.
-8. Execute steps in deterministic order, persisting progress after each step.
-9. Validate the complete draft graph using existing publication preconditions.
-10. Mark the applied revision and return the canonical integration contract.
-
-### Ownership and drift
-
-The first successful apply records the manifest-to-resource mapping. A compatible existing event,
-feature, or plan may be adopted only when preview reports the adoption and apply includes the
-reviewed manifest hash. An incompatible slug collision is a conflict.
-
-The engine does not silently overwrite dashboard changes. `get` and `preview` report drift between
-the last applied manifest and current resources. The next apply either restores the manifest,
-adopts the new compatible state through an updated manifest, or fails with an actionable conflict.
-
-### Deletion policy
-
-The initial release is additive and version-producing by default:
-
-- removing a feature from a new plan version does not delete the reusable project feature;
-- removing an event, feature, or plan from the manifest produces a warning, not a physical delete;
-- destructive archival or deletion is out of scope until ownership, active-subscription impact,
-  and rollback semantics are designed explicitly.
-
-## Durable Deployment State
-
-Add one project-scoped monetization deployment record that stores:
-
-- deployment ID;
-- canonical manifest and hash;
-- base, draft, and published revisions as applicable;
-- apply and publish idempotency keys;
-- state: applying, draft, publishing, published, failed, or partially published;
-- deterministic step progress and resource mappings;
-- structured failure details and retryability;
-- initiating API-key ID and request IDs;
-- creation and update timestamps.
-
-Only one mutating deployment may be active for a project. Preview remains concurrent and
-read-only. A new apply must use the current base revision and is rejected while a different
-deployment is applying or publishing.
-
-The deployment record is the recovery journal and audit source. It does not replace the existing
-events, features, plans, or plan-version tables.
-
-## Authentication and Authorization
-
-### Connection
-
-The skill and application instantiate the same SDK with different server-side credentials:
-
-```ts
-const unprice = new Unprice({
-  token: process.env.UNPRICE_CONFIG_TOKEN!,
-})
+```jsonc
+{
+  "plans": [
+    { "slug": "pro", "planVersionId": "pv_...", "status": "created" },   // created | unchanged | published
+  ],
+  "staleDrafts": ["pv_..."],           // drafts from a previous, now-superseded apply
+  "integrationContract": { /* see below */ },
+  "reviewUrl": "https://app.unprice.dev/<workspaceSlug>/<projectSlug>/plans/pro/pv_..."
+}
 ```
 
-The SDK sends the credential as a bearer token. The API resolves the project from the token. The
-token is never stored in `unprice.yaml`, application source, prompts, logs, fixtures, or browser
-bundles.
+### Publishing
 
-### Key presets
+Not exposed. The human opens `reviewUrl` and publishes from the dashboard.
 
-Add explicit API-key capabilities and expose two simple dashboard presets:
+This deletes, in one decision: a public publish endpoint, a publish capability scope, publish
+idempotency keys, partial-publish resume, cross-plan publication locking, provider-precondition
+error handling in the agent path, and the honesty problem about what a confirmation flag proves.
 
-| Preset | Intended owner | Capabilities |
+## Idempotency without a protocol
+
+`configHash` on the plan version is the whole mechanism. The agent holds no state; a retry is
+literally the same request body.
+
+Crash recovery needs no journal because **the draft row is the progress record**. A half-materialized
+draft carries the right hash and an incomplete feature set; the next apply finds it and finishes it.
+`applyPlanTemplate` already does exactly this with tags and `isTemplatePlanVersionComplete` — the
+hash replaces the tag heuristic and makes the lookup exact instead of approximate.
+
+Superseded drafts are reported in `staleDrafts` and left alone. `planVersions/remove.ts` already
+deletes drafts from the dashboard.
+
+Storage: one nullable `configHash text` column on plan versions, with a partial index on
+`(projectId, planId, configHash) where config_hash is not null`.
+
+## Configuration Document
+
+The request body reuses the existing insert validators rather than defining a second pricing model.
+Three substitutions at the boundary, all of which already have code:
+
+| Internal | At the boundary | Resolution |
 | --- | --- | --- |
-| Configuration | local agent or trusted CI | monetization read, preview, apply, publish |
-| Runtime | deployed application server | customer provisioning, access checks, usage, runs, and required money-path reads |
+| `meterConfig.eventId` | `eventSlug` | server resolves after events are created |
+| `planId` / `featureId` | `planSlug` / `featureSlug` | server resolves |
+| `config.price` as a Dinero snapshot | decimal string | `toDineroPrice()` in `materialize.ts` |
 
-Internally, permissions are capabilities rather than a hard-coded token-type branch so future
-hosted agents and MCP OAuth grants can request least privilege. The dashboard presents presets to
-avoid making users assemble scope strings.
-
-Existing keys retain their existing runtime behavior but do not automatically gain the new
-monetization mutation capabilities. Users intentionally create a configuration credential.
-
-`apply` and `publish` require different capabilities. This preserves the option for CI to prepare
-drafts while a more privileged process or explicit local approval publishes them.
-
-## SDK Design
-
-The SDK remains file-format and runtime neutral:
+Arrays with an explicit `slug` field, not slug-keyed maps — the validators already use arrays, and
+arrays hash deterministically after sorting without a canonicalization layer.
 
 ```ts
-const preview = await unprice.monetization.preview({ manifest })
-
-const applied = await unprice.monetization.apply({
-  manifest,
-  manifestHash: preview.result.manifestHash,
-  baseRevision: preview.result.baseRevision,
-  idempotencyKey,
+await unprice.monetization.apply({
+  events: [
+    { slug: "chat_request", name: "Chat request" },
+    { slug: "ai_completion", name: "AI completion" },
+  ],
+  features: [
+    { slug: "chat-messages", title: "Chat messages", unitOfMeasure: "message" },
+    { slug: "reasoning-model", title: "Reasoning model", unitOfMeasure: "access" },
+  ],
+  plans: [
+    {
+      slug: "free",
+      title: "Free",
+      defaultPlan: true,
+      version: {
+        currency: "USD",
+        billingConfig: { name: "monthly", interval: "month", intervalCount: 1 },
+        paymentProvider: "stripe",
+        features: [
+          {
+            featureSlug: "chat-messages",
+            featureType: "usage",
+            config: { usageMode: "unit", price: "0.00" },
+            meterConfig: { eventSlug: "chat_request", aggregationMethod: "count" },
+            limit: 20,
+            resetConfig: { interval: "day" },
+          },
+        ],
+      },
+    },
+  ],
 })
-
-const published = await unprice.monetization.publish({
-  deploymentId: applied.result.deploymentId,
-  expectedDraftRevision: applied.result.draftRevision,
-  idempotencyKey: publishIdempotencyKey,
-})
 ```
 
-The generated resource is `unprice.monetization`. No YAML parser, filesystem helper, CLI argument
-parser, or agent-specific approval logic is added to `@unprice/api`.
+No configuration file. The agent composes a typed object; the installed SDK types validate it at
+compile time, which is rule 1 of the skill's existing contract-precedence list. If a project wants a
+re-runnable artifact it can keep the call in a script — nothing reads it back, so re-running it is
+safe and deleting it changes nothing.
 
-The SDK continues returning `{ result, error }`. New calls inherit transport retry behavior, but
-retries are safe only because the application supplies stable idempotency keys. SDK retries do not
-invent new mutation identifiers.
-
-## Agent Skill Design
-
-Extend the existing canonical skill instead of creating a second skill in the first release:
-
-```text
-skills/integrate-unprice-sdk/
-├── SKILL.md
-├── agents/
-│   └── openai.yaml
-├── scripts/
-│   ├── monetization.ts
-│   └── monetization.mjs
-└── references/
-    ├── configuration-workflow.md
-    ├── monetization.schema.json
-    ├── operation-selection.md
-    ├── integration-patterns.md
-    └── verification.md
-```
-
-`SKILL.md` routes configuration requests to the configuration workflow and runtime requests to the
-existing operation-selection workflow. It remains a compact router rather than embedding the
-manifest specification.
-
-### Skill script responsibilities
-
-The source script is reviewable TypeScript. The checked-in `.mjs` artifact bundles the safe YAML
-parser and JSON Schema validator so host projects do not install parser dependencies. It
-dynamically resolves the host project's installed `@unprice/api`; it does not bundle a second SDK
-copy.
-
-The script:
-
-- reads one `unprice.yaml` file;
-- enforces the YAML safety profile;
-- validates against the generated manifest JSON Schema;
-- verifies that the installed SDK exposes the required monetization methods and minimum contract;
-- reads `UNPRICE_CONFIG_TOKEN` and optional intentional base URL from the environment;
-- calls SDK `get`, `preview`, `apply`, or `publish`;
-- emits concise human text plus stable machine-readable JSON;
-- redacts credentials and sensitive headers;
-- maps JSON paths back to YAML line/column diagnostics;
-- requires the reviewed hash/revision as confirmation for apply and publish.
-
-Example invocations:
-
-```bash
-node "$UNPRICE_SKILL_DIR/scripts/monetization.mjs" preview unprice.yaml
-node "$UNPRICE_SKILL_DIR/scripts/monetization.mjs" apply unprice.yaml \
-  --confirm-manifest "$MANIFEST_HASH" \
-  --base-revision "$BASE_REVISION"
-node "$UNPRICE_SKILL_DIR/scripts/monetization.mjs" publish \
-  --deployment "$DEPLOYMENT_ID" \
-  --confirm-revision "$DRAFT_REVISION"
-```
-
-The skill requires explicit user approval between preview and apply and again before publish. A
-command-line confirmation value reduces accidental execution but is not presented as cryptographic
-proof of human intent; agent hosts and MCP clients must provide their own destructive-tool approval
-UX.
-
-### Schema generation and drift
-
-The API request schema is authoritative. The manifest JSON Schema in the skill and the SDK request
-type are generated from the same checked-in API contract. CI regenerates them and fails on drift.
-Agents never maintain a handwritten second schema.
-
-The skill's bundled script is rebuilt deterministically in the repository. CI fails if its source,
-embedded schema, and committed bundle disagree.
-
-## Agent Workflow
-
-The configured skill guides an agent through this sequence:
-
-1. Inspect the application for customer identity, paid actions, provider costs, existing limits,
-   existing Unprice integration, and durable request IDs.
-2. Explain the proposed commercial model and its trade-offs before authoring configuration.
-3. Create or update `unprice.yaml` with stable slugs and no credentials.
-4. Run local validation and `monetization.preview`.
-5. Present the semantic diff in business language: who can use what, what is limited, what is
-   charged, and when.
-6. Obtain explicit approval to apply drafts.
-7. Run `monetization.apply` using the preview hash and base revision.
-8. Present the concrete draft resources and publication consequences.
-9. Obtain explicit approval to publish.
-10. Run `monetization.publish` and capture the integration contract.
-11. Install or update the SDK in the host app and implement customer provisioning, access checks,
-    consumption, usage evidence, and budgeted runs at the correct server boundaries.
-12. Add focused tests and report any remaining live dashboard or payment-provider verification.
+This deletes the restricted YAML parser, the YAML safety profile, the generated JSON Schema, the
+committed `.mjs` bundle, and the CI gate that proved the bundle matched its source.
 
 ## Integration Contract
 
-Preview, apply, and publish return a machine-readable integration contract derived from the
-manifest. It contains:
+`apply` returns the piece that makes this agent-native rather than merely an API: per paid action,
+which runtime call to add and why.
 
-- event slugs and required numeric properties;
-- feature slugs and whether they are flat access, synchronous usage gates, asynchronous evidence,
-  or run-budget inputs;
-- default plan and published plan-version identifiers;
-- recommended runtime SDK operation per paid action;
-- stable idempotency-key requirements;
-- customer-provisioning policy, including whether omitting `planSlug` selects the default plan;
-- warnings when actual usage is unknown before work and therefore requires `usage.record` or a
-  budgeted run rather than guessed `usage.consume` properties.
+- event slugs and their required numeric properties;
+- feature slugs, classified as flat access, synchronous usage gate, asynchronous evidence, or run
+  budget input;
+- the default plan, and the note that omitting `planSlug` in `customers.signUp` selects it;
+- warnings where actual usage is unknown before the work runs, so the correct call is
+  `usage.record` or a budgeted run rather than a guessed `usage.consume`.
 
-The contract does not generate framework code on the server. The skill uses it to produce
-host-appropriate code while preserving the application's architecture.
+The server does not generate host code. The skill turns the contract into code that fits the host
+architecture.
 
-## Error Model and UX
+## Credentials
 
-API errors remain distinct from valid commercial or configuration outcomes. New structured error
-codes include:
+One nullable column on `apikeys`: `type: 'config' | 'runtime'`. Existing keys behave as `runtime`.
+Config keys reach only the monetization operations; runtime keys cannot reach them. The dashboard
+key-creation form gains one choice.
 
-- invalid manifest, with JSON paths and remediation;
-- unresolved or incompatible reference;
-- unmanaged slug collision;
-- stale base or draft revision;
-- idempotency-key reuse with a different payload;
-- deployment already active;
-- incomplete or invalid draft;
-- payment-provider publication precondition;
-- insufficient capability;
-- partially published deployment requiring resume;
-- non-retryable domain conflict;
-- retryable infrastructure failure.
+Not a capability system. `isRoot` already exists on the table and is unreferenced in
+`apps/api/src/auth`; a capability grammar designed for an MCP OAuth flow that is an explicit
+non-goal is speculative work. If hosted MCP ships, migrate then.
 
-Every error includes the Unprice request ID. Mutation errors also include the deployment ID and
-last completed step when available. The skill maps JSON paths to YAML line/column locations and
-renders a concrete next action. It never collapses an API failure into a fake validation denial.
+## Agent Workflow
 
-The semantic preview emphasizes consequences instead of storage operations. For example:
+1. Inspect the application for customer identity, paid actions, provider costs, and existing limits.
+2. Call `monetization.get` to see what already exists.
+3. Explain the proposed commercial model and its trade-offs to the user before writing anything.
+4. Call `monetization.apply`.
+5. Show the user `reviewUrl` and stop. The user reviews and publishes in the dashboard.
+6. Implement the integration contract: `customers.signUp`, access checks, consumption, usage
+   evidence, budgeted runs, at the server boundaries that own the paid action.
+7. Add focused tests. Report anything still requiring live dashboard or payment-provider work.
 
-```text
-Free
-  + Allow 20 chat messages per day
-  - Reasoning model remains unavailable
+Step 5 is a hard stop, not an approval prompt the agent answers itself.
 
-Pro
-  + Allow 1,000 chat messages per month
-  + Include reasoning-model access
-  + Charge $0.000002 per input token
-```
+## Error Model
 
-## Observability and Audit
+Three domain errors, plus normal transport and auth failures:
 
-Configuration operations emit one wide event containing:
+| Code | Meaning |
+| --- | --- |
+| `invalid_config` | schema failure, with JSON paths and remediation |
+| `slug_conflict` | an existing event or feature with that slug is incompatible |
+| `unresolved_reference` | a feature meters an event absent from both the document and the project |
 
-- operation and deployment IDs;
-- project, workspace, API-key ID, and key capability preset;
-- manifest hash, base revision, and target revision;
-- counts of create, reuse, adopt, replace, conflict, and unchanged decisions;
-- current step, final state, retryability, and duration;
-- payment-provider validation result;
-- request ID and SDK source/version.
+Every error carries the Unprice request ID. Commercial denials at runtime stay distinct from API
+errors, as today.
 
-Never log the token, complete manifest, customer PII, or unredacted arbitrary metadata. Store the
-canonical manifest in the project-scoped deployment record with the same access control as plan
-configuration.
+## Observability
 
-## Verification
+One wide event per configuration operation: operation, project, workspace, API-key ID and type,
+config hash per plan, counts of created / unchanged / published / resumed, duration, outcome,
+request ID, SDK version. Never log the token or customer PII.
 
-### Manifest and parser
+## Deferred, With the Trigger to Revisit
 
-- Valid manifests round-trip through YAML, normalized JSON, and canonical hashing.
-- Map ordering, whitespace, and equivalent decimal formatting produce the same hash.
-- Duplicate keys, aliases, tags, multiple documents, excessive depth, and oversized files fail.
-- Invalid cross-references report the correct YAML location.
-- Unknown `apiVersion`, `kind`, fields, pricing variants, and aggregations fail clearly.
-
-### Preview
-
-- Preview is read-only.
-- Empty-project creation, compatible adoption, unchanged state, drift, slug collision, price
-  change, limit change, feature removal, and default-plan change produce correct semantic diffs.
-- Reordering the manifest does not produce changes.
-- The integration contract selects `access.check`, `usage.consume`, `usage.record`, or runs from
-  commercial behavior rather than method-name similarity.
-
-### Apply
-
-- Applying an identical manifest is a no-op.
-- Retrying with the same idempotency key and manifest resumes or returns the existing result.
-- Reusing an idempotency key with a different manifest fails.
-- A stale base revision fails before a new deployment mutates resources.
-- Failure after each dependency step can be retried without duplicates.
-- Published versions are replaced with new drafts, never edited.
-- Compatible unmanaged resources require reviewed adoption; incompatible collisions fail.
-- Only one mutating deployment runs per project.
-
-### Publish
-
-- Missing capability, stale draft revision, invalid draft, and provider-precondition failures stop
-  publication.
-- Retry after timeout returns or resumes the same publication.
-- Failure after publishing one of several plans records partial state and resumes remaining plans.
-- An already published version is treated idempotently only when it belongs to the same
-  deployment.
-- Published revision and integration contract match the resulting plan versions.
-
-### Credentials
-
-- Configuration credentials can access monetization operations but are rejected from unauthorized
-  customer-bound contexts.
-- Runtime credentials cannot preview, apply, or publish configuration.
-- Existing keys retain existing runtime behavior without gaining configuration authority.
-- Tokens never appear in script output, errors, telemetry, browser bundles, or fixtures.
-
-### SDK and skill
-
-- Generated SDK methods match OpenAPI operation IDs and exact request/response types.
-- The skill script resolves the host SDK and produces an actionable upgrade error when missing or
-  incompatible.
-- The committed bundle and JSON Schema are reproducible from source.
-- Preview output has both stable JSON and readable text.
-- Apply and publish refuse to run without reviewed hash/revision confirmations.
-- Skill structural validation and discovery still pass.
-
-### End-to-end proof
-
-In a non-production Unprice project, the AI chatbot follow-on must prove:
-
-1. the agent creates and publishes the model from `unprice.yaml`;
-2. registration calls `customers.signUp` without `planSlug` and persists the returned customer ID;
-3. signup fails without creating the local account when Unprice provisioning fails;
-4. current entitlements control model visibility without a deploy;
-5. `usage.consume` denies an exhausted message allowance before model cost;
-6. `usage.record` reports actual input and output token evidence after completion;
-7. wallet, usage, or charge evidence explains the resulting spend;
-8. SDK/API errors and commercial denials have different UX.
-
-No production customer, usage, payment, or publication is created by automated repository tests.
+| Deferred | Safe because | Revisit when |
+| --- | --- | --- |
+| Concurrency control | one writer per project at a handful of lifetime config writes; published versions are immutable | two writers actually collide — then add `If-Match` on a plan version, not a revision system |
+| Drift detection and GitOps | cannot converge in an additive domain | customers ask for CI-managed pricing — then ship a Terraform provider |
+| Archive / delete | drafts are removable from the dashboard; published versions must persist for active subscriptions | archival is designed with active-subscription impact and rollback semantics |
+| MCP server | the same two operations adapt thinly later | a hosted MCP with OAuth is actually being built |
+| Recipes / presets | the manifest contract should stabilize first | after real agent usage, as a client-side helper that compiles to the same object |
 
 ## Rollout
 
-1. Land the manifest schema, durable deployment state, desired-state service, and focused service
-   tests behind no public route.
-2. Add capability-aware keys and dashboard presets without changing existing runtime-key behavior.
-3. Add the four public API routes, OpenAPI contract tests, generated SDK resources, and an SDK
-   release changeset.
-4. Extend the agent skill, generate the JSON Schema, build the bundled script, and add skill tests.
-5. Validate the workflow against a local or non-production Unprice project.
-6. Publish the new `@unprice/api` version.
-7. Create the separate AI-chatbot implementation plan and prove the end-to-end demo.
-8. Use observed agent failures to stabilize the manifest before promoting `v1alpha1` to `v1beta1`.
+1. Add the `configHash` column and generalize the `plan-template` internals into an
+   `applyMonetizationConfig` use case reusing `materialize.ts`. Service tests only, no route.
+2. Add `apikeys.type` and the dashboard key-creation choice. Existing keys unchanged.
+3. Add the two routes, OpenAPI contract tests, and the generated SDK methods.
+4. **Prove it before releasing.** Configure and integrate the AI chatbot end to end against a
+   non-production project using a linked SDK build.
+5. Extend `skills/integrate-unprice-sdk` with one `configuration-workflow.md` reference and a router
+   line in `SKILL.md`. No script bundle, no schema generation, no drift gate.
+6. Publish `@unprice/api` with a changeset.
 
-## Future MCP Boundary
+Step 4 is deliberately before the release. The proof is the only step that produces information
+about whether the shape is right, and the document shape you would design after watching an agent
+use it is not the one written here.
 
-An MCP server is a thin adapter over the same SDK operations:
+## Verification
 
-| MCP tool | SDK method |
-| --- | --- |
-| `monetization_get` | `monetization.get` |
-| `monetization_preview` | `monetization.preview` |
-| `monetization_apply` | `monetization.apply` |
-| `monetization_publish` | `monetization.publish` |
+**Apply**
 
-MCP tool inputs use the normalized JSON manifest and generated JSON Schema. The MCP process stores
-the credential; the model never receives it. A local MCP may begin with an environment-provided
-configuration token. Hosted MCP authorization should use OAuth with least-privilege capability
-grants, but OAuth and the MCP server are not part of this implementation.
+- Applying the same document twice creates nothing the second time.
+- Reordering features or plans in the document produces no new versions.
+- A price, limit, or reset change produces a new draft and leaves the published version live.
+- A crash after partial materialization is finished by the next apply, with no duplicate version.
+- An incompatible existing feature slug fails with `slug_conflict` before anything is written.
+- A feature metering an unknown event fails with `unresolved_reference`.
+- Two plans claiming `defaultPlan` fails validation.
+- A published version is never edited.
+- `staleDrafts` lists superseded drafts and nothing else.
+
+**Get**
+
+- Round-trips: `get` output fed back into `apply` produces zero changes.
+- Resources created in the dashboard appear in `get`.
+
+**Credentials**
+
+- Runtime keys are rejected from monetization operations; config keys are rejected from
+  customer-bound runtime contexts.
+- Existing keys keep current behaviour and gain nothing.
+- Tokens never appear in output, errors, telemetry, or fixtures.
+
+**End-to-end (AI chatbot, non-production project)**
+
+1. The agent configures the model and stops at `reviewUrl`; nothing is published without a human.
+2. After publish, `customers.signUp` without `planSlug` selects the default plan and the customer ID
+   is persisted.
+3. Signup failure in Unprice does not create a local account.
+4. Entitlements control model visibility without a deploy.
+5. `usage.consume` denies an exhausted allowance before the model cost is incurred.
+6. `usage.record` reports actual input and output tokens after completion.
+7. Wallet or charge evidence explains the resulting spend.
+8. API errors and commercial denials render differently.
+
+No production customer, usage, payment, or publication is created by automated tests.
 
 ## Non-Goals
 
-- Building or publishing an MCP server in this project.
-- Adding OAuth before a hosted MCP exists.
-- Exposing public raw CRUD for configuration resources.
-- Putting YAML parsing, filesystem access, agent prompts, or approval UX in `@unprice/api`.
-- Letting an agent publish without an explicit user approval step.
-- Physically deleting removed events, features, plans, or published versions.
-- Editing published plan versions in place.
-- Automatically choosing prices without explaining assumptions and trade-offs to the user.
-- Supporting arbitrary executable logic, environment interpolation, secrets, anchors, or imports in
-  `unprice.yaml`.
-- Implementing the AI chatbot integration in the Unprice control-plane plan.
-- Treating a command-line confirmation string as cryptographic proof of human approval.
+- A configuration file of any format as authoritative state.
+- A server-side preview or diff engine.
+- A public publish endpoint.
+- Client-supplied idempotency keys, revisions, or manifest hashes.
+- A deployment record, journal, or state machine.
+- Drift detection, adoption semantics, or delete classification.
+- A capability grammar for API keys.
+- YAML parsing, JSON Schema generation, or bundled scripts in `@unprice/api` or the skill.
+- Physically deleting removed resources, or editing published versions.
+- Choosing prices for the user without explaining the assumptions.
+- Implementing the AI chatbot integration in this plan.
 
 ## Decision Summary
 
-- Canonical repository artifact: `unprice.yaml`.
-- Canonical transport: versioned JSON-compatible `MonetizationManifest`.
-- Public surface: `monetization.get`, `preview`, `apply`, and `publish`.
-- Reconciliation: declarative, revision-aware, idempotent, and resumable.
-- Publication: separate, explicit, immutable, and honest about partial multi-plan progress.
-- SDK: typed transport only.
-- YAML parsing and agent workflow: bundled skill script.
-- Credentials: distinct configuration and runtime capability presets.
-- Skill strategy: extend the existing canonical skill for the first release.
-- MCP: thin future adapter over the same schema and SDK methods.
-- Proof: separate AI-chatbot implementation after the SDK release.
+- Public surface: `monetization.get` and `monetization.apply`. Two operations, not four.
+- Apply creates drafts only, idempotent by server-computed content hash.
+- Publishing stays in the dashboard; `apply` returns a deep link.
+- No configuration file; the agent composes a typed object against the installed SDK types.
+- Request body reuses existing validators with three slug/decimal substitutions.
+- One new nullable column on plan versions, one on API keys. No new tables.
+- Three domain error codes.
+- Proof against the AI chatbot happens before the SDK release, not after it.

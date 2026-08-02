@@ -149,6 +149,27 @@ Rules that are easy to get wrong:
   meter references must be declared in `events`.
 - Prices cross the boundary as decimal strings, for example `"0.000002"`.
 
+## Model included usage and an overage cap separately
+
+Use a `usageMode: "tier"`, `tierMode: "graduated"` feature when a plan includes
+some metered units and charges beyond them. For example, 1,000,000 included
+tokens followed by `$0.00001` per token has a zero-priced first tier and a
+second tier beginning at unit 1,000,001. Omit `limit` when usage should continue
+into the paid tier.
+
+This prices the included allowance; it is not a customer spend cap. To cap a
+customer's monthly exposure, pass `creditLinePolicy: "capped"` and
+`creditLineAmountMinor` to `customers.signUp`. The amount is in currency minor
+units (`1000` is `$10.00` USD) and applies to that customer's subscription
+phase. Keep the tiered plan price and the signup cap aligned deliberately.
+
+A nonzero budgeted run is a wallet reservation, not a unit allowance. A customer
+with an active subscription but no spendable wallet credit cannot start one. Set
+the signup credit line high enough for both the maximum period spend and the
+largest set of simultaneous holds. For example, three `$0.10` chat runs can hold
+`$0.30` at once even if a daily token limit keeps their combined eventual spend
+to `$0.10`.
+
 ## After a human publishes
 
 `apply` returns `integrationContract`: what the application actually has to call at runtime for the

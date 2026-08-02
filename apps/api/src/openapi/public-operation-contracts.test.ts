@@ -4,6 +4,7 @@ import { route as analyticsChargesExplainRoute } from "~/routes/analytics/explai
 import { route as ingestionEventsStatusRoute } from "~/routes/analytics/getIngestionStatusV1"
 import { route as analyticsUsageRoute } from "~/routes/analytics/getUsageV1"
 import { route as billingReservationsFlushForInvoicingRoute } from "~/routes/billing/flushReservationsForInvoicingV1"
+import { route as customersChangePlanRoute } from "~/routes/customers/changePlanV1"
 import { route as customersSignUpRoute } from "~/routes/customers/signUpV1"
 import { route as entitlementWindowsStatusRoute } from "~/routes/entitlements/getEntitlementWindowStatusV1"
 import { route as accessEntitlementsListRoute } from "~/routes/entitlements/getEntitlementsV1"
@@ -57,6 +58,7 @@ const routes = [
   runsEndRoute,
   runsGetRoute,
   customersSignUpRoute,
+  customersChangePlanRoute,
   featuresListRoute,
   planVersionsListRoute,
   planVersionsGetRoute,
@@ -92,6 +94,7 @@ const expectedRoutes = new Map<string, string>([
   ["runs.end", "POST /v1/runs/end/{runId}"],
   ["runs.get", "GET /v1/runs/get/{runId}"],
   ["customers.signUp", "POST /v1/customers/sign-up"],
+  ["customers.changePlan", "POST /v1/customers/change-plan"],
   ["features.list", "GET /v1/features/list"],
   ["planVersions.list", "POST /v1/plan-versions/list"],
   ["planVersions.get", "GET /v1/plan-versions/get/{planVersionId}"],
@@ -142,6 +145,7 @@ const expectedSdkPublicOperations = [
   "runs.end",
   "runs.get",
   "customers.signUp",
+  "customers.changePlan",
   "features.list",
   "planVersions.list",
   "planVersions.get",

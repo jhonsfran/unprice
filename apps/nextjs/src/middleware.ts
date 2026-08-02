@@ -55,6 +55,8 @@ export default auth((req) => {
 })
 
 export const config = {
+  // Session enrichment queries Postgres, so this middleware is not Edge-compatible.
+  runtime: "nodejs",
   matcher: [
     /*
      * Match all paths except for:

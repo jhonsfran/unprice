@@ -57,11 +57,12 @@ SQL >
     SELECT
         project_id,
         {% if defined(customer_id) %} customer_id, {% end %}
+        customer_entitlement_id,
         feature_slug,
         sum(usage) as usage,
         sum(amount_after) as amount_after,
         any(currency) as currency
     FROM feature_usage_period_allocations_node
-    {% if defined(customer_id) %} GROUP BY project_id, customer_id, feature_slug {% else %} GROUP BY project_id, feature_slug {% end %}
+    {% if defined(customer_id) %} GROUP BY project_id, customer_id, customer_entitlement_id, feature_slug {% else %} GROUP BY project_id, customer_entitlement_id, feature_slug {% end %}
 
 TYPE endpoint

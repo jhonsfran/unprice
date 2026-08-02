@@ -54,6 +54,7 @@ patterns. Keep it cheap to load and useful.
 
 ## Cloudflare, API, And Ingestion
 
+- 2026-08-01: When replacing a synchronous runtime usage or run route, preserve the cached bouncer at the work-authorizing boundary; `access.check` and async `usage.record` are not enforcement gates.
 - 2026-07-08: `EntitlementWindowDO` is a thin Cloudflare adapter; entitlement window business logic
   lives in `apps/api/src/ingestion/entitlements/processor.ts` behind the backend-neutral ports in
   `ports.ts` (state store + `atomically` boundary, scheduler, runtime, wallet provider, clock).
@@ -242,6 +243,16 @@ patterns. Keep it cheap to load and useful.
 
 ## Next.js And Dashboard
 
+- 2026-08-01: Auth middleware that enriches sessions from Postgres must declare
+  `config.runtime = "nodejs"`; leaving it on Edge can surface the database failure as a misleading
+  Auth.js `JWTSessionError`.
+- 2026-08-01: Keep Turbopack opt-in on Next 15 for this dashboard until its large workspace graph
+  no longer exhausts the dev-server heap; use Webpack memory optimizations for the default dev path.
+- 2026-08-01: Never enable Auth.js `debug` logging against real OAuth credentials, even locally;
+  provider config, access tokens, refresh tokens, and encrypted cookies are included in metadata.
+
+- 2026-08-01: Before enabling Turbopack in `apps/nextjs`, remove unused Next compiler plugins and
+  version-mismatched wrappers; `@next/mdx` 14 can inject a legacy webpack config beside Next 15.
 - 2026-08-01: Auth.js sessions are host-only; redirect base-host `/auth/*` entries to `APP_DOMAIN`
   before sign-in and allow final auth redirects only on that canonical origin instead of sharing the
   session cookie with the marketing host.
@@ -775,3 +786,9 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   arrow-function `vi.fn()` implementations are not constructible.
 - 2026-07-31: `@cloudflare/vitest-pool-workers` v0.20 uses an ESM `.mts` Vitest config and the
   `cloudflareTest` plugin; the old `/config` helper is no longer exported.
+- 2026-08-02: Use a zero-priced first graduated usage tier for included units and a later paid
+  tier for overage; `customers.signUp.creditLineAmountMinor` is the separate per-period customer
+  spend cap, expressed in currency minor units.
+- 2026-08-02: A nonzero budgeted run reserves wallet funds at `runs.start`; an active subscription
+  without a wallet grant, capped credit line, or top-up fails before work begins. Size the credit
+  line for concurrent reservation holds as well as eventual metered spend.

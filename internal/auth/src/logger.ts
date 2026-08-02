@@ -17,19 +17,16 @@ function tryUseRequestLogger() {
 }
 
 export const authLogger = {
-  debug(message: string, metadata?: unknown) {
+  debug(message: string) {
     const logger = tryUseRequestLogger()
 
     if (logger) {
-      logger.info(message, {
-        auth_metadata: metadata,
-      })
+      logger.info(message)
       return
     }
 
     evlog.debug({
       message,
-      auth_metadata: metadata,
     })
   },
   error(error: Error) {

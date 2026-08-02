@@ -22,6 +22,10 @@ const authMocks = vi.hoisted(() => ({
   resolveContextProjectId: vi.fn(),
 }))
 
+const bouncerMocks = vi.hoisted(() => ({
+  bouncer: vi.fn(),
+}))
+
 vi.mock("~/auth/key", async (importOriginal) => {
   const actual = await importOriginal<typeof import("~/auth/key")>()
   return {
@@ -30,6 +34,10 @@ vi.mock("~/auth/key", async (importOriginal) => {
     resolveContextProjectId: authMocks.resolveContextProjectId,
   }
 })
+
+vi.mock("~/util/bouncer", () => ({
+  bouncer: bouncerMocks.bouncer,
+}))
 
 import { registerIngestEventsSyncV1 } from "./ingestEventsSyncV1"
 import { RAW_EVENT_MAX_BODY_BYTES, RAW_EVENT_MAX_PROPERTIES_BYTES } from "./ingestEventsV1"
@@ -66,6 +74,7 @@ beforeEach(() => {
   authMocks.resolveContextProjectId.mockImplementation(
     async (_c: unknown, defaultProjectId: string) => defaultProjectId
   )
+  bouncerMocks.bouncer.mockResolvedValue(undefined)
 })
 
 afterEach(() => {
@@ -109,6 +118,32 @@ describe("ingestEventsSyncV1 route", () => {
         },
       }),
     })
+  })
+
+  it("rejects a disabled customer before synchronous ingestion", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(requestBody.timestamp))
+    bouncerMocks.bouncer.mockRejectedValueOnce(
+      new UnpriceApiError({
+        code: "FORBIDDEN",
+        message: "Your account has been disabled. Please contact support.",
+      })
+    )
+    const { app, env, executionCtx, ingestFeatureSync } = createTestApp()
+
+    const response = await app.fetch(buildRequest(), env, executionCtx)
+
+    expect(response.status).toBe(403)
+    await expect(response.json()).resolves.toEqual({
+      code: "FORBIDDEN",
+      message: "Your account has been disabled. Please contact support.",
+    })
+    expect(bouncerMocks.bouncer).toHaveBeenCalledWith(
+      expect.anything(),
+      requestBody.customerId,
+      "proj_123"
+    )
+    expect(ingestFeatureSync).not.toHaveBeenCalled()
   })
 
   it("uses the request start time when the event timestamp is omitted", async () => {

@@ -9,7 +9,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 jiti.import("./src/env")
 
 // import MillionLint from "@million/lint"
-import createMDX from "@next/mdx"
 
 /**
  * @type {import('next').NextConfig}
@@ -28,7 +27,6 @@ const nextConfig = {
   ],
   output: process.env.NEXT_OUTPUT_STANDALONE === "1" ? "standalone" : undefined,
   outputFileTracingRoot: path.join(__dirname, "../../"),
-  pageExtensions: ["ts", "tsx", "mdx"],
   images: {
     domains: ["images.unsplash.com"],
   },
@@ -40,7 +38,7 @@ const nextConfig = {
   },
   experimental: {
     // ppr: true, // TODO: activate later
-    mdxRs: true,
+    webpackMemoryOptimizations: true,
     optimizePackageImports: [
       "@unprice/ui",
       "@unprice/trpc",
@@ -56,10 +54,7 @@ const nextConfig = {
   typescript: { ignoreBuildErrors: true },
 }
 
-const withMDX = createMDX()
-
-// Export the combined config
-export default withVercelToolbar()(withMDX(nextConfig))
+export default withVercelToolbar()(nextConfig)
 
 // TODO: try to use million
 // export default MillionLint.next({
@@ -67,6 +62,6 @@ export default withVercelToolbar()(withMDX(nextConfig))
 //   filter: {
 //     include: "**.{mtsx,mjsx,tsx,jsx}",
 //   },
-// })(withMDX()(nextConfig))
+// })(nextConfig)
 
 // TODO: https://www.flavienbonvin.com/reduce-next-js-bundle/

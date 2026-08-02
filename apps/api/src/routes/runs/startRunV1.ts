@@ -8,6 +8,7 @@ import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import { CloudflareRunBudgetClient } from "~/ingestion/run-budget/client"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
+import { bouncer } from "~/util/bouncer"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
 const tags = ["runs"]
@@ -61,6 +62,8 @@ export const registerStartRunV1 = (app: App) =>
         message: customer.message,
       })
     }
+
+    await bouncer(c, customer.customerId, key.projectId)
 
     const { customer: customerService, subscription: subscriptionService } = c.get("services")
     const logger = c.get("logger")

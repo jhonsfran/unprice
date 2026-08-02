@@ -322,6 +322,7 @@ export async function getCustomerCurrentAccess(
               isUsageEntitlement && !usageResult.error
                 ? sumUsageForFeaturePeriodKeys({
                     usageByFeaturePeriodKey,
+                    customerEntitlementId: entitlement.id,
                     featureSlug: feature.slug,
                     periodKeys,
                   })
@@ -460,7 +461,7 @@ async function loadUsageByFeaturePeriodKey({
 
     for (const row of result.val.data ?? []) {
       const usage = row.usage ?? row.value_after ?? 0
-      const key = usagePeriodKey(row.feature_slug, periodKey)
+      const key = usagePeriodKey(row.customer_entitlement_id, row.feature_slug, periodKey)
       usageByFeaturePeriodKey.set(key, (usageByFeaturePeriodKey.get(key) ?? 0) + usage)
     }
   }
@@ -560,20 +561,28 @@ function buildUsagePeriodPlan({
 
 function sumUsageForFeaturePeriodKeys({
   usageByFeaturePeriodKey,
+  customerEntitlementId,
   featureSlug,
   periodKeys,
 }: {
   usageByFeaturePeriodKey: Map<string, number>
+  customerEntitlementId: string
   featureSlug: string
   periodKeys: string[]
 }): number {
   return periodKeys.reduce(
     (total, periodKey) =>
-      total + (usageByFeaturePeriodKey.get(usagePeriodKey(featureSlug, periodKey)) ?? 0),
+      total +
+      (usageByFeaturePeriodKey.get(usagePeriodKey(customerEntitlementId, featureSlug, periodKey)) ??
+        0),
     0
   )
 }
 
-function usagePeriodKey(featureSlug: string, periodKey: string): string {
-  return `${featureSlug}\u0000${periodKey}`
+function usagePeriodKey(
+  customerEntitlementId: string,
+  featureSlug: string,
+  periodKey: string
+): string {
+  return `${customerEntitlementId}\u0000${featureSlug}\u0000${periodKey}`
 }

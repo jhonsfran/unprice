@@ -26,6 +26,7 @@ import type { App } from "~/hono/app"
 import { CloudflareReportingQueueClient } from "~/ingestion/reporting/client"
 import { CloudflareRunBudgetClient } from "~/ingestion/run-budget/client"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
+import { bouncer } from "~/util/bouncer"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
 const tags = ["runs"]
@@ -124,7 +125,13 @@ export const registerApplyRunSyncEventV1 = (app: App) =>
     })
 
     const result = await applyRunSyncEvent(
-      { services: { budgetRuns }, runBudget, entitlementResolver, reportingDispatcher },
+      {
+        services: { budgetRuns },
+        runBudget,
+        entitlementResolver,
+        reportingDispatcher,
+        assertCustomerCanConsume: ({ customerId, projectId }) => bouncer(c, customerId, projectId),
+      },
       {
         projectId: key.projectId,
         runId,

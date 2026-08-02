@@ -26,6 +26,8 @@ configuration: read [configuration-workflow.md](references/configuration-workflo
    - Read [operation-selection.md](references/operation-selection.md).
    - Choose one primary runtime path before writing code.
    - Do not infer product configuration from UI labels or plan names.
+   - For included metered usage plus overage, or a customer-specific spend cap,
+     read [configuration-workflow.md](references/configuration-workflow.md).
 
 3. Confirm prerequisites.
    - Require a published plan version and the actual plan, feature, event, and meter property slugs.
@@ -60,7 +62,12 @@ configuration: read [configuration-workflow.md](references/configuration-workflo
 - Treat `access.check` as a read-only decision.
 - Never use `usage.record` as a spend gate.
 - Do not begin paid work after a denied `usage.consume` or rejected run reservation.
-- Always close a started run in `finally`.
+- A nonzero `runs.start` reserves wallet funds. An active subscription alone is
+  insufficient: provision a wallet grant, credit line, or top-up large enough
+  for the expected simultaneous reservations.
+- Close short-lived runs in `finally`. For a deliberately long-lived conversation,
+  set `expiresAt`, reuse its stable idempotency key throughout that window, and
+  explicitly close it on cancellation or failure.
 - End a run as `failed` after exceptions or rejected consumption; do not report it as `completed`.
 - Reuse the same idempotency key when retrying the same logical mutation.
 - Do not replace a repository's existing billing or authorization owner with route-level

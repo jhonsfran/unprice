@@ -12,6 +12,7 @@ export const sdkOperationIds = [
   "access.update",
   "analytics.charges.explain",
   "analytics.usage.get",
+  "customers.changePlan",
   "customers.signUp",
   "features.list",
   "ingestionEvents.replay",
@@ -75,6 +76,9 @@ export type GeneratedSdkResources = {
     }
   }
   customers: {
+    changePlan: (
+      req: OperationInput<"customers.changePlan">
+    ) => Promise<ApiResult<OperationResponse<"customers.changePlan">>>
     signUp: (
       req: OperationInput<"customers.signUp">
     ) => Promise<ApiResult<OperationResponse<"customers.signUp">>>
@@ -173,6 +177,7 @@ export function createGeneratedSdkResources(
       },
     },
     customers: {
+      changePlan: (body) => toResult(openapi.POST("/v1/customers/change-plan", { body })),
       signUp: (body) => toResult(openapi.POST("/v1/customers/sign-up", { body })),
     },
     features: {

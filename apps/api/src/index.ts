@@ -17,6 +17,7 @@ import { registerExplainChargeV1 } from "./routes/analytics/explainChargeV1"
 import { registerGetIngestionStatusV1 } from "./routes/analytics/getIngestionStatusV1"
 import { registerGetAnalyticsUsageV1 } from "./routes/analytics/getUsageV1"
 import { registerFlushReservationsForInvoicingV1 } from "./routes/billing/flushReservationsForInvoicingV1"
+import { registerChangePlanV1 } from "./routes/customers/changePlanV1"
 import { registerSignUpV1 } from "./routes/customers/signUpV1"
 import { registerGetEntitlementWindowStatusV1 } from "./routes/entitlements/getEntitlementWindowStatusV1"
 import { registerGetEntitlementsV1 } from "./routes/entitlements/getEntitlementsV1"
@@ -171,6 +172,7 @@ registerFlushReservationsForInvoicingV1(app)
 
 // Customer routes
 registerSignUpV1(app)
+registerChangePlanV1(app)
 
 // Entitlement routes
 registerGetEntitlementsV1(app)

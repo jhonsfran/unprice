@@ -71,6 +71,9 @@ const { result, error } = await unprice.customers.signUp({
   email: account.billingEmail,
   externalId: account.id,
   planSlug,
+  // Optional monthly customer spend cap: $10.00 USD.
+  creditLinePolicy: "capped",
+  creditLineAmountMinor: 1_000,
   successUrl,
   cancelUrl,
 })
@@ -87,6 +90,11 @@ await accounts.saveUnpriceCustomerId({
 
 Make the surrounding onboarding workflow idempotent using the host application's established
 pattern. Do not call signup from every request path.
+
+Use a capped credit line only when the product needs a hard customer-specific
+spend ceiling. It is independent of a plan's usage tiers: model included units
+and overage with graduated tiers, then pass the cap in currency minor units at
+signup.
 
 ## Add a read-only shadow check
 

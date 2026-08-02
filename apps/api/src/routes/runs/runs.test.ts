@@ -15,6 +15,10 @@ const authMocks = vi.hoisted(() => ({
   resolveCustomerIdForApiKey: vi.fn(),
 }))
 
+const bouncerMocks = vi.hoisted(() => ({
+  bouncer: vi.fn(),
+}))
+
 vi.mock("~/auth/key", async (importOriginal) => {
   const actual = await importOriginal<typeof import("~/auth/key")>()
 
@@ -26,6 +30,10 @@ vi.mock("~/auth/key", async (importOriginal) => {
     validateIsAllowedToAccessProject: actual.validateIsAllowedToAccessProject,
   }
 })
+
+vi.mock("~/util/bouncer", () => ({
+  bouncer: bouncerMocks.bouncer,
+}))
 
 // Mock the use cases
 const useCaseMocks = vi.hoisted(() => ({
@@ -114,6 +122,7 @@ const verifiedKeyBoundToB = {
 
 beforeEach(() => {
   authMocks.keyAuth.mockResolvedValue(verifiedKeyWithDefault)
+  bouncerMocks.bouncer.mockResolvedValue(undefined)
 })
 
 afterEach(() => {
@@ -195,6 +204,40 @@ function createTestApp() {
 // ---------------------------------------------------------------------------
 
 describe("budgeted runs API", () => {
+  it("rejects a disabled customer before starting a budgeted run", async () => {
+    authMocks.resolveCustomerIdForApiKey.mockReturnValue({
+      success: true,
+      customerId: "cus_default",
+    })
+    bouncerMocks.bouncer.mockRejectedValueOnce(
+      new UnpriceApiError({
+        code: "FORBIDDEN",
+        message: "Your account has been disabled. Please contact support.",
+      })
+    )
+    const { app, env, executionCtx } = createTestApp()
+
+    const response = await app.fetch(
+      new Request("https://example.com/v1/runs/start", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer sk_test",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          budgetAmountMinor: 1000,
+          idempotencyKey: "idem_disabled_customer",
+        }),
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(403)
+    expect(bouncerMocks.bouncer).toHaveBeenCalledWith(expect.anything(), "cus_default", "proj_123")
+    expect(useCaseMocks.startRunForCustomerSubscription).not.toHaveBeenCalled()
+  })
+
   it("starts a run for the API key default customer without agent creation", async () => {
     // Given an API key with defaultCustomerId
     authMocks.keyAuth.mockResolvedValue(verifiedKeyWithDefault)

@@ -42,6 +42,7 @@ export type ApplyRunSyncEventDeps = {
   runBudget: RunBudgetClient
   entitlementResolver: RunEntitlementResolver
   reportingDispatcher: IngestionReportingOutcomeDispatcher
+  assertCustomerCanConsume(params: { customerId: string; projectId: string }): Promise<void>
 }
 
 export type ApplyRunSyncEventInput = {
@@ -89,6 +90,11 @@ export async function applyRunSyncEvent(
   if (!canAccessRun({ keyCustomerId: input.keyCustomerId, runCustomerId: run.customerId })) {
     return Err(new RunUseCaseError("RUN_NOT_FOUND"))
   }
+
+  await deps.assertCustomerCanConsume({
+    customerId: run.customerId,
+    projectId: run.projectId,
+  })
 
   // Resolve entitlement for the feature slug before delegating to the DO
   const resolution = await deps.entitlementResolver.resolveForFeature({

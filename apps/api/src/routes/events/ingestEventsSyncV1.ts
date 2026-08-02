@@ -12,6 +12,7 @@ import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import type { ServiceContext } from "~/hono/env"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
+import { bouncer } from "~/util/bouncer"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 import {
   assertRawEventPayloadWithinLimits,
@@ -110,6 +111,8 @@ export const registerIngestEventsSyncV1 = (app: App) => {
     })
 
     const projectId = await resolveContextProjectId(c, key.projectId, customerId)
+
+    await bouncer(c, customerId, projectId)
 
     validateEventTimestampOrThrow(timestamp, receivedAt, {
       onTooOld: (error) => {

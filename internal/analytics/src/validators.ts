@@ -270,6 +270,7 @@ export const getAnalyticsVerificationsResponseSchema = z.object({
 export const featureUsagePeriodRowSchema = z.object({
   project_id: z.string(),
   customer_id: z.string().optional(),
+  customer_entitlement_id: z.string(),
   feature_slug: z.string(),
   usage: z.number().optional(),
   value_after: z.number().optional(),

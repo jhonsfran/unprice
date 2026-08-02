@@ -16,9 +16,13 @@ vi.mock("~/lib/domains", () => ({
   }),
 }))
 
-import middleware from "./middleware"
+import middleware, { config } from "./middleware"
 
 describe("root middleware", () => {
+  it("uses the Node.js runtime required by database-backed session enrichment", () => {
+    expect(config.runtime).toBe("nodejs")
+  })
+
   it("moves base-host auth requests to the canonical app host", async () => {
     const request = new NextRequest("http://localhost:3000/auth/signin?next=%2Facme", {
       headers: { host: "localhost:3000" },
