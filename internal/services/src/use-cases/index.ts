@@ -44,6 +44,17 @@ export type {
   GetIngestionStatusInput,
   GetIngestionStatusOutput,
 } from "./analytics/get-ingestion-status"
+export {
+  BillingPeriodUsageCoverageError,
+  getCurrentBillingPeriodUsage,
+  getCurrentBillingPeriodUsageInputSchema,
+  getCurrentBillingPeriodUsageOutputSchema,
+} from "./analytics/get-current-billing-period-usage"
+export type {
+  GetCurrentBillingPeriodUsageDeps,
+  GetCurrentBillingPeriodUsageInput,
+  GetCurrentBillingPeriodUsageOutput,
+} from "./analytics/get-current-billing-period-usage"
 export { aiAnswerEnvelopeSchema, aiEvidenceSchema } from "./analytics/ai-contracts"
 export type { AiAnswerEnvelope, AiEvidence } from "./analytics/ai-contracts"
 export {

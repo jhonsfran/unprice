@@ -187,7 +187,11 @@ describe("in-memory store internals", () => {
     const first = await harness.processor.apply(input)
     expect(first.allowed).toBe(true)
     expect(first.meterFacts).toHaveLength(1)
-    expect(first.meterFacts?.[0]).toMatchObject({ delta: 3, value_after: 3 })
+    expect(first.meterFacts?.[0]).toMatchObject({
+      billing_period_id: "bp_123",
+      delta: 3,
+      value_after: 3,
+    })
 
     const replay = await harness.processor.apply(input)
     expect(replay).toMatchObject({ allowed: true, idempotencyStatus: "already_reported" })
@@ -1235,7 +1239,16 @@ describe("EntitlementWindowProcessor reads and lifecycle", () => {
         grants: input.grants,
         now,
       })
-    ).resolves.toMatchObject({ usage: 0, limit: 5, isLimitReached: false })
+    ).resolves.toMatchObject({
+      usage: 0,
+      limit: 5,
+      isLimitReached: false,
+      quotaWindow: {
+        periodKey: `onetime:${now - 60_000}`,
+        startAt: now - 60_000,
+        endAt: now + 60_000,
+      },
+    })
 
     await harness.processor.apply({
       ...input,
@@ -1247,7 +1260,84 @@ describe("EntitlementWindowProcessor reads and lifecycle", () => {
         grants: input.grants,
         now,
       })
-    ).resolves.toMatchObject({ usage: 3, limit: 5, isLimitReached: false })
+    ).resolves.toMatchObject({
+      usage: 3,
+      limit: 5,
+      isLimitReached: false,
+      quotaWindow: {
+        periodKey: `onetime:${now - 60_000}`,
+        startAt: now - 60_000,
+        endAt: now + 60_000,
+      },
+    })
+  })
+
+  it("represents an open-ended quota window without an internal infinity sentinel", async () => {
+    const now = BASE_NOW
+    const harness = createHarness({ now })
+    await harness.processor.initialize()
+    const input = createApplyInput({
+      grants: [
+        createGrantSnapshot({
+          cadenceExpiresAt: null,
+          expiresAt: null,
+        }),
+      ],
+      limit: 5,
+    })
+
+    const state = await harness.processor.getEnforcementState({
+      entitlement: input.entitlement,
+      grants: input.grants,
+      now,
+    })
+
+    expect(state.quotaWindow).toEqual({
+      periodKey: `onetime:${now - 60_000}`,
+      startAt: now - 60_000,
+      endAt: null,
+    })
+  })
+
+  it("omits a singular quota window when active grants reset at different boundaries", async () => {
+    const now = BASE_NOW
+    const harness = createHarness({ now })
+    await harness.processor.initialize()
+    const input = createApplyInput({
+      grants: [
+        createGrantSnapshot({
+          allowanceUnits: 2,
+          grantId: "grant_first",
+        }),
+        createGrantSnapshot({
+          allowanceUnits: 3,
+          cadenceEffectiveAt: now - 30_000,
+          effectiveAt: now - 30_000,
+          grantId: "grant_second",
+        }),
+      ],
+      limit: 5,
+    })
+
+    await expect(
+      harness.processor.getEnforcementState({
+        entitlement: input.entitlement,
+        grants: input.grants,
+        now,
+      })
+    ).resolves.toMatchObject({ quotaWindow: null })
+  })
+
+  it("keeps non-subscription meter facts valid without a billing period", async () => {
+    const now = BASE_NOW
+    const harness = createHarness({ now })
+    await harness.processor.initialize()
+    const input = createApplyInput({ now })
+    input.entitlement.billingPeriods = []
+
+    const result = await harness.processor.apply(input)
+
+    expect(result.meterFacts?.[0]).toMatchObject({ billing_period_id: null })
   })
 
   it("reports operational status without mutating state", async () => {

@@ -3853,6 +3853,30 @@
                       "description": "Configured limit. For usage features this is the active meter-window limit; for tier/package features this is the subscribed quantity limit.",
                       "example": 100
                     },
+                    "quotaWindow": {
+                      "type": "object",
+                      "nullable": true,
+                      "description": "The single reset window represented by usage and limit. Null when active grants use different windows.",
+                      "properties": {
+                        "periodKey": {
+                          "type": "string",
+                          "description": "The active reset-window key used by quota enforcement",
+                          "example": "day:1774051200000"
+                        },
+                        "startAt": {
+                          "type": "number",
+                          "description": "Inclusive Unix-millisecond start of the active quota window",
+                          "example": 1774051200000
+                        },
+                        "endAt": {
+                          "type": "number",
+                          "nullable": true,
+                          "description": "Exclusive Unix-millisecond end of the active quota window. Null for an open-ended quota window.",
+                          "example": 1774137600000
+                        }
+                      },
+                      "required": ["periodKey", "startAt", "endAt"]
+                    },
                     "spending": {
                       "type": "object",
                       "properties": {
@@ -11816,6 +11840,202 @@
                     }
                   },
                   "required": ["usage"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrBadRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Although the HTTP standard specifies \"unauthorized\", semantically this response means \"unauthenticated\". That is, the client must authenticate itself to get the requested response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrUnauthorized"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrForbidden"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrNotFound"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "This response is sent when a request conflicts with the current state of the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrConflict"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrPreconditionFailed"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request payload is larger than the server is willing to process.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrPayloadTooLarge"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The user has sent too many requests in a given amount of time (\"rate limiting\")",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrTooManyRequests"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server has encountered a situation it does not know how to handle.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrInternalServerError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/analytics/usage/current-billing-period": {
+      "post": {
+        "operationId": "analytics.usage.currentBillingPeriod",
+        "summary": "get current billing-period usage",
+        "description": "Get metered usage and priced deltas for the customer's active subscription billing period. This reports billing data; use access.check for real-time quota enforcement.",
+        "tags": ["analytics"],
+        "x-unprice": {
+          "audience": "public",
+          "category": "analytics",
+          "docs": {
+            "expose": true
+          },
+          "sdk": {
+            "path": ["analytics", "usage", "currentBillingPeriod"]
+          }
+        },
+        "requestBody": {
+          "description": "Current billing-period usage request",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "customer_id": {
+                    "type": "string",
+                    "description": "The customer ID. Optional when the API key is bound to a customer.",
+                    "example": "cus_1H7KQFLr7RepUyQBKdnvY"
+                  },
+                  "project_id": {
+                    "type": "string",
+                    "description": "The project ID. Only main-project keys can select another project.",
+                    "example": "project_1H7KQFLr7RepUyQBKdnvY"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Current billing-period usage",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "billing_periods": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "billing_period_id": {
+                            "type": "string"
+                          },
+                          "cycle_start_at": {
+                            "type": "integer"
+                          },
+                          "cycle_end_at": {
+                            "type": "integer"
+                          },
+                          "usage": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "feature_slug": {
+                                  "type": "string"
+                                },
+                                "usage": {
+                                  "type": "number"
+                                },
+                                "spending": {
+                                  "type": "object",
+                                  "properties": {
+                                    "amount": {
+                                      "type": "string"
+                                    },
+                                    "currency": {
+                                      "type": "string",
+                                      "minLength": 3,
+                                      "maxLength": 3
+                                    },
+                                    "display_amount": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": ["amount", "currency", "display_amount"]
+                                }
+                              },
+                              "required": ["feature_slug", "usage", "spending"]
+                            }
+                          }
+                        },
+                        "required": ["billing_period_id", "cycle_start_at", "cycle_end_at", "usage"]
+                      }
+                    }
+                  },
+                  "required": ["billing_periods"]
                 }
               }
             }

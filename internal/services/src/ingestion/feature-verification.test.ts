@@ -161,6 +161,11 @@ describe("IngestionFeatureVerifier", () => {
     const getEnforcementState = vi.fn().mockResolvedValue({
       usage: 100,
       limit: 100,
+      quotaWindow: {
+        endAt: TEST_NOW + 86_400_000,
+        periodKey: `day:${TEST_NOW}`,
+        startAt: TEST_NOW,
+      },
       isLimitReached: true,
       spending: {
         currency: "USD",
@@ -182,6 +187,11 @@ describe("IngestionFeatureVerifier", () => {
       allowed: false,
       featureSlug: "api_calls",
       limit: 100,
+      quotaWindow: {
+        endAt: TEST_NOW + 86_400_000,
+        periodKey: `day:${TEST_NOW}`,
+        startAt: TEST_NOW,
+      },
       rejectionReason: "LIMIT_EXCEEDED",
       spending: {
         currency: "USD",

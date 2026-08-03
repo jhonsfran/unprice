@@ -71,6 +71,11 @@ describe("verifyV1 route", () => {
       allowed: true,
       featureSlug: "api_calls",
       limit: 100,
+      quotaWindow: {
+        endAt: Date.now() + 86_400_000,
+        periodKey: `day:${Date.now()}`,
+        startAt: Date.now(),
+      },
       spending: {
         currency: "USD",
         displayAmount: "$42",
@@ -111,6 +116,44 @@ describe("verifyV1 route", () => {
       timestamp: requestStartedAt,
     })
   })
+
+  it("returns null for an open-ended quota window", async () => {
+    const { app, env, executionCtx } = createTestApp({
+      verifyFeatureStatus: vi.fn().mockResolvedValue({
+        allowed: true,
+        featureSlug: "api_calls",
+        limit: null,
+        quotaWindow: {
+          endAt: null,
+          periodKey: "onetime:1774051200000",
+          startAt: 1774051200000,
+        },
+        usage: 0,
+      }),
+    })
+
+    const response = await app.fetch(
+      buildRequest({
+        customerId: "cus_123",
+        featureSlug: "api_calls",
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({
+      allowed: true,
+      featureSlug: "api_calls",
+      limit: null,
+      quotaWindow: {
+        endAt: null,
+        periodKey: "onetime:1774051200000",
+        startAt: 1774051200000,
+      },
+      usage: 0,
+    })
+  })
 })
 
 function createTestApp(
@@ -126,6 +169,11 @@ function createTestApp(
       allowed: true,
       featureSlug: "api_calls",
       limit: 100,
+      quotaWindow: {
+        endAt: Date.now() + 86_400_000,
+        periodKey: `day:${Date.now()}`,
+        startAt: Date.now(),
+      },
       spending: {
         currency: "USD",
         displayAmount: "$42",

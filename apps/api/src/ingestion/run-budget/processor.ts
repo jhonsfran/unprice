@@ -1,3 +1,4 @@
+import { findBillingPeriodAt } from "@unprice/services/ingestion"
 import { CAPTURE_ABANDONED_STATUS, MAX_CAPTURE_ATTEMPTS, captureBackoffMs } from "./capture-policy"
 import { captureIntentFlushSeq } from "./capture-range"
 import {
@@ -701,10 +702,7 @@ export class RunBudgetProcessor {
     entitlement: ApplyRunSyncEventInput["entitlement"],
     eventTimestamp: number
   ): ApplyRunSyncEventInput["entitlement"]["billingPeriods"][number] {
-    const period = entitlement.billingPeriods.find(
-      (candidate) =>
-        candidate.cycleStartAt <= eventTimestamp && eventTimestamp < candidate.cycleEndAt
-    )
+    const period = findBillingPeriodAt(entitlement.billingPeriods, eventTimestamp)
 
     if (!period) {
       throw new Error(
@@ -719,9 +717,9 @@ export class RunBudgetProcessor {
     input: ApplyRunSyncEventInput,
     run: RunState
   ): RunBudgetDecision | null {
-    const billingPeriod = input.entitlement.billingPeriods.find(
-      (period) =>
-        period.cycleStartAt <= input.event.timestamp && input.event.timestamp < period.cycleEndAt
+    const billingPeriod = findBillingPeriodAt(
+      input.entitlement.billingPeriods,
+      input.event.timestamp
     )
 
     if (billingPeriod) {

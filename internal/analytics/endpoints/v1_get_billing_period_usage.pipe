@@ -1,0 +1,55 @@
+TOKEN "web-apps" READ
+
+TAGS "usage, billing"
+
+DESCRIPTION >
+    Aggregate metered usage and price deltas for exact subscription billing periods.
+    This is a reporting endpoint, not a real-time entitlement decision.
+
+NODE billing_period_usage_allocations_node
+SQL >
+    %
+    SELECT
+        project_id,
+        customer_id,
+        billing_period_id,
+        customer_entitlement_id,
+        grant_id,
+        period_key,
+        feature_slug,
+        idempotency_key,
+        argMax(delta, tuple(timestamp, created_at, event_id)) AS delta,
+        argMax(amount, tuple(timestamp, created_at, event_id)) AS amount,
+        argMax(currency, tuple(timestamp, created_at, event_id)) AS currency
+    FROM unprice_entitlement_meter_facts
+    WHERE
+        project_id = {{ String(project_id) }}
+        AND customer_id = {{ String(customer_id) }}
+        AND billing_period_id IN {{ Array(billing_period_ids, 'String') }}
+        AND timestamp >= {{ Int64(start) }}
+        AND timestamp < {{ Int64(end) }}
+    GROUP BY
+        project_id,
+        customer_id,
+        billing_period_id,
+        customer_entitlement_id,
+        grant_id,
+        period_key,
+        feature_slug,
+        idempotency_key
+
+NODE billing_period_usage_node
+SQL >
+    %
+    SELECT
+        project_id,
+        customer_id,
+        billing_period_id,
+        feature_slug,
+        sum(delta) AS usage,
+        sum(amount) AS amount,
+        any(currency) AS currency
+    FROM billing_period_usage_allocations_node
+    GROUP BY project_id, customer_id, billing_period_id, feature_slug
+
+TYPE endpoint

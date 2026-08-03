@@ -62,6 +62,11 @@ configuration: read [configuration-workflow.md](references/configuration-workflo
 - Treat `access.check` as a read-only decision.
 - Never use `usage.record` as a spend gate.
 - Do not begin paid work after a denied `usage.consume` or rejected run reservation.
+- A run reservation authorizes a finite currency envelope; it does not constrain a downstream
+  provider by itself. Before starting variable-cost work, derive a conservative worst-case cost
+  for the request, reserve that amount, and pass the matching cap to the provider (for example,
+  `maxTokens`). If the known input plus the minimum useful output cannot fit, deny before the
+  provider call. Never use post-response `runs.consume` as the only spend gate.
 - A nonzero `runs.start` reserves wallet funds. An active subscription alone is
   insufficient: provision a wallet grant, credit line, or top-up large enough
   for the expected simultaneous reservations.

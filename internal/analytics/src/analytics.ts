@@ -6,6 +6,8 @@ import { UnPriceAnalyticsError } from "./errors"
 import {
   type AnalyticsEventAction,
   analyticsEventSchema,
+  billingPeriodUsageCoverageRowSchema,
+  billingPeriodUsageRowSchema,
   entitlementMeterFactSchemaV1,
   explainChargeEventRowSchema,
   explainChargeQuerySchema,
@@ -261,6 +263,52 @@ export class Analytics {
       data: z.object({
         ...featureUsagePeriodRowSchema.shape,
       }),
+      opts: {
+        cache: "no-store",
+        retries: 3,
+        timeout: 5000, // 5 seconds
+      },
+    })
+  }
+
+  /**
+   * Billed metered deltas grouped by the subscription billing period that
+   * accepted the event. This intentionally does not expose enforcement state:
+   * use access.check for a real-time quota decision.
+   */
+  public get getBillingPeriodUsage() {
+    return this.readClient.buildPipe({
+      pipe: "v1_get_billing_period_usage",
+      parameters: z.object({
+        project_id: z.string(),
+        customer_id: z.string(),
+        billing_period_ids: z.array(z.string()).min(1),
+        start: z.number().int(),
+        end: z.number().int(),
+      }),
+      data: billingPeriodUsageRowSchema,
+      opts: {
+        cache: "no-store",
+        retries: 3,
+        timeout: 5000, // 5 seconds
+      },
+    })
+  }
+
+  /**
+   * Counts facts in a billing-period report envelope that predate
+   * billing-period attribution. Callers must not present a partial report.
+   */
+  public get getBillingPeriodUsageCoverage() {
+    return this.readClient.buildPipe({
+      pipe: "v1_get_billing_period_usage_coverage",
+      parameters: z.object({
+        project_id: z.string(),
+        customer_id: z.string(),
+        start: z.number().int(),
+        end: z.number().int(),
+      }),
+      data: billingPeriodUsageCoverageRowSchema,
       opts: {
         cache: "no-store",
         retries: 3,

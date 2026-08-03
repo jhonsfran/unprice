@@ -34,6 +34,14 @@ function resolveWindow(
 export function useRollingWindow(from: number | null, to: number | null) {
   const [rollingNow, setRollingNow] = useState(() => Date.now())
   const hasExplicitDateRange = from !== null || to !== null
+  const [previousHasExplicitDateRange, setPreviousHasExplicitDateRange] =
+    useState(hasExplicitDateRange)
+  if (hasExplicitDateRange !== previousHasExplicitDateRange) {
+    setPreviousHasExplicitDateRange(hasExplicitDateRange)
+    if (!hasExplicitDateRange) {
+      setRollingNow(Date.now())
+    }
+  }
   const queryWindow = useMemo(() => resolveWindow(from, to, rollingNow), [from, to, rollingNow])
 
   useEffect(() => {
@@ -42,7 +50,6 @@ export function useRollingWindow(from: number | null, to: number | null) {
     }
 
     const refresh = () => setRollingNow(Date.now())
-    refresh()
     const intervalId = globalThis.setInterval(refresh, ANALYTICS_REFRESH_INTERVAL_MS)
     globalThis.addEventListener("focus", refresh)
 

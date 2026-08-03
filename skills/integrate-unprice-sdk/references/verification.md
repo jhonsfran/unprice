@@ -46,6 +46,13 @@ For budgeted runs:
 - Assert an end error does not hide the original workload error.
 - Assert every step has its own stable idempotency key.
 
+For a hard-capped variable-cost provider call:
+
+- Test that an insufficient known-input or output envelope rejects before the provider is called.
+- Test that the provider receives the same output cap used to calculate the run reservation.
+- Test that one conversation cannot reserve more than its remaining conversation allowance.
+- Test an unexpected rejected settlement as a failure that prevents the next paid call.
+
 For customer signup:
 
 - Confirm signup occurs in the onboarding/subscription owner, not every request.

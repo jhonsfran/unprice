@@ -1,0 +1,11 @@
+- name: aggregates_current_billing_period_without_duplicate_delivery
+  description: Aggregates signed deltas by the explicit billing period and ignores a retry of the same idempotency key.
+  parameters: project_id=p_billing&customer_id=c_billing&billing_period_ids=bp_current&start=4070908800000&end=4071081600000
+  expected_result: |
+    {"project_id":"p_billing","customer_id":"c_billing","billing_period_id":"bp_current","feature_slug":"tokens","usage":150,"amount":1500000,"currency":"USD"}
+
+- name: excludes_other_billing_periods
+  description: The requested billing-period IDs are the reporting boundary, independent of period_key.
+  parameters: project_id=p_billing&customer_id=c_billing&billing_period_ids=bp_other&start=4071081600000&end=4071168000000
+  expected_result: |
+    {"project_id":"p_billing","customer_id":"c_billing","billing_period_id":"bp_other","feature_slug":"tokens","usage":999,"amount":9990000,"currency":"USD"}

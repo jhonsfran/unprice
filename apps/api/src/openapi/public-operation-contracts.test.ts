@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { route as accessUpdateRoute } from "~/routes/access/updateACLV1"
 import { route as analyticsChargesExplainRoute } from "~/routes/analytics/explainChargeV1"
+import { route as analyticsCurrentBillingPeriodUsageRoute } from "~/routes/analytics/getCurrentBillingPeriodUsageV1"
 import { route as ingestionEventsStatusRoute } from "~/routes/analytics/getIngestionStatusV1"
 import { route as analyticsUsageRoute } from "~/routes/analytics/getUsageV1"
 import { route as billingReservationsFlushForInvoicingRoute } from "~/routes/billing/flushReservationsForInvoicingV1"
@@ -72,6 +73,7 @@ const routes = [
   monetizationApplyRoute,
   monetizationGetRoute,
   analyticsUsageRoute,
+  analyticsCurrentBillingPeriodUsageRoute,
   analyticsChargesExplainRoute,
   ingestionEventsStatusRoute,
   ingestionEventsReplayRoute,
@@ -108,6 +110,7 @@ const expectedRoutes = new Map<string, string>([
   ["monetization.apply", "POST /v1/monetization/apply"],
   ["monetization.get", "GET /v1/monetization/get"],
   ["analytics.usage.get", "POST /v1/analytics/usage/get"],
+  ["analytics.usage.currentBillingPeriod", "POST /v1/analytics/usage/current-billing-period"],
   ["analytics.charges.explain", "POST /v1/analytics/charges/explain"],
   ["ingestionEvents.status", "POST /v1/ingestion-events/status"],
   ["ingestionEvents.replay", "POST /v1/ingestion-events/replay"],
@@ -158,6 +161,7 @@ const expectedSdkPublicOperations = [
   "monetization.apply",
   "monetization.get",
   "analytics.usage.get",
+  "analytics.usage.currentBillingPeriod",
   "analytics.charges.explain",
   "ingestionEvents.status",
   "ingestionEvents.replay",

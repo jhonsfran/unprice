@@ -1,5 +1,6 @@
 import { type LakehouseEventForSource, getLakehouseSourceCurrentVersion } from "@unprice/lakehouse"
 import type { LEDGER_SCALE } from "@unprice/money"
+import { z } from "zod"
 import type { IngestionQueueMessage } from "./message"
 
 export const EVENTS_SCHEMA_VERSION = getLakehouseSourceCurrentVersion("events")
@@ -71,11 +72,20 @@ export type IngestionMessageProcessingResult = {
   message: IngestionQueueMessage
 }
 
+export const quotaWindowSchema = z.object({
+  endAt: z.number().nullable(),
+  periodKey: z.string(),
+  startAt: z.number(),
+})
+
+export type QuotaWindow = z.infer<typeof quotaWindowSchema>
+
 export type FeatureVerificationResult = {
   allowed: boolean
   featureSlug: string
   limit?: number | null
   message?: string
+  quotaWindow?: QuotaWindow | null
   rejectionReason?: IngestionRejectionReason
   spending?: {
     currency: string
@@ -89,6 +99,7 @@ export type FeatureVerificationResult = {
 export type EntitlementWindowState = {
   isLimitReached: boolean
   limit: number | null
+  quotaWindow: QuotaWindow | null
   spending: {
     currency: string
     ledgerAmount: number

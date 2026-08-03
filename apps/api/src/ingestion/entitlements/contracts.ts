@@ -15,6 +15,7 @@ import type { Fact, GrantConsumptionState, MeterConfig } from "@unprice/services
 import type {
   IngestionIdempotencyStatus,
   IngestionRejectionReason,
+  QuotaWindow,
 } from "@unprice/services/ingestion"
 import type { ReservationCloseReason } from "@unprice/services/wallet"
 import { z } from "zod"
@@ -122,6 +123,7 @@ export const entitlementApplyMeterFactSchema = z
     source_name: z.string().nullable().optional(),
     currency: z.string().length(3),
     customer_entitlement_id: z.string(),
+    billing_period_id: z.string().nullable().optional(),
     grant_id: z.string(),
     feature_plan_version_id: z.string().nullable().optional(),
     feature_slug: z.string(),
@@ -432,6 +434,7 @@ export type FlushReservationForInvoicingResult = {
 export type EnforcementStateResult = {
   isLimitReached: boolean
   limit: number | null
+  quotaWindow: QuotaWindow | null
   spending: {
     currency: string
     ledgerAmount: number

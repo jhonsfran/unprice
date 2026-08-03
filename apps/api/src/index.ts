@@ -14,6 +14,7 @@ export { RunBudgetDO } from "~/ingestion/run-budget/RunBudgetDO"
 
 import { registerUpdateACLV1 } from "./routes/access/updateACLV1"
 import { registerExplainChargeV1 } from "./routes/analytics/explainChargeV1"
+import { registerGetCurrentBillingPeriodUsageV1 } from "./routes/analytics/getCurrentBillingPeriodUsageV1"
 import { registerGetIngestionStatusV1 } from "./routes/analytics/getIngestionStatusV1"
 import { registerGetAnalyticsUsageV1 } from "./routes/analytics/getUsageV1"
 import { registerFlushReservationsForInvoicingV1 } from "./routes/billing/flushReservationsForInvoicingV1"
@@ -213,6 +214,7 @@ registerGetSubscriptionV1(app)
 registerExplainChargeV1(app)
 registerGetIngestionStatusV1(app)
 registerGetAnalyticsUsageV1(app)
+registerGetCurrentBillingPeriodUsageV1(app)
 
 // Wallet routes
 registerGetWalletV1(app)

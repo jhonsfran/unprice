@@ -1,0 +1,20 @@
+TOKEN "web-apps" READ
+
+TAGS "usage, billing"
+
+DESCRIPTION >
+    Detect legacy metered facts that cannot be attributed to a subscription billing period.
+
+NODE billing_period_usage_coverage_node
+SQL >
+    %
+    SELECT count() AS unattributed_fact_count
+    FROM unprice_entitlement_meter_facts
+    WHERE
+        project_id = {{ String(project_id) }}
+        AND customer_id = {{ String(customer_id) }}
+        AND billing_period_id IS NULL
+        AND timestamp >= {{ Int64(start) }}
+        AND timestamp < {{ Int64(end) }}
+
+TYPE endpoint

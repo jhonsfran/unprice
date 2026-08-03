@@ -178,6 +178,9 @@ export const entitlementMeterFactSchemaV1 = z.object({
   source_name: z.string().nullable().optional(),
   ...analyticsRunContextShape,
   customer_entitlement_id: z.string(),
+  // Optional preserves the exact payload of facts written before billing-period
+  // attribution existed. Tinybird maps an omitted nullable field to NULL.
+  billing_period_id: z.string().nullable().optional(),
   feature_slug: z.string(),
   period_key: z.string(),
   event_slug: z.string(),
@@ -278,6 +281,20 @@ export const featureUsagePeriodRowSchema = z.object({
   currency: z.string().length(3).optional(),
 })
 
+export const billingPeriodUsageRowSchema = z.object({
+  project_id: z.string(),
+  customer_id: z.string(),
+  billing_period_id: z.string(),
+  feature_slug: z.string(),
+  usage: z.number(),
+  amount: z.number().int(),
+  currency: z.string().length(3),
+})
+
+export const billingPeriodUsageCoverageRowSchema = z.object({
+  unattributed_fact_count: z.number().int().nonnegative(),
+})
+
 export const featureUsageTimeseriesRowSchema = z.object({
   date: datetimeToUnixMilli,
   feature_slug: z.string(),
@@ -287,6 +304,8 @@ export const featureUsageTimeseriesRowSchema = z.object({
 })
 
 export type FeatureUsageTimeseriesRow = z.infer<typeof featureUsageTimeseriesRowSchema>
+export type BillingPeriodUsageRow = z.infer<typeof billingPeriodUsageRowSchema>
+export type BillingPeriodUsageCoverageRow = z.infer<typeof billingPeriodUsageCoverageRowSchema>
 
 export const topConsumerRowSchema = z.object({
   customer_id: z.string(),

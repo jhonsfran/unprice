@@ -183,6 +183,7 @@ export class IngestionFeatureVerifier {
       allowed: !enforcementState.isLimitReached,
       featureSlug,
       limit: enforcementState.limit,
+      quotaWindow: enforcementState.quotaWindow,
       rejectionReason: enforcementState.isLimitReached ? "LIMIT_EXCEEDED" : undefined,
       spending: formatVerificationSpending(enforcementState.spending),
       usage: enforcementState.usage,

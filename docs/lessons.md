@@ -100,6 +100,9 @@ patterns. Keep it cheap to load and useful.
 - 2026-06-30: When Tinybird endpoints, datasources, materializations, or fixtures change, add or
   update the matching `internal/analytics/tests/*.yaml` coverage and run `tb build` plus
   `tb test run` so existing endpoint expectations still pass.
+- 2026-08-02: When a raw datasource migration backfills unchanged materialized descendants,
+  their temporary `FORWARD_QUERY` must be `SELECT *`; replace stale type-migration projections
+  and remove all temporary forward queries after promotion.
 - 2026-07-01: Tinybird endpoints that `UNION ALL` per-group buckets need a final outer
   `ORDER BY`; subquery order only limits each bucket and does not make the combined output stable.
 - 2026-05-08: `entitlement_meter_facts` needs no synthetic `id`; use `amount` for event spend
@@ -792,3 +795,11 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-08-02: A nonzero budgeted run reserves wallet funds at `runs.start`; an active subscription
   without a wallet grant, capped credit line, or top-up fails before work begins. Size the credit
   line for concurrent reservation holds as well as eventual metered spend.
+- 2026-08-03: Billing-period reporting must retain `customer_entitlement_id` and fail closed when
+  facts inside the active reporting envelope lack a `billing_period_id`; that identifier is the
+  reporting attribution boundary.
+- 2026-08-03: SDK `workloadType` is a closed enum (`agent`, `workflow`, `job`, `tool`, `custom`);
+  place product-specific categories in metadata rather than inventing enum members.
+- 2026-08-03: Direct signup replay succeeds only after billing periods plus activation/invoice
+  side effects complete; reconcile partial state or surface a failure rather than reporting
+  semantic success early.

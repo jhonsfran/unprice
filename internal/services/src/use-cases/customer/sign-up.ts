@@ -40,6 +40,15 @@ type SignUpContext = {
   cancelUrl: string
 }
 
+type SignUpSuccess = {
+  success: boolean
+  url: string
+  error?: string
+  customerId: string
+}
+
+type SignUpResult = Result<SignUpSuccess, UnPriceCustomerError | FetchError>
+
 function normalizePhaseCreditLine(
   input: {
     creditLinePolicy?: CustomerSignUp["creditLinePolicy"]
@@ -81,6 +90,46 @@ function isExternalIdConflictError(error: unknown): boolean {
       dbError.message?.includes("external_id") ||
       false)
   )
+}
+
+async function getExternalIdReplay(
+  deps: SignUpDeps,
+  opts: SignUpInput
+): Promise<SignUpResult | null> {
+  const externalId = opts.input.externalId
+
+  if (!externalId) {
+    return null
+  }
+
+  const { err, val: existingCustomer } = await deps.services.customers.getCustomerByExternalId(
+    opts.projectId,
+    externalId,
+    { skipCache: true }
+  )
+
+  if (err) {
+    return Err(err)
+  }
+
+  if (!existingCustomer) {
+    return null
+  }
+
+  if (existingCustomer.email.toLowerCase() !== opts.input.email.toLowerCase()) {
+    return Err(
+      new UnPriceCustomerError({
+        code: "CUSTOMER_EXTERNAL_ID_CONFLICT",
+        message: "External customer id already belongs to a different email",
+      })
+    )
+  }
+
+  return Ok({
+    success: true,
+    url: opts.input.successUrl.replace("{CUSTOMER_ID}", existingCustomer.id),
+    customerId: existingCustomer.id,
+  })
 }
 
 async function resolvePlanVersion(
@@ -306,12 +355,7 @@ async function resolvePlanVersion(
 async function handlePaymentRequiredFlow(
   deps: SignUpDeps,
   context: SignUpContext
-): Promise<
-  Result<
-    { success: boolean; url: string; error?: string; customerId: string },
-    UnPriceCustomerError | FetchError
-  >
-> {
+): Promise<SignUpResult> {
   const { input, projectId, planVersion, customerId, pageId, successUrl, cancelUrl } = context
   const { email, name, config, timezone, externalId, metadata } = input
   const paymentProvider = planVersion.paymentProvider
@@ -429,12 +473,7 @@ async function handlePaymentRequiredFlow(
 async function handleDirectProvisioningFlow(
   deps: SignUpDeps,
   context: SignUpContext
-): Promise<
-  Result<
-    { success: boolean; url: string; error?: string; customerId: string },
-    UnPriceCustomerError | FetchError
-  >
-> {
+): Promise<SignUpResult> {
   const { input, projectId, planVersion, customerId, pageId, successUrl, cancelUrl } = context
   const { email, name, config, timezone, metadata, externalId } = input
   const paymentProvider = planVersion.paymentProvider
@@ -448,7 +487,7 @@ async function handleDirectProvisioningFlow(
   const customerMetadata = externalId ? { ...metadata, externalId } : metadata
 
   try {
-    const txResult = await deps.db.transaction(async (tx) => {
+    const subscription = await deps.db.transaction(async (tx) => {
       const newCustomer = await tx
         .insert(customers)
         .values({
@@ -466,12 +505,10 @@ async function handleDirectProvisioningFlow(
         .then((data) => data[0])
 
       if (!newCustomer?.id) {
-        return Err(
-          new UnPriceCustomerError({
-            code: "CUSTOMER_NOT_CREATED",
-            message: "Error creating customer",
-          })
-        )
+        throw new UnPriceCustomerError({
+          code: "CUSTOMER_NOT_CREATED",
+          message: "Error creating customer",
+        })
       }
 
       // Providers that don't support async payment confirmation (e.g. sandbox)
@@ -502,12 +539,10 @@ async function handleDirectProvisioningFlow(
       })
 
       if (err) {
-        return Err(
-          new UnPriceCustomerError({
-            code: "SUBSCRIPTION_NOT_CREATED",
-            message: err.message,
-          })
-        )
+        throw new UnPriceCustomerError({
+          code: "SUBSCRIPTION_NOT_CREATED",
+          message: err.message,
+        })
       }
 
       const phaseTimestamp = Date.now()
@@ -530,46 +565,39 @@ async function handleDirectProvisioningFlow(
       })
 
       if (createPhaseErr) {
-        return Err(
-          new UnPriceCustomerError({
-            code: "PHASE_NOT_CREATED",
-            message: "Error creating phase",
-          })
-        )
+        throw new UnPriceCustomerError({
+          code: "PHASE_NOT_CREATED",
+          message: "Error creating phase",
+        })
       }
 
-      deps.logger.set({
-        business: {
-          operation: "customer.sign_up.provision_customer",
-          project_id: projectId,
-          customer_id: customerId,
-        },
+      const billingPeriodsResult = await deps.services.billing.generateBillingPeriods({
+        subscriptionId: newSubscription.id,
+        projectId,
+        now: phaseTimestamp,
+        db: tx,
       })
 
-      return Ok({ customerId: newCustomer.id, subscriptionId: newSubscription.id })
-    })
-
-    if (txResult.err) {
-      return Err(txResult.err)
-    }
-
-    const billingPeriodsResult = await deps.services.billing.generateBillingPeriods({
-      subscriptionId: txResult.val.subscriptionId,
-      projectId,
-      now: Date.now(),
-    })
-
-    if (billingPeriodsResult.err) {
-      return Err(
-        new UnPriceCustomerError({
+      if (billingPeriodsResult.err) {
+        throw new UnPriceCustomerError({
           code: "PHASE_NOT_CREATED",
           message: billingPeriodsResult.err.message,
         })
-      )
-    }
+      }
+
+      return newSubscription
+    })
+
+    deps.logger.set({
+      business: {
+        operation: "customer.sign_up.provision_customer",
+        project_id: projectId,
+        customer_id: customerId,
+      },
+    })
 
     await activateWalletIfSubscriptionIsActive(deps, {
-      subscriptionId: txResult.val.subscriptionId,
+      subscriptionId: subscription.id,
       projectId,
       context:
         "customer signup wallet activation failed; subscription parked in pending_activation",
@@ -598,6 +626,15 @@ async function handleDirectProvisioningFlow(
     })
   } catch (error) {
     if (isExternalIdConflictError(error)) {
+      const replay = await getExternalIdReplay(deps, {
+        projectId,
+        input,
+      })
+
+      if (replay) {
+        return replay
+      }
+
       return Err(
         new UnPriceCustomerError({
           code: "CUSTOMER_EXTERNAL_ID_CONFLICT",
@@ -616,15 +653,7 @@ async function handleDirectProvisioningFlow(
   }
 }
 
-export async function signUp(
-  deps: SignUpDeps,
-  opts: SignUpInput
-): Promise<
-  Result<
-    { success: boolean; url: string; error?: string; customerId: string },
-    UnPriceCustomerError | FetchError
-  >
-> {
+export async function signUp(deps: SignUpDeps, opts: SignUpInput): Promise<SignUpResult> {
   const { input, projectId } = opts
 
   deps.logger.set({
@@ -633,6 +662,12 @@ export async function signUp(
       project_id: projectId,
     },
   })
+
+  const replay = await getExternalIdReplay(deps, opts)
+
+  if (replay) {
+    return replay
+  }
 
   const planResolution = await resolvePlanVersion(deps, opts)
 
@@ -661,26 +696,6 @@ export async function signUp(
         message: providerAvailability.val.message,
       })
     )
-  }
-
-  if (input.externalId) {
-    const { err: existingCustomerErr, val: existingCustomer } =
-      await deps.services.customers.getCustomerByExternalId(projectId, input.externalId, {
-        skipCache: true,
-      })
-
-    if (existingCustomerErr) {
-      return Err(existingCustomerErr)
-    }
-
-    if (existingCustomer) {
-      return Err(
-        new UnPriceCustomerError({
-          code: "CUSTOMER_EXTERNAL_ID_CONFLICT",
-          message: "External customer id already exists for this project",
-        })
-      )
-    }
   }
 
   const customerId = newId("customer")

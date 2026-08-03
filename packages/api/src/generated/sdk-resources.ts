@@ -11,6 +11,7 @@ export const sdkOperationIds = [
   "access.entitlements.list",
   "access.update",
   "analytics.charges.explain",
+  "analytics.usage.currentBillingPeriod",
   "analytics.usage.get",
   "customers.changePlan",
   "customers.signUp",
@@ -70,6 +71,9 @@ export type GeneratedSdkResources = {
       ) => Promise<ApiResult<OperationResponse<"analytics.charges.explain">>>
     }
     usage: {
+      currentBillingPeriod: (
+        req: OperationInput<"analytics.usage.currentBillingPeriod">
+      ) => Promise<ApiResult<OperationResponse<"analytics.usage.currentBillingPeriod">>>
       get: (
         req: OperationInput<"analytics.usage.get">
       ) => Promise<ApiResult<OperationResponse<"analytics.usage.get">>>
@@ -173,6 +177,8 @@ export function createGeneratedSdkResources(
         explain: (body) => toResult(openapi.POST("/v1/analytics/charges/explain", { body })),
       },
       usage: {
+        currentBillingPeriod: (body) =>
+          toResult(openapi.POST("/v1/analytics/usage/current-billing-period", { body })),
         get: (body) => toResult(openapi.POST("/v1/analytics/usage/get", { body })),
       },
     },

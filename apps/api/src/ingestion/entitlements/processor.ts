@@ -91,6 +91,7 @@ import {
   resolveLateClosedPeriod,
   resolveTotalGrantUnits,
 } from "./pricing"
+import { resolveSharedQuotaWindow } from "./quota-window"
 import { ReservationLifecycle } from "./reservation-lifecycle"
 import { unique } from "./utils"
 import { requireReservationInvoiceContext } from "./wallet-reservation-flow"
@@ -2008,6 +2009,7 @@ export class EntitlementWindowProcessor {
       return {
         usage: 0,
         limit: null,
+        quotaWindow: null,
         isLimitReached: false,
         spending: {
           currency: "USD",
@@ -2047,6 +2049,7 @@ export class EntitlementWindowProcessor {
     return {
       usage,
       limit,
+      quotaWindow: resolveSharedQuotaWindow(activeGrants, timestamp),
       spending: {
         currency,
         ledgerAmount: spendingAmount,

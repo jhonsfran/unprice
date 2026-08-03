@@ -253,6 +253,7 @@ function periodRow(overrides: Partial<FeatureUsagePeriodRow>): FeatureUsagePerio
   return {
     project_id: "proj_1",
     customer_id: "cus_1",
+    customer_entitlement_id: "ce_1",
     feature_slug: "events",
     usage: 1,
     amount_after: 0,

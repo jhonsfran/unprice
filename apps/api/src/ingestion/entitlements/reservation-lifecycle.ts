@@ -5,6 +5,7 @@ import {
   computeGrantPeriodBucket,
   computeMaxMarginalPriceMinor,
 } from "@unprice/services/entitlements"
+import { findBillingPeriodAt } from "@unprice/services/ingestion"
 import type { CreateReservationOutput, ReservationCloseReason } from "@unprice/services/wallet"
 import {
   type InitialReservationDecision,
@@ -1446,9 +1447,9 @@ export class ReservationLifecycle {
   }
 
   private resolveReservationInvoiceContext(input: ApplyInput): ReservationInvoiceContext {
-    const billingPeriod = input.entitlement.billingPeriods.find(
-      (period) =>
-        period.cycleStartAt <= input.event.timestamp && input.event.timestamp < period.cycleEndAt
+    const billingPeriod = findBillingPeriodAt(
+      input.entitlement.billingPeriods,
+      input.event.timestamp
     )
 
     if (!billingPeriod) {

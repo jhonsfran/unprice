@@ -342,13 +342,22 @@ export function resolveCustomerGrantContextWindow(params: {
   }
 }
 
+export type BillingPeriodWindow = Pick<IngestionBillingPeriodContext, "cycleEndAt" | "cycleStartAt">
+
+export function findBillingPeriodAt<T extends BillingPeriodWindow>(
+  billingPeriods: readonly T[],
+  eventAt: number
+): T | undefined {
+  return billingPeriods.find(
+    (period) => period.cycleStartAt <= eventAt && eventAt < period.cycleEndAt
+  )
+}
+
 export function hasBillingPeriodCoveringEvent(
   entitlement: Pick<IngestionEntitlement, "billingPeriods">,
   eventAt: number
 ): boolean {
-  return entitlement.billingPeriods.some(
-    (period) => period.cycleStartAt <= eventAt && eventAt < period.cycleEndAt
-  )
+  return findBillingPeriodAt(entitlement.billingPeriods, eventAt) !== undefined
 }
 
 export function toIngestionEntitlement(

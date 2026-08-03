@@ -192,6 +192,90 @@ already guarantees its lifecycle. Never drop the promise without error handling.
 
 Do not branch paid-work authorization on the outcome of `usage.record`.
 
+## Hard-cap a variable-cost provider call
+
+Use this pattern when a provider call must not start unless its maximum possible cost fits the
+customer and workload budgets. A run is the financial authorization; the provider cap is what
+keeps the external call inside that authorization.
+
+The host must derive `worstCaseAmountMinor` from a model/provider pricing table it owns. Include
+known input, request overhead, and the configured output maximum. Do not substitute an estimate
+when the product promises a hard cap.
+
+```ts
+const proposed = priceModelRequest({
+  model,
+  inputTokens: exactInputTokens,
+  // Determine this from the remaining customer and conversation allowance.
+  maxOutputTokens: affordableOutputTokens,
+})
+
+if (proposed.maxOutputTokens < minimumUsefulOutputTokens) {
+  return denyPaidAction({ reason: "INSUFFICIENT_BUDGET" })
+}
+
+const { result: run, error: startError } = await unprice.runs.start({
+  customerId,
+  budgetAmountMinor: proposed.worstCaseAmountMinor,
+  idempotencyKey: `chat:${chatId}:message:${messageId}`,
+  workloadType: "custom",
+  workloadId: messageId,
+  metadata: { workload_kind: "chat_message" },
+})
+
+if (startError) throw new Error(startError.message)
+if (run.status !== "running" || run.remainingAmountMinor < proposed.worstCaseAmountMinor) {
+  return denyPaidAction(run)
+}
+
+let finalStatus: "completed" | "failed" = "completed"
+
+try {
+  const response = await modelProvider.stream({
+    messages,
+    maxTokens: proposed.maxOutputTokens,
+  })
+  const actual = await response.usage
+
+  const { result: consumption, error: consumeError } = await unprice.runs.consume({
+    runId: run.runId,
+    featureSlug,
+    eventSlug,
+    idempotencyKey: `chat:${chatId}:message:${messageId}:usage`,
+    properties: actualMeterProperties(actual),
+  })
+
+  if (consumeError) throw new Error(consumeError.message)
+  if (!consumption.accepted) {
+    finalStatus = "failed"
+    throw new Error("Unprice rejected a usage amount that the reservation should have covered")
+  }
+
+  return response
+} catch (error) {
+  finalStatus = "failed"
+  throw error
+} finally {
+  const { error: endError } = await unprice.runs.end({
+    runId: run.runId,
+    status: finalStatus,
+  })
+
+  if (endError) {
+    logger.error(new Error(endError.message), {
+      operation: "unprice.runs.end",
+      requestId: endError.requestId,
+      code: endError.code,
+      runId: run.runId,
+    })
+  }
+}
+```
+
+If a provider exposes no enforceable cap or the host cannot price the request's maximum possible
+cost, this is not a hard-cap integration. Reject the request before the provider call or use
+asynchronous metering with an explicit product decision to accept the risk.
+
 ## Budget a multi-step workload
 
 Track final status explicitly so failures are not reported as completed.

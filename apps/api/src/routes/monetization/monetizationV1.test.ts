@@ -124,6 +124,9 @@ function createHarness(
     c.set("db", {} as never)
     c.set("services", {
       apikey: { verifyApiKey },
+      entitlement: {
+        getAccessControlList: vi.fn().mockResolvedValue(null),
+      },
       plans: {},
       features: {},
       events: {},

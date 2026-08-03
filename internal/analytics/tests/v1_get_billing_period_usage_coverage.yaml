@@ -1,0 +1,11 @@
+- name: detects_unattributed_usage_in_active_billing_envelope
+  description: Reports legacy facts without a billing-period ID so callers can reject a partial billing report.
+  parameters: project_id=p_billing&customer_id=c_billing&start=4070908800000&end=4071081600000
+  expected_result: |
+    {"unattributed_fact_count":1}
+
+- name: ignores_attributed_or_outside_usage
+  description: Billing facts with an ID and facts outside the requested envelope do not block reporting.
+  parameters: project_id=p_billing&customer_id=c_billing&start=4071081600000&end=4071168000000
+  expected_result: |
+    {"unattributed_fact_count":0}

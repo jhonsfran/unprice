@@ -538,7 +538,7 @@ function buildUsagePeriodPlan({
         start: bucket.start,
         end: bucket.end,
       })
-      const key = usagePeriodKey(featurePlanVersion.feature.slug, bucket.periodKey)
+      const key = usageScopeKey(featurePlanVersion.feature.slug, bucket.periodKey)
       scopesByKey.set(key, {
         featureSlug: featurePlanVersion.feature.slug,
         periodKey: bucket.periodKey,
@@ -585,4 +585,8 @@ function usagePeriodKey(
   periodKey: string
 ): string {
   return `${customerEntitlementId}\u0000${featureSlug}\u0000${periodKey}`
+}
+
+function usageScopeKey(featureSlug: string, periodKey: string): string {
+  return `${featureSlug}\u0000${periodKey}`
 }

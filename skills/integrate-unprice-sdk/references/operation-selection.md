@@ -92,6 +92,29 @@ Follow the lifecycle:
 5. Call `runs.end` in `finally` to release unused funds.
 6. End as `failed` after exceptions or rejected consumption.
 
+### Hard caps for AI and other variable-cost provider calls
+
+`runs.start` reserves the amount the application supplies. It cannot discover or limit the cost
+of a provider request that the application has not bounded. For a hard "do not create more cost"
+guarantee, make each provider call a finite proposed operation before it starts:
+
+1. Price the known input with the provider/model's actual pricing contract, including any fixed
+   request overhead.
+2. Choose a maximum output that fits the remaining approved envelope and configure the provider
+   with that exact limit (for example, `maxTokens`).
+3. Start a run for that worst-case amount. Continue only when it is `running` with sufficient
+   remaining budget.
+4. Call the provider only with the matching cap, then consume the actual usage and end the run.
+5. Treat an unexpected rejected consumption as a fail-closed mismatch: end the run as `failed`,
+   log it, and do not start another paid step.
+
+For chat, a per-message run is usually the clearest authorization boundary. Its budget must be
+the lesser of the customer's remaining allowance and the conversation's remaining allowance.
+The application must atomically reserve that conversation allowance before calling the provider;
+separate message runs otherwise protect only the customer's total wallet, not a per-conversation
+cap. If the host cannot calculate a safe upper bound for the model, tool, or provider request,
+deny it before execution or accept that the action is metering-only rather than hard-capped.
+
 Do not use a run as a customer identity. The customer remains the economic actor; the run labels
 and bounds the workload.
 

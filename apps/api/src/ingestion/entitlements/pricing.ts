@@ -10,6 +10,7 @@ import {
   consumeGrantsByPriority,
   resolveAvailableGrantUnits,
 } from "@unprice/services/entitlements"
+import { findBillingPeriodAt } from "@unprice/services/ingestion"
 import type {
   ActiveGrantInput,
   ApplyInput,
@@ -95,6 +96,9 @@ export function buildMeterFactPayload(params: {
     source_name: input.event.source.sourceName,
     currency: pricedFact.currency,
     customer_entitlement_id: meter.customerEntitlementId,
+    billing_period_id:
+      findBillingPeriodAt(input.entitlement.billingPeriods, input.event.timestamp)
+        ?.billingPeriodId ?? null,
     grant_id: pricedFact.grantId,
     feature_plan_version_id: pricedFact.featurePlanVersionId,
     feature_slug: pricedFact.featureSlug,

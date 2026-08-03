@@ -1,6 +1,6 @@
 import { createRoute } from "@hono/zod-openapi"
 import { LEDGER_SCALE } from "@unprice/money"
-import { INGESTION_REJECTION_REASONS } from "@unprice/services/ingestion"
+import { INGESTION_REJECTION_REASONS, quotaWindowSchema } from "@unprice/services/ingestion"
 import { endTime } from "hono/timing"
 import { startTime } from "hono/timing"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
@@ -13,6 +13,29 @@ import * as HttpStatusCodes from "~/util/http-status-codes"
 import { validateEventTimestampOrThrow } from "../events/validate-event-timestamp"
 
 const tags = ["access"]
+
+const quotaWindowResponseSchema = quotaWindowSchema
+  .extend({
+    periodKey: quotaWindowSchema.shape.periodKey.openapi({
+      description: "The active reset-window key used by quota enforcement",
+      example: "day:1774051200000",
+    }),
+    startAt: quotaWindowSchema.shape.startAt.openapi({
+      description: "Inclusive Unix-millisecond start of the active quota window",
+      example: Date.UTC(2026, 2, 21, 0, 0, 0),
+    }),
+    endAt: quotaWindowSchema.shape.endAt.openapi({
+      description:
+        "Exclusive Unix-millisecond end of the active quota window. Null for an open-ended quota window.",
+      example: Date.UTC(2026, 2, 22, 0, 0, 0),
+    }),
+  })
+  .nullable()
+  .optional()
+  .openapi({
+    description:
+      "The single reset window represented by usage and limit. Null when active grants use different windows.",
+  })
 
 const verifyFeatureStatusSchema = z.object({
   allowed: z.boolean().openapi({
@@ -36,6 +59,7 @@ const verifyFeatureStatusSchema = z.object({
       "Configured limit. For usage features this is the active meter-window limit; for tier/package features this is the subscribed quantity limit.",
     example: 100,
   }),
+  quotaWindow: quotaWindowResponseSchema,
   spending: z
     .object({
       ledgerAmount: z.number().int().openapi({

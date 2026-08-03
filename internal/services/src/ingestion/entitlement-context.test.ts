@@ -4,6 +4,7 @@ import { INGESTION_MAX_EVENT_AGE_MS } from "../entitlements"
 import {
   type IngestionEntitlement,
   IngestionEntitlementContextLoader,
+  findBillingPeriodAt,
   resolveCustomerGrantContextWindow,
   toIngestionEntitlement,
 } from "./entitlement-context"
@@ -29,6 +30,18 @@ describe("IngestionEntitlementContextLoader", () => {
         latestTimestamp: TEST_NOW,
       }).startAt
     ).toBe(0)
+  })
+
+  it("uses inclusive-start and exclusive-end billing-period boundaries", () => {
+    const billingPeriod = {
+      billingPeriodId: "bp_123",
+      cycleStartAt: TEST_NOW,
+      cycleEndAt: TEST_NOW + 60_000,
+    }
+
+    expect(findBillingPeriodAt([billingPeriod], TEST_NOW)).toBe(billingPeriod)
+    expect(findBillingPeriodAt([billingPeriod], TEST_NOW + 59_999)).toBe(billingPeriod)
+    expect(findBillingPeriodAt([billingPeriod], TEST_NOW + 60_000)).toBeUndefined()
   })
 
   it("maps customer entitlement records into ingestion entitlements", () => {
