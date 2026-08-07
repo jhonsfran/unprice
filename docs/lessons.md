@@ -103,6 +103,9 @@ patterns. Keep it cheap to load and useful.
 - 2026-08-02: When a raw datasource migration backfills unchanged materialized descendants,
   their temporary `FORWARD_QUERY` must be `SELECT *`; replace stale type-migration projections
   and remove all temporary forward queries after promotion.
+- 2026-08-07: Tinybird Cloud rejects stale `FORWARD_QUERY` projections even when local
+  `tb build` passes; remove them after promotion so nullable-column additions use `ALTER` and
+  unchanged rollups are not backfilled.
 - 2026-07-01: Tinybird endpoints that `UNION ALL` per-group buckets need a final outer
   `ORDER BY`; subquery order only limits each bucket and does not make the combined output stable.
 - 2026-05-08: `entitlement_meter_facts` needs no synthetic `id`; use `amount` for event spend
