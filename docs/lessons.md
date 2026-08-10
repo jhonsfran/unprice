@@ -812,3 +812,11 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-08-03: Direct signup replay succeeds only after billing periods plus activation/invoice
   side effects complete; reconcile partial state or surface a failure rather than reporting
   semantic success early.
+- 2026-08-10: Treat `*.vercel.app` deployment hostnames as application hosts, never customer
+  site domains; otherwise site middleware can rewrite a preview request into a customer-site page.
+- 2026-08-10: When a preview uses the shared `auth.unprice.dev` redirect proxy, its
+  `AUTH_SECRET` must equal the proxy's `AUTH_SECRET`; an OAuth callback otherwise cannot decode
+  the state cookie.
+- 2026-08-10: Preview Vercel builds must pass `APP_ENV=preview` and
+  `NEXT_PUBLIC_APP_ENV=preview` explicitly; an inherited development value makes `APP_DOMAIN`
+  generate `http://app.<preview-domain>` instead of the `app-<preview-domain>` alias.
