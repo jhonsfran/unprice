@@ -88,6 +88,7 @@ jobs:
             TINYBIRD_TOKEN
             TINYBIRD_URL
             AUTH_SECRET
+            REALTIME_TICKET_SECRET
             CLOUDFLARE_ZONE_ID
             CLOUDFLARE_CACHE_DOMAIN
             CLOUDFLARE_API_TOKEN
@@ -149,6 +150,7 @@ jobs:
           TINYBIRD_TOKEN: ${{ env.TINYBIRD_TOKEN }}
           TINYBIRD_URL: ${{ env.TINYBIRD_URL }}
           AUTH_SECRET: ${{ env.AUTH_SECRET }}
+          REALTIME_TICKET_SECRET: ${{ env.REALTIME_TICKET_SECRET }}
           # we are passing the preview database url to the deploy action
           DATABASE_URL: ${{ steps.db-url.outputs.out || env.DATABASE_URL }}
           VERSION: ${{ env.VERSION }}
