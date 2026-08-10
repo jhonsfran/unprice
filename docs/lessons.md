@@ -34,6 +34,9 @@ patterns. Keep it cheap to load and useful.
 
 ## CI And GitHub Actions
 
+- 2026-08-10: When one advisory affects multiple `nanoid` major lines, use version-qualified
+  `pnpm-workspace.yaml` overrides and regenerate the lockfile offline; do not baseline a patch
+  release that can be safely forced within each major line.
 - 2026-07-31: `tooling/scripts/audit-high.mjs` must give `spawnSync` enough output buffer for
   the full npm audit report; `GHSA-mh99-v99m-4gvg` falsely flags patched
   `brace-expansion` v1/v2 lines because its vulnerable range has no lower bound.
