@@ -19,13 +19,6 @@ import type { MarketingPricingPlan } from "../_components/marketing-pricing-card
 import { MarketingPricingTable } from "../_components/marketing-pricing-table"
 import { FeatureComparison } from "../_components/pricing-comparision"
 
-// check shadcn landing page for inspiration
-export const revalidate = 3600 // 1 hour
-
-export async function generateStaticParams() {
-  return []
-}
-
 // Metadata generation improved to include page/project name fallback
 export async function generateMetadata(props: {
   params: Promise<{ domain: string }>

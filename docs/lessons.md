@@ -339,6 +339,9 @@ patterns. Keep it cheap to load and useful.
 - 2026-06-13: Public `generateStaticParams` paths must not call session helpers or live database
   queries; return `[]` for dynamic ISR routes so `next build` does not depend on request scope or
   preview database reachability.
+- 2026-08-10: Do not use `generateStaticParams` for a public page that reads `searchParams` for
+  preview access; the static ISR path can fail at runtime with `DYNAMIC_SERVER_USAGE`. Let the
+  request-time API make that route dynamic and retain explicit `unstable_cache` data caching.
 
 ## Billing, Wallets, And Invoices
 
