@@ -216,7 +216,7 @@
       },
       "pipelines": [
         {
-          "pipeline": "c9884129e550480383e900929202980c",
+          "pipeline": "7e6f523d3e5e48568f8e471daca1e6bd",
           "binding": "PIPELINE_EVENTS"
         }
       ],
@@ -344,7 +344,7 @@
       },
       "pipelines": [
         {
-          "pipeline": "c9884129e550480383e900929202980c",
+          "pipeline": "7e6f523d3e5e48568f8e471daca1e6bd",
           "binding": "PIPELINE_EVENTS"
         }
       ],
