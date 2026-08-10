@@ -1,6 +1,6 @@
 ---
 title: "Update access"
-description: "Update access controls for a customer"
+description: "Update explicit access-control overrides for a customer."
 ---
 
 <RequestExample>
@@ -14,12 +14,9 @@ const { result, error } = await unprice.access.update({
   }
 });
 
-if (error) {
-  console.error(error.message);
-  return;
-}
+if (error) throw new Error(`${error.code}: ${error.message}`);
 
-console.log(result);
+return result;
 ```
 
 </RequestExample>
@@ -45,7 +42,8 @@ console.log(result);
 </ParamField>
 
 <ParamField body="updates.customerUsageLimitReached" type="boolean">
-    Manually mark whether the customer reached a usage limit.
+    Set an explicit usage-limit override for the customer. Clear the override when the customer can
+    use the feature again.
 </ParamField>
 
 <ParamField body="updates.subscriptionStatus" type="string">
@@ -54,4 +52,5 @@ console.log(result);
 
 ## Response
 
-Returns an empty object on success.
+Returns an empty object on success. Use this operation for an explicit operator override. Do not use
+it instead of `usage.consume` or `access.check` in the request path.

@@ -1,46 +1,38 @@
 ---
-title: Plans & Versions
-description: "Managing the lifecycle of your product pricing."
+title: Plans and versions
+description: "Keep commercial rules stable while you change pricing."
 ---
 
-Plans and Plan Versions are the primary objects you interact with in Unprice to define your offering.
+A plan is the commercial offer that you sell. A plan version is a dated set of rules for that
+offer: billing settings, prices, entitlements, meters, limits, and included credits.
 
-## Plans: The Identity
-A **Plan** represents a specific product offering (e.g., "Startup Plan", "Enterprise Plan"). It acts as a container for your features and their pricing history.
+## Plan: stable identity
 
-Key properties of a Plan:
-- **Name**: The display name of the plan.
-- **Slug**: A unique identifier used in the API and SDK.
-- **Enterprise**: A flag to indicate if this is a custom enterprise plan.
+Use the plan for the name and stable slug of an offer, such as `pro`. The plan slug selects the
+latest published version during customer signup.
 
-## Plan Versions: The Logic
-Every time you want to change the price of a plan or add/remove a feature, you create a new **Plan Version**. This is the core of the PriceOps workflow.
+## Plan version: commercial rules
 
-### Why use Versions?
-1. **Immutability**: Once a version is published, it cannot be changed. This guarantees that customers subscribed to that version will always have the same billing logic.
-2. **Scheduled Changes**: You can prepare a new version in advance and publish it when ready.
-3. **A/B Testing**: You can have multiple versions of the same plan active simultaneously to test different pricing strategies.
+Use a plan version for the rules that must remain true for a customer after you publish them. A
+version can contain a billing period, currency, features, usage meters, limits, and credit policy.
 
-### Version Lifecycle
-- **Draft**: The version is being configured. It's not visible to customers.
-- **Published**: The version is active and can be used for new subscriptions.
-- **Archived**: The version is no longer available for new subscriptions, but existing customers on this version remain unaffected.
+## Lifecycle
 
-## Configuration Details
+| State | Meaning | What to do |
+| --- | --- | --- |
+| Draft | The version is still being configured. | Review its rules before you publish it. |
+| Published | The version can be assigned to customers. | Use it for signup or migration. |
+| Archived | The version is not available for new assignment. | Keep it as evidence for customers who used it. |
 
-When configuring a Plan Version, you define:
+## Change a commercial rule
 
-### Billing Configuration
-- **Interval**: How often the customer is billed (e.g., monthly, yearly).
-- **Currency**: The currency for all prices in this version (e.g., USD, EUR).
-- **Trial Period**: Optional number of days for a free trial.
+1. Create a draft from the current plan.
+2. Change the required price, entitlement, meter, or billing rule.
+3. Review and publish the new version.
+4. Assign or migrate only the customers who should receive the new terms.
 
-### Feature Assignment
-For each feature included in the version, you specify:
-- **Price**: The cost based on the feature type (Flat, Tier, etc.).
-- **Limit**: Optional hard limit on usage.
-- **Reset Logic**: When the usage counter should reset (usually at the start of the billing cycle).
+This model avoids a request-path branch such as `if (plan === "pro")`. Your product checks a stable
+feature slug. Unprice resolves the customer's plan version and entitlement state.
 
-<Note>
-  Unprice handles the complexity of "legacy" pricing automatically. If you increase the price of your "Pro" plan by creating a new version, your existing customers remain on the old version until you explicitly choose to migrate them.
-</Note>
+Read [Feature types](/concepts/pricing/feature-types) and [Usage metering](/concepts/pricing/usage-metering)
+before you publish a usage-based version.

@@ -6,54 +6,52 @@ mode: wide
 
 The invoice is too late. The work already ran.
 
-Unprice gives your app a customer money path for usage-based SaaS: check the plan version,
-entitlement, customer budget, and wallet credits before paid work runs, then keep the evidence that
-explains the charge, credit, denial, replay, or invoice line later.
+Unprice gives your app a customer money path for usage-based SaaS. Check the plan version,
+entitlement, customer budget, and wallet credits before paid work runs. Then keep the evidence that
+explains the charge, credit, denial, replay, or invoice line.
 
 <Frame caption="The request-to-invoice money path">
-  <img src="/images/money-path.svg" alt="Paid action enters the Unprice money path, gets checked against plan version, entitlement, budget, and wallet credits, then allows or denies before the work runs and keeps invoice evidence." />
+  <img src="/images/money-path.svg" alt="A paid action enters the Unprice money path. Unprice checks the plan version, entitlement, budget, and wallet credits before it allows or denies the work. It then keeps invoice evidence." />
 </Frame>
 
-## The 5-second value
+## The value
 
-- **Authorize before cost**: call Unprice in the request path before the paid action creates margin
-  damage.
-- **Keep pricing out of app branches**: plans, plan versions, features, meters, entitlements,
+- **Authorize before cost:** Call Unprice in the request path before a paid action creates cost.
+- **Keep pricing out of product branches:** Plans, plan versions, features, meters, entitlements,
   budgets, and wallet credits stay connected but separate.
-- **Explain after billing**: accepted usage carries evidence from the decision that allowed it to the
-  invoice line that bills it.
+- **Explain after billing:** Accepted usage keeps evidence from the decision to the invoice line.
 
 ## Start with one paid action
 
-Pick the action that can burn a customer's credits, budget, or usage allowance: an LLM call, API
-request, data job, workflow, export, or tool run.
+Choose the action that can spend a customer's credits, budget, or usage allowance: an LLM call,
+API request, data job, workflow, export, or tool run.
 
 <CardGroup cols={3}>
   <Card title="1. Model the rule" icon="diagram-project" href="/quickstart/onboarding-plan">
     Publish one plan version and map one customer to it.
   </Card>
   <Card title="2. Choose the runtime call" icon="code" href="/quickstart/choose-operation">
-    Pick `access.check`, `usage.consume`, `usage.record`, or `runs`.
+    Select `access.check`, `usage.consume`, `usage.record`, or budgeted runs.
   </Card>
-  <Card title="3. Inspect the evidence" icon="file-invoice-dollar" href="/libraries/ts/sdk/wallet/get">
-    Follow wallet credits, holds, usage, and invoice evidence.
+  <Card title="3. Inspect the evidence" icon="file-invoice-dollar" href="/libraries/ts/sdk/usage/get">
+    Inspect usage, wallet credits, holds, and invoice evidence.
   </Card>
 </CardGroup>
 
 ## The runtime calls
 
-| If your app needs to... | Call | What it means |
+| If your app needs to... | Call | Meaning |
 | --- | --- | --- |
-| Ask "is this customer commercially allowed?" without changing state | `access.check` | Read-only preflight, safe for shadow mode |
-| Enforce a known usage amount in the request path | `usage.consume` | Synchronous decision; deny when the limit or funds are exhausted |
-| Report usage for metering and invoice evidence without blocking | `usage.record` | Asynchronous ingestion; never a spend gate |
-| Reserve a budget before a multi-step workload runs | `runs.start` / `runs.consume` / `runs.end` | Budget envelope for a job, workflow, tool, agent, or custom run |
+| Ask whether a customer may use a feature without changing state | `access.check` | Read-only preflight. Safe for shadow mode. |
+| Enforce a known usage amount in the request path | `usage.consume` | Synchronous decision. Deny when the limit or funds are exhausted. |
+| Report usage without blocking the request | `usage.record` | Asynchronous ingestion. It is not a spend gate. |
+| Reserve a budget before a multi-step workload runs | `runs.start` / `runs.consume` / `runs.end` | Budget envelope for a job, workflow, tool, agent, or custom run. |
 
-## Why not just a counter?
+## Why not only use a counter?
 
-A counter can say usage is high. It cannot reliably prove which plan version applied, which credits
-were reserved, why a request was denied, or how accepted usage became an invoice line. Unprice keeps
-the customer spend decision and the invoice explanation on the same inspectable path.
+A counter can report high usage. It cannot prove which plan version applied, which credits were
+reserved, why a request was denied, or how accepted usage became an invoice line. Unprice keeps the
+customer spend decision and the invoice explanation on the same inspectable path.
 
 <CardGroup cols={2}>
   <Card title="Quickstart" icon="bolt-lightning" href="/quickstart/onboarding-plan">
@@ -66,6 +64,7 @@ the customer spend decision and the invoice explanation on the same inspectable 
 
 ## Open and payment-provider aware
 
-Unprice owns the customer money path. Your payment provider still captures payment. Start on the
-built-in Sandbox, then connect your own Stripe account when you are ready. Stripe-first today,
-provider-extensible by design.
+Unprice owns the customer money path. Your payment provider still captures payment. Use Sandbox to
+test the flow, then connect Stripe for production payment capture. Stripe is the production
+provider today. The provider model can support more providers without moving pricing logic into
+your application.

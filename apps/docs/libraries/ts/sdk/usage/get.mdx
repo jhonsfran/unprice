@@ -1,6 +1,6 @@
 ---
 title: "Get usage analytics"
-description: "Get usage analytics for a project or customer"
+description: "Inspect metered usage and priced evidence for a project or customer."
 ---
 
 <RequestExample>
@@ -11,12 +11,9 @@ const { result, error } = await unprice.analytics.usage.get({
   customer_id: "cus_1234567890"
 });
 
-if (error) {
-  console.error(error.message);
-  return;
-}
+if (error) throw new Error(`${error.code}: ${error.message}`);
 
-console.log(result);
+return result;
 ```
 
 </RequestExample>
@@ -58,5 +55,6 @@ console.log(result);
 ## Response
 
 <ResponseField name="usage" type="array" required>
-    Usage data points for the selected range.
+    Usage and priced data points for the selected range. Use `access.check` or `usage.consume` for
+    a request-path decision; this method reports evidence.
 </ResponseField>

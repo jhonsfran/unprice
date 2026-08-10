@@ -1,21 +1,30 @@
 ---
 title: 'Customers'
-description: 'Centralized management for your customer base.'
+description: 'Customer records and their commercial state.'
 ---
 
-The Customers section provides a 360-degree view of every customer using your product.
+In Unprice, a customer is your end customer. Their subscription, entitlements, usage, budgeted
+runs, wallet credits, and invoices use the same customer ID.
 
-## 1. Customer Profiles
-Each customer in Unprice has a unique `unpriceCustomerId`. This ID is used to link your application's users to their billing and entitlement data.
+## Customer record
 
-## 2. Key Information
-- **Active Plan**: The plan version currently assigned to the customer.
-- **Entitlements**: A list of all features the customer can access.
-- **Usage History**: Historical consumption data across multiple billing cycles.
-- **Payment Methods**: Linked credit cards or payment provider details.
+Store the returned Unprice customer ID in your application. Send this ID in request-path calls
+such as `access.check`, `usage.consume`, and `runs.start`.
 
-## 3. Operations
-From the Customer dashboard, you can:
-- **Reset Entitlements**: Manually reset usage counters if needed.
-- **Grant Credits**: Add one-time or recurring credits to a customer's balance.
-- **Update Metadata**: Store custom key-value pairs for integration with other systems.
+## Customer evidence
+
+Use the customer pages to inspect:
+
+- the assigned plan version and active subscription
+- feature entitlements and current usage
+- wallet credits, active holds, and captured spend
+- budgeted runs and their final state
+- invoices and payment-provider references
+
+## Keep the boundary clear
+
+The Unprice customer ID connects commercial evidence. It does not replace your application user or
+account ID. Store your own ID as the external ID or metadata, then map it to the Unprice customer
+ID at the integration boundary.
+
+Read [First customer](/quickstart/onboarding-customer) for the signup flow.

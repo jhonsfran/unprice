@@ -1,15 +1,17 @@
 ---
 title: PRECONDITION_FAILED
 openapi-schema: ErrPreconditionFailed
-
 ---
 
-## Problem
+## Cause
 
-The request does not meet one or more preconditions required for fulfillment. For example, that you are not flagged into a beta feature.
+The request is valid, but a required project or resource condition is not met. For example, the
+project can lack a required published plan or configuration.
 
-## Solution
+## Action
 
-Please check if you meet all conditions outlined in the error message.
+Read the error message. Complete the named setup step, then repeat the request.
 
-If that doesn't help, ask for help on [Discord](https://unprice.dev/discord)
+## Support evidence
+
+Include the error response and `requestId` if you contact [support](mailto:seb@unprice.dev).

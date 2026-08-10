@@ -1,23 +1,27 @@
 ---
 title: "Introduction"
-description: "Machine and human readable error codes"
+description: "Machine-readable error codes and recovery actions."
 ---
 
-
-The Unprice API returns machine readable error codes to quickly identify the type of error as well as link to the docs and a `requestId`. Please always include the `requestId` in your error report.
-
+The API returns a structured error for an expected request failure. Use `code` in your application
+logic. Use `message` to correct the request. Include `requestId` if you contact support.
 
 ```json
 {
-  error: {
-    code: "UNAUTHORIZED",
-    message: "We were unable to authorize your request. Either your key was missing, malformed or does not have the required permissions.",
-    docs: "https://docs.unprice.dev/api-reference/errors/code/BAD_REQUEST",
-    requestId: "req_1234567890"
+  "error": {
+    "code": "UNAUTHORIZED",
+    "message": "The API key is missing, malformed, or not active.",
+    "docs": "https://docs.unprice.dev/api-reference/errors/code/UNAUTHORIZED",
+    "requestId": "req_1234567890"
   }
 }
-
 ```
 
+## Handle errors
 
-If you can't debug something on your own or think there is a bug, please get in touch with us on [Discord](https://unprice.dev/discord) or [Email](mailto:seb@unprice.dev) and provide the full error response.
+1. Check the error `code` and `message`.
+2. Correct the request or the project configuration.
+3. Retry only when the operation is safe to retry. Reuse the same idempotency key for a repeated
+   usage or run request.
+4. If the problem continues, contact [support](mailto:seb@unprice.dev) and include the full error
+   response and `requestId`.

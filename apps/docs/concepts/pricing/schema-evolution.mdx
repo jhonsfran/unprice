@@ -1,25 +1,27 @@
 ---
-title: 'Schema Evolution for Metering'
-description: 'How to evolve metering events safely across Durable Objects, Tinybird, and R2 lakehouse compaction.'
+title: 'Schema evolution for metering'
+description: 'Change metering event shapes without breaking usage evidence.'
 ---
 
-Use this guide when you need to change usage, verification, or metadata event shapes.
+Use this guide when you change a usage, verification, or metadata event shape. The change affects
+the Cloudflare runtime, usage analytics, and raw event storage.
 
-## Current Flow
+## Current flow
 
-1. **Durable Object buffer (SQLite)** stores fresh usage and verification records.
-2. **Flush pipeline** sends the same batch to Tinybird and R2 raw NDJSON.
-3. **Deletion safety** only removes buffered rows after both Tinybird and R2 cursors advance.
-4. **Compaction** merges raw R2 files per day into compacted files for lakehouse queries.
+1. The Durable Object buffer stores new usage and verification records in SQLite.
+2. The flush pipeline sends the same batch to Tinybird and raw R2 NDJSON files.
+3. The buffer deletes rows only after Tinybird and R2 both confirm the range.
+4. Compaction merges raw R2 files by day for lakehouse queries.
 
-This means schema changes affect three places at once: DO writes, Tinybird ingestion, and R2 readers/compaction.
+Therefore, a schema change affects three places: Durable Object writes, Tinybird ingestion, and R2
+readers and compaction.
 
-## Compatibility Contract
+## Compatibility contract
 
 - Every event includes `schema_version`.
-- Prefer **additive changes** (new nullable fields) over breaking changes.
-- Keep old fields during migration windows so dashboards and SQL consumers do not break.
-- Treat schema changes as a multi-sink rollout, not a single table change.
+- Prefer additive changes, such as a new nullable field.
+- Keep old fields during the migration window so dashboards and SQL consumers continue to work.
+- Treat a schema change as a multi-sink rollout, not as one table change.
 
 ## Safe Change Types
 
@@ -27,7 +29,8 @@ This means schema changes affect three places at once: DO writes, Tinybird inges
 - Add optional enum value
 - Add derived field while keeping original field
 
-These should not break SQL rooms dashboards or compacted readers if queries avoid strict column lists.
+These changes should not break dashboards or compacted readers when queries do not require strict
+column lists.
 
 ## Breaking Change Types
 
@@ -36,31 +39,34 @@ These should not break SQL rooms dashboards or compacted readers if queries avoi
 - Changing semantic type (example: numeric to string)
 - Changing partition/path conventions without reader fallback
 
-For breaking changes, bump `schema_version`, deploy readers first, writers second.
+For a breaking change, increase `schema_version`. Deploy readers first and writers second.
 
 ## Rollout Order
 
 1. **Readers first**
-   - Update dashboards and SQL rooms queries to support old + new schema.
-   - Update compaction/manifest readers to tolerate both shapes.
+   - Update dashboards and SQL queries to support the old and new schema.
+   - Update compaction and manifest readers to accept both shapes.
 2. **Writers second**
-   - Update DO/Tinybird/R2 payload writers.
-   - Keep old fields if possible during transition.
+   - Update Durable Object, Tinybird, and R2 payload writers.
+   - Keep old fields during the transition when possible.
 3. **Validation window**
-   - Monitor ingestion, query errors, and compaction output.
+   - Check ingestion, query errors, and compaction output.
 4. **Cleanup**
-   - Remove legacy fields only after all consumers are migrated.
+   - Remove old fields only after every consumer is migrated.
 
-## Security and Integrity in Tiered Flush
+## Data safety during flush
 
-- **Atomic intent:** flush is best-effort per destination, but row deletion only happens after both Tinybird and R2 succeed for the processed range.
-- **Idempotency:** usage id + cursor checks prevent double counting on retries.
-- **Metadata stability:** metadata is deduplicated and tied by `meta_id`, so usage/verification can still be joined after compaction.
-- **Access control:** realtime API endpoints remain key-authenticated; dashboard websocket connections are session-token validated.
+- **Deletion rule:** The flush can complete one destination at a time, but it deletes rows only after
+  Tinybird and R2 both succeed for the range.
+- **Idempotency:** Usage ID and cursor checks prevent duplicate counts during a retry.
+- **Metadata:** Metadata is deduplicated and linked by `meta_id`. Usage and verification records
+  can still join after compaction.
+- **Access control:** Realtime API endpoints require a key. Dashboard WebSocket connections require
+  a session token.
 
-## Impact on SQL Rooms Dashboards
+## Dashboard and SQL impact
 
-SQL rooms queries should be version-aware during migrations.
+SQL queries must support both schema versions during the migration.
 
 Recommended pattern:
 
@@ -70,21 +76,21 @@ FROM usage
 WHERE schema_version IN (1, 2)
 ```
 
-Avoid assumptions like mandatory presence of newly added columns until backfill and compaction windows are complete.
+Do not require a new field until the backfill and compaction window is complete.
 
 ## Impact on Compaction
 
 - Compaction is file-level and idempotent.
-- Compaction does not transform schema; it merges raw NDJSON lines.
-- If schema changes mid-day, compacted output can contain mixed `schema_version` values for that partition day.
+- Compaction does not change the schema. It merges raw NDJSON lines.
+- If a schema changes during the day, compacted output can contain mixed `schema_version` values.
 
-Because of that, readers must handle mixed versions for a period.
+Readers must support the mixed versions during that period.
 
 ## Operational Checklist
 
 - [ ] Add/update `schema_version` where payload shape changed.
-- [ ] Verify Tinybird ingest schemas accept new fields.
-- [ ] Verify R2 manifest + readers still resolve old and new file layouts.
-- [ ] Verify SQL rooms queries run for both versions.
+- [ ] Verify Tinybird ingestion schemas accept the new fields.
+- [ ] Verify R2 manifests and readers resolve old and new file layouts.
+- [ ] Verify SQL queries run for both versions.
 - [ ] Run manual compaction for target day and validate output.
 - [ ] Monitor realtime endpoint and websocket dashboards during rollout.

@@ -1,24 +1,26 @@
 ---
 title: 'Subscriptions'
-description: 'Manage customer subscriptions and billing cycles.'
+description: 'Connect a customer to a published plan version and billing period.'
 ---
 
-Subscriptions represent the relationship between a customer and a specific plan version.
+A subscription connects one customer to a published plan version. The active phase supplies the
+pricing and entitlement rules that Unprice uses for request-path decisions and billing evidence.
 
-## 1. Creating Subscriptions
-Most subscriptions are created via the SDK when a customer signs up, but you can also manage them manually in the Dashboard:
-- **Assign a Plan Version**: Choose the specific version the customer should be on.
-- **Billing Cycle**: Unprice automatically tracks the start and end of the billing period.
+## Create a subscription
 
-## 2. Managing Subscription Life Cycle
-- **Upgrades & Downgrades**: When a customer changes plans, Unprice calculates the proration automatically.
-- **Cancellations**: Subscriptions can be canceled immediately or at the end of the current period.
-- **Renewals**: Managed automatically based on the plan version configuration.
+Use `customers.signUp` for the normal first subscription flow. It creates the customer record and
+provisions the subscription from a published plan version.
 
-## 3. Usage & Limits
-For each subscription, you can view the real-time usage of all metered features:
-- **Current Usage**: See exactly how much a customer has consumed in the current cycle.
-- **Remaining Balance**: Monitor how close a customer is to their limits.
+## Change a subscription
 
-## 4. Invoicing
-Unprice generates internal records for every billing event, which are then synced to your payment provider (like Stripe) for actual payment collection.
+Use a new plan version when you change pricing or entitlements. Then move the customer to that
+version when the change should apply to them. This preserves the version that other customers
+bought.
+
+## Inspect commercial state
+
+For a subscription, inspect the active plan version, billing period, entitlement state, usage,
+wallet movement, and invoice evidence. These records explain a commercial decision; they do not
+run the workload or capture payment.
+
+Read [Customer signup SDK](/libraries/ts/sdk/customers/signup) for the request and response shape.

@@ -3,12 +3,15 @@ title: UNAUTHORIZED
 openapi-schema: ErrUnauthorized
 ---
 
-## Problem
+## Cause
 
-We were unable to authorize your request. Either your key was missing, malformed or does not have the required permissions.
+The request has no valid API key. The key can be missing, malformed, revoked, or expired.
 
-## Solution
+## Action
 
-Check the `message` field and double check you are sending the key correctly in the `Authorization` header.
+Send the project key in the `Authorization: Bearer <API_KEY>` header. Create or rotate the key in
+the Unprice Dashboard if it is no longer active.
 
-If that doesn't help, ask for help on [Discord](https://unprice.dev/discord)
+## Support evidence
+
+Include the error response and `requestId` if you contact [support](mailto:seb@unprice.dev).

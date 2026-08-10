@@ -3,12 +3,15 @@ title: FORBIDDEN
 openapi-schema: ErrForbidden
 ---
 
-## Problem
+## Cause
 
-We were able to authenticate you but you do not have access to the requested resources.
+The API key is valid, but it cannot access the requested project, customer, or operation.
 
-## Solution
+## Action
 
-Use the correct key and/or double check you are requesting the correct resources.
+Use a key for the correct project. If the key is bound to a default customer, do not use it to
+spend for another customer.
 
-If that doesn't help, ask for help on [Discord](https://unprice.dev/discord)
+## Support evidence
+
+Include the error response and `requestId` if you contact [support](mailto:seb@unprice.dev).

@@ -1,7 +1,11 @@
 ---
 title: Replay ingestion events
-description: Replay failed ingestion events by canonical audit id.
+description: Replay failed ingestion events with a stored payload.
 ---
+
+Use `ingestionEvents.replay` after you inspect an ingestion failure. Replay only events that are
+marked replayable. The operation queues the stored payload again; it does not create a new usage
+event from the dashboard state.
 
 ```ts
 const { result, error } = await unprice.ingestionEvents.replay({
@@ -9,9 +13,10 @@ const { result, error } = await unprice.ingestionEvents.replay({
   canonical_audit_ids: ["audit_123"],
 })
 
-if (error) {
-  throw new Error(error.message)
-}
+if (error) throw new Error(`${error.code}: ${error.message}`);
 
-console.log(result)
+return result;
 ```
+
+After you queue a replay, call [Ingestion event status](/libraries/ts/sdk/ingestion-events/status)
+to confirm the final state.

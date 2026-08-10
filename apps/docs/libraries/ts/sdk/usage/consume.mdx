@@ -20,11 +20,12 @@ const { result, error } = await unprice.usage.consume({
 });
 
 if (error) {
-  console.error(error.message);
-  return;
+  throw new Error(`${error.code}: ${error.message}`);
 }
 
-console.log(result);
+if (!result.allowed) {
+  return new Response(result.rejectionReason ?? "Usage denied", { status: 429 });
+}
 ```
 
 </RequestExample>
@@ -33,7 +34,8 @@ console.log(result);
 ```json
 {
   "allowed": true,
-  "state": "processed"
+  "state": "processed",
+  "idempotencyStatus": "new"
 }
 ```
 </ResponseExample>
@@ -44,12 +46,24 @@ console.log(result);
     The specific feature or entitlement to consume against, for example `ai-messages`.
 </ParamField>
 
+<ParamField body="customerId" type="string">
+    The customer ID. This is required when the API key has no default customer binding.
+</ParamField>
+
 <ParamField body="idempotencyKey" type="string" required>
     Logical key used to deduplicate the event.
 </ParamField>
 
 <ParamField body="eventSlug" type="string" required>
     The broad event kind configured in Unprice, for example `completions`.
+</ParamField>
+
+<ParamField body="id" type="string">
+    Optional event ID from your system. Unprice creates an internal ID when you omit it.
+</ParamField>
+
+<ParamField body="timestamp" type="number">
+    Optional event timestamp in epoch milliseconds. Unprice uses the request time when you omit it.
 </ParamField>
 
 <ParamField body="properties" type="object" required>
@@ -59,5 +73,6 @@ console.log(result);
 
 ## Response
 
-Returns whether the event was processed or rejected for the targeted feature. Use this when the
-request path needs an enforcing decision before paid work runs.
+Returns an allow or deny decision for the targeted feature. `state` is `processed` when the event
+was applied and `rejected` when Unprice denied it. On a denial, inspect `rejectionReason` and
+`message`. Reuse the same `idempotencyKey` when you retry the same logical request.

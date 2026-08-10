@@ -3,12 +3,15 @@ title: BAD_REQUEST
 openapi-schema: ErrBadRequest
 ---
 
-## Problem
+## Cause
 
-You do not have permission to perform this action. In most cases this means the root key you are using, is lacking permissions.
+The request is invalid. A required value can be missing, a value can have the wrong shape, or the
+request can violate an endpoint rule.
 
-## Solution
+## Action
 
-Go to the [Unprice Dashboard](https://app.unprice.dev) and add the required permissions to your key.
+Read the error message. Correct the named field or request rule, then send the request again.
 
-If that doesn't help, ask for help on [Discord](https://unprice.dev/discord)
+## Support evidence
+
+Include the error response and `requestId` if you contact [support](mailto:seb@unprice.dev).

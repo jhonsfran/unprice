@@ -3,12 +3,16 @@ title: CONFLICT
 openapi-schema: ErrConflict
 ---
 
-## Problem
+## Cause
 
-Another resource already uses this identifier. For example workspace slugs must be unique globally.
+The request conflicts with the current resource state. For example, another resource can already
+use the identifier, or the resource can already be published.
 
-## Solution
+## Action
 
-Please choose a different name/identifier.
+Load the current resource state. Use a unique identifier or change the request so it does not
+repeat the completed state change.
 
-If that doesn't help, ask for help on [Discord](https://unprice.dev/discord)
+## Support evidence
+
+Include the error response and `requestId` if you contact [support](mailto:seb@unprice.dev).

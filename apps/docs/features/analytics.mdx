@@ -1,20 +1,22 @@
 ---
 title: 'Analytics'
-description: 'Usage and revenue evidence for the customer money path.'
+description: 'Usage, spend, and invoice evidence for a customer money path.'
 ---
 
-Unprice Analytics provides a deep dive into how your pricing strategies are performing.
+Use Analytics to inspect the evidence behind customer usage and spend. It helps you answer what
+happened, which customer it affected, and which plan version and billing period applied.
 
-## 1. Key Performance Indicators (KPIs)
-Track the health of your business with built-in metrics:
-- **MRR (Monthly Recurring Revenue)**: Real-time calculation of your subscription revenue.
-- **Churn Rate**: Monitor customer retention and plan cancellations.
-- **Conversion Funnels**: See how customers move from signup to their first paid plan.
+## What to inspect
 
-## 2. Usage Heatmaps
-Understand how your features are being used:
-- **Feature Adoption**: Identify which features are most popular across your plans.
-- **Usage Distribution**: See if customers are hitting their limits and if there's an opportunity for new tiers.
+- **Usage:** Metered events and period totals for a customer or feature.
+- **Spend:** Priced usage and wallet movement for the same customer money path.
+- **Ingestion state:** Whether an event was processed, rejected, failed, or can be replayed.
+- **Invoice evidence:** The plan, usage, wallet, and billing facts that explain an invoice line.
 
-## 3. Plan Performance
-Compare plan versions by revenue and retention, so pricing experiments ship with evidence instead of guesses.
+## Use evidence before changing pricing
+
+Do not use a revenue chart as the only reason to change a plan. First check the request-path
+decisions, usage pattern, wallet movement, and invoice evidence. Then create a new plan version
+for the change. Existing customers can remain on the version that they bought.
+
+Read [Pricing overview](/concepts/pricing/overview) to see how these objects connect.

@@ -3,10 +3,15 @@ title: INTERNAL_SERVER_ERROR
 openapi-schema: ErrInternalServerError
 ---
 
-## Problem
+## Cause
 
-Something unexpected happened and we did not handle the error well.
+Unprice could not complete the request because of an unexpected server error.
 
-## Solution
+## Action
 
-If that doesn't help, ask for help on [Discord](https://unprice.dev/discord)
+Do not change the request. Retry only when the operation is idempotent. For usage and run calls,
+reuse the same idempotency key.
+
+## Support evidence
+
+Include the error response and `requestId` if you contact [support](mailto:seb@unprice.dev).

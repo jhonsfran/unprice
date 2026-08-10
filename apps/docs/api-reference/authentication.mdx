@@ -1,20 +1,23 @@
 ---
 title: Authentication
-description: 'Securely authenticating with the Unprice API'
+description: 'Authenticate server-side requests to the Unprice API.'
 ---
 
 
-Almost all Unprice API endpoints require authentication using an API key. API keys provide access to your Unprice resources.
+Use a project API key to authenticate API requests. Keep the key in server-side configuration. Do
+not send it to a browser, mobile app, or public repository.
+
+Create and revoke project API keys in the Unprice Dashboard.
 
 ## Bearer Authentication
 
-Authentication is performed using HTTP Bearer authentication in the `Authorization` header:
+Send the key as a Bearer token in the `Authorization` header:
 
 ```bash
 Authorization: Bearer unprice_live_1234567890
 ```
 
-Example request:
+For example:
 
 ```bash
 curl -X GET "https://api.unprice.dev/v1/plan-versions/get/{planVersionId}" \
@@ -22,13 +25,15 @@ curl -X GET "https://api.unprice.dev/v1/plan-versions/get/{planVersionId}" \
   -H "Content-Type: application/json"
 ```
 
-## Security Best Practices
+## Keep the key safe
 
-Never expose your API key in client-side code or include it in public repositories. For frontend applications, always use a backend server to proxy requests to the Unprice API.
+For a browser or mobile application, call your own server. Your server can then call the Unprice
+API with the key. Rotate a key if you believe that it was exposed.
 
 ## Authentication Errors
 
-If your authentication fails, you'll receive a 401 Unauthorized or 403 Forbidden response with an error message:
+An authentication failure returns a `401 UNAUTHORIZED` or `403 FORBIDDEN` error. The response
+includes a request ID. Keep this ID when you contact support.
 
 ```json
 {
@@ -44,7 +49,8 @@ If your authentication fails, you'll receive a 401 Unauthorized or 403 Forbidden
 }
 ```
 
-Common authentication issues include:
-- Missing the Authorization header
-- Invalid key format
-- Revoked or expired API key
+Check these items first:
+
+- The request has an `Authorization` header.
+- The token uses the correct project API key.
+- The key is active and has permission for the requested resource.

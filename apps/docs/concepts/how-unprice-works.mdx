@@ -1,77 +1,77 @@
 ---
-title: How Unprice Works
-description: "A high-level architecture view of where Unprice fits in your product."
+title: How Unprice works
+description: "Where Unprice fits in your paid product path."
 mode: wide
 ---
 
-Unprice sits between your product, your payment provider, and the paid work your customer triggers.
+Unprice sits between your product, the paid work that your customer starts, and your payment
+provider.
 
-Your app still owns the product experience and workload execution. Your payment provider still
-captures payment. Unprice owns the customer money path between them: pricing rules, entitlement
-decisions, usage evidence, wallet credits, billing state, and the trail that explains why work was
-allowed, denied, or billed.
+Your application owns the product experience and workload execution. Your payment provider captures
+payment. Unprice owns the customer money path between them: pricing rules, entitlement decisions,
+usage evidence, wallet credits, billing state, and the trail that explains why work was allowed,
+denied, or billed.
 
 <Frame caption="The request-to-invoice money path">
-  <img src="/images/money-path.svg" alt="A paid action flows through plan version, entitlement, budget, and wallet checks, then is allowed or denied before work runs while invoice evidence is preserved." />
+  <img src="/images/money-path.svg" alt="A paid action passes through plan version, entitlement, budget, and wallet checks. Unprice allows or denies the action before work runs and preserves invoice evidence." />
 </Frame>
 
-## The Three Boundaries
+## The three boundaries
 
 <CardGroup cols={3}>
   <Card title="Your product" icon="code">
-    Owns the user experience, workload execution, and the moment a paid action is about to run.
+    Runs the user experience and workload. It decides when a paid action is about to run.
   </Card>
   <Card title="Unprice" icon="route">
-    Owns pricing rules, entitlement decisions, budgets, wallet credits, billing state, and evidence.
+    Resolves pricing rules, entitlement decisions, budgets, wallet credits, billing state, and evidence.
   </Card>
   <Card title="Payment provider" icon="credit-card">
-    Captures or simulates payment through Stripe, Sandbox, or a custom provider adapter.
+    Captures payment through Stripe or simulates payment in Sandbox.
   </Card>
 </CardGroup>
 
-## The Money Path
+## The money path
 
 | Stage | What happens | Why it matters |
 | --- | --- | --- |
-| Paid action | Your app is about to run work that can create cost | The money question happens before the cost exists |
-| Pricing model | Unprice resolves the plan version, feature, meter, and entitlement | Pricing logic stays out of product branches |
-| Runtime decision | Unprice checks entitlement, budget, wallet credits, and meter rules | The request can be allowed or denied immediately |
-| Evidence trail | Usage facts, wallet movement, ledger entries, and invoice evidence are kept together | Support, analytics, replay, and invoices share one explanation |
-| Payment capture | The provider adapter captures or simulates money movement | The payment rail can change without moving pricing logic back into your app |
+| Paid action | Your app is about to run work that can create cost. | The money decision happens before the cost exists. |
+| Pricing model | Unprice resolves the plan version, feature, meter, and entitlement. | Pricing logic stays out of product branches. |
+| Runtime decision | Unprice checks entitlement, budget, wallet credits, and meter rules. | The request can be allowed or denied before work runs. |
+| Evidence trail | Usage facts, wallet movement, ledger entries, and invoice evidence stay connected. | Support, analytics, replay, and invoices use one explanation. |
+| Payment capture | Stripe captures payment or Sandbox simulates it. | The payment rail stays separate from pricing logic. |
 
-## The Payment-provider Boundary
+## The payment-provider boundary
 
-Unprice is not a Stripe wrapper. Stripe is the built-in production adapter today, and Sandbox is
-available for testing. The important boundary is the provider interface: invoice creation, invoice
-items, payment methods, checkout/setup sessions, payment collection, and webhooks are provider
-operations.
+Unprice is not a Stripe wrapper. Stripe is the production provider today, and Sandbox is available
+for testing. The provider interface separates invoice creation, payment methods, checkout and setup
+sessions, payment collection, and webhooks from pricing and entitlement logic.
 
-That means the pricing and evidence path can stay in Unprice while the payment-capture system can
-change. A team running its own deployment can implement another provider adapter without moving
-entitlement, metering, wallet, billing, or invoice-evidence logic back into product code.
+This separation lets Unprice keep the pricing and evidence path when the payment-capture system
+changes. The provider model can support another provider without moving entitlement, metering,
+wallet, billing, or invoice-evidence logic into product code.
 
-## The Runtime Paths
+## The runtime paths
 
 <CardGroup cols={2}>
   <Card title="Ask without changing state" icon="shield-check" href="/libraries/ts/sdk/access/check">
     Use `access.check` when your app only needs to know whether a customer can use a feature.
   </Card>
   <Card title="Decide and apply now" icon="gauge" href="/libraries/ts/sdk/usage/consume">
-    Use `usage.consume` when known usage should be blocked if the customer is over limit, budget, or credits.
+    Use `usage.consume` when known usage must be denied after a limit, budget, or credit balance is exhausted.
   </Card>
   <Card title="Report usage evidence" icon="file-invoice-dollar" href="/libraries/ts/sdk/usage/record">
-    Use `usage.record` when the request should not wait for Unprice to decide.
+    Use `usage.record` when the request does not wait for Unprice to decide.
   </Card>
   <Card title="Reserve a workload budget" icon="route" href="/libraries/ts/sdk/runs/start">
     Use `runs.start`, `runs.consume`, and `runs.end` for jobs, workflows, tool chains, and agents.
   </Card>
 </CardGroup>
 
-## What Unprice Does Not Own
+## What Unprice does not own
 
-Unprice does not run your product workload. Your application still decides when to call the LLM,
-start the job, send the API request, or execute the workflow.
+Unprice does not run your product workload. Your application still calls the LLM, starts the job,
+sends the API request, or runs the workflow.
 
-Unprice also does not replace your payment provider. Stripe, Sandbox, or another provider adapter
-still captures or simulates money movement. Unprice owns the pricing logic and evidence path that
-explains what should be charged, credited, denied, or replayed.
+Unprice also does not replace your payment provider. Stripe captures payment and Sandbox simulates
+payment for testing. Unprice keeps the pricing logic and evidence path that explains what should be
+charged, credited, denied, or replayed.

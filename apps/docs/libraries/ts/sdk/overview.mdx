@@ -3,50 +3,51 @@ title: "Overview"
 description: "TypeScript client for the Unprice public API."
 ---
 
-Use `@unprice/api` to put the customer money path inside your server request path: create or map a
-customer, check access, consume usage, reserve budgeted runs, inspect wallet credits, and explain
-usage or ingestion evidence.
+Use `@unprice/api` in your server request path. Create or map a customer, check access, consume
+usage, reserve a workload budget, and inspect usage or wallet evidence.
 
-The SDK returns typed results instead of throwing for expected API errors, so every request has an
-explicit `result` or `error` branch.
+The SDK returns typed results for expected API failures. Each call returns either `result` or
+`error`.
 
 ## Install
 
 <CodeGroup>
 
   ```bash npm
-   npm install @unprice/api
+  npm install @unprice/api
   ```
 
   ```bash pnpm
-   pnpm add @unprice/api
+  pnpm add @unprice/api
   ```
 
   ```bash yarn
-   yarn add @unprice/api
+  yarn add @unprice/api
   ```
 
   ```bash bun
-   bun install @unprice/api
+  bun add @unprice/api
   ```
 </CodeGroup>
 
-## Unprice API key
+## Configure the client
 
-Create a project API key in the [project settings](https://app.unprice.com), then provide it to the
-client from server-side code:
+Create a project API key in the [project settings](https://app.unprice.dev). Keep the key in
+server-side configuration. Do not send it to a browser or commit it to a repository.
 
 ```ts
 import { Unprice } from "@unprice/api";
 
-const unprice = new Unprice({ token: "<API_KEY>" });
+const unprice = new Unprice({
+  token: process.env.UNPRICE_API_KEY!
+});
 ```
 
-Always keep your API key on the server and reset it if you suspect it has been compromised.
+Rotate the key if you believe it was exposed.
 
 ## First runtime call
 
-For a read-only shadow check:
+Use `access.check` for a read-only shadow check:
 
 ```ts
 const { result, error } = await unprice.access.check({
@@ -55,13 +56,15 @@ const { result, error } = await unprice.access.check({
 });
 
 if (error) {
-  throw new Error(error.message);
+  throw new Error(`${error.code}: ${error.message}`);
 }
 
-console.log(result.allowed);
+if (!result.allowed) {
+  return new Response("Feature unavailable", { status: 403 });
+}
 ```
 
-For request-path enforcement when the usage amount is known:
+Use `usage.consume` when known usage must be authorized before paid work runs:
 
 ```ts
 const { result, error } = await unprice.usage.consume({
@@ -77,7 +80,7 @@ const { result, error } = await unprice.usage.consume({
 });
 
 if (error) {
-  throw new Error(error.message);
+  throw new Error(`${error.code}: ${error.message}`);
 }
 
 if (!result.allowed) {
@@ -85,32 +88,25 @@ if (!result.allowed) {
 }
 ```
 
-Read [Choose the runtime call](/quickstart/choose-operation) before wiring a production path.
+Read [Choose the runtime call](/quickstart/choose-operation) before you connect a production path.
 
 ## Response format
 
-Every method returns either an `error` or a `result` field, never both and never neither.
+Every method returns one of these shapes:
 
 <CodeGroup>
 ```ts Success
 {
-  result: T // the result depends on what method you called
+  result: T // The shape depends on the method.
 }
 ```
 
 ```ts Error
 {
   error: {
-    // A machine readable error code
     code: ErrorCode;
-
-    // A link to our documentation explaining this error in more detail
     docs: string;
-
-    // A human readable short explanation
     message: string;
-
-    // The request id for easy support lookup
     requestId: string;
   }
 }
@@ -118,105 +114,65 @@ Every method returns either an `error` or a `result` field, never both and never
 
 </CodeGroup>
 
-## Checking for errors
+Check `error` before you use `result`. The error includes a documentation link and request ID.
 
-Check the `error` property before using `result`. API errors include a docs link and request ID for
-support lookup.
+## Client options
 
-```ts
-import { Unprice } from "@unprice/api";
+### Base URL
 
-const unprice = new Unprice({
-  token: env.UNPRICE_API_KEY,
-  baseUrl: env.UNPRICE_API_URL
-})
-
-const { result, error } = await unprice.paymentMethods.list({
-  customerId: "cus_123",
-  provider: "stripe"
-});
-
-if (error) {
-  // handle potential network or bad request error
-  // a link to our docs will be in the `error.docs` field
-  console.error(error.message);
-  return;
-}
-
-return result
-```
-
-
-## Options
-
-The constructor accepts some options to customize the behavior:
-
-
-### Base Url
-
-Run all requests against your own Unprice instance.
+Use `baseUrl` to send requests to your own Unprice deployment.
 
 <ParamField body="baseUrl" type="string" default="https://api.unprice.dev">
 ```ts
 const unprice = new Unprice({
-  //...
-  baseUrl: "https://my.domain"
-})
+  token: process.env.UNPRICE_API_KEY!,
+  baseUrl: "https://api.example.com"
+});
 ```
 </ParamField>
 
 ### Retries
 
-By default the client will retry on network errors, you can customize this behavior:
+The SDK retries network and server errors by default. Configure the retry count and backoff when
+your request path needs a different policy.
 
 <ParamField body="retry">
   <Expandable defaultOpen>
     <ParamField body="attempts" type="integer">
-      How often to retry
+      Number of retries after the first request.
     </ParamField>
     <ParamField body="backoff" type="(retryCount: number) => number">
-      A function that returns how many milliseconds to wait until the next attempt is made.
+      Function that returns the wait time, in milliseconds, before the next attempt.
     </ParamField>
   </Expandable>
 </ParamField>
 
 ```ts
 const unprice = new Unprice({
-  // ...
+  token: process.env.UNPRICE_API_KEY!,
   retry: {
     attempts: 3,
     backoff: (retryCount) => retryCount * 1000
   }
-})
+});
 ```
 
 ### Cache
 
-Configure the `fetch` cache behavior.
-
-<Warning>
-As of October 2023, the `cache` option is not yet implemented in cloudflare workers and will throw an error if used.
-</Warning>
+Use `cache` to configure the standard `fetch` cache behavior for SDK requests.
 
 <ParamField body="cache" type="string">
-  Available options are: `default`, `force-cache`, `no-cache`, `no-store`, `only-if-cached` or `reload`.
- </ParamField>
-
-```ts
-const unprice = new Unprice({
-  // ...
-  cache: "no-cache"
-})
-```
+  Use a `RequestCache` value such as `default`, `no-store`, or `reload`.
+</ParamField>
 
 ### Disable telemetry
 
-By default, Unprice collects anonymous telemetry data to help us understand which versions of our SDK is being used, and in which environment.
-
-If you wish to disable this, you can do so by passing a boolean flag to the constructor:
+By default, the SDK sends anonymous telemetry: runtime, platform, and SDK version. Set
+`disableTelemetry` to disable this telemetry.
 
 ```ts
 const unprice = new Unprice({
+  token: process.env.UNPRICE_API_KEY!,
   disableTelemetry: true
-})
+});
 ```

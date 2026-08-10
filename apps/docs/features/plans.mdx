@@ -1,33 +1,32 @@
 ---
 title: 'Plans'
-description: 'How to create and manage plans in the Unprice Dashboard.'
+description: 'Define plans and publish versioned pricing rules.'
 ---
 
-The Plans section is where you define your product offerings and their pricing models.
+Use a plan to name the commercial offer that you sell. Use a plan version to define the published
+pricing, entitlement, billing, and feature rules for that offer.
 
-## 1. Creating a Plan
-Navigate to the **Plans** tab in your dashboard and click "New Plan". You'll need to provide:
-- **Name**: The name of the plan (e.g., "Scale").
-- **Slug**: A unique identifier for your SDK calls (e.g., `scale`).
-- **Description**: A brief summary of what this plan includes.
+## Create the plan identity
 
-## 2. Defining Features
-Once a plan is created, you can assign features to it. For each feature, you must select its pricing type:
-- **Flat**: Fixed price.
-- **Tier**: Volume or Graduated pricing.
-- **Usage**: Consumption-based.
-- **Package**: Bundle pricing.
+Give each plan a clear title, stable slug, and description. Your application should use feature
+slugs for runtime checks. Do not branch request-path code on plan names such as `Pro` or
+`Enterprise`.
 
-## 3. Managing Versions
-Every plan in Unprice uses versioning. When you want to change a price or add a feature:
-1. Create a **New Version** of your plan.
-2. Configure the new pricing and limits.
-3. **Publish** the version to make it available for new subscriptions.
+## Build a draft version
 
-<Info>
-  Existing customers will remain on their current version until you choose to migrate them, providing a safe way to iterate on pricing.
-</Info>
+In the version, configure the billing period, currency, included credits when used, and the
+features that the customer can access or consume. A usage feature also needs a meter that defines
+the event and property to aggregate.
 
-## 4. Plan Settings
-- **Enterprise Plan**: Mark plans as enterprise to hide them from public listings and handle custom pricing.
-- **Default Plan**: Set a default plan for new signups.
+## Publish, then assign
+
+1. Create and review the draft plan version.
+2. Publish the version.
+3. Sign up a customer with `planSlug` or assign the published version directly.
+4. Create a new version when pricing or entitlement rules change.
+
+Published versions preserve the commercial rules that existing customers bought. Move a customer
+to a new version only when you intend to change their commercial terms.
+
+Read [Plans and versions](/concepts/pricing/plans) for the model and [First plan](/quickstart/onboarding-plan)
+for the first setup.

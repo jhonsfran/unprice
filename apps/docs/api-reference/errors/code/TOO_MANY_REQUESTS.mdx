@@ -3,12 +3,15 @@ title: TOO_MANY_REQUESTS
 openapi-schema: ErrTooManyRequests
 ---
 
-## Problem
+## Cause
 
-You have made too many requests in a short period of time.
+The API key sent too many requests in a short time.
 
-## Solution
+## Action
 
-Please wait a bit and try again or increase the ratelimit on your API key.
+Wait before you retry. Reduce concurrent requests or request a higher rate limit for the key when
+the traffic is expected.
 
-If that doesn't help, ask for help on [Discord](https://unprice.dev/discord)
+## Support evidence
+
+Include the error response and `requestId` if you contact [support](mailto:seb@unprice.dev).

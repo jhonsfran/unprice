@@ -1,36 +1,42 @@
 ---
 title: Overview
-description: General information about the API.
+description: How to call the Unprice API from your server.
 ---
 
-The Unprice API uses HTTP methods and generally follow the schema:
+Call the Unprice API from trusted server-side code. It authorizes customer spend, records usage,
+and returns evidence for the decision.
+
+All public endpoints use this URL pattern:
 
 ```
 https://api.unprice.dev/{version}/{service}/{method}
 ```
 
-For example `GET https://api.unprice.dev/v1/plan-versions/get/{planVersionId}` gets a published plan version.
+For example, `GET /v1/plan-versions/get/{planVersionId}` returns a plan version.
+
+Send your project API key in the `Authorization` header. Read [Authentication](/api-reference/authentication)
+before you call an endpoint.
 
 ## HTTP Methods
 
-We strictly use only `GET` and `POST` methods. `PUT` and `DELETE` are not used.
+The public API uses `GET` and `POST`. It does not use `PUT` or `DELETE`.
 
 ### `GET`
 
 `GET` methods are used for reading data. Filtering, sorting, or pagination is done via query parameters.
 
 ```http
-curl "https://api.unprice.dev/v1/plan-versions/get/plan_123"
+curl "https://api.unprice.dev/v1/plan-versions/get/pv_123" \
   -H "Authorization: Bearer <API_KEY>"
 ```
 
 
 ### `POST`
 
-`POST` methods are used for creating, updating, and deleting data. Data is passed as `application/json` in the request body.
+Use `POST` to create, change, or apply data. Send request data as `application/json`.
 
 ```http
-curl -XPOST "https://api.unprice.dev/v1/plan-versions/list"
+curl -X POST "https://api.unprice.dev/v1/plan-versions/list" \
   -H "Authorization: Bearer <API_KEY>"
   -H "Content-Type: application/json"
   -d '{

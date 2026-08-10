@@ -1,7 +1,16 @@
 ---
 title: Ingestion event status
-description: Inspect recent ingestion events and failures.
+description: Inspect processed, rejected, and failed ingestion events.
 ---
+
+Use `ingestionEvents.status` to inspect recent usage ingestion. It is an evidence and recovery
+operation. It does not authorize customer spend.
+
+Check the returned state before you take action:
+
+- `processed`: Unprice accepted and applied the event.
+- `rejected`: Unprice refused the event as a business decision, such as a limit or budget denial.
+- `failed`: A system or pipeline error stopped processing. Check whether the event is replayable.
 
 ```ts
 const { result, error } = await unprice.ingestionEvents.status({
@@ -9,9 +18,10 @@ const { result, error } = await unprice.ingestionEvents.status({
   limit: 50,
 })
 
-if (error) {
-  throw new Error(error.message)
-}
+if (error) throw new Error(`${error.code}: ${error.message}`);
 
-console.log(result)
+return result;
 ```
+
+Read [Replay ingestion events](/libraries/ts/sdk/ingestion-events/replay) only for failed events
+with a stored replay payload.
