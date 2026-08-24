@@ -34,7 +34,10 @@ export const startRunInputSchema = z.object({
   traceId: z.string().min(1).nullable().optional(),
   parentRunId: z.string().min(1).nullable().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
-  expiresAt: z.number().int().positive().nullable().optional(),
+  expiresAt: z.number().int().positive().nullable().optional().openapi({
+    description:
+      "Expiration timestamp in epoch milliseconds. Defaults to one hour after the run starts and cannot exceed 24 hours after start.",
+  }),
 })
 
 export const applyRunSyncEventInputSchema = z.object({
@@ -97,6 +100,12 @@ export const runLedgerSyncDecisionSchema = z.object({
   run: runLedgerSummarySchema,
 })
 
+export const runLedgerSettlementDecisionSchema = runLedgerSyncDecisionSchema.extend({
+  fundingStatus: z.enum(["fully_funded", "partially_funded", "unfunded"]).optional(),
+  fundedAmount: z.number().int().nonnegative().optional(),
+  unfundedAmount: z.number().int().nonnegative().optional(),
+})
+
 export const runSyncDecisionSchema = z.object({
   accepted: z.boolean(),
   reason: z.enum([
@@ -110,6 +119,12 @@ export const runSyncDecisionSchema = z.object({
   run: runSummarySchema,
 })
 
+export const runSettlementDecisionSchema = runSyncDecisionSchema.extend({
+  fundingStatus: z.enum(["fully_funded", "partially_funded", "unfunded"]).optional(),
+  fundedAmountMinor: z.number().int().nonnegative().optional(),
+  unfundedAmountMinor: z.number().int().nonnegative().optional(),
+})
+
 export const budgetRunSelectSchema = createSelectSchema(budgetRuns)
 export const budgetRunInsertSchema = createInsertSchema(budgetRuns)
 
@@ -119,6 +134,7 @@ export type ApplyRunSyncEventInput = z.infer<typeof applyRunSyncEventInputSchema
 export type EndRunInput = z.infer<typeof endRunInputSchema>
 export type RunLedgerSummary = z.infer<typeof runLedgerSummarySchema>
 export type RunLedgerSyncDecision = z.infer<typeof runLedgerSyncDecisionSchema>
+export type RunLedgerSettlementDecision = z.infer<typeof runLedgerSettlementDecisionSchema>
 export type RunSummary = z.infer<typeof runSummarySchema>
 
 /**
@@ -137,3 +153,4 @@ export function toRunSummaryMinor(summary: RunLedgerSummary): RunSummary {
   }
 }
 export type RunSyncDecision = z.infer<typeof runSyncDecisionSchema>
+export type RunSettlementDecision = z.infer<typeof runSettlementDecisionSchema>

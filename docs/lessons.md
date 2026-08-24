@@ -57,6 +57,13 @@ patterns. Keep it cheap to load and useful.
 
 ## Cloudflare, API, And Ingestion
 
+- 2026-08-24: SDK reservation facades may release only on a known non-billable path; when provider
+  usage can already exist, keep settlement retryable and never turn a settlement error into a
+  release.
+- 2026-08-24: `runs.settle` owns post-provider accounting: bypass feature-limit enforcement, keep
+  the reserved money envelope enforced, and close through the serialized RunBudgetDO mutation.
+- 2026-08-24: Resolve run reservation expiration once before persistence; keep the same timestamp
+  in Postgres, RunBudgetDO state, its alarm, and the wallet reservation period.
 - 2026-08-01: When replacing a synchronous runtime usage or run route, preserve the cached bouncer at the work-authorizing boundary; `access.check` and async `usage.record` are not enforcement gates.
 - 2026-07-08: `EntitlementWindowDO` is a thin Cloudflare adapter; entitlement window business logic
   lives in `apps/api/src/ingestion/entitlements/processor.ts` behind the backend-neutral ports in
@@ -770,6 +777,13 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   normal ingestion path.
 - 2026-06-22: Invoice-time wallet reservation flushing must include both EntitlementWindowDO and
   RunBudgetDO pending capture buckets for the statement key before invoice totals are projected.
+- 2026-08-24: Run settlement is post-work accounting: commit full meter facts without feature or
+  run-budget rejection, cap wallet capture buckets to funded run money, and let only `runs.end`
+  close the parent run.
+- 2026-08-24: A run reservation maximum is a hard capture ceiling; settlement records full incurred
+  usage but must not extend the reservation or capture the unfunded difference.
+- 2026-08-24: Run settlement tests must cross the budget cumulatively across separate steps and
+  prove full usage, capped funded capture, replay safety, and terminal reconciliation together.
 - 2026-06-22: Ingestion billing-period context should expose only `pending` periods; allowing
   `invoiced` periods lets late events create wallet ledger captures after the invoice is frozen.
 - 2026-07-04: Browser/onboarding usage callers should use `POST /v1/usage/record` for async

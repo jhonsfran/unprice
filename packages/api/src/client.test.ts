@@ -63,8 +63,10 @@ describe("Unprice client", () => {
     expect(typeof client.usage.consume).toBe("function")
     expect(typeof client.runs.start).toBe("function")
     expect(typeof client.runs.consume).toBe("function")
+    expect(typeof client.runs.settle).toBe("function")
     expect(typeof client.runs.end).toBe("function")
     expect(typeof client.runs.get).toBe("function")
+    expect(typeof client.reservations.reserve).toBe("function")
     expect(typeof client.customers.signUp).toBe("function")
     expect(typeof client.features.list).toBe("function")
     expect(typeof client.planVersions.get).toBe("function")
@@ -95,11 +97,13 @@ describe("Unprice client", () => {
 
     expect(typeof client.runs.start).toBe("function")
     expect(typeof client.runs.consume).toBe("function")
+    expect(typeof client.runs.settle).toBe("function")
     expect(typeof client.runs.end).toBe("function")
     expect(typeof client.runs.get).toBe("function")
     expect("agents" in client).toBe(false)
 
     expectTypeOf(client.runs.start).parameter(0).toEqualTypeOf<OperationInput<"runs.start">>()
+    expectTypeOf(client.runs.settle).parameter(0).toEqualTypeOf<OperationInput<"runs.settle">>()
     expectTypeOf<{
       budgetAmountMinor: number
       idempotencyKey: string

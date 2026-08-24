@@ -6,6 +6,7 @@ import type {
   GetRunStatusInput,
   RunBudgetDecision,
   RunBudgetSummary,
+  SettleRunInput,
   StartRunInput,
 } from "./contracts"
 import type { RunBudgetProcessor } from "./processor"
@@ -18,6 +19,7 @@ type RunBudgetRpcTarget = Pick<
   | "flushCaptures"
   | "flushCapturesForInvoicing"
   | "getRunStatus"
+  | "settleRun"
   | "startRun"
 >
 
@@ -39,6 +41,10 @@ export class RunBudgetRpcShell {
 
   applySyncEvent(input: ApplyRunSyncEventInput): Promise<RunBudgetDecision> {
     return this.serializeMutation(() => this.target.applySyncEvent(input))
+  }
+
+  settleRun(input: SettleRunInput): Promise<RunBudgetDecision> {
+    return this.serializeMutation(() => this.target.settleRun(input))
   }
 
   endRun(input: EndRunInput): Promise<RunBudgetSummary> {

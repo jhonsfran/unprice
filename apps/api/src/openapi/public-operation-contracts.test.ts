@@ -28,6 +28,7 @@ import { route as planVersionsListRoute } from "~/routes/plans/listPlanVersionsV
 import { route as runsConsumeRoute } from "~/routes/runs/applyRunSyncEventV1"
 import { route as runsEndRoute } from "~/routes/runs/endRunV1"
 import { route as runsGetRoute } from "~/routes/runs/getRunV1"
+import { route as runsSettleRoute } from "~/routes/runs/settleRunV1"
 import { route as runsStartRoute } from "~/routes/runs/startRunV1"
 import { route as subscriptionsGetRoute } from "~/routes/subscriptions/getSubscriptionV1"
 import {
@@ -56,6 +57,7 @@ const routes = [
   usageConsumeRoute,
   runsStartRoute,
   runsConsumeRoute,
+  runsSettleRoute,
   runsEndRoute,
   runsGetRoute,
   customersSignUpRoute,
@@ -93,6 +95,7 @@ const expectedRoutes = new Map<string, string>([
   ["usage.consume", "POST /v1/usage/consume"],
   ["runs.start", "POST /v1/runs/start"],
   ["runs.consume", "POST /v1/runs/consume/{runId}"],
+  ["runs.settle", "POST /v1/runs/settle/{runId}"],
   ["runs.end", "POST /v1/runs/end/{runId}"],
   ["runs.get", "GET /v1/runs/get/{runId}"],
   ["customers.signUp", "POST /v1/customers/sign-up"],
@@ -145,6 +148,7 @@ const expectedSdkPublicOperations = [
   "usage.consume",
   "runs.start",
   "runs.consume",
+  "runs.settle",
   "runs.end",
   "runs.get",
   "customers.signUp",

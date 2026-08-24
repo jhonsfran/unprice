@@ -1,11 +1,12 @@
-import type { RunLedgerSyncDecision } from "@unprice/db/validators"
+import type { RunLedgerSettlementDecision } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import type { BudgetRunService } from "../../budget-runs"
 import type { IngestionReportingOutcomeDispatcher } from "../../ingestion"
-import type { RunBudgetClient } from "./run-budget-client"
+import type { RunBudgetClient, RunBudgetSummary } from "./run-budget-client"
 import {
   type RunEntitlementResolver,
   type RunEventInput,
+  type RunRecord,
   loadAccessibleRun,
   mapEntitlementRejection,
   mapRunRejection,
@@ -13,33 +14,31 @@ import {
   reportRunRejection,
   resolveRunEntitlement,
   toPublicRun,
-  toStoredPublicRun,
   updateRunFromDecision,
 } from "./run-event"
 import { RunUseCaseError } from "./start-run"
 
-export type ApplyRunSyncEventDeps = {
+export type SettleRunDeps = {
   services: Pick<{ budgetRuns: BudgetRunService }, "budgetRuns">
   runBudget: RunBudgetClient
   entitlementResolver: RunEntitlementResolver
   reportingDispatcher: IngestionReportingOutcomeDispatcher
-  assertCustomerCanConsume(params: { customerId: string; projectId: string }): Promise<void>
 }
 
-export type ApplyRunSyncEventInput = RunEventInput
+export type SettleRunInput = RunEventInput
 
-export async function applyRunSyncEvent(
-  deps: ApplyRunSyncEventDeps,
-  input: ApplyRunSyncEventInput
-): Promise<Result<RunLedgerSyncDecision, RunUseCaseError>> {
+export async function settleRun(
+  deps: SettleRunDeps,
+  input: SettleRunInput
+): Promise<Result<RunLedgerSettlementDecision, RunUseCaseError>> {
   const loaded = await loadAccessibleRun(deps.services.budgetRuns, input)
   if (loaded.err) return loaded
   const run = loaded.val
 
-  await deps.assertCustomerCanConsume({ customerId: run.customerId, projectId: run.projectId })
-
   const resolution = await resolveRunEntitlement(deps.entitlementResolver, run, input)
   if (!resolution.ok) {
+    const closed = await closeRejectedRun(deps, run, input.now)
+    if (closed.err) return closed
     await reportRunRejection({
       event: input,
       reason: resolution.reason,
@@ -49,11 +48,11 @@ export async function applyRunSyncEvent(
     return Ok({
       accepted: false,
       reason: mapEntitlementRejection(resolution.reason),
-      run: toStoredPublicRun(run),
+      run: toPublicRun(run, closed.val, "failed"),
     })
   }
 
-  const applied = await deps.runBudget.applySyncEvent({
+  const settled = await deps.runBudget.settleRun({
     projectId: run.projectId,
     customerId: run.customerId,
     runId: run.id,
@@ -66,14 +65,18 @@ export async function applyRunSyncEvent(
     entitlement: resolution.entitlement,
     grants: resolution.grants,
   })
-  if (applied.err) return Err(new RunUseCaseError("BUDGET_ERROR"))
+  if (settled.err) return Err(new RunUseCaseError("BUDGET_ERROR"))
 
-  const decision = applied.val
+  const decision = settled.val
+  const status =
+    !decision.allowed && decision.budget.status === "canceled"
+      ? ("failed" as const)
+      : decision.budget.status
   const updated = await updateRunFromDecision({
     budgetRuns: deps.services.budgetRuns,
     decision,
     run,
-    status: decision.budget.status,
+    status,
   })
   if (updated.err) return updated
 
@@ -87,6 +90,37 @@ export async function applyRunSyncEvent(
   return Ok({
     accepted: decision.allowed,
     reason: decision.allowed ? "accepted" : mapRunRejection(decision.rejectionReason),
-    run: toPublicRun(run, decision.budget),
+    fundingStatus: decision.fundingStatus,
+    fundedAmount: decision.fundedAmount,
+    unfundedAmount: decision.unfundedAmount,
+    run: toPublicRun(run, decision.budget, status),
   })
+}
+
+async function closeRejectedRun(
+  deps: SettleRunDeps,
+  run: RunRecord,
+  endedAt: number
+): Promise<Result<RunBudgetSummary, RunUseCaseError>> {
+  const closed = await deps.runBudget.endRun({
+    projectId: run.projectId,
+    customerId: run.customerId,
+    runId: run.id,
+    status: "canceled",
+    endedAt,
+  })
+  if (closed.err || closed.val.status === "running" || closed.val.endedAt == null) {
+    return Err(new RunUseCaseError("BUDGET_ERROR"))
+  }
+
+  const update = await deps.services.budgetRuns.updateRunSummary({
+    projectId: run.projectId,
+    runId: run.id,
+    status: "failed",
+    statusReason: "ENTITLEMENT_DENIED",
+    consumedAmount: closed.val.consumedAmount,
+    remainingAmount: closed.val.remainingAmount,
+    endedAt: new Date(closed.val.endedAt),
+  })
+  return update.err ? Err(new RunUseCaseError("BUDGET_ERROR")) : Ok(closed.val)
 }

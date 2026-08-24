@@ -28,6 +28,7 @@ export const sdkOperationIds = [
   "runs.consume",
   "runs.end",
   "runs.get",
+  "runs.settle",
   "runs.start",
   "subscriptions.get",
   "usage.consume",
@@ -131,6 +132,9 @@ export type GeneratedSdkResources = {
     ) => Promise<ApiResult<OperationResponse<"runs.consume">>>
     end: (req: OperationInput<"runs.end">) => Promise<ApiResult<OperationResponse<"runs.end">>>
     get: (req: OperationInput<"runs.get">) => Promise<ApiResult<OperationResponse<"runs.get">>>
+    settle: (
+      req: OperationInput<"runs.settle">
+    ) => Promise<ApiResult<OperationResponse<"runs.settle">>>
     start: (
       req: OperationInput<"runs.start">
     ) => Promise<ApiResult<OperationResponse<"runs.start">>>
@@ -221,6 +225,8 @@ export function createGeneratedSdkResources(
         toResult(openapi.POST("/v1/runs/end/{runId}", { params: { path: { runId } }, body })),
       get: ({ runId, ...query }) =>
         toResult(openapi.GET("/v1/runs/get/{runId}", { params: { path: { runId }, query } })),
+      settle: ({ runId, ...body }) =>
+        toResult(openapi.POST("/v1/runs/settle/{runId}", { params: { path: { runId } }, body })),
       start: (body) => toResult(openapi.POST("/v1/runs/start", { body })),
     },
     subscriptions: {

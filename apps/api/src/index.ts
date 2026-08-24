@@ -40,6 +40,7 @@ import { registerListPlanVersionsV1 } from "./routes/plans/listPlanVersionsV1"
 import { registerApplyRunSyncEventV1 } from "./routes/runs/applyRunSyncEventV1"
 import { registerEndRunV1 } from "./routes/runs/endRunV1"
 import { registerGetRunV1 } from "./routes/runs/getRunV1"
+import { registerSettleRunV1 } from "./routes/runs/settleRunV1"
 import { registerStartRunV1 } from "./routes/runs/startRunV1"
 import { registerGetSubscriptionV1 } from "./routes/subscriptions/getSubscriptionV1"
 
@@ -165,6 +166,7 @@ registerUpdateACLV1(app)
 // Run routes
 registerStartRunV1(app)
 registerApplyRunSyncEventV1(app)
+registerSettleRunV1(app)
 registerEndRunV1(app)
 registerGetRunV1(app)
 

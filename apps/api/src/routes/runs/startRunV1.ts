@@ -22,7 +22,8 @@ export const route = createRoute(
       description:
         "Start a new budgeted run with a budget reservation against a customer. " +
         "The currency is inherited from the customer's active subscription plan. " +
-        "budgetAmountMinor is in currency minor units, usually cents (e.g. 5000 = $50.00 USD).",
+        "budgetAmountMinor is in currency minor units, usually cents (e.g. 5000 = $50.00 USD). " +
+        "The reservation expires after one hour by default. expiresAt can override it up to 24 hours after start.",
       method: "post",
       tags,
       request: {
@@ -108,6 +109,13 @@ export const registerStartRunV1 = (app: App) =>
           code: "BAD_REQUEST",
           message:
             "Insufficient wallet balance to reserve budget. Top up the customer wallet or reduce the budget amount.",
+        })
+      }
+
+      if (result.err instanceof RunUseCaseError && result.err.message === "INVALID_EXPIRATION") {
+        throw new UnpriceApiError({
+          code: "BAD_REQUEST",
+          message: "expiresAt cannot be more than 24 hours after the run starts.",
         })
       }
 

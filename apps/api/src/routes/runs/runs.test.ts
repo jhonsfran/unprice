@@ -8,6 +8,7 @@ import { RunUseCaseError } from "@unprice/services/use-cases"
 import { registerApplyRunSyncEventV1 } from "./applyRunSyncEventV1"
 import { registerEndRunV1 } from "./endRunV1"
 import { registerGetRunV1 } from "./getRunV1"
+import { registerSettleRunV1 } from "./settleRunV1"
 import { registerStartRunV1 } from "./startRunV1"
 
 const authMocks = vi.hoisted(() => ({
@@ -40,6 +41,7 @@ const useCaseMocks = vi.hoisted(() => ({
   startRun: vi.fn(),
   startRunForCustomerSubscription: vi.fn(),
   applyRunSyncEvent: vi.fn(),
+  settleRun: vi.fn(),
   endRun: vi.fn(),
   getRun: vi.fn(),
 }))
@@ -51,6 +53,7 @@ vi.mock("@unprice/services/use-cases", async (importOriginal) => {
     startRun: useCaseMocks.startRun,
     startRunForCustomerSubscription: useCaseMocks.startRunForCustomerSubscription,
     applyRunSyncEvent: useCaseMocks.applyRunSyncEvent,
+    settleRun: useCaseMocks.settleRun,
     endRun: useCaseMocks.endRun,
     getRun: useCaseMocks.getRun,
   }
@@ -65,6 +68,7 @@ vi.mock("~/ingestion/run-budget/client", () => ({
   CloudflareRunBudgetClient: class {
     startRun = vi.fn()
     applySyncEvent = vi.fn()
+    settleRun = vi.fn()
     endRun = vi.fn()
     getRunStatus = runBudgetMocks.getRunStatus
   },
@@ -187,6 +191,7 @@ function createTestApp() {
 
   registerStartRunV1(app)
   registerApplyRunSyncEventV1(app)
+  registerSettleRunV1(app)
   registerEndRunV1(app)
   registerGetRunV1(app)
 
@@ -204,6 +209,75 @@ function createTestApp() {
 // ---------------------------------------------------------------------------
 
 describe("budgeted runs API", () => {
+  it("maps incurred usage into the settlement use case without calling the pre-work bouncer", async () => {
+    useCaseMocks.settleRun.mockResolvedValue({
+      val: {
+        accepted: true,
+        reason: "accepted",
+        fundingStatus: "partially_funded",
+        fundedAmount: 500_000_000,
+        unfundedAmount: 100_000_000,
+        run: {
+          runId: "brun_abc123",
+          status: "running",
+          endedAt: null,
+          customerId: "cus_default",
+          budgetAmount: 1_000_000_000,
+          consumedAmount: 600_000_000,
+          remainingAmount: 400_000_000,
+          currency: "USD",
+          workloadType: null,
+          workloadId: null,
+          traceId: null,
+          parentRunId: null,
+        },
+      },
+      err: undefined,
+    })
+    const { app, env, executionCtx } = createTestApp()
+
+    const response = await app.fetch(
+      new Request("https://example.com/v1/runs/settle/brun_abc123", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer sk_test",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          featureSlug: "tokens",
+          idempotencyKey: "idem_settle_1",
+          id: "evt_settle_1",
+          eventSlug: "token_usage",
+          timestamp: 4070908800000,
+          properties: { tokens: 6_000 },
+        }),
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
+      accepted: true,
+      fundingStatus: "partially_funded",
+      fundedAmountMinor: 500,
+      unfundedAmountMinor: 100,
+      run: { status: "running" },
+    })
+    expect(useCaseMocks.settleRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runBudget: expect.objectContaining({ settleRun: expect.any(Function) }),
+      }),
+      expect.objectContaining({
+        runId: "brun_abc123",
+        featureSlug: "tokens",
+        idempotencyKey: "idem_settle_1",
+        event: expect.objectContaining({ properties: { tokens: 6_000 } }),
+      })
+    )
+    expect(bouncerMocks.bouncer).not.toHaveBeenCalled()
+  })
+
   it("rejects a disabled customer before starting a budgeted run", async () => {
     authMocks.resolveCustomerIdForApiKey.mockReturnValue({
       success: true,
@@ -298,6 +372,41 @@ describe("budgeted runs API", () => {
       currency: "USD",
     })
     expect(body).not.toHaveProperty("budgetAmount")
+  })
+
+  it("returns a bad request when expiration exceeds 24 hours", async () => {
+    authMocks.resolveCustomerIdForApiKey.mockReturnValue({
+      success: true,
+      customerId: "cus_default",
+    })
+    useCaseMocks.startRunForCustomerSubscription.mockResolvedValue({
+      val: undefined,
+      err: new RunUseCaseError("INVALID_EXPIRATION"),
+    })
+    const { app, env, executionCtx } = createTestApp()
+
+    const response = await app.fetch(
+      new Request("https://example.com/v1/runs/start", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer sk_test",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          budgetAmountMinor: 1000,
+          idempotencyKey: "idem_invalid_expiration",
+          expiresAt: Date.now() + 24 * 60 * 60 * 1000 + 1,
+        }),
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "expiresAt cannot be more than 24 hours after the run starts.",
+    })
   })
 
   it("starts a run with workload, trace, and parent attribution", async () => {

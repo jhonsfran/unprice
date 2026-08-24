@@ -9,8 +9,9 @@ import type {
   IngestionGrant,
   IngestionReportingOutcomeDispatcher,
 } from "../../ingestion"
-import { type RunEntitlementResolver, applyRunSyncEvent } from "./apply-run-sync-event"
+import { applyRunSyncEvent } from "./apply-run-sync-event"
 import type { RunBudgetClient } from "./run-budget-client"
+import type { RunEntitlementResolver } from "./run-event"
 
 const TEST_NOW = Date.UTC(2026, 5, 19, 12, 0, 0)
 

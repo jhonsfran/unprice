@@ -30,11 +30,14 @@ describeRunBudgetProcessorContract(
   "RunBudgetProcessor (Durable Object SQLite contract)",
   async () => {
     const name = `test:run-budget-contract:${crypto.randomUUID()}`
+    const clockOrigin = Date.now() + 7 * 24 * 60 * 60 * 1000
+    const translateContractTime = (timestamp: number) =>
+      clockOrigin + (timestamp - RUN_BUDGET_TEST_NOW)
     const stats = {
       pricingCalls: 0,
       captureCalls: 0,
       captureFailing: false,
-      now: Date.now(),
+      now: clockOrigin,
       schedulerFailures: 0,
     }
     const createTarget = (): RunBudgetProcessorContractTarget => {
@@ -106,10 +109,23 @@ describeRunBudgetProcessorContract(
         })
 
       return {
-        startRun: (input: StartRunInput) => invoke((processor) => processor.startRun(input)),
+        startRun: (input: StartRunInput) =>
+          invoke((processor) =>
+            processor.startRun({
+              ...input,
+              now: translateContractTime(input.now),
+              expiresAt:
+                input.expiresAt == null ? input.expiresAt : translateContractTime(input.expiresAt),
+            })
+          ),
         applySyncEvent: (input: ApplyRunSyncEventInput) =>
-          invoke((processor) => processor.applySyncEvent(input)),
-        endRun: (input: EndRunInput) => invoke((processor) => processor.endRun(input)),
+          invoke((processor) =>
+            processor.applySyncEvent({ ...input, now: translateContractTime(input.now) })
+          ),
+        endRun: (input: EndRunInput) =>
+          invoke((processor) =>
+            processor.endRun({ ...input, endedAt: translateContractTime(input.endedAt) })
+          ),
         getRunStatus: (input: GetRunStatusInput) =>
           invoke((processor) => processor.getRunStatus(input)),
         flushCaptures: () => invoke((processor) => processor.flushCaptures()),

@@ -11,6 +11,7 @@ import type {
   GetRunStatusInput,
   RunBudgetDecision,
   RunBudgetSummary,
+  SettleRunInput,
   StartRunInput,
 } from "./contracts"
 import * as schema from "./db/schema"
@@ -60,6 +61,11 @@ export class RunBudgetDO extends DurableObject {
   async applySyncEvent(input: ApplyRunSyncEventInput): Promise<RunBudgetDecision> {
     await this.ready
     return this.rpc.applySyncEvent(input)
+  }
+
+  async settleRun(input: SettleRunInput): Promise<RunBudgetDecision> {
+    await this.ready
+    return this.rpc.settleRun(input)
   }
 
   async endRun(input: EndRunInput): Promise<RunBudgetSummary> {

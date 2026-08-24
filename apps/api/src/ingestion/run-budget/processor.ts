@@ -1,3 +1,4 @@
+import { resolveRunReservationExpiration } from "@unprice/services/budget-runs"
 import { findBillingPeriodAt } from "@unprice/services/ingestion"
 import { CAPTURE_ABANDONED_STATUS, MAX_CAPTURE_ATTEMPTS, captureBackoffMs } from "./capture-policy"
 import { captureIntentFlushSeq } from "./capture-range"
@@ -9,11 +10,13 @@ import {
   type GetRunStatusInput,
   type RunBudgetDecision,
   type RunBudgetSummary,
+  type SettleRunInput,
   type StartRunInput,
   applyRunSyncEventInputSchema,
   endRunInputSchema,
   flushRunBudgetCapturesForInvoicingInputSchema,
   getRunStatusInputSchema,
+  settleRunInputSchema,
   startRunInputSchema,
 } from "./contracts"
 import type {
@@ -31,11 +34,21 @@ class RunCapturesPendingError extends Error {
   }
 }
 
+type ResolvedStartRunInput = Omit<StartRunInput, "expiresAt"> & { expiresAt: number }
+
 export class RunBudgetProcessor {
   constructor(private readonly deps: RunBudgetProcessorDeps) {}
 
   async startRun(rawInput: StartRunInput): Promise<RunBudgetSummary> {
-    const input = startRunInputSchema.parse(rawInput)
+    const parsedInput = startRunInputSchema.parse(rawInput)
+    const expiration = resolveRunReservationExpiration({
+      expiresAt: parsedInput.expiresAt,
+      now: parsedInput.now,
+    })
+    if (!expiration.valid) {
+      throw new Error("Run expiration cannot exceed 24 hours")
+    }
+    const input: ResolvedStartRunInput = { ...parsedInput, expiresAt: expiration.expiresAt }
 
     // Idempotent: if run already exists, return current state
     const existing = await this.deps.store.loadRun(input.runId)
@@ -82,16 +95,14 @@ export class RunBudgetProcessor {
       lastCaptureSeq: 0,
       startedAt: input.now,
       endedAt: null,
-      expiresAt: input.expiresAt ?? null,
+      expiresAt: input.expiresAt,
       lastEventAt: null,
       traceId: input.traceId ?? null,
       metadataJson: JSON.stringify(input.metadata),
       reconciliationNeeded: false,
     })
 
-    if (input.expiresAt) {
-      await this.scheduleAlarmAt(input.expiresAt)
-    }
+    await this.scheduleAlarmAt(input.expiresAt)
 
     const run = await this.deps.store.loadRun(input.runId)
     if (!run) throw new Error("Run state missing after startRun insert")
@@ -100,10 +111,18 @@ export class RunBudgetProcessor {
 
   async applySyncEvent(rawInput: ApplyRunSyncEventInput): Promise<RunBudgetDecision> {
     const input = applyRunSyncEventInputSchema.parse(rawInput)
-    return this.applySyncEventLocked(input)
+    return this.applySyncEventLocked(input, { allowUnfunded: false, enforceLimit: true })
   }
 
-  private async applySyncEventLocked(input: ApplyRunSyncEventInput): Promise<RunBudgetDecision> {
+  async settleRun(rawInput: SettleRunInput): Promise<RunBudgetDecision> {
+    const input = settleRunInputSchema.parse(rawInput)
+    return this.applySyncEventLocked(input, { allowUnfunded: true, enforceLimit: false })
+  }
+
+  private async applySyncEventLocked(
+    input: ApplyRunSyncEventInput,
+    options: { allowUnfunded: boolean; enforceLimit: boolean }
+  ): Promise<RunBudgetDecision> {
     // Check idempotency
     const cached = await this.deps.store.loadIdempotency(input.idempotencyKey)
     if (cached) {
@@ -185,7 +204,11 @@ export class RunBudgetProcessor {
     }
 
     // Delegate pricing to EntitlementWindowDO with external reservation mode
-    const entitlementResult = await this.callEntitlementWindow(input, remainingAmount)
+    const entitlementResult = await this.callEntitlementWindow(
+      input,
+      options.allowUnfunded ? Number.MAX_SAFE_INTEGER : remainingAmount,
+      options.enforceLimit
+    )
 
     if (!entitlementResult.allowed) {
       // Pricing/limit denied or run budget exceeded
@@ -211,7 +234,12 @@ export class RunBudgetProcessor {
     // Derive priced cost from meter facts
     const meterFacts = this.withRunContext(run, entitlementResult.meterFacts)
     const pricedAmount = this.sumPricedAmount(meterFacts)
-    const bucketDeltas = this.deriveBucketDeltas(run, input.entitlement, meterFacts)
+    const fundedAmount = Math.min(pricedAmount, remainingAmount)
+    const unfundedAmount = pricedAmount - fundedAmount
+    const bucketDeltas = this.allocateFundedBucketDeltas(
+      this.deriveBucketDeltas(run, input.entitlement, meterFacts),
+      fundedAmount
+    )
 
     const updatedRun = this.projectRunSpend(run, pricedAmount, input.now)
     const decision: RunBudgetDecision = {
@@ -219,6 +247,14 @@ export class RunBudgetProcessor {
       state: "processed",
       budget: this.toSummary(updatedRun),
       meterFacts,
+      fundingStatus:
+        fundedAmount === 0 && unfundedAmount > 0
+          ? "unfunded"
+          : unfundedAmount > 0
+            ? "partially_funded"
+            : "fully_funded",
+      fundedAmount,
+      unfundedAmount,
     }
 
     await this.commitSpendAndIdempotency(
@@ -230,8 +266,9 @@ export class RunBudgetProcessor {
       bucketDeltas
     )
 
-    // Schedule alarm for capture flush if there's pending spend
-    if (updatedRun.consumedAmount > updatedRun.flushedAmount) {
+    // Only funded spend produces capture buckets. Unfunded usage is still recorded,
+    // but there is nothing that the wallet can capture for that amount.
+    if (bucketDeltas.length > 0) {
       await this.scheduleAlarm()
     }
 
@@ -525,7 +562,7 @@ export class RunBudgetProcessor {
   }
 
   private async createRunReservation(
-    input: StartRunInput
+    input: ResolvedStartRunInput
   ): Promise<
     | { success: true; reservationId: string; allocationAmount: number }
     | { success: false; reason: string }
@@ -543,7 +580,7 @@ export class RunBudgetProcessor {
       refillThresholdBps: 2000,
       refillChunkAmount: input.budgetAmount,
       periodStartAt: new Date(input.now),
-      periodEndAt: new Date(input.expiresAt ?? input.now + 24 * 60 * 60 * 1000),
+      periodEndAt: new Date(input.expiresAt),
       idempotencyKey: input.idempotencyKey,
       metadata: {
         run_id: input.runId,
@@ -570,7 +607,11 @@ export class RunBudgetProcessor {
    * Creates fresh wallet operations for one external wallet use. The lazy Neon
    * WebSocket connection and services must never cross Worker/DO request boundaries.
    */
-  private async callEntitlementWindow(input: ApplyRunSyncEventInput, remainingAmount: number) {
+  private async callEntitlementWindow(
+    input: ApplyRunSyncEventInput,
+    remainingAmount: number,
+    enforceLimit: boolean
+  ) {
     // The entitlement and grants are validated upstream by the use case. The
     // EntitlementWindowDO re-parses them with its own applyInputSchema at the RPC boundary.
     return this.deps.pricing.apply({
@@ -581,7 +622,7 @@ export class RunBudgetProcessor {
       customerEntitlementId: input.customerEntitlementId,
       entitlement: input.entitlement,
       grants: input.grants,
-      enforceLimit: true,
+      enforceLimit,
       now: input.now,
       wallet: { mode: "external_reservation", remainingAmount },
     })
@@ -695,6 +736,28 @@ export class RunBudgetProcessor {
         currency: run.currency,
         amount: fact.amount,
       }
+    })
+  }
+
+  private allocateFundedBucketDeltas(
+    bucketDeltas: RunSpendBucketDelta[],
+    fundedAmount: number
+  ): RunSpendBucketDelta[] {
+    let remaining = fundedAmount
+
+    return bucketDeltas.flatMap((delta) => {
+      if (remaining <= 0 || delta.amount <= 0) return []
+
+      const amount = Math.min(delta.amount, remaining)
+      remaining -= amount
+
+      return [
+        {
+          ...delta,
+          amount,
+          quantity: delta.quantity * (amount / delta.amount),
+        },
+      ]
     })
   }
 

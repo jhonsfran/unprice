@@ -41,9 +41,75 @@ if (!result.allowed) {
 }
 ```
 
-Use `access.check` for read-only shadow checks, `usage.record` for async usage evidence, and
-`runs.start` / `runs.consume` / `runs.end` when a multi-step workload needs a budget before it
-starts.
+Use `access.check` for read-only shadow checks and `usage.record` for async usage evidence. For a
+multi-step workload, call `runs.start` once, `runs.settle` after each completed provider step, and
+`runs.end` once. `runs.consume` remains the pre-work enforcing operation.
+
+## Reserve cost before expensive work
+
+Use `reservations.reserve` when one provider call or other expensive operation must not start
+until the customer can cover a developer-defined maximum cost.
+
+```ts
+import { generateText } from "ai"
+import { Unprice } from "@unprice/api"
+
+const unprice = new Unprice({ token: process.env.UNPRICE_TOKEN! })
+const messageId = "message_123"
+
+const { result: reservation, error } = await unprice.reservations.reserve({
+  customerId: "cus_1234567890",
+  maximumAmountMinor: 10,
+  idempotencyKey: messageId,
+})
+
+if (error) {
+  // Do not call the provider when Unprice cannot reserve the maximum cost.
+  return new Response("Budget unavailable", { status: 402 })
+}
+
+const generation = await generateText({
+  model,
+  maxOutputTokens: 2_000,
+  prompt,
+})
+
+const settlement = await reservation.settle({
+  featureSlug: "ai-tokens",
+  eventSlug: "ai-completion",
+  properties: {
+    input_tokens: generation.usage.inputTokens,
+    output_tokens: generation.usage.outputTokens,
+  },
+})
+
+if (
+  settlement.error ||
+  (!settlement.result.accepted && settlement.result.reason !== "duplicate")
+) {
+  throw new Error("Usage could not be settled")
+}
+```
+
+`maximumAmountMinor` uses the customer's plan currency in minor units. For a USD plan, `10` is
+$0.10. Set the provider's output limit when it supports one so the reserved amount can fully fund
+the provider usage. If actual usage costs more, settlement still records all usage and returns a
+`partially_funded` or `unfunded` funding status. Unprice never increases the reservation or captures
+more than `maximumAmountMinor`. For settlement, `accepted` means that Unprice recorded the usage;
+the funding fields state how much the reservation covered.
+
+Call `reservation.release()` only when the operation produced no billable usage. If the provider
+failed after it did billable work and reports usage, settle that usage instead. Do not release
+after a settlement error because the provider cost can already exist; retry settlement with the
+same reservation handle. Settlement records the incurred usage without enforcing the feature
+limit, captures the safely funded cost from the reserved money envelope, and then closes the run.
+An unclosed reservation expires one hour after it starts. The Durable Object then releases its
+unused reserved funds. Pass `expiresAt` as an epoch-millisecond timestamp when the operation needs
+a different window. The timestamp cannot be more than 24 hours after the reservation starts.
+
+For streaming APIs, reserve before `streamText`, settle from `onFinish`, and apply the same
+provider-specific decision on errors. The lower-level `runs` API remains available for workflows
+that need several usage events or a serializable run identifier.
 
 ## Monetization configuration
 

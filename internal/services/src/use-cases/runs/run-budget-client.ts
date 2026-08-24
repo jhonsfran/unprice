@@ -32,6 +32,9 @@ export type RunSyncDecision = {
   message?: string
   budget: RunBudgetSummary
   meterFacts: AnalyticsEntitlementMeterFact[]
+  fundingStatus?: "fully_funded" | "partially_funded" | "unfunded"
+  fundedAmount?: number
+  unfundedAmount?: number
 }
 
 export class RunBudgetError extends BaseError {
@@ -83,6 +86,34 @@ export interface RunBudgetClient {
       meterConfig: NonNullable<IngestionEntitlement["meterConfig"]>
     }
     /** Active grants for the entitlement */
+    grants: IngestionGrant[]
+  }): Promise<Result<RunSyncDecision, RunBudgetError>>
+
+  settleRun(input: {
+    projectId: string
+    customerId: string
+    runId: string
+    featureSlug: string
+    idempotencyKey: string
+    event: {
+      id: string
+      slug: string
+      timestamp: number
+      properties: Record<string, unknown>
+    }
+    source: {
+      workspaceId: string
+      environment: string
+      apiKeyId: string | null
+      sourceType: "api_key" | "system" | "unknown"
+      sourceId: string
+      sourceName: string | null
+    }
+    now: number
+    customerEntitlementId: string
+    entitlement: IngestionEntitlement & {
+      meterConfig: NonNullable<IngestionEntitlement["meterConfig"]>
+    }
     grants: IngestionGrant[]
   }): Promise<Result<RunSyncDecision, RunBudgetError>>
 

@@ -2,7 +2,7 @@ import type { RunLedgerSummary } from "@unprice/db/validators"
 import { BaseError, Err, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { fromCurrencyMinor, toLedgerMinor } from "@unprice/money"
-import type { BudgetRunService } from "../../budget-runs"
+import { type BudgetRunService, resolveRunReservationExpiration } from "../../budget-runs"
 import type { CustomerService } from "../../customers/service"
 import { type SyncCatchUpService, ensureSubscriptionRenewed } from "../../subscriptions"
 import type { RunBudgetClient } from "./run-budget-client"
@@ -20,6 +20,7 @@ export class RunUseCaseError extends BaseError {
       | "SUBSCRIPTION_REQUIRED"
       | "BUDGET_ERROR"
       | "WALLET_EMPTY"
+      | "INVALID_EXPIRATION"
   ) {
     super({ message })
   }
@@ -43,6 +44,7 @@ export type StartRunDeps = {
   services: Pick<{ budgetRuns: BudgetRunService }, "budgetRuns">
   runBudget: RunBudgetClient
   logger?: Logger
+  now?: () => number
 }
 
 export type StartRunForCustomerSubscriptionInput = Omit<
@@ -105,6 +107,7 @@ export async function startRunForCustomerSubscription(
     {
       services: { budgetRuns: deps.services.budgetRuns },
       runBudget: deps.runBudget,
+      now: () => now,
     },
     {
       ...input,
@@ -118,6 +121,14 @@ export async function startRun(
   deps: StartRunDeps,
   input: StartRunResolvedInput
 ): Promise<Result<RunLedgerSummary, RunUseCaseError>> {
+  const expiration = resolveRunReservationExpiration({
+    expiresAt: input.expiresAt,
+    now: deps.now?.() ?? Date.now(),
+  })
+  if (!expiration.valid) {
+    return Err(new RunUseCaseError("INVALID_EXPIRATION"))
+  }
+
   // 1. Create or fetch the Postgres budget_runs row by idempotency key
   const createResult = await deps.services.budgetRuns.createRun({
     projectId: input.projectId,
@@ -131,7 +142,7 @@ export async function startRun(
     traceId: input.traceId,
     parentRunId: input.parentRunId,
     metadata: input.metadata,
-    expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
+    expiresAt: new Date(expiration.expiresAt),
   })
 
   if (createResult.err) {
@@ -139,6 +150,7 @@ export async function startRun(
   }
 
   const run = createResult.val
+  const canonicalExpiresAt = run.expiresAt?.getTime() ?? expiration.expiresAt
 
   if (run.status === "failed") {
     return Err(
@@ -159,7 +171,7 @@ export async function startRun(
     traceId: input.traceId,
     parentRunId: input.parentRunId,
     metadata: input.metadata,
-    expiresAt: input.expiresAt,
+    expiresAt: canonicalExpiresAt,
   })
 
   if (doResult.err) {

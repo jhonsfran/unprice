@@ -1,9 +1,6 @@
 import type { MeterConfig } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logs"
-import type {
-  RunEntitlementResolution,
-  RunEntitlementResolver,
-} from "../use-cases/runs/apply-run-sync-event"
+import type { RunEntitlementResolution, RunEntitlementResolver } from "../use-cases/runs/run-event"
 import type {
   CustomerGrantContextReader,
   IngestionEntitlement,

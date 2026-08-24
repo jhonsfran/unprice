@@ -183,7 +183,7 @@ export type RunBudgetPricingInput = Pick<
   "customerId" | "entitlement" | "event" | "grants" | "idempotencyKey" | "now" | "projectId"
 > & {
   customerEntitlementId: string
-  enforceLimit: true
+  enforceLimit: boolean
   wallet: Extract<NonNullable<ApplyInput["wallet"]>, { mode: "external_reservation" }>
 }
 

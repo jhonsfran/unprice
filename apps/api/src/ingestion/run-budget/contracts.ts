@@ -85,6 +85,8 @@ export const applyRunSyncEventInputSchema = z.object({
   grants: z.array(runGrantSchema).min(1),
 })
 
+export const settleRunInputSchema = applyRunSyncEventInputSchema
+
 export const endRunInputSchema = z.object({
   runId: z.string().min(1),
   customerId: z.string().min(1),
@@ -119,10 +121,14 @@ export const runBudgetDecisionSchema = z.object({
   message: z.string().optional(),
   budget: runBudgetSummarySchema,
   meterFacts: z.array(entitlementMeterFactSchemaV1).default([]),
+  fundingStatus: z.enum(["fully_funded", "partially_funded", "unfunded"]).optional(),
+  fundedAmount: z.number().int().nonnegative().optional(),
+  unfundedAmount: z.number().int().nonnegative().optional(),
 })
 
 export type StartRunInput = z.infer<typeof startRunInputSchema>
 export type ApplyRunSyncEventInput = z.infer<typeof applyRunSyncEventInputSchema>
+export type SettleRunInput = z.infer<typeof settleRunInputSchema>
 export type EndRunInput = z.infer<typeof endRunInputSchema>
 export type GetRunStatusInput = z.infer<typeof getRunStatusInputSchema>
 export type FlushRunBudgetCapturesForInvoicingInput = z.infer<

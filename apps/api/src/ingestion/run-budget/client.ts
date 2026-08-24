@@ -55,11 +55,39 @@ export class CloudflareRunBudgetClient implements RunBudgetClient {
         message: decision.message,
         budget: decision.budget,
         meterFacts: decision.meterFacts ?? [],
+        fundingStatus: decision.fundingStatus,
+        fundedAmount: decision.fundedAmount,
+        unfundedAmount: decision.unfundedAmount,
       })
     } catch (error) {
       return Err(
         new RunBudgetErrorClass({
           message: error instanceof Error ? error.message : "applySyncEvent failed",
+        })
+      )
+    }
+  }
+
+  async settleRun(
+    input: Parameters<RunBudgetClient["settleRun"]>[0]
+  ): Promise<Result<RunSyncDecision, RunBudgetError>> {
+    try {
+      const decision: RunBudgetDecision = await this.stub(input).settleRun(input)
+      return Ok({
+        allowed: decision.allowed,
+        state: decision.state,
+        rejectionReason: decision.rejectionReason,
+        message: decision.message,
+        budget: decision.budget,
+        meterFacts: decision.meterFacts ?? [],
+        fundingStatus: decision.fundingStatus,
+        fundedAmount: decision.fundedAmount,
+        unfundedAmount: decision.unfundedAmount,
+      })
+    } catch (error) {
+      return Err(
+        new RunBudgetErrorClass({
+          message: error instanceof Error ? error.message : "settleRun failed",
         })
       )
     }

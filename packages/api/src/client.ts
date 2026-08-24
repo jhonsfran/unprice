@@ -7,6 +7,7 @@ import {
   createGeneratedSdkResources,
 } from "./generated/sdk-resources"
 import type { paths } from "./openapi"
+import { type Reservations, createReservations } from "./reservations"
 import type { ApiResult, Result } from "./result"
 import type { Telemetry } from "./telemetry"
 import { getTelemetry } from "./telemetry"
@@ -131,6 +132,7 @@ export class Unprice implements GeneratedSdkResources {
   public readonly access: GeneratedSdkResources["access"]
   public readonly usage: GeneratedSdkResources["usage"]
   public readonly runs: GeneratedSdkResources["runs"]
+  public readonly reservations: Reservations
   public readonly customers: GeneratedSdkResources["customers"]
   public readonly features: GeneratedSdkResources["features"]
   public readonly planVersions: GeneratedSdkResources["planVersions"]
@@ -185,6 +187,7 @@ export class Unprice implements GeneratedSdkResources {
     this.access = resources.access
     this.usage = resources.usage
     this.runs = resources.runs
+    this.reservations = createReservations(resources.runs)
     this.customers = resources.customers
     this.features = resources.features
     this.planVersions = resources.planVersions
