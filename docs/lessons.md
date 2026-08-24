@@ -34,6 +34,8 @@ patterns. Keep it cheap to load and useful.
 
 ## CI And GitHub Actions
 
+- 2026-08-24: Changesets release PRs can expand short arrays in package JSON; run Biome on the
+  generated package files before publishing the release commit.
 - 2026-08-24: When an audit batch mixes patched and unpatched advisories, update package overrides
   and aligned tool packages first; baseline only advisories whose registry metadata has no patch.
 - 2026-08-10: When one advisory affects multiple `nanoid` major lines, use version-qualified
