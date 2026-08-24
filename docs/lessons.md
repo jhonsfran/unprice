@@ -34,6 +34,8 @@ patterns. Keep it cheap to load and useful.
 
 ## CI And GitHub Actions
 
+- 2026-08-24: When an audit batch mixes patched and unpatched advisories, update package overrides
+  and aligned tool packages first; baseline only advisories whose registry metadata has no patch.
 - 2026-08-10: When one advisory affects multiple `nanoid` major lines, use version-qualified
   `pnpm-workspace.yaml` overrides and regenerate the lockfile offline; do not baseline a patch
   release that can be safely forced within each major line.
