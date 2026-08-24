@@ -46,13 +46,13 @@ export function ProblemSection() {
             <span className="text-background-textContrast">
               Your Redis counter is not a budget.
             </span>{" "}
-            It notices usage after the expensive action already ran, and when the customer disputes
-            the invoice, engineering reconstructs the charge from logs by hand.
+            It records usage after the expensive action runs. When a customer disputes the invoice,
+            engineering must reconstruct the charge from logs.
           </p>
         </div>
 
         <figure
-          aria-label="A trace of the DIY stack: the usage-reset cron last succeeded three days ago, the paid work executes and creates cost, and thirty days later the invoice bills $1,204. The customer opens a support ticket disputing the charge against their $500 budget and it is assigned to engineering — but the plan version is unknown, no entitlement or budget check ever ran, no credits were reserved, and there is no ledger entry. The evidence has to be reconstructed from logs by hand."
+          aria-label="A trace of the DIY stack. The usage reset last succeeded three days ago. Paid work creates cost, then the invoice bills $1,204 thirty days later. The customer disputes the charge against a $500 budget. Engineering has no plan version, budget check, credit reservation, or ledger entry, so it must reconstruct the evidence from logs."
           className="h-fit rounded-lg border border-background-border bg-surface-panel p-4 shadow-ambient sm:p-5"
         >
           <figcaption className="mb-4 flex items-baseline justify-between gap-4 border-background-border border-b pb-3">
@@ -111,7 +111,7 @@ export function ProblemSection() {
               <span className="font-mono text-[10px] text-background-text">reply due · 24h</span>
             </div>
             <p className="mt-2 text-background-textContrast text-base leading-7">
-              “Why were we charged $1,204? We set a $500 budget.”
+              &quot;Why were we charged $1,204? We set a $500 budget.&quot;
             </p>
             <div className="mt-1.5 flex items-baseline gap-2">
               <span className="font-mono text-[10px] text-background-text uppercase tracking-widest">

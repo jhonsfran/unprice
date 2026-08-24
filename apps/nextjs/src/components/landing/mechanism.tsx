@@ -79,9 +79,9 @@ export function MechanismSection() {
             <code className="rounded-sm bg-background-bg px-1 py-px font-mono text-[11px] text-background-textContrast">
               LIMIT_EXCEEDED
             </code>{" "}
-            before any cost exists — the wallet untouched, the ledger empty, the invoice clean. An
-            allow keeps the evidence that explains the invoice line, from the same decision that let
-            the work run.
+            before any cost exists. The wallet stays untouched, the ledger stays empty, and the
+            invoice has no line. An allow keeps the evidence from the decision that let the work
+            run.
           </p>
         </div>
       </div>

@@ -9,7 +9,7 @@ not send it to a browser, mobile app, or public repository.
 
 Create and revoke project API keys in the Unprice Dashboard.
 
-## Bearer Authentication
+## Bearer authentication
 
 Send the key as a Bearer token in the `Authorization` header:
 
@@ -30,7 +30,7 @@ curl -X GET "https://api.unprice.dev/v1/plan-versions/get/{planVersionId}" \
 For a browser or mobile application, call your own server. Your server can then call the Unprice
 API with the key. Rotate a key if you believe that it was exposed.
 
-## Authentication Errors
+## Authentication errors
 
 An authentication failure returns a `401 UNAUTHORIZED` or `403 FORBIDDEN` error. The response
 includes a request ID. Keep this ID when you contact support.

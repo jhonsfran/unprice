@@ -37,8 +37,8 @@ export default function ManifestoBelief() {
 
         <p className="mt-8 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
           <Balancer>
-            For usage-based SaaS, pricing is a runtime decision. We&apos;re here to make that the
-            default — in the open, on a money path you can read.
+            For usage-based SaaS, pricing is a runtime decision. Unprice keeps that decision in open
+            code you can run and inspect.
           </Balancer>
         </p>
 

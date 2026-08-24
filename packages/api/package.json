@@ -1,6 +1,6 @@
 {
   "name": "@unprice/api",
-  "description": "Unprice TypeScript SDK — open-source customer money path for usage-based SaaS. Authorize customer spend before paid work runs.",
+  "description": "Unprice TypeScript SDK for usage-based SaaS. Authorize customer spend before paid work runs.",
   "private": false,
   "version": "0.2.0",
   "main": "./dist/index.js",

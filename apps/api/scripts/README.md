@@ -63,7 +63,7 @@ Create queues from `wrangler.jsonc`:
 ./scripts/configure-queues.sh preview --dry-run
 ```
 
-The script is idempotent and treats “already exists” responses as success.
+The script is idempotent and treats "already exists" responses as success.
 
 ## Events pipeline setup
 

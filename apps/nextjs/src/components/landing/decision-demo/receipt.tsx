@@ -44,7 +44,7 @@ export function OutcomeChip({
         </span>
         <div className="flex flex-1 items-baseline justify-between gap-2">
           <p className="font-medium text-background-text text-sm">awaiting the first request</p>
-          <p className="font-mono text-[11px] text-background-text">—</p>
+          <p className="font-mono text-[11px] text-background-text">not run</p>
         </div>
       </div>
     )
@@ -96,11 +96,11 @@ export function DecisionReceipt({
   // is visible before the retry.
   const evidence = pending
     ? [
-        { label: "call", fact: "—" },
-        { label: "plan version", fact: "—" },
-        { label: "pricing rule", fact: "—" },
-        { label: "guardrail", fact: "—" },
-        { label: "remaining", fact: "—" },
+        { label: "call", fact: "not run" },
+        { label: "plan version", fact: "not resolved" },
+        { label: "pricing rule", fact: "not resolved" },
+        { label: "guardrail", fact: "not checked" },
+        { label: "remaining", fact: "not checked" },
       ]
     : [
         {
@@ -131,10 +131,10 @@ export function DecisionReceipt({
   const created: { label: string; fact: ReactNode; ghost: boolean }[] =
     pending || denied
       ? [
-          { label: "work", fact: pending ? "—" : "never ran", ghost: true },
-          { label: "accepted charge", fact: pending ? "—" : "none", ghost: true },
-          { label: "ledger", fact: pending ? "—" : "no entry", ghost: true },
-          { label: "invoice line", fact: pending ? "—" : "no line", ghost: true },
+          { label: "work", fact: pending ? "not run" : "never ran", ghost: true },
+          { label: "accepted charge", fact: "none", ghost: true },
+          { label: "ledger", fact: "no entry", ghost: true },
+          { label: "invoice line", fact: "no line", ghost: true },
         ]
       : [
           { label: "work", fact: "executed", ghost: false },
@@ -286,8 +286,8 @@ export function InvoiceReceipt({ features }: { features: Feature[] }) {
 
       <div className="mt-auto pt-4">
         <p className="border-background-border border-t pt-3 font-mono text-[10px] text-background-text leading-4">
-          every line above links to the decisions that accepted it — dispute answered from the same
-          path, not from logs
+          every line above links to its accepted decisions · answer disputes from this path, not
+          from logs
         </p>
       </div>
     </div>

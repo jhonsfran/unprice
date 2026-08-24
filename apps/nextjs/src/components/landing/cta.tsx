@@ -61,7 +61,7 @@ export default function Cta() {
         <p className="mt-5 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
           <Balancer>
             Bring the one action in your product that burns margin when a customer runs it. That is
-            the whole prerequisite — the argument behind it is in{" "}
+            the only prerequisite. Read the argument in{" "}
             <Link href="/manifesto" className={inlineLink}>
               the manifesto
             </Link>
@@ -122,10 +122,10 @@ export default function Cta() {
             >
               Email me your action
             </a>{" "}
-            and I&apos;ll reply with the first step — whether or not a slot is left.
+            and I&apos;ll reply with the first step, even if no slot is left.
           </p>
           <p className="mt-4 font-medium text-background-textContrast text-sm leading-6">
-            — Seb, founder of Unprice · <span className="font-mono text-xs">seb@unprice.dev</span>
+            Seb, founder of Unprice · <span className="font-mono text-xs">seb@unprice.dev</span>
           </p>
         </Reveal>
       </>

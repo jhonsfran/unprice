@@ -1,6 +1,6 @@
 {
   "name": "unprice",
-  "description": "Open-source customer money path for usage-based SaaS — authorize customer spend before paid work runs.",
+  "description": "Open-source customer money path for usage-based SaaS. Authorize customer spend before paid work runs.",
   "private": true,
   "engines": {
     "node": "24.x"

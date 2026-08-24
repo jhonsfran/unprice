@@ -24,7 +24,7 @@ const ownershipFacts = [
   { label: "SDK", fact: "generated from OpenAPI contracts" },
   { label: "runtime", fact: "Cloudflare Workers + DOs · your account" },
   { label: "payments", fact: "Stripe-first · provider-extensible" },
-  { label: "funds flow", fact: "yours — unprice never sits in it" },
+  { label: "funds flow", fact: "yours · unprice never sits in it" },
 ]
 
 export default function ManifestoOwnership() {
@@ -40,15 +40,14 @@ export default function ManifestoOwnership() {
             The billing layer you rent can be acquired. The money path you own cannot.
           </h2>
           <p className="mt-5 max-w-xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-            Between 2025 and 2026 the independent billing middle market stopped existing: every
-            metering-first vendor was acquired by a payment processor or left the market. Revenue
-            logic trapped in a closed runtime is one acquisition away from belonging to someone
-            else&apos;s roadmap.
+            Between 2025 and 2026, four venture-backed billing vendors were acquired or taken
+            private. When your revenue logic runs in a closed vendor runtime, an acquisition can
+            change the product and roadmap you depend on.
           </p>
           <p className="mt-4 max-w-xl text-background-text text-sm leading-6">
             Unprice keeps the customer spend decision, the double-entry ledger, and the invoice
             explanation in one open money path you can read, fork, and run in your own Cloudflare
-            account. Read the code that guards your money — or have your agent read it — before you
+            account. Read the code that guards your money, or have your agent inspect it, before you
             trust it.
           </p>
           <div className="mt-8">
@@ -72,7 +71,9 @@ export default function ManifestoOwnership() {
               <span className="font-mono text-background-text text-xs uppercase tracking-widest">
                 The billing middle market
               </span>
-              <span className="font-mono text-[10px] text-background-text">2025–2026 · traced</span>
+              <span className="font-mono text-[10px] text-background-text">
+                2025 to 2026 · traced
+              </span>
             </figcaption>
             <div className="flex flex-col">
               {consolidationTrace.map((row) => (

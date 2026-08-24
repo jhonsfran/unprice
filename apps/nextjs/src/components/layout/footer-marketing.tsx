@@ -7,7 +7,7 @@ import { siteConfig } from "~/constants/layout"
 
 // The footer is the page's colophon, set in the same receipt grammar as the
 // sections above it: the mechanism sentence, three true facts as ledger rows,
-// and only links that exist. No invented legal pages, no "Inc." — Unprice is
+// and only links that exist. No invented legal pages or "Inc." Unprice is
 // an open-source project, and the footer says exactly that and nothing more.
 
 const linkGroups: {

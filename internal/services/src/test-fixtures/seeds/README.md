@@ -1,4 +1,4 @@
-# Service Test SQL Seeds
+# Service test SQL seeds
 
 Seed files in this directory are restored by `seedTestDb` in the order passed
 by the test or `TEST_DB_FIXTURES`.

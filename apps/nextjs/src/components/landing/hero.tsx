@@ -37,8 +37,9 @@ export default function Hero() {
               reader meeting the phrase cold parses it as Unprice sitting in the
               flow, which is the one misread that costs the most. */}
           <p className="mt-6 max-w-xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-            Authorize customer spend before paid work runs — what your customers spend, not your own
-            provider bill. Open source, for SaaS that sells credits, API calls, or agent runs.
+            Authorize customer spend before paid work runs. That means what your customers spend,
+            not your provider bill. Open source, for SaaS that sells credits, API calls, or agent
+            runs.
           </p>
           <div className="mt-10 flex flex-wrap items-center gap-3">
             <AcquisitionLink
@@ -68,10 +69,9 @@ export default function Hero() {
               believe the promise — then the rest as one metadata line. */}
           <div className="mt-12 w-full max-w-xl border-background-border border-t pt-6">
             <p className="font-medium text-background-textContrast text-base leading-7">
-              Settles to your own Stripe
+              Settles to your own Stripe.{" "}
               <span className="font-normal text-background-text">
-                {" "}
-                — the money never touches Unprice.
+                The money never touches Unprice.
               </span>
             </p>
             {/* "nothing to deploy" is here because its absence cost a signup:

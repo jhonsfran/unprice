@@ -105,7 +105,7 @@ function VideoBlock() {
       </span>
       <p className="text-background-text text-sm leading-6">
         A recorded walkthrough is coming. Until it does, the receipts below are the ones you can
-        check yourself — no account, no demo call.
+        check yourself. You do not need an account or a demo call.
       </p>
     </div>
   )
@@ -120,12 +120,11 @@ export function DemoSection() {
           id="demo-title"
           className="mt-6 max-w-2xl font-primary text-background-textContrast text-display-3"
         >
-          Proof you can check yourself.
+          Read the proof.
         </h2>
         <p className="mt-5 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-          Everything above this line is drawn by us. These are not: a test that proves the
-          concurrency guarantee, a benchmark you point at your own deployment, and the money-path
-          source. If the ledger does not balance, you will find it here first.
+          Read the concurrency test, run the benchmark against your deployment, and inspect the
+          money-path source. If the ledger does not balance, the source and tests will show it.
         </p>
       </div>
 

@@ -1,7 +1,7 @@
 # pgledger (vendored)
 
 Source-of-truth ledger SQL installed via `pnpm migrate:custom` after Drizzle's
-own migrations run. Owned by this repo — vendored from the upstream so we do
+own migrations run. This repo owns the files, which it vendors from upstream so we do
 not depend on `CREATE EXTENSION` (Neon, Supabase, and local Postgres all run
 the same SQL without platform-specific allowlists).
 
@@ -15,7 +15,7 @@ the same SQL without platform-specific allowlists).
 
 ## Re-applying
 
-Re-running `pnpm migrate:custom` is safe — every statement is idempotent and
+Re-running `pnpm migrate:custom` is safe. Every statement is idempotent and
 the install function wraps the install in a transaction. The
 `pgledger_install_version` table records each successful install so version
 drift is observable from telemetry.

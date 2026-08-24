@@ -406,10 +406,10 @@ function OutcomeFork({ registry }: { registry: MoneyPathRegistry }) {
 }
 
 const FULL_ARIA =
-  "The money path: three identical usage.consume requests traced against one $10.00 budget. Each request hits the meter — 2,050 tokens — passes the access check, resolves its price — $0.002 per token on plan version pro@v3 — then reaches the budget check, which asks whether the balance covers the $4.10 this request costs. The first request is accepted: the wallet reserves $4.10, the ledger captures the movement, the invoice line — 2,050 tokens at $0.002, $4.10 — is explained by the same decision, and payment settles in your own Stripe account, leaving $5.90. Unprice never holds the funds. The second identical request is accepted the same way, leaving $1.80. The third request needs $4.10 but the balance is $1.80, so it is rejected with the reason LIMIT_EXCEEDED before any cost exists: the wallet is untouched, the ledger has no entry, the invoice has no line, nothing is charged — and the reason is returned to your app."
+  "Three identical usage.consume requests use one $10.00 budget. Each request meters 2,050 tokens at $0.002 per token on plan version pro@v3, for a cost of $4.10. The first two requests are accepted. Each one reserves $4.10, captures the ledger movement, writes the invoice line, and settles payment to your Stripe account. The balance falls to $1.80. Unprice never holds the funds. The third request is denied with LIMIT_EXCEEDED because it needs $4.10. The wallet stays untouched, and Unprice writes no ledger entry, invoice line, or charge. Your app receives the reason."
 
 const COMPACT_ARIA =
-  "The decision moment, as read-only access.check calls against a $10.00 budget that already has one request behind it, at $5.90. This request is priced at 2,050 tokens times $0.002, $4.10, and is allowed, leaving $1.80. A second, identical request cannot be covered by $1.80, so it is denied with the reason LIMIT_EXCEEDED before any cost is created. Neither call mutates anything. The full path — meter, access, wallet, ledger, invoice, and payment settling to your own Stripe — is traced further down the page."
+  "Read-only access.check calls use a $10.00 budget with $5.90 remaining. A request costs $4.10 and is allowed. An identical second request is denied with LIMIT_EXCEEDED because only $1.80 remains. Neither call changes state. The full path below traces the meter, access check, wallet, ledger, invoice, and payment to your Stripe account."
 
 export function MoneyPath({
   className,
@@ -511,7 +511,7 @@ export function MoneyPath({
       ) : (
         <p className="mt-5 border-background-border border-t pt-3 text-background-text text-xs leading-6">
           Every step in this path is a method in the public SDK. Run the check in shadow beside the
-          logic you already run — TypeScript, REST, or curl.
+          logic you already run. Use TypeScript, REST, or curl.
         </p>
       )}
     </figure>

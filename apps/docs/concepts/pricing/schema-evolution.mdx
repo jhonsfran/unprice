@@ -23,7 +23,7 @@ readers and compaction.
 - Keep old fields during the migration window so dashboards and SQL consumers continue to work.
 - Treat a schema change as a multi-sink rollout, not as one table change.
 
-## Safe Change Types
+## Safe change types
 
 - Add nullable field
 - Add optional enum value
@@ -32,7 +32,7 @@ readers and compaction.
 These changes should not break dashboards or compacted readers when queries do not require strict
 column lists.
 
-## Breaking Change Types
+## Breaking change types
 
 - Removing fields used by dashboards
 - Renaming fields without compatibility alias
@@ -41,7 +41,7 @@ column lists.
 
 For a breaking change, increase `schema_version`. Deploy readers first and writers second.
 
-## Rollout Order
+## Rollout order
 
 1. **Readers first**
    - Update dashboards and SQL queries to support the old and new schema.
@@ -56,12 +56,12 @@ For a breaking change, increase `schema_version`. Deploy readers first and write
 
 ## Data safety during flush
 
-- **Deletion rule:** The flush can complete one destination at a time, but it deletes rows only after
+- **Deletion rule.** The flush can complete one destination at a time, but it deletes rows only after
   Tinybird and R2 both succeed for the range.
-- **Idempotency:** Usage ID and cursor checks prevent duplicate counts during a retry.
-- **Metadata:** Metadata is deduplicated and linked by `meta_id`. Usage and verification records
+- **Idempotency.** Usage ID and cursor checks prevent duplicate counts during a retry.
+- **Metadata.** Metadata is deduplicated and linked by `meta_id`. Usage and verification records
   can still join after compaction.
-- **Access control:** Realtime API endpoints require a key. Dashboard WebSocket connections require
+- **Access control.** Realtime API endpoints require a key. Dashboard WebSocket connections require
   a session token.
 
 ## Dashboard and SQL impact
@@ -78,7 +78,7 @@ WHERE schema_version IN (1, 2)
 
 Do not require a new field until the backfill and compaction window is complete.
 
-## Impact on Compaction
+## Impact on compaction
 
 - Compaction is file-level and idempotent.
 - Compaction does not change the schema. It merges raw NDJSON lines.
@@ -86,7 +86,7 @@ Do not require a new field until the backfill and compaction window is complete.
 
 Readers must support the mixed versions during that period.
 
-## Operational Checklist
+## Operational checklist
 
 - [ ] Add/update `schema_version` where payload shape changed.
 - [ ] Verify Tinybird ingestion schemas accept the new fields.

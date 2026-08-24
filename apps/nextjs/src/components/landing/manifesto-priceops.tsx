@@ -23,7 +23,7 @@ const pillars = [
   },
   {
     title: "Open and inspectable",
-    body: "Money logic is too critical for a black box. The runtime is open source — read the code that guards your money, or have your agent read it.",
+    body: "Money logic should not be a black box. Read the open-source runtime yourself, or have your agent inspect it.",
     practice: "trust follows inspection",
   },
 ]
@@ -40,10 +40,9 @@ export default function ManifestoPriceOps() {
           Operate pricing like infrastructure.
         </h2>
         <p className="mt-5 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-          PriceOps is the practice of operating pricing as versioned commercial infrastructure — the
-          way DevOps operates deploys and FinOps operates cloud spend. Plans, versions,
-          entitlements, meters, budgets, credits, and invoice evidence stay separate but connected,
-          so packaging changes ship without rewriting the product.
+          PriceOps means keeping pricing rules in versioned infrastructure. Plans, versions,
+          entitlements, meters, budgets, credits, and invoice evidence stay separate but connected.
+          You can change packaging without rewriting the product.
         </p>
       </div>
 

@@ -115,7 +115,7 @@ that need several usage events or a serializable run identifier.
 
 `monetization.get` and `monetization.apply` let you describe a project's plans, features, and
 events as one configuration document instead of clicking through the dashboard. Both require a
-**config** API key — a runtime key is rejected. Keep the two key types separate: the config key can
+**config** API key. The API rejects a runtime key. Keep the key types separate because a config key can
 rewrite your pricing, the runtime key cannot.
 
 ```ts
@@ -148,9 +148,9 @@ this SDK, by design.
 reports drafts left behind by earlier documents.
 
 Call `monetization.get` to read the current configuration back in the shape `apply` accepts. It
-takes no arguments — the project comes from the key. Alongside the document it returns
-`unrepresentablePlans` (plans the document cannot describe) and `warnings` (stored configuration
-the document is silent about), so what the document omits is always visible rather than lost.
+takes no arguments because the project comes from the key. Alongside the document, it returns
+`unrepresentablePlans` for plans the document cannot describe and `warnings` for stored
+configuration the document omits. The call reports these omissions instead of discarding them.
 
 ## License
 

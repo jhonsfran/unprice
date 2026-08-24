@@ -38,13 +38,12 @@ usage event slugs, the run sends `EVENTS * eventSlugCount` async usage events.
 The script also verifies every active entitlement on every iteration. Usage and verification
 requests are sent through SDK methods so API contract drift is caught by TypeScript before k6 runs.
 
-## Latency Benchmark
+## Latency benchmark
 
-The latency script measures what an integrator's code observes — SDK call round-trip per
-endpoint — and prints a percentile table plus one `LATENCY_SUMMARY_JSON` line for machines.
-It is a measurement harness, not a load test: no latency thresholds, endpoints run
-sequentially (warm-up → `access.check` → `usage.record` → `usage.consume`) so they never
-contend with each other.
+The latency script measures the SDK round-trip time for each endpoint. It prints a percentile table
+and one machine-readable `LATENCY_SUMMARY_JSON` line. This is a measurement harness, not a load
+test. It has no latency thresholds, and it runs endpoints in sequence so they do not contend with
+each other: warm-up, `access.check`, `usage.record`, then `usage.consume`.
 
 ```bash
 pnpm --filter @unprice/k6 latency
@@ -58,8 +57,8 @@ DURATION=60s   # measured window per scenario ("60s", "2m")
 FEATURE_SLUG=  # optional; defaults to the first usage-metered entitlement
 ```
 
-Cold path (optional): signs up brand-new customers and times their first check — a new
-Durable Object plus a grant-context cache miss, the honest worst case. It creates real
+The optional cold path signs up new customers and times their first check. This includes a new
+Durable Object and a grant-context cache miss. It creates real
 customers in the target project, so point it only at a disposable load-test project:
 
 ```env
@@ -71,10 +70,10 @@ Run the same command against preview and production by switching `BASE_URL` and
 `UNPRICE_TOKEN`. Latency depends on where the client runs: numbers from your laptop include
 your last mile, so for publishable results run from a stable region (a small VM) and pair
 every number with region + date + this harness. The claim boundaries in
-`docs/brand/PRODUCT.md` forbid latency numbers on marketing surfaces until they come from a
+`docs/brand/PRODUCT.md` forbid latency numbers in marketing copy until they come from a
 reproducible run like this.
 
-## Shared-Run Overspend Proof
+## Shared-run overspend proof
 
 This manual/nightly-only scenario creates one shared run, then issues concurrent, uniquely
 idempotent `usage.consume` attempts against it. Each decision must be either accepted or denied
@@ -100,7 +99,7 @@ The final output includes `OVERSPEND_SUMMARY_JSON` with the accepted, budget-den
 unexpected-failure counts plus the invariant result. Local verification is limited to
 typechecking and bundling; running `overspend` sends requests to the configured target API.
 
-## Ingestion Failure Test
+## Ingestion failure test
 
 The ingestion failure script sends valid usage events with the non-production failure-test header.
 The API accepts the requests, and the queue consumer reports them as failed ingestion rows that the

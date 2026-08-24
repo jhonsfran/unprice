@@ -85,7 +85,7 @@ const stages = [
   },
   {
     title: "Sandbox",
-    body: "Prove the path before a dollar moves — model customers, plans, and budgets.",
+    body: "Model customers, plans, and budgets before a dollar moves.",
     facts: [
       { label: "processor", fact: "none · built-in Sandbox" },
       { label: "customers", fact: "simulated" },
@@ -122,8 +122,8 @@ export function LaunchPathSection() {
           <code className="rounded-sm bg-background-bg px-1 py-px font-mono text-[13px] text-background-textContrast">
             access.check
           </code>{" "}
-          beside the logic you already trust. The check is read-only — it decides nothing, it just
-          tells you what it would have decided.
+          beside the logic you already trust. The check is read-only. It reports the decision but
+          does not enforce it.
         </p>
       </div>
 
@@ -150,7 +150,7 @@ export function LaunchPathSection() {
             <code className="rounded-sm bg-background-bg px-1 py-px font-mono text-[12px] text-background-textContrast">
               access.check
             </code>{" "}
-            alone — it reserves nothing, so two concurrent requests both pass it.
+            alone. It reserves nothing, so two concurrent requests can both pass it.
           </p>
           <div className="mt-3 flex flex-col">
             {enforcingCalls.map((row) => (
@@ -166,8 +166,7 @@ export function LaunchPathSection() {
 
         <figcaption className="mt-6 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 border-background-border border-t pt-3 text-background-text text-xs leading-6">
           <span className="max-w-xl">
-            The two calls above are the integration the walk-away guarantee is written against —
-            read-only, blocking nothing.
+            The walk-away guarantee covers these two calls. They are read-only and block nothing.
           </span>
           <ProofLink
             source="integration_sdk"

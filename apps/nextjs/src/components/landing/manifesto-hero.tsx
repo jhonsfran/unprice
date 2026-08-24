@@ -29,17 +29,16 @@ export default function ManifestoHero() {
         </h1>
         <p className="mt-6 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
           <Balancer>
-            SaaS pricing was built for a static era: hardcoded tiers, manual feature gates,
-            end-of-cycle invoices. For usage-based products that model breaks the moment usage gets
-            expensive — a single customer, job, workflow, or agent can cross its budget before
-            anyone reaches the invoice.
+            Hardcoded tiers, manual feature gates, and end-of-cycle invoices work poorly when each
+            request creates cost. A customer, job, workflow, or agent can cross its budget before
+            the invoice exists.
           </Balancer>
         </p>
         <p className="mt-4 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
           <Balancer>
-            So the pricing decision has to move to where the cost is created: the request path.
-            Check entitlement, check budget, reserve credits, deny over-budget work before it runs —
-            then explain every charge from the same evidence.
+            Put the pricing decision where the cost starts, in the request path. Check entitlement
+            and budget, reserve credits, and deny over-budget work before it runs. Keep that
+            decision as evidence for each charge.
           </Balancer>
         </p>
 

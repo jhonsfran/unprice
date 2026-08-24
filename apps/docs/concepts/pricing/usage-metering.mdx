@@ -1,15 +1,17 @@
 ---
-title: Billing Architecture and Usage Metering
+title: Billing architecture and usage metering
 description: "How Unprice models events, meters, features, and period-based usage."
 ---
 
-Unprice meters usage within billing periods. That means usage is always interpreted relative to the current billing cycle, whether you bill monthly, yearly, or on a custom reset schedule.
+Unprice interprets usage inside the current billing period. The period can reset monthly, yearly, or
+on a custom schedule.
 
-The most important design decision is this: **meters are for usage entitlements**. Some features need a stream of events and an aggregation rule. Others are simply granted access and do not need a meter at all.
+Use meters only for usage entitlements. A usage feature needs events and an aggregation rule. A
+feature that grants access does not need a meter.
 
-## 1. Core Concepts: Events vs. Meters vs. Features
+## 1. Events, meters, and features
 
-These three terms work together, but they are not interchangeable:
+These terms have separate jobs:
 
 | Term | What it is | What it answers |
 | :--- | :--- | :--- |
@@ -96,9 +98,10 @@ Examples:
   aggregation rule.
 </Tip>
 
-## 2. Supported Aggregation Methods
+## 2. Aggregation methods
 
-Aggregation methods apply to **usage entitlements only**. Every meter evaluates usage inside the current billing period and resets automatically when that period ends.
+Aggregation methods apply only to usage entitlements. Each meter evaluates one billing period and
+resets when that period ends.
 
 | Method | What it does during the period | Good for |
 | :--- | :--- | :--- |
@@ -139,9 +142,10 @@ Use `last` when you care about the most recent reported value before the invoice
 - Common examples are active seats, enabled workspaces, or the final storage total at billing time.
 - The stored value resets with the next billing period after that period closes.
 
-## 3. Handling "Stateful" Metrics (The "Fast Cache, Slow Truth" Pattern)
+## 3. Stateful metrics
 
-Some usage is naturally event-shaped. Other usage is really a snapshot of a changing state. Treating those two categories the same is one of the fastest ways to create billing drift.
+Some usage is a stream of events. Other usage is a snapshot of changing state. Using the same
+reporting method for both can make billing totals drift.
 
 ### Streaming metrics
 
@@ -207,9 +211,9 @@ Why this causes problems:
 - backfills and imports can skip historical events
 - deletes are often harder to observe reliably than creates
 
-Instead, use the **Fast Cache, Slow Truth** pattern.
+Use a fast operational check and a slower authoritative snapshot.
 
-### Real-time enforcement: Fast Cache
+### Enforce from current application state
 
 Use your own application or cache layer to enforce hard limits immediately.
 
@@ -219,7 +223,7 @@ Use your own application or cache layer to enforce hard limits immediately.
 
 Example: if you allow at most 10 active projects on a plan, check that constraint inside your app before creating project 11.
 
-### Accurate billing: Slow Truth
+### Report authoritative snapshots
 
 Run a background job on a schedule, query the authoritative total from your database, and report that absolute total to Unprice as a snapshot event.
 
@@ -267,7 +271,7 @@ WHERE customer_id = $1;
 
 Use `max` when you care about the highest watermark during the month. Use `last` when you care about the value that exists at the moment billing closes the period.
 
-## 4. How to Handle "Lifetime" Limits (e.g., Lifetime Free Trials)
+## 4. Lifetime limits
 
 Sometimes the business rule you want is "never reset this allowance." Treat that as an entitlement or grant configuration decision, not as a different metering period.
 
@@ -291,7 +295,7 @@ This keeps your billing architecture consistent:
 - meters still aggregate usage
 - entitlements and grants still define what the customer is allowed to consume
 
-### Best Practices
+### Rules to follow
 
 - Use meters only for usage entitlements.
 - Use `count` or `sum` for streaming activity reported directly from the request path.

@@ -26,9 +26,9 @@ export function MoneyPathSection() {
           The decision becomes the invoice.
         </h2>
         <p className="mt-5 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-          An allow reserves the wallet, captures the ledger, and writes an invoice line that
-          explains itself — settled in your own Stripe. A deny leaves nothing behind: no entry, no
-          line, no charge, and the reason returned to your app.
+          An allow reserves wallet credits, captures the ledger movement, and writes the invoice
+          line. Payment settles in your own Stripe. A deny returns the reason to your app and writes
+          no ledger entry, invoice line, or charge.
         </p>
       </div>
 
