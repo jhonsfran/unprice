@@ -114,21 +114,33 @@ ResponsiveDialogClose.displayName = "ResponsiveDialogClose"
 
 type ResponsiveDialogContentProps = React.ComponentPropsWithoutRef<typeof DialogContent>
 
-function ResponsiveDialogContent({ className, ...props }: ResponsiveDialogContentProps) {
+function ResponsiveDialogContent({ className, children, ...props }: ResponsiveDialogContentProps) {
   const presentation = useResponsiveDialogContext("ResponsiveDialogContent")
 
   if (presentation === "dialog") {
-    return <DialogContent className={className} {...props} />
+    return (
+      <DialogContent className={className} {...props}>
+        {children}
+      </DialogContent>
+    )
   }
 
   return (
     <DrawerContent
       className={cn(
-        "hide-scrollbar !max-h-[calc(100dvh-0.5rem)] w-full gap-4 overflow-y-auto overscroll-contain px-4 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))] text-left",
-        className
+        "!h-[calc(100dvh-0.5rem)] !max-h-[calc(100dvh-0.5rem)] w-full gap-0 overflow-hidden p-0 text-left"
       )}
       {...props}
-    />
+    >
+      <div
+        className={cn(
+          "hide-scrollbar flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain px-4 pt-2 pb-[max(5rem,env(safe-area-inset-bottom))]",
+          className
+        )}
+      >
+        {children}
+      </div>
+    </DrawerContent>
   )
 }
 

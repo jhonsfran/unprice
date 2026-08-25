@@ -550,14 +550,17 @@ function MobileFilterDrawer<TData>({
           Filters
         </Button>
       </DrawerTrigger>
-      <DrawerContent>
-        <DrawerHeader>
+      <DrawerContent className="!h-[calc(100dvh-0.5rem)] !max-h-[calc(100dvh-0.5rem)] gap-0 overflow-hidden">
+        <DrawerHeader className="shrink-0">
           <DrawerTitle>Filters</DrawerTitle>
           <DrawerDescription>Narrow the visible rows without leaving this table.</DrawerDescription>
         </DrawerHeader>
         <ScrollArea
           hideScrollBar={presentation === "workbench"}
-          className={cn("max-h-[60vh]", PRESENTATION_CLASSES[presentation].scroll)}
+          className={cn(
+            "min-h-0 flex-1 px-4 pb-[max(5rem,env(safe-area-inset-bottom))]",
+            PRESENTATION_CLASSES[presentation].scroll
+          )}
         >
           <FilterList table={table} filters={filters} presentation={presentation} />
         </ScrollArea>

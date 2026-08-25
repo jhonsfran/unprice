@@ -329,7 +329,7 @@ export default function ConfigItemsFormField<TFieldValues extends FormValues>({
                                       </Button>
                                     </ResponsiveDialogTrigger>
 
-                                    <ResponsiveDialogContent className="flex w-full flex-col justify-between md:max-w-[600px]">
+                                    <ResponsiveDialogContent className="w-full md:max-w-[600px]">
                                       <ResponsiveDialogHeader>
                                         <ResponsiveDialogTitle>
                                           Feature: {feature.feature.title}
