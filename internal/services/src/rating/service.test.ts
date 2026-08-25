@@ -379,7 +379,7 @@ describe("RatingService", () => {
     expect(getUsageBillingFeatures).toHaveBeenCalledWith(
       expect.objectContaining({
         customerEntitlementIds: ["ce_123"],
-        periodKeys: [`month:${periodStart}`],
+        periodKeys: [`month:${effectiveAt}`],
       })
     )
   })

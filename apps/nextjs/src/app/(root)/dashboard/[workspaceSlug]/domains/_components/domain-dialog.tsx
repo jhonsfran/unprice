@@ -4,13 +4,13 @@ import { useState } from "react"
 
 import type { CreateDomain } from "@unprice/db/validators"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@unprice/ui/dialog"
+  ResponsiveDialog,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+  ResponsiveDialogTrigger,
+} from "@unprice/ui/responsive-dialog"
 
 import { DomainForm } from "./domain-form"
 
@@ -24,16 +24,16 @@ export function DomainDialog({
   const [dialogOpen, setDialogOpen] = useState(false)
 
   return (
-    <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-      <DialogTrigger asChild>{children}</DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Domain for this workspace</DialogTitle>
+    <ResponsiveDialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <ResponsiveDialogTrigger asChild>{children}</ResponsiveDialogTrigger>
+      <ResponsiveDialogContent>
+        <ResponsiveDialogHeader>
+          <ResponsiveDialogTitle>Domain for this workspace</ResponsiveDialogTitle>
 
-          <DialogDescription>
+          <ResponsiveDialogDescription>
             Add a hostname that can serve verified project pages after DNS checks pass.
-          </DialogDescription>
-        </DialogHeader>
+          </ResponsiveDialogDescription>
+        </ResponsiveDialogHeader>
 
         <DomainForm
           defaultValues={defaultValues ?? { name: "" }}
@@ -41,7 +41,7 @@ export function DomainDialog({
             setDialogOpen(false)
           }}
         />
-      </DialogContent>
-    </Dialog>
+      </ResponsiveDialogContent>
+    </ResponsiveDialog>
   )
 }

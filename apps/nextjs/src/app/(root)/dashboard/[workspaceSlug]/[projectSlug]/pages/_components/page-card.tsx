@@ -5,14 +5,6 @@ import { Badge } from "@unprice/ui/badge"
 import { Button } from "@unprice/ui/button"
 import { Card, CardDescription, CardFooter, CardHeader, CardTitle } from "@unprice/ui/card"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@unprice/ui/dialog"
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -20,6 +12,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@unprice/ui/dropdown-menu"
+import {
+  ResponsiveDialog,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+  ResponsiveDialogTrigger,
+} from "@unprice/ui/responsive-dialog"
 import { cn } from "@unprice/ui/utils"
 
 import { SITES_BASE_DOMAIN } from "@unprice/config"
@@ -57,7 +57,7 @@ export function PageCard(props: {
           </div>
           <div className="flex items-center space-x-1">
             <PropagationStopper>
-              <Dialog>
+              <ResponsiveDialog>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant={"ghost"}>
@@ -77,24 +77,26 @@ export function PageCard(props: {
                       </SuperLink>
                     </DropdownMenuItem>
 
-                    <DialogTrigger asChild>
+                    <ResponsiveDialogTrigger asChild>
                       <DropdownMenuItem>
                         <Settings className="mr-2 h-4 w-4" />
                         Settings
                       </DropdownMenuItem>
-                    </DialogTrigger>
+                    </ResponsiveDialogTrigger>
                   </DropdownMenuContent>
                 </DropdownMenu>
 
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Page Form</DialogTitle>
+                <ResponsiveDialogContent>
+                  <ResponsiveDialogHeader>
+                    <ResponsiveDialogTitle>Page Form</ResponsiveDialogTitle>
 
-                    <DialogDescription>Modify the page details below.</DialogDescription>
-                  </DialogHeader>
+                    <ResponsiveDialogDescription>
+                      Modify the page details below.
+                    </ResponsiveDialogDescription>
+                  </ResponsiveDialogHeader>
                   <PageForm defaultValues={page} />
-                </DialogContent>
-              </Dialog>
+                </ResponsiveDialogContent>
+              </ResponsiveDialog>
             </PropagationStopper>
           </div>
         </CardHeader>

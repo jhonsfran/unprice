@@ -4,13 +4,13 @@ import { useState } from "react"
 
 import type { InsertFeature } from "@unprice/db/validators"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@unprice/ui/dialog"
+  ResponsiveDialog,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+  ResponsiveDialogTrigger,
+} from "@unprice/ui/responsive-dialog"
 
 import { FeatureForm } from "./feature-form"
 
@@ -26,23 +26,25 @@ export function FeatureDialog({
   const isEdit = Boolean(defaultValues?.id)
 
   return (
-    <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-      <DialogTrigger asChild>{children}</DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit feature" : "Create feature"}</DialogTitle>
+    <ResponsiveDialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <ResponsiveDialogTrigger asChild>{children}</ResponsiveDialogTrigger>
+      <ResponsiveDialogContent>
+        <ResponsiveDialogHeader>
+          <ResponsiveDialogTitle>
+            {isEdit ? "Edit feature" : "Create feature"}
+          </ResponsiveDialogTitle>
 
-          <DialogDescription>
+          <ResponsiveDialogDescription>
             Define the sellable or gateable capability that plan versions attach to meters,
             entitlements, and limits.
-          </DialogDescription>
-        </DialogHeader>
+          </ResponsiveDialogDescription>
+        </ResponsiveDialogHeader>
 
         <FeatureForm
           defaultValues={defaultValues ?? { title: "", slug: "", description: "" }}
           setDialogOpen={setDialogOpen}
         />
-      </DialogContent>
-    </Dialog>
+      </ResponsiveDialogContent>
+    </ResponsiveDialog>
   )
 }

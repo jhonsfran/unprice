@@ -3,13 +3,13 @@ import { useState } from "react"
 
 import { Button } from "@unprice/ui/button"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@unprice/ui/dialog"
+  ResponsiveDialog,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+  ResponsiveDialogTrigger,
+} from "@unprice/ui/responsive-dialog"
 import CreateApiKeyForm from "./create-api-key-form"
 
 export default function NewApiKeyDialog() {
@@ -17,7 +17,7 @@ export default function NewApiKeyDialog() {
   const [createdKey, setCreatedKey] = useState(false)
 
   return (
-    <Dialog
+    <ResponsiveDialog
       open={dialogOpen}
       onOpenChange={(open) => {
         setDialogOpen(open)
@@ -26,18 +26,20 @@ export default function NewApiKeyDialog() {
         }
       }}
     >
-      <DialogTrigger asChild>
+      <ResponsiveDialogTrigger asChild>
         <Button>Create API key</Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{createdKey ? "API key created" : "Create API key"}</DialogTitle>
-          <DialogDescription>
+      </ResponsiveDialogTrigger>
+      <ResponsiveDialogContent>
+        <ResponsiveDialogHeader>
+          <ResponsiveDialogTitle>
+            {createdKey ? "API key created" : "Create API key"}
+          </ResponsiveDialogTitle>
+          <ResponsiveDialogDescription>
             {createdKey
               ? "Copy the secret now. You will not be able to view it again after closing this dialog."
               : "Create a key for project API access."}
-          </DialogDescription>
-        </DialogHeader>
+          </ResponsiveDialogDescription>
+        </ResponsiveDialogHeader>
         <CreateApiKeyForm
           setDialogOpen={setDialogOpen}
           onSuccess={(value) => setCreatedKey(Boolean(value))}
@@ -47,7 +49,7 @@ export default function NewApiKeyDialog() {
             defaultCustomerId: null,
           }}
         />
-      </DialogContent>
-    </Dialog>
+      </ResponsiveDialogContent>
+    </ResponsiveDialog>
   )
 }

@@ -4,13 +4,13 @@ import { useState } from "react"
 
 import type { InsertPlanVersion } from "@unprice/db/validators"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@unprice/ui/dialog"
+  ResponsiveDialog,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+  ResponsiveDialogTrigger,
+} from "@unprice/ui/responsive-dialog"
 
 import { PlanVersionForm } from "./plan-version-form"
 
@@ -26,16 +26,18 @@ export function PlanVersionDialog({
   const isEdit = Boolean(defaultValues?.id)
 
   return (
-    <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-      <DialogTrigger asChild>{children}</DialogTrigger>
-      <DialogContent className="max-h-screen overflow-y-scroll md:max-w-screen-md">
-        <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit plan version" : "Create plan version"}</DialogTitle>
+    <ResponsiveDialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <ResponsiveDialogTrigger asChild>{children}</ResponsiveDialogTrigger>
+      <ResponsiveDialogContent className="md:max-w-screen-md">
+        <ResponsiveDialogHeader>
+          <ResponsiveDialogTitle>
+            {isEdit ? "Edit plan version" : "Create plan version"}
+          </ResponsiveDialogTitle>
 
-          <DialogDescription>
+          <ResponsiveDialogDescription>
             Version the pricing, billing, and entitlement rules that customers can be pinned to.
-          </DialogDescription>
-        </DialogHeader>
+          </ResponsiveDialogDescription>
+        </ResponsiveDialogHeader>
 
         <PlanVersionForm
           defaultValues={
@@ -64,7 +66,7 @@ export function PlanVersionDialog({
           }
           setDialogOpen={setDialogOpen}
         />
-      </DialogContent>
-    </Dialog>
+      </ResponsiveDialogContent>
+    </ResponsiveDialog>
   )
 }

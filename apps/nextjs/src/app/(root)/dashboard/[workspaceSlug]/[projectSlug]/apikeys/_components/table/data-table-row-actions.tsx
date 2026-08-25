@@ -17,14 +17,6 @@ import {
   CommandLoading,
 } from "@unprice/ui/command"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@unprice/ui/dialog"
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -33,6 +25,14 @@ import {
 import { Ellipsis } from "@unprice/ui/icons"
 import { LoadingAnimation } from "@unprice/ui/loading-animation"
 import { Popover, PopoverContent, PopoverTrigger } from "@unprice/ui/popover"
+import {
+  ResponsiveDialog,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogFooter,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+} from "@unprice/ui/responsive-dialog"
 
 import { useMutation, useQuery } from "@tanstack/react-query"
 import type { RouterOutputs } from "@unprice/trpc/routes"
@@ -239,13 +239,13 @@ function DefaultCustomerDialogContent({
   onCancel: () => void
 }) {
   return (
-    <DialogContent>
-      <DialogHeader>
-        <DialogTitle>Default customer</DialogTitle>
-        <DialogDescription>
+    <ResponsiveDialogContent>
+      <ResponsiveDialogHeader>
+        <ResponsiveDialogTitle>Default customer</ResponsiveDialogTitle>
+        <ResponsiveDialogDescription>
           Configure which customer is used when requests with this API key omit `customerId`.
-        </DialogDescription>
-      </DialogHeader>
+        </ResponsiveDialogDescription>
+      </ResponsiveDialogHeader>
 
       <Popover modal={true} open={switcherOpen} onOpenChange={onSwitcherOpenChange}>
         <PopoverTrigger asChild>
@@ -330,15 +330,15 @@ function DefaultCustomerDialogContent({
         </p>
       )}
 
-      <DialogFooter>
+      <ResponsiveDialogFooter>
         <Button variant="ghost" onClick={onCancel}>
           Cancel
         </Button>
         <Button onClick={onSave} disabled={isSaving} type="button">
           Save {isSaving && <LoadingAnimation className="ml-2" />}
         </Button>
-      </DialogFooter>
-    </DialogContent>
+      </ResponsiveDialogFooter>
+    </ResponsiveDialogContent>
   )
 }
 
@@ -366,7 +366,7 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
   )
 
   return (
-    <Dialog
+    <ResponsiveDialog
       open={customerConfigOpen}
       onOpenChange={(open) => {
         setCustomerConfigOpen(open)
@@ -399,6 +399,6 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
         onSave={() => saveCustomerBinding(selectedCustomerId, () => setCustomerConfigOpen(false))}
         onCancel={() => setCustomerConfigOpen(false)}
       />
-    </Dialog>
+    </ResponsiveDialog>
   )
 }

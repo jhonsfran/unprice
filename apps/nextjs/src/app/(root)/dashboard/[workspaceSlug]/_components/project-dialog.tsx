@@ -4,13 +4,13 @@ import { useState } from "react"
 
 import type { Project, ProjectInsert } from "@unprice/db/validators"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@unprice/ui/dialog"
+  ResponsiveDialog,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+  ResponsiveDialogTrigger,
+} from "@unprice/ui/responsive-dialog"
 
 import { ProjectForm } from "./project-form"
 
@@ -26,16 +26,18 @@ export function ProjectDialog({
   const isEdit = Boolean(defaultValues?.id)
 
   return (
-    <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-      <DialogTrigger asChild>{children}</DialogTrigger>
-      <DialogContent className="max-h-[80vh] overflow-y-scroll">
-        <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit project" : "Create project"}</DialogTitle>
-          <DialogDescription>
+    <ResponsiveDialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <ResponsiveDialogTrigger asChild>{children}</ResponsiveDialogTrigger>
+      <ResponsiveDialogContent>
+        <ResponsiveDialogHeader>
+          <ResponsiveDialogTitle>
+            {isEdit ? "Edit project" : "Create project"}
+          </ResponsiveDialogTitle>
+          <ResponsiveDialogDescription>
             Projects group plans, customers, events, wallets, and invoice evidence in one money
             path.
-          </DialogDescription>
-        </DialogHeader>
+          </ResponsiveDialogDescription>
+        </ResponsiveDialogHeader>
 
         <ProjectForm
           defaultValues={
@@ -48,7 +50,7 @@ export function ProjectDialog({
           }
           onSuccess={() => setDialogOpen(false)}
         />
-      </DialogContent>
-    </Dialog>
+      </ResponsiveDialogContent>
+    </ResponsiveDialog>
   )
 }

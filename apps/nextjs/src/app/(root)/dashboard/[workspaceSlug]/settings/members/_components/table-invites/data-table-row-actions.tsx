@@ -26,13 +26,13 @@ import {
 } from "@unprice/ui/dropdown-menu"
 
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@unprice/ui/dialog"
+  ResponsiveDialog,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogFooter,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+} from "@unprice/ui/responsive-dialog"
 
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@unprice/ui/select"
@@ -162,12 +162,14 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <Dialog open={open} onOpenChange={setIsOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Change role</DialogTitle>
-            <DialogDescription>Select a new role for this user</DialogDescription>
-          </DialogHeader>
+      <ResponsiveDialog open={open} onOpenChange={setIsOpen}>
+        <ResponsiveDialogContent>
+          <ResponsiveDialogHeader>
+            <ResponsiveDialogTitle>Change role</ResponsiveDialogTitle>
+            <ResponsiveDialogDescription>
+              Select a new role for this user
+            </ResponsiveDialogDescription>
+          </ResponsiveDialogHeader>
           <Select
             onValueChange={(data: WorkspaceRole) => {
               setSelectedRole(data)
@@ -187,7 +189,7 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
               })}
             </SelectContent>
           </Select>
-          <DialogFooter>
+          <ResponsiveDialogFooter>
             <Button
               variant="ghost"
               onClick={() => {
@@ -205,9 +207,9 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
             >
               Change role {changeRoleInvite.isPending && <LoadingAnimation />}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </ResponsiveDialogFooter>
+        </ResponsiveDialogContent>
+      </ResponsiveDialog>
 
       <AlertDialogContent>
         <AlertDialogHeader>

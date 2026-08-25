@@ -4,14 +4,6 @@ import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
 import { Card, CardDescription, CardFooter, CardHeader, CardTitle } from "@unprice/ui/card"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@unprice/ui/dialog"
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -19,6 +11,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@unprice/ui/dropdown-menu"
+import {
+  ResponsiveDialog,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+  ResponsiveDialogTrigger,
+} from "@unprice/ui/responsive-dialog"
 import { cn } from "@unprice/ui/utils"
 import { SuperLink } from "~/components/super-link"
 import { PlanForm } from "../../_components/plan-form"
@@ -63,7 +63,7 @@ export function PlanCard(props: {
           </CardTitle>
           <CardDescription className="line-clamp-2 h-10">{plan.description}</CardDescription>
         </SuperLink>
-        <Dialog>
+        <ResponsiveDialog>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" className="relative z-10 size-8">
@@ -75,27 +75,27 @@ export function PlanCard(props: {
               <DropdownMenuLabel>Plan Actions</DropdownMenuLabel>
               <DropdownMenuSeparator />
 
-              <DialogTrigger asChild>
+              <ResponsiveDialogTrigger asChild>
                 <DropdownMenuItem>
                   <Settings className="mr-2 h-4 w-4" aria-hidden="true" />
                   Edit plan
                 </DropdownMenuItem>
-              </DialogTrigger>
+              </ResponsiveDialogTrigger>
             </DropdownMenuContent>
           </DropdownMenu>
 
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Edit plan</DialogTitle>
+          <ResponsiveDialogContent>
+            <ResponsiveDialogHeader>
+              <ResponsiveDialogTitle>Edit plan</ResponsiveDialogTitle>
 
-              <DialogDescription>
+              <ResponsiveDialogDescription>
                 Update the commercial package. Plan versions keep the versioned features, meters,
                 and billing behavior.
-              </DialogDescription>
-            </DialogHeader>
+              </ResponsiveDialogDescription>
+            </ResponsiveDialogHeader>
             <PlanForm defaultValues={rest} />
-          </DialogContent>
-        </Dialog>
+          </ResponsiveDialogContent>
+        </ResponsiveDialog>
       </CardHeader>
       <CardFooter className="flex flex-wrap items-center justify-between gap-3 text-muted-foreground text-sm">
         <div className="flex items-center font-mono text-muted-foreground text-xs">

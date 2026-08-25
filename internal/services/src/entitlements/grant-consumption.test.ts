@@ -33,14 +33,14 @@ describe("extractCurrencyCodeFromFeatureConfig", () => {
 
 describe("consumeGrantsByPriority", () => {
   const now = Date.UTC(2026, 2, 19, 12, 0, 0)
-  const grantStart = now - 1000
   const grantCycleStart = Date.UTC(2026, 2, 19, 0, 0, 0)
+  const grantStart = grantCycleStart
   const entitlementMonthEnd = Date.UTC(2026, 3, 19, 0, 0, 0)
 
   const monthlyReset: ResetConfig = {
     name: "monthly",
     planType: "recurring",
-    resetAnchor: 1,
+    resetAnchor: "dayOfCreation",
     resetInterval: "month",
     resetIntervalCount: 1,
   }
@@ -460,6 +460,49 @@ describe("consumeGrantsByPriority", () => {
       bucketKey: `grant_a:month:${anchoredStart}`,
       periodKey: `month:${anchoredStart}`,
       start: anchoredStart,
+      end: anchoredEnd,
+    })
+  })
+
+  it("preserves the creation time for monthly day-of-creation reset buckets", () => {
+    const cadenceStart = Date.UTC(2026, 7, 11, 17, 0, 0)
+    const cadenceEnd = Date.UTC(2026, 8, 11, 17, 0, 0)
+
+    expect(
+      computeGrantPeriodBucket(
+        grant({
+          cadenceEffectiveAt: cadenceStart,
+          resetConfig: monthlyReset,
+        }),
+        Date.UTC(2026, 7, 25, 12, 0, 0)
+      )
+    ).toEqual({
+      bucketKey: `grant_a:month:${cadenceStart}`,
+      periodKey: `month:${cadenceStart}`,
+      start: cadenceStart,
+      end: cadenceEnd,
+    })
+  })
+
+  it("uses an explicit monthly reset anchor", () => {
+    const cadenceStart = Date.UTC(2026, 7, 11, 17, 0, 0)
+    const anchoredEnd = Date.UTC(2026, 8, 1, 0, 0, 0)
+
+    expect(
+      computeGrantPeriodBucket(
+        grant({
+          cadenceEffectiveAt: cadenceStart,
+          resetConfig: {
+            ...monthlyReset,
+            resetAnchor: 1,
+          },
+        }),
+        Date.UTC(2026, 7, 25, 12, 0, 0)
+      )
+    ).toEqual({
+      bucketKey: `grant_a:month:${cadenceStart}`,
+      periodKey: `month:${cadenceStart}`,
+      start: cadenceStart,
       end: anchoredEnd,
     })
   })

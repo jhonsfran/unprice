@@ -7,14 +7,6 @@ import * as React from "react"
 import { customerSelectSchema } from "@unprice/db/validators"
 import { Button } from "@unprice/ui/button"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@unprice/ui/dialog"
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -22,6 +14,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@unprice/ui/dropdown-menu"
+import {
+  ResponsiveDialog,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+  ResponsiveDialogTrigger,
+} from "@unprice/ui/responsive-dialog"
 import { useParams } from "next/navigation"
 import { SuperLink } from "~/components/super-link"
 import { CustomerForm } from "../customer-form"
@@ -37,7 +37,7 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
   const baseUrl = `/${workspaceSlug}/${projectSlug}/customers/${customer.id}`
 
   return (
-    <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+    <ResponsiveDialog open={dialogOpen} onOpenChange={setDialogOpen}>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="icon" className="size-8 data-[state=open]:bg-accent">
@@ -48,25 +48,25 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
         <DropdownMenuContent align="end">
           <DropdownMenuLabel>More actions</DropdownMenuLabel>
           <DropdownMenuSeparator />
-          <DialogTrigger asChild>
+          <ResponsiveDialogTrigger asChild>
             <DropdownMenuItem>Edit Customer</DropdownMenuItem>
-          </DialogTrigger>
-          <DialogTrigger asChild>
+          </ResponsiveDialogTrigger>
+          <ResponsiveDialogTrigger asChild>
             <DropdownMenuItem>
               <SuperLink href={baseUrl}>Open customer</SuperLink>
             </DropdownMenuItem>
-          </DialogTrigger>
+          </ResponsiveDialogTrigger>
         </DropdownMenuContent>
       </DropdownMenu>
-      <DialogContent className="md:max-w-xl">
-        <DialogHeader>
-          <DialogTitle>Customer details</DialogTitle>
-          <DialogDescription>
+      <ResponsiveDialogContent className="md:max-w-xl">
+        <ResponsiveDialogHeader>
+          <ResponsiveDialogTitle>Customer details</ResponsiveDialogTitle>
+          <ResponsiveDialogDescription>
             Update the economic actor that holds subscriptions, wallet credits, runs, and invoices.
-          </DialogDescription>
-        </DialogHeader>
+          </ResponsiveDialogDescription>
+        </ResponsiveDialogHeader>
         <CustomerForm defaultValues={customer} setDialogOpen={setDialogOpen} />
-      </DialogContent>
-    </Dialog>
+      </ResponsiveDialogContent>
+    </ResponsiveDialog>
   )
 }

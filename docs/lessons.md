@@ -63,6 +63,9 @@ patterns. Keep it cheap to load and useful.
 
 ## Cloudflare, API, And Ingestion
 
+- 2026-08-25: Entitlement reset buckets must pass the raw cadence start and configured reset
+  anchor to `calculateCycleWindow`; cover monthly `dayOfCreation` behavior with a non-midnight
+  timestamp or usage can reset at UTC midnight before subscription renewal.
 - 2026-08-24: SDK reservation facades may release only on a known non-billable path; when provider
   usage can already exist, keep settlement retryable and never turn a settlement error into a
   release.

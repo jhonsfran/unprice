@@ -352,7 +352,7 @@ function ApiKeyTypeField({ form }: { form: CreateApiKeyFormState }) {
               aria-labelledby={labelId}
               onValueChange={field.onChange}
               value={field.value}
-              className="grid gap-2 pt-2 sm:grid-cols-2"
+              className="grid gap-2 pt-2 md:grid-cols-2"
             >
               {apiKeyTypeSchema.options.map((value) => {
                 const option = API_KEY_TYPE_OPTIONS[value]

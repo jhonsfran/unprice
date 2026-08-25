@@ -4,13 +4,13 @@ import { useState } from "react"
 
 import type { InsertPlan } from "@unprice/db/validators"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@unprice/ui/dialog"
+  ResponsiveDialog,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+  ResponsiveDialogTrigger,
+} from "@unprice/ui/responsive-dialog"
 
 import { PlanForm } from "./plan-form"
 
@@ -26,17 +26,17 @@ export function PlanDialog({
   const isEdit = Boolean(defaultValues?.id)
 
   return (
-    <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-      <DialogTrigger asChild>{children}</DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit plan" : "Create plan"}</DialogTitle>
+    <ResponsiveDialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <ResponsiveDialogTrigger asChild>{children}</ResponsiveDialogTrigger>
+      <ResponsiveDialogContent>
+        <ResponsiveDialogHeader>
+          <ResponsiveDialogTitle>{isEdit ? "Edit plan" : "Create plan"}</ResponsiveDialogTitle>
 
-          <DialogDescription>
+          <ResponsiveDialogDescription>
             Define the commercial package. Plan versions carry the features, meters, limits, and
             billing behavior.
-          </DialogDescription>
-        </DialogHeader>
+          </ResponsiveDialogDescription>
+        </ResponsiveDialogHeader>
 
         <PlanForm
           defaultValues={
@@ -51,7 +51,7 @@ export function PlanDialog({
           }
           setDialogOpen={setDialogOpen}
         />
-      </DialogContent>
-    </Dialog>
+      </ResponsiveDialogContent>
+    </ResponsiveDialog>
   )
 }
