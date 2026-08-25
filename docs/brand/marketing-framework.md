@@ -15,10 +15,9 @@ in the one offer.
 
 Primary avatar: **the margin-responsible founding engineer.**
 
-- Who: founding engineer or CTO — usually the technical co-founder — at a developer-led
-  usage-based SaaS product. Company: 2–20 people, pre-seed to Series A. Sharpest slice: AI, API,
-  and workflow products selling credits or usage allowances, where one customer-triggered action
-  (an LLM call, a data job, a compute run, a third-party API fan-out) creates real marginal cost.
+- Who: founding engineer or CTO at a developer-led AI product. Company: 2–20 people, pre-seed to
+  Series A. The product sells prepaid credits, metered AI usage, agent runs, or paid workflows. One
+  customer-triggered workload can create real marginal cost before billing records it.
 - Two brains, one person: they **buy with the founder brain** (margin eaten by over-budget work,
   disputed invoices, pricing changes that need a deploy) and **evaluate with the engineer brain**
   (SDK surface, source code, latency, blast radius, exit cost). Marketing enters through the
@@ -69,7 +68,7 @@ Each asset picks exactly one. Hook lines are canonical (owners: `brand-narrative
    what?" Market facts are dated (2026-07): verify the consolidation trace in
    `positioning-and-messaging.md` before each external use.
 
-Mechanism line for all four: **Authorize customer spend before paid work runs.**
+Mechanism line for all four: **Every AI charge starts with an authorization.**
 
 ## The Altitude Map
 
@@ -78,7 +77,7 @@ Every asset lives at exactly one altitude and links exactly one level deeper.
 | Altitude | Job | Language | Surfaces | Metric |
 | --- | --- | --- | --- | --- |
 | Hook | Make the avatar feel the incident | Money words; zero product nouns | Ads, posts, DMs, OG cards, subject lines | Qualified click-through |
-| Mechanism | State the fix in one sentence | "Authorize customer spend before paid work runs" | Hero, post bodies, README pull-quote | Scroll past hero / read time |
+| Mechanism | State the fix in one sentence | "Every AI charge starts with an authorization" | Hero, post bodies, README pull-quote | Scroll past hero / read time |
 | Proof | Make it believable | Live demo, open source, consolidation trace | Landing stations 01–04, manifesto, repo | Demo interaction, stars, docs entry |
 | Offer | Make refusing feel dumb | Time-boxed promise + guarantee | Closing CTA (station 05), campaign landings, welcome email | Sandbox signups, founder-note replies |
 

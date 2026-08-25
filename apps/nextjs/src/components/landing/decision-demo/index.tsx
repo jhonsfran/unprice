@@ -219,11 +219,11 @@ export function DecisionDemo({ className }: { className?: string }) {
           id="decision-demo-title"
           className="mt-6 font-primary text-background-textContrast text-display-3"
         >
-          Watch paid work stop before it creates cost.
+          Watch an agent run stop before it creates cost.
         </h2>
         <p className="mt-5 text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-          Click a paid action. Unprice allows, flags, or denies each request before the work runs.
-          It keeps the same decision as evidence for the invoice line.
+          Click an agent action or paid workflow. Unprice allows, flags, or denies the request
+          before work runs. It keeps that authorization as evidence for the invoice line.
         </p>
       </div>
 

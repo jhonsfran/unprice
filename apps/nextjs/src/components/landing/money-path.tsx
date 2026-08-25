@@ -39,16 +39,9 @@ import { Leader } from "./station"
 // and the loop never starts, but the sequence's final chip still lights so the
 // diagram never rests on nothing; otherwise it starts when scrolled into view.
 //
-// Two renders, and they are deliberately two different calls (launch audit
-// 2026-07-27). The hero carries variant="compact": the read-only
-// `access.check` gate — request → price → budget check → the two decision
-// chips — playing one allow (so the reader has seen what "allowed" looks
-// like) then the deny that is the actual point. That is the call the
-// walk-away guarantee is written against, so the hero must not show a
-// mutating one. The full trace at station 02 is `usage.consume`: the
-// enforcing call that reserves the wallet, captures the ledger, explains the
-// invoice line, and settles in the buyer's own Stripe. Both loop, holding
-// longer on the denial at the end of each cycle than between passes.
+// The hero uses `reservations.reserve` because the first frame must show the
+// economic control, not a read-only check. The full trace uses `usage.consume`
+// to show the known-cost path through wallet, ledger, and invoice evidence.
 
 // Narrative order, not dependency order: the event is measured first, then
 // the access question, then what it costs — the same journey the request
@@ -180,12 +173,10 @@ function RequestDecisionRail({
             Request
           </span>
           <Leader />
-          {/* The two renders are two different calls, and the page must not
-              blur them: the gate is the read-only check the guarantee is
-              written against, the full trace is the enforcing call that
-              actually moves credits. */}
+          {/* The compact render reserves variable-cost work. The full trace
+              shows the atomic known-cost path. */}
           <span className="whitespace-nowrap font-mono text-[11px] text-info-text">
-            {compact ? "access.check" : "usage.consume"}
+            {compact ? "reservations.reserve" : "usage.consume"}
           </span>
         </div>
         {compact ? null : (
@@ -409,15 +400,15 @@ const FULL_ARIA =
   "Three identical usage.consume requests use one $10.00 budget. Each request meters 2,050 tokens at $0.002 per token on plan version pro@v3, for a cost of $4.10. The first two requests are accepted. Each one reserves $4.10, captures the ledger movement, writes the invoice line, and settles payment to your Stripe account. The balance falls to $1.80. Unprice never holds the funds. The third request is denied with LIMIT_EXCEEDED because it needs $4.10. The wallet stays untouched, and Unprice writes no ledger entry, invoice line, or charge. Your app receives the reason."
 
 const COMPACT_ARIA =
-  "Read-only access.check calls use a $10.00 budget with $5.90 remaining. A request costs $4.10 and is allowed. An identical second request is denied with LIMIT_EXCEEDED because only $1.80 remains. Neither call changes state. The full path below traces the meter, access check, wallet, ledger, invoice, and payment to your Stripe account."
+  "Customer credits have $5.90 available. A reservation holds $4.10 before the provider runs and leaves $1.80 available. An identical second reservation is denied with LIMIT_EXCEEDED, so the provider does not run. The full path below traces usage, wallet movement, ledger capture, invoice evidence, and payment in your own Stripe account."
 
 export function MoneyPath({
   className,
   variant = "full",
 }: {
   className?: string
-  /** "compact" is the hero render: the gate only — request, price, budget
-   * check, and the two decision chips — with a pointer to the full trace. */
+  /** "compact" is the hero render: reservation, price, budget decision, and
+   * the two outcomes, with a pointer to the full trace. */
   variant?: "full" | "compact"
 }) {
   const compact = variant === "compact"
@@ -433,13 +424,13 @@ export function MoneyPath({
     >
       <figcaption className="mb-4 flex items-baseline justify-between gap-4 border-background-border border-b pb-3">
         <span className="font-mono text-background-text text-xs uppercase tracking-widest">
-          {compact ? "The decision" : "The money path"}
+          {compact ? "The reservation" : "The money path"}
         </span>
         {compact ? (
-          // The gate arrives mid-story on purpose: a balance already drawn
-          // down by an earlier request, so the denial has something to deny.
+          // The reservation arrives with a balance already drawn down, so the
+          // denial has something concrete to deny.
           <span className="whitespace-nowrap font-mono text-[10px] text-background-text">
-            read-only · mutates nothing
+            customer funds · before provider
           </span>
         ) : (
           <span className="whitespace-nowrap font-mono text-[10px] text-background-text">
@@ -502,7 +493,7 @@ export function MoneyPath({
           className="group mt-5 flex items-baseline justify-between gap-4 border-background-border border-t pt-3"
         >
           <span className="text-background-text text-xs leading-6">
-            Allow settles. Deny costs nothing.
+            Reserve first. Settle actual usage after.
           </span>
           <span className="whitespace-nowrap font-mono text-[11px] text-background-text transition-colors duration-regular ease-out-quad group-hover:text-background-textContrast">
             follow the full path ↓
@@ -510,8 +501,8 @@ export function MoneyPath({
         </a>
       ) : (
         <p className="mt-5 border-background-border border-t pt-3 text-background-text text-xs leading-6">
-          Every step in this path is a method in the public SDK. Run the check in shadow beside the
-          logic you already run. Use TypeScript, REST, or curl.
+          Every step is in the public SDK. Reserve variable-cost AI work, or consume known usage in
+          one call. Use TypeScript, REST, or curl.
         </p>
       )}
     </figure>

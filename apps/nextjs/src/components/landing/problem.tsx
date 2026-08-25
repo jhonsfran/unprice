@@ -40,14 +40,14 @@ export function ProblemSection() {
             id="problem-title"
             className="mt-6 max-w-xl font-primary text-background-textContrast text-display-3"
           >
-            By invoice time, the paid work already ran.
+            By invoice time, the agent already spent the credits.
           </h2>
           <p className="mt-5 max-w-xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
             <span className="text-background-textContrast">
               Your Redis counter is not a budget.
             </span>{" "}
-            It records usage after the expensive action runs. When a customer disputes the invoice,
-            engineering must reconstruct the charge from logs.
+            It records usage after the agent or workflow creates cost. When a customer disputes the
+            invoice, engineering must reconstruct the charge from logs.
           </p>
         </div>
 

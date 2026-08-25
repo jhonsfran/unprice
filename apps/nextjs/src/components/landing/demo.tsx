@@ -25,6 +25,13 @@ const DO_TEST_PATH = "apps/api/src/ingestion/entitlements/EntitlementWindowDO.wo
 // five concurrent over-limit writes, partitioned, in the real Workers runtime.
 const receipts = [
   {
+    label: "AI chatbot",
+    fact: "reserve before generation · settle actual token usage on finish",
+    href: "https://github.com/jhonsfran/chatbot/blob/main/lib/unprice/runtime.ts",
+    linkLabel: "Read the integration",
+    source: "demo_source" as const,
+  },
+  {
     label: "concurrency",
     fact: "5 concurrent over-limit writes → 2 accepted, 3 rejected",
     href: `${REPO_URL}/blob/main/${DO_TEST_PATH}`,
@@ -51,10 +58,10 @@ const receipts = [
 // watched as a diagram, done once, unedited, against a real Sandbox project.
 const shotList = [
   { label: "01", fact: "one plan version · created in the dashboard" },
-  { label: "02", fact: "customers.signUp · one test customer" },
-  { label: "03", fact: "access.check · beside the existing logic" },
-  { label: "04", fact: "the third request · LIMIT_EXCEEDED" },
-  { label: "05", fact: "the ledger entry that never got written" },
+  { label: "02", fact: "reservations.reserve · $0.10 held" },
+  { label: "03", fact: "generateText · only after funding" },
+  { label: "04", fact: "reservation.settle · actual tokens" },
+  { label: "05", fact: "unused credits released · invoice evidence kept" },
 ]
 
 function VideoBlock() {
@@ -63,7 +70,7 @@ function VideoBlock() {
       <figure className="w-full max-w-3xl rounded-lg border border-background-border bg-surface-raised p-4 shadow-ambient sm:p-5">
         <figcaption className="mb-4 flex items-baseline justify-between gap-4 border-background-border border-b pb-3">
           <span className="font-mono text-background-text text-xs uppercase tracking-widest">
-            One paid action · one afternoon
+            One agent action · one afternoon
           </span>
           <span className="whitespace-nowrap font-mono text-[10px] text-background-text">
             sandbox · no processor

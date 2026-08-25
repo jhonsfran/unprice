@@ -629,6 +629,8 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   posting a zero-amount ledger transfer.
 
 ## UI And Dashboard
+- 2026-08-25: AI-first landing examples should lead with `reservations.reserve` before provider
+  work and `reservation.settle` after usage; keep `access.check` labeled as read-only shadow mode.
 - Tailwind v3 + Radix var tokens: opacity modifiers like bg-success-bg/40 don't reliably apply alpha (tokens are var(--…) strings). For emphasis ramps use Radix steps: bg → bgHover → bgActive.
 - 2026-07-15: When WAAPI choreography must react to layout that differs per state (MoneyPath's
   stacked one-outcome column), stamp the state as a data attribute on the stage synchronously in

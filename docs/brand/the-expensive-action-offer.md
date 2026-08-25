@@ -36,7 +36,7 @@ Queues). Lead with the customer money path, not cold category language.
 | MAGIC | How it is satisfied |
 | --- | --- |
 | **M**ake it about them | "Your paid action," "your margin," "your invoice evidence," "your request path." The hero is the builder's money path, not our platform. |
-| **A**nnounce the avatar | Developer-led usage-based SaaS teams with paid actions that affect margin, invoice trust, or pricing flexibility (CTOs, founding engineers, platform engineers). |
+| **A**nnounce the avatar | Developer-led AI products that sell credits, agent runs, or paid workflows (CTOs, founding engineers, platform engineers). |
 | **G**ive them a goal | Authorize customer spend before one paid action runs and prove the charge after it bills. |
 | **I**ndicate a time interval | One afternoon to get the first action into shadow, not a quarter-long billing migration. |
 | **C**omplete with a container word | "Sprint" (the container). Alternatives below. |
@@ -330,9 +330,10 @@ No countdown timers. Urgency comes from the buyer's own traffic and from genuine
 > from real spend, it leaks over-budget work under concurrency, and it can't explain a denial after
 > the fact.
 >
-> Unprice is the open-source customer money path for usage-based SaaS. You name one paid action, and Unprice
-> puts customer spend authorization in that request path: check plan version, entitlement, budget,
-> credits, and meter rules before it runs, then keep the invoice evidence from the same money trail. Define
+> Unprice is open-source billing for AI credits and agent usage. You name one agent run or paid
+> workflow, and Unprice puts customer spend authorization in that request path: check plan version,
+> entitlement, budget, credits, and meter rules before it runs, then keep the invoice evidence from
+> the same money trail. Define
 > one plan version and a single `signUp` call provisions the customer, subscription, and entitlements
 > — no entitlement tables to hand-roll.
 >
@@ -383,7 +384,7 @@ Avoid vague CTAs like "Start pricing" or "Get started."
 
 **Tweet/post:**
 
-> For usage-based SaaS, the invoice is the autopsy — the work already ran.
+> For AI products, the invoice is the autopsy. The agent already ran.
 >
 > Unprice authorizes paid usage before it runs and keeps the evidence that explains every charge
 > after it bills.

@@ -19,7 +19,8 @@ export default function Hero() {
               payoff in ink — the clause a margin owner reads first. */}
           <h1 id="hero-title" className="font-primary text-background-textContrast text-display-1">
             <Balancer>
-              <span className="text-background-text">Sell credits and usage.</span> Keep the margin.
+              <span className="text-background-text">Sell AI credits and usage.</span> Keep the
+              margin.
             </Balancer>
           </h1>
           {/* The canonical mechanism sentence leads the subhead verbatim, so a
@@ -37,9 +38,8 @@ export default function Hero() {
               reader meeting the phrase cold parses it as Unprice sitting in the
               flow, which is the one misread that costs the most. */}
           <p className="mt-6 max-w-xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-            Authorize customer spend before paid work runs. That means what your customers spend,
-            not your provider bill. Open source, for SaaS that sells credits, API calls, or agent
-            runs.
+            Authorize every agent run and paid workflow before it creates cost. Reserve customer
+            credits up front, then trace the decision through usage and the invoice.
           </p>
           <div className="mt-10 flex flex-wrap items-center gap-3">
             <AcquisitionLink
@@ -47,7 +47,7 @@ export default function Hero() {
               pendingLabel="Opening signup…"
               className={buttonVariants({ variant: "primary", className: "gap-1.5" })}
             >
-              Start with one paid action
+              Start with one agent action
               <ArrowRight aria-hidden className="size-3.5" />
             </AcquisitionLink>
             {/* Label follows the artifact. Offering to play a recording that

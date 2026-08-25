@@ -37,8 +37,8 @@ export default function ManifestoBelief() {
 
         <p className="mt-8 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
           <Balancer>
-            For usage-based SaaS, pricing is a runtime decision. Unprice keeps that decision in open
-            code you can run and inspect.
+            For AI products, every charge starts with a runtime decision. Unprice keeps that
+            decision in open code you can run and inspect.
           </Balancer>
         </p>
 
@@ -64,7 +64,7 @@ export default function ManifestoBelief() {
             pendingLabel="Opening signup…"
             className={buttonVariants({ variant: "primary", className: "gap-1.5" })}
           >
-            Start with one paid action
+            Start with one agent action
             <ArrowRight aria-hidden className="size-3.5" />
           </AcquisitionLink>
         </div>

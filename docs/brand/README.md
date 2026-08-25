@@ -15,24 +15,25 @@ plans.
 
 Do not re-derive these. Copy from here; if they change, change them here first.
 
-- Public frame: open-source customer money path for usage-based SaaS.
+- Public frame: open-source billing for AI credits and agent usage.
 - PriceOps: internal operating model for pricing as versioned commercial infrastructure — plan versions,
   subscriptions, entitlements, meters, budgets, credits, usage evidence, and invoice evidence stay
   separate but connected.
 - PriceOps manifesto: entitlements should not be hardcoded into subscriptions; customers can stay
   pinned to the plan version they bought while the team ships new pricing experiments.
-- Wedge: customer spend authorization with invoice evidence — authorize customer spend before paid
-  work runs, then prove every allow, deny, charge, credit, and invoice line after.
-- Headline (landing h1): Sell credits and usage. Keep the margin.
-- Rallying cry / mechanism line: Authorize customer spend before paid work runs. Leads the landing
-  subheadline verbatim; owns the `<title>`, `og:title`, OG card, and HN submission title.
-- Promise line: Sell credits and usage-based plans without eating the cost when a customer overspends.
+- Wedge: authorization-led AI billing. Authorize each agent run or paid workflow before it creates
+  cost, reserve customer credits, then trace settled usage to the invoice.
+- Headline (landing h1): Sell AI credits and usage. Keep the margin.
+- Narrative bridge: Every AI charge starts with an authorization.
+- Subheadline: Authorize every agent run and paid workflow before it creates cost. Reserve customer
+  credits up front, then trace the decision through usage and the invoice.
+- Promise line: Sell AI credits and usage without paying for unfunded agent work.
 - Name meaning: "Unprice" = un-hardcoding pricing from your codebase, not removing price.
 - Payments: Stripe-first today, provider-extensible by design. Unprice never sits in the buyer's
   funds flow.
 - Business model: open-core (AGPL-3.0 plus a commercial license).
-- Primary buyers: developer-led usage-based SaaS teams — CTOs, founding engineers, platform
-  engineers. AI/API and workflow products are the sharpest early slice.
+- Primary buyers: developer-led AI products. CTOs, founding engineers, and platform engineers who
+  sell credits, agent runs, or paid workflows.
 - Contrast: gateways cap provider spend; Unprice governs what the buyer's customer is allowed to
   spend and connects that decision to invoice evidence.
 - Why now (dated 2026-07; verify before external use): the independent billing layer consolidated

@@ -74,8 +74,8 @@ export default function FooterMarketing() {
           <div className="flex max-w-sm flex-col items-start">
             <Logo size="md" />
             <p className="mt-4 text-background-text text-sm leading-6">
-              Authorize customer spend before paid work runs. The open-source customer money path
-              for usage-based SaaS.
+              Open-source billing for AI credits and agent usage. Every AI charge starts with an
+              authorization.
             </p>
             <div className="mt-6 flex w-full flex-col border-background-border border-t pt-2">
               {footerFacts.map((row) => (

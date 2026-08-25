@@ -25,7 +25,7 @@ const WelcomeEmail = ({
     <Html lang="en" dir="ltr">
       <Tailwind>
         <Head />
-        <Preview>Welcome to Unprice - authorize customer spend before paid work runs</Preview>
+        <Preview>Welcome to Unprice - sell AI credits and agent usage</Preview>
         <Body className="bg-[#191918] py-[40px] font-sans">
           <Container className="mx-auto max-w-[600px] rounded-[8px] bg-[#111110] px-[32px] py-[40px]">
             {/* Logo */}
@@ -44,13 +44,13 @@ const WelcomeEmail = ({
               </Heading>
 
               <Text className="mb-[24px] text-[#ffffff] text-[16px] leading-[24px]">
-                Unprice is the open-source customer money path for usage-based SaaS: authorize
-                customer spend before paid work runs, then explain every charge, credit, denial, and
-                invoice line from the same evidence trail.
+                Unprice is open-source billing for AI credits and agent usage. Authorize each agent
+                run or paid workflow before it creates cost, then trace settled usage to the
+                invoice.
               </Text>
 
               <Text className="mb-[32px] text-[#ffffff] text-[16px] leading-[24px]">
-                Start with one paid action. Define a plan version, install the TypeScript SDK, and
+                Start with one agent action. Define a plan version, install the TypeScript SDK, and
                 run the decision in shadow on the built-in Sandbox—nothing blocks your traffic until
                 the evidence convinces you.
               </Text>
@@ -66,7 +66,7 @@ const WelcomeEmail = ({
                   href="https://app.unprice.dev"
                   className="box-border rounded-[8px] bg-[#ffc53d] px-[32px] py-[16px] font-semibold text-[#111110] text-[16px] no-underline"
                 >
-                  Start with one paid action
+                  Start with one agent action
                 </Button>
               </Section>
 

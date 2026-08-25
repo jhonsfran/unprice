@@ -9,16 +9,15 @@ product
 
 ## Users
 
-Unprice serves developer-led usage-based SaaS teams: founders, CTOs, founding engineers, and
-platform engineers who own metering, entitlements, budgets, wallets, subscriptions, and invoice
-evidence. They use the product while configuring revenue-critical workflows, debugging customer
-state, or integrating request-path spend authorization.
+Unprice serves founders, CTOs, founding engineers, and platform engineers building AI products that
+sell credits, agent runs, or paid workflows. They own customer budgets, wallets, usage settlement,
+and invoice evidence.
 
 ## Product purpose
 
-Unprice is the open-source customer money path for usage-based SaaS. It helps teams authorize
-customer spend before paid work runs, keep pricing logic versioned and inspectable, and explain
-allow, deny, charge, credit, replay, and invoice outcomes from one connected evidence trail.
+Unprice is open-source billing for AI credits and agent usage. It helps teams authorize workloads
+before they create cost, reserve customer credits, settle actual usage, and trace invoice lines to
+the decisions that allowed the work.
 
 ## Brand personality
 

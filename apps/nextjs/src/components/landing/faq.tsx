@@ -125,9 +125,9 @@ export function FaqSection() {
             gateway. The second was missing, so that reader read the whole page
             before finding out. */}
         <p className="mt-5 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-          Unprice is for teams whose customers can trigger real cost through an LLM call, data job,
-          or paid workflow. If your product only charges per seat, Stripe Billing is enough. If you
-          need to cap your provider bill instead of customer spend, use an AI gateway.
+          Unprice is for AI products whose customers buy credits, trigger agent runs, or start paid
+          workflows. If your product only charges per seat, Stripe Billing is enough. If you need to
+          cap your model-provider bill instead of customer spend, use an AI gateway.
         </p>
         <p className="mt-4 font-mono text-[11px] text-background-text leading-5">
           Stripe today · hosted or your own Cloudflare account · not tax, accounting, or revenue

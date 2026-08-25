@@ -24,21 +24,21 @@ export default function ManifestoHero() {
           className="mt-6 max-w-3xl font-primary text-background-textContrast text-display-1"
         >
           <Balancer>
-            <span className="text-background-text">Pricing is</span> a runtime decision.
+            <span className="text-background-text">Every AI charge starts with</span> an
+            authorization.
           </Balancer>
         </h1>
         <p className="mt-6 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
           <Balancer>
-            Hardcoded tiers, manual feature gates, and end-of-cycle invoices work poorly when each
-            request creates cost. A customer, job, workflow, or agent can cross its budget before
-            the invoice exists.
+            An agent can spend a customer's credits before an end-of-cycle invoice exists. A usage
+            counter can record the cost, but it cannot decide whether the work should run.
           </Balancer>
         </p>
         <p className="mt-4 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
           <Balancer>
-            Put the pricing decision where the cost starts, in the request path. Check entitlement
-            and budget, reserve credits, and deny over-budget work before it runs. Keep that
-            decision as evidence for each charge.
+            Put the commercial decision before the run. Check the plan and budget, reserve customer
+            credits, and deny unfunded work. Then settle actual usage and trace the invoice line to
+            the authorization.
           </Balancer>
         </p>
 

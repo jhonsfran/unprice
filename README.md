@@ -1,4 +1,4 @@
-# Unprice: open-source customer money path for usage-based SaaS
+# Unprice: open-source billing for AI credits and agent usage
 
 [![GitHub stars](https://img.shields.io/github/stars/jhonsfran1165/unprice?style=social)](https://github.com/jhonsfran1165/unprice)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
@@ -6,16 +6,14 @@
 
 > "Your product is smart, but your pricing is hardcoded."
 >
-> Unprice is the open-source customer money path for usage-based SaaS. Sell credits and usage-based plans
-> without paying for over-budget customer work. Authorize spend in the request path, then keep the
-> evidence for the invoice. "Unprice" means moving plan logic out of your codebase and into an
-> inspectable runtime.
+> Sell AI credits and usage without paying for unfunded agent work. Authorize each agent run or paid
+> workflow before it creates cost, reserve customer credits up front, then trace settled usage to
+> the invoice.
 
 ## Billing is too late
 
-For usage-based products, pricing is not a page or an end-of-cycle invoice job. It is a runtime
-decision. By the time billing runs, the expensive work already happened: the LLM call, the data job,
-the costly third-party API, the multi-minute workflow.
+For AI products, billing cannot start at the end of the cycle. By then, the model call, agent run,
+or paid workflow already created cost.
 
 If the request should have been blocked, you already paid for it. When a customer disputes an
 invoice, engineering must reconstruct the path from product event to usage counter to billing line.
@@ -24,10 +22,11 @@ and support workflows.
 
 ## Put customer spend in the request path
 
-Unprice connects the customer money path so your app can decide **before** the paid work runs.
+Every AI charge starts with an authorization. Unprice gives your app that decision before the work
+runs.
 
-- **Authorize before work runs.** Check entitlement, budget, wallet credits, and meter rules while
-  the request is in flight.
+- **Authorize before work runs.** Check the plan, budget, wallet credits, and meter rules before an
+  agent or workflow creates cost.
 - **Keep invoice evidence.** Trace each charge to rated usage events and ledger captures.
 - **Inspect one money path.** Usage, entitlements, budgets, credits, ingestion, and invoices share
   one evidence trail.
@@ -40,9 +39,9 @@ wallet credits, and invoice evidence.
 
 ## Who it is for
 
-Unprice is for developer-led AI, API, and workflow SaaS teams from seed to Series A. It is built for
-CTOs, founding engineers, and platform engineers who own metering, entitlements, customer budgets,
-and request-path enforcement.
+Unprice is for developer-led AI products that sell prepaid credits, metered AI usage, agent runs,
+or paid workflows. It is built for CTOs, founding engineers, and platform engineers who own the
+path from customer authorization to invoice.
 
 ## Licenses
 
@@ -91,7 +90,7 @@ Unprice uses:
 
 ## Get started
 
-[Read the quickstart](https://docs.unprice.dev) to put one paid action on the money path.
+[Read the quickstart](https://docs.unprice.dev) to put one agent action on the money path.
 
 ## Agent skill
 

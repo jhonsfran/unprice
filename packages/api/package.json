@@ -1,6 +1,6 @@
 {
   "name": "@unprice/api",
-  "description": "Unprice TypeScript SDK for usage-based SaaS. Authorize customer spend before paid work runs.",
+  "description": "TypeScript SDK for AI credits and agent usage. Authorize runs, reserve customer credits, and settle usage.",
   "private": false,
   "version": "0.2.0",
   "main": "./dist/index.js",
