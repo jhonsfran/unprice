@@ -20,7 +20,7 @@
     "#services/*": "./src/services/*.ts",
     "#env": "./src/env.ts"
   },
-  "license": "AGPL-3.0",
+  "license": "AGPL-3.0-only",
   "scripts": {
     "test": "SKIP_ENV_VALIDATION=true NODE_ENV=test vitest run",
     "test:file": "NODE_ENV=test SKIP_ENV_VALIDATION=true APP_ENV=preview vitest 'src/**/$@'",

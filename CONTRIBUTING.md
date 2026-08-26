@@ -28,7 +28,7 @@ before writing code. This is money-path logic; correctness and evidence trails o
 | `apps/api` | The Hono runtime API on Cloudflare Workers: entitlements, metering, runs, and ingestion |
 | `apps/nextjs` | Dashboard and marketing site (Next.js App Router) |
 | `apps/docs` | Documentation site (Mintlify) |
-| `packages/api` | Published MIT-licensed TypeScript SDK, `@unprice/api` |
+| `packages/**` | MIT-licensed client packages, including the published `@unprice/api` SDK |
 | `internal/*` | Core packages such as `db`, `services`, `stripe`, `analytics`, `jobs`, `money`, and `trpc` |
 | `tooling/*` | Shared configs and dev tools |
 
@@ -89,18 +89,19 @@ expected failures), and logging patterns (`no console.log`; use the existing log
 
 ## Licensing of contributions
 
-Unprice's core is dual-licensed: [AGPL-3.0](LICENSE) plus a Commercial License. The `@unprice/api`
-client SDK is MIT.
+This repository uses a mixed-license model. All project-owned files under `packages/**` use MIT.
+The core uses [AGPL-3.0-only](LICENSE), with separate commercial terms available from the
+maintainers. See [LICENSING.md](LICENSING.md) for the path-based scope.
 
 By submitting a contribution you agree that:
 
 1. You wrote the contribution or otherwise have the right to submit it (Developer Certificate of
    Origin. Sign off your commits with `git commit -s`.
-2. Your contribution is licensed under the license of the files it modifies (AGPL-3.0 for the
-   core, MIT for the SDK packages), and you grant the project maintainers the right to also
-   distribute it under the project's Commercial License.
+2. Your contribution is licensed under the license of the files it modifies. This is MIT for
+   `packages/**` and AGPL-3.0-only for the core. For core contributions, you also grant the project
+   maintainers the right to distribute the contribution under the project's commercial license.
 
-This grant lets the maintainers offer the same core under AGPL-3.0 and a commercial license.
+This grant lets the maintainers offer the same core under AGPL-3.0-only and a commercial license.
 
 ## Questions
 

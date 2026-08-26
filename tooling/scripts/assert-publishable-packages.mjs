@@ -34,6 +34,8 @@ for (const pattern of workspacePatterns) {
     try {
       const manifest = JSON.parse(await readFile(manifestPath, "utf8"))
       workspacePackages.push({
+        directory: path.relative(repoRoot, path.dirname(manifestPath)),
+        license: manifest.license,
         name: manifest.name,
         path: path.relative(repoRoot, manifestPath),
         private: manifest.private === true,
@@ -49,6 +51,43 @@ for (const pattern of workspacePatterns) {
 
       throw error
     }
+  }
+}
+
+const mitPackages = workspacePackages.filter((workspacePackage) =>
+  workspacePackage.directory.startsWith("packages/")
+)
+
+for (const workspacePackage of mitPackages) {
+  if (workspacePackage.license !== "MIT") {
+    process.stderr.write(
+      [
+        `Refusing to publish: ${workspacePackage.name} must use the MIT license.`,
+        `Manifest: ${workspacePackage.path}`,
+        `Found: ${workspacePackage.license ?? "none"}`,
+        "All project-owned packages under packages/** use MIT.",
+        "",
+      ].join("\n")
+    )
+    process.exit(1)
+  }
+
+  try {
+    await readFile(path.join(repoRoot, workspacePackage.directory, "LICENSE"), "utf8")
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      process.stderr.write(
+        [
+          `Refusing to publish: ${workspacePackage.name} has no package-level LICENSE file.`,
+          `Expected: ${path.join(workspacePackage.directory, "LICENSE")}`,
+          "npm packages must ship their MIT license with the package.",
+          "",
+        ].join("\n")
+      )
+      process.exit(1)
+    }
+
+    throw error
   }
 }
 

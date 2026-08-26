@@ -6,7 +6,7 @@
   "types": "src/index.ts",
   "keywords": [],
   "author": "Sebastian Franco",
-  "license": "AGPL-3.0",
+  "license": "AGPL-3.0-only",
   "devDependencies": {
     "@unprice/tsconfig": "workspace:*",
     "@types/node": "24.13.2",

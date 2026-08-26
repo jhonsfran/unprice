@@ -2,7 +2,7 @@
   "name": "@unprice/tailwind-config",
   "private": true,
   "version": "0.1.0",
-  "license": "AGPL-3.0",
+  "license": "AGPL-3.0-only",
   "exports": {
     ".": "./index.ts",
     "./themes/slate.css": "./themes/slate.css",

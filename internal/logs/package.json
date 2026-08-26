@@ -10,7 +10,7 @@
     "clean": "rm -rf .turbo node_modules",
     "typecheck": "tsc --noEmit"
   },
-  "license": "AGPL-3.0",
+  "license": "AGPL-3.0-only",
   "devDependencies": {
     "@unprice/tsconfig": "workspace:*",
     "@types/node": "24.13.2",

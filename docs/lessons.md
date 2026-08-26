@@ -687,6 +687,9 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 
 ## Tests, Tooling, And Docs
 
+- 2026-08-26: License project-owned files under `packages/**` as MIT and all other project-owned
+  files as AGPL-3.0-only; keep the release guard checking each package's MIT metadata and local
+  `LICENSE` file.
 - 2026-08-11: Before publishing a repository skill with `gh skill publish`, remove tracked
   `.agents/skills` installs from Git and give each `SKILL.md` a license; discovery otherwise
   includes foreign skills and emits source-hygiene warnings.

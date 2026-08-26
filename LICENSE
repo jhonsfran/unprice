@@ -659,39 +659,3 @@ You should also get your employer (if you work as a programmer) or school,
 if any, to sign a "copyright disclaimer" for the program, if necessary.
 For more information on this, and how to apply and follow the GNU AGPL, see
 <https://www.gnu.org/licenses/>.
-
-===============================================================================
-
-                            COMMERCIAL LICENSE ADDENDUM
-
-This software is dual-licensed under the GNU Affero General Public License
-version 3 (AGPL-3.0) and a proprietary commercial license.
-
-COMMERCIAL LICENSE OPTION
-
-If you wish to use this software in a manner that does not comply with the
-terms and conditions of the GNU Affero General Public License version 3, you
-may obtain a commercial license from the copyright holder.
-
-A commercial license grants you the right to:
-  - Use, modify, and distribute this software without the copyleft obligations
-    of the AGPL-3.0
-  - Use this software in proprietary applications without being required to
-    disclose your source code
-  - Use this software in commercial products and services without the
-    requirement to license your derivative works under the AGPL-3.0
-  - Receive commercial support and warranty protections (as specified in the
-    commercial license agreement)
-
-The commercial license is a separate agreement that supersedes the AGPL-3.0
-terms for the licensed use. All rights not expressly granted by the commercial
-license remain subject to the AGPL-3.0.
-
-For inquiries regarding commercial licensing, pricing, and terms, please
-contact the copyright holder directly.
-
-Copyright Holder Contact Information: seb@unprice.dev
-
-This addendum does not modify the terms of the GNU Affero General Public
-License version 3. Users who do not obtain a commercial license remain
-subject to all terms and conditions of the AGPL-3.0.

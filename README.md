@@ -1,8 +1,9 @@
 # Unprice: open-source billing for AI credits and agent usage
 
 [![GitHub stars](https://img.shields.io/github/stars/jhonsfran1165/unprice?style=social)](https://github.com/jhonsfran1165/unprice)
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
-[![License: Commercial](https://img.shields.io/badge/License-Commercial-gold.svg)](LICENSE#L665)
+[![Core license: AGPL-3.0-only](https://img.shields.io/badge/core-AGPL--3.0--only-blue.svg)](LICENSE)
+[![Package license: MIT](https://img.shields.io/badge/packages-MIT-green.svg)](packages/api/LICENSE)
+[![Commercial license](https://img.shields.io/badge/core-commercial-gold.svg)](COMMERCIAL-LICENSING.md)
 
 > "Your product is smart, but your pricing is hardcoded."
 >
@@ -45,10 +46,14 @@ path from customer authorization to invoice.
 
 ## Licenses
 
-Unprice is dual-licensed under **AGPL-3.0** and a **Commercial License**.
+This repository uses different licenses for the core and the client packages:
 
-The published **@unprice/api** client package uses the **MIT License**. You can embed it in an
-application without applying the AGPL-3.0 core license to that application.
+- All project-owned files under [`packages/**`](packages) use the **MIT License**.
+- All other project-owned files use **AGPL-3.0-only**. A separate commercial license is available
+  for the core.
+
+You can embed an MIT package such as **@unprice/api** in an application. Doing so does not apply the
+core AGPL license to that application. See [LICENSING.md](LICENSING.md) for the exact scope.
 
 ### Why AGPL?
 
@@ -59,7 +64,7 @@ Money logic should be open to inspection.
   changes under the same license.
 - **Keep control.** Run the code in your account and keep your data there.
 
-Use the **Commercial License** if you need to keep modifications to the core private.
+Use the [commercial license](COMMERCIAL-LICENSING.md) if you need separate terms for the core.
 
 ## Core capabilities
 

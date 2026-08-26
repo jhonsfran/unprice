@@ -8,7 +8,7 @@
   },
   "keywords": [],
   "author": "Sebastian Franco",
-  "license": "AGPL-3.0",
+  "license": "AGPL-3.0-only",
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
     "@unprice/config": "workspace:^",

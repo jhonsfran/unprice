@@ -1,5 +1,6 @@
 {
   "name": "@unprice/observability",
+  "license": "AGPL-3.0-only",
   "private": true,
   "version": "1.0.0",
   "description": "Thin observability wrapper: evlog + Axiom pipeline + Unprice conventions",

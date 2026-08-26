@@ -154,5 +154,6 @@ configuration the document omits. The call reports these omissions instead of di
 
 ## License
 
-MIT. This package is licensed separately from the AGPL-3.0 Unprice core so it can be embedded in
-applications without applying the core repository license to the host app.
+MIT. All project-owned packages under `packages/**` are licensed separately from the
+AGPL-3.0-only Unprice core. You can embed this package in an application without applying the core
+license to the application.
