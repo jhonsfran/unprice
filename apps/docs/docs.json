@@ -27,6 +27,7 @@
               {
                 "group": "Quickstart",
                 "pages": [
+                  "quickstart/agent-integration",
                   "quickstart/onboarding-plan",
                   "quickstart/choose-operation",
                   "quickstart/onboarding-customer",

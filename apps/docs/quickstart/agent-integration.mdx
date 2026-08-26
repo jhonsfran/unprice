@@ -1,0 +1,111 @@
+---
+title: "Integrate with an AI agent"
+description: "Give your coding agent the Unprice integration skill and put one paid action on the money path."
+---
+
+The Unprice skill teaches Codex, Claude Code, Cursor, and other skills-compatible agents how to
+configure pricing and integrate the TypeScript SDK. The agent inspects your project first, follows
+its architecture, and selects the Unprice operation that matches your paid action.
+
+The skill handles two separate jobs:
+
+| Job | API key | Agent boundary |
+| --- | --- | --- |
+| Configure plans, prices, features, and limits | `UNPRICE_CONFIG_TOKEN` | Creates or reuses drafts, then stops at a review link |
+| Check access, consume or record usage, and reserve run budgets | `UNPRICE_TOKEN` | Adds the runtime decision at the server boundary that owns the paid action |
+
+<Note>
+  An agent cannot publish pricing. `monetization.apply` writes draft plan versions only. You must
+  review and publish each draft in the Unprice dashboard.
+</Note>
+
+## 1. Install the skill
+
+Run this command at the root of your project:
+
+```bash
+npx skills add jhonsfran/unprice --skill integrate-unprice-sdk
+```
+
+The command installs the skill at project scope by default. Commit the installed skill when every
+developer and cloud agent should use the same Unprice instructions. Use `--global` when you want
+the skill available across your local projects.
+
+You can inspect the published skill on
+[skills.sh](https://www.skills.sh/jhonsfran/unprice/integrate-unprice-sdk).
+
+## 2. Give the agent its first task
+
+Open your coding agent in the same project and send this prompt:
+
+```text
+Use the integrate-unprice-sdk skill. Inspect this project and identify the server boundary that
+owns its paid action. Explain which Unprice runtime operation fits, what pricing configuration is
+required, and which identifiers or product decisions you need from me. Do not invent plan,
+feature, event, or meter property slugs. Do not edit the project yet.
+```
+
+The agent should inspect your package manager, framework, customer identity, service boundaries,
+environment validation, and test patterns before it proposes a change.
+
+## 3. Configure Unprice
+
+Create a config API key in the Unprice dashboard and store it as `UNPRICE_CONFIG_TOKEN` with your
+other server-side secrets. Do not paste the key into the prompt or commit it.
+
+Then tell the agent what you sell. Include each plan, its price and billing cadence, its features,
+and any usage allowance or customer spend cap. For example:
+
+```text
+Use the integrate-unprice-sdk skill to configure this product in Unprice.
+
+Create a Free plan with 10,000 included tokens each month and a Pro plan at $20 per month with
+1,000,000 included tokens, then charge $0.00001 for each additional token. New customers use Free.
+Inspect the current Unprice configuration first, explain the proposed changes, and ask for my
+approval before applying them. Stop after you return the draft review URL.
+```
+
+The agent calls `monetization.get` before it writes. After you approve the commercial model, it can
+call `monetization.apply`. The operation is safe to retry with the same document. It creates or
+reuses drafts and returns a `reviewUrl`.
+
+Open that link, review the result, and publish the plan versions yourself.
+
+## 4. Add the runtime integration
+
+After you publish the plan versions, create a runtime API key and store it as `UNPRICE_TOKEN`. Tell
+the agent that publication is complete:
+
+```text
+I published the Unprice plan versions. Continue with the runtime integration. Put the Unprice
+decision at the existing server boundary that owns the paid action, keep the API key server-side,
+and add focused tests for allowed, denied, API error, and retry behavior.
+```
+
+The skill selects the runtime call from the commercial decision:
+
+| Product decision | Unprice operation |
+| --- | --- |
+| Ask whether a customer can use a feature without changing state | `access.check` |
+| Enforce a known usage amount before paid work starts | `usage.consume` |
+| Report usage without using it as a spend gate | `usage.record` |
+| Reserve credits before an agent, workflow, or other multi-step workload starts | `runs.start`, `runs.consume`, and `runs.end` |
+
+The agent should keep API failures separate from valid commercial denials. It should also reuse the
+same idempotency key when it retries the same logical mutation.
+
+## See a complete example
+
+The [Unprice AI chatbot example](https://github.com/jhonsfran/chatbot) uses the same workflow. Its
+configuration script inspects the current monetization model, applies draft changes, and returns a
+review URL. The runtime integration provisions customers, checks access, and reserves model spend
+before generation.
+
+<CardGroup cols={2}>
+  <Card title="Integrate manually" icon="code" href="/quickstart/onboarding-plan">
+    Follow the SDK quickstart without an AI agent.
+  </Card>
+  <Card title="Choose the runtime call" icon="route" href="/quickstart/choose-operation">
+    Compare access checks, usage operations, and budgeted runs.
+  </Card>
+</CardGroup>
