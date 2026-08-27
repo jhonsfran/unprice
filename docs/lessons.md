@@ -65,7 +65,8 @@ patterns. Keep it cheap to load and useful.
 
 - 2026-08-25: Entitlement reset buckets must pass the raw cadence start and configured reset
   anchor to `calculateCycleWindow`; cover monthly `dayOfCreation` behavior with a non-midnight
-  timestamp or usage can reset at UTC midnight before subscription renewal.
+  timestamp or usage can reset at UTC midnight before subscription renewal. In reset tests, match
+  expected period keys to the explicit numeric anchor; daily anchor `0` means UTC midnight.
 - 2026-08-24: SDK reservation facades may release only on a known non-billable path; when provider
   usage can already exist, keep settlement retryable and never turn a settlement error into a
   release.
