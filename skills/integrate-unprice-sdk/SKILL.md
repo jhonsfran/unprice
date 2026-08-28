@@ -27,6 +27,8 @@ configuration: read [configuration-workflow.md](references/configuration-workflo
    - Read [operation-selection.md](references/operation-selection.md).
    - Choose one primary runtime path before writing code.
    - Do not infer product configuration from UI labels or plan names.
+   - Keep only stable capability and event identifiers in the host. Unprice owns plan names,
+     membership, prices, limits, the default signup plan, and feature-to-plan rules.
    - For included metered usage plus overage, or a customer-specific spend cap,
      read [configuration-workflow.md](references/configuration-workflow.md).
 
@@ -60,6 +62,8 @@ configuration: read [configuration-workflow.md](references/configuration-workflo
 
 - Keep Unprice API keys server-side.
 - Check stable feature slugs; never branch product behavior on plan display names.
+- Use `access.entitlements.current` for a customer-wide capability or billing UI snapshot. Use
+  `access.check` when one paid action needs one current decision.
 - Treat `access.check` as a read-only decision.
 - Never use `usage.record` as a spend gate.
 - Do not begin paid work after a denied `usage.consume` or rejected run reservation.

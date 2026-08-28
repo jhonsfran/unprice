@@ -8,6 +8,7 @@ similarity.
 | Application need | Operation | Blocks over-budget work? | Mutates state? |
 | --- | --- | --- | --- |
 | Ask whether a customer may use a feature | `access.check` | No | No |
+| Read all current capabilities for account UI or application state | `access.entitlements.current` | No | No |
 | Compare Unprice with existing logic in shadow | `access.check` | No | No |
 | Enforce a known usage amount before work runs | `usage.consume` | Yes | Yes |
 | Report usage for metering and invoice evidence | `usage.record` | No | Yes, asynchronously |
@@ -18,6 +19,17 @@ Use this shorthand:
 
 > `check` asks. `consume` decides and applies known usage now. `record` reports what happened.
 > `runs` reserve before a variable-cost workload starts.
+
+## `access.entitlements.current`
+
+Use `access.entitlements.current` when the application needs one customer-wide snapshot for account
+UI, capability discovery, or several independent feature flags. Match rows by stable `featureSlug`.
+Use `status` and `allowed` as returned, including unavailable rows. Do not reconstruct capability
+state from the subscription plan name, plan slug, price, or a host-owned plan table.
+
+Use `access.check` instead when one action needs one authoritative decision immediately before the
+action. A snapshot is useful application state; it is not a replacement for an action-specific
+gate when freshness or enforcement matters.
 
 ## `access.check`
 
@@ -124,9 +136,13 @@ Use `customers.signUp` when Unprice should create or map the customer and provis
 from a published plan version. Persist the returned Unprice `customerId` against the application's
 stable account or tenant ID.
 
-Use `planSlug` for the latest published version selected by product policy, or `planVersionId` when
-the integration must pin an exact published version. Confirm the choice with the user or existing
-application behavior.
+Omit `planSlug` and `planVersionId` when Unprice owns the project's default signup plan. Use
+`planSlug` for the latest published version selected by an explicit host policy, or `planVersionId`
+when the integration must pin an exact published version.
+
+For self-service plan changes, send the selected `planVersionId` from the current Unprice plan
+catalog and validate it again on the server. Never search for a plan called `pro`, encode a plan
+order, or keep an application-owned list of upgrade targets.
 
 Do not recreate the customer on each request. Reuse the stored mapping.
 

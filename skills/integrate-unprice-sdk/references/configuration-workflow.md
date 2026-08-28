@@ -111,6 +111,11 @@ types are the contract — the same precedence rules as the rest of this skill.
 Keeping the call as a script in the host project is fine and often useful as a record of what was
 sent. Nothing reads it back. Re-running it is safe, and deleting it changes nothing.
 
+Do not copy this commercial document into runtime application constants. The host keeps stable
+feature and event identifiers. Unprice remains the source of plan names, membership, prices,
+limits, default signup, and feature-to-plan rules so pricing operators can iterate without an
+application release.
+
 ## Idempotency and drafts
 
 `apply` is content-addressed. Each plan's desired version is hashed, and the same document sent

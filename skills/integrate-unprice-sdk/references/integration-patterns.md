@@ -60,6 +60,29 @@ allow work.
 
 Use the host project's logger and error primitives. Do not introduce `console.log`.
 
+## Read the current capability snapshot
+
+Use one current-entitlements call when account UI or application state needs several feature
+decisions. Keep stable feature slugs in code and let Unprice decide which plans grant them.
+
+```ts
+const { result, error } = await unprice.access.entitlements.current({ customerId })
+
+if (error) {
+  throw new Error(error.message)
+}
+
+const sharing = result.entitlements.find(
+  (entitlement) => entitlement.featureSlug === "public-sharing"
+)
+
+const canSharePublicly =
+  sharing?.status === "available" && sharing.allowed
+```
+
+Treat unavailable or missing rows as unavailable according to the host's explicit outage and UI
+policy. Do not infer access from `planSlug`, a plan title, or price metadata.
+
 ## Provision and map a customer
 
 Call `customers.signUp` at the application workflow that owns customer or subscription onboarding.
@@ -70,10 +93,6 @@ const { result, error } = await unprice.customers.signUp({
   name: account.name,
   email: account.billingEmail,
   externalId: account.id,
-  planSlug,
-  // Optional monthly customer spend cap: $10.00 USD.
-  creditLinePolicy: "capped",
-  creditLineAmountMinor: 1_000,
   successUrl,
   cancelUrl,
 })
@@ -91,10 +110,42 @@ await accounts.saveUnpriceCustomerId({
 Make the surrounding onboarding workflow idempotent using the host application's established
 pattern. Do not call signup from every request path.
 
+Omit plan selectors when Unprice owns the default signup plan. Add `planSlug` or `planVersionId`
+only for an explicit host-owned selection. Do not copy the default plan into application code.
+
 Use a capped credit line only when the product needs a hard customer-specific
 spend ceiling. It is independent of a plan's usage tiers: model included units
 and overage with graduated tiers, then pass the cap in currency minor units at
 signup.
+
+## Change to a catalog-selected plan
+
+Load the current plan catalog from Unprice for display. Submit the selected `planVersionId`, then
+reload and validate that exact version on the server before changing the subscription. Reject
+managed or unavailable versions by their API metadata, not by plan name.
+
+```ts
+const target = await loadCurrentPlanVersion(planVersionId)
+
+if (!target || target.enterprise) {
+  return rejectSelfServiceChange()
+}
+
+const { result, error } = await unprice.customers.changePlan({
+  customerId,
+  planVersionId: target.planVersionId,
+})
+
+if (error) {
+  throw new Error(error.message)
+}
+
+return result
+```
+
+Do not encode a `free -> pro -> enterprise` ladder, plan-specific credit lines, or display-name
+checks in the host. Pricing operators must be able to change packaging without an application
+release.
 
 ## Add a read-only shadow check
 
