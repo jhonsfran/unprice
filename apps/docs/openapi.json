@@ -834,11 +834,11 @@
                     }
                   },
                   "expiresAt": {
-                    "description": "Expiration timestamp in epoch milliseconds. Defaults to one hour after the run starts and cannot exceed 24 hours after start.",
                     "type": "integer",
                     "nullable": true,
                     "minimum": 0,
-                    "exclusiveMinimum": true
+                    "exclusiveMinimum": true,
+                    "description": "Expiration timestamp in epoch milliseconds. Defaults to one hour after the run starts and cannot exceed 24 hours after start."
                   }
                 },
                 "required": ["budgetAmountMinor", "idempotencyKey"]
@@ -1184,6 +1184,282 @@
                         "consumedAmountMinor",
                         "remainingAmountMinor"
                       ]
+                    }
+                  },
+                  "required": ["accepted", "reason", "run"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrBadRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Although the HTTP standard specifies \"unauthorized\", semantically this response means \"unauthenticated\". That is, the client must authenticate itself to get the requested response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrUnauthorized"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrForbidden"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrNotFound"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "This response is sent when a request conflicts with the current state of the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrConflict"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrPreconditionFailed"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request payload is larger than the server is willing to process.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrPayloadTooLarge"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The user has sent too many requests in a given amount of time (\"rate limiting\")",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrTooManyRequests"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server has encountered a situation it does not know how to handle.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrInternalServerError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/runs/settle/{runId}": {
+      "post": {
+        "operationId": "runs.settle",
+        "summary": "settle incurred usage against a run",
+        "description": "Record already-incurred usage without feature-limit enforcement and reconcile its cost against the run budget. The run remains open until runs.end.",
+        "tags": ["runs"],
+        "x-unprice": {
+          "audience": "public",
+          "category": "runtime",
+          "docs": {
+            "expose": true
+          },
+          "sdk": {
+            "path": ["runs", "settle"]
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The run ID",
+              "example": "brun_123"
+            },
+            "required": true,
+            "name": "runId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "description": "The incurred usage payload",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "featureSlug": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "idempotencyKey": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "eventSlug": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "timestamp": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "exclusiveMinimum": true
+                  },
+                  "properties": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "nullable": true
+                    }
+                  }
+                },
+                "required": ["featureSlug", "idempotencyKey"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The settlement decision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accepted": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string",
+                      "enum": [
+                        "accepted",
+                        "duplicate",
+                        "insufficient_budget",
+                        "expired",
+                        "not_running",
+                        "entitlement_denied"
+                      ]
+                    },
+                    "run": {
+                      "type": "object",
+                      "properties": {
+                        "runId": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "running",
+                            "completed",
+                            "expired",
+                            "canceled",
+                            "budget_exceeded",
+                            "failed"
+                          ]
+                        },
+                        "endedAt": {
+                          "type": "integer",
+                          "nullable": true,
+                          "minimum": 0,
+                          "description": "Authoritative run terminal timestamp in epoch milliseconds; null while running."
+                        },
+                        "customerId": {
+                          "type": "string"
+                        },
+                        "currency": {
+                          "type": "string"
+                        },
+                        "workloadType": {
+                          "type": "string",
+                          "nullable": true,
+                          "enum": ["agent", "workflow", "job", "tool", "custom", null]
+                        },
+                        "workloadId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "traceId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "parentRunId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "budgetAmountMinor": {
+                          "type": "integer",
+                          "description": "Budget in currency minor units (cents)."
+                        },
+                        "consumedAmountMinor": {
+                          "type": "integer",
+                          "description": "Consumed in currency minor units (cents)."
+                        },
+                        "remainingAmountMinor": {
+                          "type": "integer",
+                          "description": "Remaining in currency minor units (cents)."
+                        }
+                      },
+                      "required": [
+                        "runId",
+                        "status",
+                        "customerId",
+                        "currency",
+                        "workloadType",
+                        "workloadId",
+                        "traceId",
+                        "parentRunId",
+                        "budgetAmountMinor",
+                        "consumedAmountMinor",
+                        "remainingAmountMinor"
+                      ]
+                    },
+                    "fundingStatus": {
+                      "type": "string",
+                      "enum": ["fully_funded", "partially_funded", "unfunded"]
+                    },
+                    "fundedAmountMinor": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "unfundedAmountMinor": {
+                      "type": "integer",
+                      "minimum": 0
                     }
                   },
                   "required": ["accepted", "reason", "run"]
@@ -3763,6 +4039,296 @@
         }
       }
     },
+    "/v1/access/entitlements/current": {
+      "post": {
+        "operationId": "access.entitlements.current",
+        "summary": "get current customer entitlements",
+        "description": "Get all active customer entitlements. Metered entitlements include live usage state from their entitlement windows.",
+        "tags": ["access"],
+        "x-unprice": {
+          "audience": "public",
+          "category": "runtime",
+          "docs": {
+            "expose": true
+          },
+          "sdk": {
+            "path": ["access", "entitlements", "current"]
+          }
+        },
+        "requestBody": {
+          "description": "Current customer entitlement request",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "customerId": {
+                    "type": "string",
+                    "description": "The customer ID",
+                    "example": "cus_1H7KQFLr7RepUyQBKdnvY"
+                  },
+                  "projectId": {
+                    "type": "string",
+                    "description": "The project ID. Root keys can select an allowed project.",
+                    "example": "prj_1H7KQFLr7RepUyQBKdnvY"
+                  }
+                },
+                "required": ["customerId"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Current active customer entitlements",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "customerId": {
+                      "type": "string"
+                    },
+                    "generatedAt": {
+                      "type": "integer"
+                    },
+                    "entitlements": {
+                      "type": "array",
+                      "items": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "featureSlug": {
+                                "type": "string"
+                              },
+                              "featureTitle": {
+                                "type": "string"
+                              },
+                              "featureType": {
+                                "type": "string",
+                                "enum": ["flat", "tier", "package", "usage"]
+                              },
+                              "unitOfMeasure": {
+                                "type": "string"
+                              },
+                              "grantCount": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["available"]
+                              },
+                              "allowed": {
+                                "type": "boolean"
+                              },
+                              "limit": {
+                                "type": "number",
+                                "nullable": true
+                              },
+                              "usage": {
+                                "type": "number"
+                              },
+                              "usagePercent": {
+                                "type": "number",
+                                "nullable": true
+                              },
+                              "quotaWindow": {
+                                "type": "object",
+                                "nullable": true,
+                                "properties": {
+                                  "periodKey": {
+                                    "type": "string"
+                                  },
+                                  "startAt": {
+                                    "type": "number"
+                                  },
+                                  "endAt": {
+                                    "type": "number",
+                                    "nullable": true
+                                  }
+                                },
+                                "required": ["periodKey", "startAt", "endAt"]
+                              },
+                              "spending": {
+                                "type": "object",
+                                "properties": {
+                                  "currency": {
+                                    "type": "string",
+                                    "minLength": 3,
+                                    "maxLength": 3
+                                  },
+                                  "displayAmount": {
+                                    "type": "string"
+                                  },
+                                  "ledgerAmount": {
+                                    "type": "integer"
+                                  },
+                                  "scale": {
+                                    "type": "number",
+                                    "enum": [8]
+                                  }
+                                },
+                                "required": ["currency", "displayAmount", "ledgerAmount", "scale"]
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "featureSlug",
+                              "featureTitle",
+                              "featureType",
+                              "unitOfMeasure",
+                              "grantCount",
+                              "status",
+                              "allowed",
+                              "limit"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "featureSlug": {
+                                "type": "string"
+                              },
+                              "featureTitle": {
+                                "type": "string"
+                              },
+                              "featureType": {
+                                "type": "string",
+                                "enum": ["flat", "tier", "package", "usage"]
+                              },
+                              "unitOfMeasure": {
+                                "type": "string"
+                              },
+                              "grantCount": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["unavailable"]
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "featureSlug",
+                              "featureTitle",
+                              "featureType",
+                              "unitOfMeasure",
+                              "grantCount",
+                              "status"
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "required": ["customerId", "generatedAt", "entitlements"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrBadRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Although the HTTP standard specifies \"unauthorized\", semantically this response means \"unauthenticated\". That is, the client must authenticate itself to get the requested response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrUnauthorized"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrForbidden"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrNotFound"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "This response is sent when a request conflicts with the current state of the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrConflict"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrPreconditionFailed"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request payload is larger than the server is willing to process.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrPayloadTooLarge"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The user has sent too many requests in a given amount of time (\"rate limiting\")",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrTooManyRequests"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server has encountered a situation it does not know how to handle.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrInternalServerError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/access/check": {
       "post": {
         "operationId": "access.check",
@@ -3857,8 +4423,13 @@
                     "quotaWindow": {
                       "type": "object",
                       "nullable": true,
-                      "description": "The single reset window represented by usage and limit. Null when active grants use different windows.",
                       "properties": {
+                        "endAt": {
+                          "type": "number",
+                          "nullable": true,
+                          "description": "Exclusive Unix-millisecond end of the active quota window. Null for an open-ended quota window.",
+                          "example": 1774137600000
+                        },
                         "periodKey": {
                           "type": "string",
                           "description": "The active reset-window key used by quota enforcement",
@@ -3868,15 +4439,10 @@
                           "type": "number",
                           "description": "Inclusive Unix-millisecond start of the active quota window",
                           "example": 1774051200000
-                        },
-                        "endAt": {
-                          "type": "number",
-                          "nullable": true,
-                          "description": "Exclusive Unix-millisecond end of the active quota window. Null for an open-ended quota window.",
-                          "example": 1774137600000
                         }
                       },
-                      "required": ["periodKey", "startAt", "endAt"]
+                      "required": ["endAt", "periodKey", "startAt"],
+                      "description": "The single reset window represented by usage and limit. Null when active grants use different windows."
                     },
                     "spending": {
                       "type": "object",
@@ -12526,282 +13092,6 @@
                     }
                   },
                   "required": ["currency", "wallet"]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrBadRequest"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Although the HTTP standard specifies \"unauthorized\", semantically this response means \"unauthenticated\". That is, the client must authenticate itself to get the requested response.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrUnauthorized"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrForbidden"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrNotFound"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "This response is sent when a request conflicts with the current state of the server.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrConflict"
-                }
-              }
-            }
-          },
-          "412": {
-            "description": "The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrPreconditionFailed"
-                }
-              }
-            }
-          },
-          "413": {
-            "description": "The request payload is larger than the server is willing to process.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrPayloadTooLarge"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "The user has sent too many requests in a given amount of time (\"rate limiting\")",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrTooManyRequests"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server has encountered a situation it does not know how to handle.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrInternalServerError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/runs/settle/{runId}": {
-      "post": {
-        "operationId": "runs.settle",
-        "summary": "settle incurred usage against a run",
-        "description": "Record already-incurred usage without feature-limit enforcement and reconcile its cost against the run budget. The run remains open until runs.end.",
-        "tags": ["runs"],
-        "x-unprice": {
-          "audience": "public",
-          "category": "runtime",
-          "docs": {
-            "expose": true
-          },
-          "sdk": {
-            "path": ["runs", "settle"]
-          }
-        },
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "description": "The run ID",
-              "example": "brun_123"
-            },
-            "required": true,
-            "name": "runId",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "description": "The incurred usage payload",
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "featureSlug": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "idempotencyKey": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "id": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "eventSlug": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "timestamp": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "exclusiveMinimum": true
-                  },
-                  "properties": {
-                    "type": "object",
-                    "additionalProperties": {
-                      "nullable": true
-                    }
-                  }
-                },
-                "required": ["featureSlug", "idempotencyKey"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "The settlement decision",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "accepted": {
-                      "type": "boolean"
-                    },
-                    "reason": {
-                      "type": "string",
-                      "enum": [
-                        "accepted",
-                        "duplicate",
-                        "insufficient_budget",
-                        "expired",
-                        "not_running",
-                        "entitlement_denied"
-                      ]
-                    },
-                    "fundingStatus": {
-                      "type": "string",
-                      "enum": ["fully_funded", "partially_funded", "unfunded"]
-                    },
-                    "fundedAmountMinor": {
-                      "type": "integer",
-                      "minimum": 0
-                    },
-                    "unfundedAmountMinor": {
-                      "type": "integer",
-                      "minimum": 0
-                    },
-                    "run": {
-                      "type": "object",
-                      "properties": {
-                        "runId": {
-                          "type": "string"
-                        },
-                        "status": {
-                          "type": "string",
-                          "enum": [
-                            "running",
-                            "completed",
-                            "expired",
-                            "canceled",
-                            "budget_exceeded",
-                            "failed"
-                          ]
-                        },
-                        "endedAt": {
-                          "type": "integer",
-                          "nullable": true,
-                          "minimum": 0,
-                          "description": "Authoritative run terminal timestamp in epoch milliseconds; null while running."
-                        },
-                        "customerId": {
-                          "type": "string"
-                        },
-                        "currency": {
-                          "type": "string"
-                        },
-                        "workloadType": {
-                          "type": "string",
-                          "nullable": true,
-                          "enum": ["agent", "workflow", "job", "tool", "custom", null]
-                        },
-                        "workloadId": {
-                          "type": "string",
-                          "nullable": true
-                        },
-                        "traceId": {
-                          "type": "string",
-                          "nullable": true
-                        },
-                        "parentRunId": {
-                          "type": "string",
-                          "nullable": true
-                        },
-                        "budgetAmountMinor": {
-                          "type": "integer",
-                          "description": "Budget in currency minor units (cents)."
-                        },
-                        "consumedAmountMinor": {
-                          "type": "integer",
-                          "description": "Consumed in currency minor units (cents)."
-                        },
-                        "remainingAmountMinor": {
-                          "type": "integer",
-                          "description": "Remaining in currency minor units (cents)."
-                        }
-                      },
-                      "required": [
-                        "runId",
-                        "status",
-                        "customerId",
-                        "currency",
-                        "workloadType",
-                        "workloadId",
-                        "traceId",
-                        "parentRunId",
-                        "budgetAmountMinor",
-                        "consumedAmountMinor",
-                        "remainingAmountMinor"
-                      ]
-                    }
-                  },
-                  "required": ["accepted", "reason", "run"]
                 }
               }
             }

@@ -66,6 +66,9 @@ patterns. Keep it cheap to load and useful.
 
 ## Cloudflare, API, And Ingestion
 
+- 2026-08-28: Customer “Active entitlements” reads current metered state from
+  `EntitlementWindowDO`; keep Tinybird for historical dashboard evidence. An empty usage-dashboard
+  cache loader must return `undefined` because removing the key can race the cache's deferred set.
 - 2026-08-25: Entitlement reset buckets must pass the raw cadence start and configured reset
   anchor to `calculateCycleWindow`; cover monthly `dayOfCreation` behavior with a non-midnight
   timestamp or usage can reset at UTC midnight before subscription renewal. In reset tests, match

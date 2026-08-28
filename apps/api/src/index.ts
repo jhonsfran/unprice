@@ -20,6 +20,7 @@ import { registerGetAnalyticsUsageV1 } from "./routes/analytics/getUsageV1"
 import { registerFlushReservationsForInvoicingV1 } from "./routes/billing/flushReservationsForInvoicingV1"
 import { registerChangePlanV1 } from "./routes/customers/changePlanV1"
 import { registerSignUpV1 } from "./routes/customers/signUpV1"
+import { registerGetCurrentEntitlementsV1 } from "./routes/entitlements/getCurrentEntitlementsV1"
 import { registerGetEntitlementWindowStatusV1 } from "./routes/entitlements/getEntitlementWindowStatusV1"
 import { registerGetEntitlementsV1 } from "./routes/entitlements/getEntitlementsV1"
 import { registerVerifyV1 } from "./routes/entitlements/verifyV1"
@@ -179,6 +180,7 @@ registerChangePlanV1(app)
 
 // Entitlement routes
 registerGetEntitlementsV1(app)
+registerGetCurrentEntitlementsV1(app)
 registerVerifyV1(app)
 
 // Event routes

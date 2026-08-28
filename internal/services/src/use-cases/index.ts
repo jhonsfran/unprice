@@ -24,6 +24,17 @@ export type {
   GetCustomerCurrentAccessOutput,
 } from "./customer/get-current-access"
 export {
+  customerCurrentEntitlementSchema,
+  getCustomerCurrentEntitlements,
+  getCustomerCurrentEntitlementsInputSchema,
+  getCustomerCurrentEntitlementsOutputSchema,
+} from "./customer/get-current-entitlements"
+export type {
+  GetCustomerCurrentEntitlementsDeps,
+  GetCustomerCurrentEntitlementsInput,
+  GetCustomerCurrentEntitlementsOutput,
+} from "./customer/get-current-entitlements"
+export {
   getFailedIngestionEventPayload,
   getFailedIngestionEventPayloadInputSchema,
   getFailedIngestionEventPayloadOutputSchema,
@@ -59,6 +70,7 @@ export { aiAnswerEnvelopeSchema, aiEvidenceSchema } from "./analytics/ai-contrac
 export type { AiAnswerEnvelope, AiEvidence } from "./analytics/ai-contracts"
 export {
   emptyUsageDashboardOutput,
+  hasUsageDashboardEvidence,
   getUsageDashboard,
   getUsageDashboardInputSchema,
   getUsageDashboardOutputSchema,

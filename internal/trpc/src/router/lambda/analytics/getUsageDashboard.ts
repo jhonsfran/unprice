@@ -3,6 +3,7 @@ import {
   emptyUsageDashboardOutput,
   getUsageDashboardOutputSchema,
   getUsageDashboard as getUsageDashboardUseCase,
+  hasUsageDashboardEvidence,
 } from "@unprice/services/use-cases"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
@@ -47,7 +48,7 @@ export const getUsageDashboard = protectedProjectProcedure
         throw result.err
       }
 
-      return result.val
+      return hasUsageDashboardEvidence(result.val) ? result.val : undefined
     })
 
     if (err) {
@@ -62,6 +63,12 @@ export const getUsageDashboard = protectedProjectProcedure
         range,
         err instanceof Error ? err.message : "Failed to fetch usage dashboard"
       )
+    }
+
+    // Remove empty entries written by older code. New empty reads return
+    // undefined from the loader, so the cache keeps treating them as misses.
+    if (cached && !hasUsageDashboardEvidence(cached)) {
+      await opts.ctx.cache.getUsageDashboard.remove(cacheKey)
     }
 
     return cached ?? emptyUsageDashboardOutput(range)

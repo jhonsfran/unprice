@@ -12,6 +12,7 @@ import { SuperLink } from "~/components/super-link"
 import { useTRPC } from "~/trpc/client"
 import { ANALYTICS_CONFIG_REALTIME } from "~/trpc/shared"
 import { EntitlementConfigSheet } from "./entitlement-config-sheet"
+import { mergeCurrentEntitlements } from "./merge-current-entitlements"
 
 export function CustomerCurrentAccess({
   access: initialAccess,
@@ -36,7 +37,18 @@ export function CustomerCurrentAccess({
       }
     )
   )
-  const activePlan = access.activePlan
+  const { data: currentEntitlements, isFetching: isFetchingCurrentEntitlements } = useSuspenseQuery(
+    trpc.customers.getCurrentEntitlements.queryOptions(
+      {
+        customerId: initialAccess.customerId,
+      },
+      {
+        ...ANALYTICS_CONFIG_REALTIME,
+      }
+    )
+  )
+  const merged = mergeCurrentEntitlements(access, currentEntitlements)
+  const activePlan = merged.access.activePlan
   const activePhase = activePlan?.activePhase ?? null
   const planVersionHref =
     activePlan && activePhase
@@ -47,9 +59,10 @@ export function CustomerCurrentAccess({
 
   return (
     <CurrentAccessOverview
-      access={access}
+      access={merged.access}
       wallet={wallet}
-      isFetching={isFetching}
+      isFetching={isFetching || isFetchingCurrentEntitlements}
+      unavailableEntitlementIds={merged.unavailableEntitlementIds}
       billingPeriodAction={
         <Button asChild variant="ghost" size="sm">
           <SuperLink href={subscriptionsHref}>View subscriptions</SuperLink>

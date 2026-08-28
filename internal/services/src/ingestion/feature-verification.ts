@@ -1,5 +1,6 @@
 import type { Logger } from "@unprice/logs"
 import { formatMoney, fromLedgerMinor, toDecimal } from "@unprice/money"
+import { sumGrantAllowance } from "../entitlements/entitlement-limit"
 import type {
   CustomerGrantContextReader,
   IngestionEntitlement,
@@ -217,11 +218,7 @@ function resolveStaticQuantityLimit(grants: IngestionGrant[], timestamp: number)
       grant.effectiveAt <= timestamp && (grant.expiresAt === null || timestamp < grant.expiresAt)
   )
 
-  if (activeGrants.length === 0 || activeGrants.some((grant) => grant.allowanceUnits === null)) {
-    return null
-  }
-
-  return activeGrants.reduce((total, grant) => total + (grant.allowanceUnits ?? 0), 0)
+  return sumGrantAllowance(activeGrants)
 }
 
 function formatVerificationSpending(spending: EntitlementWindowState["spending"]) {

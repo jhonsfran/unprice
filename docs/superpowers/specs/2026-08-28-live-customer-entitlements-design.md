@@ -99,9 +99,10 @@ The current 30-second refresh behavior remains unchanged.
 result returns, the tRPC procedure checks whether it contains analytics evidence. Evidence means at
 least one feature row, time-series row, or top-consumer row.
 
-If the result has no evidence, the procedure removes that exact cache key before returning the empty
-response. The next existing browser poll performs a cold Tinybird read. Non-empty results keep the
-current stale-while-revalidate behavior.
+If a loaded result has no evidence, the cache loader returns `undefined`. The cache treats it as a
+miss, so the next existing browser poll performs another Tinybird read. The procedure also removes
+an empty result returned from an older cache entry. Non-empty results keep the current
+stale-while-revalidate behavior.
 
 This change does not alter browser polling, Tinybird ingestion, materialized views, or the analytics
 cache duration for non-empty data.

@@ -8,6 +8,7 @@ import type { ApiResult } from "../result"
 
 export const sdkOperationIds = [
   "access.check",
+  "access.entitlements.current",
   "access.entitlements.list",
   "access.update",
   "analytics.charges.explain",
@@ -57,6 +58,9 @@ export type GeneratedSdkResources = {
       req: OperationInput<"access.check">
     ) => Promise<ApiResult<OperationResponse<"access.check">>>
     entitlements: {
+      current: (
+        req: OperationInput<"access.entitlements.current">
+      ) => Promise<ApiResult<OperationResponse<"access.entitlements.current">>>
       list: (
         req: OperationInput<"access.entitlements.list">
       ) => Promise<ApiResult<OperationResponse<"access.entitlements.list">>>
@@ -172,6 +176,7 @@ export function createGeneratedSdkResources(
     access: {
       check: (body) => toResult(openapi.POST("/v1/access/check", { body })),
       entitlements: {
+        current: (body) => toResult(openapi.POST("/v1/access/entitlements/current", { body })),
         list: (body) => toResult(openapi.POST("/v1/access/entitlements/list", { body })),
       },
       update: (body) => toResult(openapi.POST("/v1/access/update", { body })),
