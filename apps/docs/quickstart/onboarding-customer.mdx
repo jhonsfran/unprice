@@ -54,7 +54,7 @@ if (error) {
 }
 
 if (!result.success) {
-  throw new Error("Customer signup is incomplete. Follow the returned URL to resolve it.");
+  throw new Error(`Customer signup is incomplete. Continue at ${result.url}`);
 }
 
 await db.accounts.update({

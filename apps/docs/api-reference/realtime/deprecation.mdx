@@ -1,0 +1,17 @@
+---
+title: "Realtime tickets removed"
+description: "Update integrations that used realtime.createTicket."
+---
+
+`realtime.createTicket` is no longer part of the public API or TypeScript SDK.
+There is no public ticket or streaming replacement.
+
+For current customer entitlements, call `unprice.access.entitlements.current({ customerId })`
+from your server. Poll this read-only snapshot when your account UI needs updated access,
+usage, or quota state. Keep the API key on your server.
+
+Use [usage.get](/libraries/ts/sdk/usage/get) for historical usage reports. It does not replace
+realtime tickets or provide live entitlement state.
+
+A displayed snapshot does not reserve usage or funds. See
+[Choose an operation](/quickstart/choose-operation) for the operation to call before paid work.

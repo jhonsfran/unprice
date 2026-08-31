@@ -32,8 +32,12 @@ API with the key. Rotate a key if you believe that it was exposed.
 
 ## Authentication errors
 
-An authentication failure returns a `401 UNAUTHORIZED` or `403 FORBIDDEN` error. The response
-includes a request ID. Keep this ID when you contact support.
+Missing, malformed, or inactive keys return HTTP `401` with code `UNAUTHORIZED`.
+A key-type mismatch returns HTTP `403` with code `INSUFFICIENT_PERMISSIONS`.
+Other access restrictions can return HTTP `403` with code `FORBIDDEN`.
+Each response includes a request ID. Keep this ID when you contact support.
+
+Example HTTP `401` response:
 
 ```json
 {

@@ -22,8 +22,9 @@ export const getUsageDashboard = protectedProjectProcedure
     const customerId = opts.input.customerId
     const range = opts.input.range
     const topConsumersLimit = opts.input.topConsumersLimit
+    // Isolate legacy empty entries without deleting a concurrent SWR refresh.
     const cacheKey = [
-      "usage-dashboard",
+      "usage-dashboard-v2",
       projectId,
       customerId ?? "all",
       range,
@@ -63,12 +64,6 @@ export const getUsageDashboard = protectedProjectProcedure
         range,
         err instanceof Error ? err.message : "Failed to fetch usage dashboard"
       )
-    }
-
-    // Remove empty entries written by older code. New empty reads return
-    // undefined from the loader, so the cache keeps treating them as misses.
-    if (cached && !hasUsageDashboardEvidence(cached)) {
-      await opts.ctx.cache.getUsageDashboard.remove(cacheKey)
     }
 
     return cached ?? emptyUsageDashboardOutput(range)

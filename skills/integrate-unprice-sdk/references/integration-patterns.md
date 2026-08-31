@@ -69,7 +69,13 @@ decisions. Keep stable feature slugs in code and let Unprice decide which plans 
 const { result, error } = await unprice.access.entitlements.current({ customerId })
 
 if (error) {
-  throw new Error(error.message)
+  logger.error(new Error(error.message, { cause: error }), {
+    operation: "unprice.access.entitlements.current",
+    requestId: error.requestId,
+    code: error.code,
+  })
+
+  return applyConfiguredOutagePolicy()
 }
 
 const sharing = result.entitlements.find(

@@ -15,7 +15,7 @@
     },
     {
       "source": "/api-reference/realtime/create-ticket",
-      "destination": "/libraries/ts/sdk/usage/get"
+      "destination": "/api-reference/realtime/deprecation"
     }
   ],
   "api": {

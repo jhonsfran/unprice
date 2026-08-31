@@ -5,7 +5,8 @@ description: "Account for actual usage after reserved work completes."
 
 Use `runs.settle` when the provider has completed the work and you know the actual usage. Start the
 run before work begins so customer funds are reserved. Settlement accounts for that usage and
-closes the run.
+leaves the run open. After all known usage is settled, call `runs.end` to close the run and
+release unused reservation funds.
 
 Use `runs.consume` to authorize a known usage amount before a billable step. Do not consume and
 settle the same usage twice.
@@ -25,7 +26,13 @@ if (!result.accepted) {
   throw new Error(`Settlement needs review: ${result.reason}`);
 }
 
-return result;
+// End only after all billable usage has been settled successfully.
+const { error: endError } = await unprice.runs.end({
+  runId: "brun_123",
+  status: "completed"
+});
+
+if (endError) throw new Error(`${endError.code}: ${endError.message}`);
 ```
 
 ## Request

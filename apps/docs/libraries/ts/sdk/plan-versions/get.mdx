@@ -10,7 +10,7 @@ const { result, error } = await unprice.planVersions.get({
 
 if (error) throw new Error(`${error.code}: ${error.message}`);
 
-return result.planVersion;
+const planVersion = result.planVersion;
 ```
 
 ## Request

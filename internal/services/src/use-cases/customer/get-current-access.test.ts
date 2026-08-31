@@ -362,30 +362,33 @@ describe("getCustomerCurrentAccess", () => {
     )
   })
 
-  it("uses the subscribed grant quantity for tier entitlements", async () => {
-    const entitlement = usageEntitlement({
-      featureSlug: "plans",
-      featureTitle: "Plans",
-      grantId: "grant_plans",
-      grantAllowances: [10],
-      limit: 10_000,
-    })
-    entitlement.featurePlanVersion.featureType = "tier"
-    entitlement.featurePlanVersion.meterConfig = null
-
-    const { deps } = makeDeps({ entitlements: [entitlement] })
-    const result = await getCustomerCurrentAccess(deps, { projectId, customerId })
-
-    expect(result.err).toBeUndefined()
-    expect(result.val?.entitlements[0]).toEqual(
-      expect.objectContaining({
-        featureType: "tier",
-        grantAllowance: 10,
-        limit: 10,
-        currentUsage: null,
+  it.each(["tier", "package"])(
+    "uses the subscribed grant quantity for %s entitlements",
+    async (featureType) => {
+      const entitlement = usageEntitlement({
+        featureSlug: "plans",
+        featureTitle: "Plans",
+        grantId: "grant_plans",
+        grantAllowances: [10],
+        limit: 10_000,
       })
-    )
-  })
+      entitlement.featurePlanVersion.featureType = featureType
+      entitlement.featurePlanVersion.meterConfig = null
+
+      const { deps } = makeDeps({ entitlements: [entitlement] })
+      const result = await getCustomerCurrentAccess(deps, { projectId, customerId })
+
+      expect(result.err).toBeUndefined()
+      expect(result.val?.entitlements[0]).toEqual(
+        expect.objectContaining({
+          featureType,
+          grantAllowance: 10,
+          limit: 10,
+          currentUsage: null,
+        })
+      )
+    }
+  )
 })
 
 function makeDeps({

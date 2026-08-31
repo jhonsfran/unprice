@@ -308,15 +308,16 @@ export async function getCustomerCurrentAccess(
         entitlements: entitlements
           .map((entitlement) => {
             const featurePlanVersion = entitlement.featurePlanVersion
+            const featureType = entitlementFeatureTypeSchema.parse(featurePlanVersion.featureType)
             const feature = featurePlanVersion.feature
             const grantAllowance = sumGrantAllowance(entitlement.grants)
             const limit = resolveEntitlementLimit({
               configuredLimit: featurePlanVersion.limit,
-              featureType: featurePlanVersion.featureType,
+              featureType,
               grants: entitlement.grants,
             })
             const isUsageEntitlement =
-              featurePlanVersion.featureType === "usage" ||
+              featureType === "usage" ||
               (featurePlanVersion.meterConfig !== null &&
                 featurePlanVersion.meterConfig !== undefined)
             const usagePeriods =
@@ -336,7 +337,7 @@ export async function getCustomerCurrentAccess(
               id: entitlement.id,
               featureSlug: feature.slug,
               featureTitle: feature.title,
-              featureType: featurePlanVersion.featureType,
+              featureType,
               meterConfig: toPublicMeterConfig(featurePlanVersion.meterConfig),
               unitOfMeasure: featurePlanVersion.unitOfMeasure,
               limit,

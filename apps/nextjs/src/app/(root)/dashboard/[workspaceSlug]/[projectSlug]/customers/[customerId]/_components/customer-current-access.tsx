@@ -2,6 +2,7 @@
 
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { Button } from "@unprice/ui/button"
+import { useMemo } from "react"
 import {
   type CurrentAccessData,
   CurrentAccessOverview,
@@ -47,7 +48,10 @@ export function CustomerCurrentAccess({
       }
     )
   )
-  const merged = mergeCurrentEntitlements(access, currentEntitlements)
+  const merged = useMemo(
+    () => mergeCurrentEntitlements(access, currentEntitlements),
+    [access, currentEntitlements]
+  )
   const activePlan = merged.access.activePlan
   const activePhase = activePlan?.activePhase ?? null
   const planVersionHref =

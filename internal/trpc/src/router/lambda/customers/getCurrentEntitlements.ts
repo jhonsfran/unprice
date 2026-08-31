@@ -2,6 +2,7 @@ import { TRPCError } from "@trpc/server"
 import { getCustomerCurrentEntitlementsOutputSchema } from "@unprice/services/use-cases"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
+import { sdkErrorToTRPCCode } from "#utils/sdk-error"
 import { unprice } from "#utils/unprice"
 
 export const getCurrentEntitlements = protectedProjectProcedure
@@ -21,9 +22,11 @@ export const getCurrentEntitlements = protectedProjectProcedure
       opts.ctx.logger.error(new Error(error.message), {
         customer_id: opts.input.customerId,
         project_id: opts.ctx.project.id,
+        code: error.code,
+        request_id: error.requestId,
       })
       throw new TRPCError({
-        code: "INTERNAL_SERVER_ERROR",
+        code: sdkErrorToTRPCCode(error.code),
         message: error.message,
       })
     }

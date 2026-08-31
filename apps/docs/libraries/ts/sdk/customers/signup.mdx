@@ -24,17 +24,14 @@ const { result, error } = await unprice.customers.signUp({
 });
 
 if (error) {
-  // handle potential network or bad request error
-  // a link to our docs will be in the `error.docs` field
-  console.error(error.message);
-  return;
+  throw new Error(`${error.code}: ${error.message}`, { cause: error });
 }
 
 if (!result.success) {
-  throw new Error("Customer signup is incomplete. Follow the returned URL to resolve it.");
+  throw new Error(`Customer signup is incomplete. Continue at ${result.url}`);
 }
 
-console.log(result);
+const customerId = result.customerId;
 ```
 
 </RequestExample>

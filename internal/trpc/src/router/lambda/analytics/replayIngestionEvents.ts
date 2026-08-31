@@ -1,6 +1,7 @@
 import { TRPCError } from "@trpc/server"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
+import { sdkErrorToTRPCCode } from "#utils/sdk-error"
 import { unprice } from "#utils/unprice"
 
 const replayIngestionEventsInputSchema = z.object({
@@ -11,32 +12,6 @@ const replayIngestionEventsOutputSchema = z.object({
   replayed: z.number().int(),
   skipped: z.number().int(),
 })
-
-function toTRPCErrorCode(
-  code: string | undefined
-):
-  | "BAD_REQUEST"
-  | "UNAUTHORIZED"
-  | "FORBIDDEN"
-  | "NOT_FOUND"
-  | "TOO_MANY_REQUESTS"
-  | "INTERNAL_SERVER_ERROR" {
-  switch (code) {
-    case "BAD_REQUEST":
-      return "BAD_REQUEST"
-    case "UNAUTHORIZED":
-      return "UNAUTHORIZED"
-    case "FORBIDDEN":
-      return "FORBIDDEN"
-    case "NOT_FOUND":
-      return "NOT_FOUND"
-    case "RATE_LIMITED":
-    case "TOO_MANY_REQUESTS":
-      return "TOO_MANY_REQUESTS"
-    default:
-      return "INTERNAL_SERVER_ERROR"
-  }
-}
 
 export const replayIngestionEvents = protectedProjectProcedure
   .input(replayIngestionEventsInputSchema)
@@ -57,7 +32,7 @@ export const replayIngestionEvents = protectedProjectProcedure
       })
 
       throw new TRPCError({
-        code: toTRPCErrorCode(error?.code),
+        code: sdkErrorToTRPCCode(error?.code),
         message: error?.message ?? "Failed to replay ingestion events",
       })
     }

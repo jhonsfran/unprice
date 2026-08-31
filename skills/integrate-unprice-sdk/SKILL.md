@@ -27,8 +27,10 @@ configuration: read [configuration-workflow.md](references/configuration-workflo
    - Read [operation-selection.md](references/operation-selection.md).
    - Choose one primary runtime path before writing code.
    - Do not infer product configuration from UI labels or plan names.
-   - Keep only stable capability and event identifiers in the host. Unprice owns plan names,
-     membership, prices, limits, the default signup plan, and feature-to-plan rules.
+   - Keep stable capability and event identifiers in the host. Unprice owns plan configuration:
+     names, membership, prices, limits, the default signup plan, and feature-to-plan rules.
+     Hosts that own plan selection may pass an explicit, published, policy-approved `planSlug`
+     or `planVersionId` at signup without copying that configuration.
    - For included metered usage plus overage, or a customer-specific spend cap,
      read [configuration-workflow.md](references/configuration-workflow.md).
 

@@ -14,7 +14,7 @@ const { result, error } = await unprice.planVersions.list({
 
 if (error) throw new Error(`${error.code}: ${error.message}`);
 
-return result.planVersions;
+const planVersions = result.planVersions;
 ```
 
 ## Request

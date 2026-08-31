@@ -694,6 +694,10 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 
 ## Tests, Tooling, And Docs
 
+- 2026-08-31: When retiring empty `getUsageDashboard` cache entries, version the key;
+  deleting after `swr` can remove a concurrent refresh. Cover stale refresh and zero-usage
+  evidence with the real `@unkey/cache` memory store.
+
 - 2026-08-31: Keep internal ingestion rollout guides out of `apps/docs`; verify public MDX
   examples against `apps/docs/openapi.json` and the owning implementation. Link full SDK schemas
   to the generated API reference instead of maintaining parallel field catalogs.

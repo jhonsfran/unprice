@@ -12,6 +12,8 @@ authentication, and error mapping.
 - Confirm feature, event, and plan slugs come from real configuration.
 - Confirm the host does not copy plan names, plan order, membership, prices, limits, the default
   signup plan, or feature-to-plan rules into runtime code.
+  Permit an explicit, published, policy-approved signup plan identifier when the host owns
+  selection; reject duplicated plan configuration.
 - Confirm exact request shapes typecheck against the installed SDK.
 - Confirm no new `any`, unhandled promise, or `console.log` was introduced.
 - Confirm errors log `error.requestId` without logging the token or sensitive payloads.
