@@ -694,6 +694,14 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 
 ## Tests, Tooling, And Docs
 
+- 2026-08-31: Keep internal ingestion rollout guides out of `apps/docs`; verify public MDX
+  examples against `apps/docs/openapi.json` and the owning implementation. Link full SDK schemas
+  to the generated API reference instead of maintaining parallel field catalogs.
+
+- 2026-08-31: Keep docs money-path SVGs aligned with the full landing graph: `usage.consume`,
+  `LIMIT_EXCEEDED`, and the invoice arithmetic. Use native SVG without filters or `foreignObject`,
+  and select light/dark assets with Mintlify theme classes rather than the OS color preference.
+
 - 2026-08-26: License project-owned files under `packages/**` as MIT and all other project-owned
   files as AGPL-3.0-only; keep the release guard checking each package's MIT metadata and local
   `LICENSE` file.

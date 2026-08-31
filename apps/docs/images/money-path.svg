@@ -1,82 +1,90 @@
-<svg width="1200" height="520" viewBox="0 0 1200 520" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
-  <title id="title">Unprice customer money path</title>
-  <desc id="desc">A paid action flows through plan version, entitlement, budget and wallet checks, then is allowed or denied before work runs while invoice evidence is preserved.</desc>
-  <defs>
-    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7c7a72" />
-    </marker>
-    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
-      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000000" flood-opacity="0.10"/>
-    </filter>
-  </defs>
-
-  <rect width="1200" height="520" rx="22" fill="#fafaf9"/>
-  <rect x="28" y="28" width="1144" height="464" rx="18" fill="#ffffff" stroke="#d7d2c8"/>
-
-  <text x="70" y="76" fill="#21201c" font-family="Inter, Arial, sans-serif" font-size="28" font-weight="700">The money path</text>
-  <text x="70" y="108" fill="#63635e" font-family="Inter, Arial, sans-serif" font-size="18">Decide before the paid action runs. Keep the evidence for the invoice after.</text>
-
-  <g filter="url(#shadow)">
-    <rect x="70" y="168" width="150" height="86" rx="14" fill="#e6f4ff" stroke="#0090ff"/>
-    <text x="96" y="202" fill="#102a43" font-family="Inter, Arial, sans-serif" font-size="16" font-weight="700">Paid action</text>
-    <text x="96" y="229" fill="#3f3f3a" font-family="SFMono-Regular, Menlo, monospace" font-size="13">POST /run</text>
-  </g>
-
-  <g filter="url(#shadow)">
-    <rect x="282" y="168" width="150" height="86" rx="14" fill="#f9f9f8" stroke="#d7d2c8"/>
-    <text x="309" y="202" fill="#21201c" font-family="Inter, Arial, sans-serif" font-size="16" font-weight="700">Plan version</text>
-    <text x="309" y="229" fill="#63635e" font-family="SFMono-Regular, Menlo, monospace" font-size="13">pro@v3</text>
-  </g>
-
-  <g filter="url(#shadow)">
-    <rect x="494" y="168" width="150" height="86" rx="14" fill="#f9f9f8" stroke="#d7d2c8"/>
-    <text x="520" y="202" fill="#21201c" font-family="Inter, Arial, sans-serif" font-size="16" font-weight="700">Entitlement</text>
-    <text x="520" y="229" fill="#63635e" font-family="SFMono-Regular, Menlo, monospace" font-size="13">access.check</text>
-  </g>
-
-  <g filter="url(#shadow)">
-    <rect x="706" y="168" width="150" height="86" rx="14" fill="#fff7c2" stroke="#ab6400"/>
-    <text x="732" y="202" fill="#21201c" font-family="Inter, Arial, sans-serif" font-size="16" font-weight="700">Budget</text>
-    <text x="732" y="229" fill="#6f4b00" font-family="SFMono-Regular, Menlo, monospace" font-size="13">remaining $4.10</text>
-  </g>
-
-  <g filter="url(#shadow)">
-    <rect x="918" y="168" width="150" height="86" rx="14" fill="#f9f9f8" stroke="#d7d2c8"/>
-    <text x="944" y="202" fill="#21201c" font-family="Inter, Arial, sans-serif" font-size="16" font-weight="700">Wallet</text>
-    <text x="944" y="229" fill="#63635e" font-family="SFMono-Regular, Menlo, monospace" font-size="13">credits held</text>
-  </g>
-
-  <path d="M 230 211 H 270" stroke="#7c7a72" stroke-width="2.5" marker-end="url(#arrow)"/>
-  <path d="M 442 211 H 482" stroke="#7c7a72" stroke-width="2.5" marker-end="url(#arrow)"/>
-  <path d="M 654 211 H 694" stroke="#7c7a72" stroke-width="2.5" marker-end="url(#arrow)"/>
-  <path d="M 866 211 H 906" stroke="#7c7a72" stroke-width="2.5" marker-end="url(#arrow)"/>
-
-  <path d="M 781 254 V 286" stroke="#ab6400" stroke-width="2.5"/>
-  <path d="M 781 286 H 427 V 316" stroke="#30a46c" stroke-width="2.5" marker-end="url(#arrow)"/>
-  <path d="M 781 286 H 735 V 316" stroke="#e54d2e" stroke-width="2.5" marker-end="url(#arrow)"/>
-
-  <g filter="url(#shadow)">
-    <rect x="292" y="330" width="270" height="92" rx="14" fill="#edfdf3" stroke="#30a46c"/>
-    <circle cx="330" cy="376" r="18" fill="#30a46c"/>
-    <path d="M321 376 L328 383 L341 369" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-    <text x="366" y="368" fill="#143c25" font-family="Inter, Arial, sans-serif" font-size="17" font-weight="700">allow - checks pass</text>
-    <text x="366" y="397" fill="#2b6b45" font-family="SFMono-Regular, Menlo, monospace" font-size="13">200 - work can run</text>
-  </g>
-
-  <g filter="url(#shadow)">
-    <rect x="600" y="330" width="270" height="92" rx="14" fill="#fff0ee" stroke="#e54d2e"/>
-    <circle cx="638" cy="376" r="18" fill="#e54d2e"/>
-    <path d="M629 367 L647 385 M647 367 L629 385" stroke="white" stroke-width="3" stroke-linecap="round"/>
-    <text x="674" y="368" fill="#5f1b13" font-family="Inter, Arial, sans-serif" font-size="17" font-weight="700">deny - over budget</text>
-    <text x="674" y="392" fill="#8b2a1d" font-family="SFMono-Regular, Menlo, monospace" font-size="12">429 - rejected</text>
-    <text x="674" y="410" fill="#8b2a1d" font-family="SFMono-Regular, Menlo, monospace" font-size="12">before cost</text>
-  </g>
-
-  <path d="M 993 254 V 316" stroke="#7c7a72" stroke-width="2.5" marker-end="url(#arrow)"/>
-
-  <g filter="url(#shadow)">
-    <rect x="900" y="330" width="190" height="92" rx="14" fill="#eef9f1" stroke="#30a46c"/>
-    <text x="930" y="368" fill="#143c25" font-family="Inter, Arial, sans-serif" font-size="17" font-weight="700">Invoice line</text>
-    <text x="930" y="397" fill="#2b6b45" font-family="SFMono-Regular, Menlo, monospace" font-size="13">explained</text>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="660" viewBox="0 0 880 660" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">The money path</title>
+  <desc id="desc">Static version of the landing page money path. Three usage.consume requests share a $10 budget. Each request costs $4.10 for 2,050 tokens at $0.002 on pro@v3. The first two are accepted, leaving $1.80. Accepted usage moves through wallet, ledger, invoice evidence, and payment in your own Stripe account. The third is denied with LIMIT_EXCEEDED, leaving the wallet untouched, with no ledger entry, invoice line, or charge.</desc>
+  <!-- Static companion to apps/nextjs/src/components/landing/money-path.tsx. Keep labels and example amounts aligned. Native SVG only: no filters, foreignObject, or external assets. -->
+  <rect width="880" height="660" rx="12" fill="#fdfdfc"/>
+  <text x="32" y="40" fill="#63635e" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="13">THE MONEY PATH</text>
+  <text x="848" y="40" fill="#63635e" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="12" text-anchor="end">3 requests · one budget</text>
+  <path d="M 32 58 H 848" stroke="#d7d7d0" stroke-width="1.5"/>
+  <path d="M 42 88 V 301" stroke="#d7d7d0" stroke-width="1.5"/>
+  <circle cx="42" cy="90" r="4.5" fill="#006adc" stroke="#006adc" stroke-width="1.5"/>
+  <text x="66" y="96" fill="#21201c" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="600">Request</text>
+  <path d="M 138 92 H 723" stroke="#d7d7d0" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <text x="848" y="96" fill="#006adc" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="14" text-anchor="end">usage.consume</text>
+  <text x="66" y="119" fill="#63635e" font-family="Arial, Helvetica, sans-serif" font-size="13">the paid action asks before it runs</text>
+  <circle cx="42" cy="149" r="4.5" fill="#fdfdfc" stroke="#d7d7d0" stroke-width="1.5"/>
+  <text x="66" y="154" fill="#21201c" font-family="Arial, Helvetica, sans-serif" font-size="16">Meter</text>
+  <path d="M 114 150 H 689.8" stroke="#d7d7d0" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <text x="848" y="154" fill="#63635e" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="13" text-anchor="end">tokens used · 2,050</text>
+  <circle cx="42" cy="183" r="4.5" fill="#fdfdfc" stroke="#d7d7d0" stroke-width="1.5"/>
+  <text x="66" y="188" fill="#21201c" font-family="Arial, Helvetica, sans-serif" font-size="16">Access</text>
+  <path d="M 122 184 H 666.4" stroke="#d7d7d0" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <text x="848" y="188" fill="#63635e" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="13" text-anchor="end">included in plan · yes</text>
+  <circle cx="42" cy="217" r="4.5" fill="#fdfdfc" stroke="#d7d7d0" stroke-width="1.5"/>
+  <text x="66" y="222" fill="#21201c" font-family="Arial, Helvetica, sans-serif" font-size="16">Pricing rule</text>
+  <path d="M 170 218 H 658.6" stroke="#d7d7d0" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <text x="848" y="222" fill="#63635e" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="13" text-anchor="end">$0.002 / token · pro@v3</text>
+  <circle cx="42" cy="260" r="4.5" fill="#ab6400" stroke="#ab6400" stroke-width="1.5"/>
+  <text x="66" y="266" fill="#21201c" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="600">Budget check</text>
+  <path d="M 174 260 H 555" stroke="#d7d7d0" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <text x="836" y="266" fill="#ab6400" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="21" text-anchor="end">$10.00 → $5.90 → $1.80</text>
+  <path d="M 558 247 H 552 V 253 M 842 247 H 848 V 253 M 552 270 V 276 H 558 M 842 276 H 848 V 270" stroke="#ab6400" stroke-width="1.5"/>
+  <text x="66" y="290" fill="#63635e" font-family="Arial, Helvetica, sans-serif" font-size="13">does the balance cover this $4.10 request?</text>
+  <path d="M 42 301 V 328" stroke="#d7d7d0" stroke-width="1.5"/>
+  <path d="M 42 311 H 470 V 328" stroke="#d7d7d0" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <rect x="32" y="328" width="388" height="72" rx="4" fill="#e9f9ee" stroke="#18794e"/>
+  <path d="M 46 350 l 5 5 l 9 -10" stroke="#18794e" stroke-width="1.5"/>
+  <text x="72" y="354" fill="#21201c" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="600">allow · within budget</text>
+  <text x="46" y="381" fill="#18794e" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="12">allowed: true</text>
+  <text x="406" y="381" fill="#63635e" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="12" text-anchor="end">cost $4.10 · covered</text>
+  <path d="M 42 400 V 586" stroke="#d7d7d0" stroke-width="1.5"/>
+  <circle cx="42" cy="427" r="4.5" fill="#fdfdfc" stroke="#d7d7d0" stroke-width="1.5"/>
+  <text x="66" y="432" fill="#21201c" font-family="Arial, Helvetica, sans-serif" font-size="16">Wallet</text>
+  <path d="M 122 428 H 286.8" stroke="#d7d7d0" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <text x="406" y="432" fill="#63635e" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="13" text-anchor="end">reserve −$4.10</text>
+  <circle cx="42" cy="459" r="4.5" fill="#fdfdfc" stroke="#d7d7d0" stroke-width="1.5"/>
+  <text x="66" y="464" fill="#21201c" font-family="Arial, Helvetica, sans-serif" font-size="16">Ledger</text>
+  <path d="M 122 460 H 255.60000000000002" stroke="#d7d7d0" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <text x="406" y="464" fill="#63635e" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="13" text-anchor="end">capture · balanced</text>
+  <circle cx="42" cy="491" r="4.5" fill="#fdfdfc" stroke="#d7d7d0" stroke-width="1.5"/>
+  <text x="66" y="496" fill="#21201c" font-family="Arial, Helvetica, sans-serif" font-size="16">Invoice</text>
+  <path d="M 130 492 H 286.8" stroke="#d7d7d0" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <text x="406" y="496" fill="#63635e" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="13" text-anchor="end">line explained</text>
+  <rect x="66" y="512" width="354" height="62" rx="3" fill="#ffffff" stroke="#d7d7d0"/>
+  <text x="78" y="532" fill="#63635e" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="11">invoice line · explain</text>
+  <text x="408" y="532" fill="#21201c" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="12" text-anchor="end">$4.10</text>
+  <text x="78" y="550" fill="#63635e" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="11">2,050 tokens × $0.002 · pro@v3</text>
+  <text x="78" y="565" fill="#63635e" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="11">reserve → capture · balanced</text>
+  <circle cx="42" cy="591" r="4.5" fill="#fdfdfc" stroke="#d7d7d0" stroke-width="1.5"/>
+  <text x="66" y="596" fill="#21201c" font-family="Arial, Helvetica, sans-serif" font-size="16">Payment</text>
+  <path d="M 130 592 H 279.0" stroke="#d7d7d0" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <text x="406" y="596" fill="#63635e" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="13" text-anchor="end">your own Stripe</text>
+  <rect x="460" y="328" width="388" height="72" rx="4" fill="#fff0ee" stroke="#bc351b"/>
+  <path d="M 475 345 l 12 12 m 0 -12 l -12 12" stroke="#bc351b" stroke-width="1.5"/>
+  <text x="500" y="354" fill="#21201c" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="600">deny · over budget</text>
+  <text x="474" y="381" fill="#bc351b" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="12">LIMIT_EXCEEDED</text>
+  <text x="834" y="381" fill="#63635e" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="12" text-anchor="end">$4.10 &gt; $1.80</text>
+  <path d="M 470 400 V 586" stroke="#d7d7d0" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <circle cx="470" cy="427" r="4.5" fill="#fdfdfc" stroke="#d7d7d0" stroke-width="1.5"/>
+  <text x="494" y="432" fill="#63635e" font-family="Arial, Helvetica, sans-serif" font-size="16">Wallet</text>
+  <path d="M 550 428 H 753.8" stroke="#d7d7d0" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <text x="834" y="432" fill="#63635e" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="13" text-anchor="end">untouched</text>
+  <circle cx="470" cy="459" r="4.5" fill="#fdfdfc" stroke="#d7d7d0" stroke-width="1.5"/>
+  <text x="494" y="464" fill="#63635e" font-family="Arial, Helvetica, sans-serif" font-size="16">Ledger</text>
+  <path d="M 550 460 H 761.6" stroke="#d7d7d0" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <text x="834" y="464" fill="#63635e" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="13" text-anchor="end">no entry</text>
+  <circle cx="470" cy="491" r="4.5" fill="#fdfdfc" stroke="#d7d7d0" stroke-width="1.5"/>
+  <text x="494" y="496" fill="#63635e" font-family="Arial, Helvetica, sans-serif" font-size="16">Invoice</text>
+  <path d="M 558 492 H 769.4" stroke="#d7d7d0" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <text x="834" y="496" fill="#63635e" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="13" text-anchor="end">no line</text>
+  <rect x="494" y="512" width="354" height="62" rx="3" fill="#fdfdfc" stroke="#d7d7d0" stroke-dasharray="4 4"/>
+  <text x="506" y="532" fill="#63635e" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="11">invoice line</text>
+  <text x="836" y="532" fill="#21201c" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="12" text-anchor="end">—</text>
+  <text x="506" y="550" fill="#63635e" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="11">no cost created · nothing to explain</text>
+  <text x="506" y="565" fill="#63635e" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="11">reason → your app · limit exceeded</text>
+  <circle cx="470" cy="591" r="4.5" fill="#fdfdfc" stroke="#d7d7d0" stroke-width="1.5"/>
+  <text x="494" y="596" fill="#63635e" font-family="Arial, Helvetica, sans-serif" font-size="16">Payment</text>
+  <path d="M 558 592 H 753.8" stroke="#d7d7d0" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <text x="834" y="596" fill="#63635e" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="13" text-anchor="end">no charge</text>
+  <text x="66" y="618" fill="#63635e" font-family="Arial, Helvetica, sans-serif" font-size="12">the money never touches Unprice</text>
 </svg>

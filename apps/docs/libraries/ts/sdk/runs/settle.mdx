@@ -1,0 +1,54 @@
+---
+title: Settle run usage
+description: "Account for actual usage after reserved work completes."
+---
+
+Use `runs.settle` when the provider has completed the work and you know the actual usage. Start the
+run before work begins so customer funds are reserved. Settlement accounts for that usage and
+closes the run.
+
+Use `runs.consume` to authorize a known usage amount before a billable step. Do not consume and
+settle the same usage twice.
+
+```ts
+const { result, error } = await unprice.runs.settle({
+  runId: "brun_123",
+  featureSlug: "ai-output-tokens",
+  eventSlug: "completions",
+  idempotencyKey: "run:req_123:settle",
+  properties: { outputTokens: 620 }
+});
+
+if (error) throw new Error(`${error.code}: ${error.message}`);
+
+if (!result.accepted) {
+  throw new Error(`Settlement needs review: ${result.reason}`);
+}
+
+return result;
+```
+
+## Request
+
+| Field | Meaning |
+| --- | --- |
+| `runId` | Required run ID returned by `runs.start` |
+| `featureSlug` | Required feature whose meter prices the actual usage |
+| `idempotencyKey` | Required stable key for this settlement |
+| `eventSlug` | Event configured for the feature |
+| `properties` | Actual measured values required by the meter |
+| `timestamp` | Event time in epoch milliseconds |
+| `id` | Optional event ID from your application |
+
+## Response and recovery
+
+Check `accepted`, `reason`, and the returned `run` summary. When present, `fundingStatus`,
+`fundedAmountMinor`, and `unfundedAmountMinor` describe how much usage the reserved funds covered.
+Check these fields before treating the usage as fully funded.
+
+Persist the actual usage and settlement key before sending the request. If the API call fails,
+retry the same settlement with the same key. Do not call `runs.end` in a `finally` block to release
+funds when provider usage exists but settlement is unconfirmed.
+
+Use [End budgeted run](/libraries/ts/sdk/runs/end) to release unused funds after known usage has
+been accounted for, or when no billable work occurred.

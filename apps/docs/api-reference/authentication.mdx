@@ -37,14 +37,11 @@ includes a request ID. Keep this ID when you contact support.
 
 ```json
 {
-  "meta": {
-    "requestId": "req_abc123xyz789"
-  },
   "error": {
-    "title": "Unauthorized",
-    "detail": "The provided API key is invalid or has been revoked",
-    "status": 401,
-    "type": "https://unprice.dev/docs/errors/unauthorized"
+    "code": "UNAUTHORIZED",
+    "message": "The API key is missing, malformed, or not active.",
+    "docs": "https://docs.unprice.dev/api-reference/errors/code/UNAUTHORIZED",
+    "requestId": "req_abc123xyz789"
   }
 }
 ```

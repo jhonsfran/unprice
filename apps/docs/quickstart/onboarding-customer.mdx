@@ -53,6 +53,10 @@ if (error) {
   throw new Error(error.message);
 }
 
+if (!result.success) {
+  throw new Error("Customer signup is incomplete. Follow the returned URL to resolve it.");
+}
+
 await db.accounts.update({
   where: { id: "acct_123" },
   data: {
@@ -67,6 +71,9 @@ customer to a specific published version.
 <Frame caption="Customer signup flow">
   <img src="/images/signup-flow.png" alt="Your app calls Unprice signUp, Unprice validates data, redirects to a payment provider when needed, then returns the Unprice customer ID."/>
 </Frame>
+
+Follow the returned `url` to complete payment setup when required. A returned customer ID alone
+does not mean the subscription is ready for paid work. Confirm access before the first action.
 
 ## After signup
 

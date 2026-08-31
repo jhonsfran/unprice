@@ -6,10 +6,10 @@ description: How to call the Unprice API from your server.
 Call the Unprice API from trusted server-side code. It authorizes customer spend, records usage,
 and returns evidence for the decision.
 
-All public endpoints use this URL pattern:
+The hosted API base URL is:
 
 ```
-https://api.unprice.dev/{version}/{service}/{method}
+https://api.unprice.dev
 ```
 
 For example, `GET /v1/plan-versions/get/{planVersionId}` returns a plan version.
@@ -25,7 +25,7 @@ The public API uses `GET` and `POST`. It does not use `PUT` or `DELETE`.
 
 `GET` methods are used for reading data. Filtering, sorting, or pagination is done via query parameters.
 
-```http
+```bash
 curl "https://api.unprice.dev/v1/plan-versions/get/pv_123" \
   -H "Authorization: Bearer <API_KEY>"
 ```
@@ -33,12 +33,13 @@ curl "https://api.unprice.dev/v1/plan-versions/get/pv_123" \
 
 ### `POST`
 
-Use `POST` to create, change, or apply data. Send request data as `application/json`.
+Use `POST` for mutations and for queries with JSON filters. Send request data as
+`application/json`. The plan-version list below is a read-only query.
 
-```http
+```bash
 curl -X POST "https://api.unprice.dev/v1/plan-versions/list" \
-  -H "Authorization: Bearer <API_KEY>"
-  -H "Content-Type: application/json"
+  -H "Authorization: Bearer <API_KEY>" \
+  -H "Content-Type: application/json" \
   -d '{
     "onlyPublished": true,
     "onlyEnterprisePlan": false,

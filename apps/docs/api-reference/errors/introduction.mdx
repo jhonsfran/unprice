@@ -25,3 +25,10 @@ logic. Use `message` to correct the request. Include `requestId` if you contact 
    usage or run request.
 4. If the problem continues, contact [support](mailto:seb@unprice.dev) and include the full error
    response and `requestId`.
+
+## A denial is not an API error
+
+A valid `access.check` or `usage.consume` request can return HTTP `200` with `allowed: false`.
+Inspect `rejectionReason` before starting paid work. `runs.consume` and `runs.settle` use
+`accepted` and `reason` instead. HTTP `429` means API rate limiting; your application can choose
+its own HTTP status when it handles a commercial denial.

@@ -25,8 +25,12 @@ if (error) {
   return;
 }
 
-// A running run means the budget reservation was accepted.
-console.log(result.runId);
+// A retry can return an existing run that has already ended.
+if (result.status !== "running") {
+  throw new Error(`Run is not running: ${result.status}`);
+}
+
+return result.runId;
 ```
 
 </RequestExample>
@@ -84,7 +88,8 @@ console.log(result.runId);
 </ParamField>
 
 <ParamField body="expiresAt" type="number">
-    Optional epoch-millisecond expiration timestamp.
+    Optional epoch-millisecond expiration timestamp. Defaults to one hour after start; the maximum
+    is 24 hours after start.
 </ParamField>
 
 ## Response

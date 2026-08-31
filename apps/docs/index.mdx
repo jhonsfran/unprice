@@ -9,8 +9,11 @@ Every AI charge starts with an authorization.
 Authorize an agent run or paid workflow before it creates cost. Reserve customer credits up front,
 settle actual usage after the work completes, and keep the evidence for the invoice line.
 
-<Frame caption="The request-to-invoice money path">
-  <img src="/images/money-path.svg" alt="An agent action enters the Unprice money path. Unprice checks the plan version, entitlement, budget, and wallet credits before it allows or denies the work. It then keeps invoice evidence." />
+<Frame caption="The money path: two requests accepted, the third denied.">
+  <div className="w-full overflow-x-auto" tabIndex={0} role="region" aria-label="Money path diagram, scroll horizontally on small screens">
+    <img className="block dark:hidden" src="/images/money-path.svg" width="880" height="660" style={{ minWidth: "660px", width: "100%", height: "auto" }} alt="Three $4.10 usage.consume requests share a $10 budget. Two are accepted and produce wallet, ledger, invoice, and Stripe payment evidence. The third is denied with LIMIT_EXCEEDED at $1.80 remaining, with no wallet change, invoice line, or charge." />
+    <img className="hidden dark:block" src="/images/money-path-dark.svg" width="880" height="660" style={{ minWidth: "660px", width: "100%", height: "auto" }} alt="Three $4.10 usage.consume requests share a $10 budget. Two are accepted and produce wallet, ledger, invoice, and Stripe payment evidence. The third is denied with LIMIT_EXCEEDED at $1.80 remaining, with no wallet change, invoice line, or charge." />
+  </div>
 </Frame>
 
 ## The value

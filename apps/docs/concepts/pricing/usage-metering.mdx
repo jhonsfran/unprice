@@ -1,310 +1,110 @@
 ---
-title: Billing architecture and usage metering
-description: "How Unprice models events, meters, features, and period-based usage."
+title: Usage metering
+description: "Turn application events into usage, limits, and invoice evidence."
 ---
 
-Unprice interprets usage inside the current billing period. The period can reset monthly, yearly, or
-on a custom schedule.
+A usage feature needs a meter. The meter selects an event, reads its measured properties, and
+aggregates them for the customer's entitlement. Flat, tier, and package features do not need a
+usage meter.
 
-Use meters only for usage entitlements. A usage feature needs events and an aggregation rule. A
-feature that grants access does not need a meter.
+## Events, meters, and features
 
-## 1. Events, meters, and features
+| Concept | Purpose | Example |
+| --- | --- | --- |
+| Event | Records an action from your application | A `completions` event |
+| Meter | Selects and aggregates a measured property | Sum `outputTokens` |
+| Feature | Names the capability you sell or limit | `ai-output-tokens` |
 
-These terms have separate jobs:
+Use `eventSlug` for the action and `properties` for its measured values. Use `featureSlug` when
+checking or consuming one specific feature.
 
-| Term | What it is | What it answers |
-| :--- | :--- | :--- |
-| **Event** | An immutable envelope of activity sent from your application | "What happened?" |
-| **Meter** | A period-scoped rule that aggregates usage events for a usage entitlement | "How much usage happened this billing period?" |
-| **Feature** | A customer-facing capability in your product | "What is the customer paying for or limited on?" |
-
-### Events
-
-Events are the raw activity envelopes your application sends to Unprice.
-
-- They are append-only records of activity.
-- They should describe what happened at the moment it happened.
-- They can carry multiple measured properties from the same product action.
-- They are the input to one or more usage meters.
-
-Use `eventSlug` for the broad action your app observed, such as `completions`. Put the measurable
-facts inside `properties`. Each meter then chooses which property to aggregate.
-
-For example, one `completions` event can describe a single customer request that made two LLM calls
-and used several billable dimensions:
+One asynchronous event can update several matching feature meters:
 
 ```ts
-await unprice.usage.record({
-  idempotencyKey: request.id,
+const { error } = await unprice.usage.record({
   customerId: "cus_1234567890",
   eventSlug: "completions",
-  properties: {
-    aiMessages: 1,
-    llmCalls: 2,
-    inputTokens: 1840,
-    outputTokens: 620,
-    totalTokens: 2460,
-    toolCalls: 1,
-    model: "gpt-4.1-mini"
-  }
-});
-```
-
-That one event could feed several meters:
-
-| Feature | Meter reads | What it measures |
-| :--- | :--- | :--- |
-| `ai-messages` | `count` or `sum aiMessages` | One customer-visible message |
-| `llm-calls` | `sum llmCalls` | Two provider calls inside the same request |
-| `ai-token-usage` | `sum totalTokens` | Combined token usage for billing or analytics |
-| `ai-output-tokens` | `sum outputTokens` | Output-token usage when that dimension is priced separately |
-| `ai-tools` | `sum toolCalls` | Tool execution inside the same product action |
-
-The event is the envelope. The meters decide which fields matter for each usage entitlement.
-
-### Meters
-
-Meters are the rules that turn a stream of events into a number for the current billing period.
-
-- A meter is only relevant for **usage entitlements**.
-- A meter chooses the matching `eventSlug`, the aggregation method, and, when needed, the
-  `aggregationField` inside the event properties.
-- The result is what Unprice uses for billing, limits, and reporting on usage-based features.
-
-Examples:
-
-- "Count every API request this month"
-- "Sum all bandwidth transferred this month"
-- "Track the highest storage watermark reported this month"
-
-### Features
-
-Features are the actual capabilities you sell, limit, or expose to customers.
-
-- A feature might be a metered capability, like API requests.
-- A feature might also be simple access, like SSO or priority support.
-- A feature can exist without any meter if it is not usage-based.
-
-Examples:
-
-- `pro-api-access`
-- `database-storage`
-- `priority-support`
-
-<Tip>
-  Not every entitlement has a meter. Usage entitlements need events plus an aggregation method.
-  Non-usage entitlements such as flat access or fixed package access can exist without any
-  aggregation rule.
-</Tip>
-
-## 2. Aggregation methods
-
-Aggregation methods apply only to usage entitlements. Each meter evaluates one billing period and
-resets when that period ends.
-
-| Method | What it does during the period | Good for |
-| :--- | :--- | :--- |
-| `sum` | Adds the values of a field across all events in the period | Bandwidth, tokens, transferred GB |
-| `count` | Counts how many matching events were received in the period | API calls, jobs run, emails sent |
-| `max` | Keeps the highest value reported in the period | Peak storage, peak active users |
-| `last` | Uses the most recent value reported before billing closes the period | Active seats at period end, latest balance snapshot |
-
-### `sum`
-
-Use `sum` when each event contributes a numeric amount to the period total.
-
-- Best for values that accumulate naturally.
-- Common examples are tokens, bytes, seconds, or credits consumed.
-- The total resets at the end of the billing period.
-
-### `count`
-
-Use `count` when the important signal is the number of events, not the numeric value inside each event.
-
-- Best for request-style or action-style metrics.
-- Common examples are API calls, export jobs, or webhook deliveries.
-- The count resets at the end of the billing period.
-
-### `max`
-
-Use `max` when you care about the highest reported value reached during the period.
-
-- Best for high-watermark billing.
-- Common examples are storage, peak concurrent users, or largest queue depth.
-- The recorded maximum resets at the end of the billing period.
-
-### `last`
-
-Use `last` when you care about the most recent reported value before the invoice or reset boundary.
-
-- Best for end-of-period state.
-- Common examples are active seats, enabled workspaces, or the final storage total at billing time.
-- The stored value resets with the next billing period after that period closes.
-
-## 3. Stateful metrics
-
-Some usage is a stream of events. Other usage is a snapshot of changing state. Using the same
-reporting method for both can make billing totals drift.
-
-### Streaming metrics
-
-Streaming metrics are actions that happen one event at a time.
-
-Examples:
-
-- API calls
-- tokens generated
-- emails sent
-- files processed
-
-For these metrics, report usage directly from the request path as the action happens.
-
-```ts
-const { result, error } = await unprice.usage.consume({
   idempotencyKey: request.id,
-  eventSlug: "completions",
-  customerId: "cus_1234567890",
-  featureSlug: "ai-messages",
   properties: {
     aiMessages: 1,
-    llmCalls: 2,
     inputTokens: 1840,
-    outputTokens: 620,
-    totalTokens: 2460,
-    route: "/v1/chat/completions",
-    method: "POST"
+    outputTokens: 620
   }
 });
 
-if (error) {
-  throw error;
-}
-
-if (!result?.allowed) {
-  return new Response("Usage limit reached", { status: 429 });
-}
+if (error) throw new Error(error.message);
 ```
 
-If the feature is truly "one event equals one unit," configure the meter with `count`. If the event
-is an envelope with measured fields, use `sum` with the field that belongs to that feature, such as
-`aiMessages`, `llmCalls`, `inputTokens`, `outputTokens`, `totalTokens`, or `toolCalls`.
+For example, a message meter can sum `aiMessages` while an output-token meter sums `outputTokens`.
+Configure each usage feature with its event slug, aggregation method, and aggregation field.
 
-### Stateful metrics
+## Aggregation methods
 
-Stateful metrics represent a current total that lives in your own database or storage system.
+| Method | Result | Use for |
+| --- | --- | --- |
+| `sum` | Sum of the reported numeric field | Tokens, bytes, or seconds |
+| `count` | Number of matching events | API calls, jobs, or exports |
+| `max` | Highest reported value | Peak storage or peak active users |
+| `last` | Latest reported value | An absolute resource snapshot |
 
-Examples:
+`sum`, `max`, and `last` need an `aggregationField`. `count` counts events rather than reading a
+numeric field. Retries of the same event must use the same `idempotencyKey`.
 
-- rows stored
-- active users
-- provisioned seats
-- bytes stored
+## Quota resets and billing periods
 
-For these metrics, the anti-pattern is sending create/delete deltas like `+1` on insert and `-1` on delete.
+A quota window controls when a customer's usage allowance resets. A billing period controls when
+charges are invoiced. These can differ, for example a daily allowance on a monthly subscription.
 
-Why this causes problems:
+Configure the feature's reset cadence separately from its billing cadence. Do not assume that an
+invoice date also resets every usage limit.
 
-- retries can double-apply a change
-- dropped network requests can lose a decrement
-- race conditions can reorder updates
-- backfills and imports can skip historical events
-- deletes are often harder to observe reliably than creates
+Use `access.check` to inspect current `usage`, `limit`, and `quotaWindow`. The window contains
+`startAt`, `endAt`, and `periodKey`; timestamps use epoch milliseconds. A null `endAt` means the
+window has no end. A null `quotaWindow` means active grants do not share a single reset window.
 
-Use a fast operational check and a slower authoritative snapshot.
+Use [usage analytics](/libraries/ts/sdk/usage/get) for historical reporting, not as a live spend gate.
 
-### Enforce from current application state
+## Report usage or authorize work
 
-Use your own application or cache layer to enforce hard limits immediately.
+- Use `usage.record` after an action when you need asynchronous metering and evidence. It does not
+  prevent over-budget work.
+- Use `usage.consume` before an action when its usage amount is already known. Check `allowed`
+  before starting the work.
+- Use a budgeted run when the final amount is unknown before work starts. Reserve first, then
+  [settle actual usage](/libraries/ts/sdk/runs/settle) when the workload finishes.
 
-- Keep the hot path in systems you control, such as Redis or your primary application database.
-- Decide whether to allow or block the request before doing expensive work.
-- Treat this as the fast operational check, not the source of billing truth.
+A read-only `access.check` does not consume an allowance or reserve money. Two concurrent requests
+can both pass a read-only check. Use an enforcing operation for spend control.
 
-Example: if you allow at most 10 active projects on a plan, check that constraint inside your app before creating project 11.
+## Report resource snapshots
 
-### Report authoritative snapshots
-
-Run a background job on a schedule, query the authoritative total from your database, and report that absolute total to Unprice as a snapshot event.
-
-- Run hourly or daily, depending on how quickly the metric changes.
-- Send the full current value, not a delta.
-- Configure the meter as `max` if you bill on the highest watermark reached during the period.
-- Configure the meter as `last` if you bill on the latest value at period close.
+For resources such as active seats or stored bytes, report the absolute value from your own
+system. Configure `max` to track the highest reported value or `last` to track the latest one.
 
 ```ts
-async function syncActiveSeats(customerId: string) {
-  const row = await db.query<
-    { active_seats: number }
-  >(
-    `
-      SELECT COUNT(*)::int AS active_seats
-      FROM seats
-      WHERE customer_id = $1
-        AND revoked_at IS NULL
-    `,
-    [customerId]
-  );
+const { error } = await unprice.usage.record({
+  customerId,
+  eventSlug: "active_seats_snapshot",
+  idempotencyKey: `active-seats:${customerId}:${snapshotId}`,
+  timestamp: snapshotTimestamp,
+  properties: { activeSeats }
+});
 
-  const activeSeats = row[0]?.active_seats ?? 0;
-
-  await unprice.usage.record({
-    idempotencyKey: `active-seats:${customerId}:${new Date().toISOString().slice(0, 13)}`,
-    eventSlug: "active_seats_snapshot",
-    customerId,
-    properties: {
-      usage: activeSeats,
-      source: "cron",
-      metricType: "snapshot"
-    }
-  });
-}
+if (error) throw new Error(error.message);
 ```
 
-This same pattern works for storage totals too:
+Capture the value and timestamp together. Persist the event and its idempotency key until delivery
+succeeds. Reuse them on retry; use a new key for a new snapshot.
 
-```sql
-SELECT SUM(bytes_used) AS total_bytes
-FROM files
-WHERE customer_id = $1;
-```
+A periodic snapshot can miss a peak between samples. Choose a reporting interval that fits the
+billing rule, or send a snapshot when the resource count changes. Enforce immediate resource-count
+limits in your application transaction; a delayed snapshot cannot prevent concurrent writes.
 
-Use `max` when you care about the highest watermark during the month. Use `last` when you care about the value that exists at the moment billing closes the period.
+## One-time allowances
 
-## 4. Lifetime limits
+For an allowance that must not reset, configure a one-time entitlement or grant window. A
+non-expiring grant alone is not enough if it still has a recurring reset cadence. Keep the meter
+on the usage feature and make the allowance's reset rule explicit.
 
-Sometimes the business rule you want is "never reset this allowance." Treat that as an entitlement or grant configuration decision, not as a different metering period.
-
-Recommended pattern:
-
-- Create a normal usage feature for the activity you want to track.
-- Use a standard usage meter for that feature.
-- Configure the customer's grant or entitlement so it does not expire and does not reset.
-- Let the grant carry the long-lived allowance while the meter continues to process usage events normally.
-
-Example:
-
-- You want to give every free customer 10,000 API calls total.
-- Keep the feature as `api-requests`.
-- Meter the activity as normal usage.
-- Create a non-expiring grant with a limit of `10,000`.
-
-This keeps your billing architecture consistent:
-
-- events still describe activity
-- meters still aggregate usage
-- entitlements and grants still define what the customer is allowed to consume
-
-### Rules to follow
-
-- Use meters only for usage entitlements.
-- Use `count` or `sum` for streaming activity reported directly from the request path.
-- Use scheduled snapshot events for stateful resources.
-- Use `max` for high-watermark billing and `last` for end-of-period state billing.
-- Enforce hard operational limits in your own app or cache layer first.
-- Model long-lived allowances as grant or entitlement rules rather than inventing a separate metering model.
-
-Next steps:
-
-- Read [Entitlements](/concepts/pricing/entitlements) to understand how features become customer access rules.
-- Read [Usage consume](/libraries/ts/sdk/usage/consume) for the SDK contract and request shape.
+Read [Entitlements](/concepts/pricing/entitlements) for access rules and
+[Choose the runtime call](/quickstart/choose-operation) for complete request-path examples.

@@ -38,6 +38,10 @@ if (!result.allowed) {
 return runTokenGeneration();
 ```
 
+A read-only check does not reserve credits or consume a quota. For paid generation with an unknown
+final cost, reserve funds before the provider call and settle actual usage afterward. Use
+[Choose the runtime call](/quickstart/choose-operation) to select the enforcing operation.
+
 ## Report or enforce usage
 
 Use `usage.record` when you only need async usage evidence:

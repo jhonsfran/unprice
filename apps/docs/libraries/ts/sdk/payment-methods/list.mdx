@@ -31,7 +31,7 @@ console.log(result);
     "name": "John Doe",
     "last4": "4242",
     "expMonth": 12,
-    "expYear": 2024,
+    "expYear": 2028,
     "brand": "visa"
   }
 ]
@@ -44,8 +44,9 @@ console.log(result);
     The ID of the customer to get payment methods for
 </ParamField>
 
-<ParamField body="provider" type="string" enum="stripe,square" required>
-    The payment provider to get payment methods from
+<ParamField body="provider" type="string" enum="stripe,square,sandbox" required>
+    Use `stripe` for production or `sandbox` for testing. The contract also accepts `square`,
+    but Unprice has no built-in Square adapter.
 </ParamField>
 
 ## Response

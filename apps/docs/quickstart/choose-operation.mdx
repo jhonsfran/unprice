@@ -58,8 +58,6 @@ const { result, error } = await unprice.usage.consume({
   idempotencyKey: request.id,
   properties: {
     aiMessages: 1,
-    inputTokens: 1840,
-    outputTokens: 620
   }
 });
 
@@ -130,7 +128,7 @@ if (run.status !== "running") {
 let finalStatus: "completed" | "failed" = "completed";
 
 try {
-  // Report each billable step against the running budget.
+  // Authorize known usage before starting this billable step.
   const { result: usage, error: consumeError } = await unprice.runs.consume({
     runId: run.runId,
     featureSlug: "ai-tools",
@@ -138,8 +136,6 @@ try {
     idempotencyKey: `run:${request.id}:step:summary`,
     properties: {
       aiTools: 3,
-      inputTokens: 1840,
-      outputTokens: 620
     }
   });
 
@@ -169,6 +165,13 @@ try {
 
 Call `runs.consume` as the workload spends and `runs.end` when it finishes. Unprice does not own the
 workload executor; it owns the budget reservation, spend decision, and evidence trail.
+
+## When actual usage is only known after work
+
+The example above authorizes a known amount before a step runs. For variable provider usage,
+reserve with `runs.start`, run the workload, then use [runs.settle](/libraries/ts/sdk/runs/settle)
+to account for actual usage. Keep settlement retryable if the response is lost. Do not release the
+reservation in `finally` while incurred usage is still unaccounted for.
 
 ## Shortcut
 
