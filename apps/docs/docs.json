@@ -12,10 +12,6 @@
     {
       "source": "/concepts/pricing/schema-evolution",
       "destination": "/concepts/pricing/usage-metering"
-    },
-    {
-      "source": "/api-reference/realtime/create-ticket",
-      "destination": "/api-reference/realtime/deprecation"
     }
   ],
   "api": {

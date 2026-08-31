@@ -694,6 +694,9 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 
 ## Tests, Tooling, And Docs
 
+- 2026-08-31: Before launch, remove retired endpoint docs; do not add compatibility redirects
+  or deprecation pages for API operations that users have not used.
+
 - 2026-08-31: When retiring empty `getUsageDashboard` cache entries, version the key;
   deleting after `swr` can remove a concurrent refresh. Cover stale refresh and zero-usage
   evidence with the real `@unkey/cache` memory store.
