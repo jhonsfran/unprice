@@ -1,9 +1,6 @@
 {
   "name": "nextjs",
-<<<<<<< HEAD
-=======
   "license": "AGPL-3.0-only",
->>>>>>> origin
   "version": "0.0.2",
   "private": true,
   "engines": {
