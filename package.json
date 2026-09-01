@@ -27,7 +27,7 @@
     "validate": "pnpm typecheck && pnpm manypkg check && pnpm fmt:fix",
     "manypkg:fix": "pnpm manypkg fix",
     "commit": "cz",
-    "bump-versions": "pnpm changeset version && pnpm install",
+    "bump-versions": "pnpm changeset version && pnpm install && pnpm biome format packages/api/package.json --write",
     "release:check-packages": "node tooling/scripts/assert-publishable-packages.mjs",
     "release": "pnpm release:check-packages && pnpm --filter @unprice/api test && pnpm --filter @unprice/api typecheck && pnpm --filter @unprice/api build && pnpm --filter @unprice/api exec npm pack --dry-run --json && pnpm changeset publish",
     "prepare": "husky",
