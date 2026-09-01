@@ -113,12 +113,12 @@ describe("getCurrentEntitlementsV1 route", () => {
 
     const response = await app.fetch(buildRequest(), env, executionCtx)
 
-    expect(response.status).toBe(400)
+    expect(response.status).toBe(404)
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: "BAD_REQUEST",
+        code: "NOT_FOUND",
         message: "Customer not found",
-        docs: "https://docs.unprice.dev/api-reference/errors/code/BAD_REQUEST",
+        docs: "https://docs.unprice.dev/api-reference/errors/code/NOT_FOUND",
         requestId: "req_123",
       },
     })

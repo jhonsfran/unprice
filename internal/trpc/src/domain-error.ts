@@ -3,6 +3,7 @@ import { type DomainErrorKind, resolveDomainErrorKind } from "@unprice/services"
 
 const KIND_TO_TRPC = {
   bad_request: "BAD_REQUEST",
+  forbidden: "FORBIDDEN",
   precondition: "PRECONDITION_FAILED",
   conflict: "CONFLICT",
   not_found: "NOT_FOUND",

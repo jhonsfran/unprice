@@ -1,6 +1,6 @@
 import { z } from "@hono/zod-openapi"
-import { BaseError, FetchError } from "@unprice/error"
-import { UnPriceCustomerError } from "@unprice/services/customers"
+import { FetchError } from "@unprice/error"
+import { type DomainErrorKind, resolveDomainErrorKind } from "@unprice/services"
 import { UnPriceWalletError } from "@unprice/services/wallet"
 import type { Context } from "hono"
 import { HTTPException } from "hono/http-exception"
@@ -106,6 +106,17 @@ export const ErrorSchema = z.object({
 
 export type ErrorResponse = z.infer<typeof ErrorSchema>
 
+type PublicErrorCode = z.infer<typeof ErrorCode>
+
+const domainErrorCode: Record<DomainErrorKind, PublicErrorCode> = {
+  bad_request: "BAD_REQUEST",
+  forbidden: "FORBIDDEN",
+  precondition: "PRECONDITION_FAILED",
+  conflict: "CONFLICT",
+  not_found: "NOT_FOUND",
+  internal: "INTERNAL_SERVER_ERROR",
+}
+
 const INTERNAL_SERVER_ERROR_MESSAGE = "Internal server error"
 
 function clientErrorMessage(status: StatusCode, message: string): string {
@@ -201,13 +212,6 @@ export function toUnpriceApiError(error: unknown): UnpriceApiError {
     })
   }
 
-  if (error instanceof UnPriceCustomerError) {
-    return new UnpriceApiError({
-      code: "BAD_REQUEST",
-      message: error.message,
-    })
-  }
-
   if (error instanceof UnPriceWalletError && error.message === "WALLET_LEDGER_FAILED") {
     return new UnpriceApiError({
       code: "INTERNAL_SERVER_ERROR",
@@ -215,9 +219,11 @@ export function toUnpriceApiError(error: unknown): UnpriceApiError {
     })
   }
 
-  if (error instanceof BaseError) {
+  const domainKind = resolveDomainErrorKind(error)
+
+  if (domainKind && error instanceof Error) {
     return new UnpriceApiError({
-      code: "BAD_REQUEST",
+      code: domainErrorCode[domainKind],
       message: error.message,
     })
   }
@@ -324,53 +330,5 @@ export function handleError(err: Error, c: Context<HonoEnv>): Response {
     )
   }
 
-  if (err instanceof FetchError) {
-    return c.json<z.infer<typeof ErrorSchema>>(
-      {
-        error: {
-          code: "INTERNAL_SERVER_ERROR",
-          message: INTERNAL_SERVER_ERROR_MESSAGE,
-          docs: "https://docs.unprice.dev/api-reference/errors/code/INTERNAL_SERVER_ERROR",
-          requestId: c.get("requestId"),
-        },
-      },
-      { status: 500 }
-    )
-  }
-
-  if (err instanceof UnPriceCustomerError) {
-    return c.json<z.infer<typeof ErrorSchema>>(
-      {
-        error: {
-          code: "BAD_REQUEST",
-          message: err.message,
-          docs: "https://docs.unprice.dev/api-reference/errors/code/BAD_REQUEST",
-          requestId: c.get("requestId"),
-        },
-      },
-      { status: 400 }
-    )
-  }
-
-  /**
-   * We're lost here, all we can do is return a 500 and log it to investigate
-   */
-  console.error("unhandled exception", {
-    name: err.name,
-    message: err.message,
-    stack: err.stack,
-    requestId: c.get("requestId"),
-  })
-
-  return c.json<z.infer<typeof ErrorSchema>>(
-    {
-      error: {
-        code: "INTERNAL_SERVER_ERROR",
-        docs: "https://docs.unprice.dev/api-reference/errors/code/INTERNAL_SERVER_ERROR",
-        message: INTERNAL_SERVER_ERROR_MESSAGE,
-        requestId: c.get("requestId"),
-      },
-    },
-    { status: 500 }
-  )
+  return handleError(toUnpriceApiError(err), c)
 }

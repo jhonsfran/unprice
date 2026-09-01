@@ -575,6 +575,9 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 
 ## API SDK And Public Contracts
 
+- 2026-09-01: Public API adapters must map expected service errors through
+  `resolveDomainErrorKind`; never use a catch-all `BaseError -> BAD_REQUEST` rule, which turns
+  disabled, conflict, precondition, and internal failures into the same client error.
 - 2026-06-21: Tooling that calls `unprice.analytics.usage.get` should consume the public SDK row
   shape (`usage` plus formatted `spending`), not raw analytics/lake fields such as `value_after`
   or `amount_after`.

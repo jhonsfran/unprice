@@ -16,8 +16,10 @@ unnormalized paths can also disagree.
 
 ## Design
 
-Add `forbidden` to `DomainErrorKind`. Classify `CUSTOMER_DISABLED` and `PROJECT_DISABLED` as
-forbidden in the customer domain map. Keep all other existing domain classifications unchanged.
+Add `forbidden` to `DomainErrorKind`. Classify disabled customers and projects as forbidden,
+missing customer records as not found, customer identity conflicts as conflicts, and customer
+subscription/configuration requirements as preconditions. Classify replay payload validation
+failures as bad requests instead of relying on the API's old catch-all mapping.
 
 `toUnpriceApiError` remains the canonical HTTP adapter. It maps resolved domain kinds as follows:
 
@@ -45,4 +47,3 @@ Add focused tests for every domain kind and for an unknown domain error. Assert 
 that proves `CUSTOMER_DISABLED` returns `403 FORBIDDEN`. Run the API error tests, the subscription
 route tests, API typecheck, and repository validation checks that do not start a server or call live
 services.
-

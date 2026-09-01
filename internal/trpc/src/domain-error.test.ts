@@ -1,9 +1,22 @@
 import { SchemaError } from "@unprice/error"
+import { UnPriceCustomerError } from "@unprice/services/customers"
 import { UnPriceMachineError, UnPriceSubscriptionError } from "@unprice/services/subscriptions"
 import { describe, expect, it } from "vitest"
 import { domainErrorToTrpcError } from "#domain-error"
 
 describe("domainErrorToTrpcError", () => {
+  it("maps disabled customers to forbidden", () => {
+    const error = domainErrorToTrpcError(
+      new UnPriceCustomerError({
+        code: "CUSTOMER_DISABLED",
+        message: "customer is disabled",
+      })
+    )
+
+    expect(error.code).toBe("FORBIDDEN")
+    expect(error.message).toBe("customer is disabled")
+  })
+
   it("keeps machine precondition rejections customer-visible", () => {
     const error = domainErrorToTrpcError(
       new UnPriceMachineError({
