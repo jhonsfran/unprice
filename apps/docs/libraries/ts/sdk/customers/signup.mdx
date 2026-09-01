@@ -24,13 +24,14 @@ const { result, error } = await unprice.customers.signUp({
 });
 
 if (error) {
-  // handle potential network or bad request error
-  // a link to our docs will be in the `error.docs` field
-  console.error(error.message);
-  return;
+  throw new Error(`${error.code}: ${error.message}`, { cause: error });
 }
 
-console.log(result);
+if (!result.success) {
+  throw new Error(`Customer signup is incomplete. Continue at ${result.url}`);
+}
+
+const customerId = result.customerId;
 ```
 
 </RequestExample>
@@ -64,15 +65,15 @@ console.log(result);
 </ParamField>
 
 <ParamField body="billingInterval" type="string">
-    The billing interval for the customer's subscription. If plan version is provided, this will match the plan version. If plan slug is provided, this will be the default billing interval of the plan. Must be one of: "month", "year", "day", "minute", or "onetime"
+    The billing interval for the customer's subscription. If plan version is provided, this will match the plan version. If plan slug is provided, this will be the default billing interval of the plan. Must be one of: "month", "year", "week", "day", "minute", or "onetime"
 </ParamField>
 
 <ParamField body="planSlug" type="string">
-    The plan slug to sign up for. If provided, Unprice uses the latest published version for that slug. Required if planVersionId is not provided
+    The plan slug to sign up for. If provided, Unprice uses the latest published version for that slug. If both plan selectors are omitted, Unprice uses the project default plan.
 </ParamField>
 
 <ParamField body="planVersionId" type="string">
-    The specific plan version ID to sign up for. Required if planSlug is not provided
+    The specific plan version ID to sign up for. Omit both plan selectors to use the project default plan.
 </ParamField>
 
 <ParamField body="config" type="array">
@@ -133,7 +134,8 @@ console.log(result);
 </ResponseField>
 
 <ResponseField name="url" type="string" required>
-    The URL to redirect the customer to (either success or cancel URL)
+    The next URL in the signup flow. It can be a payment-provider checkout URL, the success URL,
+    or the cancel URL. Follow it before assuming payment setup is complete.
 </ResponseField>
 
 <ResponseField name="customerId" type="string" required>

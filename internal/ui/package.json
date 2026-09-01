@@ -1,5 +1,6 @@
 {
   "name": "@unprice/ui",
+  "license": "AGPL-3.0-only",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -91,6 +92,7 @@
     "./breadcrumb": "./src/breadcrumb.tsx",
     "./radio-group": "./src/radio-group.tsx",
     "./radio-group-card": "./src/radio-group-card.tsx",
+    "./responsive-dialog": "./src/responsive-dialog.tsx",
     "./alert-dialog": "./src/alert-dialog.tsx",
     "./resizable": "./src/resizable.tsx",
     "./drawer": "./src/drawer.tsx",

@@ -2,14 +2,14 @@
 
 This package contains Tinybird datasources, pipes, endpoints, fixtures, and tests for billing and product analytics.
 
-## Current Architecture
+## Current architecture
 
 - Source of truth: R2 raw lakehouse files.
 - Tinybird role: billing and operational analytics.
 - Durable Object flush writes to both Tinybird and R2.
 - Buffered rows are deleted only after both sinks are confirmed.
 
-## V2 Schema Direction
+## V2 schema direction
 
 The current direction optimizes Tinybird cost and query latency:
 
@@ -19,7 +19,7 @@ The current direction optimizes Tinybird cost and query latency:
 - Raw usage and verification datasources keep only billing/analytics-essential columns.
 - Raw datasources have retention TTLs to limit storage cost.
 
-## Tinybird Resources
+## Tinybird resources
 
 - Datasources: `internal/analytics/datasources/*.datasource`
 - Materialized destinations: `internal/analytics/materializations/*.datasource`
@@ -28,7 +28,7 @@ The current direction optimizes Tinybird cost and query latency:
 - Fixtures: `internal/analytics/fixtures/*`
 - Tests: `internal/analytics/tests/*.yaml`
 
-## How To Test
+## How to test
 
 Tinybird CI already runs:
 
@@ -54,7 +54,7 @@ tb test create endpoints/<pipe_name>.pipe
 
 Then edit `tests/<pipe_name>.yaml` and validate expected output.
 
-## Migration and Verification Runbook
+## Migration and verification runbook
 
 Before deploy:
 

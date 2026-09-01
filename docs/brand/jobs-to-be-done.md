@@ -25,9 +25,10 @@ Evidence limits:
 - Treat this as internal positioning, not customer research.
 - Do not write or imply customer quotes until real interviews, support threads, or sales calls are
   available.
-- The sharpest current trigger is still cost spikes from expensive AI/API/workflow usage.
-- The broader job is customer spend authorization plus evidence: decide before paid usage runs,
-  then explain the charge, credit, denial, or invoice line after from the same money path.
+- The primary trigger is an agent or paid workflow spending customer credits before billing can
+  stop it.
+- The job is authorization-led AI billing: decide before the workload runs, settle actual usage,
+  then trace the invoice line to the authorization.
 - The measurable outcomes to emphasize are cost avoided, invoice-debugging time reduced, and pricing
   changes shipped without moving existing customers off their plan versions.
 
@@ -54,25 +55,23 @@ spend cap before the request runs today?"
 
 ## Core Job
 
-When a developer-led usage-based SaaS product has paid actions that create cost or invoice
-complexity, the team wants to authorize the customer's plan, budget, credits, and entitlements at
-runtime so it can decide before work runs and explain every invoice line from the same money path.
+When an AI product sells credits, agent runs, or paid workflows, the team wants to authorize the
+customer's plan, budget, and credits before the workload creates cost, then trace settled usage to
+the invoice.
 
 ## Job Statement
 
-When my usage-based SaaS product has paid actions that can burn a customer's credits, budget, or
-usage allowance, I want to apply the correct plan version, price the feature, meter the event when
-usage-based, check entitlement, check customer budget, reserve or capture credits, and preserve
-invoice evidence in the request path, so I can show why a request was allowed, denied, charged,
-credited, invoiced, or replayed.
+When my AI product runs agents or paid workflows that spend customer credits, I want to apply the
+correct plan, check the customer's budget, reserve credits before work starts, settle actual usage,
+and preserve invoice evidence, so I can show why the workload ran and how it became a charge.
 
 ## Primary Actor
 
 Best-fit early actors:
 
 - CTOs, founding engineers, heads of platform, and product engineers.
-- Developer-led SaaS teams with 5-50 employees, Seed to Series A.
-- B2B SaaS, API, infrastructure, automation, data, or AI products where usage affects gross margin.
+- Developer-led AI products with 5-50 employees, Seed to Series A.
+- Agent, workflow, API, automation, or AI infrastructure products where usage affects gross margin.
 - Engineering teams that own billing, metering, entitlements, plan versions, or request-path
   customer spend authorization.
 
@@ -195,15 +194,18 @@ The product should help founders and engineers feel:
 
 ## Campaign Angles
 
-Lead campaigns with the primary trigger: a paid action can create cost or invoice confusion before
-the team notices. Narrow to expensive AI/API/workflow usage when the audience needs a concrete
-example.
+Lead campaigns with the primary trigger: an agent or paid workflow can spend customer credits
+before billing can stop it.
 
 Strong angles:
 
-- Authorize customer spend before paid work runs.
+- Sell AI credits and usage. Keep the margin.
+- Every AI charge starts with an authorization.
+- Authorize every agent run and paid workflow before it creates cost.
+- Reserve customer credits before the run, then settle actual usage.
+- Trace each invoice line to the decision that allowed the work.
 - Prove every charge after it bills.
-- Sell credits and usage-based plans without eating the cost when a customer overspends.
+- Sell AI credits and usage without paying for unfunded agent work.
 - Put a budget and evidence trail around the expensive action in your product.
 - Your Redis counter is not a budget: request-path enforcement beats a homegrown pre-check.
 - AI gateways cap provider spend; Unprice governs customer spend and invoice evidence.
@@ -234,8 +236,8 @@ Weak angles:
 
 Use this checklist when reviewing homepage, landing page, launch, ad, docs, or sales copy.
 
-- Does the copy name the actor: developer-led usage-based SaaS teams, CTOs, founding engineers,
-  platform engineers, or product engineers?
+- Does the copy name the actor: developer-led AI products, CTOs, founding engineers, platform
+  engineers, or product engineers?
 - Does the first screen make customer spend authorization or invoice explanation visible?
 - Does the message lead with a paid-action trigger, cost-spike trigger, invoice-dispute trigger, or
   pricing-experiment trigger from this document?
@@ -269,7 +271,7 @@ acute pain, not just "rate usage accurately after." Use this story as the workin
 propositions, but validate the lead phrase before committing GTM spend.
 
 Targets: 8-12 in-ICP engineering owners (CTOs, founding engineers, platform/product engineers) at
-developer-led usage-based SaaS teams (5-50 people, Seed to Series A) with paid actions that affect
+developer-led AI products (5-50 people, Seed to Series A) with agent runs or paid workflows that affect
 gross margin, invoice trust, or packaging flexibility. Recruit from inbound, design partners, and
 warm dev-community intros — not a broad survey. Open recruiting and interviews with the buyer's own
 words from the Public Buyer Language section ("can you check a balance or enforce a spend cap
@@ -281,11 +283,12 @@ tried to stop it in the request path, only discovered it on the invoice, or stru
 logic and entitlement state were scattered. If teams consistently say post-hoc rating plus custom
 counters is good enough, the wedge is weaker than assumed.
 
-Phrase test. Show the same hero three ways and measure comprehension and "this is for me" response:
+Phrase test. Show the same AI-first hero three ways and measure comprehension and "this is for me"
+response:
 
-1. "Authorize customer spend before paid work runs." (customer-spend frame)
-2. "Prove every charge after it bills." (evidence-after-the-fact frame)
-3. "Put a budget and evidence trail around your most expensive action." (expensive-action frame)
+1. "Sell AI credits and usage. Keep the margin." (business-outcome frame)
+2. "Every AI charge starts with an authorization." (mechanism frame)
+3. "Reserve customer credits before the agent runs." (operational frame)
 
 Pick the lead phrase from evidence, then make it canonical in `positioning-and-messaging.md`.
 

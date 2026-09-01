@@ -18,7 +18,7 @@
   },
   "keywords": [],
   "author": "Sebastian Franco",
-  "license": "AGPL-3.0",
+  "license": "AGPL-3.0-only",
   "dependencies": {
     "@unprice/api": "workspace:^"
   },

@@ -219,16 +219,16 @@ export function DecisionDemo({ className }: { className?: string }) {
           id="decision-demo-title"
           className="mt-6 font-primary text-background-textContrast text-display-3"
         >
-          Watch paid work stop before it creates cost.
+          Watch an agent run stop before it creates cost.
         </h2>
         <p className="mt-5 text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-          Click a paid action. Each request is allowed, flagged, or denied before the work runs —
-          and the same decision explains the invoice line later.
+          Click an agent action or paid workflow. Unprice allows, flags, or denies the request
+          before work runs. It keeps that authorization as evidence for the invoice line.
         </p>
       </div>
 
       <figure
-        aria-label="An interactive plan sheet for acme-corp on pro@v3. The left panel lists the plan's paid actions — API requests and tiered storage behind hard guardrails, budgeted compute behind a soft one, and a flat premium support seat — each with a live usage meter. Clicking a paid action sends one request across the request/decision boundary to the decision receipt, which answers allow, flagged, or deny before the work runs, with the evidence kept with the decision: the call, plan version, pricing rule, guardrail, and remaining budget. A hard-limited row stays clickable, and every further click is denied showing what it did not create — work never ran, no charge, no ledger entry, no invoice line. The receipt's invoice view accrues the accepted charges into the invoice each decision explains."
+        aria-label="An interactive plan sheet for acme-corp on pro@v3. The left panel lists API requests, tiered storage, budgeted compute, and premium support. Each paid action has a usage meter and guardrail. A click sends one request to a decision receipt before the work runs. The receipt shows the call, plan version, pricing rule, guardrail, and remaining budget. A denied request creates no work, charge, ledger entry, or invoice line. The invoice view adds accepted charges and links them to their decisions."
         className="mt-10 sm:mt-12"
       >
         <Reveal>
@@ -322,7 +322,7 @@ export function DecisionDemo({ className }: { className?: string }) {
 
         <figcaption className="mt-5 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 border-background-border border-t pt-3 text-background-text text-xs leading-6">
           <span>
-            The demo curates the response — every fact on the receipt is a field the API returns.
+            The demo selects which fields to show. The API returns every fact on the receipt.
           </span>
           <a
             href="https://docs.unprice.dev"

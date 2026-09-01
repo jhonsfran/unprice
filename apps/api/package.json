@@ -1,5 +1,6 @@
 {
   "name": "api",
+  "license": "AGPL-3.0-only",
   "private": true,
   "scripts": {
     "scripts:queues": "./scripts/configure-queues.sh",

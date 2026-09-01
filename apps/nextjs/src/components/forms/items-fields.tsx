@@ -32,14 +32,6 @@ import { currencySymbol } from "@unprice/money"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@unprice/ui/dialog"
-import {
   FormControl,
   FormDescription,
   FormField,
@@ -48,6 +40,14 @@ import {
   FormMessage,
 } from "@unprice/ui/form"
 import { Input } from "@unprice/ui/input"
+import {
+  ResponsiveDialog,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+  ResponsiveDialogTrigger,
+} from "@unprice/ui/responsive-dialog"
 import { Separator } from "@unprice/ui/separator"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@unprice/ui/table"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
@@ -321,28 +321,30 @@ export default function ConfigItemsFormField<TFieldValues extends FormValues>({
                             <div className="flex items-center justify-start gap-1">
                               {withFeatureDetails && (
                                 <PropagationStopper className="flex items-center justify-start">
-                                  <Dialog>
-                                    <DialogTrigger asChild>
+                                  <ResponsiveDialog>
+                                    <ResponsiveDialogTrigger asChild>
                                       <Button className="mr-1 size-4" variant="link" size="icon">
                                         <Settings className="size-4" />
                                         <span className="sr-only">View feature</span>
                                       </Button>
-                                    </DialogTrigger>
+                                    </ResponsiveDialogTrigger>
 
-                                    <DialogContent className="flex max-h-[800px] w-full flex-col justify-between overflow-y-scroll md:w-1/2 lg:w-[600px]">
-                                      <DialogHeader>
-                                        <DialogTitle>Feature: {feature.feature.title}</DialogTitle>
-                                      </DialogHeader>
-                                      <DialogDescription>
+                                    <ResponsiveDialogContent className="w-full md:max-w-[600px]">
+                                      <ResponsiveDialogHeader>
+                                        <ResponsiveDialogTitle>
+                                          Feature: {feature.feature.title}
+                                        </ResponsiveDialogTitle>
+                                      </ResponsiveDialogHeader>
+                                      <ResponsiveDialogDescription>
                                         {feature.feature.description ?? ""}
-                                      </DialogDescription>
+                                      </ResponsiveDialogDescription>
                                       <FeatureConfigForm
                                         defaultValues={feature}
                                         planVersion={selectedPlanVersion!}
                                         className="my-6"
                                       />
-                                    </DialogContent>
-                                  </Dialog>
+                                    </ResponsiveDialogContent>
+                                  </ResponsiveDialog>
                                 </PropagationStopper>
                               )}
                               <PlanVersionFeatureListItem

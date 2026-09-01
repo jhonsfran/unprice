@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "version": "0.1.0",
-  "license": "AGPL-3.0",
+  "license": "AGPL-3.0-only",
   "scripts": {
     "clean": "rm -rf .turbo node_modules",
     "typecheck": "tsc --noEmit",

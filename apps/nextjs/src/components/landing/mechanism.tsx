@@ -9,7 +9,7 @@ import { StationHeader } from "./station-header"
 
 const preflightQuestions = [
   { question: "Which plan version applies?", fact: "pro@v3 · pinned" },
-  { question: "Is the customer entitled?", fact: "access.check · ok" },
+  { question: "Is the customer entitled?", fact: "plan entitlement · active" },
   { question: "Which meter rule rates it?", fact: "tokens_used · $0.002 / token" },
   { question: "Do wallet credits cover it?", fact: "reserve −1 credit" },
   { question: "Is there budget left?", fact: "$4.10 remaining" },
@@ -67,21 +67,20 @@ export function MechanismSection() {
             id="mechanism-title"
             className="mt-6 max-w-xl font-primary text-background-textContrast text-display-3"
           >
-            Customer spend authorization runs in the request path.
+            Every AI charge starts with an authorization.
           </h2>
           <p className="mt-5 max-w-xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-            Before the paid action runs, your app asks one money path which plan version applies,
-            whether the customer is entitled, whether the budget or wallet has room, and whether the
-            decision can explain the invoice line later.
+            Before an agent or workflow runs, your app checks the customer's plan, budget, and
+            credits. That authorization stays with the usage and explains the invoice line later.
           </p>
           <p className="mt-4 max-w-xl text-background-text text-sm leading-6">
             One decision, two futures. A deny comes back as{" "}
             <code className="rounded-sm bg-background-bg px-1 py-px font-mono text-[11px] text-background-textContrast">
               LIMIT_EXCEEDED
             </code>{" "}
-            before any cost exists — the wallet untouched, the ledger empty, the invoice clean. An
-            allow keeps the evidence that explains the invoice line, from the same decision that let
-            the work run.
+            before any cost exists. The wallet stays untouched, the ledger stays empty, and the
+            invoice has no line. An allow keeps the evidence from the decision that let the work
+            run.
           </p>
         </div>
       </div>

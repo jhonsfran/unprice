@@ -6,14 +6,6 @@ import { planSelectBaseSchema, planVersionSelectBaseSchema } from "@unprice/db/v
 import { Button } from "@unprice/ui/button"
 
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@unprice/ui/dialog"
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -21,6 +13,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@unprice/ui/dropdown-menu"
+import {
+  ResponsiveDialog,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+  ResponsiveDialogTrigger,
+} from "@unprice/ui/responsive-dialog"
 import { MoreVertical } from "lucide-react"
 import { usePathname } from "next/navigation"
 import { useState } from "react"
@@ -48,7 +48,7 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
   const [isOpenDialog, setIsOpenDialog] = useState(false)
 
   return (
-    <Dialog onOpenChange={setIsOpenDialog} open={isOpenDialog}>
+    <ResponsiveDialog onOpenChange={setIsOpenDialog} open={isOpenDialog}>
       <DropdownMenu onOpenChange={setIsOpen} open={isOpen}>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="icon" className="size-8">
@@ -59,9 +59,9 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
         <DropdownMenuContent align="end">
           <DropdownMenuLabel>Actions</DropdownMenuLabel>
           <DropdownMenuSeparator />
-          <DialogTrigger asChild>
+          <ResponsiveDialogTrigger asChild>
             <DropdownMenuItem>Edit version</DropdownMenuItem>
-          </DialogTrigger>
+          </ResponsiveDialogTrigger>
           <DropdownMenuItem asChild>
             <PlanVersionDuplicate
               onConfirmAction={() => setIsOpen(false)}
@@ -91,13 +91,13 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <DialogContent className="max-h-screen overflow-y-scroll md:max-w-screen-md">
-        <DialogHeader>
-          <DialogTitle>Edit plan version</DialogTitle>
-          <DialogDescription>
+      <ResponsiveDialogContent className="md:max-w-screen-md">
+        <ResponsiveDialogHeader>
+          <ResponsiveDialogTitle>Edit plan version</ResponsiveDialogTitle>
+          <ResponsiveDialogDescription>
             Update the pricing, billing, and entitlement rules for customers pinned to this version.
-          </DialogDescription>
-        </DialogHeader>
+          </ResponsiveDialogDescription>
+        </ResponsiveDialogHeader>
         <PlanVersionForm
           defaultValues={{
             ...version,
@@ -105,7 +105,7 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
           }}
           setDialogOpen={setIsOpenDialog}
         />
-      </DialogContent>
-    </Dialog>
+      </ResponsiveDialogContent>
+    </ResponsiveDialog>
   )
 }

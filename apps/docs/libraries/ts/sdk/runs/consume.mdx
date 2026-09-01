@@ -3,23 +3,22 @@ title: "Consume run usage"
 description: "Apply usage to a running budgeted run."
 ---
 
-Use `runs.consume` while a budgeted workload is running. It applies a synchronous metered event to
-the run and rejects spend when the run is no longer allowed to consume budget.
+Use `runs.consume` before a billable step when its usage amount is known. It applies a synchronous
+metered event to the run and can reject the step before it creates cost. If the provider has already
+incurred variable usage, use [runs.settle](/libraries/ts/sdk/runs/settle).
 
 <RequestExample>
 
 ```ts
-// Report each billable step against the running budget.
+// Authorize known usage before starting the billable step.
 const { result, error } = await unprice.runs.consume({
   runId: "brun_123",
   featureSlug: "ai-tools",
   eventSlug: "completions",
   idempotencyKey: "run:req_123:step_1",
-  // One event can carry the properties used by several feature meters.
+  // This call consumes only the selected feature.
   properties: {
     aiTools: 3,
-    inputTokens: 1840,
-    outputTokens: 620,
     step: "summarize"
   }
 });

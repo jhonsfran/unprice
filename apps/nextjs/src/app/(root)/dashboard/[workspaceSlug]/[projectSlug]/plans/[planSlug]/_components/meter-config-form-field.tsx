@@ -22,14 +22,6 @@ import {
   CommandLoading,
 } from "@unprice/ui/command"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@unprice/ui/dialog"
-import {
   Form,
   FormControl,
   FormDescription,
@@ -41,6 +33,14 @@ import {
 import { Input } from "@unprice/ui/input"
 import { LoadingAnimation } from "@unprice/ui/loading-animation"
 import { Popover, PopoverContent, PopoverTrigger } from "@unprice/ui/popover"
+import {
+  ResponsiveDialog,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogFooter,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+} from "@unprice/ui/responsive-dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@unprice/ui/select"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { cn } from "@unprice/ui/utils"
@@ -194,21 +194,21 @@ function EventFormDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[620px]">
-        <DialogHeader className="space-y-2">
-          <DialogTitle>
+    <ResponsiveDialog open={open} onOpenChange={onOpenChange}>
+      <ResponsiveDialogContent className="md:max-w-[620px]">
+        <ResponsiveDialogHeader className="space-y-2">
+          <ResponsiveDialogTitle>
             {mode === "create" ? "Create event" : isPlanVersionLocked ? "View event" : "Edit event"}
-          </DialogTitle>
-          <DialogDescription>
+          </ResponsiveDialogTitle>
+          <ResponsiveDialogDescription>
             Events are reusable across features. Add the SDK slug once, then list any numeric
             payload fields you may want to aggregate later.
-          </DialogDescription>
-        </DialogHeader>
+          </ResponsiveDialogDescription>
+        </ResponsiveDialogHeader>
 
         <Form {...form}>
           <form onSubmit={handleFormSubmit} className="space-y-6">
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4 md:grid-cols-2">
               <FormField
                 control={form.control}
                 name="name"
@@ -330,17 +330,17 @@ function EventFormDialog({
               )}
             </div>
 
-            <DialogFooter className="pt-2">
+            <ResponsiveDialogFooter className="pt-2">
               <SubmitButton
                 isSubmitting={form.formState.isSubmitting}
                 isDisabled={isCreateDisabled || isPending}
                 label={mode === "create" ? "Create event" : "Save event"}
               />
-            </DialogFooter>
+            </ResponsiveDialogFooter>
           </form>
         </Form>
-      </DialogContent>
-    </Dialog>
+      </ResponsiveDialogContent>
+    </ResponsiveDialog>
   )
 }
 

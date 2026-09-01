@@ -40,8 +40,9 @@ console.log(result);
     The ID of the customer to create a payment method for
 </ParamField>
 
-<ParamField body="paymentProvider" type="string" enum="stripe,square" required>
-    The payment provider to use
+<ParamField body="paymentProvider" type="string" enum="stripe,square,sandbox" required>
+    Use `stripe` for production or `sandbox` for testing. The contract also accepts `square`,
+    but Unprice has no built-in Square adapter.
 </ParamField>
 
 <ParamField body="successUrl" type="string" required>

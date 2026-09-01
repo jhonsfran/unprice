@@ -7,6 +7,7 @@ import { route as analyticsUsageRoute } from "~/routes/analytics/getUsageV1"
 import { route as billingReservationsFlushForInvoicingRoute } from "~/routes/billing/flushReservationsForInvoicingV1"
 import { route as customersChangePlanRoute } from "~/routes/customers/changePlanV1"
 import { route as customersSignUpRoute } from "~/routes/customers/signUpV1"
+import { route as accessEntitlementsCurrentRoute } from "~/routes/entitlements/getCurrentEntitlementsV1"
 import { route as entitlementWindowsStatusRoute } from "~/routes/entitlements/getEntitlementWindowStatusV1"
 import { route as accessEntitlementsListRoute } from "~/routes/entitlements/getEntitlementsV1"
 import { route as accessCheckRoute } from "~/routes/entitlements/verifyV1"
@@ -53,6 +54,7 @@ const routes = [
   accessUpdateRoute,
   accessCheckRoute,
   accessEntitlementsListRoute,
+  accessEntitlementsCurrentRoute,
   usageRecordRoute,
   usageConsumeRoute,
   runsStartRoute,
@@ -113,6 +115,7 @@ const expectedRoutes = new Map<string, string>([
   ["monetization.apply", "POST /v1/monetization/apply"],
   ["monetization.get", "GET /v1/monetization/get"],
   ["analytics.usage.get", "POST /v1/analytics/usage/get"],
+  ["access.entitlements.current", "POST /v1/access/entitlements/current"],
   ["analytics.usage.currentBillingPeriod", "POST /v1/analytics/usage/current-billing-period"],
   ["analytics.charges.explain", "POST /v1/analytics/charges/explain"],
   ["ingestionEvents.status", "POST /v1/ingestion-events/status"],
@@ -144,6 +147,7 @@ const expectedSdkPublicOperations = [
   "access.update",
   "access.check",
   "access.entitlements.list",
+  "access.entitlements.current",
   "usage.record",
   "usage.consume",
   "runs.start",

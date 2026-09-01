@@ -1,0 +1,15 @@
+---
+title: PAYLOAD_TOO_LARGE
+openapi-schema: ErrPayloadTooLarge
+---
+
+## Cause
+
+The request body exceeds the endpoint's size limit.
+
+## Action
+
+Reduce the payload size before retrying. Remove unnecessary event properties. Keep the same
+idempotency key when retrying the same logical event.
+
+Include the error response and `requestId` if you contact [support](mailto:seb@unprice.dev).

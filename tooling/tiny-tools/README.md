@@ -1,6 +1,7 @@
 # @unprice/tiny-tools
 
-E2E test suite for the Unprice public API (`@unprice/api`). Runs against any environment — local, preview, or production.
+E2E test suite for the Unprice public API, `@unprice/api`. It runs against local, preview, or
+production environments.
 
 ## Requirements
 
@@ -11,8 +12,8 @@ E2E test suite for the Unprice public API (`@unprice/api`). Runs against any env
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `CUSTOMER_ID` | yes | — | Customer ID to run tests against (`cus_xxx`) |
-| `UNPRICE_TOKEN` | yes | — | Project API token |
+| `CUSTOMER_ID` | yes | none | Customer ID to run tests against (`cus_xxx`) |
+| `UNPRICE_TOKEN` | yes | none | Project API token |
 | `UNPRICE_API_URL` | no | `http://localhost:8787` | API base URL |
 | `ONLY` | no | (all tests) | Comma-separated test name substrings to filter |
 
@@ -53,7 +54,8 @@ UNPRICE_TOKEN=unprice_dev_1234567890 pnpm --filter @unprice/tiny-tools e2e:signu
 
 ## Test coverage
 
-Tests run sequentially. Later tests reuse state discovered in earlier ones (e.g. the usage-based feature found during verification is reused for all ingestion tests).
+Tests run in sequence. Later tests reuse state from earlier tests. For example, ingestion tests use
+the usage feature found during verification.
 
 | Test | What it checks |
 |---|---|
@@ -70,7 +72,7 @@ Tests run sequentially. Later tests reuse state discovered in earlier ones (e.g.
 
 Ingestion tests (`sync-ingestion`, `async-ingestion`, `idempotency`, `limit-enforcement`) are automatically skipped if the customer has no usage-based features or the wallet is not funded for priced usage (`WALLET_EMPTY`).
 
-## Wallet E2E
+## Wallet E2E tests
 
 `pnpm --filter @unprice/tiny-tools e2e:wallet:local` runs wallet-specific checks without sending usage. It requires a customer with at least one capped entitlement and verifies:
 
@@ -82,5 +84,5 @@ Ingestion tests (`sync-ingestion`, `async-ingestion`, `idempotency`, `limit-enfo
 
 ## Exit codes
 
-- `0` — all tests passed
-- `1` — one or more tests failed
+- `0`: all tests passed
+- `1`: one or more tests failed

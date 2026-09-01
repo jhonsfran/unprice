@@ -12,8 +12,11 @@ payment. Unprice owns the customer money path between them: pricing rules, entit
 usage evidence, wallet credits, billing state, and the trail that explains why work was allowed,
 denied, or billed.
 
-<Frame caption="The request-to-invoice money path">
-  <img src="/images/money-path.svg" alt="A paid action passes through plan version, entitlement, budget, and wallet checks. Unprice allows or denies the action before work runs and preserves invoice evidence." />
+<Frame caption="The money path: two requests accepted, the third denied.">
+  <div className="w-full overflow-x-auto" tabIndex={0} role="region" aria-label="Money path diagram, scroll horizontally on small screens">
+    <img className="block dark:hidden" src="/images/money-path.svg" width="880" height="660" style={{ minWidth: "660px", width: "100%", height: "auto" }} alt="Three $4.10 usage.consume requests share a $10 budget. Two are accepted and produce wallet, ledger, invoice, and Stripe payment evidence. The third is denied with LIMIT_EXCEEDED at $1.80 remaining, with no wallet change, invoice line, or charge." />
+    <img className="hidden dark:block" src="/images/money-path-dark.svg" width="880" height="660" style={{ minWidth: "660px", width: "100%", height: "auto" }} alt="Three $4.10 usage.consume requests share a $10 budget. Two are accepted and produce wallet, ledger, invoice, and Stripe payment evidence. The third is denied with LIMIT_EXCEEDED at $1.80 remaining, with no wallet change, invoice line, or charge." />
+  </div>
 </Frame>
 
 ## The three boundaries

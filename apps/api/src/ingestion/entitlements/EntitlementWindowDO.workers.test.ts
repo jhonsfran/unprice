@@ -87,7 +87,7 @@ describe("EntitlementWindowDO workers runtime invariants", () => {
       resetConfig: {
         name: "daily",
         planType: "recurring",
-        resetAnchor: 1,
+        resetAnchor: 0,
         resetInterval: "day",
         resetIntervalCount: 1,
       },

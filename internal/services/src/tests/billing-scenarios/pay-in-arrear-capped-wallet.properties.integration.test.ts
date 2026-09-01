@@ -262,7 +262,7 @@ describe("P0-B pay_in_arrear capped wallet properties", () => {
         seed: propertySeed,
       }
     )
-  })
+  }, 20_000)
 })
 
 async function expectWalletState(

@@ -64,6 +64,26 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/v1/runs/settle/{runId}": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * settle incurred usage against a run
+     * @description Record already-incurred usage without feature-limit enforcement and reconcile its cost against the run budget. The run remains open until runs.end.
+     */
+    post: operations["runs.settle"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/v1/runs/end/{runId}": {
     parameters: {
       query?: never
@@ -158,6 +178,26 @@ export interface paths {
      * @description Get active customer entitlements with their grants
      */
     post: operations["access.entitlements.list"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/v1/access/entitlements/current": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * get current customer entitlements
+     * @description Get all active customer entitlements. Metered entitlements include live usage state from their entitlement windows.
+     */
+    post: operations["access.entitlements.current"]
     delete?: never
     options?: never
     head?: never
@@ -535,26 +575,6 @@ export interface paths {
     get: operations["walletCredits.balance"]
     put?: never
     post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/runs/settle/{runId}": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * settle incurred usage against a run
-     * @description Record already-incurred usage without feature-limit enforcement and reconcile its cost against the run budget. The run remains open until runs.end.
-     */
-    post: operations["runs.settle"]
     delete?: never
     options?: never
     head?: never
@@ -1257,6 +1277,163 @@ export interface operations {
               /** @description Remaining in currency minor units (cents). */
               remainingAmountMinor: number
             }
+          }
+        }
+      }
+      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrBadRequest"]
+        }
+      }
+      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+      401: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrUnauthorized"]
+        }
+      }
+      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+      403: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrForbidden"]
+        }
+      }
+      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrNotFound"]
+        }
+      }
+      /** @description This response is sent when a request conflicts with the current state of the server. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrConflict"]
+        }
+      }
+      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+      412: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
+        }
+      }
+      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+      429: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrTooManyRequests"]
+        }
+      }
+      /** @description The server has encountered a situation it does not know how to handle. */
+      500: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrInternalServerError"]
+        }
+      }
+    }
+  }
+  "runs.settle": {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        runId: string
+      }
+      cookie?: never
+    }
+    /** @description The incurred usage payload */
+    requestBody: {
+      content: {
+        "application/json": {
+          featureSlug: string
+          idempotencyKey: string
+          id?: string
+          eventSlug?: string
+          timestamp?: number
+          properties?: {
+            [key: string]: unknown
+          }
+        }
+      }
+    }
+    responses: {
+      /** @description The settlement decision */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": {
+            accepted: boolean
+            /** @enum {string} */
+            reason:
+              | "accepted"
+              | "duplicate"
+              | "insufficient_budget"
+              | "expired"
+              | "not_running"
+              | "entitlement_denied"
+            run: {
+              runId: string
+              /** @enum {string} */
+              status:
+                | "running"
+                | "completed"
+                | "expired"
+                | "canceled"
+                | "budget_exceeded"
+                | "failed"
+              /** @description Authoritative run terminal timestamp in epoch milliseconds; null while running. */
+              endedAt?: number | null
+              customerId: string
+              currency: string
+              /** @enum {string|null} */
+              workloadType: "agent" | "workflow" | "job" | "tool" | "custom" | null
+              workloadId: string | null
+              traceId: string | null
+              parentRunId: string | null
+              /** @description Budget in currency minor units (cents). */
+              budgetAmountMinor: number
+              /** @description Consumed in currency minor units (cents). */
+              consumedAmountMinor: number
+              /** @description Remaining in currency minor units (cents). */
+              remainingAmountMinor: number
+            }
+            /** @enum {string} */
+            fundingStatus?: "fully_funded" | "partially_funded" | "unfunded"
+            fundedAmountMinor?: number
+            unfundedAmountMinor?: number
           }
         }
       }
@@ -2617,6 +2794,166 @@ export interface operations {
       }
     }
   }
+  "access.entitlements.current": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Current customer entitlement request */
+    requestBody: {
+      content: {
+        "application/json": {
+          /**
+           * @description The customer ID
+           * @example cus_1H7KQFLr7RepUyQBKdnvY
+           */
+          customerId: string
+          /**
+           * @description The project ID. Root keys can select an allowed project.
+           * @example prj_1H7KQFLr7RepUyQBKdnvY
+           */
+          projectId?: string
+        }
+      }
+    }
+    responses: {
+      /** @description Current active customer entitlements */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": {
+            customerId: string
+            generatedAt: number
+            entitlements: (
+              | {
+                  id: string
+                  featureSlug: string
+                  featureTitle: string
+                  /** @enum {string} */
+                  featureType: "flat" | "tier" | "package" | "usage"
+                  unitOfMeasure: string
+                  grantCount: number
+                  /** @enum {string} */
+                  status: "available"
+                  allowed: boolean
+                  limit: number | null
+                  usage?: number
+                  usagePercent?: number | null
+                  quotaWindow?: {
+                    periodKey: string
+                    startAt: number
+                    endAt: number | null
+                  } | null
+                  spending?: {
+                    currency: string
+                    displayAmount: string
+                    ledgerAmount: number
+                    /** @enum {number} */
+                    scale: 8
+                  }
+                }
+              | {
+                  id: string
+                  featureSlug: string
+                  featureTitle: string
+                  /** @enum {string} */
+                  featureType: "flat" | "tier" | "package" | "usage"
+                  unitOfMeasure: string
+                  grantCount: number
+                  /** @enum {string} */
+                  status: "unavailable"
+                }
+            )[]
+          }
+        }
+      }
+      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrBadRequest"]
+        }
+      }
+      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+      401: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrUnauthorized"]
+        }
+      }
+      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+      403: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrForbidden"]
+        }
+      }
+      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrNotFound"]
+        }
+      }
+      /** @description This response is sent when a request conflicts with the current state of the server. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrConflict"]
+        }
+      }
+      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+      412: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
+        }
+      }
+      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+      429: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrTooManyRequests"]
+        }
+      }
+      /** @description The server has encountered a situation it does not know how to handle. */
+      500: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrInternalServerError"]
+        }
+      }
+    }
+  }
   "access.check": {
     parameters: {
       query?: never
@@ -2693,6 +3030,11 @@ export interface operations {
             /** @description The single reset window represented by usage and limit. Null when active grants use different windows. */
             quotaWindow?: {
               /**
+               * @description Exclusive Unix-millisecond end of the active quota window. Null for an open-ended quota window.
+               * @example 1774137600000
+               */
+              endAt: number | null
+              /**
                * @description The active reset-window key used by quota enforcement
                * @example day:1774051200000
                */
@@ -2702,11 +3044,6 @@ export interface operations {
                * @example 1774051200000
                */
               startAt: number
-              /**
-               * @description Exclusive Unix-millisecond end of the active quota window. Null for an open-ended quota window.
-               * @example 1774137600000
-               */
-              endAt: number | null
             } | null
             /** @description Current priced usage spend for usage-based features */
             spending?: {
@@ -6947,163 +7284,6 @@ export interface operations {
               expires_at: string | null
               /** Format: date-time */
               created_at: string
-            }
-          }
-        }
-      }
-      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
-      400: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBadRequest"]
-        }
-      }
-      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
-      401: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
-      403: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrForbidden"]
-        }
-      }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
-      404: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrNotFound"]
-        }
-      }
-      /** @description This response is sent when a request conflicts with the current state of the server. */
-      409: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrConflict"]
-        }
-      }
-      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
-      412: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPreconditionFailed"]
-        }
-      }
-      /** @description The request payload is larger than the server is willing to process. */
-      413: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrPayloadTooLarge"]
-        }
-      }
-      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
-      429: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrTooManyRequests"]
-        }
-      }
-      /** @description The server has encountered a situation it does not know how to handle. */
-      500: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrInternalServerError"]
-        }
-      }
-    }
-  }
-  "runs.settle": {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        runId: string
-      }
-      cookie?: never
-    }
-    /** @description The incurred usage payload */
-    requestBody: {
-      content: {
-        "application/json": {
-          featureSlug: string
-          idempotencyKey: string
-          id?: string
-          eventSlug?: string
-          timestamp?: number
-          properties?: {
-            [key: string]: unknown
-          }
-        }
-      }
-    }
-    responses: {
-      /** @description The settlement decision */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": {
-            accepted: boolean
-            /** @enum {string} */
-            reason:
-              | "accepted"
-              | "duplicate"
-              | "insufficient_budget"
-              | "expired"
-              | "not_running"
-              | "entitlement_denied"
-            /** @enum {string} */
-            fundingStatus?: "fully_funded" | "partially_funded" | "unfunded"
-            fundedAmountMinor?: number
-            unfundedAmountMinor?: number
-            run: {
-              runId: string
-              /** @enum {string} */
-              status:
-                | "running"
-                | "completed"
-                | "expired"
-                | "canceled"
-                | "budget_exceeded"
-                | "failed"
-              /** @description Authoritative run terminal timestamp in epoch milliseconds; null while running. */
-              endedAt?: number | null
-              customerId: string
-              currency: string
-              /** @enum {string|null} */
-              workloadType: "agent" | "workflow" | "job" | "tool" | "custom" | null
-              workloadId: string | null
-              traceId: string | null
-              parentRunId: string | null
-              /** @description Budget in currency minor units (cents). */
-              budgetAmountMinor: number
-              /** @description Consumed in currency minor units (cents). */
-              consumedAmountMinor: number
-              /** @description Remaining in currency minor units (cents). */
-              remainingAmountMinor: number
             }
           }
         }

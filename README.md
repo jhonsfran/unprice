@@ -1,100 +1,103 @@
-# Unprice: Open-Source Customer Money Path for Usage-Based SaaS
+# Unprice: open-source billing for AI credits and agent usage
 
 [![GitHub stars](https://img.shields.io/github/stars/jhonsfran1165/unprice?style=social)](https://github.com/jhonsfran1165/unprice)
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
-[![License: Commercial](https://img.shields.io/badge/License-Commercial-gold.svg)](LICENSE#L665)
+[![Core license: AGPL-3.0-only](https://img.shields.io/badge/core-AGPL--3.0--only-blue.svg)](LICENSE)
+[![Package license: MIT](https://img.shields.io/badge/packages-MIT-green.svg)](packages/api/LICENSE)
+[![Commercial license](https://img.shields.io/badge/core-commercial-gold.svg)](COMMERCIAL-LICENSING.md)
 
-
-> **"Your product is smart, but your pricing is hardcoded."**
+> "Your product is smart, but your pricing is hardcoded."
 >
-> Unprice is the open-source customer money path for usage-based SaaS. Sell credits and usage-based plans
-> without eating over-budget customer work: authorize in the request path, explain on the invoice,
-> and own the money path in open source. "Unprice" means un-hardcoding pricing: moving plan logic
-> out of your codebase into one inspectable runtime, not removing price.
+> Sell AI credits and usage without paying for unfunded agent work. Authorize each agent run or paid
+> workflow before it creates cost, reserve customer credits up front, then trace settled usage to
+> the invoice.
 
-## The Problem: Billing Is Too Late
+## Billing is too late
 
-For usage-based products, pricing is not a page or an end-of-cycle invoice job. It is a runtime
-decision. By the time billing runs, the expensive work already happened: the LLM call, the data job,
-the costly third-party API, the multi-minute workflow.
+For AI products, billing cannot start at the end of the cycle. By then, the model call, agent run,
+or paid workflow already created cost.
 
-If the request should have been blocked, the cost is already created. If a customer disputes the
-invoice, engineering reconstructs the path from product event to usage counter to billing line by
-hand. If you want to change packaging, plan logic is spread across application code, billing scripts,
-counters, and support workflows.
+If the request should have been blocked, you already paid for it. When a customer disputes an
+invoice, engineering must reconstruct the path from product event to usage counter to billing line.
+Changing a package also means finding plan logic across application code, billing scripts, counters,
+and support workflows.
 
-## The Solution: Customer Spend In The Request Path
+## Put customer spend in the request path
 
-Unprice connects the customer money path so your app can decide **before** the paid work runs.
+Every AI charge starts with an authorization. Unprice gives your app that decision before the work
+runs.
 
-- **Authorize customer spend before work runs.** Check entitlement, budget, wallet credits, and
-  meter rules while the request is still in flight.
-- **Meter and gate at runtime.** Check entitlement and consume usage synchronously while the request
-  is still in flight.
-- **Explain every invoice.** Trace each charge back to rated usage events and ledger captures.
-- **One inspectable money path.** Usage, entitlements, budgets, credits, ingestion, and invoices
-  share one evidence trail.
+- **Authorize before work runs.** Check the plan, budget, wallet credits, and meter rules before an
+  agent or workflow creates cost.
+- **Keep invoice evidence.** Trace each charge to rated usage events and ledger captures.
+- **Inspect one money path.** Usage, entitlements, budgets, credits, ingestion, and invoices share
+  one evidence trail.
 
 AI gateways cap what you spend with providers. Unprice governs what your customer is allowed to
 spend, then turns that decision into invoice evidence.
 
-PriceOps is the operating model underneath: metering, entitlements, customer budgets, wallet
-credits, and invoice evidence run as one inspectable system in the request path.
+PriceOps is Unprice's operating model for versioned plan rules, entitlements, customer budgets,
+wallet credits, and invoice evidence.
 
-## Who It's For
+## Who it is for
 
-Developer-led AI/API and workflow SaaS teams (Seed to Series A) with customer-triggered paid work,
-credits, usage allowances, and hybrid subscription plus usage pricing: **CTOs, founding engineers,
-and platform engineers** who own metering, entitlements, and request-path usage enforcement.
+Unprice is for developer-led AI products that sell prepaid credits, metered AI usage, agent runs,
+or paid workflows. It is built for CTOs, founding engineers, and platform engineers who own the
+path from customer authorization to invoice.
 
-## Open & Reciprocal: Dual-Licensed
+## Licenses
 
-Unprice is dual-licensed under **AGPL-3.0** and a **Commercial License**.
+This repository uses different licenses for the core and the client packages:
 
-The published client package **@unprice/api** is licensed separately under **MIT**. It is intended
-to be embedded in customer applications without applying the AGPL-3.0 core license to the host
-app.
+- All project-owned files under [`packages/**`](packages) use the **MIT License**.
+- All other project-owned files use **AGPL-3.0-only**. A separate commercial license is available
+  for the core.
 
-### Why AGPL? Transparency & Fairness.
-We believe the infrastructure that handles your money should be **fully transparent and auditable.**
-- **No Hidden Logic**: See exactly how every cent is calculated.
-- **Reciprocal Innovation**: Improvements to the core engine benefit the entire community.
-- **No Vendor Lock-in**: You own the code. You own the data.
+You can embed an MIT package such as **@unprice/api** in an application. Doing so does not apply the
+core AGPL license to that application. See [LICENSING.md](LICENSING.md) for the exact scope.
 
-*Note: For businesses that cannot or will not open-source their modifications, we offer a **Commercial
-License** that grants full proprietary freedom and dedicated support.*
+### Why AGPL?
 
-## Core Capabilities
+Money logic should be open to inspection.
 
-- **Customer spend authorization**: check entitlement, budget, wallet credits, and meter rules
+- **Read the calculation.** Inspect how the engine rates usage and moves money.
+- **Share core changes.** If you distribute a modified core, the AGPL requires you to publish those
+  changes under the same license.
+- **Keep control.** Run the code in your account and keep your data there.
+
+Use the [commercial license](COMMERCIAL-LICENSING.md) if you need separate terms for the core.
+
+## Core capabilities
+
+- **Customer spend authorization.** Check entitlement, budget, wallet credits, and meter rules
   before paid work runs.
-- **Budgeted runs**: budget envelopes for agents, workflows, jobs, tools, and custom workloads,
+- **Budgeted runs.** Set budget envelopes for agents, workflows, jobs, tools, and custom workloads,
   with run-level rejection before the work runs.
-- **Runtime entitlements & metering**: check access and consume usage in the product request path.
-- **Wallets & credits**: purchased, granted, reserved, and consumed balances, kept distinct from
+- **Runtime entitlements and metering.** Check access and consume usage in the product request path.
+- **Wallets and credits.** Keep purchased, granted, reserved, and consumed balances separate from
   entitlement grants.
-- **Explainable invoices**: every charge traceable to rated usage events and ledger captures.
-- **Bring your own payments**: Stripe-first today, provider-extensible by design — you keep one
-  money path while your provider captures payment.
-- **Open & inspectable**: explicit schemas for features, meters, entitlements, wallets, and runs,
+- **Invoice evidence.** Trace every charge to rated usage events and ledger captures.
+- **Bring your own payments.** Stripe is the production provider today. Your provider captures the
+  payment while Unprice keeps the customer money path.
+- **Open and inspectable.** Read the schemas for features, meters, entitlements, wallets, and runs,
   plus a generated SDK from OpenAPI contracts.
 
-## Tech Stack
+## Tech stack
 
-Unprice runs on:
-- **Next.js 14** (App Router)
-- **Hono API** & **tRPC**
-- **Drizzle ORM** & **PostgreSQL**
-- **Edge Runtime** support
-- **ShadcnUI** & **Tailwind CSS**
-- **Stripe** integration (provider-extensible by design)
-- **Tinybird** (Optional for high-scale analytics)
+Unprice uses:
 
-## Getting Started
+- **Next.js 15** with the App Router
+- **Hono API** and **tRPC**
+- **Drizzle ORM** and **PostgreSQL**
+- **Cloudflare Workers**
+- **shadcn/ui** and **Tailwind CSS**
+- **Stripe** payments today
+- **Tinybird** for analytics
 
-[Visit our documentation](https://docs.unprice.dev) for a 5-minute quickstart guide.
+## Get started
 
-## Agent Skill
+[Read the quickstart](https://docs.unprice.dev) to put one agent action on the money path.
+
+## Agent skill
 
 Install the Unprice SDK integration playbook in Codex, Claude Code, Cursor, and other
 skills-compatible agents:
@@ -109,7 +112,5 @@ The same skill is available through the documentation site:
 npx skills add https://docs.unprice.dev --skill integrate-unprice-sdk
 ```
 
----
-
-*Unprice is open source. We welcome feedback, bug reports, and feature suggestions that make the
-customer money path clearer and safer to run.*
+Unprice is open source. Bug reports, documentation fixes, and focused feature proposals are
+welcome.

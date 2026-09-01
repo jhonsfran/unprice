@@ -20,13 +20,19 @@ console.log(result);
 
 </RequestExample>
 
+The response example shows selected invoice fields.
+
 <ResponseExample>
 ```json
 {
   "invoice": {
     "id": "inv_1234567890",
     "status": "paid",
-    "total_amount": 100000000
+    "currency": "USD",
+    "gross_amount": 100000000,
+    "amount_due": 0,
+    "amount_paid": 100000000,
+    "amount_included": 0
   },
   "lines": []
 }

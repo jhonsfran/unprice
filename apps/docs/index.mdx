@@ -1,27 +1,29 @@
 ---
-title: Authorize customer spend before paid work runs
-description: "Open-source customer money path for usage-based SaaS."
+title: Sell AI credits and usage without losing margin
+description: "Open-source billing for AI credits and agent usage."
 mode: wide
 ---
 
-The invoice is too late. The work already ran.
+Every AI charge starts with an authorization.
 
-Unprice gives your app a customer money path for usage-based SaaS. Check the plan version,
-entitlement, customer budget, and wallet credits before paid work runs. Then keep the evidence that
-explains the charge, credit, denial, replay, or invoice line.
+Authorize an agent run or paid workflow before it creates cost. Reserve customer credits up front,
+settle actual usage after the work completes, and keep the evidence for the invoice line.
 
-<Frame caption="The request-to-invoice money path">
-  <img src="/images/money-path.svg" alt="A paid action enters the Unprice money path. Unprice checks the plan version, entitlement, budget, and wallet credits before it allows or denies the work. It then keeps invoice evidence." />
+<Frame caption="The money path: two requests accepted, the third denied.">
+  <div className="w-full overflow-x-auto" tabIndex={0} role="region" aria-label="Money path diagram, scroll horizontally on small screens">
+    <img className="block dark:hidden" src="/images/money-path.svg" width="880" height="660" style={{ minWidth: "660px", width: "100%", height: "auto" }} alt="Three $4.10 usage.consume requests share a $10 budget. Two are accepted and produce wallet, ledger, invoice, and Stripe payment evidence. The third is denied with LIMIT_EXCEEDED at $1.80 remaining, with no wallet change, invoice line, or charge." />
+    <img className="hidden dark:block" src="/images/money-path-dark.svg" width="880" height="660" style={{ minWidth: "660px", width: "100%", height: "auto" }} alt="Three $4.10 usage.consume requests share a $10 budget. Two are accepted and produce wallet, ledger, invoice, and Stripe payment evidence. The third is denied with LIMIT_EXCEEDED at $1.80 remaining, with no wallet change, invoice line, or charge." />
+  </div>
 </Frame>
 
 ## The value
 
-- **Authorize before cost:** Call Unprice in the request path before a paid action creates cost.
-- **Keep pricing out of product branches:** Plans, plan versions, features, meters, entitlements,
+- **Authorize before cost.** Call Unprice before an agent run or paid workflow creates cost.
+- **Keep pricing out of product branches.** Plans, plan versions, features, meters, entitlements,
   budgets, and wallet credits stay connected but separate.
-- **Explain after billing:** Accepted usage keeps evidence from the decision to the invoice line.
+- **Explain after billing.** Accepted usage keeps evidence from the decision to the invoice line.
 
-## Start with one paid action
+## Start with one agent action
 
 Choose the action that can spend a customer's credits, budget, or usage allowance: an LLM call,
 API request, data job, workflow, export, or tool run.
@@ -54,8 +56,8 @@ reserved, why a request was denied, or how accepted usage became an invoice line
 customer spend decision and the invoice explanation on the same inspectable path.
 
 <CardGroup cols={2}>
-  <Card title="Quickstart" icon="bolt-lightning" href="/quickstart/onboarding-plan">
-    Put one paid action on the money path.
+  <Card title="Agent quickstart" icon="bolt-lightning" href="/quickstart/agent-integration">
+    Give your coding agent the Unprice skill and put one paid action on the money path.
   </Card>
   <Card title="TypeScript SDK" icon="terminal" href="/libraries/ts/sdk/overview">
     Install the SDK and call the public API with typed results.

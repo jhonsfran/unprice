@@ -4,13 +4,13 @@ import { useState } from "react"
 
 import type { InsertPage } from "@unprice/db/validators"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@unprice/ui/dialog"
+  ResponsiveDialog,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+  ResponsiveDialogTrigger,
+} from "@unprice/ui/responsive-dialog"
 
 import { PageForm } from "./page-form"
 
@@ -25,14 +25,14 @@ export function PageDialog({
   const [dialogOpen, setDialogOpen] = useState(false)
 
   return (
-    <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-      <DialogTrigger asChild>{children}</DialogTrigger>
-      <DialogContent className="max-h-screen overflow-y-scroll">
-        <DialogHeader>
-          <DialogTitle>Page Form</DialogTitle>
+    <ResponsiveDialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <ResponsiveDialogTrigger asChild>{children}</ResponsiveDialogTrigger>
+      <ResponsiveDialogContent>
+        <ResponsiveDialogHeader>
+          <ResponsiveDialogTitle>Page Form</ResponsiveDialogTitle>
 
-          <DialogDescription>Modify the plan details below.</DialogDescription>
-        </DialogHeader>
+          <ResponsiveDialogDescription>Modify the plan details below.</ResponsiveDialogDescription>
+        </ResponsiveDialogHeader>
 
         <PageForm
           defaultValues={
@@ -45,7 +45,7 @@ export function PageDialog({
           }
           setDialogOpen={setDialogOpen}
         />
-      </DialogContent>
-    </Dialog>
+      </ResponsiveDialogContent>
+    </ResponsiveDialog>
   )
 }

@@ -36,6 +36,14 @@ export default async function CustomerUsagePage(props: {
   }
 
   batchPrefetch([
+    trpc.customers.getCurrentEntitlements.queryOptions(
+      {
+        customerId,
+      },
+      {
+        ...ANALYTICS_CONFIG_REALTIME,
+      }
+    ),
     trpc.analytics.getUsageDashboard.queryOptions(
       {
         customerId,

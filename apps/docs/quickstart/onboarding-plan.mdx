@@ -83,11 +83,18 @@ if (error) {
   throw new Error(error.message);
 }
 
+if (!result.success) {
+  throw new Error("Customer signup is incomplete. Follow the returned URL to resolve it.");
+}
+
 const customerId = result.customerId;
 ```
 
 If you already have customers in your app, store the returned Unprice `customerId` beside your own
 account ID.
+
+Follow the returned `url` to complete payment setup when required. A returned customer ID alone
+does not mean the subscription is ready for paid work. Confirm access before the first action.
 
 ## 5. Run the decision in shadow
 
@@ -128,8 +135,6 @@ const { result, error } = await unprice.usage.consume({
   idempotencyKey: request.id,
   properties: {
     aiMessages: 1,
-    inputTokens: 1840,
-    outputTokens: 620,
     model: "gpt-4.1-mini"
   }
 });
@@ -174,7 +179,7 @@ if (run.status !== "running") {
 let finalStatus: "completed" | "failed" = "completed";
 
 try {
-  // Report each billable step against the running budget.
+  // Authorize known usage before starting this billable step.
   const { result: usage, error: consumeError } = await unprice.runs.consume({
     runId: run.runId,
     featureSlug: "ai-tools",
@@ -182,8 +187,6 @@ try {
     idempotencyKey: `run:${request.id}:step:summary`,
     properties: {
       aiTools: 3,
-      inputTokens: 1840,
-      outputTokens: 620,
       step: "summary"
     }
   });
@@ -216,6 +219,13 @@ try {
 
 This keeps the budget envelope separate from the workload executor: your app owns the workflow;
 Unprice owns the customer spend authorization and evidence.
+
+## When actual usage is only known after work
+
+The example above authorizes a known amount before a step runs. For variable provider usage,
+reserve with `runs.start`, run the workload, then use [runs.settle](/libraries/ts/sdk/runs/settle)
+to account for actual usage. Keep settlement retryable if the response is lost. Do not release the
+reservation in `finally` while incurred usage is still unaccounted for.
 
 ## Next steps
 

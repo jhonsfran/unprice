@@ -23,12 +23,12 @@ export function MoneyPathSection() {
           id="money-path-title"
           className="mt-6 max-w-2xl font-primary text-background-textContrast text-display-3"
         >
-          The decision becomes the invoice.
+          The authorization becomes invoice evidence.
         </h2>
         <p className="mt-5 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-          An allow reserves the wallet, captures the ledger, and writes an invoice line that
-          explains itself — settled in your own Stripe. A deny leaves nothing behind: no entry, no
-          line, no charge, and the reason returned to your app.
+          An allow reserves customer credits before the agent runs. After the work completes,
+          Unprice settles actual usage, captures the ledger movement, and writes the invoice line. A
+          deny creates no work, ledger entry, invoice line, or charge.
         </p>
       </div>
 

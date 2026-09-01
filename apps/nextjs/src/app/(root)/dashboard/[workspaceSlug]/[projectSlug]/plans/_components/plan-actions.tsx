@@ -5,14 +5,6 @@ import { ChevronDown } from "lucide-react"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@unprice/ui/dialog"
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -20,6 +12,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@unprice/ui/dropdown-menu"
+import {
+  ResponsiveDialog,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+  ResponsiveDialogTrigger,
+} from "@unprice/ui/responsive-dialog"
 
 import { PlanForm } from "./plan-form"
 
@@ -29,7 +29,7 @@ export function PlanActions({
   plan: RouterOutputs["plans"]["getBySlug"]["plan"]
 }) {
   return (
-    <Dialog>
+    <ResponsiveDialog>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant={"custom"}>
@@ -40,21 +40,21 @@ export function PlanActions({
         <DropdownMenuContent className="w-44" align="end">
           <DropdownMenuLabel>More actions</DropdownMenuLabel>
           <DropdownMenuSeparator />
-          <DialogTrigger asChild>
+          <ResponsiveDialogTrigger asChild>
             <DropdownMenuItem>Edit plan</DropdownMenuItem>
-          </DialogTrigger>
+          </ResponsiveDialogTrigger>
         </DropdownMenuContent>
       </DropdownMenu>
-      <DialogContent className="max-h-screen overflow-y-scroll">
-        <DialogHeader>
-          <DialogTitle>Edit plan</DialogTitle>
-          <DialogDescription>
+      <ResponsiveDialogContent>
+        <ResponsiveDialogHeader>
+          <ResponsiveDialogTitle>Edit plan</ResponsiveDialogTitle>
+          <ResponsiveDialogDescription>
             Update the commercial package. Plan versions keep the versioned features, meters, and
             billing behavior.
-          </DialogDescription>
-        </DialogHeader>
+          </ResponsiveDialogDescription>
+        </ResponsiveDialogHeader>
         <PlanForm defaultValues={plan} />
-      </DialogContent>
-    </Dialog>
+      </ResponsiveDialogContent>
+    </ResponsiveDialog>
   )
 }

@@ -1,8 +1,8 @@
-# Service Integration Test Fixtures
+# Service integration test fixtures
 
 These helpers support the metering and billing invariant test plan.
 
-## Local Setup
+## Local setup
 
 Run the local database services first:
 
@@ -22,7 +22,7 @@ Use `withRollbackTransaction` for tests that can do all assertions inside one
 transaction. Use `truncateTestDatabase` for tests that need committed state,
 ledger views, or concurrent connections.
 
-## Focused Commands
+## Focused commands
 
 Run one inspectable billing workflow with:
 
@@ -84,7 +84,7 @@ Prefer composing small seeds (`base-project.sql`, `customer-active.sql`, plan,
 subscription) over one large scenario dump. If a seed changes schema-sensitive
 columns, update the matching integration assertions in the same change.
 
-## Add A Golden Case
+## Add a golden case
 
 Add reference-model examples to
 `src/tests/billing-scenarios/golden-cases.test.ts` when the expected behavior is
@@ -108,7 +108,7 @@ must prove real persistence, pgledger rows, wallet credits, or idempotency rows.
 Keep generated ranges small enough that failures shrink quickly. Always include
 at least one explicit `examples` case for a boundary you care about.
 
-## Add A Payment Provider
+## Add a payment provider
 
 Add the adapter to the reusable contract suite before relying on service-level
 billing tests:
@@ -127,7 +127,7 @@ billing tests:
 The contract suite proves the adapter boundary. The billing integration suite
 then proves the provider-independent money path.
 
-## Add A Stateful Command
+## Add a stateful command
 
 Use `reference-model.commands.test.ts` when command order matters. Add:
 
@@ -140,7 +140,7 @@ Use `reference-model.commands.test.ts` when command order matters. Add:
 Assert after every command. End-only assertions make failing sequences much
 harder to shrink and replay.
 
-## Failure Ownership
+## Failure ownership
 
 Use this ownership rule before adding a test:
 

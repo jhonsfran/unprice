@@ -34,9 +34,15 @@ for (const pattern of workspacePatterns) {
     try {
       const manifest = JSON.parse(await readFile(manifestPath, "utf8"))
       workspacePackages.push({
+        directory: path.relative(repoRoot, path.dirname(manifestPath)),
+        license: manifest.license,
         name: manifest.name,
         path: path.relative(repoRoot, manifestPath),
         private: manifest.private === true,
+        repositoryUrl:
+          typeof manifest.repository === "object" && manifest.repository !== null
+            ? manifest.repository.url
+            : manifest.repository,
       })
     } catch (error) {
       if (error instanceof Error && "code" in error && error.code === "ENOENT") {
@@ -48,11 +54,49 @@ for (const pattern of workspacePatterns) {
   }
 }
 
+const mitPackages = workspacePackages.filter((workspacePackage) =>
+  workspacePackage.directory.startsWith("packages/")
+)
+
+for (const workspacePackage of mitPackages) {
+  if (workspacePackage.license !== "MIT") {
+    process.stderr.write(
+      [
+        `Refusing to publish: ${workspacePackage.name} must use the MIT license.`,
+        `Manifest: ${workspacePackage.path}`,
+        `Found: ${workspacePackage.license ?? "none"}`,
+        "All project-owned packages under packages/** use MIT.",
+        "",
+      ].join("\n")
+    )
+    process.exit(1)
+  }
+
+  try {
+    await readFile(path.join(repoRoot, workspacePackage.directory, "LICENSE"), "utf8")
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      process.stderr.write(
+        [
+          `Refusing to publish: ${workspacePackage.name} has no package-level LICENSE file.`,
+          `Expected: ${path.join(workspacePackage.directory, "LICENSE")}`,
+          "npm packages must ship their MIT license with the package.",
+          "",
+        ].join("\n")
+      )
+      process.exit(1)
+    }
+
+    throw error
+  }
+}
+
 const publishablePackages = workspacePackages
   .filter((workspacePackage) => !workspacePackage.private)
   .sort((left, right) => left.name.localeCompare(right.name))
 const publishableNames = publishablePackages.map((workspacePackage) => workspacePackage.name)
 const expectedPublishableNames = ["@unprice/api"]
+const expectedRepositoryUrl = "git+https://github.com/jhonsfran/unprice.git"
 
 if (JSON.stringify(publishableNames) !== JSON.stringify(expectedPublishableNames)) {
   const packageList =
@@ -72,6 +116,21 @@ if (JSON.stringify(publishableNames) !== JSON.stringify(expectedPublishableNames
     ].join("\n")
   )
   process.exit(1)
+}
+
+for (const workspacePackage of publishablePackages) {
+  if (workspacePackage.repositoryUrl !== expectedRepositoryUrl) {
+    process.stderr.write(
+      [
+        `Refusing to publish: ${workspacePackage.name} has an incorrect repository URL.`,
+        `Expected: ${expectedRepositoryUrl}`,
+        `Found: ${workspacePackage.repositoryUrl ?? "none"}`,
+        "npm trusted publishing requires this URL to match the GitHub repository exactly.",
+        "",
+      ].join("\n")
+    )
+    process.exit(1)
+  }
 }
 
 process.stdout.write(`Publishable package guard passed: ${publishableNames.join(", ")}\n`)

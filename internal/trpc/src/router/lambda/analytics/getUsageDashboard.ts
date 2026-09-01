@@ -3,6 +3,7 @@ import {
   emptyUsageDashboardOutput,
   getUsageDashboardOutputSchema,
   getUsageDashboard as getUsageDashboardUseCase,
+  hasUsageDashboardEvidence,
 } from "@unprice/services/use-cases"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
@@ -21,8 +22,9 @@ export const getUsageDashboard = protectedProjectProcedure
     const customerId = opts.input.customerId
     const range = opts.input.range
     const topConsumersLimit = opts.input.topConsumersLimit
+    // Isolate legacy empty entries without deleting a concurrent SWR refresh.
     const cacheKey = [
-      "usage-dashboard",
+      "usage-dashboard-v2",
       projectId,
       customerId ?? "all",
       range,
@@ -47,7 +49,7 @@ export const getUsageDashboard = protectedProjectProcedure
         throw result.err
       }
 
-      return result.val
+      return hasUsageDashboardEvidence(result.val) ? result.val : undefined
     })
 
     if (err) {

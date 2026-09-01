@@ -21,6 +21,8 @@ type BillingConfig = NonNullable<
   NonNullable<CurrentAccessData["activePlan"]>["activePhase"]
 >["planVersion"]["billingConfig"]
 
+const EMPTY_UNAVAILABLE_ENTITLEMENT_IDS = new Set<string>()
+
 export function CurrentAccessOverview({
   access,
   wallet,
@@ -32,6 +34,7 @@ export function CurrentAccessOverview({
   noActivePlanDescription = "This customer has no active subscription billing period.",
   noActiveEntitlementsDescription = "Access grants will appear here once the customer has an active subscription phase.",
   renderEntitlementAction,
+  unavailableEntitlementIds = EMPTY_UNAVAILABLE_ENTITLEMENT_IDS,
 }: {
   access: CurrentAccessData
   wallet: CurrentAccessWallet
@@ -43,12 +46,14 @@ export function CurrentAccessOverview({
   noActivePlanDescription?: string
   noActiveEntitlementsDescription?: string
   renderEntitlementAction?: (entitlement: CurrentAccessEntitlement) => ReactNode
+  unavailableEntitlementIds?: ReadonlySet<string>
 }) {
   const activePlan = access.activePlan
   const activePhase = activePlan?.activePhase ?? null
   const walletAvailable = wallet.balances.purchased + wallet.balances.granted
   const walletHeld = wallet.balances.reserved
   const timezone = activePlan?.timezone
+  const hasUnavailableUsage = access.usageUnavailable || unavailableEntitlementIds.size > 0
 
   return (
     <section className="flex flex-col gap-4">
@@ -155,7 +160,7 @@ export function CurrentAccessOverview({
               <div className="min-w-0">
                 <p className="font-medium text-sm">Active entitlements</p>
                 <p className="truncate text-muted-foreground text-xs">
-                  {access.usageUnavailable
+                  {hasUnavailableUsage
                     ? "Current usage temporarily unavailable"
                     : activePlan
                       ? "Current entitlement period usage"
@@ -175,7 +180,9 @@ export function CurrentAccessOverview({
                   <EntitlementUsageRow
                     key={entitlement.id}
                     entitlement={entitlement}
-                    usageUnavailable={access.usageUnavailable}
+                    usageUnavailable={
+                      access.usageUnavailable || unavailableEntitlementIds.has(entitlement.id)
+                    }
                     timezone={timezone}
                     action={renderEntitlementAction?.(entitlement)}
                   />

@@ -49,7 +49,7 @@ export default async function AuthenticationPage(props: {
       <Card>
         <CardHeader className="text-center">
           <CardTitle className="text-xl">
-            {signupIntent === "paid-action" ? "Start with one paid action" : "Create an account"}
+            {signupIntent === "paid-action" ? "Start with one agent action" : "Create an account"}
           </CardTitle>
           <CardDescription>
             {signupIntent === "paid-action"
@@ -92,7 +92,7 @@ export default async function AuthenticationPage(props: {
           )}
           {signupIntent === "paid-action" && (
             <p className="text-center text-muted-foreground text-xs">
-              One paid action · Sandbox · no card
+              One agent action · Sandbox · no card
             </p>
           )}
         </CardContent>

@@ -5,15 +5,14 @@ Date: 2026-07-06
 Status: pre-validation refresh (July 2026 market audit). Lock after the customer interviews in
 `jobs-to-be-done.md`.
 
-## Brand Core
+## Brand core
 
-Unprice is the open-source customer money path for usage-based SaaS. It helps developer-led teams
-sell credits and usage-based plans without eating the cost when a customer overspends: authorize in
-the request path, explain on the invoice, and own the money path in open source.
+Unprice is open-source billing for AI credits and agent usage. It helps developer-led AI products
+sell credits, agent runs, and paid workflows without paying for unfunded work.
 
-The wedge is customer spend authorization with invoice evidence: decide whether a customer's paid
-work is commercially allowed before cost is created, and preserve the evidence needed to explain the
-charge, credit, denial, or invoice line after the fact.
+The wedge is authorization-led AI billing: authorize each agent run or paid workflow before it
+creates cost, reserve customer credits, settle actual usage, and trace the invoice line to the
+decision.
 
 PriceOps means operating pricing as versioned commercial infrastructure — plan versions,
 subscriptions, entitlements, meters, budgets, credits, usage evidence, and invoice evidence stay
@@ -36,8 +35,8 @@ product does. Treat this as a standing brand risk, not a solved problem. The nam
 category ("PriceOps") are two new concepts at once, so every first touch must do the disambiguation
 work immediately:
 
-- Never show the wordmark cold. Pair it with the public frame ("open-source customer money path for
-  usage-based SaaS") or the headline on first impression: homepage hero, OG cards, README, social
+- Never show the wordmark cold. Pair it with the public frame ("open-source billing for AI credits
+  and agent usage") or the headline on first impression: homepage hero, OG cards, README, social
   avatars in context, conference slides.
 - Let the bracket mark carry the meaning the word cannot. The brackets read as code containment —
   pricing pulled into one inspectable place, with the gated value held inside — which is exactly
@@ -50,11 +49,9 @@ work immediately:
 
 Canonical source: [`positioning-and-messaging.md`](strategic/positioning-and-messaging.md).
 
-For developer-led usage-based SaaS teams — CTOs, founding engineers, and platform engineers — who
-sell credits, usage, or hybrid plans, Unprice is the open-source customer money path that authorizes
-customer spend in the request path: checking entitlement, customer budget, wallet credits, and meter
-rules before work runs, then preserving the evidence that explains every allow, deny, charge,
-credit, and invoice line.
+For developer-led AI products that sell credits, agent runs, or paid workflows, Unprice is the
+open-source billing system that authorizes customer spend before work runs and traces accepted usage
+to the invoice.
 
 Unlike billing platforms that rate and invoice after usage and are consolidating into payment
 processors, AI gateways that cap provider cost, closed usage runtimes that cannot be inspected or
@@ -86,7 +83,7 @@ Secondary: Ruler. The product is about control, order, auditability, and operati
 money-adjacent workflows.
 
 Archetype division of labor (resolve the lead-message tension deliberately): the wedge leads with
-Ruler energy — "authorize customer spend before paid work runs," "put a budget and evidence trail
+Ruler energy — "every AI charge starts with an authorization," "put a budget and evidence trail
 around the expensive action," the bracket logo, the name's promise of control. Ruler opens because
 the buying trigger is a loss of control over customer spend. Sage then carries the close: once
 Unprice has made the customer money decision, its durable value is explaining and inspecting the
@@ -232,7 +229,9 @@ Use only code-backed claims unless a benchmark, customer result, or integration 
 
 Allowed now:
 
-- "Open-source customer money path for usage-based SaaS."
+- "Open-source billing for AI credits and agent usage."
+- "Sell AI credits and usage. Keep the margin."
+- "Every AI charge starts with an authorization."
 - "Authorize customer spend before paid work runs."
 - "Explain every allow, deny, charge, credit, and invoice line from one money path."
 - "Meter usage, enforce entitlements, reserve credits, budget workloads, and explain invoices."
@@ -281,7 +280,7 @@ before each external use; their code moves fast.
 
 Use:
 
-- Authorize customer spend before paid work runs
+- Every AI charge starts with an authorization
 - Prove every charge after it bills
 - Spend safety
 - Customer spend authorization

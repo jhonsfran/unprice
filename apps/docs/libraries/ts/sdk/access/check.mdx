@@ -71,7 +71,8 @@ console.log(result);
 </ResponseField>
 
 <ResponseField name="limit" type="number">
-    Configured limit for usage-based features, or `null` when unlimited.
+    Active quota-window limit for usage features, or subscribed quantity for tier/package features.
+    `null` means unlimited.
 </ResponseField>
 
 <ResponseField name="spending" type="object">
@@ -92,4 +93,10 @@ console.log(result);
 
 <ResponseField name="spending.scale" type="number">
     Decimal scale for `ledgerAmount`. Currently `8`.
+</ResponseField>
+
+<ResponseField name="quotaWindow" type="object | null">
+    The quota window represented by `usage` and `limit`, with `startAt`, `endAt`, and `periodKey`.
+    Timestamps use epoch milliseconds. `endAt` is exclusive and can be null for an open-ended window.
+    The object is null when active grants use different windows.
 </ResponseField>

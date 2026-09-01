@@ -58,19 +58,18 @@ Primary CTA everywhere: **Start with one paid action**. Consultative/design-part
 
 > Your product is smart, but your pricing is *hardcoded / brittle / static / manual.*
 
-**Headline (keep — it is canonical):**
+**Headline:**
 
-> Authorize customer spend before paid work runs.
+> Sell AI credits and usage. Keep the margin.
 
 **Subheadline:**
 
-> Open-source money path for usage-based SaaS. Keep plans versioned, entitlements separate,
-> customer budgets in the request path, and invoice evidence tied to the same decision that allowed
-> or denied the work.
+> Authorize every agent run and paid workflow before it creates cost. Reserve customer credits up
+> front, then trace the decision through usage and the invoice.
 
 **Outcome line:**
 
-> Start with one paid action in one afternoon: create the plan, install the SDK, sign up one
+> Start with one agent action in one afternoon: create the plan, install the SDK, sign up one
 > customer, run the decision in shadow, and prove the path on Sandbox before you enforce anything.
 
 **Payments microcopy (replace the current line):**
@@ -284,12 +283,11 @@ money path while it's small.
 
 ## Final CTA (maps to `cta.tsx`)
 
-**Headline:** Authorize customer spend before paid work runs.
+**Headline:** Sell AI credits and usage. Keep the margin.
 
-> Unprice is the open-source customer money path for usage-based SaaS. Pick one paid action, check
-> entitlement, customer budget, credits, and meter rules before it runs, then explain every invoice
-> from the same money path. Start in shadow in one afternoon, prove it on Sandbox, then settle to
-> your own Stripe. The core is open source — build on it, or help us shape it.
+> Authorize one agent run or paid workflow before it creates cost. Reserve customer credits up
+> front, settle actual usage, and trace the decision to the invoice. Start in shadow in one
+> afternoon, prove it on Sandbox, then settle to your own Stripe.
 
 **CTA:** Start with one paid action   ·   Microcopy: Not sure where to start? **Map my paid action.**
 

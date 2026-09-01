@@ -9,7 +9,7 @@ locks the final run status.
 <RequestExample>
 
 ```ts
-// Always close the run so unused reservation funds are released.
+// Close only after billable usage is accounted for, or no billable work occurred.
 const { result, error } = await unprice.runs.end({
   runId: "brun_123",
   status: "completed"
@@ -56,3 +56,7 @@ console.log(result.status);
 ## Response
 
 Returns the final budget run summary after unused reservation funds are released.
+
+If provider work has completed but settlement is unconfirmed, retry
+[runs.settle](/libraries/ts/sdk/runs/settle) with the same idempotency key. Do not release the funds
+as error cleanup while that usage still needs accounting.

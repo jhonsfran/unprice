@@ -60,7 +60,7 @@ export default async function DashboardLayout({
                   {breadcrumbs}
                   {/* Content well sits one surface tier below the sidebar/header
                       chrome, so cards read as panels lying on the ground. */}
-                  <div className="hide-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain bg-surface-page">
+                  <div className="hide-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain bg-surface-page pb-[max(5rem,env(safe-area-inset-bottom))]">
                     {children}
                   </div>
                 </main>

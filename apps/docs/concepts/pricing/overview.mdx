@@ -25,7 +25,7 @@ paid action -> plan version -> pricing rule -> meter -> entitlement -> budget ->
 | Entitlement | Customer's right or limit for a feature | Lets your app check what the customer can do |
 | Budget | Customer or workload spend cap | Stops over-budget work before it runs |
 | Wallet credit | Spend balance held for a customer | Separates money/credits from entitlement grants |
-| Invoice evidence | Trail from decision to charge | Explains why a line was billed, denied, credited, or replayed |
+| Invoice evidence | Trail from decision to charge | Explains billed usage and credits; denied usage creates no invoice line |
 
 ## Runtime calls
 
@@ -37,18 +37,6 @@ Use these calls inside your product:
 - `runs.start`, `runs.consume`, and `runs.end` reserve and consume a budget for multi-step work.
 
 Read [Choose the runtime call](/quickstart/choose-operation) before wiring production enforcement.
-
-## PriceOps underneath
-
-PriceOps is the operating model behind Unprice: plans, plan versions, subscriptions, entitlements,
-meters, budgets, credits, usage evidence, and invoice evidence stay separate but connected.
-
-That separation is what lets you:
-
-- authorize customer spend before paid work runs
-- keep existing customers pinned to the plan version they bought
-- change packaging without rewriting product code
-- explain charges from plan, usage, wallet, ledger, and billing evidence
 
 ## Next steps
 

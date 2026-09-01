@@ -68,7 +68,7 @@ export function PricingModelPicker({
   isDisabled?: boolean
 }) {
   return (
-    <div role="radiogroup" className="grid grid-cols-2 gap-2 md:grid-cols-4">
+    <div role="radiogroup" className="grid grid-cols-1 gap-2 md:grid-cols-4">
       {FEATURE_TYPES.map((type) => {
         const selected = value === type
         const Icon = FEATURE_TYPE_ICON[type]

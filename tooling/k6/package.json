@@ -20,7 +20,7 @@
   },
   "keywords": [],
   "author": "",
-  "license": "AGPL-3.0",
+  "license": "AGPL-3.0-only",
   "devDependencies": {
     "esbuild": "0.25.12",
     "k6": "^0.0.0"

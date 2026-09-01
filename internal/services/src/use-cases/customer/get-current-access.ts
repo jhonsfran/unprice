@@ -11,7 +11,12 @@ import {
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { z } from "zod"
-import { computeGrantPeriodBucket, toGrantResetConfigFromBillingConfig } from "../../entitlements"
+import {
+  computeGrantPeriodBucket,
+  resolveEntitlementLimit,
+  sumGrantAllowance,
+  toGrantResetConfigFromBillingConfig,
+} from "../../entitlements"
 
 const entitlementFeatureTypeSchema = z.enum(["flat", "tier", "package", "usage"])
 
@@ -303,16 +308,16 @@ export async function getCustomerCurrentAccess(
         entitlements: entitlements
           .map((entitlement) => {
             const featurePlanVersion = entitlement.featurePlanVersion
+            const featureType = entitlementFeatureTypeSchema.parse(featurePlanVersion.featureType)
             const feature = featurePlanVersion.feature
             const grantAllowance = sumGrantAllowance(entitlement.grants)
-            const isStaticQuantityEntitlement =
-              featurePlanVersion.featureType === "tier" ||
-              featurePlanVersion.featureType === "package"
-            const limit = isStaticQuantityEntitlement
-              ? grantAllowance
-              : (featurePlanVersion.limit ?? grantAllowance)
+            const limit = resolveEntitlementLimit({
+              configuredLimit: featurePlanVersion.limit,
+              featureType,
+              grants: entitlement.grants,
+            })
             const isUsageEntitlement =
-              featurePlanVersion.featureType === "usage" ||
+              featureType === "usage" ||
               (featurePlanVersion.meterConfig !== null &&
                 featurePlanVersion.meterConfig !== undefined)
             const usagePeriods =
@@ -332,7 +337,7 @@ export async function getCustomerCurrentAccess(
               id: entitlement.id,
               featureSlug: feature.slug,
               featureTitle: feature.title,
-              featureType: featurePlanVersion.featureType,
+              featureType,
               meterConfig: toPublicMeterConfig(featurePlanVersion.meterConfig),
               unitOfMeasure: featurePlanVersion.unitOfMeasure,
               limit,
@@ -481,14 +486,6 @@ function toPublicMeterConfig(meterConfig: unknown) {
     aggregationMethod: parsed.data.aggregationMethod,
     aggregationField: parsed.data.aggregationField ?? null,
   }
-}
-
-function sumGrantAllowance(grants: Array<{ allowanceUnits: number | null }>): number | null {
-  if (grants.length === 0 || grants.some((grant) => grant.allowanceUnits === null)) {
-    return null
-  }
-
-  return grants.reduce((total, grant) => total + (grant.allowanceUnits ?? 0), 0)
 }
 
 function buildUsagePeriodPlan({

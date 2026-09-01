@@ -469,7 +469,7 @@ with demo state — state lives on the receipt.
 
 Shipped hero (2026-07-18) — the reference for future hero work:
 
-- Headline: "Sell credits and usage. Keep the margin." — two-tone: the business model in the text
+- Headline: "Sell AI credits and usage. Keep the margin." — two-tone: the business model in the text
   step, the money gain in ink.
 - Subheadline, exactly one sentence (the compression rule above): "Approve or deny every paid
   action against plan, credits, and budget — before usage becomes cost."

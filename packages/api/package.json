@@ -1,6 +1,6 @@
 {
   "name": "@unprice/api",
-  "description": "Unprice TypeScript SDK — open-source customer money path for usage-based SaaS. Authorize customer spend before paid work runs.",
+  "description": "TypeScript SDK for AI credits and agent usage. Authorize runs, reserve customer credits, and settle usage.",
   "private": false,
   "version": "0.2.0",
   "main": "./dist/index.js",
@@ -20,14 +20,14 @@
   },
   "keywords": ["unprice", "pricing", "saas", "subscription", "billing", "payments"],
   "bugs": {
-    "url": "https://github.com/jhonsfran1165/unprice/issues"
+    "url": "https://github.com/jhonsfran/unprice/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jhonsfran1165/unprice.git",
+    "url": "git+https://github.com/jhonsfran/unprice.git",
     "directory": "packages/api"
   },
-  "homepage": "https://github.com/jhonsfran1165/unprice#readme",
+  "homepage": "https://github.com/jhonsfran/unprice#readme",
   "scripts": {
     "clean": "rm -rf .turbo node_modules dist",
     "typecheck": "tsc --noEmit",

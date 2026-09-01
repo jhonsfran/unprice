@@ -8,6 +8,12 @@
     "dark": "#ffc53d"
   },
   "favicon": "/favicon.svg",
+  "redirects": [
+    {
+      "source": "/concepts/pricing/schema-evolution",
+      "destination": "/concepts/pricing/usage-metering"
+    }
+  ],
   "api": {
     "playground": {
       "display": "interactive"
@@ -27,6 +33,7 @@
               {
                 "group": "Quickstart",
                 "pages": [
+                  "quickstart/agent-integration",
                   "quickstart/onboarding-plan",
                   "quickstart/choose-operation",
                   "quickstart/onboarding-customer",
@@ -57,8 +64,7 @@
                   "concepts/pricing/plans",
                   "concepts/pricing/feature-types",
                   "concepts/pricing/usage-metering",
-                  "concepts/pricing/entitlements",
-                  "concepts/pricing/schema-evolution"
+                  "concepts/pricing/entitlements"
                 ]
               }
             ]
@@ -86,6 +92,7 @@
                   "api-reference/errors/code/CONFLICT",
                   "api-reference/errors/code/PRECONDITION_FAILED",
                   "api-reference/errors/code/TOO_MANY_REQUESTS",
+                  "api-reference/errors/code/PAYLOAD_TOO_LARGE",
                   "api-reference/errors/code/INTERNAL_SERVER_ERROR"
                 ]
               }
@@ -133,6 +140,7 @@
                 "pages": [
                   "libraries/ts/sdk/runs/start",
                   "libraries/ts/sdk/runs/consume",
+                  "libraries/ts/sdk/runs/settle",
                   "libraries/ts/sdk/runs/end",
                   "libraries/ts/sdk/runs/get"
                 ]
@@ -183,11 +191,6 @@
           "anchor": "Community",
           "href": "https://discord.gg/unprice",
           "icon": "discord"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://unprice.dev",
-          "icon": "newspaper"
         }
       ]
     }

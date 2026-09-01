@@ -42,17 +42,18 @@ after fixing the wording.
 
 ## Language Principles
 
-1. Lead with the wedge: authorize customer spend before paid work runs, then explain what happened
-   after.
-2. Prefer mechanism over adjective. Say what Unprice checks, reserves, rejects, captures, replays,
+1. Lead with the wedge: sell AI credits and usage without paying for unfunded agent work.
+2. Explain the mechanism: authorize each agent run or paid workflow before it creates cost, then
+   trace the decision to the invoice.
+3. Prefer mechanism over adjective. Say what Unprice checks, reserves, rejects, captures, replays,
    or explains.
-3. Use exact product nouns. `plan version`, `wallet credit`, `entitlement`, `budgeted run`,
+4. Use exact product nouns. `plan version`, `wallet credit`, `entitlement`, `budgeted run`,
    `invoice evidence`, and `meter event` are different things.
-4. Distinguish business decisions from system failures. A denial is not a crash.
-5. Make the buyer the builder. The buyer is `you`, `team`, or `builder`; the buyer's economic actor
+5. Distinguish business decisions from system failures. A denial is not a crash.
+6. Make the buyer the builder. The buyer is `you`, `team`, or `builder`; the buyer's economic actor
    is the `customer`.
-6. Keep claims code-backed. If the product cannot prove it, the copy should not promise it.
-7. Use calm urgency. Name the risk plainly, then show the control point.
+7. Keep claims code-backed. If the product cannot prove it, the copy should not promise it.
+8. Use calm urgency. Name the risk plainly, then show the control point.
 
 ## Brand Voice
 
@@ -68,6 +69,8 @@ Use this voice everywhere:
 
 Good:
 
+- "Sell AI credits and usage. Keep the margin."
+- "Every AI charge starts with an authorization."
 - "Authorize customer spend before paid work runs."
 - "Explain an invoice line from pricing, usage, wallet, and ledger evidence."
 - "Keep existing customers on the plan version they bought."
@@ -218,29 +221,33 @@ This distinction is central to the brand because it shows control instead of pan
 
 Do not present the product as five equal features. The order matters.
 
-1. Customer spend authorization: authorize customer spend before paid work runs.
-2. Evidence after the fact: explain every allow, deny, charge, credit, replay, and invoice line.
-3. Versioned PriceOps model: plans, plan versions, subscriptions, entitlements, meters, credits, and
+1. AI credits and margin: sell AI credits and usage without paying for unfunded agent work.
+2. Authorization before cost: authorize each agent run and paid workflow before it creates cost.
+3. Authorization-to-invoice evidence: explain every allow, deny, charge, credit, replay, and invoice
+   line.
+4. Versioned PriceOps model: plans, plan versions, subscriptions, entitlements, meters, credits, and
    invoices stay separate but connected.
-4. Budgeted workloads: cap expensive actions without owning the workload.
-5. Open money-path infrastructure: the team owns inspectable revenue logic.
-6. Pricing flexibility: plan versions and feature configuration change without rewriting the app.
-7. Bring your own payments: Stripe-first today, provider-extensible by design.
+5. Budgeted workloads: cap agents, workflows, and other expensive actions without owning execution.
+6. Open money-path infrastructure: the team owns inspectable revenue logic.
+7. Pricing flexibility: plan versions and feature configuration change without rewriting the app.
+8. Bring your own payments: Stripe-first today, provider-extensible by design.
 
 When space is tight, lead with the first two and mention evidence if there is room:
 
-> Authorize customer spend before paid work runs, then explain every invoice line from the same
-> money path.
+> Authorize each agent run before it creates cost, then trace the decision to the invoice.
 
 ## Surface Guidelines
 
 ### Landing Page
 
-Landing copy should start with the paid action, request-path decision, or invoice explanation. Use
-the expensive action when the page needs a concrete first integration.
+Landing copy should start with AI credits, agent usage, or margin. Use the authorization decision
+as the mechanism and one agent action as the concrete first integration.
 
 Use:
 
+- "Sell AI credits and usage. Keep the margin."
+- "Every AI charge starts with an authorization."
+- "Reserve customer credits before the agent runs, then settle actual usage."
 - "Authorize customer spend before paid work runs."
 - "Prove every charge after it bills."
 - "Put a budget and evidence trail around the expensive action."
@@ -417,7 +424,9 @@ Examples:
 
 ### One-Liners
 
-- Unprice is the open-source customer money path for usage-based SaaS.
+- Unprice is open-source billing for AI credits and agent usage.
+- Sell AI credits and usage. Keep the margin.
+- Every AI charge starts with an authorization.
 - Authorize customer spend before paid work runs.
 - Prove every charge after it bills.
 - One paid action in one afternoon.
@@ -564,7 +573,9 @@ After:
 
 Allowed:
 
-- "Open-source customer money path for usage-based SaaS."
+- "Open-source billing for AI credits and agent usage."
+- "Sell AI credits and usage. Keep the margin."
+- "Every AI charge starts with an authorization."
 - "Authorize customer spend before paid work runs."
 - "Explain every allow, deny, charge, credit, and invoice line from one money path."
 - "Meter usage, enforce entitlements, reserve credits, budget workloads, and explain invoices."
@@ -603,7 +614,8 @@ Use this before publishing app copy, marketing copy, docs, examples, or emails.
 - Does every claim have product evidence or a canonical source?
 - Does the copy avoid `growth`, `magic`, `effortless`, `all-in-one`, `no-code`, `Stripe
   replacement`, and unqualified `self-host`?
-- If the surface is cold, does it lead with the customer money path before introducing `PriceOps`?
+- If the surface is cold, does it lead with AI credits or agent usage before introducing the
+  customer money path or `PriceOps`?
 
 ## Governance
 

@@ -25,18 +25,16 @@ export default function MobileSidebar({
           <MoreVertical className="size-4 shrink-0" aria-hidden="true" />
         </Button>
       </DrawerTrigger>
-      <DrawerContent className="w-full">
-        <div className="p-4 pb-0">
-          <div className="flex flex-col items-center gap-2">
-            <DrawerHeader className="w-full">
-              <DrawerTitle>Menu</DrawerTitle>
-              <DrawerDescription>
-                <span className="text-muted-foreground">Quick access to project navigation</span>
-              </DrawerDescription>
-            </DrawerHeader>
-            <div className="flex w-full flex-col gap-2 overflow-y-auto px-4 pt-4 pb-24">
-              {children}
-            </div>
+      <DrawerContent className="!h-[calc(100dvh-0.5rem)] !max-h-[calc(100dvh-0.5rem)] w-full gap-0 overflow-hidden p-0">
+        <div className="flex min-h-0 flex-1 flex-col px-4">
+          <DrawerHeader className="shrink-0 px-0 py-4">
+            <DrawerTitle>Menu</DrawerTitle>
+            <DrawerDescription>
+              <span className="text-muted-foreground">Quick access to project navigation</span>
+            </DrawerDescription>
+          </DrawerHeader>
+          <div className="hide-scrollbar flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pb-[max(5rem,env(safe-area-inset-bottom))]">
+            {children}
           </div>
         </div>
       </DrawerContent>

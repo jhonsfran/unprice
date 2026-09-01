@@ -7,14 +7,6 @@ import * as React from "react"
 import { customerSelectSchema } from "@unprice/db/validators"
 import { Button } from "@unprice/ui/button"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@unprice/ui/dialog"
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -22,6 +14,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@unprice/ui/dropdown-menu"
+import {
+  ResponsiveDialog,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+  ResponsiveDialogTrigger,
+} from "@unprice/ui/responsive-dialog"
 import { CustomerForm } from "../../../customers/_components/customers/customer-form"
 
 interface DataTableRowActionsProps<TData> {
@@ -33,7 +33,7 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
   const [dialogOpen, setDialogOpen] = React.useState(false)
 
   return (
-    <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+    <ResponsiveDialog open={dialogOpen} onOpenChange={setDialogOpen}>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" className="h-8 w-8 p-0 data-[state=open]:bg-accent">
@@ -44,20 +44,20 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
         <DropdownMenuContent align="end">
           <DropdownMenuLabel>More actions</DropdownMenuLabel>
           <DropdownMenuSeparator />
-          <DialogTrigger asChild>
+          <ResponsiveDialogTrigger asChild>
             <DropdownMenuItem>Edit Customer</DropdownMenuItem>
-          </DialogTrigger>
+          </ResponsiveDialogTrigger>
         </DropdownMenuContent>
       </DropdownMenu>
-      <DialogContent className="max-h-[95vh] md:max-w-screen-md">
-        <DialogHeader>
-          <DialogTitle>Customer details</DialogTitle>
-          <DialogDescription>
+      <ResponsiveDialogContent className="md:max-w-screen-md">
+        <ResponsiveDialogHeader>
+          <ResponsiveDialogTitle>Customer details</ResponsiveDialogTitle>
+          <ResponsiveDialogDescription>
             Update the economic actor that holds subscriptions, wallet credits, runs, and invoices.
-          </DialogDescription>
-        </DialogHeader>
+          </ResponsiveDialogDescription>
+        </ResponsiveDialogHeader>
         <CustomerForm defaultValues={customer} setDialogOpen={setDialogOpen} />
-      </DialogContent>
-    </Dialog>
+      </ResponsiveDialogContent>
+    </ResponsiveDialog>
   )
 }

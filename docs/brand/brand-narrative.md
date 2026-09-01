@@ -5,15 +5,15 @@ Date: 2026-07-06
 Status: pre-validation refresh (July 2026 market audit). Lock after the customer interviews in
 `jobs-to-be-done.md`.
 
-This document defines the core Unprice story for developer-led usage-based SaaS founders and
-founding engineers. The primary action it should drive is product trial and SDK integration.
+This document defines the core Unprice story for founders and engineers building AI products that
+sell credits, agent runs, or paid workflows. The primary action is SDK integration.
 
 ## Narrative Intent
 
 Unprice should make a technical founder think:
 
-> I know the paid action in my product, I can authorize customer spend before it runs, and I can
-> prove every invoice line after it bills — starting with one action in one afternoon.
+> I know which agent run spends customer credits. I can authorize it before it creates cost and
+> trace the settled usage to the invoice, starting with one action in one afternoon.
 
 The builder — the developer-led team — is the hero. Unprice is the tool that helps them version,
 meter, authorize, budget, reserve, rate, invoice, and explain pricing without scattering revenue
@@ -24,10 +24,10 @@ economic actor that holds budgets, wallets, and invoices.
 
 ## Core Story
 
-A customer is about to trigger the paid action in your product.
+A customer is about to trigger an agent run or paid workflow.
 
-Maybe it is an LLM call, a data job, a costly API request, a multi-step workflow, a seat package, or
-a usage tier. The work is about to happen now. The invoice that explains it may not exist for weeks.
+Maybe it is an LLM call, a tool loop, a data job, or a multi-step workflow. The work is about to
+happen now. The invoice that explains it may not exist for weeks.
 If the decision is wrong, the team does not find out in a dashboard. They find out when the margin is
 gone, support is asking for an explanation, and an engineer has to stop building product to defend a
 charge.
@@ -40,19 +40,19 @@ Your app needs to know, right now:
 - Should credits be reserved or captured?
 - If this becomes an invoice line, what evidence will prove why?
 
-That is the shift: for usage-based and hybrid SaaS, pricing is no longer just a page, a plan table,
-or an invoice calculation. Pricing is a runtime decision and an evidence trail.
+That is the shift for AI products: every charge starts with an authorization. The product must
+decide before the run, then keep the decision through settlement and invoicing.
 
 Unprice gives developer-led teams an open-source customer money path for that decision. It connects
 plan versions, feature pricing, meter events, entitlement checks, customer budgets, budgeted runs,
 wallet credits, ledger captures, ingestion state, and invoice evidence in one inspectable path.
 
-## The Five-Second Moment
+## The five-second moment
 
 The realization:
 
-> Paid usage should not run until the commercial decision is made, and it should not bill unless the
-> money path can prove it.
+> An agent should not spend customer credits until the commercial decision is made. Every invoice
+> line should trace to that authorization.
 
 The sharper version for selling:
 
@@ -60,9 +60,9 @@ The sharper version for selling:
 
 Everything else in the story should create context for that moment.
 
-## Rallying Cry
+## Rallying cry
 
-Authorize customer spend before paid work runs.
+Every AI charge starts with an authorization.
 
 This is the most repeatable buyer mission. It is concrete, technical, and action-oriented. It also
 keeps Unprice out of vague billing-platform and gateway language.
@@ -147,20 +147,19 @@ And it does not require a leap of faith. The first proof is small: one paid acti
 one shadow check beside the code you already trust, one Sandbox path that shows the invoice evidence
 before real money moves.
 
-## Short Pitch
+## Short pitch
 
-Unprice is the open-source customer money path for usage-based SaaS.
+Unprice is open-source billing for AI credits and agent usage.
 
-It helps developer-led teams put customer spend authorization in the request path: check
-entitlement, customer budget, wallet credits, and meter rules before paid usage runs, then explain
-every charge, credit, denial, and invoice line from the same money path. Start with one paid action
-in one afternoon.
+It helps AI products authorize each agent run or paid workflow before it creates cost, reserve
+customer credits up front, and trace settled usage to the invoice. Start with one paid action in one
+afternoon.
 
-## Thirty-Second Version
+## Thirty-second version
 
-Usage-based pricing breaks when pricing only happens on a page or at invoice time. By then, the paid
-action already ran, the cost is real, and the explanation is scattered across counters, logs, and
-billing records.
+AI billing breaks when the first commercial decision happens at invoice time. By then, the agent
+already ran, the cost is real, and the explanation is scattered across counters, logs, and billing
+records.
 
 Unprice puts customer spend authorization in the request path. Your app can check access, consume
 usage, enforce customer budgets, reserve credits, and preserve invoice evidence before paid usage
@@ -169,17 +168,16 @@ becomes margin damage or a support dispute — and before the invoice becomes a 
 The first integration is deliberately small: create one plan, install the SDK, run one action in
 shadow, and prove it on Sandbox.
 
-## Homepage Narrative
+## Homepage narrative
 
 Headline:
 
-Authorize customer spend before paid work runs.
+Sell AI credits and usage. Keep the margin.
 
 Subheadline:
 
-Unprice is the open-source customer money path for usage-based SaaS. Keep plans versioned,
-entitlements separate, customer budgets in the request path, and invoice evidence tied to the same
-decision that allowed or denied the work.
+Authorize every agent run and paid workflow before it creates cost. Reserve customer credits up
+front, then trace the decision through usage and the invoice.
 
 Supporting story:
 
@@ -221,6 +219,10 @@ The demo should end with:
 ## Repeatable Lines
 
 - Pricing is not a page. Pricing is a runtime decision and an evidence trail.
+- Sell AI credits and usage. Keep the margin.
+- Every AI charge starts with an authorization.
+- Reserve customer credits before the agent runs, then settle actual usage.
+- Trace each invoice line to the decision that allowed the work.
 - Authorize customer spend before paid work runs.
 - Prove every invoice line after it bills.
 - One paid action in one afternoon.
@@ -266,8 +268,8 @@ Use proof that exists in the product and docs:
 
 Do:
 
-- Lead with the wedge: authorize customer spend before paid work runs and prove every invoice line after it
-  bills.
+- Lead with the wedge: sell AI credits and usage without paying for unfunded agent work.
+- Explain the mechanism: authorize the run before cost, then trace the decision to the invoice.
 - Start with the paid product action, then narrow to the expensive action when selling the first
   integration.
 - Make the founder or engineer (the builder) the hero.

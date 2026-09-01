@@ -4,19 +4,19 @@ import { useState } from "react"
 
 import { Button } from "@unprice/ui/button"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@unprice/ui/dialog"
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@unprice/ui/dropdown-menu"
+import {
+  ResponsiveDialog,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+  ResponsiveDialogTrigger,
+} from "@unprice/ui/responsive-dialog"
 import { ChevronDown, ExternalLink } from "lucide-react"
 
 import { SITES_BASE_DOMAIN } from "@unprice/config"
@@ -39,7 +39,7 @@ export function PageActions({
   const [isOpenDialog, setIsOpenDialog] = useState(false)
 
   return (
-    <Dialog onOpenChange={setIsOpenDialog} open={isOpenDialog}>
+    <ResponsiveDialog onOpenChange={setIsOpenDialog} open={isOpenDialog}>
       <DropdownMenu onOpenChange={setIsOpen} open={isOpen}>
         <DropdownMenuTrigger asChild>
           <Button variant={"custom"}>
@@ -48,10 +48,10 @@ export function PageActions({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent className="w-44" align="end">
-          <DialogTrigger asChild>
+          <ResponsiveDialogTrigger asChild>
             <DropdownMenuItem>Edit page</DropdownMenuItem>
-          </DialogTrigger>
-          <DialogTrigger asChild>
+          </ResponsiveDialogTrigger>
+          <ResponsiveDialogTrigger asChild>
             <DropdownMenuItem asChild>
               <PagePublish
                 pageId={page.id}
@@ -60,7 +60,7 @@ export function PageActions({
                 classNames="w-full relative flex cursor-pointer justify-start select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 hover:bg-background-bgHover hover:text-background-textContrast font-normal"
               />
             </DropdownMenuItem>
-          </DialogTrigger>
+          </ResponsiveDialogTrigger>
 
           <DropdownMenuItem>
             <SuperLink href={`${domain}`} target="_blank" className="flex items-center">
@@ -70,13 +70,13 @@ export function PageActions({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <DialogContent className="max-h-screen overflow-y-scroll">
-        <DialogHeader>
-          <DialogTitle>Plan Form</DialogTitle>
-          <DialogDescription>Modify the plan details below.</DialogDescription>
-        </DialogHeader>
+      <ResponsiveDialogContent>
+        <ResponsiveDialogHeader>
+          <ResponsiveDialogTitle>Plan Form</ResponsiveDialogTitle>
+          <ResponsiveDialogDescription>Modify the plan details below.</ResponsiveDialogDescription>
+        </ResponsiveDialogHeader>
         <PageForm defaultValues={page} setDialogOpen={setIsOpenDialog} />
-      </DialogContent>
-    </Dialog>
+      </ResponsiveDialogContent>
+    </ResponsiveDialog>
   )
 }

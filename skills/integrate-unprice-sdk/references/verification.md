@@ -10,6 +10,10 @@ authentication, and error mapping.
 - Search browser and client bundles for `UNPRICE_TOKEN`, `Unprice`, or public token exposure.
 - Confirm environment values are validated using the project's existing mechanism.
 - Confirm feature, event, and plan slugs come from real configuration.
+- Confirm the host does not copy plan names, plan order, membership, prices, limits, the default
+  signup plan, or feature-to-plan rules into runtime code.
+  Permit an explicit, published, policy-approved signup plan identifier when the host owns
+  selection; reject duplicated plan configuration.
 - Confirm exact request shapes typecheck against the installed SDK.
 - Confirm no new `any`, unhandled promise, or `console.log` was introduced.
 - Confirm errors log `error.requestId` without logging the token or sensitive payloads.
@@ -21,6 +25,12 @@ For `access.check`:
 - Test allowed, denied, and API-error outcomes.
 - Confirm the call does not mutate usage.
 - In shadow mode, confirm existing authorization still controls behavior.
+
+For `access.entitlements.current`:
+
+- Test available, denied, unavailable, missing, and API-error outcomes.
+- Confirm feature behavior matches stable feature slugs, not plan names.
+- Confirm account UI uses one customer-wide snapshot instead of one request per displayed feature.
 
 For `usage.consume`:
 
@@ -58,7 +68,9 @@ For customer signup:
 - Confirm signup occurs in the onboarding/subscription owner, not every request.
 - Confirm the returned Unprice customer ID is persisted against the stable account or tenant.
 - Confirm a retry cannot create an accidental parallel mapping.
-- Confirm the plan version is published and the plan choice matches product policy.
+- When Unprice owns the default, confirm signup omits `planSlug` and `planVersionId`.
+- When the host selects a plan, confirm the version is published and the choice matches explicit
+  product policy.
 
 ## Failure-policy checks
 

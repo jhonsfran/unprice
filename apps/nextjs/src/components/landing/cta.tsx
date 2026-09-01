@@ -10,9 +10,9 @@ import { StationHeader } from "./station-header"
 
 // The close is one decision and one signature. Nothing else.
 //
-// It used to argue the integration three times inside one viewport — the
-// subhead narrated signUp → check, the guarantee narrated it again, and the
-// strip's fact line repeated station 04's shadow ledger verbatim — then
+// It used to argue the integration three times inside one viewport. The
+// subhead narrated setup, the guarantee repeated it, and the strip copied the
+// previous station. It then
 // stacked seven micro-facts under the button and put a second button beside
 // the primary one (distill pass 2026-07-27). Station 04 owns the integration
 // and station 05 owns the objections. By the time a reader is here the
@@ -55,13 +55,13 @@ export default function Cta() {
           id="cta-title"
           className="mt-6 max-w-3xl font-primary text-background-textContrast text-display-2"
         >
-          <Balancer>Start with one paid action in one afternoon.</Balancer>
+          <Balancer>Put one agent action on a budget in one afternoon.</Balancer>
         </h2>
         {/* One prerequisite, one exit to the long argument. */}
         <p className="mt-5 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
           <Balancer>
-            Bring the one action in your product that burns margin when a customer runs it. That is
-            the whole prerequisite — the argument behind it is in{" "}
+            Bring the agent run or paid workflow that burns margin when a customer triggers it. That
+            is the only prerequisite. Read the argument in{" "}
             <Link href="/manifesto" className={inlineLink}>
               the manifesto
             </Link>
@@ -82,35 +82,32 @@ export default function Cta() {
             pendingLabel="Opening signup…"
             className={buttonVariants({ variant: "primary", className: "gap-1.5" })}
           >
-            Start with one paid action
+            Start with one agent action
             <ArrowRight aria-hidden className="size-3.5" />
           </AcquisitionLink>
         </div>
 
-        {/* The afternoon, itemized honestly: the customer-signup step is part
-            of the deal, so it stays on the receipt. */}
+        {/* The afternoon, itemized honestly. */}
         <p className="mt-5 font-mono text-[11px] text-background-text leading-5">
           <span className="whitespace-nowrap">one plan version</span> ·{" "}
           <span className="whitespace-nowrap">one customer signup</span> ·{" "}
-          <span className="whitespace-nowrap">one shadow check</span>
+          <span className="whitespace-nowrap">one reserved agent run</span>
         </p>
 
-        {/* The guarantee and the founder letter are one block: the walk-away
-            terms are Seb's promise, so they carry his signature and his
-            inbox — mono strip header, human prose, signed. */}
+        {/* The guarantee and the founder letter are one block. */}
         <Reveal className="mt-16 w-full max-w-2xl border-background-border border-y py-6 text-left">
           <div className="flex items-baseline justify-between gap-4">
             <span className="font-mono text-background-text text-xs uppercase tracking-widest">
-              The walk-away guarantee
+              Sandbox first
             </span>
             <span className="hidden font-mono text-[10px] text-background-text sm:inline">
-              delete one line · nothing changed
+              no provider call · no card
             </span>
           </div>
           <p className="mt-3 text-background-text text-sm leading-6">
-            If the decisions don&apos;t match your reality, delete the{" "}
-            <code className="font-mono text-[12px]">access.check</code> line and walk away. Nothing
-            in your stack changed, and there is no contract to exit.
+            Test the reservation with Unprice&apos;s built-in Sandbox before it touches production.
+            If the result does not match your model, remove it. No provider traffic, payment
+            processor, or contract changed.
           </p>
           {/* Honest scarcity: a real constraint on my own time, stated as a
               number. No countdown, no fake stock (marketing-framework.md). */}
@@ -122,10 +119,10 @@ export default function Cta() {
             >
               Email me your action
             </a>{" "}
-            and I&apos;ll reply with the first step — whether or not a slot is left.
+            and I&apos;ll reply with the first step, even if no slot is left.
           </p>
           <p className="mt-4 font-medium text-background-textContrast text-sm leading-6">
-            — Seb, founder of Unprice · <span className="font-mono text-xs">seb@unprice.dev</span>
+            Seb, founder of Unprice · <span className="font-mono text-xs">seb@unprice.dev</span>
           </p>
         </Reveal>
       </>

@@ -8,35 +8,34 @@ Status: pre-validation refresh (July 2026 market audit). Lock after the customer
 This is the app-level product source of truth. Detailed brand and design rules live in
 [`docs/brand`](/Users/jhonsfran/repos/unprice/docs/brand/README.md).
 
-## Product Definition
+## Product definition
 
-Unprice is the open-source customer money path for usage-based SaaS. It helps developer-led teams sell
-credits and usage-based plans without eating the cost when a customer overspends: authorize in the
-request path, explain on the invoice, and own the money path in open source.
+Unprice is open-source billing for AI credits and agent usage. It helps developer-led AI products
+sell credits, agent runs, and paid workflows without paying for unfunded work. Authorize before the
+run, settle actual usage, and trace the result to the invoice.
 
 PriceOps is the operating model behind that promise: plan versions, subscriptions, entitlements,
 meters, budgets, credits, usage evidence, and invoice evidence stay separate but connected.
 Entitlements are not hardcoded into subscriptions; customers can remain on the plan version they
 bought while new pricing experiments ship safely for future customers.
 
-The wedge is customer spend authorization with invoice evidence: decide whether a customer's paid
-work is allowed before cost is created, and preserve the evidence needed to explain the charge,
-credit, denial, or invoice line after the fact.
+The wedge is authorization-led AI billing: decide whether an agent run or paid workflow is allowed
+before it creates cost, reserve customer credits, then preserve the evidence needed to explain the
+settled usage and invoice line.
 
 Unprice is not an agent platform, tracing system, payment processor, tax engine, accounting system,
 or generic pricing-page builder. Stated positively: it is the budget, wallet, and authorization
 layer for products whose customers burn credits — including when an agent triggers the spend.
 
-## Primary Market
+## Primary market
 
-The first market is developer-led usage-based SaaS teams with paid product actions, hybrid
-subscription plus usage/credit pricing, customer-facing budgets, and a need to explain invoice
-outcomes. AI/API and workflow products are the sharpest early slice because one
-customer-triggered action can create real marginal cost.
+The first market is developer-led AI products that sell prepaid credits, metered AI usage, agent
+runs, or paid workflows. One customer-triggered workload can create marginal cost before billing
+records it.
 
 Best-fit early users:
 
-- SaaS founders and founding engineers launching usage-based pricing.
+- AI founders and founding engineers launching credit or usage pricing.
 - CTOs and platform engineers who own request-path usage enforcement.
 - AI/API and workflow teams that need per-customer or per-run spend caps.
 
@@ -51,7 +50,7 @@ Bad-fit early users:
 - Teams that only need a pricing table.
 - Buyers who need broad payment-provider portability on day one.
 
-## Product Purpose
+## Product purpose
 
 Pricing is not only a page or an invoice calculation. For usage-based products, the customer's
 commercial limit has to be checked while the request is still in flight, and the evidence has to
@@ -73,18 +72,17 @@ application money path.
 Canonical source: [`positioning-and-messaging.md`](strategic/positioning-and-messaging.md). Keep this section
 in sync with it.
 
-Public frame: open-source customer money path for usage-based SaaS. PriceOps is the internal
+Public frame: open-source billing for AI credits and agent usage. PriceOps is the internal
 operating model: plan versions, subscriptions, entitlements, meters, budgets, credits, usage
 evidence, and invoice evidence stay separate but connected.
 
-One-liner: Unprice lets developer-led SaaS teams sell credits and usage-based plans without eating
-the cost when a customer overspends: authorize in the request path, explain on the invoice, and own
-the money path in open source.
+One-liner: Unprice lets AI products sell credits and agent usage without paying for unfunded work.
+Authorize before the run, settle actual usage, and trace the result to the invoice.
 
-Homepage headline (the h1): Sell credits and usage. Keep the margin.
+Homepage headline (the h1): Sell AI credits and usage. Keep the margin.
 
-Homepage subheadline: Authorize customer spend before paid work runs. Open source, for SaaS that
-sells credits, API calls, or agent runs.
+Homepage subheadline: Authorize every agent run and paid workflow before it creates cost. Reserve
+customer credits up front, then trace the decision through usage and the invoice.
 
 Slot rule (2026-07-27): the mechanism sentence leads the subheadline verbatim rather than taking the
 h1. Launch traffic is link traffic, so the string in the HN title, `<title>`, and OG card has to be
@@ -133,7 +131,9 @@ pillar. These six are product capabilities; payments is the boundary around them
 
 Use:
 
-- "Open-source money path for usage-based SaaS."
+- "Open-source billing for AI credits and agent usage."
+- "Sell AI credits and usage. Keep the margin."
+- "Every AI charge starts with an authorization."
 - "Authorize customer spend before paid work runs."
 - "Explain every allow, deny, charge, credit, and invoice line from one money path."
 - "Meter usage, enforce entitlements, reserve credits, budget workloads, and explain invoices."

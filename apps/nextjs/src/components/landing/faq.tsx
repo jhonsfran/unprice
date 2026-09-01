@@ -23,7 +23,7 @@ const faqs: FaqItem[] = [
   {
     question: "Why not just Stripe?",
     answer:
-      "Keep Stripe for payment capture. Unprice owns the customer money path before and around the invoice: plan versions, entitlements, budgets, credits, ledger captures, and evidence.",
+      "Keep Stripe for payment capture. Unprice handles the customer money path before and around the invoice. It connects plan versions, entitlements, budgets, credits, ledger captures, and evidence.",
     link: { href: "/manifesto", label: "The full argument" },
   },
   {
@@ -33,7 +33,7 @@ const faqs: FaqItem[] = [
     // requirement that does not apply to them.
     question: "Do I need Cloudflare?",
     answer:
-      "Not to use it. The hosted cloud runs the runtime for you — install the SDK, call the API, nothing to deploy. Cloudflare is the self-run path: the open-source runtime deploys to your own Cloudflare account (Workers, Durable Objects, Queues) because the spend decision needs fast per-customer state where requests run. Self-run means your account, your data, your keys; hosted means no infrastructure at all. Both settle payments to your own Stripe.",
+      "Not to use the hosted cloud. Install the SDK and call the API. You have nothing to deploy. To run Unprice yourself, deploy the open-source runtime to your Cloudflare account. It uses Workers, Durable Objects, and Queues to keep per-customer state near the request path. In both cases, payments settle to your own Stripe account.",
   },
   {
     // Second, not seventh: this is the distinction that releases the wrong
@@ -41,7 +41,7 @@ const faqs: FaqItem[] = [
     // artifact on this page before learning it solves the other direction.
     question: "Why not an AI gateway?",
     answer:
-      "Different direction of spend. Gateways cap what you spend with your providers — your OpenAI or Anthropic bill — and route models behind virtual keys. Unprice caps what your customer is allowed to spend with you, and connects that decision to plan versions, credits, and invoice evidence. If you want per-team attribution and a ceiling on your own provider bill, use a gateway; they are not competitors and you may well want both.",
+      "They control a different bill. A gateway caps what you spend with providers such as OpenAI or Anthropic. Unprice caps what your customer can spend with you and connects that decision to plan versions, credits, and invoice evidence. Use a gateway for your provider bill. Use Unprice for your customer's budget. Some products need both.",
   },
   {
     // The real incumbent is not a competitor, it is the counter the reader
@@ -54,17 +54,17 @@ const faqs: FaqItem[] = [
   {
     question: "Does Unprice touch the money?",
     answer:
-      "No. Your app asks Unprice before paid work runs and gets an allow or deny with evidence attached. Your payment provider captures the payment — Stripe today, your own account or Stripe Connect, plus the built-in Sandbox provider for proving the path without a processor. The provider layer is one interface: Stripe-first today, provider-extensible by design, and no other provider is claimed until it ships. Unprice owns the decision, the ledger, and the evidence; it never sits in your funds flow.",
+      "No. Your app asks Unprice before paid work runs and receives an allow or deny with evidence. Stripe captures production payments in your account or through Stripe Connect. The built-in Sandbox provider lets you test the path without a payment processor. Unprice records the decision, ledger movement, and evidence. It never sits in your funds flow.",
   },
   {
     question: "What does my customer see when a request is denied?",
     answer:
-      "Whatever you decide — the deny is an answer, not an outage, and not an HTTP error. The call returns 200 with allowed false and a machine-readable reason (LIMIT_EXCEEDED, plan expired, no entitlement) before any cost is created, so your app can show the customer why and offer the upgrade path instead of failing silently. Every deny is recorded with its evidence, so you can see who keeps hitting limits and treat denials as upgrade conversations, not support tickets.",
+      "Whatever your app decides to show. A denial is a business result, not an outage or HTTP error. The call returns 200 with allowed set to false and a machine-readable reason such as LIMIT_EXCEEDED, plan expired, or no entitlement. Your app can explain the limit and offer an upgrade. Unprice records the denial and its evidence.",
   },
   {
     question: "What does the check add to my request latency?",
     answer:
-      "One authorization request. A warm check is a cached read plus one Durable Object read; invoicing, analytics, and the ledger ride queues off the request path — never inside it. Numbers depend on where your traffic runs, so the repo ships a k6 harness instead of a marketing claim: point it at your own deployment and read the percentiles.",
+      "One authorization request. A warm check uses a cached read and one Durable Object read. Invoicing, analytics, and ledger work run outside the request path. Latency depends on where your traffic runs, so the repo includes a k6 harness. Point it at your deployment and read the percentiles.",
     link: {
       href: `${REPO_URL}/tree/main/tooling/k6`,
       label: "Run the benchmark",
@@ -74,7 +74,7 @@ const faqs: FaqItem[] = [
   {
     question: "What happens if Unprice is down?",
     answer:
-      "The check fails loud, never silent: you get an explicit error and your code owns the fallback — fail open and log, or fail closed for the expensive actions. Caches serve stale answers while they revalidate, and shadow mode blocks nothing by construction, so an outage during adoption costs you nothing.",
+      "The check returns an explicit error. Your code controls the fallback. You can fail open and log the error, or fail closed for expensive actions. Caches can serve stale answers while they revalidate. Shadow mode blocks nothing, so it does not stop work during adoption.",
   },
   {
     question: "Is it safe enough for money logic?",
@@ -125,10 +125,9 @@ export function FaqSection() {
             gateway. The second was missing, so that reader read the whole page
             before finding out. */}
         <p className="mt-5 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-          Unprice is for teams whose customers can trigger real cost — an LLM call, a data job, a
-          paid workflow. If your product is pure seat-based SaaS, Stripe Billing is enough. If what
-          you need to cap is your own provider bill rather than what your customers spend, you want
-          an AI gateway, not this.
+          Unprice is for AI products whose customers buy credits, trigger agent runs, or start paid
+          workflows. If your product only charges per seat, Stripe Billing is enough. If you need to
+          cap your model-provider bill instead of customer spend, use an AI gateway.
         </p>
         <p className="mt-4 font-mono text-[11px] text-background-text leading-5">
           Stripe today · hosted or your own Cloudflare account · not tax, accounting, or revenue

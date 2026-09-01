@@ -6,14 +6,6 @@ import { useParams } from "next/navigation"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@unprice/ui/dialog"
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -21,6 +13,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@unprice/ui/dropdown-menu"
+import {
+  ResponsiveDialog,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+  ResponsiveDialogTrigger,
+} from "@unprice/ui/responsive-dialog"
 import { Separator } from "@unprice/ui/separator"
 import { SuperLink } from "~/components/super-link"
 import { CustomerForm } from "./customer-form"
@@ -38,11 +38,11 @@ export function CustomerActions({
   const addSubscriptionHref = `/${workspaceSlug}/${projectSlug}/customers/subscriptions/new?customerId=${customer.id}`
 
   return (
-    <Dialog>
+    <ResponsiveDialog>
       <div className="button-primary flex items-center space-x-1 rounded-md">
-        <DialogTrigger asChild>
+        <ResponsiveDialogTrigger asChild>
           <Button variant={"custom"}>Edit Customer</Button>
-        </DialogTrigger>
+        </ResponsiveDialogTrigger>
 
         <Separator orientation="vertical" className="h-[20px] p-0" />
 
@@ -62,15 +62,15 @@ export function CustomerActions({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      <DialogContent className="md:max-w-xl">
-        <DialogHeader>
-          <DialogTitle>Customer details</DialogTitle>
-          <DialogDescription>
+      <ResponsiveDialogContent className="md:max-w-xl">
+        <ResponsiveDialogHeader>
+          <ResponsiveDialogTitle>Customer details</ResponsiveDialogTitle>
+          <ResponsiveDialogDescription>
             Update the economic actor that holds subscriptions, wallet credits, runs, and invoices.
-          </DialogDescription>
-        </DialogHeader>
+          </ResponsiveDialogDescription>
+        </ResponsiveDialogHeader>
         <CustomerForm defaultValues={customer} />
-      </DialogContent>
-    </Dialog>
+      </ResponsiveDialogContent>
+    </ResponsiveDialog>
   )
 }

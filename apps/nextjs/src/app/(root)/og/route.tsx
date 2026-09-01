@@ -104,7 +104,7 @@ function DenialReceiptCard() {
             paddingBottom: "18px",
           }}
         >
-          Authorize customer spend before paid work runs.
+          Sell AI credits and usage. Keep the margin.
         </span>
       </div>
 

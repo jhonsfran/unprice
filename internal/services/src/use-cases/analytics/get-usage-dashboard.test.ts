@@ -10,6 +10,7 @@ import {
   type GetUsageDashboardDeps,
   type GetUsageDashboardInput,
   getUsageDashboard,
+  hasUsageDashboardEvidence,
 } from "./get-usage-dashboard"
 
 const firstHour = Date.parse("2026-06-13T07:00:00.000Z")
@@ -20,6 +21,34 @@ const last24hQueryStart = Date.parse("2026-06-12T09:00:00.000Z")
 const last30dQueryStart = Date.parse("2026-05-14T00:00:00.000Z")
 
 describe("getUsageDashboard", () => {
+  it("distinguishes provisional empty results from analytics evidence", () => {
+    expect(
+      hasUsageDashboardEvidence({
+        summary: { featureCount: 0, totalLatestUsage: 0, spending: [] },
+        features: [],
+        timeseries: [],
+        topConsumers: [],
+        freshness: { generatedAt: now, dataFrom: last24hQueryStart, dataTo: now },
+      })
+    ).toBe(false)
+
+    expect(
+      hasUsageDashboardEvidence({
+        summary: { featureCount: 1, totalLatestUsage: 0, spending: [] },
+        features: [
+          {
+            featureSlug: "tokens",
+            usage: 0,
+            spending: { amount: "0", currency: "USD", displayAmount: "$0.00" },
+          },
+        ],
+        timeseries: [],
+        topConsumers: [],
+        freshness: { generatedAt: now, dataFrom: last24hQueryStart, dataTo: now },
+      })
+    ).toBe(true)
+  })
+
   it("derives summary rows from period totals and chart rows from time buckets", async () => {
     const { deps, analytics } = makeDeps({
       now: () => now,

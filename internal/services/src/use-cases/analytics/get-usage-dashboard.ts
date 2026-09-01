@@ -252,6 +252,12 @@ export function emptyUsageDashboardOutput(
   }
 }
 
+export function hasUsageDashboardEvidence(output: GetUsageDashboardOutput): boolean {
+  return (
+    output.features.length > 0 || output.timeseries.length > 0 || output.topConsumers.length > 0
+  )
+}
+
 function buildDenseTimeseries(rows: FeatureUsageTimeseriesRow[]): UsageDashboardTimeseriesRow[] {
   const rowsByDate = new Map<number, FeatureUsageTimeseriesRow[]>()
   const featureSlugs = new Set<string>()
