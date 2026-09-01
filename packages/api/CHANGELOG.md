@@ -1,5 +1,11 @@
 # @unprice/api
 
+## 0.3.0
+
+### Minor Changes
+
+- 5b27a7e: adding current entitlement endpoint
+
 ## 0.2.0
 
 ### Minor Changes

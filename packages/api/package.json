@@ -2,7 +2,7 @@
   "name": "@unprice/api",
   "description": "TypeScript SDK for AI credits and agent usage. Authorize runs, reserve customer credits, and settle usage.",
   "private": false,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
