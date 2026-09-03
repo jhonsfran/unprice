@@ -127,7 +127,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Deploy with Wrangler
-        uses: cloudflare/wrangler-action@v3.14.1
+        uses: cloudflare/wrangler-action@v4.0.0
         with:
           apiToken: ${{ env.CLOUDFLARE_API_TOKEN }}
           wranglerVersion: "4.67.0"
