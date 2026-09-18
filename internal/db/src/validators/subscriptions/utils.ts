@@ -1,4 +1,4 @@
-import { endOfMonth } from "date-fns"
+import { endOfMonth } from "date-fns/endOfMonth"
 import { z } from "zod"
 import {
   type BillingAnchor,

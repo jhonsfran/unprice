@@ -14,7 +14,7 @@ import {
 import { Err, type FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { fromLedgerMinor, toCurrencyMinor, toLedgerMinor } from "@unprice/money"
-import { addDays } from "date-fns"
+import { addDays } from "date-fns/addDays"
 import type { Cache } from "../cache"
 import type { CustomerService } from "../customers/service"
 import type { GrantsManager } from "../entitlements"
