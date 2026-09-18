@@ -30,9 +30,9 @@ export const budgetRunsRefreshSchedule = schedules.task({
   id: "budget-runs.refresh",
   cron: {
     timezone: "UTC",
-    // Hourly. This is only a convergence backstop — the dashboard already
-    // refreshes on observation — so an hourly cadence is plenty.
-    pattern: "0 * * * *",
+    // Every 12 hours. This is only a convergence backstop — the dashboard already
+    // refreshes on observation — so this delay is acceptable.
+    pattern: "0 */12 * * *",
   },
   run: async (payload) => {
     const now = payload.timestamp.getTime()

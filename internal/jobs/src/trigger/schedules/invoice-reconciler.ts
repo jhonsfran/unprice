@@ -10,7 +10,7 @@ export const invoiceReconcilerSchedule = schedules.task({
   id: "invoice.reconciler",
   cron: {
     timezone: "UTC",
-    pattern: process.env.NODE_ENV === "development" ? "*/5 * * * *" : "*/10 * * * *",
+    pattern: "0 */12 * * *",
   },
   run: async (payload) => {
     const now = payload.timestamp.getTime()
