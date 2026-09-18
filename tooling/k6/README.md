@@ -113,3 +113,38 @@ pnpm --filter @unprice/k6 ingestion-failures
 
 `EVENTS=1000` sends 1000 failure-test events for the first usage-metered entitlement discovered
 for the customer. Recovery/replay is intentionally left to the frontend workflow.
+
+## Production plan, customer, and test runner
+
+The production runner owns an isolated test project. It refuses to change a project that contains
+plans, events, or features other than its load-test configuration.
+
+Add these values to `tooling/k6/.env`:
+
+```env
+BASE_URL=https://api.unprice.dev
+PROJECT_ID=proj_xxx
+UNPRICE_CONFIG_TOKEN=unprice_config_xxx
+UNPRICE_TOKEN=unprice_live_xxx
+CONFIRM_PRODUCTION_LOAD_TEST=yes
+
+EVENTS=1000
+RATE=20
+DURATION=60s
+INGESTION_TIMEOUT_SECONDS=120
+```
+
+The configuration token creates draft pricing. The runtime token signs up the customer and sends
+usage. The API does not allow one token type to do both jobs.
+
+Run the same command for both phases:
+
+```bash
+nvm use
+corepack pnpm --filter @unprice/tiny-tools load-test:production
+```
+
+The first run creates or reuses the `load-test-pro` draft and prints its review URL. It stops before
+customer signup. Publish the draft in the dashboard, then run the command again. The second run
+creates a customer, runs `latency` and `baseline`, and waits for the ingestion status totals. It
+fails when events are missing after the timeout, rejected, or failed.

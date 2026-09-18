@@ -66,6 +66,9 @@ patterns. Keep it cheap to load and useful.
 
 ## Cloudflare, API, And Ingestion
 
+- 2026-09-02: Pricing automation needs separate credentials: configuration keys own
+  `monetization.get`/`monetization.apply`, while runtime keys own signup, usage, and ingestion
+  status operations.
 - 2026-08-28: Customer “Active entitlements” reads current metered state from
   `EntitlementWindowDO`; keep Tinybird for historical dashboard evidence. An empty usage-dashboard
   cache loader must return `undefined` because removing the key can race the cache's deferred set.
