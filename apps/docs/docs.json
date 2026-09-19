@@ -138,6 +138,7 @@
               {
                 "group": "Budgeted runs",
                 "pages": [
+                  "libraries/ts/sdk/runs/reservations",
                   "libraries/ts/sdk/runs/start",
                   "libraries/ts/sdk/runs/consume",
                   "libraries/ts/sdk/runs/settle",

@@ -89,8 +89,24 @@ if (!result.allowed) {
 }
 ```
 
-For variable provider usage, start a budgeted run before work and
-[settle actual usage](/libraries/ts/sdk/runs/settle) after it completes.
+For variable provider usage — an LLM call whose cost is not known until it returns — hold a
+maximum before the work and settle what it actually cost after:
+
+```ts
+const { result: reservation, error } = await unprice.reservations.reserve({
+  customerId: "cus_1234567890",
+  maximumAmountMinor: 10,
+  idempotencyKey: "req_123"
+});
+
+if (error) {
+  return new Response("Customer budget unavailable", { status: 402 });
+}
+```
+
+`reservations` is a helper over the `runs` operations, not a separate API. Read
+[the reservations helper](/libraries/ts/sdk/runs/reservations) for what each call maps to, and use
+`runs.start` / `runs.consume` / `runs.settle` / `runs.end` directly for multi-step workloads.
 
 Read [Choose the runtime call](/quickstart/choose-operation) before you connect a production path.
 

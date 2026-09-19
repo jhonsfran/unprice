@@ -60,7 +60,7 @@ export function ProblemSection() {
               The DIY stack
             </span>
             <span className="font-mono text-[10px] text-background-text">
-              one paid action · traced
+              one agent run · traced
             </span>
           </figcaption>
 

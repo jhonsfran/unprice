@@ -36,12 +36,12 @@ const generation = await generateText({
 
 // 3. Capture actual usage and release the unused amount.
 const settlement = await reservation.settle({
-  featureSlug: "ai-tokens",
-  eventSlug: "ai-completion",
+  featureSlug: "ai-output-tokens",
+  eventSlug: "completions",
   id: messageId,
   properties: {
-    input_tokens: generation.usage.inputTokens,
-    output_tokens: generation.usage.outputTokens,
+    inputTokens: generation.usage.inputTokens,
+    outputTokens: generation.usage.outputTokens,
   },
 })
 

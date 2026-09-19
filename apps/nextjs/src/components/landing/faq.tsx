@@ -10,6 +10,11 @@ import { StationHeader } from "./station-header"
 // "your own Cloudflare account" not "self-host"). Answers stay plain
 // strings so the same array feeds the FAQPage JSON-LD below — the citable
 // version of this section for search engines and LLMs.
+//
+// Eight, not ten. "Do I need Cloudflare?" and "Where does my data live?"
+// were one question about where this runs, and "is it safe enough for money
+// logic?" was answered three times over by station 03, the Redis link, and
+// the Sandbox block in the close. A long FAQ reads as a long list of doubts.
 
 const REPO_URL = "https://github.com/jhonsfran1165/unprice"
 
@@ -23,56 +28,54 @@ const faqs: FaqItem[] = [
   {
     question: "Why not just Stripe?",
     answer:
-      "Stripe captures payment after the work is done, so it cannot stop the work. Keep it. Unprice sits earlier: it authorizes the spend before the provider call, then hands Stripe an invoice line that can be explained. It connects plan versions, entitlements, budgets, wallet credits, ledger captures, and the receipt.",
+      "Stripe captures payment after the work is done, so it cannot stop the work. Keep it. Unprice runs earlier: it authorizes the spend before the provider call, then hands Stripe an invoice line that can be explained.",
     link: { href: "/manifesto", label: "The full argument" },
   },
   {
-    // Moved to the top three (2026-07-27): this was the last of ten questions,
-    // and the previous answer — "Today, yes" — read as a hard infrastructure
-    // gate on the hosted product too. A reader on AWS closed the tab over a
-    // requirement that does not apply to them.
-    question: "Do I need Cloudflare?",
-    answer:
-      "Not to use the hosted cloud. Install the SDK and call the API. You have nothing to deploy. To run Unprice yourself, deploy the open-source runtime to your Cloudflare account. It uses Workers, Durable Objects, and Queues to keep per-customer state near the request path. In both cases, payments settle to your own Stripe account.",
-  },
-  {
-    // Residency is a gating question for the EU half of the avatar, and it
-    // was unanswerable on this page — the reader had to email to find out.
-    // Stated as placement, not as a certification we do not hold.
-    question: "Where does my data live?",
-    answer:
-      "In the EU. The hosted runtime, the Postgres database, and the usage analytics run in EU regions. Per-customer Durable Object state — wallet reservations, run budgets, idempotency keys — is pinned to Cloudflare's EU jurisdiction, so it is never placed or migrated outside it. If you run Unprice yourself, your data lives wherever you deploy it. Either way, payments settle in your own Stripe account.",
-  },
-  {
-    // Second, not seventh: this is the distinction that releases the wrong
-    // buyer. Arriving from "control AI spend", a reader recognises every
-    // artifact on this page before learning it solves the other direction.
+    // The distinction that releases the wrong buyer early. Arriving from
+    // "control AI spend", a reader recognises every artifact on this page
+    // before learning it solves the other direction.
     question: "Why not an AI gateway?",
     answer:
-      "A gateway sits inside the provider call and caps your aggregate provider bill. Unprice sits before it and authorizes one run against one customer's budget, then ties that decision to plan versions, wallet credits, and the invoice line. A denied run never reaches the gateway. Use a gateway for your provider bill, Unprice for your customer's budget. Some products want both.",
+      "A gateway sits inside the provider call and caps your total provider bill. Unprice sits before it and authorizes one run against one customer's budget. A denied run never reaches the gateway. Some products want both.",
   },
   {
     // The real incumbent is not a competitor, it is the counter the reader
-    // already wrote (positioning-and-messaging.md). Answering the branded
-    // alternatives while ducking this one reads as evasion.
-    question: "Why not a Redis counter?",
+    // already wrote (positioning-and-messaging.md).
+    //
+    // The old answer claimed a Redis reservation races under concurrency.
+    // That is false and trivially falsifiable — a Lua script is atomic — and
+    // an engineer who has written one discards the whole page over it. Concede
+    // the part Redis genuinely does well, then name the part that actually
+    // costs a quarter to build.
+    question: "Why not Redis?",
     answer:
-      "For a single limit it is genuinely fine. It stops being fine when the counter has to agree with money: under concurrency a race lets over-budget work reach the provider, and the counter can tell you usage was high but not which budget was checked, what was reserved, why a request was denied, or how accepted usage became an invoice line. Unprice keeps the authorization, the reservation, and the explanation on one path.",
+      "You can build the reservation in Redis. A Lua script that holds an amount and releases the remainder is about fifty lines, and it will be correct. The reservation was never the hard part. The trail is: which plan version was in force, what rate applied, which grant the hold came from, how the settled amount became a ledger entry that balances, and which invoice line it landed on. That is what gets rebuilt by hand every time support asks why a customer was charged. Unprice keeps it on one path, with the reservation attached.",
+    link: { href: REPO_URL, label: "Read the source", external: true },
   },
   {
-    question: "Does Unprice touch the money?",
+    // Merged from "Do I need Cloudflare?" and "Where does my data live?".
+    // Both were really one question — where does this thing run — and the
+    // Cloudflare one used to read as a hard infrastructure gate on the hosted
+    // product, which cost a signup from a reader on AWS.
+    question: "Where does this run?",
     answer:
-      "No. Your app asks Unprice before paid work runs and receives an allow or deny with evidence. Stripe captures production payments in your account or through Stripe Connect. The built-in Sandbox provider lets you test the path without a payment processor. Unprice records the decision, the ledger movement, and the receipt. The money never touches Unprice.",
+      "On the hosted cloud: install the SDK, call the API, nothing to deploy. It runs in EU regions, and per-customer state — wallet reservations, run budgets, idempotency keys — is pinned to Cloudflare's EU jurisdiction, so it is never placed outside it. To run Unprice yourself, deploy the open-source runtime to your own Cloudflare account, and your data lives wherever you put it. Either way, payments settle in your own Stripe account.",
   },
   {
-    question: "What does my customer see when a request is denied?",
+    question: "Does Unprice hold the money?",
     answer:
-      "Whatever your app decides to show. A denial is a business result, not an outage or HTTP error. The call returns 200 with allowed set to false and a machine-readable reason such as LIMIT_EXCEEDED, plan expired, or no entitlement. Your app can explain the limit and offer an upgrade. Unprice records the denial and its evidence.",
+      "No. Your app asks before paid work runs and gets an allow or deny with evidence. Stripe captures payment in your own account or through Stripe Connect, and the built-in Sandbox provider lets you test the path without a processor. Unprice records the decision, the ledger movement, and the receipt. The money never touches Unprice.",
   },
   {
-    question: "What does the check add to my request latency?",
+    question: "What does a deny look like to my user?",
     answer:
-      "One authorization request, ahead of a provider call that costs orders of magnitude more. A warm check uses a cached read and one Durable Object read. Invoicing, analytics, and ledger work run outside the request path. Latency depends on where your traffic runs, so the repo includes a k6 harness. Point it at your deployment and read the percentiles.",
+      "Whatever you decide to show. A deny is a business result, not an outage: the call returns 200 with allowed set to false and a machine-readable reason such as LIMIT_EXCEEDED. Your app can explain the limit and offer an upgrade.",
+  },
+  {
+    question: "How much latency does the check add?",
+    answer:
+      "One request, ahead of a provider call that costs orders of magnitude more. A warm check is a cached read plus one Durable Object read. Invoicing, analytics, and ledger work run off the request path. Latency depends on where your traffic runs, so the repo ships a k6 harness — point it at your deployment and read the percentiles.",
     link: {
       href: `${REPO_URL}/tree/main/tooling/k6`,
       label: "Run the benchmark",
@@ -80,15 +83,9 @@ const faqs: FaqItem[] = [
     },
   },
   {
-    question: "What happens if Unprice is down?",
+    question: "What if Unprice is down?",
     answer:
-      "The check returns an explicit error. Your code controls the fallback. You can fail open and log the error, or fail closed for expensive actions. Caches can serve stale answers while they revalidate. Shadow mode blocks nothing, so it does not stop work during adoption.",
-  },
-  {
-    question: "Is it safe enough for money logic?",
-    answer:
-      "Do not adopt it all at once. Read the source, run one request path in shadow, prove it on Sandbox, then enforce only when the evidence matches.",
-    link: { href: REPO_URL, label: "Read the source", external: true },
+      "The check returns an explicit error and your code picks the fallback: fail open and log it, or fail closed for expensive actions. Caches can serve stale answers while they revalidate, and shadow mode blocks nothing during adoption.",
   },
 ]
 
@@ -138,9 +135,10 @@ export function FaqSection() {
           Billing is enough. If you want one aggregate cap on your model-provider bill rather than a
           budget per customer, use an AI gateway.
         </p>
+        {/* Hosting moved into "Where does this run?" — stating it twice in
+            one viewport is the padding that made this section feel long. */}
         <p className="mt-4 font-mono text-[11px] text-background-text leading-5">
-          Stripe today · EU-hosted or your own Cloudflare account · not tax, accounting, or revenue
-          recognition
+          Stripe today · not tax, accounting, or revenue recognition
         </p>
       </div>
 

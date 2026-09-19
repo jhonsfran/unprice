@@ -34,6 +34,23 @@ denied, or billed.
   </Card>
 </CardGroup>
 
+## The words this documentation uses
+
+These terms are used precisely and are not interchangeable. Amounts ending in `Minor` are in minor
+units — cents for USD.
+
+| Term | What it means | Not to be confused with |
+| --- | --- | --- |
+| **Paid action** | Any unit of work that can create cost: an LLM call, API request, export, data job, or workflow step. The generic term. | Not an API object. Nothing is named `paidAction`. |
+| **Agent run** | A paid action executed by an agent. The case Unprice is built around — a kind of paid action, not a different mechanism. | Not a separate API path from any other paid action. |
+| **Run** | The object that carries a budget across one or more steps. Created by `runs.start`; IDs are prefixed `brun_`. | Not your own job ID. Pass that as `workloadId`. |
+| **Reservation** | A run used as a single hold: reserve once, settle once. `reservations.reserve` is a TypeScript SDK helper over `runs.start`. | Not a separate API. There are no reservation endpoints. |
+| **Budget** | The most one run may spend: `budgetAmountMinor` on `runs.start`, `maximumAmountMinor` on `reservations.reserve`. | Not the customer's balance. A budget caps one run; the wallet is what funds it. |
+| **Wallet credits** | The customer's balance that budgets and usage draw from. Read with `wallet.balance`. | Not an entitlement limit. Credits are money; limits are counts. |
+| **Entitlement** | One customer's access and limit for one feature, derived from their plan version. Checked with `access.check`. | Not a feature. The feature is what you sell; the entitlement is this customer's state of it. |
+| **Money path** | The trail from authorization to invoice line: decision, rated usage, ledger entry, invoice evidence. Also written *customer money path*; they are the same thing. | Not a funds flow. Money never moves through Unprice. |
+| **Receipt** | The evidence attached to an authorized charge: plan version, rate, grant, ledger entry, invoice line. | Not the invoice itself. One invoice line has one receipt behind it. |
+
 ## The money path
 
 | Stage | What happens | Why it matters |
@@ -66,8 +83,11 @@ wallet, billing, or invoice-evidence logic into product code.
   <Card title="Report usage evidence" icon="file-invoice-dollar" href="/libraries/ts/sdk/usage/record">
     Use `usage.record` when the request does not wait for Unprice to decide.
   </Card>
-  <Card title="Reserve a workload budget" icon="route" href="/libraries/ts/sdk/runs/start">
-    Use `runs.start`, `runs.consume`, and `runs.end` for jobs, workflows, tool chains, and agents.
+  <Card title="Hold a maximum, then settle" icon="lock" href="/libraries/ts/sdk/runs/reservations">
+    Use `reservations.reserve` when one call's cost is unknown until it returns.
+  </Card>
+  <Card title="Budget a multi-step workload" icon="route" href="/libraries/ts/sdk/runs/start">
+    Use `runs.start`, `runs.consume`, `runs.settle`, and `runs.end` for jobs, workflows, tool chains, and agents.
   </Card>
 </CardGroup>
 

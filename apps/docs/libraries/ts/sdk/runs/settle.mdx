@@ -11,6 +11,11 @@ release unused reservation funds.
 Use `runs.consume` to authorize a known usage amount before a billable step. Do not consume and
 settle the same usage twice.
 
+<Note>
+  `reservation.settle()` from the [reservations helper](/libraries/ts/sdk/runs/reservations) calls
+  this operation and then ends the run for you. Do not call `runs.end` after it.
+</Note>
+
 ```ts
 const { result, error } = await unprice.runs.settle({
   runId: "brun_123",

@@ -6,6 +6,12 @@ description: "End a budgeted run and release unused reservation funds."
 Use `runs.end` when the workload finishes. Ending the run releases unused reservation funds and
 locks the final run status.
 
+<Note>
+  The [reservations helper](/libraries/ts/sdk/runs/reservations) already calls this from
+  `reservation.settle()` and `reservation.release()`. Call `runs.end` yourself only when you drive
+  the run through the `runs` operations directly.
+</Note>
+
 <RequestExample>
 
 ```ts

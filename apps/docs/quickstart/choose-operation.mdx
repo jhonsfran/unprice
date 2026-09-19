@@ -8,7 +8,8 @@ The runtime call depends on what your app needs to decide.
 Use this rule first:
 
 > `record` tells Unprice what happened. `consume` decides whether known usage may happen now.
-> `runs` reserve a budget before a workload starts. `access.check` asks without changing state.
+> `runs` hold a budget before a workload starts, for cost that is not known yet.
+> `access.check` asks without changing state.
 
 Use `eventSlug` for the broad event your app observed, such as `completions`. Use `featureSlug` for
 the specific product feature you are checking or consuming, such as `ai-messages`,
@@ -21,7 +22,8 @@ the specific product feature you are checking or consuming, such as `ai-messages
 | Compare Unprice against existing logic | `access.check` | No | No | Shadow mode, preflight UI, entitlement checks |
 | Enforce a known usage amount before work runs | `usage.consume` | Yes | Yes | API calls, exports, known-cost actions |
 | Report usage without blocking the request | `usage.record` | No | Yes, asynchronously | Background metering, invoice evidence, eventual analytics |
-| Reserve spend for multi-step work | `runs.start` / `runs.consume` / `runs.end` | Yes | Yes | Workflows, jobs, tools, agents, custom workloads |
+| Hold a maximum for one variable-cost call | `reservations.reserve` then `reservation.settle` | Yes | Yes | LLM calls priced on tokens you cannot predict |
+| Authorize spend across multi-step work | `runs.start` / `runs.consume` / `runs.settle` / `runs.end` | Yes | Yes | Workflows, jobs, tools, agents, custom workloads |
 
 ## `access.check`: ask without changing state
 
@@ -101,10 +103,14 @@ if (error) {
 `usage.record` never blocks over-budget work. Do not use it as a spend gate. One async event can
 carry several measured properties; meters decide which property applies to each feature.
 
-## `runs`: reserve a budget envelope
+## `runs`: hold a budget envelope
 
 Use budgeted runs when a paid action unfolds over multiple steps and can spend more than expected.
-The run labels the workload and reserves a budget before it starts.
+The run labels the workload and holds a budget before it starts.
+
+For the single-call case — one LLM request whose cost you only learn from the response — the
+[reservations helper](/libraries/ts/sdk/runs/reservations) wraps the same operations in three
+lines. The operations below are for when you need the steps apart.
 
 ```ts
 // Reserve spend before the workload creates cost.

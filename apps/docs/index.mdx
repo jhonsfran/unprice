@@ -35,7 +35,7 @@ call, API request, data job, workflow, export, or tool run.
     Publish one plan version and map one customer to it.
   </Card>
   <Card title="2. Choose the runtime call" icon="code" href="/quickstart/choose-operation">
-    Select `access.check`, `usage.consume`, `usage.record`, or budgeted runs.
+    Select `access.check`, `usage.consume`, `usage.record`, or a budgeted run.
   </Card>
   <Card title="3. Inspect the evidence" icon="file-invoice-dollar" href="/libraries/ts/sdk/usage/get">
     Inspect usage, wallet credits, holds, and invoice evidence.
@@ -49,18 +49,22 @@ call, API request, data job, workflow, export, or tool run.
 | Ask whether a customer may use a feature without changing state | `access.check` | Read-only preflight. Safe for shadow mode. |
 | Enforce a known usage amount in the request path | `usage.consume` | Synchronous decision. Deny when the limit or funds are exhausted. |
 | Report usage without blocking the request | `usage.record` | Asynchronous ingestion. It is not a spend gate. |
-| Authorize a budget before a multi-step workload runs | `runs.start` / `runs.consume` / `runs.end` | Budget envelope for a job, workflow, tool, agent, or custom run. |
+| Hold a maximum for one call whose cost is unknown until it returns | `reservations.reserve` then `reservation.settle` | TypeScript SDK helper over `runs`. The common agent-call shape. |
+| Authorize a budget across a multi-step workload | `runs.start` / `runs.consume` / `runs.settle` / `runs.end` | Full control for a job, workflow, tool chain, or agent. |
 
-## Why not only use a counter?
+## Why not a counter?
 
-A counter can report high usage. It cannot stop an over-budget run before the provider call, and it
-cannot prove which plan version applied, what was reserved, why a request was denied, or how
-accepted usage became an invoice line. Unprice keeps the authorization and the invoice explanation
-on the same inspectable path.
+A counter can stop a run. Check it before the provider call, hold and release the amount in a Lua
+script, and it will be correct. The reservation was never the hard part.
+
+The trail is: which plan version was in force, what rate applied, which grant the hold came from,
+how the settled amount became a ledger entry that balances, and which invoice line it landed on.
+That is what gets rebuilt by hand every time support asks why a customer was charged. Unprice keeps
+the authorization and that explanation on one inspectable path.
 
 <CardGroup cols={2}>
   <Card title="Agent quickstart" icon="bolt-lightning" href="/quickstart/agent-integration">
-    Give your coding agent the Unprice skill and put one paid action behind an authorization.
+    Give your coding agent the Unprice skill and put one agent run behind an authorization.
   </Card>
   <Card title="TypeScript SDK" icon="terminal" href="/libraries/ts/sdk/overview">
     Install the SDK and call the public API with typed results.

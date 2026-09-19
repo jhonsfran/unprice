@@ -7,6 +7,12 @@ Use `runs.start` when a job, workflow, tool, agent, or custom workload needs a b
 before it starts. The customer remains the economic actor; the run is the workload label and spend
 reservation.
 
+<Note>
+  For the common one-hold, one-settle shape, the
+  [reservations helper](/libraries/ts/sdk/runs/reservations) wraps `runs.start`, `runs.settle`, and
+  `runs.end` in three lines. Use the operations directly when the work is multi-step.
+</Note>
+
 <RequestExample>
 
 ```ts

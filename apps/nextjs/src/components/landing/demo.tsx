@@ -21,8 +21,11 @@ const DO_TEST_PATH = "apps/api/src/ingestion/entitlements/EntitlementWindowDO.wo
 
 // Proof that does not depend on us publishing anything. Every row is a real
 // artifact in the repo, and every one can be run by a reader who believes
-// nothing on this page. The first is the invariant a Redis counter breaks:
-// five concurrent over-limit writes, partitioned, in the real Workers runtime.
+// nothing on this page. The concurrency row is not a claim about what Redis
+// cannot do — an atomic script handles this fine, and saying otherwise is how
+// the page loses the one reader who has written one. It is evidence that our
+// own enforcement holds: five concurrent over-limit writes, partitioned, in
+// the real Workers runtime.
 const receipts = [
   {
     label: "AI chatbot",

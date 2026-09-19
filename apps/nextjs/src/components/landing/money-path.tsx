@@ -180,7 +180,7 @@ function RequestDecisionRail({
           </span>
         </div>
         {compact ? null : (
-          <p className="mt-0.5 text-background-text text-xs">the paid action asks before it runs</p>
+          <p className="mt-0.5 text-background-text text-xs">the agent run asks before it spends</p>
         )}
       </div>
 

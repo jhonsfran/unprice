@@ -1,0 +1,102 @@
+---
+title: "Reservations helper"
+description: "The one-hold, one-settle shape of a budgeted run."
+---
+
+`reservations` is a convenience layer in the TypeScript SDK over the `runs` operations. It is not a
+separate API and has no endpoints of its own. Use it for the common shape: hold a maximum, run one
+piece of variable-cost work, settle what it actually cost.
+
+```ts
+import { generateText } from "ai";
+import { Unprice } from "@unprice/api";
+
+const unprice = new Unprice({ token: process.env.UNPRICE_API_KEY! });
+
+// 1. Hold the most this call may cost, against the customer's budget.
+const { result: reservation, error } = await unprice.reservations.reserve({
+  customerId: "cus_1234567890",
+  maximumAmountMinor: 10,
+  idempotencyKey: messageId
+});
+
+// 2. A denial returns here. The provider is never called.
+if (error) {
+  return new Response("Customer budget unavailable", { status: 402 });
+}
+
+const generation = await generateText({ model, prompt, maxOutputTokens: 2_000 });
+
+// 3. Settle actual usage. This also closes the run and releases the remainder.
+const settlement = await reservation.settle({
+  featureSlug: "ai-output-tokens",
+  eventSlug: "completions",
+  id: messageId,
+  properties: { outputTokens: generation.usage.outputTokens }
+});
+
+if (settlement.error) throw settlement.error;
+```
+
+## What each call maps to
+
+| Helper | Operations it performs |
+| --- | --- |
+| `reservations.reserve({ maximumAmountMinor, ... })` | `runs.start({ budgetAmountMinor: maximumAmountMinor, ... })` |
+| `reservation.settle(input)` | `runs.settle({ ...input, runId })`, then `runs.end({ runId, status })` |
+| `reservation.release()` | `runs.end({ runId, status: "canceled" })` |
+
+`settle` derives the end status from the settlement: `completed` when it is accepted or a duplicate,
+`failed` otherwise. It appends `:settle` to your idempotency key for the settlement call, so pass
+the same key you used to reserve.
+
+## The reservation object
+
+<ParamField body="id" type="string">
+    The run ID. Identical to `runId` in the `runs` operations.
+</ParamField>
+
+<ParamField body="customerId" type="string">
+    The customer the budget was held against.
+</ParamField>
+
+<ParamField body="maximumAmountMinor" type="integer">
+    The amount held, in minor units. The same value `runs.start` reports as `budgetAmountMinor`.
+</ParamField>
+
+<ParamField body="currency" type="string">
+    Currency of the held amount.
+</ParamField>
+
+## Common mistakes
+
+<Warning>
+`settle` and `release` are methods on the reservation returned by `reserve`, not on the
+`reservations` resource. `unprice.reservations.settle(...)` does not exist.
+</Warning>
+
+- **Do not call `runs.end` after `reservation.settle()`.** Settling already ended the run. A second
+  end call is redundant and can conflict with the recorded status.
+- **Do not mix the two styles on one run.** If you need `runs.consume` for intermediate steps, or a
+  status the helper does not produce, use the `runs` operations directly for that whole run.
+- **Use `release()` for the abandoned path**, not `settle()` with zero usage. `release` cancels the
+  run and returns the full hold; a zero settlement records a real settlement of nothing.
+
+## When to use the `runs` operations instead
+
+Reach past the helper when the work is multi-step or long-lived:
+
+<CardGroup cols={2}>
+  <Card title="Start a run" icon="play" href="/libraries/ts/sdk/runs/start">
+    Full control over `workloadType`, `workloadId`, `traceId`, and `parentRunId`.
+  </Card>
+  <Card title="Consume mid-run" icon="gauge" href="/libraries/ts/sdk/runs/consume">
+    Authorize a known amount partway through, before a billable step.
+  </Card>
+  <Card title="Settle usage" icon="file-invoice-dollar" href="/libraries/ts/sdk/runs/settle">
+    Account for usage while leaving the run open for more steps.
+  </Card>
+  <Card title="End a run" icon="stop" href="/libraries/ts/sdk/runs/end">
+    Close the run yourself and release the unused budget.
+  </Card>
+</CardGroup>
