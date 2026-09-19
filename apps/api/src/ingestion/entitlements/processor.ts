@@ -284,8 +284,7 @@ export class EntitlementWindowProcessor {
               projectedCost: error.params.projectedCost,
             })
             const denial = bootstrap.result
-            metrics.reservation_bootstrap_duration_ms =
-              bootstrap.walletCreateReservationDurationMs
+            metrics.reservation_bootstrap_duration_ms = bootstrap.walletCreateReservationDurationMs
 
             if (denial) {
               throw new Error(`Batch reservation bootstrap denied: ${denial.deniedReason}`)
@@ -294,8 +293,7 @@ export class EntitlementWindowProcessor {
             reservationAction = "bootstrapped"
             const retry = await this.applyBatchWithCompactDraft(input)
             metrics = retry.metrics
-            metrics.reservation_bootstrap_duration_ms =
-              bootstrap.walletCreateReservationDurationMs
+            metrics.reservation_bootstrap_duration_ms = bootstrap.walletCreateReservationDurationMs
             results.push(...retry.results)
             return { results: retry.results }
           }
