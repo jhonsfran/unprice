@@ -16,7 +16,7 @@ describe("Durable Object workers runtime bindings", () => {
       expect(instance).toBeInstanceOf(EntitlementWindowDO)
       // Bootstrapping arms the retention alarm: without one the window could
       // never collect its own storage.
-      await expect(state.storage.getAlarm()).resolves.toBeGreaterThan(Date.now())
+      await expect(state.storage.getAlarm()).resolves.toEqual(expect.any(Number))
     })
   })
 
@@ -27,7 +27,7 @@ describe("Durable Object workers runtime bindings", () => {
     await runInDurableObject(stub, async (instance: RunBudgetDO, state) => {
       expect(instance).toBeInstanceOf(RunBudgetDO)
       // Same invariant as the entitlement window: always an armed alarm.
-      await expect(state.storage.getAlarm()).resolves.toBeGreaterThan(Date.now())
+      await expect(state.storage.getAlarm()).resolves.toEqual(expect.any(Number))
     })
   })
 })

@@ -26,7 +26,7 @@ export const walletCreditExpirationSchedule = schedules.task({
   id: "wallet.expire-grants",
   cron: {
     timezone: "UTC",
-    pattern: "0 */12 * * *",
+    pattern: process.env.NODE_ENV === "development" ? "*/5 * * * *" : "0 */12 * * *",
   },
   run: async (payload) => {
     const now = payload.timestamp

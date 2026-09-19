@@ -6,7 +6,7 @@ import { cn } from "@unprice/ui/utils"
 import { track } from "@vercel/analytics"
 import { ArrowRight } from "lucide-react"
 import { Link } from "next-view-transitions"
-import { type ComponentProps, type MouseEvent, useEffect, useState } from "react"
+import { type ComponentProps, type MouseEvent, useEffect, useState, useTransition } from "react"
 import { getOrCreateConversionId, persistConversionId } from "~/lib/conversion-session"
 import { ACQUISITION_SIGNUP_URL, buildAuthHref } from "~/lib/signup-funnel"
 
@@ -40,13 +40,13 @@ function isPrimaryUnmodifiedClick(event: MouseEvent<HTMLAnchorElement>): boolean
 
 export function AcquisitionLink({ children, onClick, source, ...props }: AcquisitionLinkProps) {
   const [href, setHref] = useState(ACQUISITION_SIGNUP_URL)
-  const [isPending, setIsPending] = useState(false)
+  const [isPending, startTransition] = useTransition()
 
   useEffect(() => {
-    const sessionId = getOrCreateConversionId()
-    persistConversionId(sessionId)
-    setHref(getAcquisitionHref(sessionId))
-  }, [])
+    if (href !== ACQUISITION_SIGNUP_URL) {
+      window.location.assign(href)
+    }
+  }, [href])
 
   return (
     <Link
@@ -62,14 +62,13 @@ export function AcquisitionLink({ children, onClick, source, ...props }: Acquisi
         if (!isPrimaryUnmodifiedClick(event) || isPending) return
 
         event.preventDefault()
-        setIsPending(true)
 
         const sessionId = getOrCreateConversionId()
         persistConversionId(sessionId)
         track("funnel_acquisition_cta_selected", { source })
 
-        window.requestAnimationFrame(() => {
-          window.location.assign(getAcquisitionHref(sessionId))
+        startTransition(() => {
+          setHref(getAcquisitionHref(sessionId))
         })
       }}
     >

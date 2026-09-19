@@ -3,6 +3,10 @@ import { siteConfig } from "~/constants/layout"
 
 export const runtime = "edge"
 
+const geistBoldFont = fetch(new URL("../../../assets/fonts/Geist-Bold.ttf", import.meta.url)).then(
+  (res) => res.arrayBuffer()
+)
+
 // Brand bracket mark for Satori (no filters). Matches internal/ui/src/unprice.tsx:
 // a pair of brackets in paper ink cradling the amber signal dot.
 const BracketMark = ({ size = 80 }: { size?: number }) => (
@@ -150,10 +154,7 @@ export async function GET(req: Request) {
     }
   }
 
-  // Load font from local assets
-  const font = await fetch(new URL("../../../assets/fonts/Geist-Bold.ttf", import.meta.url)).then(
-    (res) => res.arrayBuffer()
-  )
+  const font = await geistBoldFont
 
   if (!font) {
     return new Response("Failed to load fonts for OG image generation.", { status: 500 })

@@ -26,6 +26,9 @@ const { result: reservation, error } = await unprice.reservations.reserve({
 if (error) {
   return new Response("Customer budget unavailable", { status: 402 })
 }
+if (!reservation.allowed) {
+  return new Response("Customer budget unavailable", { status: 402 })
+}
 
 // 2. Spend only after the reservation succeeds.
 const generation = await generateText({

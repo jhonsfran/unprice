@@ -80,6 +80,7 @@ function VideoBlock() {
           </span>
         </figcaption>
         <video
+          aria-label="Unprice reservation and settlement demo"
           controls
           preload="none"
           poster={DEMO_VIDEO.poster}

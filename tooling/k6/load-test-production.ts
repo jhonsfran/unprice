@@ -2,18 +2,13 @@ import { spawnSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { fileURLToPath } from "node:url"
 import { Unprice } from "@unprice/api"
-import {
-  LOAD_TEST_EVENT_SLUGS,
-  LOAD_TEST_FEATURE_SLUGS,
-  LOAD_TEST_PLAN_SLUG,
-  loadTestPricing,
-} from "./load-test-pricing"
+import { LOAD_TEST_EVENT_SLUGS, LOAD_TEST_PLAN_SLUG, loadTestPricing } from "./load-test-pricing"
 
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url))
 const PRODUCTION_API_URL = "https://api.unprice.dev"
 const BLOCKING_WARNING_CODES = new Set(["enforcement_settings_dropped", "version_settings_dropped"])
 
-const baseUrl = requiredEnv("BASE_URL").replace(/\/$/, "")
+const baseUrl = new URL(requiredEnv("BASE_URL")).origin
 const configToken = requiredEnv("UNPRICE_CONFIG_TOKEN")
 
 if (baseUrl === PRODUCTION_API_URL && process.env.CONFIRM_PRODUCTION_LOAD_TEST !== "yes") {
@@ -91,23 +86,35 @@ async function assertConfigurationCanBeManaged(): Promise<void> {
     )
   }
 
-  const foreignPlanSlugs = current.result.config.plans
-    .map(({ slug }) => slug)
-    .filter((slug) => slug !== LOAD_TEST_PLAN_SLUG)
-  const allowedEventSlugs = new Set<string>(LOAD_TEST_EVENT_SLUGS)
-  const foreignEventSlugs = (current.result.config.events ?? [])
-    .map(({ slug }) => slug)
-    .filter((slug) => !allowedEventSlugs.has(slug))
-  const allowedFeatureSlugs = new Set<string>(LOAD_TEST_FEATURE_SLUGS)
-  const foreignFeatureSlugs = (current.result.config.features ?? [])
-    .map(({ slug }) => slug)
-    .filter((slug) => !allowedFeatureSlugs.has(slug))
+  const { config } = current.result
+  const isEmptyProject =
+    config.plans.length === 0 &&
+    (config.events?.length ?? 0) === 0 &&
+    (config.features?.length ?? 0) === 0
 
-  if (foreignPlanSlugs.length || foreignEventSlugs.length || foreignFeatureSlugs.length) {
+  if (!isEmptyProject && canonicalJson(config) !== canonicalJson(loadTestPricing)) {
     throw new Error(
-      `Refusing to manage a project that is not dedicated to this load test. Other plans: ${foreignPlanSlugs.join(", ") || "none"}; other events: ${foreignEventSlugs.join(", ") || "none"}; other features: ${foreignFeatureSlugs.join(", ") || "none"}`
+      "Refusing to manage a project whose existing configuration does not exactly match the load-test pricing document"
     )
   }
+}
+
+function canonicalJson(value: unknown): string {
+  if (value === null || value === undefined) return "null"
+
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(",")}]`
+  }
+
+  if (typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .filter(([, entryValue]) => entryValue !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entryValue]) => `${JSON.stringify(key)}:${canonicalJson(entryValue)}`)
+      .join(",")}}`
+  }
+
+  return JSON.stringify(value)
 }
 
 async function signUpLoadTestCustomer(

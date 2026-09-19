@@ -1100,7 +1100,9 @@ export class EntitlementWindowProcessor {
         usesWalletReservation: bootstrap.usesWalletReservation,
         wideEvent,
       })
+      const reservationBootstrapDurationMs = metrics.reservationBootstrapDurationMs
       Object.assign(metrics, execution.metrics)
+      metrics.reservationBootstrapDurationMs = reservationBootstrapDurationMs
       result = execution.result
       return execution.result
     } catch (error) {

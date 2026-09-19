@@ -10,6 +10,12 @@ import { TRPCReactProvider } from "~/trpc/client"
 
 export const dynamic = "force-dynamic"
 
+const USERJOT_OPTIONS = {
+  widget: true,
+  theme: "auto",
+  position: process.env.NODE_ENV === "development" ? "left" : "right",
+} as const
+
 export default async function DashboardLayout({
   breadcrumbs,
   sidebar,
@@ -21,11 +27,6 @@ export default async function DashboardLayout({
   sidebar: ReactNode
   header: ReactNode
 }) {
-  const userJotOptions = {
-    widget: true,
-    theme: "auto",
-    position: process.env.NODE_ENV === "development" ? "left" : "right",
-  }
   const userJotId = env.USERJOT_ID?.trim()
 
   return (
@@ -48,7 +49,7 @@ export default async function DashboardLayout({
               }
             });
             document.head.appendChild(s);
-            window.uj.init("${userJotId}", ${JSON.stringify(userJotOptions)});
+            window.uj.init("${userJotId}", ${JSON.stringify(USERJOT_OPTIONS)});
           `}
         </Script>
       ) : null}

@@ -32,7 +32,7 @@ export const budgetRunsRefreshSchedule = schedules.task({
     timezone: "UTC",
     // Every 12 hours. This is only a convergence backstop — the dashboard already
     // refreshes on observation — so this delay is acceptable.
-    pattern: "0 */12 * * *",
+    pattern: process.env.NODE_ENV === "development" ? "*/5 * * * *" : "0 */12 * * *",
   },
   run: async (payload) => {
     const now = payload.timestamp.getTime()
