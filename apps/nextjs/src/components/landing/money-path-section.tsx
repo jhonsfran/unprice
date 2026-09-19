@@ -23,12 +23,13 @@ export function MoneyPathSection() {
           id="money-path-title"
           className="mt-6 max-w-2xl font-primary text-background-textContrast text-display-3"
         >
-          The authorization becomes invoice evidence.
+          The authorization becomes the receipt.
         </h2>
         <p className="mt-5 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-          An allow reserves customer credits before the agent runs. After the work completes,
-          Unprice settles actual usage, captures the ledger movement, and writes the invoice line. A
-          deny creates no work, ledger entry, invoice line, or charge.
+          An allow reserves against the customer&apos;s budget before the agent runs. After the work
+          completes, Unprice settles actual usage, captures the ledger movement, and writes the
+          invoice line. A deny makes zero provider calls: no work, no ledger entry, no invoice line,
+          no charge.
         </p>
       </div>
 

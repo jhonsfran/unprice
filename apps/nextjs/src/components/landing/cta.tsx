@@ -1,6 +1,5 @@
 import { buttonVariants } from "@unprice/ui/button"
 import { cn, focusRing } from "@unprice/ui/utils"
-import { ArrowRight } from "lucide-react"
 import { Link } from "next-view-transitions"
 import Balancer from "react-wrap-balancer"
 import { AcquisitionLink } from "./acquisition-link"
@@ -79,11 +78,9 @@ export default function Cta() {
           ))}
           <AcquisitionLink
             source="closing_cta"
-            pendingLabel="Opening signup…"
             className={buttonVariants({ variant: "primary", className: "gap-1.5" })}
           >
             Start with one agent action
-            <ArrowRight aria-hidden className="size-3.5" />
           </AcquisitionLink>
         </div>
 

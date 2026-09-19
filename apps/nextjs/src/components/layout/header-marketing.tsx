@@ -1,7 +1,6 @@
 import { buttonVariants } from "@unprice/ui/button"
 import { GitHub } from "@unprice/ui/icons"
 import { cn } from "@unprice/ui/utils"
-import { ArrowRight } from "lucide-react"
 import { AcquisitionLink } from "~/components/landing/acquisition-link"
 import { Logo } from "~/components/layout/logo"
 import { MainNav } from "~/components/layout/main-nav"
@@ -52,15 +51,13 @@ export default function HeaderMarketing() {
                 the first viewport.) */}
             <AcquisitionLink
               source="header"
-              pendingLabel="Opening signup…"
               className={buttonVariants({
                 variant: "outline",
                 className: "h-9 gap-1.5 whitespace-nowrap px-2.5 text-xs sm:px-3 sm:text-sm",
               })}
             >
               <span className="sm:hidden">Start now</span>
-              <span className="hidden sm:inline">Start with one paid action</span>
-              <ArrowRight aria-hidden className="size-3.5" />
+              <span className="hidden sm:inline">Start with one agent action</span>
             </AcquisitionLink>
           </div>
         </div>

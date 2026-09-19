@@ -47,7 +47,7 @@ const receipts = [
   },
   {
     label: "the money path",
-    fact: "AGPL-3.0 · ledger, wallet, and decision in the open",
+    fact: "AGPL-3.0 · the decision, the ledger, and the wallet in the open",
     href: REPO_URL,
     linkLabel: "Read the source",
     source: "demo_source" as const,
@@ -59,9 +59,9 @@ const receipts = [
 const shotList = [
   { label: "01", fact: "one plan version · created in the dashboard" },
   { label: "02", fact: "reservations.reserve · $0.10 held" },
-  { label: "03", fact: "generateText · only after funding" },
+  { label: "03", fact: "generateText · only after the allow" },
   { label: "04", fact: "reservation.settle · actual tokens" },
-  { label: "05", fact: "unused credits released · invoice evidence kept" },
+  { label: "05", fact: "unused budget released · receipt kept" },
 ]
 
 function VideoBlock() {
@@ -131,7 +131,8 @@ export function DemoSection() {
         </h2>
         <p className="mt-5 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
           Read the concurrency test, run the benchmark against your deployment, and inspect the
-          money-path source. If the ledger does not balance, the source and tests will show it.
+          authorization source. If a deny leaks a provider call or the ledger does not balance, the
+          source and tests will show it.
         </p>
       </div>
 

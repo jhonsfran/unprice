@@ -1,6 +1,5 @@
 import { buttonVariants } from "@unprice/ui/button"
 import { cn } from "@unprice/ui/utils"
-import { ArrowRight } from "lucide-react"
 import Balancer from "react-wrap-balancer"
 import { AcquisitionLink } from "./acquisition-link"
 import { hasDemoVideo } from "./demo-video"
@@ -15,40 +14,38 @@ export default function Hero() {
     >
       <div className="grid items-center gap-12 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] lg:gap-14 xl:grid-cols-[minmax(0,28rem)_minmax(0,1fr)]">
         <div className="flex flex-col items-start">
-          {/* Two-tone emphasis: the business model in muted text, the money
-              payoff in ink — the clause a margin owner reads first. */}
+          {/* Two-tone emphasis: the mechanism in muted text, the moment it
+              happens in ink — the clause a burned engineer reads first. The
+              whole product is a question of when, not what. */}
           <h1 id="hero-title" className="font-primary text-background-textContrast text-display-1">
             <Balancer>
-              <span className="text-background-text">Sell AI credits and usage.</span> Keep the
-              margin.
+              <span className="text-background-text">Authorize agent spend</span> before the
+              provider call.
             </Balancer>
           </h1>
-          {/* The canonical mechanism sentence leads the subhead verbatim, so a
-              reader who clicked the HN post, the <title> or the OG card lands
-              on the string they clicked. Message-match needs the sentence
-              recognized above the fold, not occupying the h1 — and a benefit
-              reads better as a short declarative than as the negative clause
-              it becomes when the mechanism takes the headline slot.
+          {/* The h1 names the moment; the subhead names the loop, in the four
+              words the runtime actually uses: reserve, run, settle, release.
+              The second sentence is the claim nothing adjacent can make — a
+              deny is not a slower request or a smaller charge, it is zero
+              provider calls — paired with the artifact that proves it.
 
-              Second sentence names three product shapes the avatar recognizes
-              instead of the coined category. "Customer money path" is canon and
-              stays — but it is earned at station 02, directly above the diagram
-              that defines it. Used here it also collides with the funds
-              boundary three rows below ("the money never touches Unprice"): a
-              reader meeting the phrase cold parses it as Unprice sitting in the
-              flow, which is the one misread that costs the most. */}
+              "Customer money path" is canon and stays, but it is earned at
+              station 02, directly above the diagram that defines it. Used here
+              it collides with the funds boundary three rows below ("the money
+              never touches Unprice"): a reader meeting the phrase cold parses
+              it as Unprice sitting in the flow, which is the one misread that
+              costs the most. */}
           <p className="mt-6 max-w-xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-            Authorize every agent run and paid workflow before it creates cost. Reserve customer
-            credits up front, then trace the decision through usage and the invoice.
+            Reserve against the customer&apos;s budget, run the work, then settle what it actually
+            cost and release the rest. A denied run makes zero provider calls and still leaves a
+            receipt that says why.
           </p>
           <div className="mt-10 flex flex-wrap items-center gap-3">
             <AcquisitionLink
               source="hero"
-              pendingLabel="Opening signup…"
               className={buttonVariants({ variant: "primary", className: "gap-1.5" })}
             >
               Start with one agent action
-              <ArrowRight aria-hidden className="size-3.5" />
             </AcquisitionLink>
             {/* Label follows the artifact. Offering to play a recording that
                 does not exist yet is the fastest way to read as a shell — and
@@ -80,7 +77,7 @@ export default function Hero() {
                 AWS bounced rather than ask. Cloudflare is the self-run path
                 only. */}
             <p className="mt-2 font-mono text-[11px] text-background-text leading-5">
-              AGPL-3.0 open source · two calls to integrate · nothing to deploy
+              AGPL-3.0 open source · EU-hosted · two calls to integrate · nothing to deploy
             </p>
           </div>
         </div>

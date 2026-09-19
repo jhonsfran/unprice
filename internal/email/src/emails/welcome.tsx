@@ -25,7 +25,7 @@ const WelcomeEmail = ({
     <Html lang="en" dir="ltr">
       <Tailwind>
         <Head />
-        <Preview>Welcome to Unprice - sell AI credits and agent usage</Preview>
+        <Preview>Welcome to Unprice - spend authorization for AI agents</Preview>
         <Body className="bg-[#191918] py-[40px] font-sans">
           <Container className="mx-auto max-w-[600px] rounded-[8px] bg-[#111110] px-[32px] py-[40px]">
             {/* Logo */}
@@ -44,9 +44,9 @@ const WelcomeEmail = ({
               </Heading>
 
               <Text className="mb-[24px] text-[#ffffff] text-[16px] leading-[24px]">
-                Unprice is open-source billing for AI credits and agent usage. Authorize each agent
-                run or paid workflow before it creates cost, then trace settled usage to the
-                invoice.
+                Unprice is open-source spend authorization for AI agents. Authorize each agent run
+                or paid workflow before it reaches a provider, then settle what it actually cost and
+                keep the receipt.
               </Text>
 
               <Text className="mb-[32px] text-[#ffffff] text-[16px] leading-[24px]">

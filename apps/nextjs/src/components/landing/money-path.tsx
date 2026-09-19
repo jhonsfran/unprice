@@ -380,7 +380,7 @@ function OutcomeFork({ registry }: { registry: MoneyPathRegistry }) {
               <span className="font-mono text-[11px] text-background-text">—</span>
             </div>
             <p className="mt-1 font-mono text-[10px] text-background-text leading-4">
-              no cost created · nothing to explain
+              zero provider calls · no cost to explain
             </p>
             {/* Same arrow grammar as the allow receipt's "reserve → capture":
                 the one thing a deny does produce is its reason, delivered to
@@ -400,7 +400,7 @@ const FULL_ARIA =
   "Three identical usage.consume requests use one $10.00 budget. Each request meters 2,050 tokens at $0.002 per token on plan version pro@v3, for a cost of $4.10. The first two requests are accepted. Each one reserves $4.10, captures the ledger movement, writes the invoice line, and settles payment to your Stripe account. The balance falls to $1.80. Unprice never holds the funds. The third request is denied with LIMIT_EXCEEDED because it needs $4.10. The wallet stays untouched, and Unprice writes no ledger entry, invoice line, or charge. Your app receives the reason."
 
 const COMPACT_ARIA =
-  "Customer credits have $5.90 available. A reservation holds $4.10 before the provider runs and leaves $1.80 available. An identical second reservation is denied with LIMIT_EXCEEDED, so the provider does not run. The full path below traces usage, wallet movement, ledger capture, invoice evidence, and payment in your own Stripe account."
+  "The customer's budget has $5.90 available. A reservation authorizes $4.10 before the provider runs and leaves $1.80 available. An identical second reservation is denied with LIMIT_EXCEEDED, so the provider is never called. The full path below traces usage, wallet movement, ledger capture, invoice evidence, and payment in your own Stripe account."
 
 export function MoneyPath({
   className,
@@ -430,7 +430,7 @@ export function MoneyPath({
           // The reservation arrives with a balance already drawn down, so the
           // denial has something concrete to deny.
           <span className="whitespace-nowrap font-mono text-[10px] text-background-text">
-            customer funds · before provider
+            budget authorized · before provider
           </span>
         ) : (
           <span className="whitespace-nowrap font-mono text-[10px] text-background-text">
@@ -493,7 +493,7 @@ export function MoneyPath({
           className="group mt-5 flex items-baseline justify-between gap-4 border-background-border border-t pt-3"
         >
           <span className="text-background-text text-xs leading-6">
-            Reserve first. Settle actual usage after.
+            Authorize first. Settle what the run actually cost.
           </span>
           <span className="whitespace-nowrap font-mono text-[11px] text-background-text transition-colors duration-regular ease-out-quad group-hover:text-background-textContrast">
             follow the full path ↓
@@ -501,8 +501,8 @@ export function MoneyPath({
         </a>
       ) : (
         <p className="mt-5 border-background-border border-t pt-3 text-background-text text-xs leading-6">
-          Every step is in the public SDK. Reserve variable-cost AI work, or consume known usage in
-          one call. Use TypeScript, REST, or curl.
+          Every step is in the public SDK. Reserve for variable-cost agent work, or authorize known
+          usage in one call. Use TypeScript, REST, or curl.
         </p>
       )}
     </figure>

@@ -104,12 +104,12 @@ function DenialReceiptCard() {
             paddingBottom: "18px",
           }}
         >
-          Sell AI credits and usage. Keep the margin.
+          Authorize agent spend before the provider call.
         </span>
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", width: "100%" }}>
-        <Row label="REQUEST" fact="access.check" />
+        <Row label="REQUEST" fact="reservations.reserve" />
         <Row label="PRICE" fact="2,050 tokens × $0.002 = $4.10" />
         <Row label="BALANCE" fact="$1.80" factColor={AMBER} />
         <div
@@ -121,9 +121,7 @@ function DenialReceiptCard() {
             paddingTop: "22px",
           }}
         >
-          <span style={{ fontSize: "30px", color: DANGER }}>
-            denied · before any cost was created
-          </span>
+          <span style={{ fontSize: "30px", color: DANGER }}>denied · zero provider calls</span>
           <span style={{ fontSize: "26px", color: DANGER, letterSpacing: "0.08em" }}>
             LIMIT_EXCEEDED
           </span>
@@ -260,7 +258,7 @@ export async function GET(req: Request) {
             flexWrap: "wrap",
           }}
         >
-          {["Meter usage", "Budget the request", "Explain the invoice"].map((label) => (
+          {["Reserve the budget", "Deny before cost", "Settle the receipt"].map((label) => (
             <div
               key={label}
               style={{

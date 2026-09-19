@@ -48,6 +48,7 @@ const linkGroups: {
 const footerFacts = [
   { label: "license", fact: "AGPL-3.0 · open source" },
   { label: "status", fact: "early access · free" },
+  { label: "hosting", fact: "EU regions" },
   { label: "payments", fact: "your Stripe account" },
 ]
 
@@ -74,8 +75,8 @@ export default function FooterMarketing() {
           <div className="flex max-w-sm flex-col items-start">
             <Logo size="md" />
             <p className="mt-4 text-background-text text-sm leading-6">
-              Open-source billing for AI credits and agent usage. Every AI charge starts with an
-              authorization.
+              Open-source spend authorization for AI agents. Authorize before the provider call,
+              keep the receipt after.
             </p>
             <div className="mt-6 flex w-full flex-col border-background-border border-t pt-2">
               {footerFacts.map((row) => (
