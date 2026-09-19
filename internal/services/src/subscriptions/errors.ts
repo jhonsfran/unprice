@@ -1,5 +1,5 @@
 import { BaseError } from "@unprice/error"
-import type { DomainErrorKind } from "../domain-error-kind"
+import { DomainError, type DomainErrorKind } from "../domain-error-kind"
 
 export const subscriptionErrorCodes = [
   "SUBSCRIPTION_BUSY",
@@ -60,8 +60,9 @@ export class UnPriceCalculationError extends BaseError {
   }
 }
 
-export class UnPriceSubscriptionError extends BaseError<{ context?: Record<string, unknown> }> {
+export class UnPriceSubscriptionError extends DomainError<{ context?: Record<string, unknown> }> {
   public readonly code: SubscriptionErrorCode
+  public readonly kind: DomainErrorKind
   public readonly retry = false
   public readonly name = UnPriceSubscriptionError.name
 
@@ -79,10 +80,11 @@ export class UnPriceSubscriptionError extends BaseError<{ context?: Record<strin
       context,
     })
     this.code = code
+    this.kind = subscriptionErrorKinds[code]
   }
 }
 
-export class UnPriceMachineError extends BaseError {
+export class UnPriceMachineError extends DomainError {
   public readonly retry = false
   public readonly name = UnPriceMachineError.name
   public readonly kind: DomainErrorKind

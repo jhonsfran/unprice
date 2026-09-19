@@ -1,8 +1,7 @@
 import type { z } from "zod"
 
 import type { deniedReasonSchema } from "@unprice/db/validators"
-import { BaseError } from "@unprice/error"
-import type { DomainErrorKind } from "../domain-error-kind"
+import { DomainError, type DomainErrorKind } from "../domain-error-kind"
 
 export type DenyReason = z.infer<typeof deniedReasonSchema>
 
@@ -23,10 +22,11 @@ export const customerErrorKinds: Partial<Record<DenyReason, DomainErrorKind>> = 
   CURRENCY_MISMATCH: "precondition",
 }
 
-export class UnPriceCustomerError extends BaseError<{ customerId?: string }> {
+export class UnPriceCustomerError extends DomainError<{ customerId?: string }> {
   public readonly retry = false
   public readonly name = UnPriceCustomerError.name
   public readonly code: DenyReason
+  public readonly kind: DomainErrorKind
 
   constructor({
     code,
@@ -44,5 +44,6 @@ export class UnPriceCustomerError extends BaseError<{ customerId?: string }> {
       },
     })
     this.code = code
+    this.kind = customerErrorKinds[code] ?? "internal"
   }
 }

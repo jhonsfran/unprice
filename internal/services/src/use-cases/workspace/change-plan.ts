@@ -1,12 +1,12 @@
 import type { Database } from "@unprice/db"
 import { paymentProviderSchema, subscriptionItemsConfigSchema } from "@unprice/db/validators"
-import { BaseError, Err, type FetchError, Ok, type Result, type SchemaError } from "@unprice/error"
+import { Err, type FetchError, Ok, type Result, type SchemaError } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { z } from "zod"
 import type { UnPriceBillingError } from "../../billing/errors"
 import type { ServiceContext } from "../../context"
 import type { UnPriceCustomerError } from "../../customers/errors"
-import type { DomainErrorKind } from "../../domain-error-kind"
+import { DomainError, type DomainErrorKind } from "../../domain-error-kind"
 import {
   type UnPricePaymentProviderError,
   isMissingPaymentMethodError,
@@ -108,7 +108,7 @@ type WorkspaceChangePlanFailure =
   | UnPriceSubscriptionError
   | WorkspaceChangePlanError
 
-export class WorkspaceChangePlanError extends BaseError<{
+export class WorkspaceChangePlanError extends DomainError<{
   billingProjectId?: string
   customerId?: string
   targetPlanVersionId?: string

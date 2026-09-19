@@ -1,5 +1,4 @@
-import { BaseError } from "@unprice/error"
-import type { DomainErrorKind } from "../domain-error-kind"
+import { DomainError, type DomainErrorKind } from "../domain-error-kind"
 
 export const billingErrorCodes = [
   "SUBSCRIPTION_BUSY",
@@ -47,8 +46,9 @@ export const billingErrorKinds: Record<BillingErrorCode, DomainErrorKind> = {
   BILLING_OPERATION_FAILED: "internal",
 }
 
-export class UnPriceBillingError extends BaseError<{ context?: Record<string, unknown> }> {
+export class UnPriceBillingError extends DomainError<{ context?: Record<string, unknown> }> {
   public readonly code: BillingErrorCode
+  public readonly kind: DomainErrorKind
   public readonly retry = false
   public readonly name = UnPriceBillingError.name
 
@@ -66,5 +66,6 @@ export class UnPriceBillingError extends BaseError<{ context?: Record<string, un
       context,
     })
     this.code = code
+    this.kind = billingErrorKinds[code]
   }
 }

@@ -1,16 +1,4 @@
-import { SchemaError } from "@unprice/error"
-import { UnPriceBillingError, billingErrorKinds } from "./billing/errors"
-import { UnPriceCustomerError, customerErrorKinds } from "./customers/errors"
-import {
-  UnPriceMachineError,
-  UnPriceSubscriptionError,
-  subscriptionErrorKinds,
-} from "./subscriptions/errors"
-import { ReplayIngestionEventsError } from "./use-cases/ingestion/replay-ingestion-events"
-import { SubscriptionChangePhasePlanError } from "./use-cases/subscription/change-plan"
-import { WorkspaceChangePlanError } from "./use-cases/workspace/change-plan"
-import { GetWorkspaceBillingOverviewError } from "./use-cases/workspace/get-billing-overview"
-import { GetWorkspaceUpgradeOptionsError } from "./use-cases/workspace/get-upgrade-options"
+import { BaseError, type ErrorContext, SchemaError } from "@unprice/error"
 
 export type DomainErrorKind =
   | "bad_request"
@@ -20,18 +8,16 @@ export type DomainErrorKind =
   | "not_found"
   | "internal"
 
+export abstract class DomainError<
+  TContext extends ErrorContext = ErrorContext,
+> extends BaseError<TContext> {
+  public abstract readonly kind: DomainErrorKind
+}
+
 // Returns the kind for a known domain error, or null when the error is unknown
 // (caller maps null -> internal). SchemaError -> bad_request is handled here too.
 export function resolveDomainErrorKind(error: unknown): DomainErrorKind | null {
   if (error instanceof SchemaError) return "bad_request"
-  if (error instanceof UnPriceSubscriptionError) return subscriptionErrorKinds[error.code]
-  if (error instanceof UnPriceBillingError) return billingErrorKinds[error.code]
-  if (error instanceof UnPriceCustomerError) return customerErrorKinds[error.code] ?? "internal"
-  if (error instanceof UnPriceMachineError) return error.kind
-  if (error instanceof WorkspaceChangePlanError) return error.kind
-  if (error instanceof SubscriptionChangePhasePlanError) return error.kind
-  if (error instanceof GetWorkspaceUpgradeOptionsError) return error.kind
-  if (error instanceof GetWorkspaceBillingOverviewError) return error.kind
-  if (error instanceof ReplayIngestionEventsError) return "bad_request"
+  if (error instanceof DomainError) return error.kind
   return null
 }

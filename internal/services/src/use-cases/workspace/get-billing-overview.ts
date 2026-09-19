@@ -1,12 +1,12 @@
 import { type Interval, analyticsIntervalSchema } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import { paymentProviderSchema } from "@unprice/db/validators"
-import { BaseError, Err, type FetchError, Ok, type Result } from "@unprice/error"
+import { Err, type FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { z } from "zod"
 import type { ServiceContext } from "../../context"
 import type { UnPriceCustomerError } from "../../customers/errors"
-import type { DomainErrorKind } from "../../domain-error-kind"
+import { DomainError, type DomainErrorKind } from "../../domain-error-kind"
 import type { UnPriceWalletError } from "../../wallet/errors"
 import {
   emptyUsageDashboardOutput,
@@ -76,7 +76,7 @@ export type GetWorkspaceBillingOverviewOutput = z.infer<
   typeof getWorkspaceBillingOverviewOutputSchema
 >
 
-export class GetWorkspaceBillingOverviewError extends BaseError<{
+export class GetWorkspaceBillingOverviewError extends DomainError<{
   billingProjectId?: string
   customerId?: string
   workspaceId?: string

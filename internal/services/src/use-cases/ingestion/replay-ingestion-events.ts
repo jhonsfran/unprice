@@ -1,5 +1,6 @@
 import { BaseError, Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import { z } from "zod"
+import { DomainError } from "../../domain-error-kind"
 import {
   type IngestionQueueMessage,
   type RawIngestionQueueClient,
@@ -52,9 +53,10 @@ export type ReplayIngestionEventsDeps = {
 
 export type ReplayIngestionEventsFailure = ReplayIngestionEventsError | FetchError
 
-export class ReplayIngestionEventsError extends BaseError<{
+export class ReplayIngestionEventsError extends DomainError<{
   reason: ReplayIngestionEventsErrorReason
 }> {
+  public readonly kind = "bad_request" as const
   public override readonly name = "ReplayIngestionEventsError"
   public readonly retry = false
   public readonly reason: ReplayIngestionEventsErrorReason

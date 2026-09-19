@@ -6,12 +6,12 @@ import {
   subscriptionChangePlanSchema,
   subscriptionStatusSchema,
 } from "@unprice/db/validators"
-import { BaseError, Err, FetchError, Ok, type Result, type SchemaError } from "@unprice/error"
+import { Err, FetchError, Ok, type Result, type SchemaError } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { z } from "zod"
 import type { UnPriceBillingError } from "../../billing/errors"
 import type { ServiceContext } from "../../context"
-import type { DomainErrorKind } from "../../domain-error-kind"
+import { DomainError, type DomainErrorKind } from "../../domain-error-kind"
 import type { UnPriceSubscriptionError } from "../../subscriptions/errors"
 import { checkPaymentProviderAvailability } from "../payment-provider/availability"
 
@@ -69,7 +69,7 @@ type SubscriptionChangePhasePlanFailure =
   | UnPriceSubscriptionError
   | SubscriptionChangePhasePlanError
 
-export class SubscriptionChangePhasePlanError extends BaseError<{
+export class SubscriptionChangePhasePlanError extends DomainError<{
   projectId?: string
   subscriptionId?: string
   targetPlanVersionId?: string

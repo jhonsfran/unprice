@@ -6,12 +6,12 @@ import {
   paymentProviderSchema,
   workspaceSelectBase,
 } from "@unprice/db/validators"
-import { BaseError, Err, type FetchError, Ok, type Result } from "@unprice/error"
+import { Err, type FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { z } from "zod"
 import type { ServiceContext } from "../../context"
 import type { UnPriceCustomerError } from "../../customers/errors"
-import type { DomainErrorKind } from "../../domain-error-kind"
+import { DomainError, type DomainErrorKind } from "../../domain-error-kind"
 import {
   type UnPricePaymentProviderError,
   isMissingPaymentMethodError,
@@ -93,7 +93,7 @@ export type GetWorkspaceUpgradeOptionsOutput = z.infer<
   typeof getWorkspaceUpgradeOptionsOutputSchema
 >
 
-export class GetWorkspaceUpgradeOptionsError extends BaseError<{
+export class GetWorkspaceUpgradeOptionsError extends DomainError<{
   billingProjectId?: string
   customerId?: string
   workspaceId?: string
