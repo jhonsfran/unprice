@@ -5,14 +5,13 @@ import { describe, expect, it, vi } from "vitest"
 import { CloudflareEntitlementWindowClient } from "./entitlements/client"
 import { CloudflareReportingQueueClient } from "./reporting/client"
 import { createIngestionService } from "./service"
+import { createDurableObjectNamespaceMock } from "./testing/durable-object-namespace-mock"
 
 describe("createIngestionService", () => {
   it("builds the ingestion service with shared cloudflare clients", () => {
     const env = {
       APP_ENV: "development",
-      entitlementwindow: {
-        getByName: vi.fn(),
-      },
+      entitlementwindow: createDurableObjectNamespaceMock({}),
       INGESTION_REPORTING_QUEUE: {
         send: vi.fn(),
       },

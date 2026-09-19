@@ -24,9 +24,14 @@ vi.mock("~/ingestion/entitlements/client", () => ({
   },
 }))
 
-const runBudgetMocks = vi.hoisted(() => ({
-  getByName: vi.fn(),
-}))
+// Inlined rather than using testing/durable-object-namespace-mock: vi.hoisted
+// runs before imports. Same contract — jurisdiction() before getByName(), see
+// ingestion/do-placement.ts.
+const runBudgetMocks = vi.hoisted(() => {
+  const getByName = vi.fn()
+  const namespace = { getByName, jurisdiction: vi.fn(() => namespace) }
+  return { getByName, namespace }
+})
 
 import { registerFlushReservationsForInvoicingV1 } from "./flushReservationsForInvoicingV1"
 
@@ -290,7 +295,11 @@ describe("flushReservationsForInvoicingV1 route", () => {
 
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ ok: true, flushed: 2, skipped: 0 })
-    expect(runBudgetMocks.getByName).toHaveBeenCalledWith("development:proj_123:cus_123:brun_123")
+    // Placement itself is asserted in ingestion/do-placement.test.ts. This env
+    // is APP_ENV=development, which deliberately skips the jurisdiction.
+    expect(runBudgetMocks.getByName).toHaveBeenCalledWith("development:proj_123:cus_123:brun_123", {
+      locationHint: "weur",
+    })
     expect(flushCapturesForInvoicing).toHaveBeenCalledWith({
       statementKey: "stmt_123",
       billingPeriodIds: ["bp_123"],
@@ -359,7 +368,7 @@ function createTestApp(options: {
   const env = {
     APP_ENV: "development",
     entitlementwindow: {},
-    runbudget: { getByName: runBudgetMocks.getByName },
+    runbudget: runBudgetMocks.namespace,
   }
 
   const executionCtx = {

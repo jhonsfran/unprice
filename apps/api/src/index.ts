@@ -4,6 +4,7 @@ import { partyserverMiddleware } from "hono-party"
 import { cors } from "hono/cors"
 import { type Env, createRuntimeEnv } from "~/env"
 import { newApp } from "~/hono/app"
+import { durableObjectJurisdiction } from "~/ingestion/do-placement"
 import { init } from "~/middleware/init"
 
 import serveEmojiFavicon from "stoker/middlewares/serve-emoji-favicon"
@@ -109,6 +110,13 @@ app.use(
     onError: (error) => log.error({ message: "Partyserver websocket error", error }),
     options: {
       prefix: "broadcast",
+      // DurableObjectProject is addressed by partyserver, not by our own
+      // getByName, so this is the only place its placement can be set. It
+      // holds ephemeral broadcast state, but leaving it outside the EU would
+      // make the residency claim on the landing page false. Resolves to
+      // undefined locally — workerd rejects jurisdictions outright. See
+      // ingestion/do-placement.ts.
+      jurisdiction: durableObjectJurisdiction(env.APP_ENV),
       onBeforeConnect: async (req) => {
         const url = new URL(req.url)
         const { room } = resolvePartyAndRoomFromPath(url.pathname)

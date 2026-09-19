@@ -1,7 +1,7 @@
 import { evictDurableObject, reset, runDurableObjectAlarm } from "cloudflare:test"
 import { env } from "cloudflare:workers"
-import { buildIngestionWindowName } from "@unprice/services/ingestion"
 import { afterEach, describe, expect, it } from "vitest"
+import { getEntitlementWindowStub } from "~/ingestion/do-placement"
 import { createApplyInput } from "./entitlement-window-test-fixtures"
 import { describeEntitlementWindowProcessorContract } from "./testing/processor-contract"
 
@@ -12,13 +12,16 @@ function entitlementStub(params: {
   customerId?: string
   projectId?: string
 }) {
-  return env.entitlementwindow.getByName(
-    buildIngestionWindowName({
-      appEnv: "test",
+  // Addressed exactly the way production addresses it. APP_ENV comes from the
+  // real binding rather than a literal: it drives both the object name and the
+  // jurisdiction, and workerd rejects jurisdictions outright.
+  return getEntitlementWindowStub(
+    { APP_ENV: env.APP_ENV, entitlementwindow: env.entitlementwindow },
+    {
       customerEntitlementId: params.customerEntitlementId ?? "ce_123",
       customerId: params.customerId ?? "cus_123",
       projectId: params.projectId ?? "proj_123",
-    })
+    }
   )
 }
 

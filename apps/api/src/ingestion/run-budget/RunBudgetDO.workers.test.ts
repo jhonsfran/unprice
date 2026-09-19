@@ -2,6 +2,7 @@ import { evictDurableObject, reset, runInDurableObject } from "cloudflare:test"
 import { env } from "cloudflare:workers"
 import { drizzle } from "drizzle-orm/durable-sqlite"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { runBudgetNamespace } from "~/ingestion/do-placement"
 import type { RunBudgetDO } from "./RunBudgetDO"
 import type {
   ApplyRunSyncEventInput,
@@ -41,7 +42,7 @@ describeRunBudgetProcessorContract(
       schedulerFailures: 0,
     }
     const createTarget = (): RunBudgetProcessorContractTarget => {
-      const stub = env.runbudget.getByName(name)
+      const stub = runBudgetNamespace(env).getByName(name)
       const invoke = async <T>(fn: (processor: RunBudgetProcessor) => Promise<T>): Promise<T> =>
         runInDurableObject(stub, async (instance: RunBudgetDO, state) => {
           await instance
@@ -161,7 +162,7 @@ describeRunBudgetProcessorContract(
     return {
       target: createTarget(),
       revive: async () => {
-        await evictDurableObject(env.runbudget.getByName(name))
+        await evictDurableObject(runBudgetNamespace(env).getByName(name))
         return createTarget()
       },
     }
@@ -170,7 +171,7 @@ describeRunBudgetProcessorContract(
 
 describe("RunBudgetProcessor (Durable Object shared run concurrency)", () => {
   it("does not overspend a shared run when concurrent consumes arrive", async () => {
-    const stub = env.runbudget.getByName(`test:run-budget-shared:${crypto.randomUUID()}`)
+    const stub = runBudgetNamespace(env).getByName(`test:run-budget-shared:${crypto.randomUUID()}`)
     const wallet = {
       createReservation: vi.fn(
         async (_input: Parameters<RunBudgetWalletOps["createReservation"]>[0]) => ({

@@ -1,5 +1,6 @@
 import { RunBudgetError } from "@unprice/services/use-cases"
 import { describe, expect, it, vi } from "vitest"
+import { createDurableObjectNamespaceMock } from "../testing/durable-object-namespace-mock"
 import { CloudflareRunBudgetClient } from "./client"
 
 describe("CloudflareRunBudgetClient", () => {
@@ -12,11 +13,11 @@ describe("CloudflareRunBudgetClient", () => {
       remainingAmount: 100,
       walletReservationId: "res_123",
     })
-    const getByName = vi.fn().mockReturnValue({ startRun })
+    const runbudget = createDurableObjectNamespaceMock({ startRun })
 
     const env = {
       APP_ENV: "preview",
-      runbudget: { getByName },
+      runbudget,
     } as unknown as ConstructorParameters<typeof CloudflareRunBudgetClient>[0]
     const client = new CloudflareRunBudgetClient(env)
 
@@ -29,7 +30,10 @@ describe("CloudflareRunBudgetClient", () => {
       idempotencyKey: "idem_123",
     })
 
-    expect(getByName).toHaveBeenCalledWith("preview:proj_123:cus_123:brun_123")
+    expect(runbudget.jurisdiction).toHaveBeenCalledWith("eu")
+    expect(runbudget.getByName).toHaveBeenCalledWith("preview:proj_123:cus_123:brun_123", {
+      locationHint: "weur",
+    })
     expect(startRun).toHaveBeenCalledWith(
       expect.objectContaining({
         projectId: "proj_123",
@@ -43,10 +47,10 @@ describe("CloudflareRunBudgetClient", () => {
     const flushCapturesForInvoicing = vi
       .fn()
       .mockResolvedValue({ ok: true, flushed: 2, skipped: 1 })
-    const getByName = vi.fn().mockReturnValue({ flushCapturesForInvoicing })
+    const runbudget = createDurableObjectNamespaceMock({ flushCapturesForInvoicing })
     const env = {
       APP_ENV: "preview",
-      runbudget: { getByName },
+      runbudget,
     } as unknown as ConstructorParameters<typeof CloudflareRunBudgetClient>[0]
     const client = new CloudflareRunBudgetClient(env)
 
@@ -59,7 +63,10 @@ describe("CloudflareRunBudgetClient", () => {
     })
 
     expect(result.val).toEqual({ flushed: 2, skipped: 1 })
-    expect(getByName).toHaveBeenCalledWith("preview:proj_123:cus_123:brun_123")
+    expect(runbudget.jurisdiction).toHaveBeenCalledWith("eu")
+    expect(runbudget.getByName).toHaveBeenCalledWith("preview:proj_123:cus_123:brun_123", {
+      locationHint: "weur",
+    })
     expect(flushCapturesForInvoicing).toHaveBeenCalledWith({
       statementKey: "stmt_123",
       billingPeriodIds: ["bp_123"],
@@ -68,12 +75,11 @@ describe("CloudflareRunBudgetClient", () => {
 
   it("returns a RunBudgetError when an invoicing flush fails", async () => {
     const cause = new RunBudgetError({ message: "capture unavailable" })
-    const getByName = vi.fn().mockReturnValue({
-      flushCapturesForInvoicing: vi.fn().mockRejectedValue(cause),
-    })
     const env = {
       APP_ENV: "production",
-      runbudget: { getByName },
+      runbudget: createDurableObjectNamespaceMock({
+        flushCapturesForInvoicing: vi.fn().mockRejectedValue(cause),
+      }),
     } as unknown as ConstructorParameters<typeof CloudflareRunBudgetClient>[0]
     const client = new CloudflareRunBudgetClient(env)
 
@@ -91,12 +97,11 @@ describe("CloudflareRunBudgetClient", () => {
   })
 
   it("uses a generic message when an invoicing flush rejects without an Error", async () => {
-    const getByName = vi.fn().mockReturnValue({
-      flushCapturesForInvoicing: vi.fn().mockRejectedValue("capture unavailable"),
-    })
     const env = {
       APP_ENV: "production",
-      runbudget: { getByName },
+      runbudget: createDurableObjectNamespaceMock({
+        flushCapturesForInvoicing: vi.fn().mockRejectedValue("capture unavailable"),
+      }),
     } as unknown as ConstructorParameters<typeof CloudflareRunBudgetClient>[0]
     const client = new CloudflareRunBudgetClient(env)
 

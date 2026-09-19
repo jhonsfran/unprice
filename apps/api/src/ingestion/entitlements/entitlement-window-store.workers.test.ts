@@ -2,6 +2,7 @@ import { reset, runInDurableObject } from "cloudflare:test"
 import { env } from "cloudflare:workers"
 import { drizzle } from "drizzle-orm/durable-sqlite"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { entitlementWindowNamespace } from "~/ingestion/do-placement"
 import type { EntitlementWindowDO } from "./EntitlementWindowDO"
 import { entitlementPeriodUsageTable, schema } from "./db/schema"
 import { EntitlementWindowStore } from "./entitlement-window-store"
@@ -13,7 +14,7 @@ afterEach(async () => {
 
 describe("EntitlementWindowStore SQLite reads", () => {
   it("reads only active period buckets when broad retained history exists", async () => {
-    const stub = env.entitlementwindow.getByName("test:store:bounded-active-buckets")
+    const stub = entitlementWindowNamespace(env).getByName("test:store:bounded-active-buckets")
 
     await runInDurableObject(stub, async (instance: EntitlementWindowDO, state) => {
       // Await constructor migrations before opening a second store over the same SQLite handle.

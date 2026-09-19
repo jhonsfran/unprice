@@ -6,15 +6,13 @@ import { createRunBudgetApplyInput } from "./testing/processor-contract"
 
 function createPricingHarness(meterFacts: unknown[]) {
   const apply = vi.fn(async () => ({ allowed: true, meterFacts }))
-  const idFromName = vi.fn(() => "entitlement-id")
+  const getByName = vi.fn(() => ({ apply }))
+  const jurisdiction = vi.fn(() => ({ getByName }))
   const env = {
     APP_ENV: "test",
-    entitlementwindow: {
-      idFromName,
-      get: vi.fn(() => ({ apply })),
-    },
+    entitlementwindow: { jurisdiction, getByName },
   } as unknown as Pick<Env, "APP_ENV" | "entitlementwindow">
-  return { apply, delegate: createRunBudgetPricingDelegate(env), idFromName }
+  return { apply, delegate: createRunBudgetPricingDelegate(env), getByName, jurisdiction }
 }
 
 function pricingInput() {
@@ -37,7 +35,12 @@ describe("RunBudget pricing adapter", () => {
   it("addresses the entitlement window and forwards external-reservation pricing", async () => {
     const harness = createPricingHarness([createRunBudgetMeterFact()])
     await expect(harness.delegate.apply(pricingInput())).resolves.toMatchObject({ allowed: true })
-    expect(harness.idFromName).toHaveBeenCalledWith("test:proj_1:cus_1:ce_test_1")
+    // Byte-identical to the name the ingestion client builds. If these two
+    // paths ever diverge, the entitlement gets two durable objects.
+    expect(harness.jurisdiction).toHaveBeenCalledWith("eu")
+    expect(harness.getByName).toHaveBeenCalledWith("test:proj_1:cus_1:ce_test_1", {
+      locationHint: "weur",
+    })
     expect(harness.apply).toHaveBeenCalledWith(
       expect.objectContaining({
         idempotencyKey: "idem_consume_1:ew",

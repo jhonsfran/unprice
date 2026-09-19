@@ -1,5 +1,4 @@
 import { BaseError, Err, Ok, type Result } from "@unprice/error"
-import { buildRunBudgetName } from "@unprice/services/ingestion"
 import type {
   RunBudgetClient,
   RunBudgetError,
@@ -9,15 +8,14 @@ import type {
 } from "@unprice/services/use-cases"
 import { RunBudgetError as RunBudgetErrorClass } from "@unprice/services/use-cases"
 import type { Env } from "~/env"
+import { getRunBudgetStub } from "../do-placement"
 import type { RunBudgetDecision } from "./contracts"
 
 export class CloudflareRunBudgetClient implements RunBudgetClient {
-  private readonly appEnv: Env["APP_ENV"]
-  private readonly runbudget: Env["runbudget"]
+  private readonly env: Pick<Env, "APP_ENV" | "runbudget">
 
   constructor(env: Pick<Env, "APP_ENV" | "runbudget">) {
-    this.appEnv = env.APP_ENV
-    this.runbudget = env.runbudget
+    this.env = env
   }
 
   async startRun(
@@ -144,14 +142,8 @@ export class CloudflareRunBudgetClient implements RunBudgetClient {
     }
   }
 
+  // Addressing (name, jurisdiction, location hint) lives in do-placement.ts.
   private stub(input: { projectId: string; customerId: string; runId: string }) {
-    return this.runbudget.getByName(
-      buildRunBudgetName({
-        appEnv: this.appEnv,
-        customerId: input.customerId,
-        projectId: input.projectId,
-        runId: input.runId,
-      })
-    )
+    return getRunBudgetStub(this.env, input)
   }
 }
