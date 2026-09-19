@@ -172,6 +172,12 @@ patterns. Keep it cheap to load and useful.
   `.nextjs.<timestamp>.raw.log`. Also you can use openlogs tail -n 100 to get the latest logs.
 - 2026-05-18: API Axiom drain flushes should be batched through scheduled `waitUntil`;
   reserve immediate flushes for errors, thrown DO operations, and slow requests.
+- 2026-09-19: Deployed Cloudflare Worker timers only advance after I/O; `Date.now()` and
+  `performance.now()` can both report `0` for synchronous Durable Object CPU/SQLite work. Use
+  caller-side RPC timing, native CPU/wall traces, and separate timers around awaited wallet calls.
+- 2026-09-19: `EntitlementWindowDO` awaits `ready` before `runDoOperation`, so operation duration
+  excludes migration/initialization cold-start time; measure readiness separately and keep the DO
+  id distinct from a per-invocation request id.
 - 2026-06-08: EntitlementWindowDO batch diagnostics that must be queried in Axiom need a
   first-class drain event; constructor-scoped DO logger entries can be absent from top-level
   Axiom rows, leaving only the outer `runDoOperation` wrapper fields.

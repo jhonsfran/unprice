@@ -30,7 +30,7 @@
     "@unprice/error": "workspace:^",
     "@unprice/analytics": "workspace:^",
     "evlog": "2.4.1",
-    "next": "15.5.21",
+    "next": "15.5.24",
     "next-auth": "5.0.0-beta.32",
     "zod": "^3.24.2"
   },

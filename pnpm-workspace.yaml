@@ -5,7 +5,7 @@ packages:
   - internal/*
 
 overrides:
-  "adm-zip@^0.5.0": 0.6.0
+  "adm-zip@^0.5.0": 0.6.1
   "brace-expansion@^1.1.0": 1.1.18
   "brace-expansion@^2.0.0": 2.1.4
   "brace-expansion@^5.0.0": 5.0.9
@@ -13,17 +13,20 @@ overrides:
   date-fns: ^3.3.1
   deepmerge-ts: 8.0.0
   engine.io: 6.6.7
-  fast-uri: 3.1.5
+  fast-uri: 3.1.6
   fast-xml-parser: 5.10.1
-  "js-yaml@^3.0.0": 3.15.0
-  "js-yaml@^4.0.0": 4.3.0
-  nodemailer: ^9.0.1
+  "js-yaml@^3.0.0": 3.15.2
+  "js-yaml@^4.0.0": 4.3.2
+  nodemailer: 9.1.0
   "nanoid@^3.0.0": 3.3.18
   "nanoid@^5.0.0": 5.1.16
   ip-address: 10.3.1
   postcss: 8.5.18
-  "sharp@^0.33.0": 0.35.0
-  "sharp@^0.34.0": 0.35.0
+  "sharp@^0.33.0": 0.35.4
+  "sharp@^0.34.0": 0.35.4
+  "sharp@^0.35.0": 0.35.4
+  browserslist: 4.28.7
+  smol-toml: 1.7.1
   shell-quote: 1.9.0
   socket.io-parser: 4.2.7
   systeminformation: 5.31.7
