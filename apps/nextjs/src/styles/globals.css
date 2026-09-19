@@ -84,6 +84,15 @@
     scroll-padding-top: 4rem;
   }
 
+  /* The dashboard is a fixed-viewport app shell: its own scrollers (the content
+   * well, each workbench pane) are the only ones that should move. Anything
+   * injected as a sibling of the shell — dev toolbars, feedback widgets — must
+   * not be able to give the document a scrollbar that drags the whole UI. */
+  body:has([data-app-shell]) {
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
   /* default styles */
   h1 {
     @apply font-primary text-2xl font-extrabold;
