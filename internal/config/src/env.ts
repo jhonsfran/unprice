@@ -9,7 +9,7 @@ export const env = createEnv({
   server: {},
   client: {
     NEXT_PUBLIC_APP_DOMAIN: z.string().optional().default("localhost:3000"),
-    NEXT_PUBLIC_APP_ENV: z.enum(["development", "preview", "production"]).default("development"),
+    NEXT_PUBLIC_APP_ENV: z.enum(["development", "preview", "production"]).optional(),
   },
   clientPrefix: "NEXT_PUBLIC_",
   runtimeEnv: {

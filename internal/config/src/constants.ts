@@ -5,26 +5,31 @@ export const STAGES = ["prod", "test", "dev"] as const
 const MAIN_DOMAIN = "unprice.dev"
 const SITES_DOMAIN = "builderai.sh"
 
-// sometimes we need to use the vercel env from the client
-const APP_ENV = env.APP_ENV || env.NEXT_PUBLIC_APP_ENV
+// Prefer the public value because it is available in both server and client bundles.
+// The server value remains a fallback for non-browser consumers.
+const APP_ENV = env.NEXT_PUBLIC_APP_ENV ?? env.APP_ENV
 
 const DEV_APP_DOMAIN = env.NEXT_PUBLIC_APP_DOMAIN
+const IS_LOCAL_APP_DOMAIN = /^localhost(?::\d+)?$/.test(DEV_APP_DOMAIN)
 
-export const BASE_DOMAIN =
-  APP_ENV === "production"
+export const BASE_DOMAIN = IS_LOCAL_APP_DOMAIN
+  ? DEV_APP_DOMAIN
+  : APP_ENV === "production"
     ? MAIN_DOMAIN
     : APP_ENV === "preview"
       ? `${env.NEXT_PUBLIC_APP_DOMAIN}`
       : DEV_APP_DOMAIN
 
-export const BASE_URL =
-  APP_ENV === "production"
+export const BASE_URL = IS_LOCAL_APP_DOMAIN
+  ? `http://${DEV_APP_DOMAIN}`
+  : APP_ENV === "production"
     ? `https://${MAIN_DOMAIN}`
     : APP_ENV === "preview"
       ? `https://${env.NEXT_PUBLIC_APP_DOMAIN}`
       : `http://${DEV_APP_DOMAIN}`
 
-export const APP_BASE_DOMAIN = `app.${BASE_DOMAIN}`
+export const APP_BASE_DOMAIN =
+  IS_LOCAL_APP_DOMAIN || APP_ENV !== "preview" ? `app.${BASE_DOMAIN}` : `app-${BASE_DOMAIN}`
 
 export const SITES_BASE_DOMAIN =
   APP_ENV === "production" ? SITES_DOMAIN : APP_ENV === "preview" ? SITES_DOMAIN : DEV_APP_DOMAIN
@@ -48,8 +53,9 @@ export function isAppHostname(domain: string): boolean {
   return false
 }
 
-export const APP_DOMAIN =
-  APP_ENV === "production"
+export const APP_DOMAIN = IS_LOCAL_APP_DOMAIN
+  ? `http://app.${DEV_APP_DOMAIN}/`
+  : APP_ENV === "production"
     ? `https://app.${MAIN_DOMAIN}/`
     : APP_ENV === "preview"
       ? `https://app-${env.NEXT_PUBLIC_APP_DOMAIN}/`
