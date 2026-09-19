@@ -56,16 +56,19 @@ async function main(): Promise<void> {
   const runtimeToken = requiredEnv("UNPRICE_TOKEN")
   const projectId = requiredEnv("PROJECT_ID")
   const runtimeClient = new Unprice({ baseUrl, token: runtimeToken })
-  const customerId = await signUpLoadTestCustomer(runtimeClient)
-  const testStartedAt = Date.now() - 1_000
+  const latencyCustomerId = await signUpLoadTestCustomer(runtimeClient, "latency")
 
-  runK6("latency", { baseUrl, customerId, projectId, runtimeToken })
-  runK6("baseline", { baseUrl, customerId, projectId, runtimeToken })
+  runK6("latency", { baseUrl, customerId: latencyCustomerId, projectId, runtimeToken })
+
+  const baselineCustomerId = await signUpLoadTestCustomer(runtimeClient, "baseline")
+  const baselineStartedAt = Date.now() - 1_000
+
+  runK6("baseline", { baseUrl, customerId: baselineCustomerId, projectId, runtimeToken })
 
   await verifyIngestion(runtimeClient, {
-    customerId,
+    customerId: baselineCustomerId,
     expectedMinimum: positiveInteger(process.env.EVENTS, 1_000) * LOAD_TEST_EVENT_SLUGS.length,
-    fromTimestamp: testStartedAt,
+    fromTimestamp: baselineStartedAt,
   })
 }
 
@@ -107,12 +110,15 @@ async function assertConfigurationCanBeManaged(): Promise<void> {
   }
 }
 
-async function signUpLoadTestCustomer(client: Unprice): Promise<string> {
+async function signUpLoadTestCustomer(
+  client: Unprice,
+  phase: "baseline" | "latency"
+): Promise<string> {
   const suffix = `${Date.now()}-${randomUUID().slice(0, 8)}`
-  const externalId = `k6-production-${suffix}`
+  const externalId = `k6-production-${phase}-${suffix}`
   const result = await client.customers.signUp({
-    name: `k6 production ${suffix}`,
-    email: `k6-production+${suffix}@example.com`,
+    name: `k6 production ${phase} ${suffix}`,
+    email: `k6-production-${phase}+${suffix}@example.com`,
     externalId,
     planSlug: LOAD_TEST_PLAN_SLUG,
     successUrl: "https://example.com/load-test/success",
@@ -121,7 +127,7 @@ async function signUpLoadTestCustomer(client: Unprice): Promise<string> {
     defaultCurrency: "USD",
     billingInterval: "month",
     creditLinePolicy: "uncapped",
-    metadata: { region: "k6-production" },
+    metadata: { region: `k6-production-${phase}` },
   })
   assertApiResult("customers.signUp", result)
 
@@ -129,7 +135,7 @@ async function signUpLoadTestCustomer(client: Unprice): Promise<string> {
     throw new Error("customers.signUp did not return a successful customer")
   }
 
-  console.info(`Customer: ${result.result.customerId}`)
+  console.info(`${phase} customer: ${result.result.customerId}`)
   console.info(`External ID: ${externalId}`)
   return result.result.customerId
 }

@@ -146,5 +146,5 @@ corepack pnpm --filter @unprice/k6 load-test:production
 
 The first run creates or reuses the `load-test-pro` draft and prints its review URL. It stops before
 customer signup. Publish the draft in the dashboard, then run the command again. The second run
-creates a customer, runs `latency` and `baseline`, and waits for the ingestion status totals. It
-fails when events are missing after the timeout, rejected, or failed.
+creates separate customers for `latency` and `baseline`, then verifies ingestion only for the
+baseline customer. It fails when events are missing after the timeout, rejected, or failed.
