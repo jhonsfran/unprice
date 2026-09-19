@@ -277,14 +277,16 @@ export class EntitlementWindowProcessor {
             // Grants and meter identity come from the request, not storage —
             // the bootstrap retry needs no store reads.
             const activeGrants = resolveActiveGrants(input.grants, error.params.event.timestamp)
-            const bootstrap = await this.reservations.bootstrapReservationForProjectedCost({
-              activeGrants,
-              input: eventInput,
-              meter: resolveMeterIdentity(input.entitlement),
-              projectedCost: error.params.projectedCost,
-            })
+            const bootstrap = await this.measureReservationBootstrap(() =>
+              this.reservations.bootstrapReservationForProjectedCost({
+                activeGrants,
+                input: eventInput,
+                meter: resolveMeterIdentity(input.entitlement),
+                projectedCost: error.params.projectedCost,
+              })
+            )
             const denial = bootstrap.result
-            metrics.reservation_bootstrap_duration_ms = bootstrap.walletCreateReservationDurationMs
+            metrics.reservation_bootstrap_duration_ms = bootstrap.durationMs
 
             if (denial) {
               throw new Error(`Batch reservation bootstrap denied: ${denial.deniedReason}`)
@@ -293,7 +295,7 @@ export class EntitlementWindowProcessor {
             reservationAction = "bootstrapped"
             const retry = await this.applyBatchWithCompactDraft(input)
             metrics = retry.metrics
-            metrics.reservation_bootstrap_duration_ms = bootstrap.walletCreateReservationDurationMs
+            metrics.reservation_bootstrap_duration_ms = bootstrap.durationMs
             results.push(...retry.results)
             return { results: retry.results }
           }
@@ -711,13 +713,15 @@ export class EntitlementWindowProcessor {
       })
     }
 
-    const bootstrap = await this.reservations.bootstrapReservationForProjectedCost({
-      activeGrants,
-      input: eventInput,
-      meter: setup.meter,
-      projectedCost,
-    })
-    state.metrics.reservation_bootstrap_duration_ms = bootstrap.walletCreateReservationDurationMs
+    const bootstrap = await this.measureReservationBootstrap(() =>
+      this.reservations.bootstrapReservationForProjectedCost({
+        activeGrants,
+        input: eventInput,
+        meter: setup.meter,
+        projectedCost,
+      })
+    )
+    state.metrics.reservation_bootstrap_duration_ms = bootstrap.durationMs
     const denial = bootstrap.result
 
     if (denial) {
@@ -1319,12 +1323,10 @@ export class EntitlementWindowProcessor {
 
     let denial: ApplyResult | null
     try {
-      const bootstrap = await this.reservations.bootstrapReservationSingleFlight(
-        input,
-        activeGrants,
-        meter
+      const bootstrap = await this.measureReservationBootstrap(() =>
+        this.reservations.bootstrapReservationSingleFlight(input, activeGrants, meter)
       )
-      metrics.reservationBootstrapDurationMs = bootstrap.walletCreateReservationDurationMs
+      metrics.reservationBootstrapDurationMs = bootstrap.durationMs
       denial = bootstrap.result
     } catch (error) {
       wideEvent.bootstrap_outcome = "error"
@@ -1347,6 +1349,18 @@ export class EntitlementWindowProcessor {
     })
     metrics.idempotencyInsertCount = 1
     return { result: deniedResult, usesWalletReservation }
+  }
+
+  private async measureReservationBootstrap<T>(operation: () => Promise<T>): Promise<{
+    durationMs: number
+    result: T
+  }> {
+    const startedAt = this.clock.now()
+    const result = await operation()
+    return {
+      durationMs: Math.max(0, this.clock.now() - startedAt),
+      result,
+    }
   }
 
   private prepareSingleApplyContext(input: ApplyInput, _createdAt: number): SingleApplyContext {
