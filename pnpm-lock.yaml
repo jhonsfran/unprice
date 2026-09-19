@@ -1179,13 +1179,23 @@ importers:
         version: 4.1.10(@opentelemetry/api@1.9.1)(@types/node@24.13.2)(vite@6.4.3(@types/node@24.13.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.21.0)(yaml@2.9.0))
 
   tooling/k6:
+    dependencies:
+      '@unprice/api':
+        specifier: workspace:^
+        version: link:../../packages/api
     devDependencies:
+      '@types/node':
+        specifier: 24.13.2
+        version: 24.13.2
       esbuild:
         specifier: 0.25.12
         version: 0.25.12
       k6:
         specifier: ^0.0.0
         version: 0.0.0
+      tsx:
+        specifier: ^4.7.2
+        version: 4.21.0
 
   tooling/migrate:
     dependencies:

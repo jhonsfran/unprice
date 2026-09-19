@@ -141,7 +141,7 @@ Run the same command for both phases:
 
 ```bash
 nvm use
-corepack pnpm --filter @unprice/tiny-tools load-test:production
+corepack pnpm --filter @unprice/k6 load-test:production
 ```
 
 The first run creates or reuses the `load-test-pro` draft and prints its review URL. It stops before

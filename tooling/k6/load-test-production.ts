@@ -1,7 +1,5 @@
 import { spawnSync } from "node:child_process"
 import { randomUUID } from "node:crypto"
-import { existsSync } from "node:fs"
-import { loadEnvFile } from "node:process"
 import { fileURLToPath } from "node:url"
 import { Unprice } from "@unprice/api"
 import {
@@ -12,13 +10,8 @@ import {
 } from "./load-test-pricing"
 
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url))
-const ENV_PATH = fileURLToPath(new URL("../k6/.env", import.meta.url))
 const PRODUCTION_API_URL = "https://api.unprice.dev"
 const BLOCKING_WARNING_CODES = new Set(["enforcement_settings_dropped", "version_settings_dropped"])
-
-if (existsSync(ENV_PATH)) {
-  loadEnvFile(ENV_PATH)
-}
 
 const baseUrl = requiredEnv("BASE_URL").replace(/\/$/, "")
 const configToken = requiredEnv("UNPRICE_CONFIG_TOKEN")

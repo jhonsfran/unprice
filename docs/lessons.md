@@ -26,6 +26,8 @@ patterns. Keep it cheap to load and useful.
   `ProjectService.deleteProjectRecord` can fail after child rows exist.
 - Before adding a helper, utility, or repeated row shape, search the repo for an established
   pattern first; reuse or extract the canonical path instead of duplicating logic.
+- 2026-09-19: Tooling packages that support local configuration should load an optional package-local
+  `.env` with Node's `--env-file-if-exists`; keep `.env.example` tracked and let shell variables override it.
 - Before running the app, always check if it's already running on locahost:3000 for landing or app.locaholst:300 for dashboard.
 - Whenever you are gonna work with the front end, please load the shadcn skill. And keep and follow the patterns for empty states, components, etc.
 - 2026-07-06: Mintlify dev can throw `No docs config` after hot-adding or editing docs pages even

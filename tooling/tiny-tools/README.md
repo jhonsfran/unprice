@@ -8,6 +8,17 @@ production environments.
 - A valid `UNPRICE_TOKEN` (project API token)
 - A `CUSTOMER_ID` with an active subscription
 
+## Setup
+
+Copy the example file and set the values for the target environment:
+
+```bash
+cp tooling/tiny-tools/.env.example tooling/tiny-tools/.env
+```
+
+All commands load `tooling/tiny-tools/.env` when it exists. Variables set in the shell override
+values from the file.
+
 ## Environment variables
 
 | Variable | Required | Default | Description |
@@ -21,13 +32,13 @@ production environments.
 
 ```bash
 # Against local dev server
-CUSTOMER_ID=cus_xxx UNPRICE_TOKEN=xxx pnpm --filter @unprice/tiny-tools e2e:local
+pnpm --filter @unprice/tiny-tools e2e:local
 
 # Wallet-only checks
-CUSTOMER_ID=cus_xxx UNPRICE_TOKEN=xxx pnpm --filter @unprice/tiny-tools e2e:wallet:local
+pnpm --filter @unprice/tiny-tools e2e:wallet:local
 
 # Against a specific environment
-CUSTOMER_ID=cus_xxx UNPRICE_TOKEN=xxx UNPRICE_API_URL=https://api.unprice.dev pnpm --filter @unprice/tiny-tools e2e
+UNPRICE_API_URL=https://api.unprice.dev pnpm --filter @unprice/tiny-tools e2e
 
 # Using infisical for secrets (preview env)
 pnpm --filter @unprice/tiny-tools with-env pnpm e2e:local
