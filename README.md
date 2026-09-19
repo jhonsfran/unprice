@@ -1,4 +1,4 @@
-# Unprice: open-source billing for AI credits and agent usage
+# Unprice: open-source spend authorization for AI agents
 
 [![GitHub stars](https://img.shields.io/github/stars/jhonsfran1165/unprice?style=social)](https://github.com/jhonsfran1165/unprice)
 [![Core license: AGPL-3.0-only](https://img.shields.io/badge/core-AGPL--3.0--only-blue.svg)](LICENSE)
@@ -7,9 +7,9 @@
 
 > "Your product is smart, but your pricing is hardcoded."
 >
-> Sell AI credits and usage without paying for unfunded agent work. Authorize each agent run or paid
-> workflow before it creates cost, reserve customer credits up front, then trace settled usage to
-> the invoice.
+> Authorize each agent run or paid workflow before it reaches a provider. Reserve against the
+> customer's budget, run the work, then settle what it actually cost and release the rest. A denied
+> run makes zero provider calls and still leaves a receipt.
 
 ## Billing is too late
 
@@ -27,22 +27,23 @@ Every AI charge starts with an authorization. Unprice gives your app that decisi
 runs.
 
 - **Authorize before work runs.** Check the plan, budget, wallet credits, and meter rules before an
-  agent or workflow creates cost.
+  agent or workflow reaches a provider. A deny is a hard stop, not a slower request.
 - **Keep invoice evidence.** Trace each charge to rated usage events and ledger captures.
 - **Inspect one money path.** Usage, entitlements, budgets, credits, ingestion, and invoices share
   one evidence trail.
 
-AI gateways cap what you spend with providers. Unprice governs what your customer is allowed to
-spend, then turns that decision into invoice evidence.
+AI gateways sit inside the provider call and cap your aggregate provider bill. Unprice sits before
+it and authorizes one run against one customer's budget, then turns that decision into invoice
+evidence.
 
 PriceOps is Unprice's operating model for versioned plan rules, entitlements, customer budgets,
 wallet credits, and invoice evidence.
 
 ## Who it is for
 
-Unprice is for developer-led AI products that sell prepaid credits, metered AI usage, agent runs,
-or paid workflows. It is built for CTOs, founding engineers, and platform engineers who own the
-path from customer authorization to invoice.
+Unprice is for developer-led AI products where one customer request can start an agent run or paid
+workflow that spends real money before anyone checks. It is built for CTOs, founding engineers, and
+platform engineers who own the path from customer authorization to invoice.
 
 ## Licenses
 
