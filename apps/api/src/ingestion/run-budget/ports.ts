@@ -104,6 +104,16 @@ export type RunSpendBucketDelta = {
   statementKey: string
 }
 
+/** Storage-retention snapshot for the whole object, not a single run. */
+export type RunBudgetRetentionState = {
+  /** Runs that have not reached a terminal state yet. */
+  openRunCount: number
+  /** Latest `endedAt` across terminal runs; null when there are none. */
+  latestEndedAt: number | null
+  /** A closed run is flagged for manual capture reconciliation. */
+  reconciliationNeeded: boolean
+}
+
 export type RunBudgetStore = {
   loadRun(runId: string): Promise<RunState | undefined>
   createRun(run: RunState): Promise<void>
@@ -159,6 +169,7 @@ export type RunBudgetStore = {
     reconciliationNeeded: boolean
   }): Promise<void>
   markExpiredRunFinalized(runId: string): Promise<void>
+  readRetentionState(): Promise<RunBudgetRetentionState>
 }
 
 /** A fresh service graph is required for every external wallet operation. */
@@ -202,6 +213,16 @@ export type RunBudgetScheduler = {
   setAlarm(at: number): Promise<void>
 }
 
+/** Host runtime facilities for one run budget. */
+export type RunBudgetRuntime = {
+  /**
+   * Destroy ALL state for this object including any scheduled wake-up. Only
+   * called once every run here is terminal, its captures are resolved, and the
+   * retention window has passed.
+   */
+  destroy(): Promise<void>
+}
+
 export type RunBudgetClock = {
   now(): number
 }
@@ -214,6 +235,7 @@ export type RunBudgetProcessorDeps = {
   clock: RunBudgetClock
   logger: RunBudgetLogger
   pricing: RunBudgetPricingDelegate
+  runtime: RunBudgetRuntime
   scheduler: RunBudgetScheduler
   store: RunBudgetStore
   wallet: RunBudgetWalletFactory

@@ -70,6 +70,12 @@ export class AlarmLifecycle {
 
   public async initialize(): Promise<void> {
     this.nextAlarmAt = await this.scheduler.getAlarm()
+    // A prompt bootstrap alarm lets the lifecycle inspect persisted state,
+    // repair missing business deadlines, and collect empty windows. Normal
+    // traffic can still pull this alarm earlier.
+    if (this.nextAlarmAt === null) {
+      await this.scheduleAlarm(this.clock.now() + FLUSH_INTERVAL_MS)
+    }
   }
 
   public async alarm(): Promise<void> {
@@ -139,19 +145,30 @@ export class AlarmLifecycle {
     wideEvent: Record<string, unknown>
   }): Promise<void> {
     const { flushIntervalMs, inactivityMs, now, wideEvent } = params
-    const lifecycleEndAt = this.store.readLifecycleEndAt()
+    const retention = this.store.readRetentionState()
+    const { lifecycleEndAt, retentionAnchorAt } = retention
     wideEvent.lifecycle_end_at = lifecycleEndAt
+    wideEvent.last_activity_at = retention.lastActivityAt
+    wideEvent.retention_anchor_at = retentionAnchorAt
 
-    if (!lifecycleEndAt) {
-      // We don't know when this window can be safely collected. Go to sleep.
-      // Next apply() will wake us up.
-      wideEvent.outcome = "idle"
+    if (retentionAnchorAt === null) {
+      // The window holds no state at all — a read-only enforcement check that
+      // materialised it, say. Collect it now unless something is still open;
+      // an open reservation belongs to apply(), which will wake us again.
+      const emptyWindow = this.store.readWalletReservation()
+      if (!this.isCleanupComplete(emptyWindow)) {
+        wideEvent.outcome = "idle"
+        return
+      }
+      wideEvent.self_destruct = true
+      wideEvent.outcome = "deleted"
+      await this.runtime.destroyWindow()
       return
     }
 
     // After the latest known grant/reservation window we keep the window alive
     // for the full idempotency TTL before self-destructing.
-    const selfDestructAt = lifecycleEndAt + DO_IDEMPOTENCY_TTL_MS
+    const selfDestructAt = retentionAnchorAt + DO_IDEMPOTENCY_TTL_MS
 
     if (now > selfDestructAt) {
       await this.handleRetentionCleanupAlarm({
@@ -444,7 +461,7 @@ export class AlarmLifecycle {
   }
 
   private async handleRetentionCleanupAlarm(params: {
-    lifecycleEndAt: number
+    lifecycleEndAt: number | null
     now: number
     selfDestructAt: number
     wideEvent: Record<string, unknown>

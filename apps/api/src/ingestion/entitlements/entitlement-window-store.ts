@@ -1,6 +1,6 @@
 import type { GrantConsumptionState } from "@unprice/services/entitlements"
 import { DO_IDEMPOTENCY_TTL_MS, computeGrantPeriodBucket } from "@unprice/services/entitlements"
-import { asc, desc, eq, inArray, lt } from "drizzle-orm"
+import { asc, desc, eq, inArray, lt, sql } from "drizzle-orm"
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite"
 import type { z } from "zod"
 import { idempotencyEntryToApplyResult } from "./batch-apply-helpers"
@@ -29,6 +29,7 @@ import {
 import type { MeterStateDraft } from "./meter-state-adapter"
 import type {
   EnsureWalletReservationParams,
+  EntitlementWindowRetentionState,
   EntitlementWindowStateOps,
   EntitlementWindowStateStore,
   WalletReservationPatch,
@@ -532,7 +533,7 @@ export class EntitlementWindowStore implements EntitlementWindowStateStore {
   // Lifecycle
   // -------------------------------------------------------------------
 
-  readLifecycleEndAt(): number | null {
+  readRetentionState(): EntitlementWindowRetentionState {
     const latestPeriodUsage = this.db
       .select({ periodEndAt: entitlementPeriodUsageTable.periodEndAt })
       .from(entitlementPeriodUsageTable)
@@ -540,6 +541,7 @@ export class EntitlementWindowStore implements EntitlementWindowStateStore {
       .limit(1)
       .get()
 
+    const wallet = this.readWalletReservation()
     const lifecycleEnds: number[] = []
     if (
       typeof latestPeriodUsage?.periodEndAt === "number" &&
@@ -547,12 +549,41 @@ export class EntitlementWindowStore implements EntitlementWindowStateStore {
     ) {
       lifecycleEnds.push(latestPeriodUsage.periodEndAt)
     }
-    const reservationEndAt = this.readWalletReservation()?.reservationEndAt
+    const reservationEndAt = wallet?.reservationEndAt
     if (typeof reservationEndAt === "number" && Number.isFinite(reservationEndAt)) {
       lifecycleEnds.push(reservationEndAt)
     }
 
-    return lifecycleEnds.length > 0 ? Math.max(...lifecycleEnds) : null
+    const lifecycleEndAt = lifecycleEnds.length > 0 ? Math.max(...lifecycleEnds) : null
+    const newestIdempotencyAt = this.db
+      .select({ at: sql<number | null>`max(${idempotencyKeyBatchesTable.createdAt})` })
+      .from(idempotencyKeyBatchesTable)
+      .get()?.at
+    const newestMeterAt = this.db
+      .select({
+        at: sql<
+          number | null
+        >`max(coalesce(${meterStateTable.updatedAt}, ${meterStateTable.createdAt}))`,
+      })
+      .from(meterStateTable)
+      .get()?.at
+    const lastEventAt = wallet?.lastEventAt ?? null
+
+    const candidates = [newestIdempotencyAt, newestMeterAt, lastEventAt].filter(
+      (candidate): candidate is number =>
+        typeof candidate === "number" && Number.isFinite(candidate)
+    )
+
+    const lastActivityAt = candidates.length > 0 ? Math.max(...candidates) : null
+    const retentionCandidates = [lifecycleEndAt, lastActivityAt].filter(
+      (candidate): candidate is number => candidate !== null
+    )
+
+    return {
+      lifecycleEndAt,
+      lastActivityAt,
+      retentionAnchorAt: retentionCandidates.length > 0 ? Math.max(...retentionCandidates) : null,
+    }
   }
 
   // -------------------------------------------------------------------

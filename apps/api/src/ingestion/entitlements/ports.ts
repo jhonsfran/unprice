@@ -112,6 +112,15 @@ export type EnsureWalletReservationParams = {
   statementKey?: string | null
 }
 
+export type EntitlementWindowRetentionState = {
+  /** Latest grant-period or wallet-reservation deadline. */
+  lifecycleEndAt: number | null
+  /** Latest durable event, meter, or replay-seal write. */
+  lastActivityAt: number | null
+  /** Latest timestamp that must complete a full retention period before collection. */
+  retentionAnchorAt: number | null
+}
+
 /**
  * Domain state operations for one entitlement window. Available both directly
  * on the store (auto-commit single commands) and inside `atomically`
@@ -175,11 +184,8 @@ export interface EntitlementWindowStateStore extends EntitlementWindowStateOps {
   /** Bounded cleanup of entries older than DO_IDEMPOTENCY_TTL_MS; returns count removed. */
   cleanupStaleIdempotencyKeys(now: number): number
 
-  /**
-   * Latest lifecycle deadline for this window: max(period usage end,
-   * reservation end). Drives the retention self-destruct alarm.
-   */
-  readLifecycleEndAt(): number | null
+  /** Canonical retention snapshot across lifecycle deadlines and durable writes. */
+  readRetentionState(): EntitlementWindowRetentionState
 }
 
 /**

@@ -58,6 +58,7 @@ export function createRunBudgetProcessorHarness(
   const state = {
     now: options.now ?? RUN_BUDGET_TEST_NOW,
     alarmAt: null as number | null,
+    destroyed: false,
     schedulerFailuresRemaining: options.schedulerFailures ?? 0,
   }
   const store = options.store ?? new InMemoryRunBudgetStore()
@@ -97,6 +98,9 @@ export function createRunBudgetProcessorHarness(
     }
   )
   const logger = { error: vi.fn() }
+  const runtimeDestroy = vi.fn(async () => {
+    state.destroyed = true
+  })
   const schedulerSetAlarm = vi.fn(async (at: number) => {
     if (state.schedulerFailuresRemaining > 0) {
       state.schedulerFailuresRemaining--
@@ -110,6 +114,7 @@ export function createRunBudgetProcessorHarness(
       clock: { now: () => state.now },
       logger,
       pricing: { apply: pricingApply },
+      runtime: { destroy: runtimeDestroy },
       scheduler: {
         getAlarm: async () => state.alarmAt,
         setAlarm: schedulerSetAlarm,
@@ -126,6 +131,7 @@ export function createRunBudgetProcessorHarness(
     pricingApply,
     processor: createProcessor(),
     releaseReservation,
+    runtimeDestroy,
     schedulerSetAlarm,
     state,
     store,

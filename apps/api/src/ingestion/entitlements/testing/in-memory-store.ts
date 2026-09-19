@@ -9,6 +9,7 @@ import type {
 } from "../contracts"
 import type {
   EnsureWalletReservationParams,
+  EntitlementWindowRetentionState,
   EntitlementWindowStateOps,
   EntitlementWindowStateStore,
   WalletReservationPatch,
@@ -145,7 +146,7 @@ export class InMemoryEntitlementWindowStore implements EntitlementWindowStateSto
     return removed
   }
 
-  readLifecycleEndAt(): number | null {
+  readRetentionState(): EntitlementWindowRetentionState {
     const ends: number[] = []
     for (const state of this.grantStates.values()) {
       if (Number.isFinite(state.periodEndAt)) ends.push(state.periodEndAt)
@@ -153,7 +154,26 @@ export class InMemoryEntitlementWindowStore implements EntitlementWindowStateSto
     if (typeof this.walletRow?.reservationEndAt === "number") {
       ends.push(this.walletRow.reservationEndAt)
     }
-    return ends.length > 0 ? Math.max(...ends) : null
+    const lifecycleEndAt = ends.length > 0 ? Math.max(...ends) : null
+    const candidates: number[] = []
+    for (const entry of this.idempotency.values()) {
+      candidates.push(entry.createdAt)
+    }
+    for (const row of this.meterStates.values()) {
+      candidates.push(row.updatedAt ?? row.createdAt)
+    }
+    if (typeof this.walletRow?.lastEventAt === "number") {
+      candidates.push(this.walletRow.lastEventAt)
+    }
+    const lastActivityAt = candidates.length > 0 ? Math.max(...candidates) : null
+    const retentionCandidates = [lifecycleEndAt, lastActivityAt].filter(
+      (candidate): candidate is number => candidate !== null
+    )
+    return {
+      lifecycleEndAt,
+      lastActivityAt,
+      retentionAnchorAt: retentionCandidates.length > 0 ? Math.max(...retentionCandidates) : null,
+    }
   }
 
   readWalletReservation(): WalletReservationSnapshot {

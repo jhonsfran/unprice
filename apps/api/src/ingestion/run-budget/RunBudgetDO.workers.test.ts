@@ -43,15 +43,22 @@ describeRunBudgetProcessorContract(
     }
     const createTarget = (): RunBudgetProcessorContractTarget => {
       const stub = runBudgetNamespace(env).getByName(name)
+      let bootstrapped = false
       const invoke = async <T>(fn: (processor: RunBudgetProcessor) => Promise<T>): Promise<T> =>
         runInDurableObject(stub, async (instance: RunBudgetDO, state) => {
-          await instance
-            .getRunStatus({
-              runId: "__contract_bootstrap__",
-              customerId: "cus_1",
-              projectId: "proj_1",
-            })
-            .catch(() => undefined)
+          if (!bootstrapped) {
+            bootstrapped = true
+            await instance
+              .getRunStatus({
+                runId: "__contract_bootstrap__",
+                customerId: "cus_1",
+                projectId: "proj_1",
+              })
+              .catch(() => undefined)
+            // Bootstrapping arms the DO's own retention alarm. This contract
+            // asserts the alarms the processor schedules, so start from none.
+            await state.storage.deleteAlarm()
+          }
 
           const wallet = {
             createReservation: vi.fn(
@@ -91,6 +98,12 @@ describeRunBudgetProcessorContract(
                       meterFacts: [],
                     }
                   : { allowed: true, meterFacts: [fact] }
+              },
+            },
+            runtime: {
+              destroy: async () => {
+                await state.storage.deleteAlarm()
+                await state.storage.deleteAll()
               },
             },
             scheduler: {
@@ -217,6 +230,12 @@ describe("RunBudgetProcessor (Durable Object shared run concurrency)", () => {
                       meterFacts: [],
                     }
                   : { allowed: true, meterFacts: [fact] }
+              },
+            },
+            runtime: {
+              destroy: async () => {
+                await state.storage.deleteAlarm()
+                await state.storage.deleteAll()
               },
             },
             scheduler: {

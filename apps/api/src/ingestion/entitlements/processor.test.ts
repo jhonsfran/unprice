@@ -7,6 +7,7 @@ import {
 } from "@unprice/services/entitlements"
 import { describe, expect, it, vi } from "vitest"
 import { createDeferred } from "../test-fixtures/race"
+import { FLUSH_INTERVAL_MS } from "./constants"
 import type { ApplyInput } from "./contracts"
 import type { WalletReservationSnapshot } from "./contracts"
 import {
@@ -264,6 +265,8 @@ describe("in-memory store internals", () => {
     const now = Date.now()
     const harness = createHarness({ now })
     await harness.processor.initialize()
+    // initialize() arms the retention alarm; a rejected apply must not move it.
+    const retentionAlarmAt = harness.getAlarmAt()
     const malformedInput = {
       ...createLiveApplyInput(now),
       walletMode: "external_reservation",
@@ -274,7 +277,7 @@ describe("in-memory store internals", () => {
     expect(harness.store.idempotency.size).toBe(0)
     expect(harness.store.meterStates.size).toBe(0)
     expect(harness.store.grantStates.size).toBe(0)
-    expect(harness.getAlarmAt()).toBeNull()
+    expect(harness.getAlarmAt()).toBe(retentionAlarmAt)
   })
 })
 
@@ -1414,6 +1417,92 @@ describe("EntitlementWindowProcessor reads and lifecycle", () => {
 
     expect(store.idempotency.has("inside")).toBe(true)
     expect(store.idempotency.has("outside")).toBe(false)
+  })
+
+  it("arms a prompt lifecycle alarm on a window that has none", async () => {
+    const harness = createHarness({ now: BASE_NOW, store: new InMemoryEntitlementWindowStore() })
+
+    await harness.processor.initialize()
+
+    expect(harness.getAlarmAt()).toBe(BASE_NOW + FLUSH_INTERVAL_MS)
+  })
+
+  it("repairs a missing alarm for a live reservation before its deadline", async () => {
+    let now = BASE_NOW
+    const store = new InMemoryEntitlementWindowStore()
+    seedWallet(store)
+    const harness = createHarness({ now: () => now, store })
+
+    await harness.processor.initialize()
+    expect(harness.getAlarmAt()).toBe(BASE_NOW + FLUSH_INTERVAL_MS)
+
+    now += FLUSH_INTERVAL_MS
+    await harness.processor.alarm()
+
+    expect(harness.getAlarmAt()).toBe(BASE_NOW + 60_000)
+  })
+
+  it("uses the newest durable write as the retention deadline", async () => {
+    const lifecycleEndAt = BASE_NOW
+    const lastActivityAt = BASE_NOW + 60_000
+    let now = lastActivityAt
+    const store = new InMemoryEntitlementWindowStore()
+    store.grantStates.set("grant_1:period_1", {
+      bucketKey: "grant_1:period_1",
+      consumedInCurrentWindow: 1,
+      exhaustedAt: null,
+      grantId: "grant_1",
+      periodEndAt: lifecycleEndAt,
+      periodKey: "period_1",
+      periodStartAt: lifecycleEndAt - 60_000,
+    })
+    store.idempotency.set("idem_recent", {
+      eventId: "idem_recent",
+      createdAt: lastActivityAt,
+      allowed: true,
+      deniedReason: null,
+      denyMessage: null,
+      meterFacts: [],
+    })
+    const harness = createHarness({ now: () => now, store })
+    await harness.processor.initialize()
+
+    now = lifecycleEndAt + DO_IDEMPOTENCY_TTL_MS + 1
+    await harness.processor.alarm()
+
+    expect(harness.wasDestroyed()).toBe(false)
+    expect(store.idempotency.has("idem_recent")).toBe(true)
+    expect(harness.getAlarmAt()).toBe(lastActivityAt + DO_IDEMPOTENCY_TTL_MS)
+  })
+
+  it("destroys a window that never recorded any state", async () => {
+    const harness = createHarness({ now: BASE_NOW, store: new InMemoryEntitlementWindowStore() })
+    await harness.processor.initialize()
+
+    await harness.processor.alarm()
+
+    expect(harness.wasDestroyed()).toBe(true)
+  })
+
+  it("destroys an idle window one retention period after its last write", async () => {
+    const store = new InMemoryEntitlementWindowStore()
+    // Meter state only: no grant period and no reservation, so the window has
+    // no lifecycle deadline and falls back to its own last write.
+    store.meterStates.set("meter_1", { usage: 5, updatedAt: BASE_NOW, createdAt: BASE_NOW })
+    let now = BASE_NOW
+    const harness = createHarness({ now: () => now, store })
+    await harness.processor.initialize()
+
+    now = BASE_NOW + FLUSH_INTERVAL_MS
+    await harness.processor.alarm()
+
+    expect(harness.wasDestroyed()).toBe(false)
+    expect(harness.getAlarmAt()).toBe(BASE_NOW + DO_IDEMPOTENCY_TTL_MS)
+
+    now = BASE_NOW + DO_IDEMPOTENCY_TTL_MS + 1
+    await harness.processor.alarm()
+
+    expect(harness.wasDestroyed()).toBe(true)
   })
 
   it("marks deletion, closes the reservation, and destroys the window", async () => {

@@ -36,8 +36,21 @@ class RunCapturesPendingError extends Error {
 
 type ResolvedStartRunInput = Omit<StartRunInput, "expiresAt"> & { expiresAt: number }
 
+/**
+ * How long a finished run keeps its storage. Runs live at most 24h, their
+ * captures are already in the ledger by the time they close, and the dashboard
+ * reads the Postgres read model — so this only covers late replays and
+ * post-hoc inspection. Everything past it is storage nobody reads.
+ */
+export const RUN_BUDGET_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000
+
 export class RunBudgetProcessor {
   constructor(private readonly deps: RunBudgetProcessorDeps) {}
+
+  /** Promptly inspect persisted state when an object has no alarm. */
+  async initialize(): Promise<void> {
+    await this.scheduleAlarm()
+  }
 
   async startRun(rawInput: StartRunInput): Promise<RunBudgetSummary> {
     const parsedInput = startRunInputSchema.parse(rawInput)
@@ -451,7 +464,45 @@ export class RunBudgetProcessor {
 
     if (nextAlarmAt) {
       await this.deps.scheduler.setAlarm(nextAlarmAt)
+      return
     }
+
+    await this.collectStorage(now)
+  }
+
+  /**
+   * Nothing is pending for this object. Release its SQLite database once the
+   * retention window is up — without this, every run ever started keeps a
+   * database alive and billed forever.
+   */
+  private async collectStorage(now: number): Promise<void> {
+    const retention = await this.deps.store.readRetentionState()
+
+    // A live run always carries an expiration alarm, so it never reaches here.
+    if (retention.openRunCount > 0) return
+
+    if (retention.reconciliationNeeded) {
+      this.deps.logger.error("run budget storage retained for reconciliation", {
+        outcome: "error",
+        operator_action_required: true,
+        recovery_required: true,
+        latest_ended_at: retention.latestEndedAt,
+      })
+      return
+    }
+
+    // `latestEndedAt === null` means no run was ever recorded here — a status
+    // read or an invoicing flush for a run that is already gone materialised
+    // the object and left only the migration tables behind.
+    const releaseAt =
+      retention.latestEndedAt === null ? now : retention.latestEndedAt + RUN_BUDGET_RETENTION_MS
+
+    if (now < releaseAt) {
+      await this.deps.scheduler.setAlarm(releaseAt)
+      return
+    }
+
+    await this.deps.runtime.destroy()
   }
 
   // --- Private methods ---
@@ -499,6 +550,9 @@ export class RunBudgetProcessor {
     if (reconciliationNeeded) {
       await this.logAbandonedCaptures(afterFlush, abandonedIntents)
     }
+
+    // Keep an alarm on the books so the closed run's storage gets collected.
+    await this.scheduleAlarmAt(input.endedAt + RUN_BUDGET_RETENTION_MS)
 
     const final = await this.deps.store.loadRun(input.runId)
     if (!final) throw new Error("Run state missing after close")

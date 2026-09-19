@@ -358,4 +358,36 @@ describe("RunBudgetStore real SQLite transactions", () => {
       })
     })
   })
+
+  it("reports retention state across open and closed runs", async () => {
+    const stub = runBudgetNamespace(env).getByName(`test:run-budget-store:${crypto.randomUUID()}`)
+    await runInDurableObject(stub, async (instance: RunBudgetDO, state) => {
+      await instance
+        .getRunStatus({ runId: "__bootstrap__", customerId: "cus_1", projectId: "proj_1" })
+        .catch(() => undefined)
+      const db = drizzle(state.storage, { schema, logger: false })
+      const store = new RunBudgetStore(db)
+
+      await expect(store.readRetentionState()).resolves.toEqual({
+        openRunCount: 0,
+        latestEndedAt: null,
+        reconciliationNeeded: false,
+      })
+
+      await store.createRun(createRun("run_open"))
+      await store.createRun(createRun("run_closed"))
+      await store.closeRun({
+        runId: "run_closed",
+        status: "completed",
+        endedAt: RUN_BUDGET_TEST_NOW + 1_000,
+        reconciliationNeeded: true,
+      })
+
+      await expect(store.readRetentionState()).resolves.toEqual({
+        openRunCount: 1,
+        latestEndedAt: RUN_BUDGET_TEST_NOW + 1_000,
+        reconciliationNeeded: true,
+      })
+    })
+  })
 })

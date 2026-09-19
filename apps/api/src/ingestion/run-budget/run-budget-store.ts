@@ -16,6 +16,7 @@ import { type EndRunInput, type RunBudgetDecision, runStatusSchema } from "./con
 import * as schema from "./db/schema"
 import type {
   OpenRunCaptureIntent,
+  RunBudgetRetentionState,
   RunBudgetStore as RunBudgetStateStore,
   RunCaptureIntent,
   RunSpendBucketDelta,
@@ -301,6 +302,24 @@ export class RunBudgetStore implements RunBudgetStateStore {
       .update(schema.runState)
       .set({ expiresAt: null })
       .where(eq(schema.runState.runId, runId))
+  }
+
+  async readRetentionState(): Promise<RunBudgetRetentionState> {
+    const rows = await this.db.query.runState.findMany()
+    let openRunCount = 0
+    let latestEndedAt: number | null = null
+    let reconciliationNeeded = false
+
+    for (const row of rows) {
+      if (row.status === "running" || row.endedAt === null) {
+        openRunCount++
+        continue
+      }
+      latestEndedAt = Math.max(latestEndedAt ?? row.endedAt, row.endedAt)
+      reconciliationNeeded = reconciliationNeeded || Boolean(row.reconciliationNeeded)
+    }
+
+    return { openRunCount, latestEndedAt, reconciliationNeeded }
   }
 
   private intentBelongsToRun(intent: RunCaptureIntent, runId: string): boolean {

@@ -38,6 +38,12 @@ export class RunBudgetDO extends DurableObject {
       clock: { now: () => Date.now() },
       logger,
       pricing: createRunBudgetPricingDelegate(env),
+      runtime: {
+        destroy: async () => {
+          await this.ctx.storage.deleteAlarm()
+          await this.ctx.storage.deleteAll()
+        },
+      },
       scheduler: {
         getAlarm: () => this.ctx.storage.getAlarm(),
         setAlarm: (at) => this.ctx.storage.setAlarm(at),
@@ -50,6 +56,7 @@ export class RunBudgetDO extends DurableObject {
     )
     this.ready = this.ctx.blockConcurrencyWhile(async () => {
       await migrate(db, migrations)
+      await processor.initialize()
     })
   }
 

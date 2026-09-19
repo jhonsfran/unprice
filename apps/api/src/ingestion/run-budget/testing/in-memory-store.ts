@@ -12,6 +12,7 @@ import {
 import type { EndRunInput, RunBudgetDecision } from "../contracts"
 import type {
   OpenRunCaptureIntent,
+  RunBudgetRetentionState,
   RunBudgetStore,
   RunCaptureIntent,
   RunIdempotencyEntry,
@@ -272,6 +273,23 @@ export class InMemoryRunBudgetStore implements RunBudgetStore {
   async markExpiredRunFinalized(runId: string): Promise<void> {
     const run = this.runs.get(runId)
     if (run) run.expiresAt = null
+  }
+
+  async readRetentionState(): Promise<RunBudgetRetentionState> {
+    let openRunCount = 0
+    let latestEndedAt: number | null = null
+    let reconciliationNeeded = false
+
+    for (const run of this.runs.values()) {
+      if (run.status === "running" || run.endedAt === null) {
+        openRunCount++
+        continue
+      }
+      latestEndedAt = Math.max(latestEndedAt ?? run.endedAt, run.endedAt)
+      reconciliationNeeded = reconciliationNeeded || run.reconciliationNeeded
+    }
+
+    return { openRunCount, latestEndedAt, reconciliationNeeded }
   }
 
   private writeIdempotency(entry: RunIdempotencyEntry): void {

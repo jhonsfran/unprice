@@ -4,7 +4,7 @@ import {
 } from "@unprice/services/budget-runs"
 import { UnPriceWalletError } from "@unprice/services/wallet"
 import { describe, expect, it } from "vitest"
-import type { RunBudgetProcessor } from "./processor"
+import { RUN_BUDGET_RETENTION_MS, type RunBudgetProcessor } from "./processor"
 import {
   RUN_BUDGET_TEST_NOW,
   createRunBudgetMeterFact,
@@ -641,7 +641,7 @@ describe("RunBudgetProcessor capture sequence regressions", () => {
 })
 
 describe("RunBudgetProcessor alarm capture regressions", () => {
-  it("leaves an idle alarm unarmed when there is no captureable spend or expiry", async () => {
+  it("collects an object that never recorded a run instead of arming an alarm", async () => {
     const harness = createRunBudgetProcessorHarness()
 
     await harness.processor.alarm()
@@ -649,6 +649,80 @@ describe("RunBudgetProcessor alarm capture regressions", () => {
     expect(harness.captureReservationUsage).not.toHaveBeenCalled()
     expect(harness.schedulerSetAlarm).not.toHaveBeenCalled()
     expect(harness.state.alarmAt).toBeNull()
+    expect(harness.state.destroyed).toBe(true)
+  })
+
+  it("arms a prompt lifecycle alarm on an object that has none", async () => {
+    const harness = createRunBudgetProcessorHarness()
+
+    await harness.processor.initialize()
+
+    expect(harness.state.alarmAt).toBe(RUN_BUDGET_TEST_NOW + 10_000)
+  })
+
+  it("repairs a missing alarm for a running run before its expiration", async () => {
+    const harness = createRunBudgetProcessorHarness()
+    await harness.processor.startRun(createRunBudgetStartInput())
+    harness.state.alarmAt = null
+
+    await harness.processor.initialize()
+
+    expect(harness.state.alarmAt).toBe(RUN_BUDGET_TEST_NOW + 10_000)
+
+    harness.state.now += 10_000
+    harness.state.alarmAt = null
+    await harness.processor.alarm()
+
+    expect(harness.state.alarmAt).toBe(RUN_BUDGET_TEST_NOW + DEFAULT_RUN_RESERVATION_TTL_MS)
+  })
+
+  it("collects a closed run's storage once its retention window passes", async () => {
+    const store = new InMemoryRunBudgetStore()
+    const harness = createRunBudgetProcessorHarness({ store })
+    await harness.processor.startRun(createRunBudgetStartInput())
+    await harness.processor.endRun({
+      runId: "run_1",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      status: "completed",
+      endedAt: RUN_BUDGET_TEST_NOW,
+    })
+
+    await harness.processor.alarm()
+
+    expect(harness.state.destroyed).toBe(false)
+    expect(harness.state.alarmAt).toBe(RUN_BUDGET_TEST_NOW + RUN_BUDGET_RETENTION_MS)
+
+    harness.state.now = RUN_BUDGET_TEST_NOW + RUN_BUDGET_RETENTION_MS
+    harness.state.alarmAt = null
+    await harness.processor.alarm()
+
+    expect(harness.state.destroyed).toBe(true)
+  })
+
+  it("retains a closed run's storage while it needs reconciliation", async () => {
+    const store = new InMemoryRunBudgetStore()
+    const harness = createRunBudgetProcessorHarness({ store })
+    await harness.processor.startRun(createRunBudgetStartInput())
+    await harness.processor.endRun({
+      runId: "run_1",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      status: "completed",
+      endedAt: RUN_BUDGET_TEST_NOW,
+    })
+    const run = store.runs.get("run_1")
+    if (run) run.reconciliationNeeded = true
+
+    harness.state.now = RUN_BUDGET_TEST_NOW + RUN_BUDGET_RETENTION_MS
+    harness.state.alarmAt = null
+    await harness.processor.alarm()
+
+    expect(harness.state.destroyed).toBe(false)
+    expect(harness.logger.error).toHaveBeenCalledWith(
+      "run budget storage retained for reconciliation",
+      expect.objectContaining({ operator_action_required: true })
+    )
   })
 
   it("flushes fresh accepted spend when its first scheduled alarm fires", async () => {

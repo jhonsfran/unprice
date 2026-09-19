@@ -908,3 +908,10 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   `APP_BASE_DOMAIN` hyphenated for preview aliases.
 - 2026-09-19: Never apply the Vercel preview alias to a localhost app, even when preview variables
   are inherited; local auth must use `http://app.localhost:<port>`.
+- 2026-09-19: A Durable Object must always hold an alarm — the alarm is the only thing that can
+  ever call `deleteAll()` on itself, so an object that goes quiet without one keeps its SQLite
+  storage billed forever. `EntitlementWindowDO` and `RunBudgetDO` arm a prompt lifecycle alarm
+  during bootstrap; row-level `DELETE`s are not a substitute.
+- 2026-09-19: Contract tests that assert exact alarm timestamps must clear the alarm the DO's own
+  bootstrap arms (`RunBudgetDO.workers.test.ts`), or a lifecycle alarm that happens to fall
+  earlier silently swallows the `setAlarm` the test is asserting on.
