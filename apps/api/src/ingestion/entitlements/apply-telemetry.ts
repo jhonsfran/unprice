@@ -161,6 +161,7 @@ export type SingleApplyExecutionMetrics = {
   outboxInsertCount: number
   pricedFactCount: number
   refillTrigger: RefillTrigger | null
+  reservationBootstrapDurationMs: number | null
   reservationEngaged: boolean
   totalCost: number
   walletReservationWriteCount: number
@@ -178,6 +179,7 @@ export function createSingleApplyExecutionMetrics(): SingleApplyExecutionMetrics
     outboxInsertCount: 0,
     pricedFactCount: 0,
     refillTrigger: null,
+    reservationBootstrapDurationMs: null,
     reservationEngaged: false,
     totalCost: 0,
     walletReservationWriteCount: 0,

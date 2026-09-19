@@ -66,6 +66,7 @@ export const apiMetricsLogger: Logger = createMetricsLogger(apiDrain)
  */
 export function shouldAlwaysKeepDoLogEvent(fields: Record<string, unknown> | undefined): boolean {
   if (!fields) return false
+  if (fields.cold_start === true) return true
   if (fields.outcome === "error") return true
   if (fields.error !== undefined && fields.error !== null) return true
   if (typeof fields.error_message === "string" && fields.error_message.length > 0) return true

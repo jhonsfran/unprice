@@ -61,6 +61,7 @@ describe("shouldAlwaysKeepDoLogEvent", () => {
     expect(shouldAlwaysKeepDoLogEvent({ denied_reason: "WALLET_EMPTY" })).toBe(true)
     expect(shouldAlwaysKeepDoLogEvent({ denied_count: 3 })).toBe(true)
     expect(shouldAlwaysKeepDoLogEvent({ recovery_required: true })).toBe(true)
+    expect(shouldAlwaysKeepDoLogEvent({ cold_start: true })).toBe(true)
   })
 
   it("samples happy-path events", async () => {

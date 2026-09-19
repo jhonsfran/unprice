@@ -302,6 +302,7 @@ export type ApplyBatchMetrics = {
   outbox_fact_count: number
   outbox_insert_count: number
   priced_fact_count: number
+  reservation_bootstrap_duration_ms: number | null
   wallet_reservation_write_count: number
 }
 
@@ -321,6 +322,7 @@ export function createApplyBatchMetrics(): ApplyBatchMetrics {
     outbox_fact_count: 0,
     outbox_insert_count: 0,
     priced_fact_count: 0,
+    reservation_bootstrap_duration_ms: null,
     wallet_reservation_write_count: 0,
   }
 }

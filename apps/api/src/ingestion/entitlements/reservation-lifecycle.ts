@@ -127,7 +127,10 @@ export class ReservationLifecycle {
   // In-memory single-flight for lazy reservation bootstrap. It only dedupes
   // external wallet I/O while this window instance is alive; the reservation
   // row remains the durable source of truth.
-  private reservationBootstrapPromise: Promise<ApplyResult | null> | null = null
+  private reservationBootstrapPromise: Promise<{
+    result: ApplyResult | null
+    walletCreateReservationDurationMs: number | null
+  }> | null = null
 
   constructor(deps: ReservationLifecycleDeps) {
     this.clock = deps.clock
@@ -1209,12 +1212,18 @@ export class ReservationLifecycle {
     input: ApplyInput,
     activeGrants: ActiveGrantInput[],
     meter: MeterIdentity
-  ): Promise<ApplyResult | null> {
+  ): Promise<{
+    result: ApplyResult | null
+    walletCreateReservationDurationMs: number | null
+  }> {
     const existing = this.reservationBootstrapPromise
     if (existing) {
-      const result = await existing
+      const bootstrap = await existing
       const window = this.store.readWalletReservation()
-      return window?.reservationId ? null : result
+      return {
+        ...bootstrap,
+        result: window?.reservationId ? null : bootstrap.result,
+      }
     }
 
     const promise = this.bootstrapReservation(input, activeGrants, meter)
@@ -1229,9 +1238,7 @@ export class ReservationLifecycle {
   }
 
   // Opens the per-(stream, period) reservation lazily on first priced apply().
-  // Returns a denial result when the wallet has no available
-  // balance to back the reservation; returns `null` on success (or when the
-  // feature is free, in which case no reservation is needed).
+  // Returns the denial result and the awaited wallet-call duration.
   //
   // The reservation row is durable: even an allocation of 0 is persisted so
   // subsequent events on this window short-circuit through the in-tx reservation
@@ -1244,7 +1251,10 @@ export class ReservationLifecycle {
     input: ApplyInput,
     activeGrants: ActiveGrantInput[],
     meter: MeterIdentity
-  ): Promise<ApplyResult | null> {
+  ): Promise<{
+    result: ApplyResult | null
+    walletCreateReservationDurationMs: number | null
+  }> {
     const projectedCost = this.computeProjectedCurrentEventCostMinor(input, activeGrants, meter)
 
     return this.bootstrapReservationForProjectedCost({
@@ -1260,14 +1270,19 @@ export class ReservationLifecycle {
     input: ApplyInput
     meter: MeterIdentity
     projectedCost: number
-  }): Promise<ApplyResult | null> {
+  }): Promise<{
+    result: ApplyResult | null
+    walletCreateReservationDurationMs: number | null
+  }> {
     const { activeGrants, input, meter, projectedCost } = params
 
     // The next event lands in a free portion of the curve — flat-free plan,
     // included-quantity tier still has runway, etc. No wallet engagement
     // needed for this event; a later apply() that crosses into a paid tier
     // will re-probe and bootstrap then.
-    if (projectedCost <= 0) return null
+    if (projectedCost <= 0) {
+      return { result: null, walletCreateReservationDurationMs: null }
+    }
 
     const plan = this.createReservationBootstrapPlan({
       activeGrants,
@@ -1275,9 +1290,12 @@ export class ReservationLifecycle {
       meter,
       projectedCost,
     })
-    if (!plan) return null
+    if (!plan) {
+      return { result: null, walletCreateReservationDurationMs: null }
+    }
 
     const invoiceContext = this.resolveReservationInvoiceContext(input)
+    const walletCreateReservationStartedAt = this.clock.now()
     const result = await this.wallet.get().createReservation({
       projectId: input.projectId,
       customerId: input.customerId,
@@ -1301,6 +1319,10 @@ export class ReservationLifecycle {
       // dedupe — this key just tags ledger entries for traceability.
       idempotencyKey: plan.idempotencyKey,
     })
+    const walletCreateReservationDurationMs = Math.max(
+      0,
+      this.clock.now() - walletCreateReservationStartedAt
+    )
 
     if (result.err) {
       const errorFields: Record<string, unknown> = {
@@ -1336,13 +1358,16 @@ export class ReservationLifecycle {
       // in-tx WALLET_EMPTY denial path. Surface the denial for this event
       // too so the caller doesn't think a free apply happened.
       return {
-        allowed: false,
-        deniedReason: "WALLET_EMPTY",
-        message: "Wallet has no available balance to back the reservation",
+        result: {
+          allowed: false,
+          deniedReason: "WALLET_EMPTY",
+          message: "Wallet has no available balance to back the reservation",
+        },
+        walletCreateReservationDurationMs,
       }
     }
 
-    return null
+    return { result: null, walletCreateReservationDurationMs }
   }
 
   private createReservationBootstrapPlan(params: {

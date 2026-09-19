@@ -103,9 +103,16 @@ export class EntitlementWindowDO extends DurableObject {
     })
     // Keep cold start minimal: the idempotency result cache hydrates lazily on
     // first lookup, so alarm-only wakes of dormant windows never pay the scan.
+    const readyStartedAt = Date.now()
     this.ready = this.ctx.blockConcurrencyWhile(async () => {
       await migrate(db, migrations)
       await this.processor.initialize()
+    }).then(() => {
+      this.logger.info("entitlement window ready", {
+        operation: "ready",
+        cold_start: true,
+        ready_duration_ms: Math.max(0, Date.now() - readyStartedAt),
+      })
     })
   }
 
