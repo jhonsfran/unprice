@@ -222,6 +222,10 @@ patterns. Keep it cheap to load and useful.
   `CUSTOMER_ID`, and `EVENTS=1000`; it discovers meters through `entitlements.get`, sends async
   usage grouped by event slug, samples verification with `VERIFY_EVERY`, and runs one final
   verification without signup/payment flows.
+- 2026-09-19: Production k6 latency and baseline phases must use separate customers; customer-scoped
+  ingestion totals can otherwise let latency traffic hide missing baseline events.
+- 2026-09-19: Entitlement reservation lifecycle methods return domain outcomes only; measure
+  bootstrap duration in `EntitlementWindowProcessor`, which owns apply telemetry.
 - 2026-05-17: Async raw ingestion supports one event fanning out to multiple active usage
   entitlements with the same `eventSlug`; keep same-slug meter tests at the service layer so
   payload-compatible meters stay processed together.
@@ -283,6 +287,15 @@ patterns. Keep it cheap to load and useful.
 - 2026-07-11: Subscription phase scheduling must normalize stale `currentCycleEndAt` values to a future boundary; otherwise `updatePhase` clamps the old end to `now` and `createPhase` reports a false overlap.
 - 2026-07-11: Subscription creation must return a conflict when a customer already has an active subscription; explain the one-subscription invariant and direct callers to update the existing subscription.
 - 2026-07-11: Subscription creation checks customer activity before duplicate-subscription handling; map inactive customers to a visible precondition instead of `SUBSCRIPTION_OPERATION_FAILED`, which becomes a generic internal error.
+
+- 2026-09-19: Address every Durable Object through `apps/api/src/ingestion/do-placement.ts`.
+  Jurisdiction is part of a DO's identity, so a single unscoped call site silently creates a
+  second object holding half the money state; `do-placement.test.ts` fails the build on a raw
+  binding access or an addressing call outside that module.
+- 2026-09-19: `namespace.jurisdiction()` throws "Jurisdiction restrictions are not implemented in
+  workerd", which breaks `wrangler dev` and the workers test pool, so `do-placement.ts` skips it
+  when `APP_ENV === "development"` and applies it everywhere else. Test mocks of a DO namespace
+  need `jurisdiction()` too — use `ingestion/testing/durable-object-namespace-mock.ts`.
 
 ## Next.js And Dashboard
 
@@ -589,6 +602,8 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-09-01: Public API adapters must map expected service errors through
   `resolveDomainErrorKind`; never use a catch-all `BaseError -> BAD_REQUEST` rule, which turns
   disabled, conflict, precondition, and internal failures into the same client error.
+- 2026-09-19: Service errors exposed through HTTP or tRPC must extend `DomainError` and own their
+  `kind`; keep `resolveDomainErrorKind` independent of concrete service and use-case errors.
 - 2026-06-21: Tooling that calls `unprice.analytics.usage.get` should consume the public SDK row
   shape (`usage` plus formatted `spending`), not raw analytics/lake fields such as `value_after`
   or `amount_after`.
@@ -888,3 +903,8 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-08-10: Preview Vercel builds must pass `APP_ENV=preview` and
   `NEXT_PUBLIC_APP_ENV=preview` explicitly; an inherited development value makes `APP_DOMAIN`
   generate `http://app.<preview-domain>` instead of the `app-<preview-domain>` alias.
+- 2026-09-19: Shared URL constants must prefer `NEXT_PUBLIC_APP_ENV` when it is set; `APP_ENV`
+  has a development default and can otherwise override preview configuration. Keep
+  `APP_BASE_DOMAIN` hyphenated for preview aliases.
+- 2026-09-19: Never apply the Vercel preview alias to a localhost app, even when preview variables
+  are inherited; local auth must use `http://app.localhost:<port>`.
