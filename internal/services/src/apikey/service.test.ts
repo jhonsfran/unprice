@@ -752,6 +752,32 @@ describe("ApiKeysService customer binding", () => {
     expect(updateWhere).toHaveBeenCalledTimes(2)
   })
 
+  it("rollApiKey returns a fetch error when the key lookup fails", async () => {
+    const service = new ApiKeysService({
+      cache,
+      metrics,
+      analytics,
+      logger,
+      db: {
+        query: {
+          apikeys: {
+            findFirst: vi.fn().mockRejectedValue(new Error("database unavailable")),
+          },
+        },
+      } as unknown as Database,
+      waitUntil,
+      hashCache,
+    })
+
+    const result = await service.rollApiKey({
+      keyHash: "old_hash",
+      projectId: "proj_123",
+    })
+
+    expect(result.err).toBeInstanceOf(FetchError)
+    expect(result.err?.message).toContain("database unavailable")
+  })
+
   it("rollApiKey keeps the key type when the secret is rotated", async () => {
     const existingRow = {
       id: "api_123",

@@ -620,7 +620,23 @@ export class ApiKeysService {
     projectId: string
     expiresAt?: number | null
   }): Promise<Result<ApiKey & { newKey: string }, SchemaError | FetchError | UnPriceApiKeyError>> {
-    const apiKey = await this.getData(req.keyHash, req.projectId)
+    const { val: apiKey, err } = await wrapResult(
+      this.getData(req.keyHash, req.projectId),
+      (error) =>
+        new FetchError({
+          message: `error fetching api key for rotation: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error(err, {
+        context: "error fetching api key for rotation",
+        projectId: req.projectId,
+        keyHash: req.keyHash,
+      })
+      return Err(err)
+    }
 
     if (!apiKey) {
       return Err(
