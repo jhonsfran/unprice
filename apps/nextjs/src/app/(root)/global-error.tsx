@@ -13,13 +13,15 @@ export default function GlobalError({
   reset,
   error,
 }: {
-  error: Error
+  // Next adds `digest` — the only handle on the fault in production builds,
+  // where message and stack are stripped from client boundaries
+  error: Error & { digest?: string }
   reset: () => void
 }) {
   const router = useRouter()
 
   useEffect(() => {
-    void logError(error.message, { name: error.name })
+    void logError(error.message, { digest: error.digest, name: error.name, stack: error.stack })
   }, [error])
 
   const description = error.message
