@@ -390,58 +390,48 @@ export class ApiKeysService {
   }
 
   private async getData(keyHash: string, projectId?: string): Promise<ApiKeyExtended | null> {
-    const data = await this.db.query.apikeys
-      .findFirst({
-        with: {
-          project: {
-            columns: {
-              workspaceId: true,
-              id: true,
-              enabled: true,
-              slug: true,
-              defaultCurrency: true,
-              isMain: true,
-              isInternal: true,
-              timezone: true,
-            },
-            with: {
-              workspace: {
-                columns: {
-                  slug: true,
-                  enabled: true,
-                  unPriceCustomerId: true,
-                  isPersonal: true,
-                  isInternal: true,
-                  isMain: true,
-                  createdBy: true,
-                },
+    const data = await this.db.query.apikeys.findFirst({
+      with: {
+        project: {
+          columns: {
+            workspaceId: true,
+            id: true,
+            enabled: true,
+            slug: true,
+            defaultCurrency: true,
+            isMain: true,
+            isInternal: true,
+            timezone: true,
+          },
+          with: {
+            workspace: {
+              columns: {
+                slug: true,
+                enabled: true,
+                unPriceCustomerId: true,
+                isPersonal: true,
+                isInternal: true,
+                isMain: true,
+                createdBy: true,
               },
             },
           },
         },
-        columns: {
-          id: true,
-          projectId: true,
-          expiresAt: true,
-          revokedAt: true,
-          hash: true,
-          defaultCustomerId: true,
-          type: true,
-        },
-        where: (apikey, { and, eq }) =>
-          projectId
-            ? and(eq(apikey.hash, keyHash), eq(apikey.projectId, projectId))
-            : eq(apikey.hash, keyHash),
-      })
-      .catch((e) => {
-        this.logger.set({ error: toErrorContext(e) })
-        this.logger.error(e, {
-          context: `Error fetching apikey from db: ${e.message}`,
-          keyHash,
-        })
-
-        return null
-      })
+      },
+      columns: {
+        id: true,
+        projectId: true,
+        expiresAt: true,
+        revokedAt: true,
+        hash: true,
+        defaultCustomerId: true,
+        type: true,
+      },
+      where: (apikey, { and, eq }) =>
+        projectId
+          ? and(eq(apikey.hash, keyHash), eq(apikey.projectId, projectId))
+          : eq(apikey.hash, keyHash),
+    })
 
     if (!data) {
       return null
@@ -515,6 +505,10 @@ export class ApiKeysService {
     }
 
     if (!data) {
+      // A missing key is not stable enough to cache. The key can be created after
+      // this lookup, and a prior database failure may have left a negative entry
+      // in a shared cache.
+      await this.cache.apiKeyByHash.remove(keyHash)
       return Err(
         new UnPriceApiKeyError({
           code: "NOT_FOUND",

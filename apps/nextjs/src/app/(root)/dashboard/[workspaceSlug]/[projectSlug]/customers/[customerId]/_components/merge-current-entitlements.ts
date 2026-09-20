@@ -5,11 +5,22 @@ type CurrentEntitlements = RouterOutputs["customers"]["getCurrentEntitlements"]
 
 export function mergeCurrentEntitlements(
   access: CurrentAccess,
-  current: CurrentEntitlements
+  current: CurrentEntitlements | null
 ): {
   access: CurrentAccess
   unavailableEntitlementIds: ReadonlySet<string>
 } {
+  if (!current) {
+    return {
+      access,
+      unavailableEntitlementIds: new Set(
+        access.entitlements
+          .filter((entitlement) => entitlement.featureType === "usage")
+          .map((entitlement) => entitlement.id)
+      ),
+    }
+  }
+
   const currentById = new Map(
     current.entitlements.map((entitlement) => [entitlement.id, entitlement])
   )

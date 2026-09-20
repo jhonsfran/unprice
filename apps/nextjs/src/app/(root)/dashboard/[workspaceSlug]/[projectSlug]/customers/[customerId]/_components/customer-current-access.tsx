@@ -1,6 +1,6 @@
 "use client"
 
-import { useSuspenseQuery } from "@tanstack/react-query"
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query"
 import { Button } from "@unprice/ui/button"
 import { useMemo } from "react"
 import {
@@ -38,7 +38,7 @@ export function CustomerCurrentAccess({
       }
     )
   )
-  const { data: currentEntitlements, isFetching: isFetchingCurrentEntitlements } = useSuspenseQuery(
+  const { data: currentEntitlements, isFetching: isFetchingCurrentEntitlements } = useQuery(
     trpc.customers.getCurrentEntitlements.queryOptions(
       {
         customerId: initialAccess.customerId,
@@ -49,7 +49,7 @@ export function CustomerCurrentAccess({
     )
   )
   const merged = useMemo(
-    () => mergeCurrentEntitlements(access, currentEntitlements),
+    () => mergeCurrentEntitlements(access, currentEntitlements ?? null),
     [access, currentEntitlements]
   )
   const activePlan = merged.access.activePlan

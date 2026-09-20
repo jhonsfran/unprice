@@ -124,4 +124,11 @@ describe("mergeCurrentEntitlements", () => {
     expect([...result.unavailableEntitlementIds]).toEqual(["ce_tokens"])
     expect(result.access.entitlements[1]?.limit).toBe(1)
   })
+
+  it("keeps configured access visible when live entitlements are unavailable", () => {
+    const result = mergeCurrentEntitlements(access, null)
+
+    expect(result.access).toEqual(access)
+    expect([...result.unavailableEntitlementIds]).toEqual(["ce_tokens"])
+  })
 })
