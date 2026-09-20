@@ -52,6 +52,8 @@ export type UnpriceOptions = {
   }
   /**
    * Customize the `fetch` cache behaviour.
+   *
+   * @default "no-store"
    */
   cache?: RequestCache
 
@@ -160,7 +162,7 @@ export class Unprice implements GeneratedSdkResources {
     }
 
     this.headers = opts.headers ?? {}
-    this.cache = opts.cache ?? "default"
+    this.cache = opts.cache ?? "no-store"
     /**
      * Even though TypeScript should prevent this, some people still pass undefined or empty strings.
      */

@@ -24,6 +24,18 @@ const createClient = (fetch?: (input: Request) => Promise<Response>) =>
   })
 
 describe("Unprice client", () => {
+  it("uses a Cloudflare-compatible cache mode by default", async () => {
+    const requests: Request[] = []
+    const client = createClient(async (request) => {
+      requests.push(request.clone())
+      return createJsonResponse({ features: [] })
+    })
+
+    await client.features.list()
+
+    expect(requests[0]?.cache).toBe("no-store")
+  })
+
   it("keeps generated analytics SDK contracts aligned with OpenAPI operation shapes", () => {
     const client = createClient()
 

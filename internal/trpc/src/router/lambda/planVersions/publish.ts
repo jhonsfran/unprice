@@ -4,6 +4,7 @@ import { z } from "zod"
 
 import { TRPCError } from "@trpc/server"
 import { protectedProjectProcedure } from "#trpc"
+import { paymentProviderPublishError } from "./publish-error"
 
 export const publish = protectedProjectProcedure
   .input(planVersionSelectBaseSchema.partial().required({ id: true }))
@@ -71,10 +72,7 @@ export const publish = protectedProjectProcedure
     }
 
     if (val.state === "payment_provider_error") {
-      throw new TRPCError({
-        code: "INTERNAL_SERVER_ERROR",
-        message: "Error validating payment provider",
-      })
+      throw paymentProviderPublishError()
     }
 
     if (val.state === "publish_error") {

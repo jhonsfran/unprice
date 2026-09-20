@@ -68,6 +68,11 @@ patterns. Keep it cheap to load and useful.
 
 ## Cloudflare, API, And Ingestion
 
+- 2026-09-20: Default authenticated SDK requests to `cache: "no-store"`; Cloudflare Workers reject
+  an explicitly supplied `cache: "default"` before the request reaches the API.
+- 2026-09-20: Treat a missing or disabled payment provider during paid plan publication as an
+  expected precondition failure; `INTERNAL_SERVER_ERROR` is masked by the tRPC formatter and hides
+  the payment-settings action from the user.
 - 2026-09-02: Pricing automation needs separate credentials: configuration keys own
   `monetization.get`/`monetization.apply`, while runtime keys own signup, usage, and ingestion
   status operations.
