@@ -397,6 +397,9 @@ patterns. Keep it cheap to load and useful.
 
 ## Billing, Wallets, And Invoices
 
+- 2026-09-20: Customer ledger statements must use `COALESCE(event_at, created_at)` for both date
+  filters and pagination order; ordering by insert time moves late or backfilled transfers to the
+  wrong visible date and page.
 - 2026-07-19: Plan-included credits are configured on `plan_versions.metadata.includedCreditAmount`
   (ledger scale) and derived into a `plan_included` activation grant in
   `derive-provision-inputs.ts`; phases on such plans must use the `capped` policy

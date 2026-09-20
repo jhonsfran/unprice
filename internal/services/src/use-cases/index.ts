@@ -233,5 +233,22 @@ export type {
   GetCustomerWalletInput,
   GetCustomerWalletOutput,
 } from "./wallet/get-customer-wallet"
+export {
+  customerLedgerAccountSchema,
+  customerLedgerActivitySchema,
+  customerLedgerMovementSchema,
+  getCustomerLedger,
+  getCustomerLedgerInputSchema,
+  getCustomerLedgerOutputSchema,
+  ledgerDirectionSchema,
+  ledgerPartySchema,
+} from "./wallet/get-customer-ledger"
+export type {
+  CustomerLedgerMovementView,
+  GetCustomerLedgerDeps,
+  GetCustomerLedgerInput,
+  GetCustomerLedgerOutput,
+  LedgerParty,
+} from "./wallet/get-customer-ledger"
 export * from "./runs"
 export * from "./ingestion"

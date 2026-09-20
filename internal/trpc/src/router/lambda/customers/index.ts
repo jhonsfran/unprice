@@ -11,6 +11,7 @@ import { getEconomicSummary } from "./getEconomicSummary"
 import { getEntitlements } from "./getEntitlements"
 import { getInvoiceById } from "./getInvoiceById"
 import { getInvoices } from "./getInvoices"
+import { getLedger } from "./getLedger"
 import { getRuns } from "./getRuns"
 import { getSubscription } from "./getSubscription"
 import { getSubscriptions } from "./getSubscriptions"
@@ -41,6 +42,7 @@ export const customersRouter = createTRPCRouter({
   listRunsByActiveProject: listRunsByActiveProject,
   getInvoices: getInvoices,
   getRuns: getRuns,
+  getLedger: getLedger,
   getWallet: getWallet,
   getInvoiceById: getInvoiceById,
 })

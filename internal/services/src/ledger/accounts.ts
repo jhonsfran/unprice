@@ -10,7 +10,7 @@
 
 export type PlatformFundingKind = "topup" | "promo" | "plan_credit" | "manual" | "credit_line"
 
-export const PLATFORM_FUNDING_KINDS: readonly PlatformFundingKind[] = [
+export const PLATFORM_FUNDING_KINDS = [
   // Customer self-serve top-ups (cash collected).
   "topup",
   // Promotional credits funded by the platform.
@@ -21,7 +21,7 @@ export const PLATFORM_FUNDING_KINDS: readonly PlatformFundingKind[] = [
   "manual",
   // Postpaid spending line tracked as customer receivable.
   "credit_line",
-] as const
+] as const satisfies readonly PlatformFundingKind[]
 
 export function platformAccountKey(kind: PlatformFundingKind, projectId: string): string {
   return `platform.${projectId}.funding.${kind}`
@@ -62,3 +62,17 @@ export function customerAvailableKeys(customerId: string): readonly [string, str
     `customer.${customerId}.available.purchased`,
   ] as const
 }
+
+/**
+ * The five customer sub-account kinds, in statement reading order. Used by
+ * read-side projections that need to label an account name back to its kind.
+ */
+export const CUSTOMER_ACCOUNT_KINDS = [
+  "purchased",
+  "granted",
+  "reserved",
+  "consumed",
+  "receivable",
+] as const satisfies readonly (keyof CustomerAccountKeys)[]
+
+export type CustomerAccountKind = (typeof CUSTOMER_ACCOUNT_KINDS)[number]
