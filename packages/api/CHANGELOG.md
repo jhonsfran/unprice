@@ -1,5 +1,11 @@
 # @unprice/api
 
+## 0.3.1
+
+### Patch Changes
+
+- 11be10a: Use `no-store` as the default fetch cache mode so SDK requests work in Cloudflare Workers.
+
 ## 0.3.0
 
 ### Minor Changes
