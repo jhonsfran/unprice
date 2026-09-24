@@ -18,7 +18,7 @@ jobs:
       pull-requests: write
       statuses: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: ./.github/actions/install
         name: Install dependencies
@@ -114,7 +114,7 @@ jobs:
         ports:
           - 5433:80
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: ./.github/actions/install
         name: Install dependencies
