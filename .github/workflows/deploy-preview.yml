@@ -67,7 +67,7 @@ jobs:
 
       - name: Get branch name
         id: branch-name
-        uses: tj-actions/branch-names@dde14ac574a8b9b1cedc59a1cf312788af43d8d8 # v8
+        uses: tj-actions/branch-names@5250492686b253f06fa55861556d1027b067aeb5 # v9
 
       - name: Create Neon Branch
         id: create-branch
