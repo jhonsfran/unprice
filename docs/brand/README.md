@@ -2,8 +2,9 @@
 
 Date: 2026-07-03
 
-Status: pre-validation refresh (July 2026 market audit). Run the Validation Plan in
-`jobs-to-be-done.md`, fold in the interview evidence, then lock these documents.
+Status: pre-validation refresh (July 2026 market audit). The persona and triggers were re-derived
+from market evidence on 2026-10-13 in `docs/specs/2026-10-13-budget-primitive-problem-space.md`;
+fold that in, validate with design partners, then lock these documents.
 
 These documents define how Unprice should present itself in product UI, marketing pages, docs,
 sales demos, and developer examples.
@@ -59,7 +60,7 @@ Each fact has one owner. Other docs should reference, not restate, the owner.
 | Product nouns, verbs, CTAs, state language, and surface-specific copy rules | `language-and-vocabulary.md` |
 | Product definition, ICP, pillars, claim boundaries, business model | `PRODUCT.md` |
 | Narrative, pitches, demo script, rallying cry | `brand-narrative.md` |
-| JTBD, triggers, switch forces, copy-review checklist | `jobs-to-be-done.md` |
+| Persona, sub-segments, triggers, voice-of-persona lines (evidence-based, 2026-10-13) | `../specs/2026-10-13-budget-primitive-problem-space.md` |
 | Marketing avatar, incident bank, altitude map, offer placement, channel motion | `marketing-framework.md` |
 | UI/marketing design rules, signature visual | `design-system-guidelines.md` |
 
@@ -82,8 +83,9 @@ Each fact has one owner. Other docs should reference, not restate, the owner.
 - [Positioning And Messaging](strategic/positioning-and-messaging.md): canonical source for beachhead market,
   ICP, category, positioning statement, headline, message hierarchy, competitor contrast, and GTM
   message discipline.
-- [Jobs To Be Done](jobs-to-be-done.md): core job, trigger priority, switch forces, campaign
-  angles, and copy-review checklist for marketing and launch work.
+- [Budget Primitive Problem Space](../specs/2026-10-13-budget-primitive-problem-space.md): persona,
+  sub-segments, triggers, objections, channels, and voice-of-persona lines derived from market
+  evidence on 2026-10-13. Replaces the former `jobs-to-be-done.md`.
 - [Marketing Framework](marketing-framework.md): the marketing operating system — avatar, incident
   bank, altitude map, offer placement, channel motion, measurement, and the pre-publish checklist
   for every ad, post, email, and launch asset.

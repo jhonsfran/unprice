@@ -49,8 +49,9 @@ builder" — never "the customer." "Customer" always means the avatar's end cust
 
 ## The Incident Bank
 
-Each asset picks exactly one. Hook lines are canonical (owners: `brand-narrative.md`,
-`jobs-to-be-done.md`); the mechanism line is always the same sentence.
+Each asset picks exactly one. Hook lines are canonical (owner: `brand-narrative.md`;
+persona and triggers: `docs/specs/2026-10-13-budget-primitive-problem-space.md`); the mechanism
+line is always the same sentence.
 
 1. **The over-budget run.** A customer or agent triggered paid work that burned real margin before
    anyone could stop it. Hooks: "The invoice is too late. The work already ran." · "Stop the cost

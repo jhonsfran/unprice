@@ -2,8 +2,8 @@
 
 Date: 2026-07-06
 
-Status: pre-validation refresh (July 2026 market audit). Lock after the customer interviews in
-`jobs-to-be-done.md`.
+Status: pre-validation refresh (July 2026 market audit). Lock after the persona in
+`docs/specs/2026-10-13-budget-primitive-problem-space.md` is validated with design partners.
 
 This document defines the core Unprice story for founders and engineers building AI products that
 sell credits, agent runs, or paid workflows. The primary action is SDK integration.
