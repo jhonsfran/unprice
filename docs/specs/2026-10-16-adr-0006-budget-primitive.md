@@ -115,8 +115,8 @@ Budget
 ```text
 authorize { key, estimate: { amount } | { usage }, ttl?, idempotencyKey }
           -> { holdId, allowed, remaining, blockedBy?, final? }
-settle    { holdId, actual: { amount } | { usage }, idempotencyKey }      // closes the hold
-release   { holdId }                                                      // nothing consumed
+settle    { key, holdId, actual: { amount } | { usage } }                  // closes the hold
+release   { key, holdId }                                                 // nothing consumed
 charge    { key, amount | usage, idempotencyKey }   // gated one-shot: denied if it does not fit
 record    { key, amount | usage, idempotencyKey }   // usage that already happened: never denied
 ```
@@ -129,6 +129,9 @@ authorize(est 80)   available 100 -> 20   held 0 -> 80
 settle(actual 55)   held 80 -> 0          consumed 0 -> 55   available 20 -> 45
 ```
 
+- The hold id is the idempotency key for `settle` and `release`. Settling again with the same
+  amount replays the first result; a different amount, or a release after a settle, returns 409.
+  A settle on a hold minted but already purged after retention is consumed as late usage.
 - `authorize` holds the estimate against every limit on the key. If `usage` is passed, the budget's
   pricing turns it into an amount first; a usage without a price row is denied (`NOT_PRICED`), never
   priced at zero.
