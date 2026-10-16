@@ -131,7 +131,8 @@ settle(actual 55)   held 80 -> 0          consumed 0 -> 55   available 20 -> 45
 
 - The hold id is the idempotency key for `settle` and `release`. Settling again with the same
   amount replays the first result; a different amount, or a release after a settle, returns 409.
-  A settle on a hold minted but already purged after retention is consumed as late usage.
+  A hold's row is kept for 24 hours after it closes or lapses. After that the hold is retired, and
+  settle and release return 409 `HOLD_RETIRED` (B3).
 - `authorize` holds the estimate against every limit on the key. If `usage` is passed, the budget's
   pricing turns it into an amount first; a usage without a price row is denied (`NOT_PRICED`), never
   priced at zero.
@@ -148,13 +149,19 @@ settle(actual 55)   held 80 -> 0          consumed 0 -> 55   available 20 -> 45
   headers. A denial is always HTTP 402 with `blockedBy` (the limit or the funding source) and a
   remedy.
 
-### B3. Holds expire; late usage is never dropped
+### B3. Holds expire; late usage is accepted within retention
 
 - Every hold has a TTL (default 15 minutes, maximum 24 hours). At TTL the alarm marks it `expired`
   and keeps it counted. After a grace of twice the TTL it releases the remainder (the telecom Tcc
   rule).
-- A settle that arrives after expiry is accepted and consumes, even if it pushes remaining below
-  zero. Usage that happened is never dropped.
+- A settle that arrives after expiry, or after the hold lapsed, is accepted and consumes, even if it
+  pushes remaining below zero. It counts against the window it arrives in, not the window the work
+  ran in: an amount is priced and attributed when it is written.
+- This holds until the hold's retention ends, 24 hours after it closes or lapses. After that the
+  row is purged, and a purged row cannot tell a first settle from a retry of one that committed.
+  Accepting it would count a retried settle twice, so the hold is retired: settle and release
+  return 409 `HOLD_RETIRED`. Retention is the setting for how late is too late. A caller that knows
+  its settle never committed reports that usage with `record` and its own idempotency key.
 - Holds and settles carry the authorization timestamp. Prices are resolved at that timestamp
   (ADR-0005), so a price change between authorize and settle never changes what one call costs.
 
@@ -249,6 +256,8 @@ close: final capture, then source.release(key = "rel:{budget}:{epoch}")
    throw and never delete themselves.
 5. Every transition asserts `funded = available + held + consumed + grantedToChildren`.
 6. Webhook events leave through an outbox table written in the same transaction as the change.
+7. The ledger row is the balance. Journal entries are an audit trail that the alarm prunes after
+   24 hours; nothing replays them to rebuild state.
 
 ### B8. Unprice's own billing runs on budgets
 
@@ -485,7 +494,8 @@ Steps 0 to 3 are the first release: a budget a builder can adopt without any oth
 - Never expose a Durable Object id, a parent, or a funding source in the public API. The key is the
   address.
 - Never price a usage without a row at zero. Deny it.
-- Never drop usage that happened: late settles and late reports consume.
+- Never drop usage that happened inside retention: late settles and late reports consume.
+- Never accept a settle the store can no longer deduplicate. A retired hold returns 409.
 - Never release capacity that a pending capture still covers.
 - Never `await` between a check and the debit it guards.
 - Never put a funding call on the request path while local capacity remains.

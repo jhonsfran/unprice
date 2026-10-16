@@ -6,13 +6,8 @@ import type {
   UpsertBudgetInput,
 } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
-import {
-  type Amount,
-  type BudgetOutcome,
-  UnPriceBudgetError,
-  parseAmount,
-  parseBudgetConfig,
-} from "../../budgets"
+import { type Amount, parseAmount } from "@unprice/money"
+import { type OutcomeOf, UnPriceBudgetError, isOutcomeOf, parseBudgetConfig } from "../../budgets"
 import type { BudgetClient, BudgetRequest } from "./budget-client"
 
 /** A verb as an adapter receives it: wire amounts and config, the key carried beside it. */
@@ -27,10 +22,10 @@ export type BudgetVerbRequest =
 
 export type ExecuteBudgetCommandDeps = { budgets: BudgetClient }
 
-export type ExecuteBudgetCommandInput = {
+export type ExecuteBudgetCommandInput<R extends BudgetVerbRequest = BudgetVerbRequest> = {
   projectId: string
   key: string
-  request: BudgetVerbRequest
+  request: R
 }
 
 /**
@@ -38,13 +33,22 @@ export type ExecuteBudgetCommandInput = {
  * subscription-created budgets later. It turns wire amounts and config into the core's types,
  * and an upsert always configures the budget at the address it is sent to.
  */
-export async function executeBudgetCommand(
+export async function executeBudgetCommand<R extends BudgetVerbRequest>(
   deps: ExecuteBudgetCommandDeps,
-  input: ExecuteBudgetCommandInput
-): Promise<Result<BudgetOutcome, UnPriceBudgetError>> {
+  input: ExecuteBudgetCommandInput<R>
+): Promise<Result<OutcomeOf<R["type"]>, UnPriceBudgetError>> {
   const request = toBudgetRequest(input)
   if (request.err) return request
-  return deps.budgets.execute({ projectId: input.projectId, key: input.key }, request.val)
+  const result = await deps.budgets.execute(
+    { projectId: input.projectId, key: input.key },
+    request.val
+  )
+  if (result.err) return result
+  // RPC erases the verb's type; the budget always answers with the outcome of the verb it ran.
+  if (!isOutcomeOf(result.val, input.request.type)) {
+    throw new Error(`budget ${input.request.type} returned a ${result.val.type} outcome`)
+  }
+  return Ok(result.val)
 }
 
 function toBudgetRequest({
@@ -91,5 +95,7 @@ function toBudgetRequest({
 function amountOf(text: string): Result<Amount, UnPriceBudgetError> {
   const parsed = parseAmount(text)
   if (parsed.ok) return Ok(parsed.amount)
-  return Err(new UnPriceBudgetError({ code: "INVALID_AMOUNT", amount: text }))
+  return Err(
+    new UnPriceBudgetError({ code: "INVALID_AMOUNT", amount: text, reason: parsed.reason })
+  )
 }

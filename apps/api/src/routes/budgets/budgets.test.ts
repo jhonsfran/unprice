@@ -237,6 +237,7 @@ describe("budgets API", () => {
       409,
       "CONFLICT",
     ],
+    ["/v1/budgets/release", { code: "HOLD_RETIRED", holdId: "h_1" }, 409, "CONFLICT"],
     [
       "/v1/budgets/upsert",
       { code: "UNIT_IMMUTABLE", current: "money:USD", requested: "money:EUR" },

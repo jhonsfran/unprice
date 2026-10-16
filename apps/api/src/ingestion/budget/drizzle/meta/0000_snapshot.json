@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "68598562-30d3-4e79-a8e4-9c3193cb587a",
+  "id": "7c3aa962-a69c-4a48-840a-c8c1c7b01830",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "budget_entries": {
@@ -30,37 +30,6 @@
         },
         "fact_json": {
           "name": "fact_json",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "budget_journal_base": {
-      "name": "budget_journal_base",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "seq": {
-          "name": "seq",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "ledger_json": {
-          "name": "ledger_json",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -153,7 +122,7 @@
           "name": "key_hash",
           "type": "text",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "due_at": {

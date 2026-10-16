@@ -1,15 +1,11 @@
 import { createRoute } from "@hono/zod-openapi"
 import { recordBudgetInputSchema, recordBudgetResponseSchema } from "@unprice/db/validators"
-import { formatAmount } from "@unprice/services/budgets"
-import { executeBudgetCommand } from "@unprice/services/use-cases"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
-import { keyAuth } from "~/auth/key"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
-import { CloudflareBudgetClient } from "~/ingestion/budget/client"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
-import { budgetOutcome, toWireBalance } from "./respond"
+import { runBudgetVerb, toWire } from "./budget-verb"
 
 export const route = createRoute(
   defineEndpointContract(
@@ -41,19 +37,6 @@ export const route = createRoute(
 export const registerRecordBudgetV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { key, ...request } = c.req.valid("json")
-    const apiKey = await keyAuth(c)
-    const result = await executeBudgetCommand(
-      { budgets: new CloudflareBudgetClient(c.env) },
-      { projectId: apiKey.projectId, key, request: { type: "record", ...request } }
-    )
-    const outcome = budgetOutcome(c, result, "record")
-    return c.json(
-      {
-        amount: formatAmount(outcome.amount),
-        crossed: [...outcome.crossed],
-        replayed: outcome.replayed,
-        balance: toWireBalance(outcome.balance),
-      },
-      HttpStatusCodes.OK
-    )
+    const { type: _, ...recorded } = await runBudgetVerb(c, key, { type: "record", ...request })
+    return c.json(toWire(recorded), HttpStatusCodes.OK)
   })

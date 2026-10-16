@@ -12,23 +12,11 @@ import {
   up,
 } from "dinero.js"
 import * as currencies from "dinero.js/currencies"
+import { LEDGER_SCALE } from "./amount"
+
+export * from "./amount"
 
 type DineroCurrency = (typeof currencies)[keyof typeof currencies]
-
-/**
- * Single internal scale for every precise money value: pgledger storage,
- * per-event priced amounts flushed to analytics, and any intermediate
- * computation that must preserve sub-cent precision (e.g. $0.000003/token).
- *
- * Quantization to currency minor units (cents) happens only at external
- * boundaries. Provider handoff uses `formatAmountForProvider`; customer
- * display uses `toCurrencyMinor`.
- *
- * Changing this value is a data-model break: existing ledger entries,
- * persisted outbox payloads, and Tinybird rows all interpret `amount` at
- * this scale. Treat as a constant, not a configuration knob.
- */
-export const LEDGER_SCALE = 8
 
 /**
  * The set of currencies the money layer understands at runtime. Adding a

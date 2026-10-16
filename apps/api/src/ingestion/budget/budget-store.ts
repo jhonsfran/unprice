@@ -1,7 +1,6 @@
 import { sha256HexSync } from "@unprice/db/utils"
 import {
   type BudgetRecord,
-  type Entry,
   type HoldOperation,
   type Ledger,
   type Operation,
@@ -147,8 +146,7 @@ function bind(
           .values({
             id: operation.id,
             kind: operation.kind,
-            keyHash:
-              operation.kind === "late_settle" ? null : sha256HexSync(operation.idempotencyKey),
+            keyHash: sha256HexSync(operation.idempotencyKey),
             ...row,
           })
           .onConflictDoUpdate({ target: operations.id, set: row })
@@ -163,40 +161,18 @@ function bind(
         .where(and(ne(operations.status, "open"), lte(operations.dueAt, now)))
         .orderBy(asc(operations.dueAt))
         .limit(limit)
-      return db
-        .delete(operations)
-        .where(inArray(operations.id, expired))
-        .returning({ id: operations.id })
-        .all().length
+      db.delete(operations).where(inArray(operations.id, expired)).run()
     },
 
-    readJournalBase() {
-      const row = db
-        .select({ ledgerJson: schema.budgetJournalBase.ledgerJson })
-        .from(schema.budgetJournalBase)
-        .where(eq(schema.budgetJournalBase.id, SINGLETON_ID))
-        .get()
-      return row ? decode<Ledger>(row.ledgerJson) : emptyLedger
-    },
-
-    readJournalHead(before, limit) {
-      return db
-        .select({ factJson: schema.budgetEntries.factJson })
-        .from(schema.budgetEntries)
-        .where(lt(schema.budgetEntries.at, before))
-        .orderBy(asc(schema.budgetEntries.seq))
+    pruneJournal(before, limit) {
+      const entries = schema.budgetEntries
+      const expired = db
+        .select({ seq: entries.seq })
+        .from(entries)
+        .where(lt(entries.at, before))
+        .orderBy(asc(entries.seq))
         .limit(limit)
-        .all()
-        .map((row) => decode<Entry>(row.factJson))
-    },
-
-    compactJournal(base) {
-      const row = { seq: base.seq, ledgerJson: encode(base) }
-      db.insert(schema.budgetJournalBase)
-        .values({ id: SINGLETON_ID, ...row })
-        .onConflictDoUpdate({ target: schema.budgetJournalBase.id, set: row })
-        .run()
-      db.delete(schema.budgetEntries).where(lte(schema.budgetEntries.seq, base.seq)).run()
+      db.delete(entries).where(inArray(entries.seq, expired)).run()
     },
 
     nextDueAt() {

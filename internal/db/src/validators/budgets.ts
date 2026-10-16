@@ -1,21 +1,24 @@
+import { AMOUNT_PATTERN } from "@unprice/money"
 import { z } from "zod"
 import { extendZodWithOpenApi } from "zod-openapi"
 
 extendZodWithOpenApi(z)
 
-// The patterns mirror `@unprice/services/budgets`, which this package cannot import. The core
-// re-parses amounts and config; keys and hold ids are trusted after this boundary.
+// The one definition of the budget wire contract. `@unprice/services/budgets` imports the window
+// list and the limit cap from here; keys and hold ids are trusted after this boundary.
+
+export const BUDGET_WINDOWS = ["hour", "day", "week", "month", "never"] as const
+
+export const MAX_BUDGET_LIMITS = 16
 
 export const budgetKeyInputSchema = z
   .string()
   .regex(/^[A-Za-z0-9][A-Za-z0-9:/_.@-]{0,127}$/, "letters, digits and : / _ . @ -")
   .openapi({ description: "The budget's key, chosen by you", example: "customer:acme" })
 
-const decimalPattern = /^\d{1,19}(\.\d{1,8})?$/
-
 export const budgetAmountInputSchema = z
   .string()
-  .regex(decimalPattern, "a non-negative decimal string with at most 8 decimal places")
+  .regex(AMOUNT_PATTERN, "a non-negative decimal string with at most 8 decimal places")
   .openapi({ description: "A decimal amount in the budget's unit", example: "0.05" })
 
 const budgetDecimalSchema = z
@@ -27,7 +30,7 @@ export const budgetHoldIdSchema = z
   .regex(/^h_[1-9][0-9]{0,15}$/, "hold ids look like h_<n>")
   .openapi({ example: "h_42" })
 
-export const budgetWindowSchema = z.enum(["hour", "day", "week", "month", "never"])
+export const budgetWindowSchema = z.enum(BUDGET_WINDOWS)
 
 const budgetEnforceSchema = z.enum(["hard", "soft"])
 
@@ -52,7 +55,7 @@ export const upsertBudgetInputSchema = z
           enforce: budgetEnforceSchema.optional(),
         })
       )
-      .max(16),
+      .max(MAX_BUDGET_LIMITS),
     holds: z
       .object({
         defaultTtlMs: z.number().int().optional(),

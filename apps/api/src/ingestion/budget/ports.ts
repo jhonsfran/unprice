@@ -1,7 +1,7 @@
 import type {
+  BudgetReader,
   BudgetRecord,
   Entry,
-  HoldOperation,
   Ledger,
   Operation,
 } from "@unprice/services/budgets"
@@ -16,13 +16,7 @@ export type BudgetScheduler = {
 }
 
 /** Synchronous reads and writes bound to one SQLite transaction. Rows come back as domain types. */
-export type BudgetStoreTx = {
-  readBudget(): BudgetRecord | null
-  readLedger(): Ledger
-  readOperation(id: string): Operation | null
-  readOperationByKey(idempotencyKey: string): Operation | null
-  /** Open holds with `lapsesAt <= at`, earliest first. */
-  readDueHolds(at: number, limit: number): HoldOperation[]
+export type BudgetStoreTx = BudgetReader & {
   commit(params: {
     budget: BudgetRecord | null
     ledger: Ledger
@@ -30,13 +24,10 @@ export type BudgetStoreTx = {
     operations: readonly Operation[]
     now: number
   }): void
-  /** Deletes closed rows whose retention ended; returns how many. */
-  purgeOperations(now: number, limit: number): number
-  readJournalBase(): Ledger
-  /** The oldest entries with `at < before`, in seq order. */
-  readJournalHead(before: number, limit: number): Entry[]
-  /** Stores `base` and deletes every entry it folded (seq <= base.seq). */
-  compactJournal(base: Ledger): void
+  /** Deletes up to `limit` closed rows whose retention ended. */
+  purgeOperations(now: number, limit: number): void
+  /** Deletes up to `limit` of the oldest journal entries with `at < before`. */
+  pruneJournal(before: number, limit: number): void
   nextDueAt(): number | null
   oldestEntryAt(): number | null
 }

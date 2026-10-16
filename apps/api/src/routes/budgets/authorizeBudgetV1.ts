@@ -1,15 +1,11 @@
 import { createRoute } from "@hono/zod-openapi"
 import { authorizeBudgetInputSchema, authorizeBudgetResponseSchema } from "@unprice/db/validators"
-import { formatAmount } from "@unprice/services/budgets"
-import { executeBudgetCommand } from "@unprice/services/use-cases"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
-import { keyAuth } from "~/auth/key"
 import { openApiBudgetErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
-import { CloudflareBudgetClient } from "~/ingestion/budget/client"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
-import { budgetOutcome, toWireBalance } from "./respond"
+import { runBudgetVerb, toWire } from "./budget-verb"
 
 export const route = createRoute(
   defineEndpointContract(
@@ -41,21 +37,6 @@ export const route = createRoute(
 export const registerAuthorizeBudgetV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { key, ...request } = c.req.valid("json")
-    const apiKey = await keyAuth(c)
-    const result = await executeBudgetCommand(
-      { budgets: new CloudflareBudgetClient(c.env) },
-      { projectId: apiKey.projectId, key, request: { type: "authorize", ...request } }
-    )
-    const outcome = budgetOutcome(c, result, "authorize")
-    return c.json(
-      {
-        allowed: true as const,
-        holdId: outcome.holdId,
-        amount: formatAmount(outcome.amount),
-        expiresAt: outcome.expiresAt,
-        replayed: outcome.replayed,
-        balance: toWireBalance(outcome.balance),
-      },
-      HttpStatusCodes.OK
-    )
+    const { type: _, ...held } = await runBudgetVerb(c, key, { type: "authorize", ...request })
+    return c.json({ allowed: true as const, ...toWire(held) }, HttpStatusCodes.OK)
   })

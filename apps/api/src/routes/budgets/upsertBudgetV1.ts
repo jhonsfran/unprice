@@ -1,15 +1,11 @@
 import { createRoute } from "@hono/zod-openapi"
 import { upsertBudgetInputSchema, upsertBudgetResponseSchema } from "@unprice/db/validators"
-import { type ConfigChange, formatAmount } from "@unprice/services/budgets"
-import { executeBudgetCommand } from "@unprice/services/use-cases"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
-import { keyAuth } from "~/auth/key"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
-import { CloudflareBudgetClient } from "~/ingestion/budget/client"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
-import { budgetOutcome, toWireBudget } from "./respond"
+import { runBudgetVerb, toWire } from "./budget-verb"
 
 export const route = createRoute(
   defineEndpointContract(
@@ -44,24 +40,6 @@ export const route = createRoute(
 export const registerUpsertBudgetV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { key, ...request } = c.req.valid("json")
-    const apiKey = await keyAuth(c)
-    const result = await executeBudgetCommand(
-      { budgets: new CloudflareBudgetClient(c.env) },
-      { projectId: apiKey.projectId, key, request: { type: "upsert", ...request } }
-    )
-    const outcome = budgetOutcome(c, result, "upsert")
-    return c.json(
-      {
-        changes: outcome.changes.map(toWireChange),
-        budget: toWireBudget(outcome.budget),
-      },
-      HttpStatusCodes.OK
-    )
+    const { type: _, ...upserted } = await runBudgetVerb(c, key, { type: "upsert", ...request })
+    return c.json(toWire(upserted), HttpStatusCodes.OK)
   })
-
-function toWireChange(change: ConfigChange) {
-  if (!("from" in change)) return change
-  const format = (value: typeof change.from) =>
-    typeof value === "bigint" ? formatAmount(value) : value
-  return { ...change, from: format(change.from), to: format(change.to) }
-}

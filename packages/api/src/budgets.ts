@@ -41,7 +41,10 @@ export type BudgetHold = {
   readonly key: string
   readonly amount: string
   readonly expiresAt: number
-  /** Safe to retry: the hold id is the idempotency key, so the same amount replays. */
+  /**
+   * Safe to retry: the hold id is the idempotency key, so the same amount replays. A hold retires
+   * 24 hours after it closes or lapses; after that this returns a 409 instead of counting twice.
+   */
   settle(input: { amount: AmountInput }): Promise<ApiResult<BudgetSettlement>>
   /** Safe to retry. Call it only when the work produced no usage. */
   release(): Promise<ApiResult<BudgetRelease>>
@@ -116,7 +119,8 @@ export class BudgetRequestError extends Error {
 /**
  * The work ran and produced `value`, but its usage was not settled. Retry
  * `error.hold.settle({ amount: error.actual })`: the hold id makes the retry safe, while recording
- * the usage separately would count it twice if the first settle did commit.
+ * the usage separately would count it twice if the first settle did commit. Retry within 24 hours
+ * of the hold lapsing; after that the hold is retired and the settle returns a 409.
  */
 export class BudgetSettleError extends Error {
   readonly value: unknown

@@ -3,7 +3,6 @@ import { env } from "cloudflare:workers"
 import {
   type BudgetConfigInput,
   type BudgetOutcome,
-  foldJournal,
   parseBudgetConfig,
 } from "@unprice/services/budgets"
 import type { BudgetReply, BudgetRequest } from "@unprice/services/use-cases"
@@ -273,7 +272,7 @@ describe("BudgetDO verbs", () => {
 })
 
 describe("BudgetDO alarm", () => {
-  it("lapses a due hold, compacts the journal, purges the tombstone, and always re-arms", async () => {
+  it("lapses a due hold, prunes the journal, purges the tombstone, and always re-arms", async () => {
     const key = "customer:alarm"
     const stub = stubFor(key)
     // Far enough ahead that the alarms set here never fire on the real clock mid-test.
@@ -283,7 +282,6 @@ describe("BudgetDO alarm", () => {
     await runInDurableObject(stub, async (instance: BudgetDO, state) => {
       await instance.execute({ type: "get" })
       await state.storage.deleteAlarm()
-      const store = new BudgetSqliteStore(drizzle(state.storage, { schema, logger: false }))
       const errors: string[] = []
       const processor = realStorageProcessor(state, () => now, errors)
 
@@ -304,14 +302,9 @@ describe("BudgetDO alarm", () => {
 
       now = t0 + 24 * HOUR + 1
       await processor.alarm()
-      const compacted = store.atomically((tx) => ({
-        base: tx.readJournalBase(),
-        tail: tx.readJournalHead(Number.MAX_SAFE_INTEGER, 100),
-        ledger: tx.readLedger(),
-      }))
-      expect(compacted.base.seq).toBe(2)
-      expect(compacted.tail.map((entry) => [entry.seq, entry.type])).toEqual([[3, "hold.lapsed"]])
-      expect(foldJournal(compacted.base, compacted.tail)).toEqual(compacted.ledger)
+      expect(state.storage.sql.exec("SELECT seq, type FROM budget_entries").toArray()).toEqual([
+        { seq: 3, type: "hold.lapsed" },
+      ])
       await expect(state.storage.getAlarm()).resolves.toBe(t0 + 3_000 + 24 * HOUR)
 
       now = t0 + 3_000 + 24 * HOUR
@@ -321,12 +314,11 @@ describe("BudgetDO alarm", () => {
       })
       await expect(state.storage.getAlarm()).resolves.toBe(now + 1_000)
 
-      const late = outcome(
-        await processor.execute({ type: "settle", holdId: "h_1", cost: { amount: units(4) } }),
-        "settle"
-      )
-      expect([late.late, late.covered, late.overrun]).toEqual([true, BigInt(0), units(4)])
-      expect(late.balance.remaining).toBe(units(46))
+      expect(
+        rejection(
+          await processor.execute({ type: "settle", holdId: "h_1", cost: { amount: units(4) } })
+        )
+      ).toEqual({ code: "HOLD_RETIRED", holdId: "h_1" })
       expect(errors).toEqual([])
     })
   })

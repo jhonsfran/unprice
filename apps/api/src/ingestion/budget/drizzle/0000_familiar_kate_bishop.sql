@@ -5,12 +5,6 @@ CREATE TABLE `budget_entries` (
 	`fact_json` text NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE `budget_journal_base` (
-	`id` integer PRIMARY KEY NOT NULL,
-	`seq` integer NOT NULL,
-	`ledger_json` text NOT NULL
-);
---> statement-breakpoint
 CREATE TABLE `budget_ledger` (
 	`id` integer PRIMARY KEY NOT NULL,
 	`seq` integer NOT NULL,
@@ -24,7 +18,7 @@ CREATE TABLE `budget_operations` (
 	`id` text PRIMARY KEY NOT NULL,
 	`kind` text NOT NULL,
 	`status` text NOT NULL,
-	`key_hash` text,
+	`key_hash` text NOT NULL,
 	`due_at` integer NOT NULL,
 	`data_json` text NOT NULL
 );

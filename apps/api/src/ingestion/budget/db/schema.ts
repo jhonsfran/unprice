@@ -28,14 +28,10 @@ export const budgetLedger = sqliteTable("budget_ledger", {
   usageJson: text("usage_json").notNull(),
 })
 
-/** Singleton row (id = 1): the ledger folded through `seq` from compacted entries. */
-export const budgetJournalBase = sqliteTable("budget_journal_base", {
-  id: integer("id").primaryKey(),
-  seq: integer("seq").notNull(),
-  ledgerJson: text("ledger_json").notNull(),
-})
-
-/** Append-only journal. `seq` and `at` grow together, so compaction walks the primary key. */
+/**
+ * Append-only audit trail of every fact. `seq` and `at` grow together, so pruning walks the
+ * primary key. The ledger row, not this table, is the balance.
+ */
 export const budgetEntries = sqliteTable("budget_entries", {
   seq: integer("seq").primaryKey(),
   at: integer("at").notNull(),
@@ -44,7 +40,7 @@ export const budgetEntries = sqliteTable("budget_entries", {
 })
 
 /**
- * Holds, charges, records, and late settlements. The row is the open hold, the closed tombstone,
+ * Holds, charges, and records. The row is the open hold, the closed tombstone,
  * and the idempotency record at once. `due_at` is `dueAt(operation)`: lapse time for open holds,
  * purge time for everything else.
  */
@@ -52,12 +48,12 @@ export const budgetOperations = sqliteTable(
   "budget_operations",
   {
     id: text("id").primaryKey(),
-    kind: text("kind", { enum: ["hold", "charge", "record", "late_settle"] }).notNull(),
+    kind: text("kind", { enum: ["hold", "charge", "record"] }).notNull(),
     status: text("status", {
       enum: ["open", "lapsed", "settled", "released", "done"],
     }).notNull(),
-    /** sha256 of the idempotency key; null for late settlements, which are keyed by hold id. */
-    keyHash: text("key_hash"),
+    /** sha256 of the idempotency key. */
+    keyHash: text("key_hash").notNull(),
     dueAt: integer("due_at").notNull(),
     dataJson: text("data_json").notNull(),
   },

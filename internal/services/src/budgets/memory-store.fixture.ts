@@ -1,6 +1,7 @@
 import type { Result } from "@unprice/error"
 import {
   type BudgetCommand,
+  type BudgetReader,
   type BudgetRecord,
   type BudgetState,
   type BudgetTransition,
@@ -11,14 +12,17 @@ import {
   type UnPriceBudgetError,
   dueAt,
   emptyLedger,
+  loadView,
   transition,
-} from "./core"
+  viewState,
+} from "./index"
 
 /**
  * Test double for the Durable Object store: rows indexed by id and idempotency key, a due-hold
- * scan, retention purge, and the journal. Commits a transition only when it is Ok.
+ * scan, retention purge, and the journal. Loads its view the way the store does and commits a
+ * transition only when it is Ok.
  */
-export class MemoryBudgetStore {
+export class MemoryBudgetStore implements BudgetReader {
   budget: BudgetRecord | null = null
   ledger: Ledger = emptyLedger
   readonly rows = new Map<string, Operation>()
@@ -28,10 +32,8 @@ export class MemoryBudgetStore {
   private readonly byKey = new Map<string, string>()
 
   run(command: BudgetCommand, clockMs: number): Result<BudgetTransition, UnPriceBudgetError> {
-    const view = this.view(command, clockMs)
-    const loaded = new Map<string, Operation>(view.due.map((hold) => [hold.id, hold]))
-    if (view.target) loaded.set(view.target.id, view.target)
-    this.lastBefore = { budget: view.budget, ledger: view.ledger, operations: loaded }
+    const view = loadView(this, command, clockMs, Number.MAX_SAFE_INTEGER)
+    this.lastBefore = viewState(view)
     const result = transition({ view, command, clockMs })
     if (result.err) return result
     const { next, entries, operations } = result.val
@@ -40,7 +42,7 @@ export class MemoryBudgetStore {
     this.entries.push(...entries)
     for (const operation of operations) {
       this.rows.set(operation.id, operation)
-      if (operation.kind !== "late_settle") this.byKey.set(operation.idempotencyKey, operation.id)
+      this.byKey.set(operation.idempotencyKey, operation.id)
     }
     return result
   }
@@ -51,26 +53,38 @@ export class MemoryBudgetStore {
       const open = operation.kind === "hold" && operation.state.status === "open"
       if (open || dueAt(operation) > clockMs) continue
       this.rows.delete(id)
-      if (operation.kind !== "late_settle") this.byKey.delete(operation.idempotencyKey)
+      this.byKey.delete(operation.idempotencyKey)
     }
   }
 
-  private view(command: BudgetCommand, clockMs: number) {
-    let targetId: string | undefined
-    if ("idempotencyKey" in command) targetId = this.byKey.get(command.idempotencyKey)
-    if ("holdId" in command) targetId = command.holdId
-    const now = Math.max(clockMs, this.ledger.lastAt)
+  readBudget() {
+    return this.budget
+  }
+
+  readLedger() {
+    return this.ledger
+  }
+
+  readOperation(id: string) {
+    return this.rows.get(id) ?? null
+  }
+
+  readOperationByKey(idempotencyKey: string) {
+    const id = this.byKey.get(idempotencyKey)
+    return id === undefined ? null : this.readOperation(id)
+  }
+
+  readDueHolds(at: number, limit: number) {
     const due: HoldOperation[] = []
     for (const operation of this.rows.values()) {
       if (
         operation.kind === "hold" &&
         operation.state.status === "open" &&
-        operation.lapsesAt <= now
+        operation.lapsesAt <= at
       ) {
         due.push(operation)
       }
     }
-    const target = targetId === undefined ? null : (this.rows.get(targetId) ?? null)
-    return { budget: this.budget, ledger: this.ledger, target, due }
+    return due.sort((a, b) => a.lapsesAt - b.lapsesAt).slice(0, limit)
   }
 }

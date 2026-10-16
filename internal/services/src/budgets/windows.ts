@@ -5,7 +5,9 @@
  * Keep this module pure: no clock reads, no storage.
  */
 
-export const BUDGET_WINDOWS = ["hour", "day", "week", "month", "never"] as const
+import { BUDGET_WINDOWS } from "@unprice/db/validators"
+
+export { BUDGET_WINDOWS }
 
 export type BudgetWindow = (typeof BUDGET_WINDOWS)[number]
 

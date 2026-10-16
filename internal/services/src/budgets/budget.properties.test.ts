@@ -7,9 +7,9 @@ import {
   type BudgetOutcome,
   checkTransition,
   emptyLedger,
-  foldJournal,
+  evolveLedger,
   requestFingerprint,
-} from "./core"
+} from "./index"
 import { MemoryBudgetStore } from "./memory-store.fixture"
 
 const runs = Number.parseInt(process.env.UNPRICE_MODEL_RUNS ?? "300", 10)
@@ -93,7 +93,6 @@ class ReferenceBudget {
   readonly consumptions: Array<{ at: number; amount: bigint }> = []
   readonly holds = new Map<number, ModelHold>()
   readonly keyed = new Map<string, KeyedRecord>()
-  readonly lateSettles = new Map<number, Settled & { createdAt: number }>()
 
   purge(clock: number) {
     const retention = 24 * hour
@@ -105,9 +104,6 @@ class ReferenceBudget {
     }
     for (const [key, rec] of this.keyed) {
       if (rec.verb !== "authorize" && clock >= rec.createdAt + retention) this.keyed.delete(key)
-    }
-    for (const [n, late] of this.lateSettles) {
-      if (clock >= late.createdAt + retention) this.lateSettles.delete(n)
     }
   }
 
@@ -206,15 +202,11 @@ class ReferenceBudget {
       const match = /^h_([1-9]\d*)$/.exec(command.holdId)
       const n = match ? Number(match[1]) : 0
       const hold = this.holds.get(n)
-      const late = this.lateSettles.get(n)
       const minted = n >= 1 && n <= this.holdCount
+      // A purged hold's outcome is unknown, so it is retired rather than settled twice.
+      if (!hold) return { error: minted ? "HOLD_RETIRED" : "HOLD_NOT_FOUND" }
 
       if (command.type === "release") {
-        if (late) return { error: "HOLD_CLOSED" }
-        if (!hold) {
-          if (!minted) return { error: "HOLD_NOT_FOUND" }
-          return { outcome: { released: ZERO, replayed: true }, wrote: false, checkBalance: true }
-        }
         if (hold.status === "settled") return { error: "HOLD_CLOSED" }
         if (hold.status === "released") {
           return {
@@ -229,19 +221,14 @@ class ReferenceBudget {
       }
 
       const actual = command.cost.amount
-      const replayOrClosed = (prior: Settled) =>
-        prior.actual === actual
-          ? { outcome: { ...prior, replayed: true }, wrote: false, checkBalance: true }
+      if (hold.status === "settled" && hold.settle) {
+        return hold.settle.actual === actual
+          ? { outcome: { ...hold.settle, replayed: true }, wrote: false, checkBalance: true }
           : { error: "HOLD_CLOSED" }
-      if (late) {
-        const { createdAt: _, ...prior } = late
-        return replayOrClosed(prior)
       }
-      if (!hold && !minted) return { error: "HOLD_NOT_FOUND" }
-      if (hold?.status === "settled" && hold.settle) return replayOrClosed(hold.settle)
-      if (hold?.status === "released") return { error: "HOLD_CLOSED" }
+      if (hold.status === "released") return { error: "HOLD_CLOSED" }
 
-      const open = hold !== undefined && !isLapsed(hold)
+      const open = !isLapsed(hold)
       const covered = open ? (actual < hold.amount ? actual : hold.amount) : ZERO
       const released = open ? hold.amount - covered : ZERO
       const settled: Settled = {
@@ -254,8 +241,7 @@ class ReferenceBudget {
         crossed: this.crossed(now, covered + released - actual),
       }
       this.consumptions.push({ at: now, amount: actual })
-      if (hold) Object.assign(hold, { status: "settled", changedAt: now, settle: settled })
-      else this.lateSettles.set(n, { ...settled, createdAt: now })
+      Object.assign(hold, { status: "settled", changedAt: now, settle: settled })
       return { outcome: { ...settled, replayed: false }, wrote: true, checkBalance: true }
     }
 
@@ -529,12 +515,8 @@ describe("budget core against a reference model", () => {
             })
           }
           expect(checkTransition(store.lastBefore!, entries, next)).toEqual([])
-          expect(foldJournal(emptyLedger, store.entries)).toEqual(store.ledger)
+          expect(store.entries.reduce(evolveLedger, emptyLedger)).toEqual(store.ledger)
         }
-
-        const split = Math.floor(store.entries.length / 2)
-        const base = foldJournal(emptyLedger, store.entries.slice(0, split))
-        expect(foldJournal(base, store.entries.slice(split))).toEqual(store.ledger)
       }),
       { numRuns: runs, seed }
     )

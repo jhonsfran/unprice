@@ -1,5 +1,5 @@
+import { formatAmount } from "@unprice/money"
 import { describe, expect, it } from "vitest"
-import { formatAmount, parseAmount } from "./amount"
 import {
   type BudgetCommand,
   type BudgetConfigInput,
@@ -14,7 +14,7 @@ import {
   parseBudgetConfig,
   requestFingerprint,
   transition,
-} from "./core"
+} from "./index"
 import { MemoryBudgetStore } from "./memory-store.fixture"
 
 const t0 = Date.parse("2026-10-14T10:00:00.000Z")
@@ -27,7 +27,7 @@ const oct15 = Date.parse("2026-10-15T00:00:00.000Z")
 /** Whole units to base units at scale 8. */
 const $ = (units: number) => BigInt(units) * BigInt(100_000_000)
 
-const month100: BudgetConfigInput = { limits: [{ id: "month", amount: 100, window: "month" }] }
+const month100: BudgetConfigInput = { limits: [{ id: "month", amount: "100", window: "month" }] }
 
 function config(input: BudgetConfigInput) {
   const parsed = parseBudgetConfig(input)
@@ -164,9 +164,9 @@ describe("denials", () => {
   it("blocks on the failing hard limit that resets last", () => {
     const store = budgetWith({
       limits: [
-        { id: "daily", amount: 50, window: "day" },
-        { id: "lifetime", amount: 100, window: "never" },
-        { id: "alert", amount: 1, window: "hour", enforce: "soft" },
+        { id: "daily", amount: "50", window: "day" },
+        { id: "lifetime", amount: "100", window: "never" },
+        { id: "alert", amount: "1", window: "hour", enforce: "soft" },
       ],
     })
     ok(store.run(charge("c1", 45), t0))
@@ -216,8 +216,8 @@ describe("idempotency", () => {
   it("replays charge and record from their row", () => {
     const store = budgetWith({
       limits: [
-        { id: "month", amount: 100, window: "month" },
-        { id: "alert", amount: 50, window: "month", enforce: "soft" },
+        { id: "month", amount: "100", window: "month" },
+        { id: "alert", amount: "50", window: "month", enforce: "soft" },
       ],
     })
     expect(ok(store.run(charge("c1", 60), t0)).outcome).toMatchObject({
@@ -342,34 +342,24 @@ describe("expiry, lapse, and late usage", () => {
     expect(remaining(charged)).toEqual([["month", $(10)]])
   })
 
-  it("consumes a settle on a purged hold as late usage, once", () => {
+  it("retires a hold once its row is purged, so a retried settle never counts twice", () => {
     const store = budgetWith(month100)
     ok(store.run(authorize("k1", 80, minute), t0))
     ok(store.run(authorize("k2", 5, minute), t0))
+    ok(store.run(settle("h_1", 25), t0))
     ok(store.run({ type: "sweep" }, t0 + 3 * minute))
     const purgedAt = t0 + 3 * minute + day
     store.purge(purgedAt)
     expect(store.rows.size).toBe(0)
 
-    const late = ok(store.run(settle("h_1", 25), purgedAt))
-    expect(late.outcome).toMatchObject({
-      late: true,
-      overrun: $(25),
-      replayed: false,
-      balance: { remaining: $(75) },
+    expect(rejection(store.run(settle("h_1", 25), purgedAt))).toEqual({
+      code: "HOLD_RETIRED",
+      holdId: "h_1",
     })
-    expect(ok(store.run(settle("h_1", 25), purgedAt)).outcome).toMatchObject({
-      replayed: true,
-      balance: { remaining: $(75) },
-    })
-    expect(rejection(store.run(settle("h_1", 26), purgedAt)).code).toBe("HOLD_CLOSED")
-    expect(rejection(store.run(release("h_1"), purgedAt)).code).toBe("HOLD_CLOSED")
-
-    const gone = ok(store.run(release("h_2"), purgedAt))
-    expect([gone.entries.length, gone.outcome]).toMatchObject([
-      0,
-      { released: $(0), replayed: true },
-    ])
+    expect(rejection(store.run(settle("h_2", 1), purgedAt)).code).toBe("HOLD_RETIRED")
+    expect(rejection(store.run(release("h_2"), purgedAt)).code).toBe("HOLD_RETIRED")
+    expect(rejection(store.run(settle("h_3", 1), purgedAt)).code).toBe("HOLD_NOT_FOUND")
+    expect(store.ledger.usage.never.consumed).toBe($(25))
   })
 })
 
@@ -389,11 +379,11 @@ describe("time and config never reset usage", () => {
   })
 
   it("keeps consumption across rename, window change, and remove then re-add", () => {
-    const store = budgetWith({ limits: [{ id: "monthly", amount: 100, window: "month" }] })
+    const store = budgetWith({ limits: [{ id: "monthly", amount: "100", window: "month" }] })
     ok(store.run(charge("c1", 60), t0))
 
     const renamed = ok(
-      store.run(upsert({ limits: [{ id: "cap", amount: 100, window: "month" }] }), t0)
+      store.run(upsert({ limits: [{ id: "cap", amount: "100", window: "month" }] }), t0)
     )
     expect(renamed.outcome).toMatchObject({
       changes: [
@@ -405,7 +395,7 @@ describe("time and config never reset usage", () => {
     expect(remaining(renamed)).toEqual([["cap", $(40)]])
 
     const rewindowed = ok(
-      store.run(upsert({ limits: [{ id: "cap", amount: 100, window: "day" }] }), t0)
+      store.run(upsert({ limits: [{ id: "cap", amount: "100", window: "day" }] }), t0)
     )
     expect(rewindowed.outcome).toMatchObject({
       changes: [{ change: "limit.window", limitId: "cap", from: "month", to: "day" }],
@@ -414,7 +404,7 @@ describe("time and config never reset usage", () => {
 
     ok(store.run(upsert({ limits: [] }), t0))
     const readded = ok(
-      store.run(upsert({ limits: [{ id: "cap", amount: 100, window: "month" }] }), t0)
+      store.run(upsert({ limits: [{ id: "cap", amount: "100", window: "month" }] }), t0)
     )
     expect(remaining(readded)).toEqual([["cap", $(40)]])
     expect(readded.outcome).toMatchObject({ budget: { version: 5 } })
@@ -442,7 +432,7 @@ describe("time and config never reset usage", () => {
 
   it("resets a week window on Monday 00:00 UTC", () => {
     const sunday = Date.parse("2026-10-18T23:00:00.000Z")
-    const store = budgetWith({ limits: [{ id: "weekly", amount: 100, window: "week" }] }, sunday)
+    const store = budgetWith({ limits: [{ id: "weekly", amount: "100", window: "week" }] }, sunday)
     const charged = ok(store.run(charge("c1", 70), sunday))
     expect(charged.outcome).toMatchObject({
       balance: { limits: [{ remaining: $(30), resetsAt: Date.parse("2026-10-19T00:00:00.000Z") }] },
@@ -478,8 +468,8 @@ describe("amounts and crossings", () => {
   it("reports a crossing once, and again after the window resets", () => {
     const store = budgetWith({
       limits: [
-        { id: "month", amount: 100, window: "month" },
-        { id: "alerts", amount: 10, window: "day", enforce: "soft" },
+        { id: "month", amount: "100", window: "month" },
+        { id: "alerts", amount: "10", window: "day", enforce: "soft" },
       ],
     })
     const crossed = (key: string, units: number, at: number) => {
@@ -492,7 +482,7 @@ describe("amounts and crossings", () => {
     expect(crossed("r4", 11, t0 + day)).toEqual(["alerts"])
   })
 
-  it("rejects out-of-range TTLs and amounts", () => {
+  it("rejects out-of-range TTLs and refuses to commit a negative amount", () => {
     const store = budgetWith({ ...month100, holds: { maxTtlMs: hour } })
     expect(rejection(store.run(authorize("k1", 1, 500), t0))).toEqual({
       code: "INVALID_TTL",
@@ -501,10 +491,9 @@ describe("amounts and crossings", () => {
       maxTtlMs: hour,
     })
     expect(rejection(store.run(authorize("k2", 1, hour + 1), t0)).code).toBe("INVALID_TTL")
-    expect(rejection(store.run(oneShot("record", "r1", BigInt(-1)), t0))).toEqual({
-      code: "INVALID_AMOUNT",
-      amount: "-1",
-    })
+    expect(() => store.run(oneShot("record", "r1", BigInt(-1)), t0)).toThrow(
+      "budget transition breaks invariants"
+    )
   })
 })
 
@@ -512,7 +501,7 @@ describe("config schema", () => {
   it("fills defaults and round-trips through its JSON form", () => {
     const parsed = config({
       limits: [{ id: "m", amount: "12.5", window: "month" }],
-      onUnavailable: { allowUpTo: 3 },
+      onUnavailable: { allowUpTo: "3" },
     })
     expect(parsed).toEqual({
       limits: [{ id: "m", amount: BigInt(1_250_000_000), window: "month", enforce: "hard" }],
@@ -531,14 +520,14 @@ describe("config schema", () => {
     const amounts = parseBudgetConfig({
       limits: [
         { id: "a", amount: "1.123456789", window: "day" },
-        { id: "b", amount: Number.NaN, window: "day" },
+        { id: "b", amount: "99999999999", window: "day" },
       ],
     })
     expect(amounts.err?.rejection).toEqual({
       code: "INVALID_CONFIG",
       issues: [
-        "limits.0.amount: invalid amount: too_precise",
-        "limits.1.amount: invalid amount: not_finite",
+        "limits.0.amount: invalid amount: not_decimal",
+        "limits.1.amount: invalid amount: too_large",
       ],
     })
 
@@ -557,36 +546,6 @@ describe("config schema", () => {
         "holds.defaultTtlMs: defaultTtlMs must not exceed maxTtlMs",
       ],
     })
-  })
-})
-
-describe("parseAmount", () => {
-  it.each([
-    ["44.95", { ok: true, amount: BigInt(4_495_000_000) }],
-    ["0.00000001", { ok: true, amount: BigInt(1) }],
-    ["1.100000000", { ok: true, amount: BigInt(110_000_000) }],
-    ["92233720368.54775807", { ok: true, amount: BigInt("9223372036854775807") }],
-    ["92233720368.54775808", { ok: false, reason: "too_large" }],
-    ["1.123456789", { ok: false, reason: "too_precise" }],
-    ["1e5", { ok: false, reason: "not_decimal" }],
-    [".5", { ok: false, reason: "not_decimal" }],
-    ["-1", { ok: false, reason: "negative" }],
-    [0.1, { ok: true, amount: BigInt(10_000_000) }],
-    [1e-7, { ok: true, amount: BigInt(10) }],
-    [0.1 + 0.2, { ok: false, reason: "too_precise" }],
-    [2 ** 53 + 2, { ok: false, reason: "unsafe_number" }],
-    [Number.NaN, { ok: false, reason: "not_finite" }],
-    [-0.5, { ok: false, reason: "negative" }],
-  ] as const)("parses %s", (input, expected) => {
-    expect(parseAmount(input)).toEqual(expected)
-  })
-
-  it("formats canonical decimals", () => {
-    expect([BigInt(4_495_000_000), BigInt(-1), BigInt(0)].map(formatAmount)).toEqual([
-      "44.95",
-      "-0.00000001",
-      "0",
-    ])
   })
 })
 

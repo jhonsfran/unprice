@@ -3,7 +3,7 @@ import {
   type BudgetCommand,
   type BudgetOutcome,
   type BudgetRejection,
-  foldJournal,
+  loadView,
   requestFingerprint,
   transition,
 } from "@unprice/services/budgets"
@@ -15,11 +15,11 @@ const HOUR_MS = 60 * 60 * 1000
 export const INLINE_SWEEP_LIMIT = 32
 export const ALARM_SWEEP_LIMIT = 256
 export const ALARM_PURGE_LIMIT = 512
-export const ALARM_COMPACT_LIMIT = 1_000
+export const ALARM_PRUNE_LIMIT = 1_000
 export const ALARM_CONTINUE_MS = 1_000
 export const ALARM_RETRY_MS = 30_000
 export const ALARM_HEARTBEAT_MS = 24 * HOUR_MS
-/** Journal entries stay in the object this long before the alarm folds them into the base. */
+/** Journal entries stay in the object this long before the alarm prunes them. */
 export const JOURNAL_RETENTION_MS = 24 * HOUR_MS
 
 type Committed =
@@ -45,23 +45,23 @@ export class BudgetProcessor {
   }
 
   async execute(request: BudgetRequest): Promise<BudgetReply> {
-    const committed = this.commit(
-      withRequestHash(request),
-      this.deps.clock.now(),
-      INLINE_SWEEP_LIMIT
+    const command = withRequestHash(request)
+    const clockMs = this.deps.clock.now()
+    const committed = this.deps.store.atomically((tx) =>
+      commit(tx, command, clockMs, INLINE_SWEEP_LIMIT)
     )
     if (!committed.ok) return committed
     await this.lowerAlarm(committed.wakeAt)
     return { ok: true, outcome: committed.outcome }
   }
 
-  /** Sweeper: lapses due holds, purges expired rows, compacts the journal, always re-arms. */
+  /** Sweeper: lapses due holds, purges expired rows, prunes the journal, always re-arms. */
   async alarm(): Promise<void> {
     this.armedAt = null
     const now = this.deps.clock.now()
     let next: number | null
     try {
-      next = this.sweep(now)
+      next = this.deps.store.atomically((tx) => sweep(tx, now))
     } catch (error) {
       this.deps.logger.error("budget alarm failed", { error: errorMessage(error) })
       next = now + ALARM_RETRY_MS
@@ -72,66 +72,6 @@ export class BudgetProcessor {
     } catch (error) {
       this.deps.logger.error("budget alarm could not re-arm", { error: errorMessage(error) })
     }
-  }
-
-  private commit(command: BudgetCommand, clockMs: number, dueLimit: number): Committed {
-    return this.deps.store.atomically((tx): Committed => {
-      const ledger = tx.readLedger()
-      const view = {
-        budget: tx.readBudget(),
-        ledger,
-        target: readTarget(tx, command),
-        due: tx.readDueHolds(Math.max(clockMs, ledger.lastAt), dueLimit),
-      }
-      const result = transition({ view, command, clockMs })
-      if (result.err) return { ok: false, rejection: result.err.rejection }
-
-      const { entries, next, operations, outcome, now, wakeAt } = result.val
-      if (entries.length === 0) return { ok: true, outcome, wakeAt }
-      tx.commit({
-        budget: next.budget === view.budget ? null : next.budget,
-        ledger: next.ledger,
-        entries,
-        operations,
-        now,
-      })
-      const compactAt = now + JOURNAL_RETENTION_MS
-      return {
-        ok: true,
-        outcome,
-        wakeAt: wakeAt === null ? compactAt : Math.min(wakeAt, compactAt),
-      }
-    })
-  }
-
-  /** Returns the next wake, or null when the object holds no budget and so has no work. */
-  private sweep(now: number): number | null {
-    const swept = this.commit({ type: "sweep" }, now, ALARM_SWEEP_LIMIT)
-    const lapsed = swept.ok && swept.outcome.type === "sweep" ? swept.outcome.lapsed : 0
-
-    return this.deps.store.atomically((tx) => {
-      if (tx.readBudget() === null) return null
-      const purged = tx.purgeOperations(now, ALARM_PURGE_LIMIT)
-      const head = tx.readJournalHead(now - JOURNAL_RETENTION_MS, ALARM_COMPACT_LIMIT)
-      if (head.length > 0) tx.compactJournal(foldJournal(tx.readJournalBase(), head))
-
-      if (
-        lapsed === ALARM_SWEEP_LIMIT ||
-        purged === ALARM_PURGE_LIMIT ||
-        head.length === ALARM_COMPACT_LIMIT
-      ) {
-        return now + ALARM_CONTINUE_MS
-      }
-      const oldestEntryAt = tx.oldestEntryAt()
-      const work = [
-        tx.nextDueAt(),
-        oldestEntryAt === null ? null : oldestEntryAt + JOURNAL_RETENTION_MS,
-      ].filter((at): at is number => at !== null)
-      // A floor keeps a row the sweep cannot clear from spinning the alarm.
-      return work.length === 0
-        ? now + ALARM_HEARTBEAT_MS
-        : Math.max(Math.min(...work), now + ALARM_CONTINUE_MS)
-    })
   }
 
   private async lowerAlarm(at: number | null): Promise<void> {
@@ -146,6 +86,48 @@ export class BudgetProcessor {
   }
 }
 
+function commit(
+  tx: BudgetStoreTx,
+  command: BudgetCommand,
+  clockMs: number,
+  dueLimit: number
+): Committed {
+  const view = loadView(tx, command, clockMs, dueLimit)
+  const result = transition({ view, command, clockMs })
+  if (result.err) return { ok: false, rejection: result.err.rejection }
+
+  const { entries, next, operations, outcome, now, wakeAt } = result.val
+  if (entries.length === 0) return { ok: true, outcome, wakeAt }
+  tx.commit({
+    budget: next.budget === view.budget ? null : next.budget,
+    ledger: next.ledger,
+    entries,
+    operations,
+    now,
+  })
+  const pruneAt = now + JOURNAL_RETENTION_MS
+  return { ok: true, outcome, wakeAt: wakeAt === null ? pruneAt : Math.min(wakeAt, pruneAt) }
+}
+
+/** Returns the next wake, or null when the object holds no budget and so has no work. */
+function sweep(tx: BudgetStoreTx, now: number): number | null {
+  if (tx.readBudget() === null) return null
+  commit(tx, { type: "sweep" }, now, ALARM_SWEEP_LIMIT)
+  tx.purgeOperations(now, ALARM_PURGE_LIMIT)
+  tx.pruneJournal(now - JOURNAL_RETENTION_MS, ALARM_PRUNE_LIMIT)
+
+  const oldestEntryAt = tx.oldestEntryAt()
+  const work = [
+    tx.nextDueAt(),
+    oldestEntryAt === null ? null : oldestEntryAt + JOURNAL_RETENTION_MS,
+  ].filter((at): at is number => at !== null)
+  // Work a capped batch left behind is already due, so the floor is also the continuation delay,
+  // and it keeps a row the sweep cannot clear from spinning the alarm.
+  return work.length === 0
+    ? now + ALARM_HEARTBEAT_MS
+    : Math.max(Math.min(...work), now + ALARM_CONTINUE_MS)
+}
+
 function withRequestHash(request: BudgetRequest): BudgetCommand {
   switch (request.type) {
     case "authorize":
@@ -154,20 +136,6 @@ function withRequestHash(request: BudgetRequest): BudgetCommand {
       return { ...request, requestHash: sha256HexSync(requestFingerprint(request)) }
     default:
       return request
-  }
-}
-
-function readTarget(tx: BudgetStoreTx, command: BudgetCommand) {
-  switch (command.type) {
-    case "authorize":
-    case "charge":
-    case "record":
-      return tx.readOperationByKey(command.idempotencyKey)
-    case "settle":
-    case "release":
-      return tx.readOperation(command.holdId)
-    default:
-      return null
   }
 }
 
