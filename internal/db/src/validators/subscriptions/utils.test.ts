@@ -150,13 +150,17 @@ describe("getAnchor", () => {
     expect(() => getAnchor(date, "week", 7)).toThrow()
   })
 
-  it("caps monthly anchor to the last day of the target month", () => {
-    const jan31 = utc("2024-01-31")
-    // February 2024 has 29 days
-    expect(getAnchor(jan31, "month", 31)).toBe(31) // for ref month cap is done in window alignment
-    // when aligning, the month end cap is applied (tested in billing tests)
-    const apr30 = utc("2024-04-30")
-    expect(getAnchor(apr30, "month", 31)).toBe(30)
+  describe.each(["month", "year"] as const)("%s anchors", (interval) => {
+    it.each([
+      { date: "2024-01-01", anchor: 15, expected: 15 },
+      { date: "2024-01-31", anchor: 31, expected: 31 },
+      { date: "2024-02-01", anchor: 31, expected: 29 },
+      { date: "2025-02-01", anchor: 31, expected: 28 },
+      { date: "2024-04-01", anchor: 31, expected: 30 },
+      { date: "2024-12-31", anchor: 31, expected: 31 },
+    ])("caps anchor $anchor on $date to $expected in UTC", ({ date, anchor, expected }) => {
+      expect(getAnchor(utc(date), interval, anchor)).toBe(expected)
+    })
   })
 })
 

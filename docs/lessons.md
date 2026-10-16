@@ -219,6 +219,11 @@ patterns. Keep it cheap to load and useful.
 - 2026-07-11: RunBudget alarms must flush captureable bucket spend even before an intent exists;
   persist quantity ranges on the intent too, and seal nullable legacy quantity snapshots before
   retries or cumulative bucket updates so wallet payload hashes cannot drift.
+- 2026-10-15: When reviewing run hierarchy, trace funding through `RunBudgetProcessor` and
+  `WalletService.lockCustomer`; separate run DOs share customer funds, while `parentRunId` alone
+  does not enforce a recursive parent budget.
+- 2026-10-15: When reviewing run expiry, distinguish retryable captures from abandoned captures;
+  `closeRunInStorage` can release funds after abandonment and mark reconciliation needed.
 - 2026-05-08: Tiny-tools usage discovery reads `featurePlanVersion.meterConfig` from
   `entitlements.get`; `verify` is only for the decision.
 - 2026-05-11: Tier/package entitlements are static quantity limits from subscription grants; do
@@ -730,6 +735,10 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   The superlink component disables the auto fetch of next.js, allowing to reduce unnecesary load.
 
 ## Tests, Tooling, And Docs
+
+- 2026-10-16: Keep `getAnchor` month-length calculations entirely in UTC; local `endOfMonth`
+  combined with `getUTCDate` returns day 1 in Bogotá. Verify billing changes under both
+  `TZ=America/Bogota` and `TZ=UTC`.
 
 - 2026-08-31: Before launch, remove retired endpoint docs; do not add compatibility redirects
   or deprecation pages for API operations that users have not used.
