@@ -93,6 +93,7 @@ Budget
   refill     { target?, lowWater?, maxOutstanding? }           // adaptive by default
   overrun    { tolerance: 0 }                                  // above it, usage is recorded as debt
   holds      { defaultTtl: "15m", maxTtl: "24h" }
+  onUnavailable  deny | allow | { allowUpTo }                  // default deny; SDK-side, overridable per call
   events     [threshold, exhausted, hold.expired, funding.requested, funding.failed] -> webhook
 ```
 
@@ -293,8 +294,11 @@ const text = await acme.spend({ estimate: 0.05 }, async () => {
 ```
 
 - `spend` throws `BudgetExceededError { blockedBy, remaining, remedy }`; `authorize` returns
-  `allowed: false` instead. Both fail closed when Unprice is unreachable, unless the call passes
-  `onUnavailable: "allow"`.
+  `allowed: false` instead.
+- The failure policy is the builder's choice. A budget stores `onUnavailable: "deny" | "allow" |
+  { allowUpTo: amount }` (default `"deny"`), and a call can override it. The SDK applies it when
+  Unprice cannot be reached within the call's timeout, marks the response `degraded: true`, and
+  reports any spend it allowed once the connection returns, through `record`, so nothing is lost.
 - `budget.child({ key, limits, ttl })` upserts a child funded by the handle's budget (B6).
 - `budget.wrap(price, fn)` returns `fn` with a charge in front, for tool `execute` functions.
 - The SDK never runs in a browser.
