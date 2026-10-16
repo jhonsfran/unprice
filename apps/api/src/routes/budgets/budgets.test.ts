@@ -1,0 +1,318 @@
+import { OpenAPIHono } from "@hono/zod-openapi"
+import { Err, Ok } from "@unprice/error"
+import { type BudgetBalance, UnPriceBudgetError } from "@unprice/services/budgets"
+import type { ExecutionContext } from "hono"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { UnpriceApiError, handleError, handleZodError } from "~/errors"
+import type { HonoEnv } from "~/hono/env"
+import { registerAuthorizeBudgetV1 } from "./authorizeBudgetV1"
+import { registerChargeBudgetV1 } from "./chargeBudgetV1"
+import { registerGetBudgetV1 } from "./getBudgetV1"
+import { registerRecordBudgetV1 } from "./recordBudgetV1"
+import { registerReleaseBudgetV1 } from "./releaseBudgetV1"
+import { registerSettleBudgetV1 } from "./settleBudgetV1"
+import { registerUpsertBudgetV1 } from "./upsertBudgetV1"
+
+const mocks = vi.hoisted(() => ({ keyAuth: vi.fn(), execute: vi.fn() }))
+
+vi.mock("~/auth/key", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("~/auth/key")>()),
+  keyAuth: mocks.keyAuth,
+}))
+
+vi.mock("~/ingestion/budget/client", () => ({
+  CloudflareBudgetClient: class {
+    execute = mocks.execute
+  },
+}))
+
+const ONE = BigInt(100_000_000)
+const usd = (value: number) => BigInt(value) * ONE
+
+const balance = (remaining: bigint, held = BigInt(0)): BudgetBalance => ({
+  remaining,
+  held,
+  limits: [
+    {
+      id: "month",
+      window: "month",
+      enforce: "hard",
+      amount: usd(50),
+      consumed: usd(50) - remaining - held,
+      held,
+      remaining,
+      resetsAt: 1_798_761_600_000,
+    },
+  ],
+  asOf: 1_796_083_200_000,
+})
+
+beforeEach(() => {
+  mocks.keyAuth.mockResolvedValue({ id: "key_1", projectId: "proj_123" })
+})
+
+afterEach(() => {
+  vi.clearAllMocks()
+})
+
+function createTestApp() {
+  const app = new OpenAPIHono<HonoEnv>({ defaultHook: handleZodError })
+  app.onError(handleError)
+  app.use("*", async (c, next) => {
+    c.set("requestId", "req_test")
+    await next()
+  })
+  for (const register of [
+    registerUpsertBudgetV1,
+    registerAuthorizeBudgetV1,
+    registerSettleBudgetV1,
+    registerReleaseBudgetV1,
+    registerChargeBudgetV1,
+    registerRecordBudgetV1,
+    registerGetBudgetV1,
+  ]) {
+    register(app)
+  }
+  return app
+}
+
+async function call(path: string, body?: unknown) {
+  return createTestApp().fetch(
+    new Request(`https://example.com${path}`, {
+      method: body === undefined ? "GET" : "POST",
+      headers: { authorization: "Bearer key", "content-type": "application/json" },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    }),
+    { APP_ENV: "development" },
+    { passThroughOnException: vi.fn(), waitUntil: vi.fn() } as unknown as ExecutionContext
+  )
+}
+
+const rejectWith = (rejection: ConstructorParameters<typeof UnPriceBudgetError>[0]) =>
+  mocks.execute.mockResolvedValue(Err(new UnPriceBudgetError(rejection)))
+
+describe("budgets API", () => {
+  it("serializes into the OpenAPI document with the 402 on gated verbs", () => {
+    const document = createTestApp().getOpenAPIDocument({
+      openapi: "3.0.3",
+      info: { title: "Unprice API", version: "1.0.0" },
+    })
+
+    expect(Object.keys(document.paths)).toEqual([
+      "/v1/budgets/upsert",
+      "/v1/budgets/authorize",
+      "/v1/budgets/settle",
+      "/v1/budgets/release",
+      "/v1/budgets/charge",
+      "/v1/budgets/record",
+      "/v1/budgets/get",
+    ])
+    const statuses = (path: string) =>
+      Object.keys(document.paths[path]?.post?.responses ?? {}).filter((status) => status === "402")
+    expect([statuses("/v1/budgets/authorize"), statuses("/v1/budgets/record")]).toEqual([
+      ["402"],
+      [],
+    ])
+  })
+
+  it("rejects a request without a valid key", async () => {
+    mocks.keyAuth.mockRejectedValue(
+      new UnpriceApiError({ code: "UNAUTHORIZED", message: "key required" })
+    )
+
+    const response = await call("/v1/budgets/charge", {
+      key: "customer:acme",
+      amount: "1",
+      idempotencyKey: "c1",
+    })
+
+    expect(response.status).toBe(401)
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe("UNAUTHORIZED")
+  })
+
+  it.each([
+    ["an amount with nine decimals", { key: "customer:acme", amount: "0.123456789" }],
+    ["a negative amount", { key: "customer:acme", amount: "-1" }],
+    ["a key with a space", { key: "customer acme", amount: "1" }],
+    ["an unknown field", { key: "customer:acme", amount: "1", parent: "org" }],
+  ])("returns 400 for %s", async (_name, body) => {
+    const response = await call("/v1/budgets/authorize", { ...body, idempotencyKey: "a1" })
+
+    expect(response.status).toBe(400)
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe("BAD_REQUEST")
+  })
+
+  it("holds an amount and answers in decimal strings with the remaining header", async () => {
+    mocks.execute.mockResolvedValue(
+      Ok({
+        type: "authorize",
+        holdId: "h_1",
+        amount: usd(10),
+        expiresAt: 1_796_084_100_000,
+        replayed: false,
+        balance: balance(usd(40), usd(10)),
+      })
+    )
+
+    const response = await call("/v1/budgets/authorize", {
+      key: "customer:acme/run:1",
+      amount: "10",
+      idempotencyKey: "a1",
+    })
+
+    expect(mocks.execute).toHaveBeenCalledWith(
+      { projectId: "proj_123", key: "customer:acme/run:1" },
+      { type: "authorize", idempotencyKey: "a1", ttlMs: undefined, cost: { amount: usd(10) } }
+    )
+    expect(response.status).toBe(200)
+    expect(response.headers.get("Unprice-Budget-Remaining")).toBe("40")
+    expect(await response.json()).toEqual({
+      allowed: true,
+      holdId: "h_1",
+      amount: "10",
+      expiresAt: 1_796_084_100_000,
+      replayed: false,
+      balance: {
+        remaining: "40",
+        held: "10",
+        limits: [
+          {
+            id: "month",
+            window: "month",
+            enforce: "hard",
+            amount: "50",
+            consumed: "0",
+            held: "10",
+            remaining: "40",
+            resetsAt: 1_798_761_600_000,
+          },
+        ],
+        asOf: 1_796_083_200_000,
+      },
+    })
+  })
+
+  it("returns 402 with the blocking limit when a charge does not fit", async () => {
+    rejectWith({
+      code: "LIMIT_EXCEEDED",
+      blocked: {
+        limitId: "month",
+        window: "month",
+        remaining: usd(1) / BigInt(2),
+        held: BigInt(0),
+        resetsAt: 1_798_761_600_000,
+        remedy: "wait_for_reset",
+      },
+      balance: balance(usd(1) / BigInt(2)),
+    })
+
+    const response = await call("/v1/budgets/charge", {
+      key: "customer:acme",
+      amount: "2",
+      idempotencyKey: "c1",
+    })
+
+    expect(response.status).toBe(402)
+    expect(response.headers.get("Unprice-Budget-Remaining")).toBe("0.5")
+    const body = (await response.json()) as {
+      error: { code: string; details: { kind: string; blocked: unknown; balance: unknown } }
+    }
+    expect(body.error.code).toBe("BUDGET_EXCEEDED")
+    expect(body.error.details.kind).toBe("budget_exceeded")
+    expect(body.error.details.blocked).toEqual({
+      limitId: "month",
+      window: "month",
+      remaining: "0.5",
+      held: "0",
+      resetsAt: 1_798_761_600_000,
+      remedy: "wait_for_reset",
+    })
+  })
+
+  it.each([
+    ["/v1/budgets/charge", { code: "IDEMPOTENCY_CONFLICT", idempotencyKey: "c1" }, 409, "CONFLICT"],
+    [
+      "/v1/budgets/settle",
+      { code: "HOLD_CLOSED", holdId: "h_1", status: "released" },
+      409,
+      "CONFLICT",
+    ],
+    [
+      "/v1/budgets/upsert",
+      { code: "UNIT_IMMUTABLE", current: "money:USD", requested: "money:EUR" },
+      409,
+      "CONFLICT",
+    ],
+    ["/v1/budgets/release", { code: "HOLD_NOT_FOUND", holdId: "h_1" }, 404, "NOT_FOUND"],
+    ["/v1/budgets/record", { code: "BUDGET_NOT_FOUND" }, 404, "NOT_FOUND"],
+    [
+      "/v1/budgets/authorize",
+      { code: "INVALID_TTL", ttlMs: 5, minTtlMs: 1_000, maxTtlMs: 86_400_000 },
+      400,
+      "BAD_REQUEST",
+    ],
+  ] as const)("maps a %s rejection to its status", async (path, rejection, status, code) => {
+    rejectWith(rejection)
+    const bodies: Record<string, unknown> = {
+      "/v1/budgets/charge": { key: "k", amount: "1", idempotencyKey: "c1" },
+      "/v1/budgets/settle": { key: "k", holdId: "h_1", amount: "1" },
+      "/v1/budgets/upsert": { key: "k", unit: "EUR", limits: [] },
+      "/v1/budgets/release": { key: "k", holdId: "h_1" },
+      "/v1/budgets/record": { key: "k", amount: "1", idempotencyKey: "r1" },
+      "/v1/budgets/authorize": { key: "k", amount: "1", idempotencyKey: "a1", ttlMs: 5 },
+    }
+
+    const response = await call(path, bodies[path])
+
+    expect(response.status).toBe(status)
+    expect(((await response.json()) as { error: { code: string } }).error.code).toBe(code)
+  })
+
+  it("reads a budget by the key in the query string", async () => {
+    rejectWith({ code: "BUDGET_NOT_FOUND" })
+
+    const response = await call(`/v1/budgets/get?key=${encodeURIComponent("customer:acme/run:1")}`)
+
+    expect(mocks.execute).toHaveBeenCalledWith(
+      { projectId: "proj_123", key: "customer:acme/run:1" },
+      { type: "get" }
+    )
+    expect(response.status).toBe(404)
+  })
+
+  it("defaults limit ids to their window and expands a currency unit on upsert", async () => {
+    rejectWith({ code: "BUDGET_NOT_FOUND" })
+
+    await call("/v1/budgets/upsert", {
+      key: "customer:acme",
+      unit: "USD",
+      limits: [{ amount: "50", window: "month" }],
+    })
+
+    const [, request] = mocks.execute.mock.calls[0] ?? []
+    expect(request).toMatchObject({
+      type: "upsert",
+      key: "customer:acme",
+      projectId: "proj_123",
+      unit: "money:USD",
+      config: { limits: [{ id: "month", amount: usd(50), window: "month", enforce: "hard" }] },
+    })
+  })
+
+  it("returns 400 for a config the core rejects before reaching the budget", async () => {
+    const response = await call("/v1/budgets/upsert", {
+      key: "customer:acme",
+      unit: "USD",
+      limits: [
+        { amount: "50", window: "month" },
+        { amount: "60", window: "month" },
+      ],
+    })
+
+    expect(response.status).toBe(400)
+    expect(((await response.json()) as { error: { message: string } }).error.message).toBe(
+      "Invalid budget config: limits.1.id: duplicate limit id month"
+    )
+    expect(mocks.execute).toHaveBeenCalledTimes(0)
+  })
+})

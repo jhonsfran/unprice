@@ -1,4 +1,5 @@
 import { z } from "@hono/zod-openapi"
+import { budgetExceededDetailsSchema } from "@unprice/db/validators"
 import { FetchError } from "@unprice/error"
 import { type DomainErrorKind, resolveDomainErrorKind } from "@unprice/services"
 import { UnPriceWalletError } from "@unprice/services/wallet"
@@ -25,6 +26,7 @@ const ErrorCode = z.enum([
   "METHOD_NOT_ALLOWED",
   "EXPIRED",
   "DELETE_PROTECTED",
+  "BUDGET_EXCEEDED",
 ])
 
 /**
@@ -35,14 +37,13 @@ const ErrorCode = z.enum([
  *
  * This is shared across every error response because `openApiErrorResponses` is,
  * so it is named for the layer that carries it rather than for its first
- * consumer. It is optional everywhere and today only the `monetization.*`
- * operations populate it; every other route omits it. A new kind from another
- * domain belongs in this same enum rather than in a second parallel field.
+ * consumer. It is optional everywhere; the `monetization.*` operations and the
+ * budget 402 populate it, and every other route omits it. A new kind belongs in
+ * this same union, discriminated by `kind`, rather than in a parallel field.
  */
-export const apiErrorDetailsSchema = z.object({
+const configErrorDetailsSchema = z.object({
   kind: z.enum(["invalid_config", "slug_conflict", "unresolved_reference"]).openapi({
-    description:
-      "What kind of failure this is. Currently only the monetization configuration operations set it",
+    description: "What kind of failure this is",
     example: "invalid_config",
   }),
   issues: z
@@ -58,6 +59,11 @@ export const apiErrorDetailsSchema = z.object({
     .optional()
     .openapi({ description: "Per-location detail, when the failure has locations" }),
 })
+
+export const apiErrorDetailsSchema = z.discriminatedUnion("kind", [
+  configErrorDetailsSchema,
+  budgetExceededDetailsSchema,
+])
 
 export type ApiErrorDetails = z.infer<typeof apiErrorDetailsSchema>
 
@@ -129,6 +135,8 @@ function codeToStatus(code: z.infer<typeof ErrorCode>): StatusCode {
       return 400
     case "UNAUTHORIZED":
       return 401
+    case "BUDGET_EXCEEDED":
+      return 402
     case "FORBIDDEN":
     case "DISABLED":
     case "INSUFFICIENT_PERMISSIONS":
@@ -159,6 +167,8 @@ function statusToCode(status: StatusCode): z.infer<typeof ErrorCode> {
       return "BAD_REQUEST"
     case 401:
       return "UNAUTHORIZED"
+    case 402:
+      return "BUDGET_EXCEEDED"
     case 403:
       return "FORBIDDEN"
 

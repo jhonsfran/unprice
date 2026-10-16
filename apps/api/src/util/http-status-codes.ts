@@ -4,6 +4,7 @@ export const MOVED_TEMPORARILY = 302 as const
 export const SEE_OTHER = 303 as const
 export const BAD_REQUEST = 400 as const
 export const UNAUTHORIZED = 401 as const
+export const PAYMENT_REQUIRED = 402 as const
 export const FORBIDDEN = 403 as const
 export const NOT_FOUND = 404 as const
 export const CONFLICT = 409 as const

@@ -99,6 +99,15 @@ export function buildRunBudgetName(params: {
   return [params.appEnv, params.projectId, params.customerId, params.runId].join(":")
 }
 
+/** The key is the tail, so a key containing ":" or "/" cannot collide with another address. */
+export function buildBudgetName(params: {
+  appEnv: string
+  projectId: string
+  key: string
+}): string {
+  return `${params.appEnv}:${params.projectId}:budget:${params.key}`
+}
+
 export function isIngestionEntitlementActiveAt(
   entitlement: Pick<IngestionEntitlement, "effectiveAt" | "expiresAt">,
   timestamp: number

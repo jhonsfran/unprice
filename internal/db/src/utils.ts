@@ -8,6 +8,7 @@ export * from "./utils/constants"
 export * from "./utils/id"
 export * from "./utils/pagination"
 export * from "./utils/nformatter"
+export * from "./utils/sha256-sync"
 
 export { dinero, type Dinero, currencies, add, multiply, toDecimal, toSnapshot, isZero }
 

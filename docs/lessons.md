@@ -225,6 +225,11 @@ patterns. Keep it cheap to load and useful.
   (its own calendar math, no core imports beyond the API) instead of asserting the core's totals.
 - 2026-10-16: `internal/services` targets ES2018, so bigint literals (`1n`) fail tsc; use
   `BigInt(1)` in budget code and tests.
+- 2026-10-16: Workers RPC carries `bigint` both ways, but DO SQLite rejects a bigint binding
+  ("Cannot convert a BigInt value to a number"); store amounts as TEXT. A generic DO RPC method
+  loses its type parameter through the stub, so narrow the result at the caller instead.
+- 2026-10-16: An error escaping a DO method (RPC or `runInDurableObject` instance call) shows up as
+  an unhandled rejection in vitest-pool-workers; test rollback paths through the processor.
 - 2026-10-15: When reviewing run hierarchy, trace funding through `RunBudgetProcessor` and
   `WalletService.lockCustomer`; separate run DOs share customer funds, while `parentRunId` alone
   does not enforce a recursive parent budget.

@@ -1,4 +1,8 @@
-import { buildIngestionWindowName, buildRunBudgetName } from "@unprice/services/ingestion"
+import {
+  buildBudgetName,
+  buildIngestionWindowName,
+  buildRunBudgetName,
+} from "@unprice/services/ingestion"
 import type { Env } from "~/env"
 
 /**
@@ -90,8 +94,16 @@ export function runBudgetNamespace(env: Pick<Env, "APP_ENV" | "runbudget">): Env
     : env.runbudget
 }
 
+/** EU-scoped budget namespace. Never use the raw binding. */
+export function budgetNamespace(env: Pick<Env, "APP_ENV" | "budget">): Env["budget"] {
+  return isJurisdictionSupported(env.APP_ENV)
+    ? env.budget.jurisdiction(DO_JURISDICTION)
+    : env.budget
+}
+
 export type EntitlementWindowStub = ReturnType<Env["entitlementwindow"]["getByName"]>
 export type RunBudgetStub = ReturnType<Env["runbudget"]["getByName"]>
+export type BudgetStub = ReturnType<Env["budget"]["getByName"]>
 
 /**
  * The canonical entitlement-window address: EU jurisdiction, Western Europe
@@ -126,6 +138,17 @@ export function getRunBudgetStub(
       projectId: params.projectId,
       runId: params.runId,
     }),
+    DO_LOCATION_HINT
+  )
+}
+
+/** The canonical budget address. Same rules as above. */
+export function getBudgetStub(
+  env: Pick<Env, "APP_ENV" | "budget">,
+  params: { projectId: string; key: string }
+): BudgetStub {
+  return budgetNamespace(env).getByName(
+    buildBudgetName({ appEnv: env.APP_ENV, projectId: params.projectId, key: params.key }),
     DO_LOCATION_HINT
   )
 }
