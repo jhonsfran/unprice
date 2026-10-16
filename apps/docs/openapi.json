@@ -71,34 +71,144 @@
                 "example": "req_1234"
               },
               "details": {
-                "type": "object",
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "enum": ["invalid_config", "slug_conflict", "unresolved_reference"],
-                    "description": "What kind of failure this is. Currently only the monetization configuration operations set it",
-                    "example": "invalid_config"
-                  },
-                  "issues": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "path": {
-                          "type": "string",
-                          "description": "JSON path into the submitted document",
-                          "example": "config.plans[0].version.features[1].featureSlug"
-                        },
-                        "message": {
-                          "type": "string"
-                        }
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["invalid_config", "slug_conflict", "unresolved_reference"],
+                        "description": "What kind of failure this is",
+                        "example": "invalid_config"
                       },
-                      "required": ["path", "message"]
+                      "issues": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "path": {
+                              "type": "string",
+                              "description": "JSON path into the submitted document",
+                              "example": "config.plans[0].version.features[1].featureSlug"
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["path", "message"]
+                        },
+                        "description": "Per-location detail, when the failure has locations"
+                      }
                     },
-                    "description": "Per-location detail, when the failure has locations"
+                    "required": ["kind"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["budget_exceeded"]
+                      },
+                      "blocked": {
+                        "type": "object",
+                        "properties": {
+                          "limitId": {
+                            "type": "string"
+                          },
+                          "window": {
+                            "type": "string",
+                            "enum": ["hour", "day", "week", "month", "never"]
+                          },
+                          "remaining": {
+                            "type": "string",
+                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          },
+                          "held": {
+                            "type": "string",
+                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          },
+                          "resetsAt": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "remedy": {
+                            "type": "string",
+                            "enum": ["release_holds", "wait_for_reset", "raise_limit"]
+                          }
+                        },
+                        "required": ["limitId", "window", "remaining", "held", "resetsAt", "remedy"]
+                      },
+                      "balance": {
+                        "type": "object",
+                        "properties": {
+                          "remaining": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "The least remaining over hard limits; null when the budget has no hard limit"
+                          },
+                          "held": {
+                            "type": "string",
+                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          },
+                          "limits": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "window": {
+                                  "type": "string",
+                                  "enum": ["hour", "day", "week", "month", "never"]
+                                },
+                                "enforce": {
+                                  "type": "string",
+                                  "enum": ["hard", "soft"]
+                                },
+                                "amount": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "consumed": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "held": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "remaining": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "resetsAt": {
+                                  "type": "integer",
+                                  "nullable": true
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "window",
+                                "enforce",
+                                "amount",
+                                "consumed",
+                                "held",
+                                "remaining",
+                                "resetsAt"
+                              ]
+                            }
+                          },
+                          "asOf": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": ["remaining", "held", "limits", "asOf"]
+                      }
+                    },
+                    "required": ["kind", "blocked", "balance"]
                   }
-                },
-                "required": ["kind"]
+                ]
               }
             },
             "required": ["code", "docs", "message", "requestId"]
@@ -133,34 +243,144 @@
                 "example": "req_1234"
               },
               "details": {
-                "type": "object",
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "enum": ["invalid_config", "slug_conflict", "unresolved_reference"],
-                    "description": "What kind of failure this is. Currently only the monetization configuration operations set it",
-                    "example": "invalid_config"
-                  },
-                  "issues": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "path": {
-                          "type": "string",
-                          "description": "JSON path into the submitted document",
-                          "example": "config.plans[0].version.features[1].featureSlug"
-                        },
-                        "message": {
-                          "type": "string"
-                        }
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["invalid_config", "slug_conflict", "unresolved_reference"],
+                        "description": "What kind of failure this is",
+                        "example": "invalid_config"
                       },
-                      "required": ["path", "message"]
+                      "issues": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "path": {
+                              "type": "string",
+                              "description": "JSON path into the submitted document",
+                              "example": "config.plans[0].version.features[1].featureSlug"
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["path", "message"]
+                        },
+                        "description": "Per-location detail, when the failure has locations"
+                      }
                     },
-                    "description": "Per-location detail, when the failure has locations"
+                    "required": ["kind"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["budget_exceeded"]
+                      },
+                      "blocked": {
+                        "type": "object",
+                        "properties": {
+                          "limitId": {
+                            "type": "string"
+                          },
+                          "window": {
+                            "type": "string",
+                            "enum": ["hour", "day", "week", "month", "never"]
+                          },
+                          "remaining": {
+                            "type": "string",
+                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          },
+                          "held": {
+                            "type": "string",
+                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          },
+                          "resetsAt": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "remedy": {
+                            "type": "string",
+                            "enum": ["release_holds", "wait_for_reset", "raise_limit"]
+                          }
+                        },
+                        "required": ["limitId", "window", "remaining", "held", "resetsAt", "remedy"]
+                      },
+                      "balance": {
+                        "type": "object",
+                        "properties": {
+                          "remaining": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "The least remaining over hard limits; null when the budget has no hard limit"
+                          },
+                          "held": {
+                            "type": "string",
+                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          },
+                          "limits": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "window": {
+                                  "type": "string",
+                                  "enum": ["hour", "day", "week", "month", "never"]
+                                },
+                                "enforce": {
+                                  "type": "string",
+                                  "enum": ["hard", "soft"]
+                                },
+                                "amount": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "consumed": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "held": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "remaining": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "resetsAt": {
+                                  "type": "integer",
+                                  "nullable": true
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "window",
+                                "enforce",
+                                "amount",
+                                "consumed",
+                                "held",
+                                "remaining",
+                                "resetsAt"
+                              ]
+                            }
+                          },
+                          "asOf": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": ["remaining", "held", "limits", "asOf"]
+                      }
+                    },
+                    "required": ["kind", "blocked", "balance"]
                   }
-                },
-                "required": ["kind"]
+                ]
               }
             },
             "required": ["code", "docs", "message", "requestId"]
@@ -195,34 +415,144 @@
                 "example": "req_1234"
               },
               "details": {
-                "type": "object",
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "enum": ["invalid_config", "slug_conflict", "unresolved_reference"],
-                    "description": "What kind of failure this is. Currently only the monetization configuration operations set it",
-                    "example": "invalid_config"
-                  },
-                  "issues": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "path": {
-                          "type": "string",
-                          "description": "JSON path into the submitted document",
-                          "example": "config.plans[0].version.features[1].featureSlug"
-                        },
-                        "message": {
-                          "type": "string"
-                        }
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["invalid_config", "slug_conflict", "unresolved_reference"],
+                        "description": "What kind of failure this is",
+                        "example": "invalid_config"
                       },
-                      "required": ["path", "message"]
+                      "issues": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "path": {
+                              "type": "string",
+                              "description": "JSON path into the submitted document",
+                              "example": "config.plans[0].version.features[1].featureSlug"
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["path", "message"]
+                        },
+                        "description": "Per-location detail, when the failure has locations"
+                      }
                     },
-                    "description": "Per-location detail, when the failure has locations"
+                    "required": ["kind"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["budget_exceeded"]
+                      },
+                      "blocked": {
+                        "type": "object",
+                        "properties": {
+                          "limitId": {
+                            "type": "string"
+                          },
+                          "window": {
+                            "type": "string",
+                            "enum": ["hour", "day", "week", "month", "never"]
+                          },
+                          "remaining": {
+                            "type": "string",
+                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          },
+                          "held": {
+                            "type": "string",
+                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          },
+                          "resetsAt": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "remedy": {
+                            "type": "string",
+                            "enum": ["release_holds", "wait_for_reset", "raise_limit"]
+                          }
+                        },
+                        "required": ["limitId", "window", "remaining", "held", "resetsAt", "remedy"]
+                      },
+                      "balance": {
+                        "type": "object",
+                        "properties": {
+                          "remaining": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "The least remaining over hard limits; null when the budget has no hard limit"
+                          },
+                          "held": {
+                            "type": "string",
+                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          },
+                          "limits": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "window": {
+                                  "type": "string",
+                                  "enum": ["hour", "day", "week", "month", "never"]
+                                },
+                                "enforce": {
+                                  "type": "string",
+                                  "enum": ["hard", "soft"]
+                                },
+                                "amount": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "consumed": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "held": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "remaining": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "resetsAt": {
+                                  "type": "integer",
+                                  "nullable": true
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "window",
+                                "enforce",
+                                "amount",
+                                "consumed",
+                                "held",
+                                "remaining",
+                                "resetsAt"
+                              ]
+                            }
+                          },
+                          "asOf": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": ["remaining", "held", "limits", "asOf"]
+                      }
+                    },
+                    "required": ["kind", "blocked", "balance"]
                   }
-                },
-                "required": ["kind"]
+                ]
               }
             },
             "required": ["code", "docs", "message", "requestId"]
@@ -257,34 +587,144 @@
                 "example": "req_1234"
               },
               "details": {
-                "type": "object",
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "enum": ["invalid_config", "slug_conflict", "unresolved_reference"],
-                    "description": "What kind of failure this is. Currently only the monetization configuration operations set it",
-                    "example": "invalid_config"
-                  },
-                  "issues": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "path": {
-                          "type": "string",
-                          "description": "JSON path into the submitted document",
-                          "example": "config.plans[0].version.features[1].featureSlug"
-                        },
-                        "message": {
-                          "type": "string"
-                        }
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["invalid_config", "slug_conflict", "unresolved_reference"],
+                        "description": "What kind of failure this is",
+                        "example": "invalid_config"
                       },
-                      "required": ["path", "message"]
+                      "issues": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "path": {
+                              "type": "string",
+                              "description": "JSON path into the submitted document",
+                              "example": "config.plans[0].version.features[1].featureSlug"
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["path", "message"]
+                        },
+                        "description": "Per-location detail, when the failure has locations"
+                      }
                     },
-                    "description": "Per-location detail, when the failure has locations"
+                    "required": ["kind"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["budget_exceeded"]
+                      },
+                      "blocked": {
+                        "type": "object",
+                        "properties": {
+                          "limitId": {
+                            "type": "string"
+                          },
+                          "window": {
+                            "type": "string",
+                            "enum": ["hour", "day", "week", "month", "never"]
+                          },
+                          "remaining": {
+                            "type": "string",
+                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          },
+                          "held": {
+                            "type": "string",
+                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          },
+                          "resetsAt": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "remedy": {
+                            "type": "string",
+                            "enum": ["release_holds", "wait_for_reset", "raise_limit"]
+                          }
+                        },
+                        "required": ["limitId", "window", "remaining", "held", "resetsAt", "remedy"]
+                      },
+                      "balance": {
+                        "type": "object",
+                        "properties": {
+                          "remaining": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "The least remaining over hard limits; null when the budget has no hard limit"
+                          },
+                          "held": {
+                            "type": "string",
+                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          },
+                          "limits": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "window": {
+                                  "type": "string",
+                                  "enum": ["hour", "day", "week", "month", "never"]
+                                },
+                                "enforce": {
+                                  "type": "string",
+                                  "enum": ["hard", "soft"]
+                                },
+                                "amount": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "consumed": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "held": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "remaining": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "resetsAt": {
+                                  "type": "integer",
+                                  "nullable": true
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "window",
+                                "enforce",
+                                "amount",
+                                "consumed",
+                                "held",
+                                "remaining",
+                                "resetsAt"
+                              ]
+                            }
+                          },
+                          "asOf": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": ["remaining", "held", "limits", "asOf"]
+                      }
+                    },
+                    "required": ["kind", "blocked", "balance"]
                   }
-                },
-                "required": ["kind"]
+                ]
               }
             },
             "required": ["code", "docs", "message", "requestId"]
@@ -319,34 +759,144 @@
                 "example": "req_1234"
               },
               "details": {
-                "type": "object",
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "enum": ["invalid_config", "slug_conflict", "unresolved_reference"],
-                    "description": "What kind of failure this is. Currently only the monetization configuration operations set it",
-                    "example": "invalid_config"
-                  },
-                  "issues": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "path": {
-                          "type": "string",
-                          "description": "JSON path into the submitted document",
-                          "example": "config.plans[0].version.features[1].featureSlug"
-                        },
-                        "message": {
-                          "type": "string"
-                        }
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["invalid_config", "slug_conflict", "unresolved_reference"],
+                        "description": "What kind of failure this is",
+                        "example": "invalid_config"
                       },
-                      "required": ["path", "message"]
+                      "issues": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "path": {
+                              "type": "string",
+                              "description": "JSON path into the submitted document",
+                              "example": "config.plans[0].version.features[1].featureSlug"
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["path", "message"]
+                        },
+                        "description": "Per-location detail, when the failure has locations"
+                      }
                     },
-                    "description": "Per-location detail, when the failure has locations"
+                    "required": ["kind"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["budget_exceeded"]
+                      },
+                      "blocked": {
+                        "type": "object",
+                        "properties": {
+                          "limitId": {
+                            "type": "string"
+                          },
+                          "window": {
+                            "type": "string",
+                            "enum": ["hour", "day", "week", "month", "never"]
+                          },
+                          "remaining": {
+                            "type": "string",
+                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          },
+                          "held": {
+                            "type": "string",
+                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          },
+                          "resetsAt": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "remedy": {
+                            "type": "string",
+                            "enum": ["release_holds", "wait_for_reset", "raise_limit"]
+                          }
+                        },
+                        "required": ["limitId", "window", "remaining", "held", "resetsAt", "remedy"]
+                      },
+                      "balance": {
+                        "type": "object",
+                        "properties": {
+                          "remaining": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "The least remaining over hard limits; null when the budget has no hard limit"
+                          },
+                          "held": {
+                            "type": "string",
+                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          },
+                          "limits": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "window": {
+                                  "type": "string",
+                                  "enum": ["hour", "day", "week", "month", "never"]
+                                },
+                                "enforce": {
+                                  "type": "string",
+                                  "enum": ["hard", "soft"]
+                                },
+                                "amount": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "consumed": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "held": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "remaining": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "resetsAt": {
+                                  "type": "integer",
+                                  "nullable": true
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "window",
+                                "enforce",
+                                "amount",
+                                "consumed",
+                                "held",
+                                "remaining",
+                                "resetsAt"
+                              ]
+                            }
+                          },
+                          "asOf": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": ["remaining", "held", "limits", "asOf"]
+                      }
+                    },
+                    "required": ["kind", "blocked", "balance"]
                   }
-                },
-                "required": ["kind"]
+                ]
               }
             },
             "required": ["code", "docs", "message", "requestId"]
@@ -381,34 +931,144 @@
                 "example": "req_1234"
               },
               "details": {
-                "type": "object",
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "enum": ["invalid_config", "slug_conflict", "unresolved_reference"],
-                    "description": "What kind of failure this is. Currently only the monetization configuration operations set it",
-                    "example": "invalid_config"
-                  },
-                  "issues": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "path": {
-                          "type": "string",
-                          "description": "JSON path into the submitted document",
-                          "example": "config.plans[0].version.features[1].featureSlug"
-                        },
-                        "message": {
-                          "type": "string"
-                        }
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["invalid_config", "slug_conflict", "unresolved_reference"],
+                        "description": "What kind of failure this is",
+                        "example": "invalid_config"
                       },
-                      "required": ["path", "message"]
+                      "issues": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "path": {
+                              "type": "string",
+                              "description": "JSON path into the submitted document",
+                              "example": "config.plans[0].version.features[1].featureSlug"
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["path", "message"]
+                        },
+                        "description": "Per-location detail, when the failure has locations"
+                      }
                     },
-                    "description": "Per-location detail, when the failure has locations"
+                    "required": ["kind"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["budget_exceeded"]
+                      },
+                      "blocked": {
+                        "type": "object",
+                        "properties": {
+                          "limitId": {
+                            "type": "string"
+                          },
+                          "window": {
+                            "type": "string",
+                            "enum": ["hour", "day", "week", "month", "never"]
+                          },
+                          "remaining": {
+                            "type": "string",
+                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          },
+                          "held": {
+                            "type": "string",
+                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          },
+                          "resetsAt": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "remedy": {
+                            "type": "string",
+                            "enum": ["release_holds", "wait_for_reset", "raise_limit"]
+                          }
+                        },
+                        "required": ["limitId", "window", "remaining", "held", "resetsAt", "remedy"]
+                      },
+                      "balance": {
+                        "type": "object",
+                        "properties": {
+                          "remaining": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "The least remaining over hard limits; null when the budget has no hard limit"
+                          },
+                          "held": {
+                            "type": "string",
+                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          },
+                          "limits": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "window": {
+                                  "type": "string",
+                                  "enum": ["hour", "day", "week", "month", "never"]
+                                },
+                                "enforce": {
+                                  "type": "string",
+                                  "enum": ["hard", "soft"]
+                                },
+                                "amount": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "consumed": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "held": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "remaining": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "resetsAt": {
+                                  "type": "integer",
+                                  "nullable": true
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "window",
+                                "enforce",
+                                "amount",
+                                "consumed",
+                                "held",
+                                "remaining",
+                                "resetsAt"
+                              ]
+                            }
+                          },
+                          "asOf": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": ["remaining", "held", "limits", "asOf"]
+                      }
+                    },
+                    "required": ["kind", "blocked", "balance"]
                   }
-                },
-                "required": ["kind"]
+                ]
               }
             },
             "required": ["code", "docs", "message", "requestId"]
@@ -443,34 +1103,144 @@
                 "example": "req_1234"
               },
               "details": {
-                "type": "object",
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "enum": ["invalid_config", "slug_conflict", "unresolved_reference"],
-                    "description": "What kind of failure this is. Currently only the monetization configuration operations set it",
-                    "example": "invalid_config"
-                  },
-                  "issues": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "path": {
-                          "type": "string",
-                          "description": "JSON path into the submitted document",
-                          "example": "config.plans[0].version.features[1].featureSlug"
-                        },
-                        "message": {
-                          "type": "string"
-                        }
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["invalid_config", "slug_conflict", "unresolved_reference"],
+                        "description": "What kind of failure this is",
+                        "example": "invalid_config"
                       },
-                      "required": ["path", "message"]
+                      "issues": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "path": {
+                              "type": "string",
+                              "description": "JSON path into the submitted document",
+                              "example": "config.plans[0].version.features[1].featureSlug"
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["path", "message"]
+                        },
+                        "description": "Per-location detail, when the failure has locations"
+                      }
                     },
-                    "description": "Per-location detail, when the failure has locations"
+                    "required": ["kind"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["budget_exceeded"]
+                      },
+                      "blocked": {
+                        "type": "object",
+                        "properties": {
+                          "limitId": {
+                            "type": "string"
+                          },
+                          "window": {
+                            "type": "string",
+                            "enum": ["hour", "day", "week", "month", "never"]
+                          },
+                          "remaining": {
+                            "type": "string",
+                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          },
+                          "held": {
+                            "type": "string",
+                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          },
+                          "resetsAt": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "remedy": {
+                            "type": "string",
+                            "enum": ["release_holds", "wait_for_reset", "raise_limit"]
+                          }
+                        },
+                        "required": ["limitId", "window", "remaining", "held", "resetsAt", "remedy"]
+                      },
+                      "balance": {
+                        "type": "object",
+                        "properties": {
+                          "remaining": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "The least remaining over hard limits; null when the budget has no hard limit"
+                          },
+                          "held": {
+                            "type": "string",
+                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          },
+                          "limits": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "window": {
+                                  "type": "string",
+                                  "enum": ["hour", "day", "week", "month", "never"]
+                                },
+                                "enforce": {
+                                  "type": "string",
+                                  "enum": ["hard", "soft"]
+                                },
+                                "amount": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "consumed": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "held": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "remaining": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "resetsAt": {
+                                  "type": "integer",
+                                  "nullable": true
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "window",
+                                "enforce",
+                                "amount",
+                                "consumed",
+                                "held",
+                                "remaining",
+                                "resetsAt"
+                              ]
+                            }
+                          },
+                          "asOf": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": ["remaining", "held", "limits", "asOf"]
+                      }
+                    },
+                    "required": ["kind", "blocked", "balance"]
                   }
-                },
-                "required": ["kind"]
+                ]
               }
             },
             "required": ["code", "docs", "message", "requestId"]
@@ -505,34 +1275,144 @@
                 "example": "req_1234"
               },
               "details": {
-                "type": "object",
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "enum": ["invalid_config", "slug_conflict", "unresolved_reference"],
-                    "description": "What kind of failure this is. Currently only the monetization configuration operations set it",
-                    "example": "invalid_config"
-                  },
-                  "issues": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "path": {
-                          "type": "string",
-                          "description": "JSON path into the submitted document",
-                          "example": "config.plans[0].version.features[1].featureSlug"
-                        },
-                        "message": {
-                          "type": "string"
-                        }
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["invalid_config", "slug_conflict", "unresolved_reference"],
+                        "description": "What kind of failure this is",
+                        "example": "invalid_config"
                       },
-                      "required": ["path", "message"]
+                      "issues": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "path": {
+                              "type": "string",
+                              "description": "JSON path into the submitted document",
+                              "example": "config.plans[0].version.features[1].featureSlug"
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["path", "message"]
+                        },
+                        "description": "Per-location detail, when the failure has locations"
+                      }
                     },
-                    "description": "Per-location detail, when the failure has locations"
+                    "required": ["kind"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["budget_exceeded"]
+                      },
+                      "blocked": {
+                        "type": "object",
+                        "properties": {
+                          "limitId": {
+                            "type": "string"
+                          },
+                          "window": {
+                            "type": "string",
+                            "enum": ["hour", "day", "week", "month", "never"]
+                          },
+                          "remaining": {
+                            "type": "string",
+                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          },
+                          "held": {
+                            "type": "string",
+                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          },
+                          "resetsAt": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "remedy": {
+                            "type": "string",
+                            "enum": ["release_holds", "wait_for_reset", "raise_limit"]
+                          }
+                        },
+                        "required": ["limitId", "window", "remaining", "held", "resetsAt", "remedy"]
+                      },
+                      "balance": {
+                        "type": "object",
+                        "properties": {
+                          "remaining": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "The least remaining over hard limits; null when the budget has no hard limit"
+                          },
+                          "held": {
+                            "type": "string",
+                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          },
+                          "limits": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "window": {
+                                  "type": "string",
+                                  "enum": ["hour", "day", "week", "month", "never"]
+                                },
+                                "enforce": {
+                                  "type": "string",
+                                  "enum": ["hard", "soft"]
+                                },
+                                "amount": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "consumed": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "held": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "remaining": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "resetsAt": {
+                                  "type": "integer",
+                                  "nullable": true
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "window",
+                                "enforce",
+                                "amount",
+                                "consumed",
+                                "held",
+                                "remaining",
+                                "resetsAt"
+                              ]
+                            }
+                          },
+                          "asOf": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": ["remaining", "held", "limits", "asOf"]
+                      }
+                    },
+                    "required": ["kind", "blocked", "balance"]
                   }
-                },
-                "required": ["kind"]
+                ]
               }
             },
             "required": ["code", "docs", "message", "requestId"]
@@ -567,34 +1447,316 @@
                 "example": "req_1234"
               },
               "details": {
-                "type": "object",
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "enum": ["invalid_config", "slug_conflict", "unresolved_reference"],
-                    "description": "What kind of failure this is. Currently only the monetization configuration operations set it",
-                    "example": "invalid_config"
-                  },
-                  "issues": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "path": {
-                          "type": "string",
-                          "description": "JSON path into the submitted document",
-                          "example": "config.plans[0].version.features[1].featureSlug"
-                        },
-                        "message": {
-                          "type": "string"
-                        }
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["invalid_config", "slug_conflict", "unresolved_reference"],
+                        "description": "What kind of failure this is",
+                        "example": "invalid_config"
                       },
-                      "required": ["path", "message"]
+                      "issues": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "path": {
+                              "type": "string",
+                              "description": "JSON path into the submitted document",
+                              "example": "config.plans[0].version.features[1].featureSlug"
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["path", "message"]
+                        },
+                        "description": "Per-location detail, when the failure has locations"
+                      }
                     },
-                    "description": "Per-location detail, when the failure has locations"
+                    "required": ["kind"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["budget_exceeded"]
+                      },
+                      "blocked": {
+                        "type": "object",
+                        "properties": {
+                          "limitId": {
+                            "type": "string"
+                          },
+                          "window": {
+                            "type": "string",
+                            "enum": ["hour", "day", "week", "month", "never"]
+                          },
+                          "remaining": {
+                            "type": "string",
+                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          },
+                          "held": {
+                            "type": "string",
+                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          },
+                          "resetsAt": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "remedy": {
+                            "type": "string",
+                            "enum": ["release_holds", "wait_for_reset", "raise_limit"]
+                          }
+                        },
+                        "required": ["limitId", "window", "remaining", "held", "resetsAt", "remedy"]
+                      },
+                      "balance": {
+                        "type": "object",
+                        "properties": {
+                          "remaining": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "The least remaining over hard limits; null when the budget has no hard limit"
+                          },
+                          "held": {
+                            "type": "string",
+                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          },
+                          "limits": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "window": {
+                                  "type": "string",
+                                  "enum": ["hour", "day", "week", "month", "never"]
+                                },
+                                "enforce": {
+                                  "type": "string",
+                                  "enum": ["hard", "soft"]
+                                },
+                                "amount": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "consumed": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "held": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "remaining": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "resetsAt": {
+                                  "type": "integer",
+                                  "nullable": true
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "window",
+                                "enforce",
+                                "amount",
+                                "consumed",
+                                "held",
+                                "remaining",
+                                "resetsAt"
+                              ]
+                            }
+                          },
+                          "asOf": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": ["remaining", "held", "limits", "asOf"]
+                      }
+                    },
+                    "required": ["kind", "blocked", "balance"]
                   }
-                },
-                "required": ["kind"]
+                ]
+              }
+            },
+            "required": ["code", "docs", "message", "requestId"]
+          }
+        },
+        "required": ["error"]
+      },
+      "ErrBudgetExceeded": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": ["BUDGET_EXCEEDED"],
+                "description": "A machine readable error code.",
+                "example": "BUDGET_EXCEEDED"
+              },
+              "docs": {
+                "type": "string",
+                "description": "A link to our documentation with more details about this error code",
+                "example": "https://docs.unprice.dev/api-reference/errors/code/BUDGET_EXCEEDED"
+              },
+              "message": {
+                "type": "string",
+                "description": "A human readable explanation of what went wrong"
+              },
+              "requestId": {
+                "type": "string",
+                "description": "Please always include the requestId in your error report",
+                "example": "req_1234"
+              },
+              "details": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["invalid_config", "slug_conflict", "unresolved_reference"],
+                        "description": "What kind of failure this is",
+                        "example": "invalid_config"
+                      },
+                      "issues": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "path": {
+                              "type": "string",
+                              "description": "JSON path into the submitted document",
+                              "example": "config.plans[0].version.features[1].featureSlug"
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["path", "message"]
+                        },
+                        "description": "Per-location detail, when the failure has locations"
+                      }
+                    },
+                    "required": ["kind"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["budget_exceeded"]
+                      },
+                      "blocked": {
+                        "type": "object",
+                        "properties": {
+                          "limitId": {
+                            "type": "string"
+                          },
+                          "window": {
+                            "type": "string",
+                            "enum": ["hour", "day", "week", "month", "never"]
+                          },
+                          "remaining": {
+                            "type": "string",
+                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          },
+                          "held": {
+                            "type": "string",
+                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          },
+                          "resetsAt": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "remedy": {
+                            "type": "string",
+                            "enum": ["release_holds", "wait_for_reset", "raise_limit"]
+                          }
+                        },
+                        "required": ["limitId", "window", "remaining", "held", "resetsAt", "remedy"]
+                      },
+                      "balance": {
+                        "type": "object",
+                        "properties": {
+                          "remaining": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "The least remaining over hard limits; null when the budget has no hard limit"
+                          },
+                          "held": {
+                            "type": "string",
+                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          },
+                          "limits": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "window": {
+                                  "type": "string",
+                                  "enum": ["hour", "day", "week", "month", "never"]
+                                },
+                                "enforce": {
+                                  "type": "string",
+                                  "enum": ["hard", "soft"]
+                                },
+                                "amount": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "consumed": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "held": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "remaining": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                },
+                                "resetsAt": {
+                                  "type": "integer",
+                                  "nullable": true
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "window",
+                                "enforce",
+                                "amount",
+                                "consumed",
+                                "held",
+                                "remaining",
+                                "resetsAt"
+                              ]
+                            }
+                          },
+                          "asOf": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": ["remaining", "held", "limits", "asOf"]
+                      }
+                    },
+                    "required": ["kind", "blocked", "balance"]
+                  }
+                ]
               }
             },
             "required": ["code", "docs", "message", "requestId"]
@@ -1896,6 +3058,1898 @@
                     "consumedAmountMinor",
                     "remainingAmountMinor"
                   ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrBadRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Although the HTTP standard specifies \"unauthorized\", semantically this response means \"unauthenticated\". That is, the client must authenticate itself to get the requested response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrUnauthorized"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrForbidden"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrNotFound"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "This response is sent when a request conflicts with the current state of the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrConflict"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrPreconditionFailed"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request payload is larger than the server is willing to process.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrPayloadTooLarge"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The user has sent too many requests in a given amount of time (\"rate limiting\")",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrTooManyRequests"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server has encountered a situation it does not know how to handle.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrInternalServerError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/budgets/upsert": {
+      "post": {
+        "operationId": "budgets.upsert",
+        "summary": "create or update a budget",
+        "description": "Create the budget at a key, or update its limits and hold settings. Sending the same definition again changes nothing. The unit cannot change after creation.",
+        "tags": ["budgets"],
+        "x-unprice": {
+          "audience": "public",
+          "category": "runtime",
+          "docs": {
+            "expose": true
+          },
+          "sdk": {
+            "path": ["budgets", "upsert"]
+          }
+        },
+        "requestBody": {
+          "description": "The upsert request",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9:/_.@-]{0,127}$",
+                    "description": "The budget's key, chosen by you",
+                    "example": "customer:acme"
+                  },
+                  "unit": {
+                    "type": "string",
+                    "pattern": "^([A-Z]{3}|money:[A-Z]{3}|credits:[a-z0-9_-]{1,64}|units:[a-z0-9_-]{1,64})$",
+                    "description": "A currency code (shorthand for money:<code>), credits:<id>, or units:<slug>",
+                    "example": "USD"
+                  },
+                  "limits": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "description": "Defaults to the window name"
+                        },
+                        "amount": {
+                          "type": "string",
+                          "pattern": "^\\d{1,19}(\\.\\d{1,8})?$",
+                          "description": "A decimal amount in the budget's unit",
+                          "example": "0.05"
+                        },
+                        "window": {
+                          "type": "string",
+                          "enum": ["hour", "day", "week", "month", "never"]
+                        },
+                        "enforce": {
+                          "type": "string",
+                          "enum": ["hard", "soft"]
+                        }
+                      },
+                      "required": ["amount", "window"]
+                    },
+                    "maxItems": 16
+                  },
+                  "holds": {
+                    "type": "object",
+                    "properties": {
+                      "defaultTtlMs": {
+                        "type": "integer"
+                      },
+                      "maxTtlMs": {
+                        "type": "integer"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "onUnavailable": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": ["deny", "allow"]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "allowUpTo": {
+                            "type": "string",
+                            "pattern": "^\\d{1,19}(\\.\\d{1,8})?$",
+                            "description": "A decimal amount in the budget's unit",
+                            "example": "0.05"
+                          }
+                        },
+                        "required": ["allowUpTo"]
+                      }
+                    ]
+                  }
+                },
+                "required": ["key", "unit", "limits"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The changes applied and the budget",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "changes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "change": {
+                            "type": "string"
+                          },
+                          "limitId": {
+                            "type": "string"
+                          },
+                          "from": {
+                            "type": "string"
+                          },
+                          "to": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["change"]
+                      }
+                    },
+                    "budget": {
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string"
+                        },
+                        "unit": {
+                          "type": "string"
+                        },
+                        "version": {
+                          "type": "integer"
+                        },
+                        "limits": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "amount": {
+                                "type": "string",
+                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                              },
+                              "window": {
+                                "type": "string",
+                                "enum": ["hour", "day", "week", "month", "never"]
+                              },
+                              "enforce": {
+                                "type": "string",
+                                "enum": ["hard", "soft"]
+                              }
+                            },
+                            "required": ["id", "amount", "window", "enforce"]
+                          }
+                        },
+                        "holds": {
+                          "type": "object",
+                          "properties": {
+                            "defaultTtlMs": {
+                              "type": "integer"
+                            },
+                            "maxTtlMs": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": ["defaultTtlMs", "maxTtlMs"]
+                        },
+                        "onUnavailable": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": ["deny", "allow"]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "allowUpTo": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                }
+                              },
+                              "required": ["allowUpTo"]
+                            }
+                          ]
+                        },
+                        "balance": {
+                          "type": "object",
+                          "properties": {
+                            "remaining": {
+                              "type": "string",
+                              "nullable": true,
+                              "description": "The least remaining over hard limits; null when the budget has no hard limit"
+                            },
+                            "held": {
+                              "type": "string",
+                              "description": "A decimal amount in the budget's unit; negative after an overrun"
+                            },
+                            "limits": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "window": {
+                                    "type": "string",
+                                    "enum": ["hour", "day", "week", "month", "never"]
+                                  },
+                                  "enforce": {
+                                    "type": "string",
+                                    "enum": ["hard", "soft"]
+                                  },
+                                  "amount": {
+                                    "type": "string",
+                                    "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  },
+                                  "consumed": {
+                                    "type": "string",
+                                    "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  },
+                                  "held": {
+                                    "type": "string",
+                                    "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  },
+                                  "remaining": {
+                                    "type": "string",
+                                    "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  },
+                                  "resetsAt": {
+                                    "type": "integer",
+                                    "nullable": true
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "window",
+                                  "enforce",
+                                  "amount",
+                                  "consumed",
+                                  "held",
+                                  "remaining",
+                                  "resetsAt"
+                                ]
+                              }
+                            },
+                            "asOf": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": ["remaining", "held", "limits", "asOf"]
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "unit",
+                        "version",
+                        "limits",
+                        "holds",
+                        "onUnavailable",
+                        "balance"
+                      ]
+                    }
+                  },
+                  "required": ["changes", "budget"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrBadRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Although the HTTP standard specifies \"unauthorized\", semantically this response means \"unauthenticated\". That is, the client must authenticate itself to get the requested response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrUnauthorized"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrForbidden"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrNotFound"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "This response is sent when a request conflicts with the current state of the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrConflict"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrPreconditionFailed"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request payload is larger than the server is willing to process.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrPayloadTooLarge"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The user has sent too many requests in a given amount of time (\"rate limiting\")",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrTooManyRequests"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server has encountered a situation it does not know how to handle.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrInternalServerError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/budgets/authorize": {
+      "post": {
+        "operationId": "budgets.authorize",
+        "summary": "hold an amount against a budget before work runs",
+        "description": "Hold an estimate against every hard limit of the budget, or return 402 with the limit that blocked it. Settle the hold with the actual amount, or release it. A retry with the same idempotency key returns the same hold.",
+        "tags": ["budgets"],
+        "x-unprice": {
+          "audience": "public",
+          "category": "runtime",
+          "docs": {
+            "expose": true
+          },
+          "sdk": {
+            "path": ["budgets", "authorize"]
+          }
+        },
+        "requestBody": {
+          "description": "The authorize request",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9:/_.@-]{0,127}$",
+                    "description": "The budget's key, chosen by you",
+                    "example": "customer:acme"
+                  },
+                  "amount": {
+                    "type": "string",
+                    "pattern": "^\\d{1,19}(\\.\\d{1,8})?$",
+                    "description": "A decimal amount in the budget's unit",
+                    "example": "0.05"
+                  },
+                  "ttlMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "exclusiveMinimum": true
+                  },
+                  "idempotencyKey": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  }
+                },
+                "required": ["key", "amount", "idempotencyKey"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The hold",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "allowed": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "holdId": {
+                      "type": "string",
+                      "pattern": "^h_[1-9][0-9]{0,15}$",
+                      "example": "h_42"
+                    },
+                    "amount": {
+                      "type": "string",
+                      "description": "A decimal amount in the budget's unit; negative after an overrun"
+                    },
+                    "expiresAt": {
+                      "type": "integer"
+                    },
+                    "replayed": {
+                      "type": "boolean"
+                    },
+                    "balance": {
+                      "type": "object",
+                      "properties": {
+                        "remaining": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "The least remaining over hard limits; null when the budget has no hard limit"
+                        },
+                        "held": {
+                          "type": "string",
+                          "description": "A decimal amount in the budget's unit; negative after an overrun"
+                        },
+                        "limits": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "window": {
+                                "type": "string",
+                                "enum": ["hour", "day", "week", "month", "never"]
+                              },
+                              "enforce": {
+                                "type": "string",
+                                "enum": ["hard", "soft"]
+                              },
+                              "amount": {
+                                "type": "string",
+                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                              },
+                              "consumed": {
+                                "type": "string",
+                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                              },
+                              "held": {
+                                "type": "string",
+                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                              },
+                              "remaining": {
+                                "type": "string",
+                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                              },
+                              "resetsAt": {
+                                "type": "integer",
+                                "nullable": true
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "window",
+                              "enforce",
+                              "amount",
+                              "consumed",
+                              "held",
+                              "remaining",
+                              "resetsAt"
+                            ]
+                          }
+                        },
+                        "asOf": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": ["remaining", "held", "limits", "asOf"]
+                    }
+                  },
+                  "required": ["allowed", "holdId", "amount", "expiresAt", "replayed", "balance"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrBadRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Although the HTTP standard specifies \"unauthorized\", semantically this response means \"unauthenticated\". That is, the client must authenticate itself to get the requested response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrUnauthorized"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "The request does not fit the budget. `details.blocked` names the limit that blocked it and the remedy that would let it through.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrBudgetExceeded"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrForbidden"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrNotFound"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "This response is sent when a request conflicts with the current state of the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrConflict"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrPreconditionFailed"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request payload is larger than the server is willing to process.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrPayloadTooLarge"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The user has sent too many requests in a given amount of time (\"rate limiting\")",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrTooManyRequests"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server has encountered a situation it does not know how to handle.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrInternalServerError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/budgets/settle": {
+      "post": {
+        "operationId": "budgets.settle",
+        "summary": "settle a hold with the actual amount",
+        "description": "Consume the actual amount and release the rest of the hold. An actual above the hold, or a settle after the hold lapsed, is still consumed. The hold id is the idempotency key: the same amount replays, another amount returns 409.",
+        "tags": ["budgets"],
+        "x-unprice": {
+          "audience": "public",
+          "category": "runtime",
+          "docs": {
+            "expose": true
+          },
+          "sdk": {
+            "path": ["budgets", "settle"]
+          }
+        },
+        "requestBody": {
+          "description": "The settle request",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9:/_.@-]{0,127}$",
+                    "description": "The budget's key, chosen by you",
+                    "example": "customer:acme"
+                  },
+                  "holdId": {
+                    "type": "string",
+                    "pattern": "^h_[1-9][0-9]{0,15}$",
+                    "example": "h_42"
+                  },
+                  "amount": {
+                    "type": "string",
+                    "pattern": "^\\d{1,19}(\\.\\d{1,8})?$",
+                    "description": "A decimal amount in the budget's unit",
+                    "example": "0.05"
+                  }
+                },
+                "required": ["key", "holdId", "amount"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The settlement",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "holdId": {
+                      "type": "string",
+                      "pattern": "^h_[1-9][0-9]{0,15}$",
+                      "example": "h_42"
+                    },
+                    "actual": {
+                      "type": "string",
+                      "description": "A decimal amount in the budget's unit; negative after an overrun"
+                    },
+                    "covered": {
+                      "type": "string",
+                      "description": "A decimal amount in the budget's unit; negative after an overrun"
+                    },
+                    "released": {
+                      "type": "string",
+                      "description": "A decimal amount in the budget's unit; negative after an overrun"
+                    },
+                    "overrun": {
+                      "type": "string",
+                      "description": "A decimal amount in the budget's unit; negative after an overrun"
+                    },
+                    "late": {
+                      "type": "boolean"
+                    },
+                    "expired": {
+                      "type": "boolean"
+                    },
+                    "crossed": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "replayed": {
+                      "type": "boolean"
+                    },
+                    "balance": {
+                      "type": "object",
+                      "properties": {
+                        "remaining": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "The least remaining over hard limits; null when the budget has no hard limit"
+                        },
+                        "held": {
+                          "type": "string",
+                          "description": "A decimal amount in the budget's unit; negative after an overrun"
+                        },
+                        "limits": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "window": {
+                                "type": "string",
+                                "enum": ["hour", "day", "week", "month", "never"]
+                              },
+                              "enforce": {
+                                "type": "string",
+                                "enum": ["hard", "soft"]
+                              },
+                              "amount": {
+                                "type": "string",
+                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                              },
+                              "consumed": {
+                                "type": "string",
+                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                              },
+                              "held": {
+                                "type": "string",
+                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                              },
+                              "remaining": {
+                                "type": "string",
+                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                              },
+                              "resetsAt": {
+                                "type": "integer",
+                                "nullable": true
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "window",
+                              "enforce",
+                              "amount",
+                              "consumed",
+                              "held",
+                              "remaining",
+                              "resetsAt"
+                            ]
+                          }
+                        },
+                        "asOf": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": ["remaining", "held", "limits", "asOf"]
+                    }
+                  },
+                  "required": [
+                    "holdId",
+                    "actual",
+                    "covered",
+                    "released",
+                    "overrun",
+                    "late",
+                    "expired",
+                    "crossed",
+                    "replayed",
+                    "balance"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrBadRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Although the HTTP standard specifies \"unauthorized\", semantically this response means \"unauthenticated\". That is, the client must authenticate itself to get the requested response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrUnauthorized"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrForbidden"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrNotFound"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "This response is sent when a request conflicts with the current state of the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrConflict"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrPreconditionFailed"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request payload is larger than the server is willing to process.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrPayloadTooLarge"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The user has sent too many requests in a given amount of time (\"rate limiting\")",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrTooManyRequests"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server has encountered a situation it does not know how to handle.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrInternalServerError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/budgets/release": {
+      "post": {
+        "operationId": "budgets.release",
+        "summary": "release a hold without consuming",
+        "description": "Return the whole hold to the budget. Releasing twice changes nothing; releasing a settled hold returns 409.",
+        "tags": ["budgets"],
+        "x-unprice": {
+          "audience": "public",
+          "category": "runtime",
+          "docs": {
+            "expose": true
+          },
+          "sdk": {
+            "path": ["budgets", "release"]
+          }
+        },
+        "requestBody": {
+          "description": "The release request",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9:/_.@-]{0,127}$",
+                    "description": "The budget's key, chosen by you",
+                    "example": "customer:acme"
+                  },
+                  "holdId": {
+                    "type": "string",
+                    "pattern": "^h_[1-9][0-9]{0,15}$",
+                    "example": "h_42"
+                  }
+                },
+                "required": ["key", "holdId"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The release",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "holdId": {
+                      "type": "string",
+                      "pattern": "^h_[1-9][0-9]{0,15}$",
+                      "example": "h_42"
+                    },
+                    "released": {
+                      "type": "string",
+                      "description": "A decimal amount in the budget's unit; negative after an overrun"
+                    },
+                    "replayed": {
+                      "type": "boolean"
+                    },
+                    "balance": {
+                      "type": "object",
+                      "properties": {
+                        "remaining": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "The least remaining over hard limits; null when the budget has no hard limit"
+                        },
+                        "held": {
+                          "type": "string",
+                          "description": "A decimal amount in the budget's unit; negative after an overrun"
+                        },
+                        "limits": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "window": {
+                                "type": "string",
+                                "enum": ["hour", "day", "week", "month", "never"]
+                              },
+                              "enforce": {
+                                "type": "string",
+                                "enum": ["hard", "soft"]
+                              },
+                              "amount": {
+                                "type": "string",
+                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                              },
+                              "consumed": {
+                                "type": "string",
+                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                              },
+                              "held": {
+                                "type": "string",
+                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                              },
+                              "remaining": {
+                                "type": "string",
+                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                              },
+                              "resetsAt": {
+                                "type": "integer",
+                                "nullable": true
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "window",
+                              "enforce",
+                              "amount",
+                              "consumed",
+                              "held",
+                              "remaining",
+                              "resetsAt"
+                            ]
+                          }
+                        },
+                        "asOf": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": ["remaining", "held", "limits", "asOf"]
+                    }
+                  },
+                  "required": ["holdId", "released", "replayed", "balance"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrBadRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Although the HTTP standard specifies \"unauthorized\", semantically this response means \"unauthenticated\". That is, the client must authenticate itself to get the requested response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrUnauthorized"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrForbidden"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrNotFound"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "This response is sent when a request conflicts with the current state of the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrConflict"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrPreconditionFailed"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request payload is larger than the server is willing to process.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrPayloadTooLarge"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The user has sent too many requests in a given amount of time (\"rate limiting\")",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrTooManyRequests"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server has encountered a situation it does not know how to handle.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrInternalServerError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/budgets/charge": {
+      "post": {
+        "operationId": "budgets.charge",
+        "summary": "consume an amount if it fits",
+        "description": "Consume an amount in one call when it fits every hard limit, or return 402 with the limit that blocked it. For cheap work gated before it runs.",
+        "tags": ["budgets"],
+        "x-unprice": {
+          "audience": "public",
+          "category": "runtime",
+          "docs": {
+            "expose": true
+          },
+          "sdk": {
+            "path": ["budgets", "charge"]
+          }
+        },
+        "requestBody": {
+          "description": "The charge request",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9:/_.@-]{0,127}$",
+                    "description": "The budget's key, chosen by you",
+                    "example": "customer:acme"
+                  },
+                  "amount": {
+                    "type": "string",
+                    "pattern": "^\\d{1,19}(\\.\\d{1,8})?$",
+                    "description": "A decimal amount in the budget's unit",
+                    "example": "0.05"
+                  },
+                  "idempotencyKey": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  }
+                },
+                "required": ["key", "amount", "idempotencyKey"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The charge",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "allowed": {
+                      "type": "boolean",
+                      "enum": [true]
+                    },
+                    "amount": {
+                      "type": "string",
+                      "description": "A decimal amount in the budget's unit; negative after an overrun"
+                    },
+                    "crossed": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "replayed": {
+                      "type": "boolean"
+                    },
+                    "balance": {
+                      "type": "object",
+                      "properties": {
+                        "remaining": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "The least remaining over hard limits; null when the budget has no hard limit"
+                        },
+                        "held": {
+                          "type": "string",
+                          "description": "A decimal amount in the budget's unit; negative after an overrun"
+                        },
+                        "limits": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "window": {
+                                "type": "string",
+                                "enum": ["hour", "day", "week", "month", "never"]
+                              },
+                              "enforce": {
+                                "type": "string",
+                                "enum": ["hard", "soft"]
+                              },
+                              "amount": {
+                                "type": "string",
+                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                              },
+                              "consumed": {
+                                "type": "string",
+                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                              },
+                              "held": {
+                                "type": "string",
+                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                              },
+                              "remaining": {
+                                "type": "string",
+                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                              },
+                              "resetsAt": {
+                                "type": "integer",
+                                "nullable": true
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "window",
+                              "enforce",
+                              "amount",
+                              "consumed",
+                              "held",
+                              "remaining",
+                              "resetsAt"
+                            ]
+                          }
+                        },
+                        "asOf": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": ["remaining", "held", "limits", "asOf"]
+                    }
+                  },
+                  "required": ["allowed", "amount", "crossed", "replayed", "balance"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrBadRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Although the HTTP standard specifies \"unauthorized\", semantically this response means \"unauthenticated\". That is, the client must authenticate itself to get the requested response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrUnauthorized"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "The request does not fit the budget. `details.blocked` names the limit that blocked it and the remedy that would let it through.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrBudgetExceeded"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrForbidden"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrNotFound"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "This response is sent when a request conflicts with the current state of the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrConflict"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrPreconditionFailed"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request payload is larger than the server is willing to process.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrPayloadTooLarge"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The user has sent too many requests in a given amount of time (\"rate limiting\")",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrTooManyRequests"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server has encountered a situation it does not know how to handle.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrInternalServerError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/budgets/record": {
+      "post": {
+        "operationId": "budgets.record",
+        "summary": "record usage that already happened",
+        "description": "Consume an amount for work that already ran. Never denied, so remaining can go negative.",
+        "tags": ["budgets"],
+        "x-unprice": {
+          "audience": "public",
+          "category": "runtime",
+          "docs": {
+            "expose": true
+          },
+          "sdk": {
+            "path": ["budgets", "record"]
+          }
+        },
+        "requestBody": {
+          "description": "The record request",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9:/_.@-]{0,127}$",
+                    "description": "The budget's key, chosen by you",
+                    "example": "customer:acme"
+                  },
+                  "amount": {
+                    "type": "string",
+                    "pattern": "^\\d{1,19}(\\.\\d{1,8})?$",
+                    "description": "A decimal amount in the budget's unit",
+                    "example": "0.05"
+                  },
+                  "idempotencyKey": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  }
+                },
+                "required": ["key", "amount", "idempotencyKey"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The record",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "amount": {
+                      "type": "string",
+                      "description": "A decimal amount in the budget's unit; negative after an overrun"
+                    },
+                    "crossed": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "replayed": {
+                      "type": "boolean"
+                    },
+                    "balance": {
+                      "type": "object",
+                      "properties": {
+                        "remaining": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "The least remaining over hard limits; null when the budget has no hard limit"
+                        },
+                        "held": {
+                          "type": "string",
+                          "description": "A decimal amount in the budget's unit; negative after an overrun"
+                        },
+                        "limits": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "window": {
+                                "type": "string",
+                                "enum": ["hour", "day", "week", "month", "never"]
+                              },
+                              "enforce": {
+                                "type": "string",
+                                "enum": ["hard", "soft"]
+                              },
+                              "amount": {
+                                "type": "string",
+                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                              },
+                              "consumed": {
+                                "type": "string",
+                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                              },
+                              "held": {
+                                "type": "string",
+                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                              },
+                              "remaining": {
+                                "type": "string",
+                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                              },
+                              "resetsAt": {
+                                "type": "integer",
+                                "nullable": true
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "window",
+                              "enforce",
+                              "amount",
+                              "consumed",
+                              "held",
+                              "remaining",
+                              "resetsAt"
+                            ]
+                          }
+                        },
+                        "asOf": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": ["remaining", "held", "limits", "asOf"]
+                    }
+                  },
+                  "required": ["amount", "crossed", "replayed", "balance"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrBadRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Although the HTTP standard specifies \"unauthorized\", semantically this response means \"unauthenticated\". That is, the client must authenticate itself to get the requested response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrUnauthorized"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrForbidden"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrNotFound"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "This response is sent when a request conflicts with the current state of the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrConflict"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrPreconditionFailed"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request payload is larger than the server is willing to process.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrPayloadTooLarge"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The user has sent too many requests in a given amount of time (\"rate limiting\")",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrTooManyRequests"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server has encountered a situation it does not know how to handle.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrInternalServerError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/budgets/get": {
+      "get": {
+        "operationId": "budgets.get",
+        "summary": "get a budget and its balance",
+        "description": "Get the budget at a key with its limits and the current balance of each.",
+        "tags": ["budgets"],
+        "x-unprice": {
+          "audience": "public",
+          "category": "runtime",
+          "docs": {
+            "expose": true
+          },
+          "sdk": {
+            "path": ["budgets", "get"]
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9:/_.@-]{0,127}$",
+              "description": "The budget's key, chosen by you",
+              "example": "customer:acme"
+            },
+            "required": true,
+            "name": "key",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The budget",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "budget": {
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string"
+                        },
+                        "unit": {
+                          "type": "string"
+                        },
+                        "version": {
+                          "type": "integer"
+                        },
+                        "limits": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "amount": {
+                                "type": "string",
+                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                              },
+                              "window": {
+                                "type": "string",
+                                "enum": ["hour", "day", "week", "month", "never"]
+                              },
+                              "enforce": {
+                                "type": "string",
+                                "enum": ["hard", "soft"]
+                              }
+                            },
+                            "required": ["id", "amount", "window", "enforce"]
+                          }
+                        },
+                        "holds": {
+                          "type": "object",
+                          "properties": {
+                            "defaultTtlMs": {
+                              "type": "integer"
+                            },
+                            "maxTtlMs": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": ["defaultTtlMs", "maxTtlMs"]
+                        },
+                        "onUnavailable": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": ["deny", "allow"]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "allowUpTo": {
+                                  "type": "string",
+                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                }
+                              },
+                              "required": ["allowUpTo"]
+                            }
+                          ]
+                        },
+                        "balance": {
+                          "type": "object",
+                          "properties": {
+                            "remaining": {
+                              "type": "string",
+                              "nullable": true,
+                              "description": "The least remaining over hard limits; null when the budget has no hard limit"
+                            },
+                            "held": {
+                              "type": "string",
+                              "description": "A decimal amount in the budget's unit; negative after an overrun"
+                            },
+                            "limits": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "window": {
+                                    "type": "string",
+                                    "enum": ["hour", "day", "week", "month", "never"]
+                                  },
+                                  "enforce": {
+                                    "type": "string",
+                                    "enum": ["hard", "soft"]
+                                  },
+                                  "amount": {
+                                    "type": "string",
+                                    "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  },
+                                  "consumed": {
+                                    "type": "string",
+                                    "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  },
+                                  "held": {
+                                    "type": "string",
+                                    "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  },
+                                  "remaining": {
+                                    "type": "string",
+                                    "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  },
+                                  "resetsAt": {
+                                    "type": "integer",
+                                    "nullable": true
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "window",
+                                  "enforce",
+                                  "amount",
+                                  "consumed",
+                                  "held",
+                                  "remaining",
+                                  "resetsAt"
+                                ]
+                              }
+                            },
+                            "asOf": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": ["remaining", "held", "limits", "asOf"]
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "unit",
+                        "version",
+                        "limits",
+                        "holds",
+                        "onUnavailable",
+                        "balance"
+                      ]
+                    }
+                  },
+                  "required": ["budget"]
                 }
               }
             }

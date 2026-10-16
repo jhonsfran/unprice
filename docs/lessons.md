@@ -644,6 +644,8 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-06-20: Run `pnpm --filter @unprice/api generate` with the API dev server running before
   SDK contract work is complete; it updates `apps/docs/openapi.json`,
   `packages/api/src/openapi.d.ts`, and `packages/api/src/generated/sdk-resources.ts` together.
+- 2026-10-16: `pnpm generate` writes `openapi.d.ts` unformatted (4 spaces, semicolons), which
+  diffs every line; run `pnpm biome format packages/api/src/openapi.d.ts --write` afterwards.
 - 2026-05-08: Public Hono routes callable from `@unprice/api` need SDK-shaped `operationId`s.
 - 2026-05-08: Align first OpenAPI tag and first `/v1` path segment with the SDK namespace.
 - 2026-05-08: Keep SDK resource methods as one-object calls grouped by product concepts.

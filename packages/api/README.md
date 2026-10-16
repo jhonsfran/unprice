@@ -111,6 +111,39 @@ For streaming APIs, reserve before `streamText`, settle from `onFinish`, and app
 provider-specific decision on errors. The lower-level `runs` API remains available for workflows
 that need several usage events or a serializable run identifier.
 
+## Budgets
+
+A budget caps spend under a key you choose. Define it once with `budgets.upsert`, then take a handle
+with `unprice.budget(key)`. The handle is local and never creates or changes the budget.
+
+```ts
+await unprice.budgets.upsert({
+  key: "customer:acme",
+  unit: "USD",
+  limits: [{ amount: "50", window: "month" }],
+})
+
+const acme = unprice.budget("customer:acme")
+
+const text = await acme.spend({ estimate: 0.05 }, async () => {
+  const r = await generateText({ model, prompt })
+  return { value: r.text, actual: costOf(r.usage) }
+})
+```
+
+`spend` authorizes the estimate, runs the function, and settles the actual it returns. It releases
+the hold when the function throws. It throws `BudgetExceededError` when the budget denies the
+estimate, and also when Unprice cannot be reached (`error.blocked.reason === "unavailable"`). It
+throws `BudgetSettleError` when the work succeeded but the settle failed. Retry
+`error.hold.settle({ amount: error.actual })`. Do not `record` that usage, because the first settle
+may have committed.
+
+For manual control, `acme.authorize({ amount })` returns `{ allowed: true, hold }` or
+`{ allowed: false, blocked }`. `hold.settle({ amount })` and `hold.release()` are safe to retry
+because the hold id is the idempotency key. `acme.charge` gates a one-shot amount, and
+`acme.record({ amount, idempotencyKey })` reports usage that already happened and is never denied.
+Amounts accept numbers or decimal strings and come back as decimal strings.
+
 ## Monetization configuration
 
 `monetization.get` and `monetization.apply` let you describe a project's plans, features, and

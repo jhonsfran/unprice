@@ -1,5 +1,6 @@
 import createOpenApiClient, { type Client as OpenApiClient } from "openapi-fetch"
 import { version } from "../package.json"
+import { type BudgetHandle, createBudgetHandle } from "./budgets"
 import type { ApiError, ErrorResponse } from "./errors"
 import {
   type GeneratedSdkResources,
@@ -135,6 +136,7 @@ export class Unprice implements GeneratedSdkResources {
   public readonly usage: GeneratedSdkResources["usage"]
   public readonly runs: GeneratedSdkResources["runs"]
   public readonly reservations: Reservations
+  public readonly budgets: GeneratedSdkResources["budgets"]
   public readonly customers: GeneratedSdkResources["customers"]
   public readonly features: GeneratedSdkResources["features"]
   public readonly planVersions: GeneratedSdkResources["planVersions"]
@@ -190,6 +192,7 @@ export class Unprice implements GeneratedSdkResources {
     this.usage = resources.usage
     this.runs = resources.runs
     this.reservations = createReservations(resources.runs)
+    this.budgets = resources.budgets
     this.customers = resources.customers
     this.features = resources.features
     this.planVersions = resources.planVersions
@@ -201,6 +204,11 @@ export class Unprice implements GeneratedSdkResources {
     this.analytics = resources.analytics
     this.ingestionEvents = resources.ingestionEvents
     this.monetization = resources.monetization
+  }
+
+  /** A local handle bound to one budget key. It never creates or changes the budget. */
+  budget(key: string): BudgetHandle {
+    return createBudgetHandle(this.budgets, key)
   }
 
   private getHeaders(): Record<string, string> {

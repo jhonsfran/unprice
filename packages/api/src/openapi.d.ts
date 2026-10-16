@@ -124,6 +124,146 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/v1/budgets/upsert": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * create or update a budget
+     * @description Create the budget at a key, or update its limits and hold settings. Sending the same definition again changes nothing. The unit cannot change after creation.
+     */
+    post: operations["budgets.upsert"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/v1/budgets/authorize": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * hold an amount against a budget before work runs
+     * @description Hold an estimate against every hard limit of the budget, or return 402 with the limit that blocked it. Settle the hold with the actual amount, or release it. A retry with the same idempotency key returns the same hold.
+     */
+    post: operations["budgets.authorize"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/v1/budgets/settle": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * settle a hold with the actual amount
+     * @description Consume the actual amount and release the rest of the hold. An actual above the hold, or a settle after the hold lapsed, is still consumed. The hold id is the idempotency key: the same amount replays, another amount returns 409.
+     */
+    post: operations["budgets.settle"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/v1/budgets/release": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * release a hold without consuming
+     * @description Return the whole hold to the budget. Releasing twice changes nothing; releasing a settled hold returns 409.
+     */
+    post: operations["budgets.release"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/v1/budgets/charge": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * consume an amount if it fits
+     * @description Consume an amount in one call when it fits every hard limit, or return 402 with the limit that blocked it. For cheap work gated before it runs.
+     */
+    post: operations["budgets.charge"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/v1/budgets/record": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * record usage that already happened
+     * @description Consume an amount for work that already ran. Never denied, so remaining can go negative.
+     */
+    post: operations["budgets.record"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/v1/budgets/get": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * get a budget and its balance
+     * @description Get the budget at a key with its limits and the current balance of each.
+     */
+    get: operations["budgets.get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/v1/customers/sign-up": {
     parameters: {
       query?: never
@@ -605,23 +745,63 @@ export interface components {
          * @example req_1234
          */
         requestId: string
-        details?: {
-          /**
-           * @description What kind of failure this is. Currently only the monetization configuration operations set it
-           * @example invalid_config
-           * @enum {string}
-           */
-          kind: "invalid_config" | "slug_conflict" | "unresolved_reference"
-          /** @description Per-location detail, when the failure has locations */
-          issues?: {
-            /**
-             * @description JSON path into the submitted document
-             * @example config.plans[0].version.features[1].featureSlug
-             */
-            path: string
-            message: string
-          }[]
-        }
+        details?:
+          | {
+              /**
+               * @description What kind of failure this is
+               * @example invalid_config
+               * @enum {string}
+               */
+              kind: "invalid_config" | "slug_conflict" | "unresolved_reference"
+              /** @description Per-location detail, when the failure has locations */
+              issues?: {
+                /**
+                 * @description JSON path into the submitted document
+                 * @example config.plans[0].version.features[1].featureSlug
+                 */
+                path: string
+                message: string
+              }[]
+            }
+          | {
+              /** @enum {string} */
+              kind: "budget_exceeded"
+              blocked: {
+                limitId: string
+                /** @enum {string} */
+                window: "hour" | "day" | "week" | "month" | "never"
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                remaining: string
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                held: string
+                resetsAt: number | null
+                /** @enum {string} */
+                remedy: "release_holds" | "wait_for_reset" | "raise_limit"
+              }
+              balance: {
+                /** @description The least remaining over hard limits; null when the budget has no hard limit */
+                remaining: string | null
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                held: string
+                limits: {
+                  id: string
+                  /** @enum {string} */
+                  window: "hour" | "day" | "week" | "month" | "never"
+                  /** @enum {string} */
+                  enforce: "hard" | "soft"
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  amount: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  consumed: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  held: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  remaining: string
+                  resetsAt: number | null
+                }[]
+                asOf: number
+              }
+            }
       }
     }
     ErrUnauthorized: {
@@ -644,23 +824,63 @@ export interface components {
          * @example req_1234
          */
         requestId: string
-        details?: {
-          /**
-           * @description What kind of failure this is. Currently only the monetization configuration operations set it
-           * @example invalid_config
-           * @enum {string}
-           */
-          kind: "invalid_config" | "slug_conflict" | "unresolved_reference"
-          /** @description Per-location detail, when the failure has locations */
-          issues?: {
-            /**
-             * @description JSON path into the submitted document
-             * @example config.plans[0].version.features[1].featureSlug
-             */
-            path: string
-            message: string
-          }[]
-        }
+        details?:
+          | {
+              /**
+               * @description What kind of failure this is
+               * @example invalid_config
+               * @enum {string}
+               */
+              kind: "invalid_config" | "slug_conflict" | "unresolved_reference"
+              /** @description Per-location detail, when the failure has locations */
+              issues?: {
+                /**
+                 * @description JSON path into the submitted document
+                 * @example config.plans[0].version.features[1].featureSlug
+                 */
+                path: string
+                message: string
+              }[]
+            }
+          | {
+              /** @enum {string} */
+              kind: "budget_exceeded"
+              blocked: {
+                limitId: string
+                /** @enum {string} */
+                window: "hour" | "day" | "week" | "month" | "never"
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                remaining: string
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                held: string
+                resetsAt: number | null
+                /** @enum {string} */
+                remedy: "release_holds" | "wait_for_reset" | "raise_limit"
+              }
+              balance: {
+                /** @description The least remaining over hard limits; null when the budget has no hard limit */
+                remaining: string | null
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                held: string
+                limits: {
+                  id: string
+                  /** @enum {string} */
+                  window: "hour" | "day" | "week" | "month" | "never"
+                  /** @enum {string} */
+                  enforce: "hard" | "soft"
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  amount: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  consumed: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  held: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  remaining: string
+                  resetsAt: number | null
+                }[]
+                asOf: number
+              }
+            }
       }
     }
     ErrForbidden: {
@@ -683,23 +903,63 @@ export interface components {
          * @example req_1234
          */
         requestId: string
-        details?: {
-          /**
-           * @description What kind of failure this is. Currently only the monetization configuration operations set it
-           * @example invalid_config
-           * @enum {string}
-           */
-          kind: "invalid_config" | "slug_conflict" | "unresolved_reference"
-          /** @description Per-location detail, when the failure has locations */
-          issues?: {
-            /**
-             * @description JSON path into the submitted document
-             * @example config.plans[0].version.features[1].featureSlug
-             */
-            path: string
-            message: string
-          }[]
-        }
+        details?:
+          | {
+              /**
+               * @description What kind of failure this is
+               * @example invalid_config
+               * @enum {string}
+               */
+              kind: "invalid_config" | "slug_conflict" | "unresolved_reference"
+              /** @description Per-location detail, when the failure has locations */
+              issues?: {
+                /**
+                 * @description JSON path into the submitted document
+                 * @example config.plans[0].version.features[1].featureSlug
+                 */
+                path: string
+                message: string
+              }[]
+            }
+          | {
+              /** @enum {string} */
+              kind: "budget_exceeded"
+              blocked: {
+                limitId: string
+                /** @enum {string} */
+                window: "hour" | "day" | "week" | "month" | "never"
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                remaining: string
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                held: string
+                resetsAt: number | null
+                /** @enum {string} */
+                remedy: "release_holds" | "wait_for_reset" | "raise_limit"
+              }
+              balance: {
+                /** @description The least remaining over hard limits; null when the budget has no hard limit */
+                remaining: string | null
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                held: string
+                limits: {
+                  id: string
+                  /** @enum {string} */
+                  window: "hour" | "day" | "week" | "month" | "never"
+                  /** @enum {string} */
+                  enforce: "hard" | "soft"
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  amount: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  consumed: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  held: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  remaining: string
+                  resetsAt: number | null
+                }[]
+                asOf: number
+              }
+            }
       }
     }
     ErrNotFound: {
@@ -722,23 +982,63 @@ export interface components {
          * @example req_1234
          */
         requestId: string
-        details?: {
-          /**
-           * @description What kind of failure this is. Currently only the monetization configuration operations set it
-           * @example invalid_config
-           * @enum {string}
-           */
-          kind: "invalid_config" | "slug_conflict" | "unresolved_reference"
-          /** @description Per-location detail, when the failure has locations */
-          issues?: {
-            /**
-             * @description JSON path into the submitted document
-             * @example config.plans[0].version.features[1].featureSlug
-             */
-            path: string
-            message: string
-          }[]
-        }
+        details?:
+          | {
+              /**
+               * @description What kind of failure this is
+               * @example invalid_config
+               * @enum {string}
+               */
+              kind: "invalid_config" | "slug_conflict" | "unresolved_reference"
+              /** @description Per-location detail, when the failure has locations */
+              issues?: {
+                /**
+                 * @description JSON path into the submitted document
+                 * @example config.plans[0].version.features[1].featureSlug
+                 */
+                path: string
+                message: string
+              }[]
+            }
+          | {
+              /** @enum {string} */
+              kind: "budget_exceeded"
+              blocked: {
+                limitId: string
+                /** @enum {string} */
+                window: "hour" | "day" | "week" | "month" | "never"
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                remaining: string
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                held: string
+                resetsAt: number | null
+                /** @enum {string} */
+                remedy: "release_holds" | "wait_for_reset" | "raise_limit"
+              }
+              balance: {
+                /** @description The least remaining over hard limits; null when the budget has no hard limit */
+                remaining: string | null
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                held: string
+                limits: {
+                  id: string
+                  /** @enum {string} */
+                  window: "hour" | "day" | "week" | "month" | "never"
+                  /** @enum {string} */
+                  enforce: "hard" | "soft"
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  amount: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  consumed: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  held: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  remaining: string
+                  resetsAt: number | null
+                }[]
+                asOf: number
+              }
+            }
       }
     }
     ErrConflict: {
@@ -761,23 +1061,63 @@ export interface components {
          * @example req_1234
          */
         requestId: string
-        details?: {
-          /**
-           * @description What kind of failure this is. Currently only the monetization configuration operations set it
-           * @example invalid_config
-           * @enum {string}
-           */
-          kind: "invalid_config" | "slug_conflict" | "unresolved_reference"
-          /** @description Per-location detail, when the failure has locations */
-          issues?: {
-            /**
-             * @description JSON path into the submitted document
-             * @example config.plans[0].version.features[1].featureSlug
-             */
-            path: string
-            message: string
-          }[]
-        }
+        details?:
+          | {
+              /**
+               * @description What kind of failure this is
+               * @example invalid_config
+               * @enum {string}
+               */
+              kind: "invalid_config" | "slug_conflict" | "unresolved_reference"
+              /** @description Per-location detail, when the failure has locations */
+              issues?: {
+                /**
+                 * @description JSON path into the submitted document
+                 * @example config.plans[0].version.features[1].featureSlug
+                 */
+                path: string
+                message: string
+              }[]
+            }
+          | {
+              /** @enum {string} */
+              kind: "budget_exceeded"
+              blocked: {
+                limitId: string
+                /** @enum {string} */
+                window: "hour" | "day" | "week" | "month" | "never"
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                remaining: string
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                held: string
+                resetsAt: number | null
+                /** @enum {string} */
+                remedy: "release_holds" | "wait_for_reset" | "raise_limit"
+              }
+              balance: {
+                /** @description The least remaining over hard limits; null when the budget has no hard limit */
+                remaining: string | null
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                held: string
+                limits: {
+                  id: string
+                  /** @enum {string} */
+                  window: "hour" | "day" | "week" | "month" | "never"
+                  /** @enum {string} */
+                  enforce: "hard" | "soft"
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  amount: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  consumed: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  held: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  remaining: string
+                  resetsAt: number | null
+                }[]
+                asOf: number
+              }
+            }
       }
     }
     ErrPreconditionFailed: {
@@ -800,23 +1140,63 @@ export interface components {
          * @example req_1234
          */
         requestId: string
-        details?: {
-          /**
-           * @description What kind of failure this is. Currently only the monetization configuration operations set it
-           * @example invalid_config
-           * @enum {string}
-           */
-          kind: "invalid_config" | "slug_conflict" | "unresolved_reference"
-          /** @description Per-location detail, when the failure has locations */
-          issues?: {
-            /**
-             * @description JSON path into the submitted document
-             * @example config.plans[0].version.features[1].featureSlug
-             */
-            path: string
-            message: string
-          }[]
-        }
+        details?:
+          | {
+              /**
+               * @description What kind of failure this is
+               * @example invalid_config
+               * @enum {string}
+               */
+              kind: "invalid_config" | "slug_conflict" | "unresolved_reference"
+              /** @description Per-location detail, when the failure has locations */
+              issues?: {
+                /**
+                 * @description JSON path into the submitted document
+                 * @example config.plans[0].version.features[1].featureSlug
+                 */
+                path: string
+                message: string
+              }[]
+            }
+          | {
+              /** @enum {string} */
+              kind: "budget_exceeded"
+              blocked: {
+                limitId: string
+                /** @enum {string} */
+                window: "hour" | "day" | "week" | "month" | "never"
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                remaining: string
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                held: string
+                resetsAt: number | null
+                /** @enum {string} */
+                remedy: "release_holds" | "wait_for_reset" | "raise_limit"
+              }
+              balance: {
+                /** @description The least remaining over hard limits; null when the budget has no hard limit */
+                remaining: string | null
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                held: string
+                limits: {
+                  id: string
+                  /** @enum {string} */
+                  window: "hour" | "day" | "week" | "month" | "never"
+                  /** @enum {string} */
+                  enforce: "hard" | "soft"
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  amount: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  consumed: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  held: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  remaining: string
+                  resetsAt: number | null
+                }[]
+                asOf: number
+              }
+            }
       }
     }
     ErrPayloadTooLarge: {
@@ -839,23 +1219,63 @@ export interface components {
          * @example req_1234
          */
         requestId: string
-        details?: {
-          /**
-           * @description What kind of failure this is. Currently only the monetization configuration operations set it
-           * @example invalid_config
-           * @enum {string}
-           */
-          kind: "invalid_config" | "slug_conflict" | "unresolved_reference"
-          /** @description Per-location detail, when the failure has locations */
-          issues?: {
-            /**
-             * @description JSON path into the submitted document
-             * @example config.plans[0].version.features[1].featureSlug
-             */
-            path: string
-            message: string
-          }[]
-        }
+        details?:
+          | {
+              /**
+               * @description What kind of failure this is
+               * @example invalid_config
+               * @enum {string}
+               */
+              kind: "invalid_config" | "slug_conflict" | "unresolved_reference"
+              /** @description Per-location detail, when the failure has locations */
+              issues?: {
+                /**
+                 * @description JSON path into the submitted document
+                 * @example config.plans[0].version.features[1].featureSlug
+                 */
+                path: string
+                message: string
+              }[]
+            }
+          | {
+              /** @enum {string} */
+              kind: "budget_exceeded"
+              blocked: {
+                limitId: string
+                /** @enum {string} */
+                window: "hour" | "day" | "week" | "month" | "never"
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                remaining: string
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                held: string
+                resetsAt: number | null
+                /** @enum {string} */
+                remedy: "release_holds" | "wait_for_reset" | "raise_limit"
+              }
+              balance: {
+                /** @description The least remaining over hard limits; null when the budget has no hard limit */
+                remaining: string | null
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                held: string
+                limits: {
+                  id: string
+                  /** @enum {string} */
+                  window: "hour" | "day" | "week" | "month" | "never"
+                  /** @enum {string} */
+                  enforce: "hard" | "soft"
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  amount: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  consumed: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  held: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  remaining: string
+                  resetsAt: number | null
+                }[]
+                asOf: number
+              }
+            }
       }
     }
     ErrTooManyRequests: {
@@ -878,23 +1298,63 @@ export interface components {
          * @example req_1234
          */
         requestId: string
-        details?: {
-          /**
-           * @description What kind of failure this is. Currently only the monetization configuration operations set it
-           * @example invalid_config
-           * @enum {string}
-           */
-          kind: "invalid_config" | "slug_conflict" | "unresolved_reference"
-          /** @description Per-location detail, when the failure has locations */
-          issues?: {
-            /**
-             * @description JSON path into the submitted document
-             * @example config.plans[0].version.features[1].featureSlug
-             */
-            path: string
-            message: string
-          }[]
-        }
+        details?:
+          | {
+              /**
+               * @description What kind of failure this is
+               * @example invalid_config
+               * @enum {string}
+               */
+              kind: "invalid_config" | "slug_conflict" | "unresolved_reference"
+              /** @description Per-location detail, when the failure has locations */
+              issues?: {
+                /**
+                 * @description JSON path into the submitted document
+                 * @example config.plans[0].version.features[1].featureSlug
+                 */
+                path: string
+                message: string
+              }[]
+            }
+          | {
+              /** @enum {string} */
+              kind: "budget_exceeded"
+              blocked: {
+                limitId: string
+                /** @enum {string} */
+                window: "hour" | "day" | "week" | "month" | "never"
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                remaining: string
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                held: string
+                resetsAt: number | null
+                /** @enum {string} */
+                remedy: "release_holds" | "wait_for_reset" | "raise_limit"
+              }
+              balance: {
+                /** @description The least remaining over hard limits; null when the budget has no hard limit */
+                remaining: string | null
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                held: string
+                limits: {
+                  id: string
+                  /** @enum {string} */
+                  window: "hour" | "day" | "week" | "month" | "never"
+                  /** @enum {string} */
+                  enforce: "hard" | "soft"
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  amount: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  consumed: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  held: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  remaining: string
+                  resetsAt: number | null
+                }[]
+                asOf: number
+              }
+            }
       }
     }
     ErrInternalServerError: {
@@ -917,23 +1377,142 @@ export interface components {
          * @example req_1234
          */
         requestId: string
-        details?: {
-          /**
-           * @description What kind of failure this is. Currently only the monetization configuration operations set it
-           * @example invalid_config
-           * @enum {string}
-           */
-          kind: "invalid_config" | "slug_conflict" | "unresolved_reference"
-          /** @description Per-location detail, when the failure has locations */
-          issues?: {
-            /**
-             * @description JSON path into the submitted document
-             * @example config.plans[0].version.features[1].featureSlug
-             */
-            path: string
-            message: string
-          }[]
-        }
+        details?:
+          | {
+              /**
+               * @description What kind of failure this is
+               * @example invalid_config
+               * @enum {string}
+               */
+              kind: "invalid_config" | "slug_conflict" | "unresolved_reference"
+              /** @description Per-location detail, when the failure has locations */
+              issues?: {
+                /**
+                 * @description JSON path into the submitted document
+                 * @example config.plans[0].version.features[1].featureSlug
+                 */
+                path: string
+                message: string
+              }[]
+            }
+          | {
+              /** @enum {string} */
+              kind: "budget_exceeded"
+              blocked: {
+                limitId: string
+                /** @enum {string} */
+                window: "hour" | "day" | "week" | "month" | "never"
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                remaining: string
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                held: string
+                resetsAt: number | null
+                /** @enum {string} */
+                remedy: "release_holds" | "wait_for_reset" | "raise_limit"
+              }
+              balance: {
+                /** @description The least remaining over hard limits; null when the budget has no hard limit */
+                remaining: string | null
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                held: string
+                limits: {
+                  id: string
+                  /** @enum {string} */
+                  window: "hour" | "day" | "week" | "month" | "never"
+                  /** @enum {string} */
+                  enforce: "hard" | "soft"
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  amount: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  consumed: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  held: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  remaining: string
+                  resetsAt: number | null
+                }[]
+                asOf: number
+              }
+            }
+      }
+    }
+    ErrBudgetExceeded: {
+      error: {
+        /**
+         * @description A machine readable error code.
+         * @example BUDGET_EXCEEDED
+         * @enum {string}
+         */
+        code: "BUDGET_EXCEEDED"
+        /**
+         * @description A link to our documentation with more details about this error code
+         * @example https://docs.unprice.dev/api-reference/errors/code/BUDGET_EXCEEDED
+         */
+        docs: string
+        /** @description A human readable explanation of what went wrong */
+        message: string
+        /**
+         * @description Please always include the requestId in your error report
+         * @example req_1234
+         */
+        requestId: string
+        details?:
+          | {
+              /**
+               * @description What kind of failure this is
+               * @example invalid_config
+               * @enum {string}
+               */
+              kind: "invalid_config" | "slug_conflict" | "unresolved_reference"
+              /** @description Per-location detail, when the failure has locations */
+              issues?: {
+                /**
+                 * @description JSON path into the submitted document
+                 * @example config.plans[0].version.features[1].featureSlug
+                 */
+                path: string
+                message: string
+              }[]
+            }
+          | {
+              /** @enum {string} */
+              kind: "budget_exceeded"
+              blocked: {
+                limitId: string
+                /** @enum {string} */
+                window: "hour" | "day" | "week" | "month" | "never"
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                remaining: string
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                held: string
+                resetsAt: number | null
+                /** @enum {string} */
+                remedy: "release_holds" | "wait_for_reset" | "raise_limit"
+              }
+              balance: {
+                /** @description The least remaining over hard limits; null when the budget has no hard limit */
+                remaining: string | null
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                held: string
+                limits: {
+                  id: string
+                  /** @enum {string} */
+                  window: "hour" | "day" | "week" | "month" | "never"
+                  /** @enum {string} */
+                  enforce: "hard" | "soft"
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  amount: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  consumed: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  held: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  remaining: string
+                  resetsAt: number | null
+                }[]
+                asOf: number
+              }
+            }
       }
     }
   }
@@ -1691,6 +2270,1117 @@ export interface operations {
             consumedAmountMinor: number
             /** @description Remaining in currency minor units (cents). */
             remainingAmountMinor: number
+          }
+        }
+      }
+      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrBadRequest"]
+        }
+      }
+      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+      401: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrUnauthorized"]
+        }
+      }
+      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+      403: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrForbidden"]
+        }
+      }
+      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrNotFound"]
+        }
+      }
+      /** @description This response is sent when a request conflicts with the current state of the server. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrConflict"]
+        }
+      }
+      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+      412: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
+        }
+      }
+      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+      429: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrTooManyRequests"]
+        }
+      }
+      /** @description The server has encountered a situation it does not know how to handle. */
+      500: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrInternalServerError"]
+        }
+      }
+    }
+  }
+  "budgets.upsert": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The upsert request */
+    requestBody: {
+      content: {
+        "application/json": {
+          /**
+           * @description The budget's key, chosen by you
+           * @example customer:acme
+           */
+          key: string
+          /**
+           * @description A currency code (shorthand for money:<code>), credits:<id>, or units:<slug>
+           * @example USD
+           */
+          unit: string
+          limits: {
+            /** @description Defaults to the window name */
+            id?: string
+            /**
+             * @description A decimal amount in the budget's unit
+             * @example 0.05
+             */
+            amount: string
+            /** @enum {string} */
+            window: "hour" | "day" | "week" | "month" | "never"
+            /** @enum {string} */
+            enforce?: "hard" | "soft"
+          }[]
+          holds?: {
+            defaultTtlMs?: number
+            maxTtlMs?: number
+          }
+          onUnavailable?:
+            | ("deny" | "allow")
+            | {
+                /**
+                 * @description A decimal amount in the budget's unit
+                 * @example 0.05
+                 */
+                allowUpTo: string
+              }
+        }
+      }
+    }
+    responses: {
+      /** @description The changes applied and the budget */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": {
+            changes: {
+              change: string
+              limitId?: string
+              from?: string
+              to?: string
+            }[]
+            budget: {
+              key: string
+              unit: string
+              version: number
+              limits: {
+                id: string
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                amount: string
+                /** @enum {string} */
+                window: "hour" | "day" | "week" | "month" | "never"
+                /** @enum {string} */
+                enforce: "hard" | "soft"
+              }[]
+              holds: {
+                defaultTtlMs: number
+                maxTtlMs: number
+              }
+              onUnavailable:
+                | ("deny" | "allow")
+                | {
+                    /** @description A decimal amount in the budget's unit; negative after an overrun */
+                    allowUpTo: string
+                  }
+              balance: {
+                /** @description The least remaining over hard limits; null when the budget has no hard limit */
+                remaining: string | null
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                held: string
+                limits: {
+                  id: string
+                  /** @enum {string} */
+                  window: "hour" | "day" | "week" | "month" | "never"
+                  /** @enum {string} */
+                  enforce: "hard" | "soft"
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  amount: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  consumed: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  held: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  remaining: string
+                  resetsAt: number | null
+                }[]
+                asOf: number
+              }
+            }
+          }
+        }
+      }
+      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrBadRequest"]
+        }
+      }
+      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+      401: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrUnauthorized"]
+        }
+      }
+      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+      403: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrForbidden"]
+        }
+      }
+      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrNotFound"]
+        }
+      }
+      /** @description This response is sent when a request conflicts with the current state of the server. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrConflict"]
+        }
+      }
+      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+      412: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
+        }
+      }
+      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+      429: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrTooManyRequests"]
+        }
+      }
+      /** @description The server has encountered a situation it does not know how to handle. */
+      500: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrInternalServerError"]
+        }
+      }
+    }
+  }
+  "budgets.authorize": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The authorize request */
+    requestBody: {
+      content: {
+        "application/json": {
+          /**
+           * @description The budget's key, chosen by you
+           * @example customer:acme
+           */
+          key: string
+          /**
+           * @description A decimal amount in the budget's unit
+           * @example 0.05
+           */
+          amount: string
+          ttlMs?: number
+          idempotencyKey: string
+        }
+      }
+    }
+    responses: {
+      /** @description The hold */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": {
+            /** @enum {boolean} */
+            allowed: true
+            /** @example h_42 */
+            holdId: string
+            /** @description A decimal amount in the budget's unit; negative after an overrun */
+            amount: string
+            expiresAt: number
+            replayed: boolean
+            balance: {
+              /** @description The least remaining over hard limits; null when the budget has no hard limit */
+              remaining: string | null
+              /** @description A decimal amount in the budget's unit; negative after an overrun */
+              held: string
+              limits: {
+                id: string
+                /** @enum {string} */
+                window: "hour" | "day" | "week" | "month" | "never"
+                /** @enum {string} */
+                enforce: "hard" | "soft"
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                amount: string
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                consumed: string
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                held: string
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                remaining: string
+                resetsAt: number | null
+              }[]
+              asOf: number
+            }
+          }
+        }
+      }
+      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrBadRequest"]
+        }
+      }
+      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+      401: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrUnauthorized"]
+        }
+      }
+      /** @description The request does not fit the budget. `details.blocked` names the limit that blocked it and the remedy that would let it through. */
+      402: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrBudgetExceeded"]
+        }
+      }
+      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+      403: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrForbidden"]
+        }
+      }
+      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrNotFound"]
+        }
+      }
+      /** @description This response is sent when a request conflicts with the current state of the server. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrConflict"]
+        }
+      }
+      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+      412: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
+        }
+      }
+      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+      429: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrTooManyRequests"]
+        }
+      }
+      /** @description The server has encountered a situation it does not know how to handle. */
+      500: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrInternalServerError"]
+        }
+      }
+    }
+  }
+  "budgets.settle": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The settle request */
+    requestBody: {
+      content: {
+        "application/json": {
+          /**
+           * @description The budget's key, chosen by you
+           * @example customer:acme
+           */
+          key: string
+          /** @example h_42 */
+          holdId: string
+          /**
+           * @description A decimal amount in the budget's unit
+           * @example 0.05
+           */
+          amount: string
+        }
+      }
+    }
+    responses: {
+      /** @description The settlement */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": {
+            /** @example h_42 */
+            holdId: string
+            /** @description A decimal amount in the budget's unit; negative after an overrun */
+            actual: string
+            /** @description A decimal amount in the budget's unit; negative after an overrun */
+            covered: string
+            /** @description A decimal amount in the budget's unit; negative after an overrun */
+            released: string
+            /** @description A decimal amount in the budget's unit; negative after an overrun */
+            overrun: string
+            late: boolean
+            expired: boolean
+            crossed: string[]
+            replayed: boolean
+            balance: {
+              /** @description The least remaining over hard limits; null when the budget has no hard limit */
+              remaining: string | null
+              /** @description A decimal amount in the budget's unit; negative after an overrun */
+              held: string
+              limits: {
+                id: string
+                /** @enum {string} */
+                window: "hour" | "day" | "week" | "month" | "never"
+                /** @enum {string} */
+                enforce: "hard" | "soft"
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                amount: string
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                consumed: string
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                held: string
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                remaining: string
+                resetsAt: number | null
+              }[]
+              asOf: number
+            }
+          }
+        }
+      }
+      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrBadRequest"]
+        }
+      }
+      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+      401: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrUnauthorized"]
+        }
+      }
+      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+      403: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrForbidden"]
+        }
+      }
+      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrNotFound"]
+        }
+      }
+      /** @description This response is sent when a request conflicts with the current state of the server. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrConflict"]
+        }
+      }
+      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+      412: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
+        }
+      }
+      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+      429: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrTooManyRequests"]
+        }
+      }
+      /** @description The server has encountered a situation it does not know how to handle. */
+      500: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrInternalServerError"]
+        }
+      }
+    }
+  }
+  "budgets.release": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The release request */
+    requestBody: {
+      content: {
+        "application/json": {
+          /**
+           * @description The budget's key, chosen by you
+           * @example customer:acme
+           */
+          key: string
+          /** @example h_42 */
+          holdId: string
+        }
+      }
+    }
+    responses: {
+      /** @description The release */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": {
+            /** @example h_42 */
+            holdId: string
+            /** @description A decimal amount in the budget's unit; negative after an overrun */
+            released: string
+            replayed: boolean
+            balance: {
+              /** @description The least remaining over hard limits; null when the budget has no hard limit */
+              remaining: string | null
+              /** @description A decimal amount in the budget's unit; negative after an overrun */
+              held: string
+              limits: {
+                id: string
+                /** @enum {string} */
+                window: "hour" | "day" | "week" | "month" | "never"
+                /** @enum {string} */
+                enforce: "hard" | "soft"
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                amount: string
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                consumed: string
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                held: string
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                remaining: string
+                resetsAt: number | null
+              }[]
+              asOf: number
+            }
+          }
+        }
+      }
+      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrBadRequest"]
+        }
+      }
+      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+      401: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrUnauthorized"]
+        }
+      }
+      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+      403: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrForbidden"]
+        }
+      }
+      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrNotFound"]
+        }
+      }
+      /** @description This response is sent when a request conflicts with the current state of the server. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrConflict"]
+        }
+      }
+      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+      412: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
+        }
+      }
+      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+      429: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrTooManyRequests"]
+        }
+      }
+      /** @description The server has encountered a situation it does not know how to handle. */
+      500: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrInternalServerError"]
+        }
+      }
+    }
+  }
+  "budgets.charge": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The charge request */
+    requestBody: {
+      content: {
+        "application/json": {
+          /**
+           * @description The budget's key, chosen by you
+           * @example customer:acme
+           */
+          key: string
+          /**
+           * @description A decimal amount in the budget's unit
+           * @example 0.05
+           */
+          amount: string
+          idempotencyKey: string
+        }
+      }
+    }
+    responses: {
+      /** @description The charge */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": {
+            /** @enum {boolean} */
+            allowed: true
+            /** @description A decimal amount in the budget's unit; negative after an overrun */
+            amount: string
+            crossed: string[]
+            replayed: boolean
+            balance: {
+              /** @description The least remaining over hard limits; null when the budget has no hard limit */
+              remaining: string | null
+              /** @description A decimal amount in the budget's unit; negative after an overrun */
+              held: string
+              limits: {
+                id: string
+                /** @enum {string} */
+                window: "hour" | "day" | "week" | "month" | "never"
+                /** @enum {string} */
+                enforce: "hard" | "soft"
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                amount: string
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                consumed: string
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                held: string
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                remaining: string
+                resetsAt: number | null
+              }[]
+              asOf: number
+            }
+          }
+        }
+      }
+      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrBadRequest"]
+        }
+      }
+      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+      401: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrUnauthorized"]
+        }
+      }
+      /** @description The request does not fit the budget. `details.blocked` names the limit that blocked it and the remedy that would let it through. */
+      402: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrBudgetExceeded"]
+        }
+      }
+      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+      403: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrForbidden"]
+        }
+      }
+      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrNotFound"]
+        }
+      }
+      /** @description This response is sent when a request conflicts with the current state of the server. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrConflict"]
+        }
+      }
+      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+      412: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
+        }
+      }
+      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+      429: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrTooManyRequests"]
+        }
+      }
+      /** @description The server has encountered a situation it does not know how to handle. */
+      500: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrInternalServerError"]
+        }
+      }
+    }
+  }
+  "budgets.record": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The record request */
+    requestBody: {
+      content: {
+        "application/json": {
+          /**
+           * @description The budget's key, chosen by you
+           * @example customer:acme
+           */
+          key: string
+          /**
+           * @description A decimal amount in the budget's unit
+           * @example 0.05
+           */
+          amount: string
+          idempotencyKey: string
+        }
+      }
+    }
+    responses: {
+      /** @description The record */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": {
+            /** @description A decimal amount in the budget's unit; negative after an overrun */
+            amount: string
+            crossed: string[]
+            replayed: boolean
+            balance: {
+              /** @description The least remaining over hard limits; null when the budget has no hard limit */
+              remaining: string | null
+              /** @description A decimal amount in the budget's unit; negative after an overrun */
+              held: string
+              limits: {
+                id: string
+                /** @enum {string} */
+                window: "hour" | "day" | "week" | "month" | "never"
+                /** @enum {string} */
+                enforce: "hard" | "soft"
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                amount: string
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                consumed: string
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                held: string
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                remaining: string
+                resetsAt: number | null
+              }[]
+              asOf: number
+            }
+          }
+        }
+      }
+      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrBadRequest"]
+        }
+      }
+      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+      401: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrUnauthorized"]
+        }
+      }
+      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+      403: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrForbidden"]
+        }
+      }
+      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrNotFound"]
+        }
+      }
+      /** @description This response is sent when a request conflicts with the current state of the server. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrConflict"]
+        }
+      }
+      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+      412: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
+        }
+      }
+      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+      429: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrTooManyRequests"]
+        }
+      }
+      /** @description The server has encountered a situation it does not know how to handle. */
+      500: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrInternalServerError"]
+        }
+      }
+    }
+  }
+  "budgets.get": {
+    parameters: {
+      query: {
+        key: string
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description The budget */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": {
+            budget: {
+              key: string
+              unit: string
+              version: number
+              limits: {
+                id: string
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                amount: string
+                /** @enum {string} */
+                window: "hour" | "day" | "week" | "month" | "never"
+                /** @enum {string} */
+                enforce: "hard" | "soft"
+              }[]
+              holds: {
+                defaultTtlMs: number
+                maxTtlMs: number
+              }
+              onUnavailable:
+                | ("deny" | "allow")
+                | {
+                    /** @description A decimal amount in the budget's unit; negative after an overrun */
+                    allowUpTo: string
+                  }
+              balance: {
+                /** @description The least remaining over hard limits; null when the budget has no hard limit */
+                remaining: string | null
+                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                held: string
+                limits: {
+                  id: string
+                  /** @enum {string} */
+                  window: "hour" | "day" | "week" | "month" | "never"
+                  /** @enum {string} */
+                  enforce: "hard" | "soft"
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  amount: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  consumed: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  held: string
+                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  remaining: string
+                  resetsAt: number | null
+                }[]
+                asOf: number
+              }
+            }
           }
         }
       }
