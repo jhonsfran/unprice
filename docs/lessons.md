@@ -219,6 +219,12 @@ patterns. Keep it cheap to load and useful.
 - 2026-07-11: RunBudget alarms must flush captureable bucket spend even before an intent exists;
   persist quantity ranges on the intent too, and seal nullable legacy quantity snapshots before
   retries or cumulative bucket updates so wallet payload hashes cannot drift.
+- 2026-10-16: The budget primitive (ADR-0006) keeps its state machine pure in
+  `@unprice/services/budgets` (`transition`); a DO persists the returned ledger, rows, and entries
+  in one transaction. When adding a verb, extend the reference model in `core.properties.test.ts`
+  (its own calendar math, no core imports beyond the API) instead of asserting the core's totals.
+- 2026-10-16: `internal/services` targets ES2018, so bigint literals (`1n`) fail tsc; use
+  `BigInt(1)` in budget code and tests.
 - 2026-10-15: When reviewing run hierarchy, trace funding through `RunBudgetProcessor` and
   `WalletService.lockCustomer`; separate run DOs share customer funds, while `parentRunId` alone
   does not enforce a recursive parent budget.
