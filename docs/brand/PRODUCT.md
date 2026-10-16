@@ -2,8 +2,8 @@
 
 Date: 2026-07-03
 
-Status: pre-validation refresh (July 2026 market audit). Lock after the customer interviews in
-`jobs-to-be-done.md`.
+Status: pre-validation refresh (July 2026 market audit). Lock after the persona in
+`docs/specs/2026-10-13-budget-primitive-problem-space.md` is validated with design partners.
 
 This is the app-level product source of truth. Detailed brand and design rules live in
 [`docs/brand`](/Users/jhonsfran/repos/unprice/docs/brand/README.md).

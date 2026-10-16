@@ -1,4 +1,3 @@
-import { endOfMonth } from "date-fns/endOfMonth"
 import { z } from "zod"
 import {
   type BillingAnchor,
@@ -353,7 +352,7 @@ export function getAnchor(date: number, interval: BillingInterval, anchor: Billi
       if (numeric < 1) {
         throw new Error("For monthly intervals, anchor must be 1-31 (day of month).")
       }
-      const last = endOfMonth(ref).getUTCDate()
+      const last = new Date(Date.UTC(ref.getUTCFullYear(), ref.getUTCMonth() + 1, 0)).getUTCDate()
       return Math.min(numeric, last)
     }
     case "year": {
@@ -361,7 +360,7 @@ export function getAnchor(date: number, interval: BillingInterval, anchor: Billi
         throw new Error("For yearly intervals, anchor must be 1-31 (day of month).")
       }
       // Yearly plans use day-of-month anchoring; cap to last day for the reference month
-      const last = endOfMonth(ref).getUTCDate()
+      const last = new Date(Date.UTC(ref.getUTCFullYear(), ref.getUTCMonth() + 1, 0)).getUTCDate()
       return Math.min(numeric, last)
     }
     case "onetime": {
