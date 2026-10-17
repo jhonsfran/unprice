@@ -1,12 +1,13 @@
 /**
- * Policy (ADR-0006 B1-B3): every rule that accepts or rejects a command. Returns facts or a
- * rejection; folding them is `evolve`'s job.
+ * Policy (ADR-0006 B1-B3): every rule that accepts or rejects a command. Returns the change it
+ * makes or a rejection; applying the change to the ledger is `transition`'s job.
  */
 
 import { Ok, type Result } from "@unprice/error"
 import type { Amount, SignedAmount } from "@unprice/money"
 import {
   type BudgetRecord,
+  type ConfigChange,
   HOLD_LAPSE_TTL_MULTIPLIER,
   MIN_HOLD_TTL_MS,
   OPERATION_RETENTION_MS,
@@ -15,14 +16,12 @@ import {
   diffConfig,
   isClosed,
 } from "./config"
-import { countersOf } from "./evolve"
 import {
   type Blocked,
   type BlockedRemedy,
   type BudgetBalance,
   type BudgetCommand,
   type BudgetView,
-  type Fact,
   type HoldOperation,
   type Ledger,
   type LimitBalance,
@@ -30,7 +29,7 @@ import {
   type UnPriceBudgetError,
   reject,
 } from "./model"
-import { windowBounds, windowIdOf, windowSpecOf } from "./windows"
+import { windowBounds, windowIdOf } from "./windows"
 
 const ZERO = BigInt(0)
 
@@ -110,47 +109,60 @@ function crossings(balance: BudgetBalance, delta: SignedAmount): string[] {
 // Decide
 
 /**
+ * What one accepted command changes. `rows` are the rows it wrote, as new objects; `row` is the row
+ * its outcome reads, written or replayed. No rows and no config is a read or an idempotent replay.
+ */
+export type Change = Readonly<{
+  configured?: Readonly<{ budget: BudgetRecord; changes: readonly ConfigChange[] }>
+  rows: readonly Operation[]
+  row: Operation | null
+  held: SignedAmount
+  consumed: Amount
+}>
+
+const unchanged = (row: Operation | null): Change => ({ rows: [], row, held: ZERO, consumed: ZERO })
+
+/**
  * Policy for one command against a view that `transition` already swept at a clamped `now`.
- * Zero facts with Ok is a read or an idempotent replay. A rejection writes nothing.
+ * A rejection writes nothing.
  */
 export function decide(
   command: BudgetCommand,
-  view: Pick<BudgetView, "budget" | "ledger" | "target" | "receipt">,
+  view: Pick<BudgetView, "budget" | "ledger" | "target">,
   now: number
-): Result<Fact[], UnPriceBudgetError> {
+): Result<Change, UnPriceBudgetError> {
   if (command.type === "upsert") return decideUpsert(command, view.budget)
-  if (command.type === "sweep") return Ok([])
+  if (command.type === "sweep") return Ok(unchanged(null))
   const budget = view.budget
   if (!budget) return reject({ code: "BUDGET_NOT_FOUND" })
   const state = { budget, ledger: view.ledger }
 
   switch (command.type) {
     case "get":
-      return Ok([])
+      return Ok(unchanged(null))
     case "authorize":
     case "charge":
     case "record":
-      return decideKeyed(command, state, view, now)
+      return decideKeyed(command, state, view.target, now)
     case "settle":
       return decideSettle(command, state, view.target, now)
     case "release":
-      return decideRelease(command, state.ledger, view.target)
+      return decideRelease(command, state.ledger, view.target, now)
   }
 }
 
 function decideUpsert(
   command: Extract<BudgetCommand, { type: "upsert" }>,
   budget: BudgetRecord | null
-): Result<Fact[], UnPriceBudgetError> {
+): Result<Change, UnPriceBudgetError> {
   const { key, projectId, unit, config } = command
   if (!budget) {
     const changes = config.limits.map((limit) => ({
       change: "limit.added" as const,
       limitId: limit.id,
     }))
-    return Ok([
-      { type: "budget.configured", budget: { key, projectId, unit, version: 1, config }, changes },
-    ])
+    const created = { key, projectId, unit, version: 1, config }
+    return Ok({ ...unchanged(null), configured: { budget: created, changes } })
   }
   if (budget.key !== key || budget.projectId !== projectId) {
     throw new Error(
@@ -161,32 +173,34 @@ function decideUpsert(
     return reject({ code: "UNIT_IMMUTABLE", current: budget.unit, requested: unit })
   }
   const changes = diffConfig(budget.config, config)
-  if (changes.length === 0) return Ok([])
-  return Ok([
-    {
-      type: "budget.configured",
-      budget: { ...budget, version: budget.version + 1, config },
-      changes,
-    },
-  ])
+  if (changes.length === 0) return Ok(unchanged(null))
+  const updated = { ...budget, version: budget.version + 1, config }
+  return Ok({ ...unchanged(null), configured: { budget: updated, changes } })
+}
+
+/** A keyed command repeats its row when the verb, the amount, and (for a hold) the TTL match. */
+function sameRequest(
+  row: Operation,
+  command: Extract<BudgetCommand, { type: "authorize" | "charge" | "record" }>
+): boolean {
+  if (row.amount !== command.amount) return false
+  if (command.type !== "authorize") return row.kind === command.type
+  return row.kind === "hold" && row.ttlMs === (command.ttlMs ?? null)
 }
 
 function decideKeyed(
   command: Extract<BudgetCommand, { type: "authorize" | "charge" | "record" }>,
   state: Funded,
-  { target, receipt }: Pick<BudgetView, "target" | "receipt">,
+  target: Operation | null,
   now: number
-): Result<Fact[], UnPriceBudgetError> {
-  const amount = command.cost.amount
-  if (target && target.idempotencyKey !== command.idempotencyKey) {
-    throw new Error(`target ${target.id} is not the row for key ${command.idempotencyKey}`)
-  }
-  // The row answers for a day; a record's receipt answers the same way for RECORD_DEDUPE_MS.
-  const prior = target ?? (receipt && { kind: "record" as const, ...receipt })
-  if (prior) {
-    const kind = command.type === "authorize" ? "hold" : command.type
-    if (prior.kind === kind && prior.requestHash === command.requestHash) return Ok([])
-    return reject({ code: "IDEMPOTENCY_CONFLICT", idempotencyKey: command.idempotencyKey })
+): Result<Change, UnPriceBudgetError> {
+  const { amount, idempotencyKey } = command
+  if (target) {
+    if (target.idempotencyKey !== idempotencyKey) {
+      throw new Error(`target ${target.id} is not the row for key ${idempotencyKey}`)
+    }
+    if (sameRequest(target, command)) return Ok(unchanged(target))
+    return reject({ code: "IDEMPOTENCY_CONFLICT", idempotencyKey })
   }
 
   let ttlMs = 0
@@ -223,30 +237,31 @@ function decideKeyed(
     const blocked = blockingLimit(balance, amount)
     if (blocked) return reject({ code: "LIMIT_EXCEEDED", blocked, balance })
   }
-  const { idempotencyKey, requestHash } = command
-  const crossed = crossings(balance, -amount)
 
-  switch (command.type) {
-    case "authorize": {
-      const expiresAt = now + ttlMs
-      return Ok([
-        {
-          type: "hold.placed",
-          holdId: `h_${state.ledger.holdSeq + 1}`,
-          idempotencyKey,
-          requestHash,
-          amount,
-          expiresAt,
-          lapsesAt: expiresAt + HOLD_LAPSE_TTL_MULTIPLIER * ttlMs,
-          crossed,
-        },
-      ])
+  if (command.type === "authorize") {
+    const expiresAt = now + ttlMs
+    const hold: HoldOperation = {
+      kind: "hold",
+      id: `h_${state.ledger.holdSeq + 1}`,
+      idempotencyKey,
+      amount,
+      ttlMs: command.ttlMs ?? null,
+      createdAt: now,
+      expiresAt,
+      lapsesAt: expiresAt + HOLD_LAPSE_TTL_MULTIPLIER * ttlMs,
+      state: { status: "open" },
     }
-    case "charge":
-      return Ok([{ type: "charged", idempotencyKey, requestHash, amount, crossed }])
-    case "record":
-      return Ok([{ type: "recorded", idempotencyKey, requestHash, amount, crossed }])
+    return Ok({ rows: [hold], row: hold, held: amount, consumed: ZERO })
   }
+  const row: Operation = {
+    kind: command.type,
+    id: `o:${idempotencyKey}`,
+    idempotencyKey,
+    amount,
+    createdAt: now,
+    crossed: crossings(balance, -amount),
+  }
+  return Ok({ rows: [row], row, held: ZERO, consumed: amount })
 }
 
 function decideSettle(
@@ -254,66 +269,61 @@ function decideSettle(
   state: Funded,
   target: Operation | null,
   now: number
-): Result<Fact[], UnPriceBudgetError> {
+): Result<Change, UnPriceBudgetError> {
   const hold = holdOf(target, command.holdId, state.ledger)
   if (hold.err) return hold
-  const { holdId } = command
-  const actual = command.cost.amount
+  const { holdId, amount: actual } = command
   const { amount, state: holdState } = hold.val
 
   switch (holdState.status) {
     case "settled":
-      if (holdState.actual === actual) return Ok([])
+      if (holdState.actual === actual) return Ok(unchanged(hold.val))
       return reject({ code: "HOLD_CLOSED", holdId, status: "settled" })
     case "released":
       return reject({ code: "HOLD_CLOSED", holdId, status: "released" })
     case "lapsed":
       // The lapse already returned the hold, so all of `actual` is consumed as late usage.
-      return Ok([
-        settled(state, now, { holdId, actual, covered: ZERO, released: ZERO, late: true }),
-      ])
+      return Ok(settle(state, hold.val, now, { actual, covered: ZERO, released: ZERO, late: true }))
     case "open": {
       const covered = actual < amount ? actual : amount
       const released = amount - covered
-      return Ok([settled(state, now, { holdId, actual, covered, released, late: false })])
+      return Ok(settle(state, hold.val, now, { actual, covered, released, late: false }))
     }
   }
 }
 
-function settled(
+function settle(
   state: Funded,
+  hold: HoldOperation,
   now: number,
-  settle: Readonly<{
-    holdId: string
-    actual: Amount
-    covered: Amount
-    released: Amount
-    late: boolean
-  }>
-): Fact {
-  const crossed = crossings(balanceOf(state, now), settle.covered + settle.released - settle.actual)
-  return { type: "hold.settled", ...settle, overrun: settle.actual - settle.covered, crossed }
+  settled: Readonly<{ actual: Amount; covered: Amount; released: Amount; late: boolean }>
+): Change {
+  const { actual, covered, released } = settled
+  const crossed = crossings(balanceOf(state, now), covered + released - actual)
+  const row: HoldOperation = {
+    ...hold,
+    state: { status: "settled", closedAt: now, ...settled, overrun: actual - covered, crossed },
+  }
+  return { rows: [row], row, held: -(covered + released), consumed: actual }
 }
 
 function decideRelease(
   command: Extract<BudgetCommand, { type: "release" }>,
   ledger: Ledger,
-  target: Operation | null
-): Result<Fact[], UnPriceBudgetError> {
+  target: Operation | null,
+  now: number
+): Result<Change, UnPriceBudgetError> {
   const hold = holdOf(target, command.holdId, ledger)
   if (hold.err) return hold
-  const { holdId } = command
-
-  switch (hold.val.state.status) {
-    case "released":
-      return Ok([])
-    case "settled":
-      return reject({ code: "HOLD_CLOSED", holdId, status: "settled" })
-    case "lapsed":
-      return Ok([{ type: "hold.released", holdId, released: ZERO }])
-    case "open":
-      return Ok([{ type: "hold.released", holdId, released: hold.val.amount }])
+  const status = hold.val.state.status
+  if (status === "released") return Ok(unchanged(hold.val))
+  if (status === "settled") {
+    return reject({ code: "HOLD_CLOSED", holdId: command.holdId, status: "settled" })
   }
+  // A lapsed hold already returned its amount; releasing it only closes it.
+  const released = status === "open" ? hold.val.amount : ZERO
+  const row: HoldOperation = { ...hold.val, state: { status: "released", closedAt: now, released } }
+  return Ok({ rows: [row], row, held: -released, consumed: ZERO })
 }
 
 /**
@@ -342,45 +352,18 @@ function wasMinted(holdId: string, ledger: Ledger): boolean {
   return holdId === `h_${n}` && n >= 1 && n <= ledger.holdSeq
 }
 
-function holdNumber(holdId: string): number {
+export function holdNumber(holdId: string): number {
   return Number(holdId.slice(2))
 }
 
-/**
- * One `window.rolled` per counter whose period ended by `now` with usage in it. An idle gap of many
- * periods yields one fact, for the last period that had usage.
- */
-export function rollFacts(ledger: Ledger, now: number): Fact[] {
-  const facts: Fact[] = []
-  for (const [windowId, counter] of countersOf(ledger.usage)) {
-    if (counter.consumed === ZERO) continue
-    const spec = windowSpecOf(windowId)
-    if (windowBounds(spec, now).start <= counter.start) continue
-    const { end } = windowBounds(spec, counter.start)
-    if (end === null) throw new Error(`window ${windowId} rolled but never ends`)
-    facts.push({
-      type: "window.rolled",
-      windowId,
-      start: counter.start,
-      end,
-      consumed: counter.consumed,
-    })
+/** Open holds past `lapsesAt`, lapsed at `now`: the sweep every command runs before it decides. */
+export function lapse(holds: Iterable<Operation>, now: number): Change {
+  const rows: HoldOperation[] = []
+  let held = ZERO
+  for (const hold of holds) {
+    if (hold.kind !== "hold" || hold.state.status !== "open" || hold.lapsesAt > now) continue
+    rows.push({ ...hold, state: { status: "lapsed", lapsedAt: now } })
+    held -= hold.amount
   }
-  return facts
-}
-
-/** Open holds past `lapsesAt`, in lapse order. */
-export function lapseFacts(operations: Iterable<Operation>, now: number): Fact[] {
-  const due: HoldOperation[] = []
-  for (const operation of operations) {
-    if (
-      operation.kind === "hold" &&
-      operation.state.status === "open" &&
-      operation.lapsesAt <= now
-    ) {
-      due.push(operation)
-    }
-  }
-  due.sort((a, b) => a.lapsesAt - b.lapsesAt || holdNumber(a.id) - holdNumber(b.id))
-  return due.map((hold) => ({ type: "hold.lapsed", holdId: hold.id, released: hold.amount }))
+  return { rows, row: null, held, consumed: ZERO }
 }

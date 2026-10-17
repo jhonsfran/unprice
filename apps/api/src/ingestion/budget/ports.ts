@@ -1,10 +1,4 @@
-import type {
-  BudgetReader,
-  BudgetRecord,
-  Entry,
-  Ledger,
-  Operation,
-} from "@unprice/services/budgets"
+import type { BudgetReader, BudgetTransition } from "@unprice/services/budgets"
 
 export type BudgetClock = { now(): number }
 
@@ -17,22 +11,17 @@ export type BudgetScheduler = {
 
 /** Synchronous reads and writes bound to one SQLite transaction. Rows come back as domain types. */
 export type BudgetStoreTx = BudgetReader & {
-  commit(params: {
-    budget: BudgetRecord | null
-    ledger: Ledger
-    entries: readonly Entry[]
-    operations: readonly Operation[]
-    now: number
-  }): void
-  /** Deletes up to `limit` closed rows whose retention ended. */
+  /** Writes what an accepted transition returned. */
+  commit(
+    transition: Pick<
+      BudgetTransition,
+      "budget" | "ledger" | "purged" | "operations" | "periods" | "now"
+    >
+  ): void
+  /** Deletes up to `limit` closed rows whose retention ended by `now`. */
   purgeOperations(now: number, limit: number): void
-  /** Deletes up to `limit` of the oldest journal entries with `at < before`. */
-  pruneJournal(before: number, limit: number): void
-  /** Deletes up to `limit` record receipts whose dedupe ended by `at`. */
-  purgeRecordReceipts(at: number, limit: number): void
+  /** The earliest `due_at` of any row: the next lapse or end of retention. */
   nextDueAt(): number | null
-  oldestEntryAt(): number | null
-  oldestReceiptExpiresAt(): number | null
 }
 
 export type Sync<T> = T extends PromiseLike<unknown> ? never : T

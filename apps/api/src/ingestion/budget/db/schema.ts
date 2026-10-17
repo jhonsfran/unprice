@@ -29,7 +29,6 @@ export const budgetRecord = sqliteTable("budget", {
 /** Singleton row (id = 1): the aggregate every accepted command rewrites. */
 export const budgetLedger = sqliteTable("budget_ledger", {
   id: integer("id").primaryKey(),
-  seq: integer("seq").notNull(),
   lastAt: integer("last_at").notNull(),
   holdSeq: integer("hold_seq").notNull(),
   held: amount("held").notNull(),
@@ -37,20 +36,9 @@ export const budgetLedger = sqliteTable("budget_ledger", {
 })
 
 /**
- * Append-only audit trail of every fact. `seq` and `at` grow together, so pruning walks the
- * primary key. The ledger row, not this table, is the balance.
- */
-export const budgetEntries = sqliteTable("budget_entries", {
-  seq: integer("seq").primaryKey(),
-  at: integer("at").notNull(),
-  type: text("type").notNull(),
-  factJson: text("fact_json").notNull(),
-})
-
-/**
- * Holds, charges, and records. The row is the open hold, the closed tombstone,
- * and the idempotency record at once. `due_at` is `dueAt(operation)`: lapse time for open holds,
- * purge time for everything else.
+ * Holds, charges, and records. The row is the open hold, the closed tombstone, and the idempotency
+ * record at once. `due_at` is `dueAt(operation)`: lapse time for open holds, the end of retention
+ * for everything else.
  */
 export const budgetOperations = sqliteTable(
   "budget_operations",
@@ -72,9 +60,8 @@ export const budgetOperations = sqliteTable(
 )
 
 /**
- * One row per `window.rolled` fact: a period of a window that ended with usage. The commit that
- * inserts a period deletes that window's periods beyond WINDOW_HISTORY_PERIODS, the most `get`
- * returns.
+ * One row per ended period of a limited window that had usage. The commit that inserts a period
+ * deletes that window's periods beyond WINDOW_HISTORY_PERIODS, the most `get` returns.
  */
 export const budgetWindowHistory = sqliteTable(
   "budget_window_history",
@@ -85,21 +72,4 @@ export const budgetWindowHistory = sqliteTable(
     consumed: amount("consumed").notNull(),
   },
   (table) => ({ pk: primaryKey({ columns: [table.windowId, table.start] }) })
-)
-
-/**
- * What every `recorded` fact leaves for RECORD_DEDUPE_MS, keyed by the sha256 of its idempotency
- * key: it outlives the record's operation row, so for 8 days a replay answers as the row did and a
- * changed request under the same key is a conflict.
- */
-export const budgetRecordReceipts = sqliteTable(
-  "budget_record_receipts",
-  {
-    keyHash: text("key_hash").primaryKey(),
-    requestHash: text("request_hash").notNull(),
-    amount: amount("amount").notNull(),
-    crossedJson: text("crossed_json").notNull(),
-    expiresAt: integer("expires_at").notNull(),
-  },
-  (table) => ({ expires: index("budget_record_receipts_expires_at_idx").on(table.expiresAt) })
 )

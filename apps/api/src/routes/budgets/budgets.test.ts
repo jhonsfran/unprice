@@ -162,7 +162,7 @@ describe("budgets API", () => {
 
     expect(mocks.execute).toHaveBeenCalledWith(
       { projectId: "proj_123", key: "customer:acme/run:1" },
-      { type: "authorize", idempotencyKey: "a1", ttlMs: undefined, cost: { amount: usd(10) } }
+      { type: "authorize", idempotencyKey: "a1", ttlMs: undefined, amount: usd(10) }
     )
     expect(response.status).toBe(200)
     expect(response.headers.get("Unprice-Budget-Remaining")).toBe("40")
@@ -321,7 +321,7 @@ describe("budgets API", () => {
         type: "record",
         idempotencyKey: "r1",
         occurredAt: 1_796_083_200_000,
-        cost: { amount: usd(1) },
+        amount: usd(1),
       }
     )
   })

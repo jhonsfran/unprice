@@ -4,14 +4,12 @@ import {
   type HoldOperation,
   type Ledger,
   type Operation,
-  RECORD_DEDUPE_MS,
   WINDOW_HISTORY_PERIODS,
   type WindowId,
   dueAt,
   emptyLedger,
-  periodOf,
 } from "@unprice/services/budgets"
-import { and, asc, desc, eq, gt, inArray, lt, lte, min, ne, notInArray } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, lte, min, ne, notInArray } from "drizzle-orm"
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite"
 import * as schema from "./db/schema"
 import type { BudgetStore, BudgetStoreTx, Sync } from "./ports"
@@ -81,7 +79,6 @@ function bind(
         .get()
       if (!row) return emptyLedger
       return {
-        seq: row.seq,
         lastAt: row.lastAt,
         holdSeq: row.holdSeq,
         held: row.held,
@@ -105,18 +102,6 @@ function bind(
         .map((row) => decode<HoldOperation>(row.data))
     },
 
-    readRecordReceipt(idempotencyKey, at) {
-      const receipts = schema.budgetRecordReceipts
-      const row = db
-        .select()
-        .from(receipts)
-        .where(and(eq(receipts.keyHash, sha256HexSync(idempotencyKey)), gt(receipts.expiresAt, at)))
-        .get()
-      if (!row) return null
-      const { requestHash, amount, crossedJson } = row
-      return { requestHash, amount, crossed: decode<string[]>(crossedJson) }
-    },
-
     readHistory(windowIds, limit) {
       const history = schema.budgetWindowHistory
       return windowIds.flatMap((windowId) =>
@@ -131,7 +116,7 @@ function bind(
       )
     },
 
-    commit({ budget, ledger, entries, operations: changed, now }) {
+    commit({ budget, ledger, purged, operations: changed, periods, now }) {
       if (budget) {
         const record = {
           key: budget.key,
@@ -148,7 +133,6 @@ function bind(
       }
 
       const ledgerRow = {
-        seq: ledger.seq,
         lastAt: ledger.lastAt,
         holdSeq: ledger.holdSeq,
         held: ledger.held,
@@ -160,40 +144,26 @@ function bind(
         .run()
 
       // One statement per row: DO SQLite caps bound parameters at 100 per statement.
-      for (const entry of entries) {
-        db.insert(schema.budgetEntries)
-          .values({ seq: entry.seq, at: entry.at, type: entry.type, factJson: encode(entry) })
+      const history = schema.budgetWindowHistory
+      for (const period of periods) {
+        const ofWindow = eq(history.windowId, period.windowId)
+        db.insert(history).values(period).run()
+        // Keep what `get` can return and no more.
+        const kept = db
+          .select({ start: history.start })
+          .from(history)
+          .where(ofWindow)
+          .orderBy(desc(history.start))
+          .limit(WINDOW_HISTORY_PERIODS)
+        db.delete(history)
+          .where(and(ofWindow, notInArray(history.start, kept)))
           .run()
-        for (const period of periodOf(entry)) {
-          const history = schema.budgetWindowHistory
-          const ofWindow = eq(history.windowId, period.windowId)
-          db.insert(history).values(period).run()
-          // Keep what `get` can return and no more.
-          const kept = db
-            .select({ start: history.start })
-            .from(history)
-            .where(ofWindow)
-            .orderBy(desc(history.start))
-            .limit(WINDOW_HISTORY_PERIODS)
-          db.delete(history)
-            .where(and(ofWindow, notInArray(history.start, kept)))
-            .run()
-        }
-        if (entry.type === "recorded") {
-          // A key whose dedupe ended but is not purged yet is recorded again: replace its receipt.
-          const receipt = {
-            requestHash: entry.requestHash,
-            amount: entry.amount,
-            crossedJson: encode(entry.crossed),
-            expiresAt: entry.at + RECORD_DEDUPE_MS,
-          }
-          db.insert(schema.budgetRecordReceipts)
-            .values({ keyHash: sha256HexSync(entry.idempotencyKey), ...receipt })
-            .onConflictDoUpdate({ target: schema.budgetRecordReceipts.keyHash, set: receipt })
-            .run()
-        }
       }
 
+      // Before the upserts: a row past its retention frees its key for the row that reuses it.
+      for (const operation of purged) {
+        db.delete(operations).where(eq(operations.id, operation.id)).run()
+      }
       for (const operation of changed) {
         const row = {
           status: statusOf(operation),
@@ -222,54 +192,11 @@ function bind(
       db.delete(operations).where(inArray(operations.id, expired)).run()
     },
 
-    pruneJournal(before, limit) {
-      const entries = schema.budgetEntries
-      const expired = db
-        .select({ seq: entries.seq })
-        .from(entries)
-        .where(lt(entries.at, before))
-        .orderBy(asc(entries.seq))
-        .limit(limit)
-      db.delete(entries).where(inArray(entries.seq, expired)).run()
-    },
-
-    purgeRecordReceipts(at, limit) {
-      const receipts = schema.budgetRecordReceipts
-      const expired = db
-        .select({ keyHash: receipts.keyHash })
-        .from(receipts)
-        .where(lte(receipts.expiresAt, at))
-        .orderBy(asc(receipts.expiresAt))
-        .limit(limit)
-      db.delete(receipts).where(inArray(receipts.keyHash, expired)).run()
-    },
-
     nextDueAt() {
       return (
         db
           .select({ at: min(operations.dueAt) })
           .from(operations)
-          .get()?.at ?? null
-      )
-    },
-
-    oldestReceiptExpiresAt() {
-      const receipts = schema.budgetRecordReceipts
-      return (
-        db
-          .select({ at: min(receipts.expiresAt) })
-          .from(receipts)
-          .get()?.at ?? null
-      )
-    },
-
-    oldestEntryAt() {
-      return (
-        db
-          .select({ at: schema.budgetEntries.at })
-          .from(schema.budgetEntries)
-          .orderBy(asc(schema.budgetEntries.seq))
-          .limit(1)
           .get()?.at ?? null
       )
     },

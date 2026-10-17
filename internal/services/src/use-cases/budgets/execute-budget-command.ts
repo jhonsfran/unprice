@@ -73,29 +73,25 @@ function toBudgetRequest({
       const amount = amountOf(request.amount)
       if (amount.err) return amount
       const { idempotencyKey, ttlMs } = request
-      return Ok({ type: "authorize", idempotencyKey, ttlMs, cost: { amount: amount.val } })
+      return Ok({ type: "authorize", idempotencyKey, ttlMs, amount: amount.val })
     }
     case "settle": {
       const amount = amountOf(request.amount)
       if (amount.err) return amount
-      return Ok({ type: "settle", holdId: request.holdId, cost: { amount: amount.val } })
+      return Ok({ type: "settle", holdId: request.holdId, amount: amount.val })
     }
     case "release":
       return Ok({ type: "release", holdId: request.holdId })
     case "charge": {
       const amount = amountOf(request.amount)
       if (amount.err) return amount
-      return Ok({
-        type: "charge",
-        idempotencyKey: request.idempotencyKey,
-        cost: { amount: amount.val },
-      })
+      return Ok({ type: "charge", idempotencyKey: request.idempotencyKey, amount: amount.val })
     }
     case "record": {
       const amount = amountOf(request.amount)
       if (amount.err) return amount
       const { idempotencyKey, occurredAt } = request
-      return Ok({ type: "record", idempotencyKey, occurredAt, cost: { amount: amount.val } })
+      return Ok({ type: "record", idempotencyKey, occurredAt, amount: amount.val })
     }
     case "get":
       return Ok({ type: "get" })

@@ -1,5 +1,5 @@
 /**
- * The budget's data model: projections, the journal's facts, commands, outcomes, and rejections.
+ * The budget's data model: the ledger, operation rows, commands, outcomes, and rejections.
  * Types only, plus the error a rejection travels in.
  */
 
@@ -40,15 +40,14 @@ export type WindowPeriod = Readonly<{
 /**
  * The aggregate and the authoritative balance: one row, rewritten by every accepted command, O(1)
  * in history.
- * - `seq` is the last journal entry; `lastAt` its time. `transition` clamps its clock to
- *   `lastAt`, so windows only roll forward.
+ * - `lastAt` is the budget's clock: when it last wrote. `transition` clamps to it, so windows only
+ *   roll forward and nothing is purged ahead of a later command's clock.
  * - `holdSeq` counts holds ever placed. `h_<n>` with n <= holdSeq was minted.
  * - `held` = sum of `amount` over open holds (including expired ones not yet lapsed).
  * - `usage` has all five canonical windows plus anchored ones; `usage.never.consumed` is lifetime
  *   consumption. Every consumption adds to every counter.
  */
 export type Ledger = Readonly<{
-  seq: number
   lastAt: number
   holdSeq: number
   held: Amount
@@ -56,7 +55,6 @@ export type Ledger = Readonly<{
 }>
 
 export const emptyLedger: Ledger = {
-  seq: 0,
   lastAt: 0,
   holdSeq: 0,
   held: ZERO,
@@ -82,42 +80,39 @@ export type HoldState =
       status: "settled"
       closedAt: number
       actual: Amount
+      /** Consumed out of the hold. */
       covered: Amount
+      /** Returned to capacity by this settle (0 when late, because the lapse already returned it). */
       released: Amount
+      /** Consumed beyond the hold: actual - covered. */
       overrun: Amount
       late: boolean
       crossed: readonly string[]
     }>
   | Readonly<{ status: "released"; closedAt: number; released: Amount }>
 
+/**
+ * Operation rows are the idempotency record: the same key with the same request replays from the
+ * row, and with another request conflicts.
+ */
 export type HoldOperation = Readonly<{
   kind: "hold"
   id: string
   idempotencyKey: string
-  requestHash: string
   amount: Amount
+  /** As requested; null took the budget's default, so a retry must omit it too. */
+  ttlMs: number | null
   createdAt: number
   expiresAt: number
   lapsesAt: number
   state: HoldState
 }>
 
-/**
- * What a `recorded` fact leaves behind for RECORD_DEDUPE_MS, after its row is purged: enough to
- * answer a replay as the row would and to tell a changed request from a retry.
- */
-export type RecordReceipt = Readonly<{
-  requestHash: string
-  amount: Amount
-  crossed: readonly string[]
-}>
-
-/** A charge or record row; id `o_<seq>` of its entry. Pure idempotency record. */
+/** A charge or record row; its id is `o:<idempotency key>`. */
 export type ChargeOperation = Readonly<{
   kind: "charge" | "record"
   id: string
   idempotencyKey: string
-  requestHash: string
   amount: Amount
   createdAt: number
   crossed: readonly string[]
@@ -139,71 +134,12 @@ export type BudgetView = Readonly<{
   target: Operation | null
   /** Open holds with `lapsesAt <= max(clock, ledger.lastAt)`, any subset; the alarm sweeps the rest. */
   due: readonly HoldOperation[]
-  /**
-   * For `record` without a row: the receipt its key left within RECORD_DEDUPE_MS. Receipts outlive
-   * rows, so a replay after the row's purge is still answered, and a changed request still conflicts.
-   */
-  receipt: RecordReceipt | null
   /** For `get`: up to WINDOW_HISTORY_PERIODS stored periods per limited window id, newest first. */
   history: readonly WindowPeriod[]
 }>
 
-/** Projections after folding: the budget, the ledger, and the rows this transition saw. */
-export type BudgetState = Readonly<{
-  budget: BudgetRecord | null
-  ledger: Ledger
-  operations: ReadonlyMap<string, Operation>
-}>
-
-// Journal
-
-export type Fact =
-  | Readonly<{ type: "budget.configured"; budget: BudgetRecord; changes: readonly ConfigChange[] }>
-  | Readonly<{
-      type: "hold.placed"
-      holdId: string
-      idempotencyKey: string
-      requestHash: string
-      amount: Amount
-      expiresAt: number
-      lapsesAt: number
-      crossed: readonly string[]
-    }>
-  | Readonly<{ type: "hold.lapsed"; holdId: string; released: Amount }>
-  | Readonly<{
-      type: "hold.settled"
-      holdId: string
-      actual: Amount
-      /** Consumed out of the hold. */
-      covered: Amount
-      /** Returned to capacity by this settle (0 when late). */
-      released: Amount
-      /** Consumed beyond the hold: actual - covered. */
-      overrun: Amount
-      late: boolean
-      crossed: readonly string[]
-    }>
-  | Readonly<{ type: "hold.released"; holdId: string; released: Amount }>
-  | Readonly<{
-      type: "charged" | "recorded"
-      idempotencyKey: string
-      requestHash: string
-      amount: Amount
-      crossed: readonly string[]
-    }>
-  /** A counter left a period that had usage. History only: the roll itself moves no balance. */
-  | (Readonly<{ type: "window.rolled" }> & WindowPeriod)
-
-export type Entry = Readonly<{ seq: number; at: number }> & Fact
-
 // Commands
 
-export type Cost = Readonly<{ amount: Amount }>
-
-/**
- * `requestHash` is a digest of `requestFingerprint(command)` computed by the caller, so the core
- * stays free of crypto. Settle and release are keyed by hold id and need no hash.
- */
 export type BudgetCommand =
   | Readonly<{
       type: "upsert"
@@ -212,41 +148,19 @@ export type BudgetCommand =
       unit: string
       config: BudgetConfig
     }>
-  | Readonly<{
-      type: "authorize"
-      idempotencyKey: string
-      requestHash: string
-      cost: Cost
-      ttlMs?: number
-    }>
-  | Readonly<{ type: "settle"; holdId: string; cost: Cost }>
+  | Readonly<{ type: "authorize"; idempotencyKey: string; amount: Amount; ttlMs?: number }>
+  | Readonly<{ type: "settle"; holdId: string; amount: Amount }>
   | Readonly<{ type: "release"; holdId: string }>
-  | Readonly<{ type: "charge"; idempotencyKey: string; requestHash: string; cost: Cost }>
+  | Readonly<{ type: "charge"; idempotencyKey: string; amount: Amount }>
   | Readonly<{
       type: "record"
       idempotencyKey: string
-      requestHash: string
-      cost: Cost
+      amount: Amount
       /** Epoch ms the usage happened. Bounds acceptance only; usage counts when it arrives. */
       occurredAt: number
     }>
   | Readonly<{ type: "get" }>
   | Readonly<{ type: "sweep" }>
-
-type KeyedCommand = Extract<BudgetCommand, { idempotencyKey: string }>
-
-/**
- * Canonical request text for the idempotency hash. Excludes the key and every clock value, so a
- * record retried with another `occurredAt` is the same request, and includes the verb, so one key
- * reused across verbs conflicts.
- */
-export function requestFingerprint(
-  command: Pick<KeyedCommand, "type" | "cost"> & { ttlMs?: number }
-): string {
-  const amount = command.cost.amount.toString()
-  if (command.type !== "authorize") return `${command.type}|${amount}`
-  return `authorize|${amount}|${command.ttlMs ?? "default"}`
-}
 
 // Outcomes
 

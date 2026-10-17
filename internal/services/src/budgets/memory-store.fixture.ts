@@ -3,14 +3,10 @@ import {
   type BudgetCommand,
   type BudgetReader,
   type BudgetRecord,
-  type BudgetState,
   type BudgetTransition,
-  type Entry,
   type HoldOperation,
   type Ledger,
   type Operation,
-  RECORD_DEDUPE_MS,
-  type RecordReceipt,
   type UnPriceBudgetError,
   WINDOW_HISTORY_PERIODS,
   type WindowId,
@@ -18,54 +14,37 @@ import {
   dueAt,
   emptyLedger,
   loadView,
-  periodOf,
-  receiptsPurgeAt,
   transition,
-  viewState,
 } from "./index"
 
 /**
  * Test double for the Durable Object store: rows indexed by id and idempotency key, a due-hold
- * scan, retention purge, the journal, the window history, and record receipts. Loads its view the
- * way the store does and commits a transition only when it is Ok.
+ * scan, the window history, and the alarm's sweep and purge. Loads its view the way the store
+ * does and writes a transition only when it is Ok and says to write.
  */
 export class MemoryBudgetStore implements BudgetReader {
   budget: BudgetRecord | null = null
   ledger: Ledger = emptyLedger
   readonly rows = new Map<string, Operation>()
-  readonly entries: Entry[] = []
   /** Up to WINDOW_HISTORY_PERIODS periods per window id, newest first, as the store keeps them. */
   readonly history = new Map<WindowId, WindowPeriod[]>()
-  /** Record key to its receipt and the time its dedupe ends. */
-  readonly receipts = new Map<string, RecordReceipt & { expiresAt: number }>()
-  /** The projections the last transition started from, for `checkTransition`. */
-  lastBefore: BudgetState | null = null
+  /** How many transitions wrote. */
+  writes = 0
   private readonly byKey = new Map<string, string>()
 
   run(command: BudgetCommand, clockMs: number): Result<BudgetTransition, UnPriceBudgetError> {
     const view = loadView(this, command, clockMs, Number.MAX_SAFE_INTEGER)
-    this.lastBefore = viewState(view)
     const result = transition({ view, command, clockMs })
-    if (result.err) return result
-    const { next, entries, operations } = result.val
-    this.budget = next.budget
-    this.ledger = next.ledger
-    this.entries.push(...entries)
-    for (const entry of entries) {
-      for (const period of periodOf(entry)) {
-        const kept = [period, ...(this.history.get(period.windowId) ?? [])]
-        this.history.set(period.windowId, kept.slice(0, WINDOW_HISTORY_PERIODS))
-      }
-      if (entry.type === "recorded") {
-        const { idempotencyKey, requestHash, amount, crossed, at } = entry
-        this.receipts.set(idempotencyKey, {
-          requestHash,
-          amount,
-          crossed,
-          expiresAt: at + RECORD_DEDUPE_MS,
-        })
-      }
+    if (result.err || !result.val.write) return result
+    const { budget, ledger, purged, operations, periods } = result.val
+    this.writes += 1
+    if (budget) this.budget = budget
+    this.ledger = ledger
+    for (const period of periods) {
+      const kept = [period, ...(this.history.get(period.windowId) ?? [])]
+      this.history.set(period.windowId, kept.slice(0, WINDOW_HISTORY_PERIODS))
     }
+    for (const operation of purged) this.rows.delete(operation.id)
     for (const operation of operations) {
       this.rows.set(operation.id, operation)
       this.byKey.set(operation.idempotencyKey, operation.id)
@@ -73,15 +52,14 @@ export class MemoryBudgetStore implements BudgetReader {
     return result
   }
 
-  /** Deletes every closed row whose retention ended and every expired receipt, as the alarm would. */
-  purge(clockMs: number) {
-    const receiptsAt = receiptsPurgeAt(clockMs, this.ledger)
-    for (const [key, receipt] of this.receipts) {
-      if (receipt.expiresAt <= receiptsAt) this.receipts.delete(key)
-    }
+  /** What the alarm does: sweeps, which moves the clock to `clockMs`, then purges closed rows. */
+  alarm(clockMs: number) {
+    if (!this.budget) return
+    const swept = this.run({ type: "sweep" }, clockMs)
+    if (swept.err) throw swept.err
     for (const [id, operation] of this.rows) {
       const open = operation.kind === "hold" && operation.state.status === "open"
-      if (open || dueAt(operation) > clockMs) continue
+      if (open || dueAt(operation) > swept.val.now) continue
       this.rows.delete(id)
       this.byKey.delete(operation.idempotencyKey)
     }
@@ -102,13 +80,6 @@ export class MemoryBudgetStore implements BudgetReader {
   readOperationByKey(idempotencyKey: string) {
     const id = this.byKey.get(idempotencyKey)
     return id === undefined ? null : this.readOperation(id)
-  }
-
-  readRecordReceipt(idempotencyKey: string, at: number): RecordReceipt | null {
-    const receipt = this.receipts.get(idempotencyKey)
-    if (!receipt || receipt.expiresAt <= at) return null
-    const { requestHash, amount, crossed } = receipt
-    return { requestHash, amount, crossed }
   }
 
   readHistory(windowIds: readonly WindowId[], limit: number) {

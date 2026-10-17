@@ -1,8 +1,10 @@
 /** Conservation (ADR-0006 B7.5): what every transition must preserve before it may commit. */
 
 import type { Amount } from "@unprice/money"
-import { countersOf, evolveOperation, ledgerDelta, operationIdOf } from "./evolve"
-import type { BudgetState, Entry, Ledger, Operation } from "./model"
+import type { BudgetLimit } from "./config"
+import { countersOf } from "./ledger"
+import type { Ledger, Operation, WindowPeriod } from "./model"
+import { windowIdOf } from "./windows"
 
 const ZERO = BigInt(0)
 
@@ -17,156 +19,123 @@ function consumedBy(operation: Operation | undefined): Amount {
   return operation.state.status === "settled" ? operation.state.actual : ZERO
 }
 
+/** One row moving from what it was (undefined when created) to what it became. */
+export type RowStep = readonly [prior: Operation | undefined, row: Operation]
+
+export type CheckedTransition = Readonly<{
+  before: Ledger
+  after: Ledger
+  /** The limits in force before the transition, which decide what a roll reports. */
+  limits: readonly BudgetLimit[]
+  /** Every row step in order: a hold that lapses and then settles takes two. */
+  steps: readonly RowStep[]
+  periods: readonly WindowPeriod[]
+}>
+
 /**
- * Violations of the transition invariants; empty when it may commit. O(entries + touched rows).
- * 1. Seqs are contiguous from `before.ledger.seq + 1`; `at` never goes below `lastAt` or back.
- * 2. Two independent folds agree: the ledger's held and lifetime consumed moved by exactly the
- *    sum of `ledgerDelta`, and by exactly the change in `heldBy` and consumption over the rows.
- * 3. Per fact: settle has actual = covered + overrun and, unless late, covered + released = the
- *    hold's amount; a lapse or a release from an open hold returns its whole amount.
- * 4. Held, every window's consumed, and every fact amount are non-negative.
- * 5. Per counter, nothing is lost or counted twice across a roll: consumed after plus what
- *    `window.rolled` reported equals consumed before plus what this transition consumed. A roll
- *    reports the counter's period and only a period with usage, once per counter.
+ * Violations of the transition invariants; empty when it may commit. O(touched rows + counters).
+ * 1. Every row step is legal in its lifecycle, with the hold's arithmetic intact.
+ * 2. The ledger's held moved by exactly the change in `heldBy` over the touched rows.
+ * 3. Per counter, nothing is lost or counted twice: a counter that kept its period grew by exactly
+ *    what the rows consumed; one that moved to a new period holds only that, and its old period
+ *    is reported when it had usage on a limited window.
+ * 4. Held and every counter are non-negative.
  */
-export function checkTransition(
-  before: BudgetState,
-  entries: readonly Entry[],
-  after: BudgetState
+export function checkTransition(transition: CheckedTransition): string[] {
+  const { before, after, steps } = transition
+  const violations: string[] = []
+  let held = ZERO
+  let consumed = ZERO
+  for (const [prior, row] of steps) {
+    violations.push(...stepViolations(prior, row))
+    held += heldBy(row) - heldBy(prior)
+    consumed += consumedBy(row) - consumedBy(prior)
+  }
+  if (after.held - before.held !== held) {
+    violations.push(`ledger held moved ${after.held - before.held}, rows say ${held}`)
+  }
+  if (after.held < ZERO) violations.push(`ledger held ${after.held} is negative`)
+  violations.push(...counterViolations(transition, consumed))
+  return violations
+}
+
+/** The hold lifecycle: open -> lapsed | settled | released, lapsed -> settled | released. */
+function stepViolations(prior: Operation | undefined, row: Operation): string[] {
+  const at = `row ${row.id}`
+  if (row.amount < ZERO) return [`${at} amount ${row.amount} is negative`]
+  if (row.kind !== "hold") return prior ? [`${at} ${row.kind} was written twice`] : []
+  if (!prior) return row.state.status === "open" ? [] : [`${at} was created ${row.state.status}`]
+  if (prior.kind !== "hold" || prior.amount !== row.amount) return [`${at} changed identity`]
+
+  const from = prior.state.status
+  const state = row.state
+  switch (state.status) {
+    case "lapsed":
+      return from === "open" ? [] : [`${at} lapsed from ${from}`]
+    case "released": {
+      const expected = from === "open" ? row.amount : ZERO
+      if (from !== "open" && from !== "lapsed") return [`${at} released from ${from}`]
+      return state.released === expected ? [] : [`${at} released ${state.released} of ${expected}`]
+    }
+    case "settled": {
+      if (from !== "open" && from !== "lapsed") return [`${at} settled from ${from}`]
+      const violations: string[] = []
+      const { actual, covered, released, overrun, late } = state
+      if (covered < ZERO || released < ZERO || overrun < ZERO) {
+        violations.push(`${at} settled with a negative part`)
+      }
+      if (actual !== covered + overrun)
+        violations.push(`${at} actual ${actual} != covered + overrun`)
+      if (late !== (from === "lapsed"))
+        violations.push(`${at} late=${late} settling a ${from} hold`)
+      const returnable = from === "open" ? row.amount : ZERO
+      if (covered + released !== returnable) {
+        violations.push(`${at} covered + released != ${returnable}`)
+      }
+      return violations
+    }
+    case "open":
+      return [`${at} reopened from ${from}`]
+  }
+}
+
+function counterViolations(
+  { before, after, limits, periods }: CheckedTransition,
+  consumed: Amount
 ): string[] {
   const violations: string[] = []
-  let heldDelta = ZERO
-  let consumedDelta = ZERO
-  let lastAt = before.ledger.lastAt
-  const rows = new Map(before.operations)
-
-  entries.forEach((entry, index) => {
-    const expectedSeq = before.ledger.seq + index + 1
-    if (entry.seq !== expectedSeq) violations.push(`entry seq ${entry.seq} expected ${expectedSeq}`)
-    if (entry.at < lastAt) violations.push(`entry ${entry.seq} at ${entry.at} before ${lastAt}`)
-    lastAt = Math.max(lastAt, entry.at)
-
-    const delta = ledgerDelta(entry)
-    heldDelta += delta.held
-    consumedDelta += delta.consumed
-    violations.push(...factViolations(entry, rows))
-
-    const id = operationIdOf(entry)
-    if (id !== null) {
-      const row = evolveOperation(rows.get(id), entry)
-      if (row) rows.set(id, row)
+  const limited = new Set(limits.map(windowIdOf))
+  const reported = new Map<string, WindowPeriod>()
+  for (const period of periods) {
+    if (reported.has(period.windowId)) violations.push(`${period.windowId} rolled twice`)
+    if (period.consumed <= ZERO) violations.push(`${period.windowId} rolled an empty period`)
+    if (period.end <= period.start || !after.usage[period.windowId]) {
+      violations.push(`${period.windowId} rolled [${period.start}, ${period.end}), not a period`)
     }
-  })
-
-  if (after.ledger.seq !== before.ledger.seq + entries.length) {
-    violations.push(
-      `ledger seq ${after.ledger.seq} after ${entries.length} entries from ${before.ledger.seq}`
-    )
-  }
-  if (after.ledger.held - before.ledger.held !== heldDelta) {
-    violations.push(
-      `ledger held moved ${after.ledger.held - before.ledger.held}, facts say ${heldDelta}`
-    )
-  }
-  const lifetime = after.ledger.usage.never.consumed - before.ledger.usage.never.consumed
-  if (lifetime !== consumedDelta) {
-    violations.push(`ledger consumed moved ${lifetime}, facts say ${consumedDelta}`)
+    reported.set(period.windowId, period)
   }
 
-  let rowsHeld = ZERO
-  let rowsConsumed = ZERO
-  for (const id of new Set([...before.operations.keys(), ...after.operations.keys()])) {
-    rowsHeld += heldBy(after.operations.get(id)) - heldBy(before.operations.get(id))
-    rowsConsumed += consumedBy(after.operations.get(id)) - consumedBy(before.operations.get(id))
-  }
-  if (rowsHeld !== heldDelta) violations.push(`rows held moved ${rowsHeld}, facts say ${heldDelta}`)
-  if (rowsConsumed !== consumedDelta) {
-    violations.push(`rows consumed moved ${rowsConsumed}, facts say ${consumedDelta}`)
-  }
-
-  if (after.ledger.held < ZERO) violations.push(`ledger held ${after.ledger.held} is negative`)
-  for (const [id, counter] of countersOf(after.ledger.usage)) {
+  for (const [id, counter] of countersOf(after.usage)) {
     if (counter.consumed < ZERO) violations.push(`${id} consumed ${counter.consumed} is negative`)
-  }
-  violations.push(...rollViolations(before.ledger, entries, after.ledger, consumedDelta))
-  return violations
-}
-
-function rollViolations(
-  before: Ledger,
-  entries: readonly Entry[],
-  after: Ledger,
-  consumedDelta: Amount
-): string[] {
-  const violations: string[] = []
-  const rolled = new Map<string, Amount>()
-  for (const entry of entries) {
-    if (entry.type !== "window.rolled") continue
-    const counter = before.usage[entry.windowId]
-    if (rolled.has(entry.windowId)) violations.push(`${entry.windowId} rolled twice`)
-    if (entry.consumed <= ZERO) violations.push(`${entry.windowId} rolled an empty period`)
-    if (counter?.start !== entry.start || entry.end <= entry.start) {
-      violations.push(`${entry.windowId} rolled [${entry.start}, ${entry.end}), not its period`)
+    const prior = before.usage[id]
+    const period = reported.get(id)
+    if (prior && counter.start === prior.start) {
+      if (counter.consumed !== prior.consumed + consumed) {
+        violations.push(`${id} counted ${counter.consumed}, expected ${prior.consumed + consumed}`)
+      }
+      if (period) violations.push(`${id} reported a roll but kept its period`)
+      continue
     }
-    rolled.set(entry.windowId, entry.consumed)
-  }
-  const ids = new Set([...Object.keys(before.usage), ...Object.keys(after.usage)])
-  for (const id of ids as Set<keyof Ledger["usage"]>) {
-    const now = after.usage[id]
-    const kept = (now?.consumed ?? ZERO) + (rolled.get(id) ?? ZERO)
-    const owed = (before.usage[id]?.consumed ?? ZERO) + (now ? consumedDelta : ZERO)
-    if (kept !== owed) violations.push(`${id} kept ${kept} of ${owed} consumed`)
-  }
-  return violations
-}
-
-function factViolations(entry: Entry, rows: ReadonlyMap<string, Operation>): string[] {
-  const violations: string[] = []
-  const negative = (name: string, value: Amount) => {
-    if (value < ZERO) violations.push(`entry ${entry.seq} ${name} ${value} is negative`)
-  }
-  switch (entry.type) {
-    case "hold.placed":
-    case "charged":
-    case "recorded":
-      negative("amount", entry.amount)
-      break
-    case "hold.lapsed":
-    case "hold.released": {
-      negative("released", entry.released)
-      const hold = rows.get(entry.holdId)
-      const status = hold?.kind === "hold" ? hold.state.status : "missing"
-      const expected = hold?.kind === "hold" && status === "open" ? hold.amount : ZERO
-      if (entry.type === "hold.lapsed" && status !== "open") {
-        violations.push(`entry ${entry.seq} lapses a ${status} hold`)
-      }
-      if (entry.released !== expected) {
-        violations.push(
-          `entry ${entry.seq} released ${entry.released} from a ${status} hold of ${expected}`
-        )
-      }
-      break
+    if (counter.consumed !== consumed) {
+      violations.push(`${id} started a period with ${counter.consumed}, expected ${consumed}`)
     }
-    case "hold.settled": {
-      negative("covered", entry.covered)
-      negative("released", entry.released)
-      negative("overrun", entry.overrun)
-      if (entry.actual !== entry.covered + entry.overrun) {
-        violations.push(`entry ${entry.seq} actual ${entry.actual} != covered + overrun`)
-      }
-      const hold = rows.get(entry.holdId)
-      const open = hold?.kind === "hold" && hold.state.status === "open"
-      if (entry.late === open) {
-        violations.push(`entry ${entry.seq} late=${entry.late} on an open=${open} hold`)
-      }
-      const amount = open && hold?.kind === "hold" ? hold.amount : ZERO
-      if (entry.covered + entry.released !== amount) {
-        violations.push(`entry ${entry.seq} covered + released != ${amount}`)
-      }
-      break
+    if (!prior) continue
+    if (counter.start < prior.start) violations.push(`${id} rolled backwards`)
+    const owed = prior.consumed > ZERO && limited.has(id)
+    if (owed !== (period !== undefined)) violations.push(`${id} rolled without its period`)
+    if (period && (period.start !== prior.start || period.consumed !== prior.consumed)) {
+      violations.push(`${id} reported [${period.start}, ${period.end}), not its period`)
     }
-    case "budget.configured":
-      break
   }
   return violations
 }

@@ -15,6 +15,13 @@
       "when": 1792198952758,
       "tag": "0001_silly_kitty_pryde",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1792203391575,
+      "tag": "0002_natural_kree",
+      "breakpoints": true
     }
   ]
 }

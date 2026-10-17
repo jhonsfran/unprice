@@ -5,15 +5,12 @@ import {
   type BudgetCommand,
   type BudgetConfig,
   type BudgetOutcome,
+  type Ledger,
   RECORD_ACCEPT_WINDOW_MS,
   RECORD_DEDUPE_MS,
   RECORD_FUTURE_SKEW_MS,
   anchoredWindowBounds,
-  checkTransition,
   countersOf,
-  emptyLedger,
-  evolve,
-  requestFingerprint,
 } from "./index"
 import { MemoryBudgetStore } from "./memory-store.fixture"
 
@@ -151,26 +148,41 @@ class ReferenceBudget {
   readonly consumptions: Array<{ at: number; amount: bigint }> = []
   readonly holds = new Map<number, ModelHold>()
   readonly keyed = new Map<string, KeyedRecord>()
-  /** Record key to what a replay answers with, until its dedupe ends. */
-  readonly receipts = new Map<string, { amount: bigint; crossed: string[]; until: number }>()
+  /** Every config in force, with when it took effect: a period reports under the one at its end. */
+  readonly configs: Array<{ at: number; ids: Set<string> }> = []
   readonly segments: Segment[] = (["hour", "day", "week", "month", "never"] as const).map(
     (window) => ({ id: window, window, from: 0, until: null })
   )
 
-  purge(clock: number) {
-    const retention = 24 * hour
-    for (const [n, hold] of this.holds) {
-      if (hold.status !== "open" && clock >= hold.changedAt + retention) {
-        this.holds.delete(n)
-        this.keyed.delete(hold.key)
+  /**
+   * A closed row answers until its retention ends at the command's clock: a hold or a charge for a
+   * day after it closed, a record for 8 days. Only the alarm deletes rows.
+   */
+  private holdLive(hold: ModelHold, now: number) {
+    return hold.status === "open" || now < hold.changedAt + day
+  }
+
+  private keyedLive(rec: KeyedRecord, now: number) {
+    if (rec.verb === "authorize") {
+      const hold = this.holds.get(rec.holdNo)
+      return hold !== undefined && this.holdLive(hold, now)
+    }
+    return now < rec.createdAt + (rec.verb === "record" ? 8 * day : day)
+  }
+
+  /** The alarm: lapses due holds and moves the clock to `clock`, then drops what expired. */
+  alarm(clock: number) {
+    if (!this.config) return
+    const now = Math.max(clock, this.lastWriteAt)
+    for (const hold of this.holds.values()) {
+      if (hold.status === "open" && hold.lapsesAt <= now) {
+        Object.assign(hold, { status: "lapsed", changedAt: now })
       }
     }
-    for (const [key, rec] of this.keyed) {
-      if (rec.verb !== "authorize" && clock >= rec.createdAt + retention) this.keyed.delete(key)
-    }
-    // Keys are purged against the ledger's clock, so a clock stepping back cannot reopen one.
-    const keysAt = Math.min(clock, this.lastWriteAt)
-    for (const [key, { until }] of this.receipts) if (keysAt >= until) this.receipts.delete(key)
+    this.lastWriteAt = now
+    this.rolledCount = this.rolledPeriods(now).length
+    for (const [key, rec] of this.keyed) if (!this.keyedLive(rec, now)) this.keyed.delete(key)
+    for (const [n, hold] of this.holds) if (!this.holdLive(hold, now)) this.holds.delete(n)
   }
 
   /** The segment of `id` still counting at `t`, if any. */
@@ -193,13 +205,21 @@ class ReferenceBudget {
     return sum
   }
 
-  /** Every period that ended by `now` with consumption in it, per segment. */
+  /** Whether a limit used the window id when a period of it ended. */
+  private limitedAt(id: string, end: number) {
+    let ids: Set<string> | undefined
+    for (const config of this.configs) if (config.at < end) ids = config.ids
+    return ids?.has(id) ?? false
+  }
+
+  /** Every period that ended by `now` with consumption in it on a window limited at its end. */
   rolledPeriods(now: number): Period[] {
     const periods = new Map<string, Period>()
     for (const segment of this.segments) {
       for (const c of this.countedBy(segment)) {
         const range = rangeOf(segment.window, segment.anchor, c.at)
         if (range.end === null || range.end > now) continue
+        if (!this.limitedAt(segment.id, range.end)) continue
         const key = `${segment.id}|${range.start}`
         const prior = periods.get(key)?.[3] ?? ZERO
         periods.set(key, [segment.id, range.start, range.end, prior + c.amount])
@@ -283,9 +303,13 @@ class ReferenceBudget {
       // Only an accepted command persists the lapse.
       if (hold.status === "open") Object.assign(hold, { status: "lapsed", changedAt: now })
     }
-    // An accepted command also persists the roll of every period with usage that ended.
+    // An accepted command also persists the roll of every reported period that ended, and a sweep
+    // always moves the clock.
     const rolled = this.rolledPeriods(now).length
-    if (decided.wrote || due.length > 0 || rolled > this.rolledCount) this.lastWriteAt = now
+    const sweep = command.type === "sweep" && this.config !== null
+    if (decided.wrote || due.length > 0 || rolled > this.rolledCount || sweep) {
+      this.lastWriteAt = now
+    }
     this.rolledCount = rolled
     return { outcome: decided.outcome, checkBalance: decided.checkBalance }
   }
@@ -314,6 +338,7 @@ class ReferenceBudget {
         this.config = next
         this.version += 1
         this.track(next, now)
+        this.configs.push({ at: now, ids: new Set(next.limits.map(idOf)) })
       }
       const closed = next.closesAt !== null && now >= next.closesAt
       return { outcome: { version: this.version, closed }, wrote: !same, checkBalance: true }
@@ -330,7 +355,8 @@ class ReferenceBudget {
     if (command.type === "settle" || command.type === "release") {
       const match = /^h_([1-9]\d*)$/.exec(command.holdId)
       const n = match ? Number(match[1]) : 0
-      const hold = this.holds.get(n)
+      const stored = this.holds.get(n)
+      const hold = stored && this.holdLive(stored, now) ? stored : undefined
       const minted = n >= 1 && n <= this.holdCount
       // A purged hold's outcome is unknown, so it is retired rather than settled twice.
       if (!hold) return { error: minted ? "HOLD_RETIRED" : "HOLD_NOT_FOUND" }
@@ -349,7 +375,7 @@ class ReferenceBudget {
         return { outcome: { released, replayed: false }, wrote: true, checkBalance: true }
       }
 
-      const actual = command.cost.amount
+      const actual = command.amount
       if (hold.status === "settled" && hold.settle) {
         return hold.settle.actual === actual
           ? { outcome: { ...hold.settle, replayed: true }, wrote: false, checkBalance: true }
@@ -374,10 +400,11 @@ class ReferenceBudget {
       return { outcome: { ...settled, replayed: false }, wrote: true, checkBalance: true }
     }
 
-    const amount = command.cost.amount
+    const amount = command.amount
     const ttlMs = command.type === "authorize" ? command.ttlMs : undefined
     const occurredAt = command.type === "record" ? command.occurredAt : undefined
-    const prior = this.keyed.get(command.idempotencyKey)
+    const stored = this.keyed.get(command.idempotencyKey)
+    const prior = stored && this.keyedLive(stored, now) ? stored : undefined
     if (prior) {
       if (prior.verb !== command.type || prior.amount !== amount || prior.ttlMs !== ttlMs) {
         return { error: "IDEMPOTENCY_CONFLICT" }
@@ -389,15 +416,7 @@ class ReferenceBudget {
               expiresAt: this.holds.get(prior.holdNo)?.expiresAt,
               replayed: true,
             }
-          : { crossed: prior.crossed, replayed: true }
-      return { outcome, wrote: false, checkBalance: true }
-    }
-    // A record's receipt outlives its row by days and answers the same way the row did.
-    const receipt =
-      command.type === "record" ? this.receipts.get(command.idempotencyKey) : undefined
-    if (receipt && receipt.until > now) {
-      if (receipt.amount !== amount) return { error: "IDEMPOTENCY_CONFLICT" }
-      const outcome = { amount, crossed: receipt.crossed, replayed: true }
+          : { amount: prior.amount, crossed: prior.crossed, replayed: true }
       return { outcome, wrote: false, checkBalance: true }
     }
 
@@ -426,10 +445,9 @@ class ReferenceBudget {
       crossed,
       createdAt: now,
     }
+    // A row past its retention is replaced, and so is the hold it named.
+    if (stored?.verb === "authorize") this.holds.delete(stored.holdNo)
     this.keyed.set(command.idempotencyKey, rec)
-    if (command.type === "record") {
-      this.receipts.set(command.idempotencyKey, { amount, crossed, until: now + 8 * day })
-    }
 
     if (command.type !== "authorize") {
       this.consumptions.push({ at: now, amount })
@@ -556,30 +574,18 @@ function commandArb(scale: bigint): fc.Arbitrary<Planned> {
   )
   const charge = fc
     .record({ idempotencyKey: key, amount })
-    .map(({ idempotencyKey, amount }): Planned => {
-      const cost = { amount }
-      return {
-        type: "charge",
-        idempotencyKey,
-        cost,
-        requestHash: requestFingerprint({ type: "charge", cost }),
-      }
-    })
+    .map(({ idempotencyKey, amount }): Planned => ({ type: "charge", idempotencyKey, amount }))
   const record = fc
     .record({ idempotencyKey: key, amount, occurredOffset })
     .map((planned): Planned => ({ type: "record-ref", ...planned }))
   const authorize = fc
     .record({ idempotencyKey: key, amount, ttlMs })
-    .map(({ idempotencyKey, amount, ttlMs }): Planned => {
-      const cost = { amount }
-      return {
-        type: "authorize",
-        idempotencyKey,
-        cost,
-        ttlMs,
-        requestHash: requestFingerprint({ type: "authorize", cost, ttlMs }),
-      }
-    })
+    .map(
+      ({ idempotencyKey, amount, ttlMs }): Planned =>
+        ttlMs === undefined
+          ? { type: "authorize", idempotencyKey, amount }
+          : { type: "authorize", idempotencyKey, amount, ttlMs }
+    )
   const upsert = fc
     .record({
       config: configArb(scale),
@@ -606,7 +612,7 @@ function commandArb(scale: bigint): fc.Arbitrary<Planned> {
     {
       weight: 1,
       arbitrary: fc.constantFrom<Planned>(
-        { type: "settle", holdId: "hold_1", cost: { amount: scale } },
+        { type: "settle", holdId: "hold_1", amount: scale },
         { type: "release", holdId: "h_0" }
       ),
     },
@@ -632,20 +638,16 @@ function resolve(
     case "retry-record":
       return previous.record ?? { type: "get" }
     case "settle-ref":
-      return { type: "settle", holdId: holdId(planned.offset), cost: { amount: planned.amount } }
+      return { type: "settle", holdId: holdId(planned.offset), amount: planned.amount }
     case "release-ref":
       return { type: "release", holdId: holdId(planned.offset) }
-    case "record-ref": {
-      const cost = { amount: planned.amount }
-      const occurredAt = clock + planned.occurredOffset
+    case "record-ref":
       return {
         type: "record",
         idempotencyKey: planned.idempotencyKey,
-        cost,
-        occurredAt,
-        requestHash: requestFingerprint({ type: "record", cost }),
+        amount: planned.amount,
+        occurredAt: clock + planned.occurredOffset,
       }
-    }
     default:
       return planned
   }
@@ -668,10 +670,13 @@ function advance(clock: number, by: number | "hour-edge" | "day-edge"): number {
 const scenarioArb = scaleArb.chain((scale) =>
   fc.record({
     config: configArb(scale),
-    steps: fc.array(fc.record({ advanceMs: advanceArb, planned: commandArb(scale) }), {
-      minLength: 15,
-      maxLength: 80,
-    }),
+    steps: fc.array(
+      fc.record({ advanceMs: advanceArb, alarm: fc.boolean(), planned: commandArb(scale) }),
+      {
+        minLength: 15,
+        maxLength: 80,
+      }
+    ),
   })
 )
 
@@ -695,23 +700,31 @@ function outcomeFields(outcome: BudgetOutcome, expected: Record<string, unknown>
 
 function rolledInStore(store: MemoryBudgetStore): Period[] {
   return sortPeriods(
-    store.entries.flatMap((entry): Period[] =>
-      entry.type === "window.rolled"
-        ? [[entry.windowId, entry.start, entry.end, entry.consumed]]
-        : []
+    [...store.history.values()].flatMap((periods) =>
+      periods.map((p): Period => [p.windowId, p.start, p.end, p.consumed])
     )
   )
 }
 
-/** Per live counter: what the store counts in the current period against what the model attributes. */
-function countersView(store: MemoryBudgetStore, model: ReferenceBudget, now: number) {
+/** The store keeps the newest WINDOW_HISTORY_PERIODS of each window. */
+function keptPeriods(periods: Period[]): Period[] {
+  const kept = new Map<string, Period[]>()
+  for (const period of [...periods].sort((a, b) => b[1] - a[1])) {
+    const ofWindow = kept.get(period[0]) ?? []
+    if (ofWindow.length < 12) kept.set(period[0], [...ofWindow, period])
+  }
+  return sortPeriods([...kept.values()].flat())
+}
+
+/** Per live counter: what the ledger counts in the current period against what the model attributes. */
+function countersView(ledger: Ledger, model: ReferenceBudget, now: number) {
   const actual: Record<string, bigint> = {}
   const expected: Record<string, bigint> = {}
   for (const segment of model.segments) {
     if (segment.until !== null && now >= segment.until) continue
     expected[segment.id] = model.counted(segment, rangeOf(segment.window, segment.anchor, now))
   }
-  for (const [id, counter] of countersOf(store.ledger.usage)) {
+  for (const [id, counter] of countersOf(ledger.usage)) {
     const segment = model.segmentAt(id, now)
     const range = segment ? rangeOf(segment.window, segment.anchor, now) : null
     const current = id === "never" || counter.start === range?.start
@@ -724,7 +737,7 @@ function countersView(store: MemoryBudgetStore, model: ReferenceBudget, now: num
 }
 
 describe("budget core against a reference model", () => {
-  it("agrees on every outcome, balance, counter, window history, and journal fold", () => {
+  it("agrees on every outcome, balance, counter, and window history", () => {
     fc.assert(
       fc.property(scenarioArb, ({ config, steps }) => {
         const store = new MemoryBudgetStore()
@@ -742,19 +755,22 @@ describe("budget core against a reference model", () => {
           },
           record: null,
         }
-        const all: Array<{ advanceMs: number | "hour-edge" | "day-edge"; planned: Planned }> = [
-          { advanceMs: 0, planned: previous.command },
-          ...steps,
-        ]
+        const all: Array<{
+          advanceMs: number | "hour-edge" | "day-edge"
+          alarm: boolean
+          planned: Planned
+        }> = [{ advanceMs: 0, alarm: false, planned: previous.command }, ...steps]
 
         for (const step of all) {
           clock = advance(clock, step.advanceMs)
           const command = resolve(step.planned, previous, model.holdCount, clock)
           previous.command = command
           if (command.type === "record") previous.record = command
-          store.purge(clock)
-          model.purge(clock)
-          const entriesBefore = store.entries.length
+          if (step.alarm) {
+            store.alarm(clock)
+            model.alarm(clock)
+          }
+          const writesBefore = store.writes
           const expected = model.apply(command, clock)
           const result = store.run(command, clock)
 
@@ -770,15 +786,15 @@ describe("budget core against a reference model", () => {
               limitId: expected.limitId,
               remedy: expected.remedy,
             })
-            expect(store.entries.length).toBe(entriesBefore)
+            expect(store.writes).toBe(writesBefore)
             continue
           }
           if (result.err) throw result.err
 
-          const { outcome, entries, next } = result.val
-          if (command.type === "record" && entries.some((e) => e.type === "recorded")) {
-            const { idempotencyKey, cost, occurredAt } = command
-            recordedEvents.push(`${idempotencyKey}|${cost.amount}|${occurredAt}`)
+          const { outcome, ledger } = result.val
+          if (command.type === "record" && outcome.type === "record" && !outcome.replayed) {
+            const { idempotencyKey, amount, occurredAt } = command
+            recordedEvents.push(`${idempotencyKey}|${amount}|${occurredAt}`)
           }
           const now = Math.max(clock, model.lastWriteAt)
           expect(outcomeFields(outcome, expected.outcome)).toEqual(expected.outcome)
@@ -796,10 +812,10 @@ describe("budget core against a reference model", () => {
               limits: reference.limits.map((l) => [l.id, l.remaining, l.resetsAt]),
             })
           }
-          const counters = countersView(store, model, now)
+          const counters = countersView(ledger, model, now)
           expect(counters.actual).toEqual(counters.expected)
           const rolled = model.rolledPeriods(now)
-          expect(rolledInStore(store)).toEqual(rolled)
+          expect(rolledInStore(store)).toEqual(keptPeriods(rolled))
           if (outcome.type === "get" && model.config) {
             const ids = [...new Set(model.config.limits.map(idOf))]
             expect(
@@ -820,13 +836,6 @@ describe("budget core against a reference model", () => {
           ) {
             expect(now).toBeLessThan(model.config.closesAt)
           }
-          expect(checkTransition(store.lastBefore!, entries, next)).toEqual([])
-          const folded = store.entries.reduce(evolve, {
-            budget: null,
-            ledger: emptyLedger,
-            operations: new Map(),
-          })
-          expect(folded.ledger).toEqual(store.ledger)
         }
 
         // One event is recorded at most once, ever: a retry inside the dedupe window replays, and

@@ -1,30 +1,21 @@
-import { sha256HexSync } from "@unprice/db/utils"
 import {
   type BudgetCommand,
   type BudgetOutcome,
   type BudgetRejection,
   loadView,
-  receiptsPurgeAt,
-  requestFingerprint,
   transition,
 } from "@unprice/services/budgets"
 import type { BudgetReply, BudgetRequest } from "@unprice/services/use-cases"
 import type { BudgetProcessorDeps, BudgetStoreTx } from "./ports"
 
-const HOUR_MS = 60 * 60 * 1000
-
 export const INLINE_SWEEP_LIMIT = 32
 export const ALARM_SWEEP_LIMIT = 256
 export const ALARM_PURGE_LIMIT = 512
-export const ALARM_PRUNE_LIMIT = 1_000
 export const ALARM_CONTINUE_MS = 1_000
 export const ALARM_RETRY_MS = 30_000
-export const ALARM_HEARTBEAT_MS = 24 * HOUR_MS
-/** Journal entries stay in the object this long before the alarm prunes them. */
-export const JOURNAL_RETENTION_MS = 24 * HOUR_MS
 
 type Committed =
-  | { ok: true; outcome: BudgetOutcome; wakeAt: number | null }
+  | { ok: true; outcome: BudgetOutcome; wakeAt: number | null; now: number }
   | { ok: false; rejection: BudgetRejection }
 
 /**
@@ -46,10 +37,9 @@ export class BudgetProcessor {
   }
 
   async execute(request: BudgetRequest): Promise<BudgetReply> {
-    const command = withRequestHash(request)
     const clockMs = this.deps.clock.now()
     const committed = this.deps.store.atomically((tx) =>
-      commit(tx, command, clockMs, INLINE_SWEEP_LIMIT)
+      commit(tx, request, clockMs, INLINE_SWEEP_LIMIT)
     )
     if (!committed.ok) return committed
     await this.lowerAlarm(committed.wakeAt)
@@ -57,8 +47,8 @@ export class BudgetProcessor {
   }
 
   /**
-   * Sweeper: rolls ended windows, lapses due holds, purges expired rows and record receipts,
-   * prunes the journal, always re-arms.
+   * Sweeper: lapses due holds, rolls ended windows, purges rows whose retention ended, and re-arms
+   * for the next due row. A budget with no rows due sleeps until a command writes one.
    */
   async alarm(): Promise<void> {
     this.armedAt = null
@@ -100,53 +90,22 @@ function commit(
   const result = transition({ view, command, clockMs })
   if (result.err) return { ok: false, rejection: result.err.rejection }
 
-  const { entries, next, operations, outcome, now, wakeAt } = result.val
-  if (entries.length === 0) return { ok: true, outcome, wakeAt }
-  tx.commit({
-    budget: next.budget === view.budget ? null : next.budget,
-    ledger: next.ledger,
-    entries,
-    operations,
-    now,
-  })
-  const pruneAt = now + JOURNAL_RETENTION_MS
-  return { ok: true, outcome, wakeAt: wakeAt === null ? pruneAt : Math.min(wakeAt, pruneAt) }
+  const { write, outcome, now, wakeAt } = result.val
+  if (write) tx.commit(result.val)
+  return { ok: true, outcome, wakeAt: write ? wakeAt : null, now }
 }
 
-/** Returns the next wake, or null when the object holds no budget and so has no work. */
-function sweep(tx: BudgetStoreTx, now: number): number | null {
+/** Returns the next wake, or null when nothing is due. */
+function sweep(tx: BudgetStoreTx, clockMs: number): number | null {
   if (tx.readBudget() === null) return null
-  commit(tx, { type: "sweep" }, now, ALARM_SWEEP_LIMIT)
-  tx.purgeOperations(now, ALARM_PURGE_LIMIT)
-  tx.pruneJournal(now - JOURNAL_RETENTION_MS, ALARM_PRUNE_LIMIT)
-  const receiptsAt = receiptsPurgeAt(now, tx.readLedger())
-  tx.purgeRecordReceipts(receiptsAt, ALARM_PURGE_LIMIT)
-
-  const oldestEntryAt = tx.oldestEntryAt()
-  const oldestReceiptAt = tx.oldestReceiptExpiresAt()
-  const work = [
-    tx.nextDueAt(),
-    oldestEntryAt === null ? null : oldestEntryAt + JOURNAL_RETENTION_MS,
-    // A backlog the capped purge left behind continues; a receipt the ledger's clock has not
-    // passed yet waits for the next sweep instead of spinning the alarm.
-    oldestReceiptAt !== null && oldestReceiptAt <= receiptsAt ? now : null,
-  ].filter((at): at is number => at !== null)
+  const swept = commit(tx, { type: "sweep" }, clockMs, ALARM_SWEEP_LIMIT)
+  if (!swept.ok) throw new Error(`budget sweep rejected: ${swept.rejection.code}`)
+  // The sweep moved the budget's clock to `now`, so purging at it never runs ahead of a command.
+  tx.purgeOperations(swept.now, ALARM_PURGE_LIMIT)
+  const next = tx.nextDueAt()
   // Work a capped batch left behind is already due, so the floor is also the continuation delay,
   // and it keeps a row the sweep cannot clear from spinning the alarm.
-  return work.length === 0
-    ? now + ALARM_HEARTBEAT_MS
-    : Math.max(Math.min(...work), now + ALARM_CONTINUE_MS)
-}
-
-function withRequestHash(request: BudgetRequest): BudgetCommand {
-  switch (request.type) {
-    case "authorize":
-    case "charge":
-    case "record":
-      return { ...request, requestHash: sha256HexSync(requestFingerprint(request)) }
-    default:
-      return request
-  }
+  return next === null ? null : Math.max(next, swept.now + ALARM_CONTINUE_MS)
 }
 
 function errorMessage(error: unknown): string {

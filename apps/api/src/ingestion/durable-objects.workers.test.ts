@@ -53,8 +53,8 @@ describe("Durable Object workers runtime bindings", () => {
     expect(reply.ok).toBe(true)
     await runInDurableObject(stub, async (instance: InstanceType<typeof BudgetDO>, state) => {
       expect(instance).toBeInstanceOf(BudgetDO)
-      // A configured budget always has an alarm: it is how its journal gets compacted.
-      await expect(state.storage.getAlarm()).resolves.toEqual(expect.any(Number))
+      // A budget wakes only for a row that is due, so one with no holds or charges sleeps.
+      await expect(state.storage.getAlarm()).resolves.toBeNull()
     })
   })
 })

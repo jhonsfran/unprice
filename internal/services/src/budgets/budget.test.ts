@@ -3,16 +3,14 @@ import { describe, expect, it } from "vitest"
 import {
   type BudgetCommand,
   type BudgetConfigInput,
-  type BudgetState,
   type BudgetTransition,
-  type Entry,
+  type BudgetView,
   type HoldOperation,
   checkTransition,
+  consume,
   emptyLedger,
-  evolve,
   formatBudgetConfig,
   parseBudgetConfig,
-  requestFingerprint,
   transition,
 } from "./index"
 import { MemoryBudgetStore } from "./memory-store.fixture"
@@ -40,14 +38,7 @@ function upsert(input: BudgetConfigInput, unit = "money:USD"): BudgetCommand {
 }
 
 function authorize(key: string, units: number, ttlMs?: number): BudgetCommand {
-  const cost = { amount: $(units) }
-  return {
-    type: "authorize",
-    idempotencyKey: key,
-    cost,
-    ttlMs,
-    requestHash: requestFingerprint({ type: "authorize", cost, ttlMs }),
-  }
+  return { type: "authorize", idempotencyKey: key, amount: $(units), ttlMs }
 }
 
 function oneShot(
@@ -56,10 +47,8 @@ function oneShot(
   amount: bigint,
   occurredAt = t0
 ): BudgetCommand {
-  const cost = { amount }
-  const requestHash = requestFingerprint({ type, cost })
-  if (type === "charge") return { type, idempotencyKey: key, cost, requestHash }
-  return { type, idempotencyKey: key, cost, occurredAt, requestHash }
+  if (type === "charge") return { type, idempotencyKey: key, amount }
+  return { type, idempotencyKey: key, amount, occurredAt }
 }
 
 const charge = (key: string, units: number) => oneShot("charge", key, $(units))
@@ -68,7 +57,7 @@ const record = (key: string, units: number, occurredAt = t0) =>
 const settle = (holdId: string, units: number): BudgetCommand => ({
   type: "settle",
   holdId,
-  cost: { amount: $(units) },
+  amount: $(units),
 })
 const release = (holdId: string): BudgetCommand => ({ type: "release", holdId })
 
@@ -112,20 +101,18 @@ describe("authorize and settle", () => {
     expect(held.wakeAt).toBe(t0 + 45 * minute)
 
     const settled = ok(store.run(settle("h_1", 55), t0 + minute))
-    expect(settled.entries).toEqual([
-      {
-        type: "hold.settled",
-        holdId: "h_1",
+    expect(store.rows.get("h_1")).toMatchObject({
+      state: {
+        status: "settled",
+        closedAt: t0 + minute,
         actual: $(55),
         covered: $(55),
         released: $(25),
         overrun: $(0),
         late: false,
         crossed: [],
-        seq: 3,
-        at: t0 + minute,
       },
-    ])
+    })
     expect(settled.outcome).toMatchObject({ late: false, expired: false, replayed: false })
     expect(remaining(settled)).toEqual([["month", $(45)]])
     expect(settled.wakeAt).toBe(t0 + minute + day)
@@ -150,7 +137,7 @@ describe("denials", () => {
   it("names the blocking limit, writes nothing, and lets the same key pass later", () => {
     const store = budgetWith(month100)
     ok(store.run(authorize("k1", 60), t0))
-    const seqBefore = store.ledger.seq
+    const writes = store.writes
 
     expect(rejection(store.run(authorize("k2", 60), t0))).toMatchObject({
       code: "LIMIT_EXCEEDED",
@@ -163,7 +150,7 @@ describe("denials", () => {
         remedy: "release_holds",
       },
     })
-    expect([store.ledger.seq, store.entries.length]).toEqual([seqBefore, 2])
+    expect([store.writes, store.ledger.held]).toEqual([writes, $(60)])
 
     ok(store.run(release("h_1"), t0))
     expect(ok(store.run(authorize("k2", 60), t0)).outcome).toMatchObject({ holdId: "h_2" })
@@ -203,7 +190,7 @@ describe("idempotency", () => {
     ok(store.run(authorize("k1", 80), t0))
 
     const replay = ok(store.run(authorize("k1", 80), t0 + minute))
-    expect(replay.entries).toEqual([])
+    expect(replay.write).toBe(false)
     expect(replay.outcome).toMatchObject({
       holdId: "h_1",
       expiresAt: t0 + 15 * minute,
@@ -234,8 +221,8 @@ describe("idempotency", () => {
     })
 
     const replay = ok(store.run(charge("c1", 60), t0))
-    expect([replay.entries.length, replay.outcome]).toMatchObject([
-      0,
+    expect([replay.write, replay.outcome]).toMatchObject([
+      false,
       {
         type: "charge",
         amount: $(60),
@@ -258,8 +245,8 @@ describe("idempotency", () => {
     ok(store.run(settle("h_1", 55), t0))
 
     const replay = ok(store.run(settle("h_1", 55), t0))
-    expect([replay.entries.length, replay.outcome]).toMatchObject([
-      0,
+    expect([replay.write, replay.outcome]).toMatchObject([
+      false,
       { covered: $(55), released: $(25), replayed: true },
     ])
     expect(rejection(store.run(settle("h_1", 56), t0))).toEqual({
@@ -306,7 +293,7 @@ describe("expiry, lapse, and late usage", () => {
     ok(store.run(authorize("k1", 80, minute), t0))
 
     const read = ok(store.run({ type: "get" }, t0 + 2 * minute))
-    expect([read.entries.length, remaining(read)]).toEqual([0, [["month", $(20)]]])
+    expect([read.write, remaining(read)]).toEqual([false, [["month", $(20)]]])
 
     expect(ok(store.run(settle("h_1", 50), t0 + 2 * minute)).outcome).toMatchObject({
       covered: $(50),
@@ -322,8 +309,9 @@ describe("expiry, lapse, and late usage", () => {
 
     const swept = ok(store.run({ type: "sweep" }, t0 + 3 * minute))
     expect(swept.outcome).toEqual({ type: "sweep", lapsed: 1 })
-    expect(swept.entries).toEqual([
-      { type: "hold.lapsed", holdId: "h_1", released: $(80), seq: 3, at: t0 + 3 * minute },
+    expect([store.ledger.held, store.rows.get("h_1")]).toMatchObject([
+      $(0),
+      { state: { status: "lapsed", lapsedAt: t0 + 3 * minute } },
     ])
     expect(swept.wakeAt).toBe(t0 + 3 * minute + day)
 
@@ -346,7 +334,12 @@ describe("expiry, lapse, and late usage", () => {
     expect(store.ledger.held).toBe($(80))
 
     const charged = ok(store.run(charge("c2", 90), t0 + 3 * minute))
-    expect(charged.entries.map((entry) => entry.type)).toEqual(["hold.lapsed", "charged"])
+    expect(
+      charged.operations.map((row) => [row.id, row.kind === "hold" ? row.state.status : row.kind])
+    ).toEqual([
+      ["h_1", "lapsed"],
+      ["o:c2", "charge"],
+    ])
     expect(remaining(charged)).toEqual([["month", $(10)]])
   })
 
@@ -357,7 +350,7 @@ describe("expiry, lapse, and late usage", () => {
     ok(store.run(settle("h_1", 25), t0))
     ok(store.run({ type: "sweep" }, t0 + 3 * minute))
     const purgedAt = t0 + 3 * minute + day
-    store.purge(purgedAt)
+    store.alarm(purgedAt)
     expect(store.rows.size).toBe(0)
 
     expect(rejection(store.run(settle("h_1", 25), purgedAt))).toEqual({
@@ -382,7 +375,7 @@ describe("time and config never reset usage", () => {
       blocked: { limitId: "month", remaining: $(10) },
     })
     const recorded = ok(store.run(record("d", 5, behind), behind))
-    expect(recorded.entries[0]?.at).toBe(Date.parse("2026-11-01T00:00:00.001Z"))
+    expect(recorded.now).toBe(Date.parse("2026-11-01T00:00:00.001Z"))
     expect(remaining(recorded)).toEqual([["month", $(5)]])
   })
 
@@ -421,8 +414,8 @@ describe("time and config never reset usage", () => {
   it("converges an identical upsert without writing", () => {
     const store = budgetWith(month100)
     const again = ok(store.run(upsert(month100), t0))
-    expect([again.entries.length, again.outcome]).toMatchObject([
-      0,
+    expect([again.write, again.outcome]).toMatchObject([
+      false,
       { changes: [], budget: { version: 1 } },
     ])
     expect(rejection(store.run(upsert(month100, "money:EUR"), t0))).toEqual({
@@ -542,26 +535,8 @@ describe("anchored windows", () => {
       ["month", $(80)],
       ["billing", $(100)],
     ])
-    expect(readded.entries.filter((entry) => entry.type === "window.rolled")).toEqual([
-      {
-        type: "window.rolled",
-        windowId: "day",
-        start: Date.parse("2026-10-14T00:00:00.000Z"),
-        end: oct15,
-        consumed: $(20),
-        seq: 5,
-        at: oct15 + hour,
-      },
-      {
-        type: "window.rolled",
-        windowId: "month@2026-10-15T00:00:00.000Z",
-        start: Date.parse("2026-09-15T00:00:00.000Z"),
-        end: oct15,
-        consumed: $(20),
-        seq: 6,
-        at: oct15 + hour,
-      },
-    ])
+    // No limit used the anchor or the day window when their periods ended, so neither reports.
+    expect([readded.periods, store.history.size]).toEqual([[], 0])
   })
 
   it("names an anchor move as a window change", () => {
@@ -594,7 +569,7 @@ describe("window history", () => {
   const daily50: BudgetConfigInput = { limits: [{ id: "daily", amount: "50", window: "day" }] }
   const oct14 = Date.parse("2026-10-14T00:00:00.000Z")
 
-  it("rolls a period with usage into one fact, inside an accepted command only", () => {
+  it("rolls a limited window's period with usage into its history, inside an accepted command only", () => {
     const store = new MemoryBudgetStore()
     // No wake at the boundary: the next command rolls the period the same however late it comes.
     expect(ok(store.run(upsert(daily50), t0)).wakeAt).toBeNull()
@@ -604,31 +579,13 @@ describe("window history", () => {
     expect(store.history.size).toBe(0)
 
     const read = ok(store.run({ type: "get" }, t0 + 3 * day))
-    expect(read.entries).toEqual([
-      {
-        type: "window.rolled",
-        windowId: "hour",
-        start: t0,
-        end: t0 + hour,
-        consumed: $(20),
-        seq: 3,
-        at: t0 + 3 * day,
-      },
-      {
-        type: "window.rolled",
-        windowId: "day",
-        start: oct14,
-        end: oct15,
-        consumed: $(20),
-        seq: 4,
-        at: t0 + 3 * day,
-      },
-    ])
+    // The hour counter rolls too, but no limit uses it, so it keeps no history.
+    expect(read.periods).toEqual([{ windowId: "day", start: oct14, end: oct15, consumed: $(20) }])
     expect(read.outcome).toMatchObject({
       history: [{ windowId: "day", start: oct14, end: oct15, consumed: $(20) }],
       budget: { balance: { limits: [{ consumed: $(0), remaining: $(50) }] } },
     })
-    expect(ok(store.run({ type: "get" }, t0 + 3 * day)).entries).toEqual([])
+    expect(ok(store.run({ type: "get" }, t0 + 3 * day)).write).toBe(false)
   })
 
   it("keeps and returns the last twelve periods of each window, newest first", () => {
@@ -640,7 +597,7 @@ describe("window history", () => {
     expect(read.history.map((period) => [period.start, period.consumed])).toEqual(
       Array.from({ length: 12 }, (_, i) => [oct14 + (13 - i) * day, $(14 - i)])
     )
-    expect([store.history.get("day")?.length, store.history.get("hour")?.length]).toEqual([12, 12])
+    expect([store.history.get("day")?.length, store.history.has("hour")]).toEqual([12, false])
   })
 })
 
@@ -657,13 +614,13 @@ describe("record dedupe", () => {
       occurredAt: t0 + 5 * minute + 1,
       latestAccepted: t0 + 5 * minute,
     })
-    expect(store.entries.length).toBe(1)
+    expect(store.writes).toBe(1)
 
     expect(ok(store.run(record("r1", 1, t0 - 7 * day), t0)).outcome).toMatchObject({
       replayed: false,
     })
     const ahead = ok(store.run(record("r2", 2, t0 + 5 * minute), t0))
-    expect([ahead.entries[0]?.at, remaining(ahead)]).toEqual([t0, [["month", $(97)]]])
+    expect([ahead.now, remaining(ahead)]).toEqual([t0, [["month", $(97)]]])
   })
 
   it("replays a retry with another occurredAt, and conflicts on another amount", () => {
@@ -671,39 +628,39 @@ describe("record dedupe", () => {
     ok(store.run(record("r1", 30), t0))
 
     const retried = ok(store.run(record("r1", 30, t0 + minute), t0 + minute))
-    expect([retried.outcome, retried.entries]).toMatchObject([{ replayed: true }, []])
+    expect([retried.outcome, retried.write]).toMatchObject([{ replayed: true }, false])
     expect(rejection(store.run(record("r1", 31), t0 + minute)).code).toBe("IDEMPOTENCY_CONFLICT")
   })
 
-  it("answers from the receipt for 8 days after the row is purged, then refuses the replay", () => {
-    // Receipts are purged only up to the ledger's clock, so the first purge keeps r1 until a write.
+  it("keeps a record's row for 8 days, then refuses the replay as too late", () => {
     const store = budgetWith({ limits: [{ id: "life", amount: "100", window: "never" }] })
     ok(store.run(record("r1", 30), t0))
     ok(store.run(record("r2", 80), t0))
 
-    store.purge(t0 + day)
-    expect(store.rows.size).toBe(0)
-    const replay = ok(store.run(record("r2", 80), t0 + 6 * day))
-    expect(replay.outcome).toMatchObject({
+    store.alarm(t0 + day)
+    expect([...store.rows.keys()]).toEqual(["o:r1", "o:r2"])
+    expect(ok(store.run(record("r2", 80), t0 + 6 * day)).outcome).toMatchObject({
       type: "record",
       amount: $(80),
       crossed: ["life"],
       replayed: true,
       balance: { remaining: $(-10) },
     })
-    expect(replay.entries.map((entry) => entry.type)).toEqual([
-      "window.rolled",
-      "window.rolled",
-      "window.rolled",
-    ])
     expect(rejection(store.run(record("r1", 31), t0 + 6 * day)).code).toBe("IDEMPOTENCY_CONFLICT")
+    expect(rejection(store.run(charge("r1", 30), t0 + 6 * day)).code).toBe("IDEMPOTENCY_CONFLICT")
 
-    store.purge(t0 + 8 * day)
-    expect([...store.receipts.keys()]).toEqual(["r1", "r2"])
-    ok(store.run(record("r3", 1, t0 + 8 * day), t0 + 8 * day))
-    store.purge(t0 + 8 * day)
-    expect([...store.receipts.keys()]).toEqual(["r3"])
+    store.alarm(t0 + 8 * day)
+    expect(store.rows.size).toBe(0)
     expect(rejection(store.run(record("r1", 30), t0 + 8 * day)).code).toBe("TOO_LATE")
+  })
+
+  it("stops answering from a row when its retention ends, even before the alarm purges it", () => {
+    const store = budgetWith(month100)
+    ok(store.run(record("r1", 30), t0))
+
+    const reused = ok(store.run(record("r1", 5, t0 + 8 * day), t0 + 8 * day))
+    expect(reused.outcome).toMatchObject({ amount: $(5), replayed: false })
+    expect([store.rows.size, store.rows.get("o:r1")?.amount]).toEqual([1, $(5)])
   })
 })
 
@@ -857,63 +814,61 @@ describe("checkTransition", () => {
       kind: "hold",
       id: "h_1",
       idempotencyKey: "k1",
-      requestHash: "authorize|8000000000|default",
       amount: $(80),
+      ttlMs: minute,
       createdAt: t0,
       expiresAt: t0 + minute,
       lapsesAt: t0 + 3 * minute,
       state: { status: "open" },
     }
-    const before: BudgetState = {
-      budget: null,
-      ledger: { ...emptyLedger, seq: 2, lastAt: t0, holdSeq: 1, held: $(80) },
-      operations: new Map([["h_1", hold]]),
+    const broken: HoldOperation = {
+      ...hold,
+      state: {
+        status: "settled",
+        closedAt: t0,
+        actual: $(55),
+        covered: $(55),
+        released: $(0),
+        overrun: $(0),
+        late: false,
+        crossed: [],
+      },
     }
-    const broken: Entry = {
-      type: "hold.settled",
-      holdId: "h_1",
-      actual: $(55),
-      covered: $(55),
-      released: $(0),
-      overrun: $(0),
-      late: false,
-      crossed: [],
-      seq: 3,
-      at: t0,
-    }
-    expect(checkTransition(before, [broken], evolve(before, broken))).toEqual([
-      "entry 3 covered + released != 8000000000",
-      "rows held moved -8000000000, facts say -5500000000",
+    const before = { ...emptyLedger, lastAt: t0, holdSeq: 1, held: $(80) }
+    const after = { ...before, held: $(25), usage: consume(before.usage, $(55)) }
+    expect(
+      checkTransition({ before, after, limits: [], steps: [[hold, broken]], periods: [] })
+    ).toEqual([
+      "row h_1 covered + released != 8000000000",
+      "ledger held moved -5500000000, rows say -8000000000",
     ])
   })
 })
 
 describe("history does not slow the hot path", () => {
   it("decides in under 1 ms with 50,000 closed operations behind the ledger", () => {
-    const view = {
-      budget: null as BudgetState["budget"],
+    let state: BudgetView = {
+      budget: null,
       ledger: emptyLedger,
       target: null,
       due: [],
-      receipt: null,
       history: [],
     }
-    let state = { ...view }
     const first = transition({ view: state, command: upsert(month100), clockMs: t0 })
     if (first.err) throw first.err
-    state = { ...state, budget: first.val.next.budget, ledger: first.val.next.ledger }
+    state = { ...state, budget: first.val.budget, ledger: first.val.ledger }
 
     for (let i = 0; i < 50_000; i++) {
       const placed = transition({ view: state, command: authorize(`k${i}`, 0), clockMs: t0 + i })
       if (placed.err) throw placed.err
       const hold = placed.val.operations[0] ?? null
       const settled = transition({
-        view: { ...state, ledger: placed.val.next.ledger, target: hold },
+        view: { ...state, ledger: placed.val.ledger, target: hold },
         command: settle(hold?.id ?? "", 0),
         clockMs: t0 + i,
       })
       if (settled.err) throw settled.err
-      state = { ...state, ledger: settled.val.next.ledger }
+      state = { ...state, ledger: settled.val.ledger }
     }
     expect(state.ledger.holdSeq).toBe(50_000)
 
