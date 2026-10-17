@@ -329,16 +329,45 @@ describe("expiry and final settlement", () => {
     })
   })
 
-  it("does not admit a record against unresolved capacity", () => {
+  it("counts a record past a hard limit and keeps holds, then denies gated spend", () => {
     const store = budgetWith(month100)
     ok(store.run(authorize("k1", 80, minute), t0))
-    expect(rejection(store.run(record("event", 21), t0 + 3 * minute)).code).toBe("LIMIT_EXCEEDED")
-    expect(store.ledger.held).toBe($(80))
-    expect(ok(store.run(record("event", 20), t0 + 3 * minute)).outcome).toMatchObject({
-      amount: $(20),
+    expect(ok(store.run(record("e1", 30), t0 + minute)).outcome).toMatchObject({
+      amount: $(30),
+      crossed: [],
       replayed: false,
-      balance: { remaining: $(0) },
+      balance: { remaining: -$(10), held: $(80) },
     })
+    expect(ok(store.run(settle("h_1", 70), t0 + minute)).outcome).toMatchObject({
+      crossed: [],
+      balance: { remaining: $(0), held: $(0) },
+    })
+    expect(ok(store.run(record("e2", 5), t0 + minute)).outcome).toMatchObject({
+      crossed: ["month"],
+      balance: { remaining: -$(5) },
+    })
+    expect(rejection(store.run(charge("c1", 1), t0 + minute))).toMatchObject({
+      code: "LIMIT_EXCEEDED",
+      blocked: { limitId: "month", remedy: "wait_for_reset" },
+    })
+  })
+
+  it("lets an upsert keep or raise a hard limit a record passed, never lower it", () => {
+    const store = budgetWith(month100)
+    ok(store.run(record("e1", 120), t0))
+    const daily = { id: "day", amount: "1000", window: "day" as const }
+    ok(store.run(upsert({ limits: [...month100.limits, daily] }), t0))
+    const lowered = { id: "month", amount: "90", window: "month" as const }
+    expect(rejection(store.run(upsert({ limits: [lowered, daily] }), t0))).toMatchObject({
+      code: "LIMIT_BELOW_USAGE",
+      minimum: $(120),
+      requested: $(90),
+    })
+    const raised = { id: "month", amount: "110", window: "month" as const }
+    expect(remaining(ok(store.run(upsert({ limits: [raised, daily] }), t0)))).toEqual([
+      ["month", -$(10)],
+      ["day", $(880)],
+    ])
   })
 
   it("retires a hold once its row is purged, so a retried settle never counts twice", () => {

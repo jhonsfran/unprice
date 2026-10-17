@@ -98,15 +98,13 @@ function resetsLater(a: number | null, b: number | null): boolean {
   return a === null || a > b
 }
 
-/** Soft limits whose consumed amount first exceeds their threshold. */
+/**
+ * Limits whose consumed amount first exceeds their amount. A hard limit gets there only after
+ * recorded usage took the room its holds and charges were checked against.
+ */
 function crossings(balance: BudgetBalance, amount: Amount): string[] {
   return balance.limits
-    .filter(
-      (limit) =>
-        limit.enforce === "soft" &&
-        limit.consumed <= limit.amount &&
-        limit.consumed + amount > limit.amount
-    )
+    .filter((limit) => limit.consumed <= limit.amount && limit.consumed + amount > limit.amount)
     .map((limit) => limit.id)
 }
 
@@ -204,8 +202,12 @@ function decideUpsert(
   if (changes.length === 0) return Ok(unchanged(null))
   const updated = { ...budget, version: budget.version + 1, config }
   const balance = balanceOf({ budget: updated, ledger }, now)
+  const previous = new Map(budget.config.limits.map((limit) => [limit.id, limit]))
   for (const limit of balance.limits) {
-    if (limit.enforce === "hard" && limit.remaining < ZERO) {
+    // A record may already have passed a hard limit; an upsert may keep or raise it, never tighten.
+    const before = previous.get(limit.id)
+    const tightened = before?.enforce !== "hard" || limit.amount < before.amount
+    if (limit.enforce === "hard" && limit.remaining < ZERO && tightened) {
       return reject({
         code: "LIMIT_BELOW_USAGE",
         limitId: limit.id,
@@ -272,7 +274,8 @@ function decideKeyed(
   }
 
   const balance = balanceOf(state, now)
-  const blocked = blockingLimit(balance, amount)
+  // Recorded work already ran: refusing it would lose the count, not the spend.
+  const blocked = command.type === "record" ? null : blockingLimit(balance, amount)
   if (blocked) return reject({ code: "LIMIT_EXCEEDED", blocked, balance })
 
   if (command.type === "authorize") {

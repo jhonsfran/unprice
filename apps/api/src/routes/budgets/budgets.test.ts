@@ -109,10 +109,9 @@ describe("budgets API", () => {
     ])
     const statuses = (path: string) =>
       Object.keys(document.paths[path]?.post?.responses ?? {}).filter((status) => status === "402")
-    expect([statuses("/v1/budgets/authorize"), statuses("/v1/budgets/record")]).toEqual([
-      ["402"],
-      ["402"],
-    ])
+    expect(
+      ["authorize", "charge", "record"].map((verb) => statuses(`/v1/budgets/${verb}`))
+    ).toEqual([["402"], ["402"], []])
   })
 
   it("returns settlement maximum and actual on an over-reservation conflict", async () => {

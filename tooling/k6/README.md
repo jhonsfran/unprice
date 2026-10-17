@@ -113,7 +113,7 @@ Two scenarios run at a fixed arrival rate:
 | Scenario | Traffic | Budget |
 |---|---|---|
 | `gated` | 55% authorize→settle (actual ≤ estimate), 15% authorize→release, 30% charge | `KEYS` budgets, each with one hard lifetime limit of `LIMIT` |
-| `recorded` | record at `RECORD_RATE`/s | its own budget with one hard lifetime limit of `LIMIT / 10` |
+| `recorded` | record at `RECORD_RATE`/s | its own budget with a 1-unit limit, which record runs past |
 
 Amounts are random multiples of 0.0001 up to 1. `DUPLICATE_PERCENT` of the final writes (settle,
 release, charge, record) go out twice in one `http.batch`, the way a client retry races its

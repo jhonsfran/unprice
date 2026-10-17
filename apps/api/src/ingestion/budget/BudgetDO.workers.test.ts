@@ -401,16 +401,6 @@ describe("BudgetDO alarm", () => {
         ).code
       ).toBe("LIMIT_EXCEEDED")
       expect(
-        rejection(
-          await processor.execute({
-            type: "record",
-            idempotencyKey: "event",
-            amount: units(11),
-            occurredAt: now,
-          })
-        ).code
-      ).toBe("LIMIT_EXCEEDED")
-      expect(
         rejection(await processor.execute({ type: "settle", holdId: "h_1", amount: units(41) }))
       ).toEqual({
         code: "HOLD_AMOUNT_EXCEEDED",

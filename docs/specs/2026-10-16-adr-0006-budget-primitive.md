@@ -119,7 +119,8 @@ Budget
   changed by Unprice.
 - Adding or lowering a hard limit, including a change from soft to hard, must preserve
   `consumed + held <= amount`. Otherwise upsert returns 409 `LIMIT_BELOW_USAGE` and keeps the
-  previous configuration.
+  previous configuration. A hard limit that recorded usage already passed may keep or raise its
+  amount, so the rest of the configuration stays editable.
 - A window is a UTC calendar window (`hour`, `day`, `week` from Monday, `month`, `never`) or an
   anchored one: `window: "month", anchor: "2026-10-15T00:00:00Z"` repeats every month from the
   anchor, forward and backward. A monthly anchor keeps its day of month and time of day; in a month
@@ -154,7 +155,7 @@ authorize { key, estimate: { amount } | { usage }, ttl?, idempotencyKey }
 settle    { key, holdId, actual: { amount } | { usage } }                  // closes the hold
 release   { key, holdId }                                                 // nothing consumed
 charge    { key, amount | usage, idempotencyKey }   // gated one-shot: denied if it does not fit
-record    { key, amount | usage, idempotencyKey, occurredAt }   // deduplicated debit; hard limits apply
+record    { key, amount | usage, idempotencyKey, occurredAt }   // deduplicated debit; always counts
 get       { key } -> { budget, history }            // history: last 12 ended periods per window
 ```
 
@@ -181,11 +182,14 @@ settle(actual 55)   held 80 -> 0          consumed 0 -> 55   available 20 -> 45
   The server never clamps usage or accepts debt. More work requires another authorization before
   that work starts. Settlement is final, so the caller must stop the operation before releasing
   its unused reservation.
-- `charge` is for cheap work that is gated before it runs. `record` is for usage that already
-  happened. Both reject a debit that would exceed a hard limit, including outstanding reservations.
-  A report after work cannot grant permission retroactively. Use authorization before work when
-  the operation needs a spending guarantee. `record` carries `occurredAt`, the epoch milliseconds
-  the usage happened; the window rules are in B3.
+- `charge` is for cheap work that is gated before it runs. It rejects a debit that would exceed a
+  hard limit, including outstanding reservations. `record` is for usage that already happened. It
+  always counts, even past a hard limit, because refusing it would lose the count, not the spend.
+  `crossed` names each limit it passes, the limit then denies `authorize` and `charge` until it
+  resets or rises, and open holds keep their reservation. A hard cap therefore bounds what the
+  budget gates; a report after work cannot grant permission retroactively. Use authorization
+  before work when the operation needs a spending guarantee. `record` carries `occurredAt`, the
+  epoch milliseconds the usage happened; the window rules are in B3.
 - When a counter's period ends, the next accepted command (or alarm sweep) rolls it and, if the
   period had usage and a limit used that window when it ended, writes a `{ windowId, start, end,
   consumed }` period to the window history. A counter keeps its period's start, so the period is
@@ -199,9 +203,10 @@ settle(actual 55)   held 80 -> 0          consumed 0 -> 55   available 20 -> 45
 - Keep at most 32 retained anchored schedules, in addition to the five calendar counters. Removing
   a limit retains its counter until the period ends. A configuration that adds a distinct schedule
   beyond the bound returns 409 `WINDOW_CAPACITY_EXCEEDED`; it never deletes live usage to fit.
-- A soft threshold reports `crossed` when actual consumption moves from at most the threshold to
-  above it. A reservation or its release does not trigger a consumption crossing. Replays preserve
-  the original crossing result.
+- A limit reports `crossed` when actual consumption moves from at most its amount to above it: a
+  soft limit through any consumption, a hard limit only after recorded usage took its room. A
+  reservation or its release does not trigger a consumption crossing. Replays preserve the
+  original crossing result.
 - Every response carries `remaining` for each limit, and the HTTP adapter copies it into response
   headers. A denial is always HTTP 402 with `blockedBy` (the limit or the funding source) and a
   remedy.
@@ -553,7 +558,7 @@ await hold.settle({ usage: { feature: "model_call",
 // 12. Trial: $5 that expires on day 14
 { key: "customer:acme", unit: "USD", funding: { grant: { amount: 5, expiresAt: trialEnd } } }
 
-// Event ingestion applies a debit only if every hard limit has room.
+// Event ingestion always counts the debit; `crossed` names any limit it passed.
 // occurredAt is the event's own time and bounds acceptance (7 days); the same key and amount
 // count once within 8 days.
 await unprice.budget("customer:acme").record({ usage: { feature: "image", properties: {} },
@@ -604,7 +609,8 @@ Steps 0 to 3 are the first release: a budget a builder can adopt without any oth
 - Never expose a Durable Object id, a parent, or a funding source in the public API. The key is the
   address.
 - Never price a usage without a row at zero. Deny it.
-- Never accept actual usage above the authorized maximum or bypass a hard limit with `record`.
+- Never accept actual usage above the authorized maximum. Never refuse a `record` over a hard
+  limit: count it, report the crossing, and deny the next gated spend.
 - Never return an unresolved reservation because a timeout passed.
 - Never accept a settle the store can no longer deduplicate. A retired hold returns 409.
 - Never release capacity that a pending capture still covers.

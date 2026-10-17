@@ -179,7 +179,7 @@
                                 "enforce": {
                                   "type": "string",
                                   "enum": ["hard", "soft"],
-                                  "description": "hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                  "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                   "example": "hard"
                                 },
                                 "amount": {
@@ -196,7 +196,7 @@
                                 },
                                 "remaining": {
                                   "type": "string",
-                                  "description": "amount - consumed - held; negative only for a soft limit"
+                                  "description": "amount - consumed - held; negative for a soft limit, or a hard limit a record passed"
                                 },
                                 "resetsAt": {
                                   "type": "integer",
@@ -446,7 +446,7 @@
                                 "enforce": {
                                   "type": "string",
                                   "enum": ["hard", "soft"],
-                                  "description": "hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                  "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                   "example": "hard"
                                 },
                                 "amount": {
@@ -463,7 +463,7 @@
                                 },
                                 "remaining": {
                                   "type": "string",
-                                  "description": "amount - consumed - held; negative only for a soft limit"
+                                  "description": "amount - consumed - held; negative for a soft limit, or a hard limit a record passed"
                                 },
                                 "resetsAt": {
                                   "type": "integer",
@@ -713,7 +713,7 @@
                                 "enforce": {
                                   "type": "string",
                                   "enum": ["hard", "soft"],
-                                  "description": "hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                  "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                   "example": "hard"
                                 },
                                 "amount": {
@@ -730,7 +730,7 @@
                                 },
                                 "remaining": {
                                   "type": "string",
-                                  "description": "amount - consumed - held; negative only for a soft limit"
+                                  "description": "amount - consumed - held; negative for a soft limit, or a hard limit a record passed"
                                 },
                                 "resetsAt": {
                                   "type": "integer",
@@ -980,7 +980,7 @@
                                 "enforce": {
                                   "type": "string",
                                   "enum": ["hard", "soft"],
-                                  "description": "hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                  "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                   "example": "hard"
                                 },
                                 "amount": {
@@ -997,7 +997,7 @@
                                 },
                                 "remaining": {
                                   "type": "string",
-                                  "description": "amount - consumed - held; negative only for a soft limit"
+                                  "description": "amount - consumed - held; negative for a soft limit, or a hard limit a record passed"
                                 },
                                 "resetsAt": {
                                   "type": "integer",
@@ -1247,7 +1247,7 @@
                                 "enforce": {
                                   "type": "string",
                                   "enum": ["hard", "soft"],
-                                  "description": "hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                  "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                   "example": "hard"
                                 },
                                 "amount": {
@@ -1264,7 +1264,7 @@
                                 },
                                 "remaining": {
                                   "type": "string",
-                                  "description": "amount - consumed - held; negative only for a soft limit"
+                                  "description": "amount - consumed - held; negative for a soft limit, or a hard limit a record passed"
                                 },
                                 "resetsAt": {
                                   "type": "integer",
@@ -1514,7 +1514,7 @@
                                 "enforce": {
                                   "type": "string",
                                   "enum": ["hard", "soft"],
-                                  "description": "hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                  "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                   "example": "hard"
                                 },
                                 "amount": {
@@ -1531,7 +1531,7 @@
                                 },
                                 "remaining": {
                                   "type": "string",
-                                  "description": "amount - consumed - held; negative only for a soft limit"
+                                  "description": "amount - consumed - held; negative for a soft limit, or a hard limit a record passed"
                                 },
                                 "resetsAt": {
                                   "type": "integer",
@@ -1781,7 +1781,7 @@
                                 "enforce": {
                                   "type": "string",
                                   "enum": ["hard", "soft"],
-                                  "description": "hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                  "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                   "example": "hard"
                                 },
                                 "amount": {
@@ -1798,7 +1798,7 @@
                                 },
                                 "remaining": {
                                   "type": "string",
-                                  "description": "amount - consumed - held; negative only for a soft limit"
+                                  "description": "amount - consumed - held; negative for a soft limit, or a hard limit a record passed"
                                 },
                                 "resetsAt": {
                                   "type": "integer",
@@ -2048,7 +2048,7 @@
                                 "enforce": {
                                   "type": "string",
                                   "enum": ["hard", "soft"],
-                                  "description": "hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                  "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                   "example": "hard"
                                 },
                                 "amount": {
@@ -2065,7 +2065,7 @@
                                 },
                                 "remaining": {
                                   "type": "string",
-                                  "description": "amount - consumed - held; negative only for a soft limit"
+                                  "description": "amount - consumed - held; negative for a soft limit, or a hard limit a record passed"
                                 },
                                 "resetsAt": {
                                   "type": "integer",
@@ -2315,7 +2315,7 @@
                                 "enforce": {
                                   "type": "string",
                                   "enum": ["hard", "soft"],
-                                  "description": "hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                  "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                   "example": "hard"
                                 },
                                 "amount": {
@@ -2332,7 +2332,7 @@
                                 },
                                 "remaining": {
                                   "type": "string",
-                                  "description": "amount - consumed - held; negative only for a soft limit"
+                                  "description": "amount - consumed - held; negative for a soft limit, or a hard limit a record passed"
                                 },
                                 "resetsAt": {
                                   "type": "integer",
@@ -2582,7 +2582,7 @@
                                 "enforce": {
                                   "type": "string",
                                   "enum": ["hard", "soft"],
-                                  "description": "hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                  "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                   "example": "hard"
                                 },
                                 "amount": {
@@ -2599,7 +2599,7 @@
                                 },
                                 "remaining": {
                                   "type": "string",
-                                  "description": "amount - consumed - held; negative only for a soft limit"
+                                  "description": "amount - consumed - held; negative for a soft limit, or a hard limit a record passed"
                                 },
                                 "resetsAt": {
                                   "type": "integer",
@@ -4298,7 +4298,7 @@
                               "enforce": {
                                 "type": "string",
                                 "enum": ["hard", "soft"],
-                                "description": "hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                 "example": "hard"
                               }
                             },
@@ -4359,7 +4359,7 @@
                                   "enforce": {
                                     "type": "string",
                                     "enum": ["hard", "soft"],
-                                    "description": "hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                    "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                     "example": "hard"
                                   },
                                   "amount": {
@@ -4376,7 +4376,7 @@
                                   },
                                   "remaining": {
                                     "type": "string",
-                                    "description": "amount - consumed - held; negative only for a soft limit"
+                                    "description": "amount - consumed - held; negative for a soft limit, or a hard limit a record passed"
                                   },
                                   "resetsAt": {
                                     "type": "integer",
@@ -4631,7 +4631,7 @@
                               "enforce": {
                                 "type": "string",
                                 "enum": ["hard", "soft"],
-                                "description": "hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                 "example": "hard"
                               },
                               "amount": {
@@ -4648,7 +4648,7 @@
                               },
                               "remaining": {
                                 "type": "string",
-                                "description": "amount - consumed - held; negative only for a soft limit"
+                                "description": "amount - consumed - held; negative for a soft limit, or a hard limit a record passed"
                               },
                               "resetsAt": {
                                 "type": "integer",
@@ -4864,7 +4864,7 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "Soft limit ids whose consumed amount first exceeded the threshold. Reservations do not trigger crossings. Replays preserve the original result."
+                      "description": "Limit ids whose consumed amount first exceeded the limit's amount. A hard limit crosses only after recorded usage took its room. Reservations do not trigger crossings. Replays preserve the original result."
                     },
                     "replayed": {
                       "type": "boolean",
@@ -4899,7 +4899,7 @@
                               "enforce": {
                                 "type": "string",
                                 "enum": ["hard", "soft"],
-                                "description": "hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                 "example": "hard"
                               },
                               "amount": {
@@ -4916,7 +4916,7 @@
                               },
                               "remaining": {
                                 "type": "string",
-                                "description": "amount - consumed - held; negative only for a soft limit"
+                                "description": "amount - consumed - held; negative for a soft limit, or a hard limit a record passed"
                               },
                               "resetsAt": {
                                 "type": "integer",
@@ -5144,7 +5144,7 @@
                               "enforce": {
                                 "type": "string",
                                 "enum": ["hard", "soft"],
-                                "description": "hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                 "example": "hard"
                               },
                               "amount": {
@@ -5161,7 +5161,7 @@
                               },
                               "remaining": {
                                 "type": "string",
-                                "description": "amount - consumed - held; negative only for a soft limit"
+                                "description": "amount - consumed - held; negative for a soft limit, or a hard limit a record passed"
                               },
                               "resetsAt": {
                                 "type": "integer",
@@ -5358,7 +5358,7 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "Soft limit ids whose consumed amount first exceeded the threshold. Reservations do not trigger crossings. Replays preserve the original result."
+                      "description": "Limit ids whose consumed amount first exceeded the limit's amount. A hard limit crosses only after recorded usage took its room. Reservations do not trigger crossings. Replays preserve the original result."
                     },
                     "replayed": {
                       "type": "boolean",
@@ -5393,7 +5393,7 @@
                               "enforce": {
                                 "type": "string",
                                 "enum": ["hard", "soft"],
-                                "description": "hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                 "example": "hard"
                               },
                               "amount": {
@@ -5410,7 +5410,7 @@
                               },
                               "remaining": {
                                 "type": "string",
-                                "description": "amount - consumed - held; negative only for a soft limit"
+                                "description": "amount - consumed - held; negative for a soft limit, or a hard limit a record passed"
                               },
                               "resetsAt": {
                                 "type": "integer",
@@ -5550,7 +5550,7 @@
       "post": {
         "operationId": "budgets.record",
         "summary": "record usage that already happened",
-        "description": "Consume an amount for work that already ran. Every hard limit must have enough remaining capacity. A denial returns 402 and records no usage. Usage must have occurred within the last 7 days (409 beyond it). For 8 days, a retry with the same idempotency key and amount replays instead of counting twice, and the same key with another amount returns 409.",
+        "description": "Consume an amount for work that already ran. It always counts, even past a hard limit, because the work cannot be undone: `crossed` names any limit it passed, and hard limits then deny authorize and charge. Usage must have occurred within the last 7 days (409 beyond it). For 8 days, a retry with the same idempotency key and amount replays instead of counting twice, and the same key with another amount returns 409.",
         "tags": ["budgets"],
         "x-unprice": {
           "audience": "public",
@@ -5579,7 +5579,7 @@
                   "amount": {
                     "type": "string",
                     "pattern": "^\\d{1,19}(\\.\\d{1,8})?$",
-                    "description": "The amount to record, checked against every hard limit. Recording after work does not authorize that work retroactively.",
+                    "description": "The amount to record. It always counts, even past a hard limit; recording after work does not authorize that work retroactively.",
                     "example": "0.05"
                   },
                   "idempotencyKey": {
@@ -5619,7 +5619,7 @@
                       "items": {
                         "type": "string"
                       },
-                      "description": "Soft limit ids whose consumed amount first exceeded the threshold. Reservations do not trigger crossings. Replays preserve the original result."
+                      "description": "Limit ids whose consumed amount first exceeded the limit's amount. A hard limit crosses only after recorded usage took its room. Reservations do not trigger crossings. Replays preserve the original result."
                     },
                     "replayed": {
                       "type": "boolean",
@@ -5654,7 +5654,7 @@
                               "enforce": {
                                 "type": "string",
                                 "enum": ["hard", "soft"],
-                                "description": "hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                 "example": "hard"
                               },
                               "amount": {
@@ -5671,7 +5671,7 @@
                               },
                               "remaining": {
                                 "type": "string",
-                                "description": "amount - consumed - held; negative only for a soft limit"
+                                "description": "amount - consumed - held; negative for a soft limit, or a hard limit a record passed"
                               },
                               "resetsAt": {
                                 "type": "integer",
@@ -5720,16 +5720,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrUnauthorized"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "The request does not fit the budget. `details.blocked` names the limit that blocked it and the remedy that would let it through.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrBudgetExceeded"
                 }
               }
             }
@@ -5884,7 +5874,7 @@
                               "enforce": {
                                 "type": "string",
                                 "enum": ["hard", "soft"],
-                                "description": "hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                 "example": "hard"
                               }
                             },
@@ -5945,7 +5935,7 @@
                                   "enforce": {
                                     "type": "string",
                                     "enum": ["hard", "soft"],
-                                    "description": "hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                    "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                     "example": "hard"
                                   },
                                   "amount": {
@@ -5962,7 +5952,7 @@
                                   },
                                   "remaining": {
                                     "type": "string",
-                                    "description": "amount - consumed - held; negative only for a soft limit"
+                                    "description": "amount - consumed - held; negative for a soft limit, or a hard limit a record passed"
                                   },
                                   "resetsAt": {
                                     "type": "integer",

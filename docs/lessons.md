@@ -224,7 +224,8 @@ patterns. Keep it cheap to load and useful.
   in one transaction. When adding a verb, extend the reference model in `budget.properties.test.ts`
   (its own calendar math, no core imports beyond the API) instead of asserting the core's totals.
 - 2026-10-17: A budget estimate is the maximum authorized usage. Reject settlement above the
-  reservation and apply hard limits to `record`; do not treat either path as permission for debt.
+  reservation; do not treat it as permission for debt. `record` reports work that already ran, so
+  it always counts, even past a hard limit: refusing it loses the count, not the spend.
 - 2026-10-17: Keep unresolved BudgetDO holds reserved across timeouts and window resets. Only
   final settlement or explicit zero-usage release can return capacity; see ADR-0006 B2-B3.
 - 2026-10-17: No BudgetDO data has shipped (see 136ab303a). Change its stored format without

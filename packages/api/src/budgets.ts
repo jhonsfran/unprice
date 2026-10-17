@@ -74,8 +74,9 @@ export type ChargeBudgetInput = {
 }
 
 /**
- * Usage that already happened. Hard limits can reject it, so authorize before work that needs
- * guaranteed capacity. Within 8 days, the same event key and amount replay; another amount is 409.
+ * Usage that already happened. It always counts, even past a hard limit, and `crossed` names any
+ * limit it passed; authorize before work that needs guaranteed capacity. Within 8 days, the same
+ * event key and amount replay; another amount is 409.
  */
 export type RecordBudgetInput = {
   amount: AmountInput

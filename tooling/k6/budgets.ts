@@ -15,8 +15,8 @@ import {
 //
 // `gated` fires authorize→settle, authorize→release, and charge at a fixed arrival rate against
 // KEYS budgets sized to run out partway through, so admits and denials race on one counter.
-// `recorded` sends usage to its own smaller budget, whose hard limit caps record the same way. A
-// share of the final writes go out twice in one batch, the way a client retry races its original.
+// `recorded` sends usage to its own budget, which record pushes below zero. A share of the final
+// writes go out twice in one batch, the way a client retry races its original.
 //
 // Accuracy: every applied amount adds to `budget_drift_ticks`, and teardown subtracts what each
 // budget consumed, so the counter ends at 0 only when nothing was lost or counted twice.
@@ -110,8 +110,8 @@ export async function setup(): Promise<BudgetData> {
   for (const key of keys) {
     await upsert(key, String(LIMIT))
   }
-  // RECORD_RATE defaults to a tenth of RATE, so a tenth of the limit runs out partway through too.
-  await upsert(recordKey, String(Math.max(1, Math.floor(LIMIT / 10))))
+  // A one-unit limit that record runs past within the first seconds: record is never denied.
+  await upsert(recordKey, "1")
 
   console.info(`budgets: ${KEYS} gated key(s) with a ${LIMIT} limit under ${run}`)
   return { keys, recordKey }
@@ -170,11 +170,13 @@ export async function teardown(data: BudgetData): Promise<void> {
     const consumed = toTicks(limit.consumed)
     drift.add(-consumed)
 
+    const gatedKey = key !== data.recordKey
     const held = check(limit, {
       "teardown: no hold is left open": (value) => value.held === "0",
       "teardown: remaining is the limit minus consumed": (value) =>
         toTicks(value.remaining) === toTicks(value.amount) - consumed,
-      "teardown: a hard limit is never overspent": (value) => consumed <= toTicks(value.amount),
+      "teardown: a hard limit is never overspent": (value) =>
+        !gatedKey || consumed <= toTicks(value.amount),
     })
     if (!held) broken.add(1)
 
@@ -245,12 +247,12 @@ function tally<R extends { replayed: boolean }>(
   return null
 }
 
-/** A 402 from a debiting verb, naming the lifetime limit and a remedy that can apply to it. */
+/** A 402 from a gated verb, naming the lifetime limit and a remedy that can apply to it. */
 function isLimitDenial(verb: Verb, failure: Failure): boolean {
   if ("transport" in failure) return false
   const { error } = failure
   return (
-    (verb === "authorize" || verb === "charge" || verb === "record") &&
+    (verb === "authorize" || verb === "charge") &&
     failure.status === 402 &&
     error?.code === "BUDGET_EXCEEDED" &&
     error.details?.kind === "budget_exceeded" &&

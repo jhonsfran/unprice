@@ -42,17 +42,20 @@ export type CheckedTransition = Readonly<{
  *    what the rows consumed; one that moved to a new period holds only that, and its old period
  *    is reported when it had usage on a limited window.
  * 4. Held and every counter are non-negative.
- * 5. No hard limit's consumed + held grows past its amount.
+ * 5. No hard limit's consumed + held grows past its amount, except by recorded usage: that work
+ *    already ran, so it is counted, never refused.
  */
 export function checkTransition(transition: CheckedTransition): string[] {
   const { before, after, steps } = transition
   const violations: string[] = []
   let held = ZERO
   let consumed = ZERO
+  let recorded = ZERO
   for (const [prior, row] of steps) {
     violations.push(...stepViolations(prior, row))
     held += heldBy(row) - heldBy(prior)
     consumed += consumedBy(row) - consumedBy(prior)
+    if (row.kind === "record" && !prior) recorded += row.amount
   }
   if (after.held - before.held !== held) {
     violations.push(`ledger held moved ${after.held - before.held}, rows say ${held}`)
@@ -66,7 +69,7 @@ export function checkTransition(transition: CheckedTransition): string[] {
     const previous = before.usage[id]
     const priorConsumed = previous?.start === current?.start ? (previous?.consumed ?? ZERO) : ZERO
     const priorExposure = priorConsumed + before.held
-    const exposure = (current?.consumed ?? ZERO) + after.held
+    const exposure = (current?.consumed ?? ZERO) + after.held - recorded
     const increasesHardLimitExcess = exposure > limit.amount && exposure > priorExposure
     if (increasesHardLimitExcess) {
       violations.push(`limit ${limit.id} committed ${exposure} beyond ${limit.amount}`)

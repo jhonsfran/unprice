@@ -101,7 +101,7 @@ export const budgetWindowSchema = z.enum(BUDGET_WINDOWS).openapi({
 
 const budgetEnforceSchema = z.enum(["hard", "soft"]).openapi({
   description:
-    "hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+    "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
   example: "hard",
 })
 
@@ -131,7 +131,7 @@ const budgetReplayedSchema = z.boolean().openapi({
 
 const budgetCrossedSchema = z.array(z.string()).openapi({
   description:
-    "Soft limit ids whose consumed amount first exceeded the threshold. Reservations do not trigger crossings. Replays preserve the original result.",
+    "Limit ids whose consumed amount first exceeded the limit's amount. A hard limit crosses only after recorded usage took its room. Reservations do not trigger crossings. Replays preserve the original result.",
 })
 
 export const upsertBudgetInputSchema = z
@@ -318,7 +318,7 @@ export const recordBudgetInputSchema = chargeBudgetInputSchema
     amount: budgetAmountInputSchema
       .openapi({
         description:
-          "The amount to record, checked against every hard limit. Recording after work does not authorize that work retroactively.",
+          "The amount to record. It always counts, even past a hard limit; recording after work does not authorize that work retroactively.",
       })
       .transform(toAmount),
     idempotencyKey: budgetIdempotencyKeySchema.openapi({
@@ -352,7 +352,8 @@ export const budgetBalanceSchema = z.object({
       consumed: budgetDecimalSchema.openapi({ description: "Used in the current period" }),
       held: budgetDecimalSchema.openapi({ description: "Held by open holds" }),
       remaining: budgetDecimalSchema.openapi({
-        description: "amount - consumed - held; negative only for a soft limit",
+        description:
+          "amount - consumed - held; negative for a soft limit, or a hard limit a record passed",
       }),
       resetsAt: budgetResetsAtSchema,
     })

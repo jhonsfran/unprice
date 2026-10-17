@@ -279,9 +279,7 @@ class ReferenceBudget {
 
   crossed(now: number, amount: bigint): string[] {
     return this.balance(now)
-      .limits.filter(
-        (l) => l.enforce === "soft" && l.consumed <= l.amount && l.consumed + amount > l.amount
-      )
+      .limits.filter((l) => l.consumed <= l.amount && l.consumed + amount > l.amount)
       .map((l) => l.id)
   }
 
@@ -373,7 +371,9 @@ class ReferenceBudget {
           const consumed = segment
             ? this.counted(segment, rangeOf(limit.window, limit.anchor, now))
             : ZERO
-          if (limit.enforce === "hard" && limit.amount < consumed + held) {
+          const before = this.config.limits.find((l) => l.id === limit.id)
+          const kept = before?.enforce === "hard" && limit.amount >= before.amount
+          if (limit.enforce === "hard" && limit.amount < consumed + held && !kept) {
             return { error: "LIMIT_BELOW_USAGE" }
           }
         }
@@ -471,7 +471,7 @@ class ReferenceBudget {
     if (config.closesAt !== null && now >= config.closesAt + grace) {
       return { error: "BUDGET_CLOSED" }
     }
-    const blocked = this.block(now, amount)
+    const blocked = command.type === "record" ? null : this.block(now, amount)
     if (blocked) return { error: "LIMIT_EXCEEDED", ...blocked }
     const crossed = this.crossed(now, amount)
     const rec: KeyedRecord = {
@@ -846,7 +846,10 @@ describe("budget core against a reference model", () => {
                   ? outcome.budget.balance
                   : null
             const reference = model.balance(now)
-            for (const limit of balance?.limits ?? []) {
+            // Only a record passes a hard limit, so admitted gated spend always fits.
+            const admitted =
+              (outcome.type === "authorize" || outcome.type === "charge") && !outcome.replayed
+            for (const limit of admitted ? (balance?.limits ?? []) : []) {
               if (limit.enforce === "hard")
                 expect(limit.consumed + limit.held <= limit.amount).toBe(true)
             }

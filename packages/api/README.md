@@ -178,9 +178,9 @@ capacity automatically.
 Open holds stay reserved until final settlement or explicit release. A closed hold retains its
 result for 24 hours; later retries return 409 instead of counting twice.
 `acme.charge({ amount, idempotencyKey })` gates a one-shot amount, and
-`acme.record({ amount, idempotencyKey, occurredAt })` records usage only when every hard limit has
-capacity. `record` returns a `BUDGET_EXCEEDED` API error when capacity is insufficient. Authorize
-before work that needs guaranteed capacity.
+`acme.record({ amount, idempotencyKey, occurredAt })` reports usage that already happened. It
+always counts, even past a hard limit, and its `crossed` names each limit it passed; that limit
+then denies `authorize` and `charge`. Authorize before work that needs guaranteed capacity.
 The API also rejects a lower hard cap when consumption plus open holds would exceed it.
 Pass the event's id as the record key and its own time as `occurredAt`, never the call time.
 For 8 days the same key and amount count once and another amount returns 409. Usage older than

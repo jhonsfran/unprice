@@ -265,38 +265,6 @@ describe("budget handle", () => {
     })
   })
 
-  it("returns the API error when a record exceeds a hard limit", async () => {
-    const { budget, requests } = createClient([exceeded()])
-
-    const result = await budget.record({
-      amount: "1",
-      idempotencyKey: "evt_blocked",
-      occurredAt: 1_792_000_000_000,
-    })
-
-    expect(result).toEqual({
-      error: {
-        code: "BUDGET_EXCEEDED",
-        message: "Budget exceeded",
-        docs: "https://docs.unprice.dev/api-reference/errors/code/BUDGET_EXCEEDED",
-        requestId: "req_1",
-        details: { kind: "budget_exceeded", blocked, balance },
-      },
-    })
-    expect(requests).toEqual([
-      {
-        method: "POST",
-        url: "https://example.com/v1/budgets/record",
-        body: {
-          key: "customer:acme",
-          amount: "1",
-          idempotencyKey: "evt_blocked",
-          occurredAt: 1_792_000_000_000,
-        },
-      },
-    ])
-  })
-
   it("sends number amounts as exact decimal strings and preserves caller keys", async () => {
     const charged = { allowed: true, amount: "0.00000001", crossed: [], replayed: false, balance }
     const recorded = { amount: "12.5", crossed: [], replayed: false, balance }

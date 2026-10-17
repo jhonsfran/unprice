@@ -235,7 +235,7 @@ export interface paths {
     put?: never
     /**
      * record usage that already happened
-     * @description Consume an amount for work that already ran. Every hard limit must have enough remaining capacity. A denial returns 402 and records no usage. Usage must have occurred within the last 7 days (409 beyond it). For 8 days, a retry with the same idempotency key and amount replays instead of counting twice, and the same key with another amount returns 409.
+     * @description Consume an amount for work that already ran. It always counts, even past a hard limit, because the work cannot be undone: `crossed` names any limit it passed, and hard limits then deny authorize and charge. Usage must have occurred within the last 7 days (409 beyond it). For 8 days, a retry with the same idempotency key and amount replays instead of counting twice, and the same key with another amount returns 409.
      */
     post: operations["budgets.record"]
     delete?: never
@@ -801,7 +801,7 @@ export interface components {
                    */
                   window: "hour" | "day" | "week" | "month" | "never"
                   /**
-                   * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @description hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.
                    * @example hard
                    * @enum {string}
                    */
@@ -812,7 +812,7 @@ export interface components {
                   consumed: string
                   /** @description Held by open holds */
                   held: string
-                  /** @description amount - consumed - held; negative only for a soft limit */
+                  /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                   remaining: string
                   /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
@@ -933,7 +933,7 @@ export interface components {
                    */
                   window: "hour" | "day" | "week" | "month" | "never"
                   /**
-                   * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @description hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.
                    * @example hard
                    * @enum {string}
                    */
@@ -944,7 +944,7 @@ export interface components {
                   consumed: string
                   /** @description Held by open holds */
                   held: string
-                  /** @description amount - consumed - held; negative only for a soft limit */
+                  /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                   remaining: string
                   /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
@@ -1065,7 +1065,7 @@ export interface components {
                    */
                   window: "hour" | "day" | "week" | "month" | "never"
                   /**
-                   * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @description hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.
                    * @example hard
                    * @enum {string}
                    */
@@ -1076,7 +1076,7 @@ export interface components {
                   consumed: string
                   /** @description Held by open holds */
                   held: string
-                  /** @description amount - consumed - held; negative only for a soft limit */
+                  /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                   remaining: string
                   /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
@@ -1197,7 +1197,7 @@ export interface components {
                    */
                   window: "hour" | "day" | "week" | "month" | "never"
                   /**
-                   * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @description hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.
                    * @example hard
                    * @enum {string}
                    */
@@ -1208,7 +1208,7 @@ export interface components {
                   consumed: string
                   /** @description Held by open holds */
                   held: string
-                  /** @description amount - consumed - held; negative only for a soft limit */
+                  /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                   remaining: string
                   /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
@@ -1329,7 +1329,7 @@ export interface components {
                    */
                   window: "hour" | "day" | "week" | "month" | "never"
                   /**
-                   * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @description hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.
                    * @example hard
                    * @enum {string}
                    */
@@ -1340,7 +1340,7 @@ export interface components {
                   consumed: string
                   /** @description Held by open holds */
                   held: string
-                  /** @description amount - consumed - held; negative only for a soft limit */
+                  /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                   remaining: string
                   /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
@@ -1461,7 +1461,7 @@ export interface components {
                    */
                   window: "hour" | "day" | "week" | "month" | "never"
                   /**
-                   * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @description hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.
                    * @example hard
                    * @enum {string}
                    */
@@ -1472,7 +1472,7 @@ export interface components {
                   consumed: string
                   /** @description Held by open holds */
                   held: string
-                  /** @description amount - consumed - held; negative only for a soft limit */
+                  /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                   remaining: string
                   /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
@@ -1593,7 +1593,7 @@ export interface components {
                    */
                   window: "hour" | "day" | "week" | "month" | "never"
                   /**
-                   * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @description hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.
                    * @example hard
                    * @enum {string}
                    */
@@ -1604,7 +1604,7 @@ export interface components {
                   consumed: string
                   /** @description Held by open holds */
                   held: string
-                  /** @description amount - consumed - held; negative only for a soft limit */
+                  /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                   remaining: string
                   /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
@@ -1725,7 +1725,7 @@ export interface components {
                    */
                   window: "hour" | "day" | "week" | "month" | "never"
                   /**
-                   * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @description hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.
                    * @example hard
                    * @enum {string}
                    */
@@ -1736,7 +1736,7 @@ export interface components {
                   consumed: string
                   /** @description Held by open holds */
                   held: string
-                  /** @description amount - consumed - held; negative only for a soft limit */
+                  /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                   remaining: string
                   /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
@@ -1857,7 +1857,7 @@ export interface components {
                    */
                   window: "hour" | "day" | "week" | "month" | "never"
                   /**
-                   * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @description hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.
                    * @example hard
                    * @enum {string}
                    */
@@ -1868,7 +1868,7 @@ export interface components {
                   consumed: string
                   /** @description Held by open holds */
                   held: string
-                  /** @description amount - consumed - held; negative only for a soft limit */
+                  /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                   remaining: string
                   /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
@@ -1989,7 +1989,7 @@ export interface components {
                    */
                   window: "hour" | "day" | "week" | "month" | "never"
                   /**
-                   * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @description hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.
                    * @example hard
                    * @enum {string}
                    */
@@ -2000,7 +2000,7 @@ export interface components {
                   consumed: string
                   /** @description Held by open holds */
                   held: string
-                  /** @description amount - consumed - held; negative only for a soft limit */
+                  /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                   remaining: string
                   /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
@@ -3010,7 +3010,7 @@ export interface operations {
                 /** @description The anchor instant of an anchored window, as an ISO 8601 string */
                 anchor?: string
                 /**
-                 * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                 * @description hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.
                  * @example hard
                  * @enum {string}
                  */
@@ -3040,7 +3040,7 @@ export interface operations {
                    */
                   window: "hour" | "day" | "week" | "month" | "never"
                   /**
-                   * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @description hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.
                    * @example hard
                    * @enum {string}
                    */
@@ -3051,7 +3051,7 @@ export interface operations {
                   consumed: string
                   /** @description Held by open holds */
                   held: string
-                  /** @description amount - consumed - held; negative only for a soft limit */
+                  /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                   remaining: string
                   /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
@@ -3215,7 +3215,7 @@ export interface operations {
                  */
                 window: "hour" | "day" | "week" | "month" | "never"
                 /**
-                 * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                 * @description hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.
                  * @example hard
                  * @enum {string}
                  */
@@ -3226,7 +3226,7 @@ export interface operations {
                 consumed: string
                 /** @description Held by open holds */
                 held: string
-                /** @description amount - consumed - held; negative only for a soft limit */
+                /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                 remaining: string
                 /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
@@ -3377,7 +3377,7 @@ export interface operations {
             released: string
             /** @description Settled at or after the hold's expiresAt */
             expired: boolean
-            /** @description Soft limit ids whose consumed amount first exceeded the threshold. Reservations do not trigger crossings. Replays preserve the original result. */
+            /** @description Limit ids whose consumed amount first exceeded the limit's amount. A hard limit crosses only after recorded usage took its room. Reservations do not trigger crossings. Replays preserve the original result. */
             crossed: string[]
             /** @description True when this answer replays an earlier request instead of applying it again */
             replayed: boolean
@@ -3395,7 +3395,7 @@ export interface operations {
                  */
                 window: "hour" | "day" | "week" | "month" | "never"
                 /**
-                 * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                 * @description hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.
                  * @example hard
                  * @enum {string}
                  */
@@ -3406,7 +3406,7 @@ export interface operations {
                 consumed: string
                 /** @description Held by open holds */
                 held: string
-                /** @description amount - consumed - held; negative only for a soft limit */
+                /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                 remaining: string
                 /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
@@ -3555,7 +3555,7 @@ export interface operations {
                  */
                 window: "hour" | "day" | "week" | "month" | "never"
                 /**
-                 * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                 * @description hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.
                  * @example hard
                  * @enum {string}
                  */
@@ -3566,7 +3566,7 @@ export interface operations {
                 consumed: string
                 /** @description Held by open holds */
                 held: string
-                /** @description amount - consumed - held; negative only for a soft limit */
+                /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                 remaining: string
                 /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
@@ -3701,7 +3701,7 @@ export interface operations {
             allowed: true
             /** @description The amount consumed */
             amount: string
-            /** @description Soft limit ids whose consumed amount first exceeded the threshold. Reservations do not trigger crossings. Replays preserve the original result. */
+            /** @description Limit ids whose consumed amount first exceeded the limit's amount. A hard limit crosses only after recorded usage took its room. Reservations do not trigger crossings. Replays preserve the original result. */
             crossed: string[]
             /** @description True when this answer replays an earlier request instead of applying it again */
             replayed: boolean
@@ -3719,7 +3719,7 @@ export interface operations {
                  */
                 window: "hour" | "day" | "week" | "month" | "never"
                 /**
-                 * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                 * @description hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.
                  * @example hard
                  * @enum {string}
                  */
@@ -3730,7 +3730,7 @@ export interface operations {
                 consumed: string
                 /** @description Held by open holds */
                 held: string
-                /** @description amount - consumed - held; negative only for a soft limit */
+                /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                 remaining: string
                 /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
@@ -3850,7 +3850,7 @@ export interface operations {
            */
           key: string
           /**
-           * @description The amount to record, checked against every hard limit. Recording after work does not authorize that work retroactively.
+           * @description The amount to record. It always counts, even past a hard limit; recording after work does not authorize that work retroactively.
            * @example 0.05
            */
           amount: string
@@ -3877,7 +3877,7 @@ export interface operations {
           "application/json": {
             /** @description The amount consumed */
             amount: string
-            /** @description Soft limit ids whose consumed amount first exceeded the threshold. Reservations do not trigger crossings. Replays preserve the original result. */
+            /** @description Limit ids whose consumed amount first exceeded the limit's amount. A hard limit crosses only after recorded usage took its room. Reservations do not trigger crossings. Replays preserve the original result. */
             crossed: string[]
             /** @description True when this answer replays an earlier request instead of applying it again */
             replayed: boolean
@@ -3895,7 +3895,7 @@ export interface operations {
                  */
                 window: "hour" | "day" | "week" | "month" | "never"
                 /**
-                 * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                 * @description hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.
                  * @example hard
                  * @enum {string}
                  */
@@ -3906,7 +3906,7 @@ export interface operations {
                 consumed: string
                 /** @description Held by open holds */
                 held: string
-                /** @description amount - consumed - held; negative only for a soft limit */
+                /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                 remaining: string
                 /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
@@ -3933,15 +3933,6 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["ErrUnauthorized"]
-        }
-      }
-      /** @description The request does not fit the budget. `details.blocked` names the limit that blocked it and the remedy that would let it through. */
-      402: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          "application/json": components["schemas"]["ErrBudgetExceeded"]
         }
       }
       /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
@@ -4049,7 +4040,7 @@ export interface operations {
                 /** @description The anchor instant of an anchored window, as an ISO 8601 string */
                 anchor?: string
                 /**
-                 * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                 * @description hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.
                  * @example hard
                  * @enum {string}
                  */
@@ -4079,7 +4070,7 @@ export interface operations {
                    */
                   window: "hour" | "day" | "week" | "month" | "never"
                   /**
-                   * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @description hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.
                    * @example hard
                    * @enum {string}
                    */
@@ -4090,7 +4081,7 @@ export interface operations {
                   consumed: string
                   /** @description Held by open holds */
                   held: string
-                  /** @description amount - consumed - held; negative only for a soft limit */
+                  /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                   remaining: string
                   /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
