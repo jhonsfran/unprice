@@ -33,6 +33,15 @@ function decode<T>(text: string): T {
   ) as T
 }
 
+/**
+ * Holds keep their minted `h_<n>`. Charge and record rows are keyed by their key's hash, so a
+ * 256-character idempotency key never becomes a 256-character primary key.
+ */
+function keysOf(operation: Operation): { id: string; keyHash: string } {
+  const keyHash = sha256HexSync(operation.idempotencyKey)
+  return { id: operation.kind === "hold" ? operation.id : `o:${keyHash}`, keyHash }
+}
+
 function statusOf(operation: Operation): (typeof schema.budgetOperations.$inferInsert)["status"] {
   return operation.kind === "hold" ? operation.state.status : "done"
 }
@@ -162,7 +171,9 @@ function bind(
 
       // Before the upserts: a row past its retention frees its key for the row that reuses it.
       for (const operation of purged) {
-        db.delete(operations).where(eq(operations.id, operation.id)).run()
+        db.delete(operations)
+          .where(eq(operations.id, keysOf(operation).id))
+          .run()
       }
       for (const operation of changed) {
         const row = {
@@ -171,12 +182,7 @@ function bind(
           dataJson: encode(operation),
         }
         db.insert(operations)
-          .values({
-            id: operation.id,
-            kind: operation.kind,
-            keyHash: sha256HexSync(operation.idempotencyKey),
-            ...row,
-          })
+          .values({ ...keysOf(operation), kind: operation.kind, ...row })
           .onConflictDoUpdate({ target: operations.id, set: row })
           .run()
       }

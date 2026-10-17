@@ -1,5 +1,6 @@
 import { evictDurableObject, reset, runInDurableObject } from "cloudflare:test"
 import { env } from "cloudflare:workers"
+import { sha256HexSync } from "@unprice/db/utils"
 import { type BudgetConfigInput, upsertBudgetInputSchema } from "@unprice/db/validators"
 import type { BudgetOutcome } from "@unprice/services/budgets"
 import type { BudgetReply, BudgetRequest } from "@unprice/services/use-cases"
@@ -95,6 +96,25 @@ describe("BudgetDO runtime assumptions", () => {
         amount: { $bigint: "1000000000" },
         ttlMs: null,
       })
+    })
+  })
+
+  it("keys a charge row by its key's hash, so a long key never becomes the primary key", async () => {
+    const key = "customer:long-keys"
+    const stub = stubFor(key)
+    await stub.execute(upsert(key, fiftyPerMonth))
+    const longKey = "k".repeat(256)
+    const charge: BudgetRequest = { type: "charge", idempotencyKey: longKey, amount: units(1) }
+
+    expect(outcome(await stub.execute(charge), "charge").replayed).toBe(false)
+    expect(outcome(await stub.execute(charge), "charge").replayed).toBe(true)
+
+    await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
+      expect(
+        state.storage.sql
+          .exec("SELECT id, key_hash FROM budget_operations WHERE kind = 'charge'")
+          .toArray()
+      ).toEqual([{ id: `o:${sha256HexSync(longKey)}`, key_hash: sha256HexSync(longKey) }])
     })
   })
 })

@@ -102,7 +102,10 @@ export type HoldOperation = Readonly<{
   state: HoldState
 }>
 
-/** A charge or record row; its id is `o:<idempotency key>`. */
+/**
+ * A charge or record row; its id is `o:<idempotency key>`. The SQLite store keys the row by the
+ * key's hash instead.
+ */
 export type ChargeOperation = Readonly<{
   kind: "charge" | "record"
   id: string

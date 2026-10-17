@@ -43,6 +43,7 @@ export const budgetLedger = sqliteTable("budget_ledger", {
 export const budgetOperations = sqliteTable(
   "budget_operations",
   {
+    /** `h_<n>` for a hold; `o:<key_hash>` for a charge or record. */
     id: text("id").primaryKey(),
     kind: text("kind", { enum: ["hold", "charge", "record"] }).notNull(),
     status: text("status", {
