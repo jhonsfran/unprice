@@ -1,6 +1,7 @@
 import { sha256HexSync } from "@unprice/db/utils"
 import {
   type BudgetRecord,
+  type ChargeOperation,
   type HoldOperation,
   type Ledger,
   type Operation,
@@ -9,7 +10,7 @@ import {
   dueAt,
   emptyLedger,
 } from "@unprice/services/budgets"
-import { and, asc, desc, eq, inArray, lte, min, ne, notInArray } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, lte, min, notInArray, sql } from "drizzle-orm"
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite"
 import * as schema from "./db/schema"
 import type { BudgetStore, BudgetStoreTx, Sync } from "./ports"
@@ -18,28 +19,48 @@ type SqliteHandle = DrizzleSqliteDODatabase<typeof schema>
 
 const SINGLETON_ID = 1
 
-/** JSON with bigints tagged, so amounts nested in facts and rows round-trip exactly. */
+/** JSON with bigints tagged, so amounts in the config, counters, and rows round-trip exactly. */
 function encode(value: unknown): string {
-  return JSON.stringify(value, (_key, item) =>
+  return JSON.stringify(value, (_key: string, item: unknown) =>
     typeof item === "bigint" ? { $bigint: item.toString() } : item
   )
 }
 
 function decode<T>(text: string): T {
-  return JSON.parse(text, (_key, item) =>
-    item !== null && typeof item === "object" && typeof item.$bigint === "string"
+  return JSON.parse(text, (_key: string, item: unknown) =>
+    item !== null &&
+    typeof item === "object" &&
+    "$bigint" in item &&
+    typeof item.$bigint === "string"
       ? BigInt(item.$bigint)
       : item
   ) as T
+}
+
+type Payload = Omit<HoldOperation, "kind" | "id"> | Omit<ChargeOperation, "kind" | "id">
+
+/** `kind` and `id` live in their own columns, so the payload leaves them out. */
+function encodeOperation({ kind: _kind, id: _id, ...payload }: Operation): string {
+  return encode(payload)
+}
+
+function decodeOperation(
+  row: Pick<typeof schema.budgetOperations.$inferSelect, "id" | "kind" | "dataJson">
+): Operation {
+  const payload = decode<Payload>(row.dataJson)
+  if (row.kind === "hold" && "state" in payload) return { ...payload, kind: "hold", id: row.id }
+  if (row.kind !== "hold" && "crossed" in payload) {
+    return { ...payload, kind: row.kind, id: `o:${payload.idempotencyKey}` }
+  }
+  throw new Error(`budget operation ${row.id} does not match its kind ${row.kind}`)
 }
 
 /**
  * Holds keep their minted `h_<n>`. Charge and record rows are keyed by their key's hash, so a
  * 256-character idempotency key never becomes a 256-character primary key.
  */
-function keysOf(operation: Operation): { id: string; keyHash: string } {
-  const keyHash = sha256HexSync(operation.idempotencyKey)
-  return { id: operation.kind === "hold" ? operation.id : `o:${keyHash}`, keyHash }
+function storedId(operation: Operation): string {
+  return operation.kind === "hold" ? operation.id : `o:${sha256HexSync(operation.idempotencyKey)}`
 }
 
 function statusOf(operation: Operation): (typeof schema.budgetOperations.$inferInsert)["status"] {
@@ -58,9 +79,14 @@ function bind(
   db: SqliteHandle | Parameters<Parameters<SqliteHandle["transaction"]>[0]>[0]
 ): BudgetStoreTx {
   const operations = schema.budgetOperations
+  const terminal = sql`${operations.status} IN ('done', 'settled', 'released')`
   const readOperationWhere = (where: ReturnType<typeof eq>) => {
-    const row = db.select({ data: operations.dataJson }).from(operations).where(where).get()
-    return row ? decode<Operation>(row.data) : null
+    const row = db
+      .select({ id: operations.id, kind: operations.kind, dataJson: operations.dataJson })
+      .from(operations)
+      .where(where)
+      .get()
+    return row ? decodeOperation(row) : null
   }
 
   return {
@@ -98,18 +124,7 @@ function bind(
     readOperation: (id) => readOperationWhere(eq(operations.id, id)),
 
     readOperationByKey: (idempotencyKey) =>
-      readOperationWhere(eq(operations.keyHash, sha256HexSync(idempotencyKey))),
-
-    readDueHolds(at, limit) {
-      return db
-        .select({ data: operations.dataJson })
-        .from(operations)
-        .where(and(eq(operations.status, "open"), lte(operations.dueAt, at)))
-        .orderBy(asc(operations.dueAt))
-        .limit(limit)
-        .all()
-        .map((row) => decode<HoldOperation>(row.data))
-    },
+      readOperationWhere(eq(sql`${operations.dataJson} ->> '$.idempotencyKey'`, idempotencyKey)),
 
     readHistory(windowIds, limit) {
       const history = schema.budgetWindowHistory
@@ -125,7 +140,7 @@ function bind(
       )
     },
 
-    commit({ budget, ledger, purged, operations: changed, periods, now }) {
+    commit({ budget, ledger, purged, operations: changed, periods, retiredWindows, now }) {
       if (budget) {
         const record = {
           key: budget.key,
@@ -154,6 +169,13 @@ function bind(
 
       // One statement per row: DO SQLite caps bound parameters at 100 per statement.
       const history = schema.budgetWindowHistory
+      if (retiredWindows.length > 0) {
+        db.delete(history)
+          .where(
+            sql`${history.windowId} IN (SELECT value FROM json_each(${JSON.stringify(retiredWindows)}))`
+          )
+          .run()
+      }
       for (const period of periods) {
         const ofWindow = eq(history.windowId, period.windowId)
         db.insert(history).values(period).run()
@@ -172,19 +194,24 @@ function bind(
       // Before the upserts: a row past its retention frees its key for the row that reuses it.
       for (const operation of purged) {
         db.delete(operations)
-          .where(eq(operations.id, keysOf(operation).id))
+          .where(eq(operations.id, storedId(operation)))
           .run()
       }
       for (const operation of changed) {
+        // An open hold has no retention end; the due index skips it by status, not by this value.
         const row = {
           status: statusOf(operation),
-          dueAt: dueAt(operation),
-          dataJson: encode(operation),
+          dueAt: dueAt(operation) ?? 0,
+          dataJson: encodeOperation(operation),
         }
-        db.insert(operations)
-          .values({ ...keysOf(operation), kind: operation.kind, ...row })
-          .onConflictDoUpdate({ target: operations.id, set: row })
-          .run()
+        const insert = db
+          .insert(operations)
+          .values({ id: storedId(operation), kind: operation.kind, ...row })
+        if (operation.kind === "hold") {
+          insert.onConflictDoUpdate({ target: operations.id, set: row }).run()
+        } else {
+          insert.run()
+        }
       }
     },
 
@@ -192,7 +219,7 @@ function bind(
       const expired = db
         .select({ id: operations.id })
         .from(operations)
-        .where(and(ne(operations.status, "open"), lte(operations.dueAt, now)))
+        .where(and(terminal, lte(operations.dueAt, now)))
         .orderBy(asc(operations.dueAt))
         .limit(limit)
       db.delete(operations).where(inArray(operations.id, expired)).run()
@@ -203,6 +230,7 @@ function bind(
         db
           .select({ at: min(operations.dueAt) })
           .from(operations)
+          .where(terminal)
           .get()?.at ?? null
       )
     },

@@ -4,6 +4,7 @@ import { sha256HexSync } from "@unprice/db/utils"
 import { type BudgetConfigInput, upsertBudgetInputSchema } from "@unprice/db/validators"
 import type { BudgetOutcome } from "@unprice/services/budgets"
 import type { BudgetReply, BudgetRequest } from "@unprice/services/use-cases"
+import { and, asc, eq, lte, min, sql } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
 import { afterEach, describe, expect, it } from "vitest"
@@ -71,7 +72,7 @@ function rejection(reply: BudgetReply) {
 }
 
 describe("BudgetDO runtime assumptions", () => {
-  it("carries bigint across RPC, stores amounts as TEXT, and hashes keys synchronously", async () => {
+  it("carries bigint across RPC and stores exact decimal amounts", async () => {
     const key = "customer:acme"
     const stub = stubFor(key)
     await stub.execute(upsert(key, fiftyPerMonth))
@@ -88,9 +89,8 @@ describe("BudgetDO runtime assumptions", () => {
         state.storage.sql.exec("SELECT held, typeof(held) AS type FROM budget_ledger").one()
       ).toEqual({ held: "1000000000", type: "text" })
       const row = state.storage.sql
-        .exec("SELECT key_hash, data_json FROM budget_operations WHERE id = 'h_1'")
-        .one() as { key_hash: string; data_json: string }
-      expect(row.key_hash).toBe("f55ff16f66f43360266b95db6f8fec01d76031054306ae4a4b380598f6cfd114")
+        .exec("SELECT data_json FROM budget_operations WHERE id = 'h_1'")
+        .one() as { data_json: string }
       expect(JSON.parse(row.data_json)).toMatchObject({
         idempotencyKey: "a1",
         amount: { $bigint: "1000000000" },
@@ -111,10 +111,46 @@ describe("BudgetDO runtime assumptions", () => {
 
     await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
       expect(
+        state.storage.sql.exec("SELECT id FROM budget_operations WHERE kind = 'charge'").toArray()
+      ).toEqual([{ id: `o:${sha256HexSync(longKey)}` }])
+    })
+  })
+
+  it("finds a row by key, and the next due row, through their indexes", async () => {
+    const key = "customer:indexes"
+    const stub = stubFor(key)
+    await stub.execute(upsert(key, fiftyPerMonth))
+
+    await runInDurableObject(stub, (_instance: BudgetDO, state) => {
+      // The same queries the store builds, so the plan covers the SQL drizzle renders.
+      const db = drizzle(state.storage, { schema, logger: false })
+      const operations = schema.budgetOperations
+      const terminal = sql`${operations.status} IN ('done', 'settled', 'released')`
+      const plan = ({ sql: query, params }: { sql: string; params: unknown[] }) =>
         state.storage.sql
-          .exec("SELECT id, key_hash FROM budget_operations WHERE kind = 'charge'")
+          .exec(`EXPLAIN QUERY PLAN ${query}`, ...params)
           .toArray()
-      ).toEqual([{ id: `o:${sha256HexSync(longKey)}`, key_hash: sha256HexSync(longKey) }])
+          .map((row) => String(row.detail))
+          .join("; ")
+
+      const byKey = db
+        .select({ dataJson: operations.dataJson })
+        .from(operations)
+        .where(eq(sql`${operations.dataJson} ->> '$.idempotencyKey'`, "k"))
+      expect(plan(byKey.toSQL())).toContain("USING INDEX budget_operations_key_idx")
+      const due = db
+        .select({ id: operations.id })
+        .from(operations)
+        .where(and(terminal, lte(operations.dueAt, 0)))
+        .orderBy(asc(operations.dueAt))
+        .limit(2048)
+      const next = db
+        .select({ at: min(operations.dueAt) })
+        .from(operations)
+        .where(terminal)
+      for (const query of [due, next]) {
+        expect(plan(query.toSQL())).toContain("USING INDEX budget_operations_terminal_due_idx")
+      }
     })
   })
 })
@@ -138,12 +174,7 @@ describe("BudgetDO verbs", () => {
       await stub.execute({ type: "settle", holdId: "h_1", amount: units(7) }),
       "settle"
     )
-    expect([settled.covered, settled.released, settled.overrun, settled.late]).toEqual([
-      units(7),
-      units(3),
-      BigInt(0),
-      false,
-    ])
+    expect([settled.actual, settled.released]).toEqual([units(7), units(3)])
     expect(settled.balance.remaining).toBe(units(43))
 
     const charged = outcome(
@@ -157,12 +188,12 @@ describe("BudgetDO verbs", () => {
         type: "record",
         idempotencyKey: "r1",
         occurredAt: Date.now(),
-        amount: units(45),
+        amount: units(40),
       }),
       "record"
     )
-    expect(recorded.crossed).toEqual(["month"])
-    expect(recorded.balance.remaining).toBe(-units(5))
+    expect(recorded.crossed).toEqual([])
+    expect(recorded.balance.remaining).toBe(BigInt(0))
 
     const denied = rejection(
       await stub.execute({ type: "charge", idempotencyKey: "c2", amount: units(1) })
@@ -172,7 +203,7 @@ describe("BudgetDO verbs", () => {
       blocked: {
         limitId: "month",
         window: "month",
-        remaining: -units(5),
+        remaining: BigInt(0),
         remedy: "wait_for_reset",
       },
     })
@@ -187,8 +218,8 @@ describe("BudgetDO verbs", () => {
     ).toEqual({ code: "HOLD_NOT_FOUND", holdId: "h_99" })
 
     const read = outcome(await stub.execute({ type: "get" }), "get")
-    expect(read.budget.balance.remaining).toBe(-units(5))
-    expect(read.budget.balance.limits[0]?.consumed).toBe(units(55))
+    expect(read.budget.balance.remaining).toBe(BigInt(0))
+    expect(read.budget.balance.limits[0]?.consumed).toBe(units(50))
   })
 
   it("refuses spend on a budget past its closesAt and reports it closed", async () => {
@@ -342,48 +373,120 @@ describe("BudgetDO verbs", () => {
 })
 
 describe("BudgetDO alarm", () => {
-  it("lapses a due hold, purges the tombstone, and sleeps when nothing is due", async () => {
-    const key = "customer:alarm"
+  it("keeps unresolved capacity across expiry, reset and alarms", async () => {
+    const key = "customer:uncertain"
     const stub = stubFor(key)
     const t0 = midMonthAhead()
     let now = t0
-
     await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
       await migrate(drizzle(state.storage), migrations)
-      const errors: string[] = []
-      const processor = realStorageProcessor(state, () => now, errors)
-
-      await processor.execute(upsert(key, fiftyPerMonth))
-      await expect(state.storage.getAlarm()).resolves.toBeNull()
+      const processor = realStorageProcessor(state, () => now)
+      await processor.execute(upsert(key, { limits: [{ id: "cap", amount: "50", window: "day" }] }))
       await processor.execute({
         type: "authorize",
-        idempotencyKey: "k1",
-        amount: units(20),
+        idempotencyKey: "unknown-provider-result",
+        amount: units(40),
         ttlMs: 1_000,
       })
-      await expect(state.storage.getAlarm()).resolves.toBe(t0 + 3_000)
-
-      // The runtime clears an alarm when it fires; the test does it by hand.
-      const fire = async (at: number) => {
-        now = at
-        await state.storage.deleteAlarm()
-        await processor.alarm()
-      }
-      await fire(t0 + 3_000)
-      const lapsed = outcome(await processor.execute({ type: "get" }), "get")
-      expect(lapsed.budget.balance.held).toBe(BigInt(0))
-      await expect(state.storage.getAlarm()).resolves.toBe(t0 + 3_000 + 24 * HOUR)
-
-      await fire(t0 + 3_000 + 24 * HOUR)
-      expect(state.storage.sql.exec("SELECT count(*) AS n FROM budget_operations").one()).toEqual({
-        n: 0,
-      })
       await expect(state.storage.getAlarm()).resolves.toBeNull()
-
+      now += 2 * 24 * HOUR
+      await processor.alarm()
       expect(
-        rejection(await processor.execute({ type: "settle", holdId: "h_1", amount: units(4) }))
-      ).toEqual({ code: "HOLD_RETIRED", holdId: "h_1" })
-      expect(errors).toEqual([])
+        rejection(
+          await processor.execute({
+            type: "charge",
+            idempotencyKey: "competitor",
+            amount: units(11),
+          })
+        ).code
+      ).toBe("LIMIT_EXCEEDED")
+      expect(
+        rejection(
+          await processor.execute({
+            type: "record",
+            idempotencyKey: "event",
+            amount: units(11),
+            occurredAt: now,
+          })
+        ).code
+      ).toBe("LIMIT_EXCEEDED")
+      expect(
+        rejection(await processor.execute({ type: "settle", holdId: "h_1", amount: units(41) }))
+      ).toEqual({
+        code: "HOLD_AMOUNT_EXCEEDED",
+        holdId: "h_1",
+        maximum: units(40),
+        actual: units(41),
+      })
+      expect(state.storage.sql.exec("SELECT held FROM budget_ledger").one()).toEqual({
+        held: units(40).toString(),
+      })
+      expect(
+        rejection(
+          await processor.execute(
+            upsert(key, { limits: [{ id: "cap", amount: "39", window: "day" }] })
+          )
+        ).code
+      ).toBe("LIMIT_BELOW_USAGE")
+      const final = outcome(
+        await processor.execute({ type: "settle", holdId: "h_1", amount: units(35) }),
+        "settle"
+      )
+      expect([final.expired, final.actual, final.released, final.balance.remaining]).toEqual([
+        true,
+        units(35),
+        units(5),
+        units(15),
+      ])
+      await expect(state.storage.getAlarm()).resolves.toBe(now + 24 * HOUR)
+      now += 24 * HOUR
+      await processor.alarm()
+      expect(
+        rejection(await processor.execute({ type: "settle", holdId: "h_1", amount: units(35) }))
+          .code
+      ).toBe("HOLD_RETIRED")
+    })
+    await evictDurableObject(stub)
+    const read = outcome(await stub.execute({ type: "get" }), "get")
+    expect(read.budget.balance.held).toBe(BigInt(0))
+  })
+
+  it("keeps 64 expired reservations until explicit recovery releases them", async () => {
+    const key = "customer:many-uncertain"
+    const stub = stubFor(key)
+    let now = midMonthAhead()
+    await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
+      await migrate(drizzle(state.storage), migrations)
+      const processor = realStorageProcessor(state, () => now)
+      await processor.execute(
+        upsert(key, { limits: [{ id: "cap", amount: "64", window: "never" }] })
+      )
+      for (let i = 0; i < 64; i++) {
+        outcome(
+          await processor.execute({
+            type: "authorize",
+            idempotencyKey: `hold-${i}`,
+            amount: units(1),
+            ttlMs: 1_000,
+          }),
+          "authorize"
+        )
+      }
+      now += 8 * 24 * HOUR
+      await processor.alarm()
+    })
+    await evictDurableObject(stub)
+    await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
+      const processor = realStorageProcessor(state, () => now)
+      const request = { type: "authorize", idempotencyKey: "next", amount: units(40) } as const
+      expect(rejection(await processor.execute(request)).code).toBe("LIMIT_EXCEEDED")
+      expect(outcome(await processor.execute({ type: "get" }), "get").budget.balance.held).toBe(
+        units(64)
+      )
+      for (let i = 1; i <= 40; i++) await processor.execute({ type: "release", holdId: `h_${i}` })
+      expect(outcome(await processor.execute(request), "authorize").balance.remaining).toBe(
+        BigInt(0)
+      )
     })
   })
 
@@ -480,6 +583,27 @@ describe("BudgetDO alarm", () => {
       expect(rows()).toEqual({ n: 0 })
       expect(rejection(await processor.execute(request)).code).toBe("TOO_LATE")
     })
+  })
+
+  it("propagates a failed attempt to re-arm after a sweep error", async () => {
+    const errors: string[] = []
+    const processor = new BudgetProcessor({
+      clock: { now: () => Date.now() },
+      logger: { error: (message) => errors.push(message) },
+      scheduler: {
+        getAlarm: async () => null,
+        setAlarm: async () => {
+          throw new Error("alarm unavailable")
+        },
+      },
+      store: {
+        atomically: () => {
+          throw new Error("storage unavailable")
+        },
+      },
+    })
+    await expect(processor.alarm()).rejects.toThrow("alarm unavailable")
+    expect(errors).toEqual(["budget alarm failed", "budget alarm could not re-arm"])
   })
 
   it("re-arms with a retry when the sweep throws", async () => {

@@ -19,15 +19,17 @@ function countersFrom(entries: Iterable<[WindowId, WindowUsage]>): WindowCounter
 /**
  * Moves every counter forward (only) to the period containing `at`, under the limits in force.
  * Returns the ended periods that had usage on a limited window: the window history. An anchored
- * counter no limit references is dropped when its period ends. Unchanged counters keep identity.
+ * counter no limit references is dropped when its period ends and listed in `retired`, so the store
+ * drops its history too. Unchanged counters keep identity.
  */
 export function rollUsage(
   usage: WindowCounters,
   at: number,
   limits: readonly BudgetLimit[]
-): { usage: WindowCounters; periods: WindowPeriod[] } {
+): { usage: WindowCounters; periods: WindowPeriod[]; retired: WindowId[] } {
   const limited = new Set(limits.map(windowIdOf))
   const periods: WindowPeriod[] = []
+  const retired: WindowId[] = []
   const rolled = countersOf(usage).flatMap(([id, counter]): Array<[WindowId, WindowUsage]> => {
     const spec = windowSpecOf(id)
     const start = windowBounds(spec, at).start
@@ -37,10 +39,13 @@ export function rollUsage(
       if (end === null) throw new Error(`window ${id} rolled but never ends`)
       periods.push({ windowId: id, start: counter.start, end, consumed: counter.consumed })
     }
-    if (spec.anchor !== undefined && !limited.has(id)) return []
+    if (spec.anchor !== undefined && !limited.has(id)) {
+      retired.push(id)
+      return []
+    }
     return [[id, { start, consumed: ZERO }]]
   })
-  return { usage: countersFrom(rolled), periods }
+  return { usage: countersFrom(rolled), periods, retired }
 }
 
 /** After a config change: a counter for every anchored window id that has none, counting from `at`. */
@@ -70,22 +75,17 @@ export function consume(usage: WindowCounters, amount: Amount): WindowCounters {
 }
 
 /**
- * When a row next needs attention: an open hold lapses at `lapsesAt`; a record is kept for
- * RECORD_DEDUPE_MS so a retry never counts twice; every other row is purged
- * OPERATION_RETENTION_MS after it closed. A store mirrors this in an indexed `due_at` column.
+ * When a row's retention ends and the alarm may purge it; null for an open hold, which stays until
+ * it is settled or released. A record is kept for RECORD_DEDUPE_MS so a retry never counts twice;
+ * every other row is purged OPERATION_RETENTION_MS after it closed. A store mirrors this in an
+ * indexed `due_at` column.
  */
-export function dueAt(operation: Operation): number {
+export function dueAt(operation: Operation): number | null {
   if (operation.kind !== "hold") {
     const retention = operation.kind === "record" ? RECORD_DEDUPE_MS : OPERATION_RETENTION_MS
     return operation.createdAt + retention
   }
-  switch (operation.state.status) {
-    case "open":
-      return operation.lapsesAt
-    case "lapsed":
-      return operation.state.lapsedAt + OPERATION_RETENTION_MS
-    case "settled":
-    case "released":
-      return operation.state.closedAt + OPERATION_RETENTION_MS
-  }
+  return operation.state.status === "open"
+    ? null
+    : operation.state.closedAt + OPERATION_RETENTION_MS
 }

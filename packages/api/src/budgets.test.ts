@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest"
-import { BudgetExceededError, BudgetRequestError, BudgetSettleError } from "./budgets"
+import { describe, expect, it, vi } from "vitest"
+import {
+  BudgetExceededError,
+  BudgetRecoveryError,
+  BudgetRequestError,
+  BudgetSettleError,
+} from "./budgets"
 import { Unprice } from "./client"
 
 const json = (body: unknown, status = 200) =>
@@ -38,10 +43,7 @@ const authorized = {
 const settled = {
   holdId: "h_7",
   actual: "0.031",
-  covered: "0.031",
   released: "0.019",
-  overrun: "0",
-  late: false,
   expired: false,
   crossed: [],
   replayed: false,
@@ -93,13 +95,13 @@ const conflict = () =>
 
 type Reply = Response | Error
 
-const createClient = (replies: Reply[]) => {
+const createClient = (replies: Reply[], retryAttempts = 0) => {
   const requests: Array<{ method: string; url: string; body: unknown }> = []
   const client = new Unprice({
     token: "test-token",
     baseUrl: "https://example.com",
     disableTelemetry: true,
-    retry: { attempts: 0 },
+    retry: { attempts: retryAttempts, backoff: () => 0 },
     fetch: async (request) => {
       const text = await request.text()
       requests.push({
@@ -205,6 +207,49 @@ describe("budget handle", () => {
     expect(authorization.error?.code).toBe("CONFLICT")
   })
 
+  it.each(["authorize", "charge"] as const)(
+    "recovers a committed %s after a lost response with the caller's key",
+    async (verb) => {
+      const committedKeys = new Set<string>()
+      const bodies: unknown[] = []
+      const charged = { allowed: true, amount: "0.05", crossed: [], replayed: true, balance }
+      const client = new Unprice({
+        token: "test-token",
+        baseUrl: "https://example.com",
+        disableTelemetry: true,
+        retry: { attempts: 0 },
+        fetch: async (request) => {
+          expect(request.url).toBe(`https://example.com/v1/budgets/${verb}`)
+          const body = (await request.json()) as { idempotencyKey: string }
+          bodies.push(body)
+          if (!committedKeys.has(body.idempotencyKey)) {
+            committedKeys.add(body.idempotencyKey)
+            throw new TypeError("Response lost after commit")
+          }
+          return json(verb === "authorize" ? { ...authorized, replayed: true } : charged)
+        },
+      })
+      const budget = client.budget("customer:acme")
+      const input = { amount: "0.05", idempotencyKey: `msg_lost_${verb}` }
+
+      const uncertain = await budget[verb](input)
+      expect(uncertain).toMatchObject({ result: { allowed: false, degraded: true } })
+
+      const recovered = await budget[verb](input)
+      expect(recovered).toMatchObject({
+        result: { allowed: true, degraded: false, replayed: true },
+      })
+      if (verb === "authorize") {
+        expect(recovered).toMatchObject({ result: { hold: { id: authorized.holdId } } })
+      }
+      expect(committedKeys.size).toBe(1)
+      expect(bodies).toEqual([
+        { ...input, key: "customer:acme" },
+        { ...input, key: "customer:acme" },
+      ])
+    }
+  )
+
   it("records with the occurredAt the caller passes", async () => {
     const recorded = { amount: "1", crossed: [], replayed: false, balance }
     const { budget, requests } = createClient([json(recorded)])
@@ -220,19 +265,55 @@ describe("budget handle", () => {
     })
   })
 
-  it("sends number amounts as exact decimal strings and generates idempotency keys", async () => {
-    const charged = { allowed: true, amount: "0.3", crossed: [], replayed: false, balance }
-    const recorded = { amount: "1250", crossed: ["month"], replayed: false, balance }
+  it("returns the API error when a record exceeds a hard limit", async () => {
+    const { budget, requests } = createClient([exceeded()])
+
+    const result = await budget.record({
+      amount: "1",
+      idempotencyKey: "evt_blocked",
+      occurredAt: 1_792_000_000_000,
+    })
+
+    expect(result).toEqual({
+      error: {
+        code: "BUDGET_EXCEEDED",
+        message: "Budget exceeded",
+        docs: "https://docs.unprice.dev/api-reference/errors/code/BUDGET_EXCEEDED",
+        requestId: "req_1",
+        details: { kind: "budget_exceeded", blocked, balance },
+      },
+    })
+    expect(requests).toEqual([
+      {
+        method: "POST",
+        url: "https://example.com/v1/budgets/record",
+        body: {
+          key: "customer:acme",
+          amount: "1",
+          idempotencyKey: "evt_blocked",
+          occurredAt: 1_792_000_000_000,
+        },
+      },
+    ])
+  })
+
+  it("sends number amounts as exact decimal strings and preserves caller keys", async () => {
+    const charged = { allowed: true, amount: "0.00000001", crossed: [], replayed: false, balance }
+    const recorded = { amount: "12.5", crossed: [], replayed: false, balance }
     const { budget, requests } = createClient([
-      json(authorized),
+      json({ ...authorized, amount: "0.3" }),
       json(charged),
       json(recorded),
-      json(settled),
+      json({ ...settled, actual: "0.00000025", released: "0.29999975" }),
     ])
 
-    const authorization = await budget.authorize({ amount: 0.1 + 0.2, ttlMs: 30_000 })
-    const charge = await budget.charge({ amount: 0.000000014 })
-    const record = await budget.record({ amount: 1250, idempotencyKey: "evt_1", occurredAt: 1 })
+    const authorization = await budget.authorize({
+      amount: 0.1 + 0.2,
+      ttlMs: 30_000,
+      idempotencyKey: "msg_decimal",
+    })
+    const charge = await budget.charge({ amount: 0.000000014, idempotencyKey: "charge_decimal" })
+    const record = await budget.record({ amount: 12.5, idempotencyKey: "evt_1", occurredAt: 1 })
     if (!authorization.result?.allowed) {
       throw new Error("expected an allowed authorization")
     }
@@ -241,20 +322,19 @@ describe("budget handle", () => {
     expect(charge).toEqual({ result: { ...charged, degraded: false } })
     expect(record).toEqual({ result: recorded })
     const bodies = requests.map((request) => request.body as Record<string, unknown>)
-    expect(bodies.map(({ amount }) => amount)).toEqual(["0.3", "0.00000001", "1250", "0.00000025"])
+    expect(bodies.map(({ amount }) => amount)).toEqual(["0.3", "0.00000001", "12.5", "0.00000025"])
     expect(bodies[0]?.ttlMs).toBe(30_000)
-    expect(bodies[0]?.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/)
-    expect(bodies[1]?.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/)
-    expect(bodies[0]?.idempotencyKey).not.toBe(bodies[1]?.idempotencyKey)
+    expect(bodies[0]?.idempotencyKey).toBe("msg_decimal")
+    expect(bodies[1]?.idempotencyKey).toBe("charge_decimal")
     expect(bodies[2]?.idempotencyKey).toBe("evt_1")
   })
 
   it("rejects non-finite number amounts before sending", async () => {
     const { budget, requests } = createClient([])
 
-    await expect(budget.authorize({ amount: Number.NaN })).rejects.toThrow(
-      "Budget amounts must be finite, received NaN"
-    )
+    await expect(
+      budget.authorize({ amount: Number.NaN, idempotencyKey: "msg_invalid" })
+    ).rejects.toThrow("Budget amounts must be finite, received NaN")
     expect(requests).toEqual([])
   })
 
@@ -296,17 +376,83 @@ describe("budget.spend", () => {
     ])
   })
 
-  it("releases the hold and rethrows when the work throws", async () => {
-    const { budget, requests } = createClient([json(authorized), json(released)])
+  it("retains uncertain usage and exposes the hold for partial settlement", async () => {
+    const { budget, requests } = createClient([json(authorized), json(settled)])
+    const cause = new Error("model timed out after producing tokens")
 
-    await expect(
-      budget.spend({ estimate: "0.05" }, async () => {
-        throw new Error("model timed out")
+    const error = await budget
+      .spend({ estimate: "0.05", idempotencyKey: "msg_timeout" }, async () => {
+        throw cause
       })
-    ).rejects.toThrow("model timed out")
+      .catch((caught: unknown) => caught)
+
+    if (!(error instanceof BudgetRecoveryError)) throw error
+    expect(error).toMatchObject({
+      name: "BudgetRecoveryError",
+      reason: "work_failed",
+      idempotencyKey: "msg_timeout",
+      hold: { id: "h_7", key: "customer:acme" },
+    })
+    expect(error.cause).toBe(cause)
+    expect(requests.map(({ url }) => url)).toEqual(["https://example.com/v1/budgets/authorize"])
+
+    const recovery = await error.hold.settle({ amount: "0.031" })
+
+    expect(recovery).toEqual({ result: settled })
     expect(requests.map(({ url, body }) => [url, body])).toEqual([
-      ["https://example.com/v1/budgets/authorize", expect.any(Object)],
-      ["https://example.com/v1/budgets/release", { key: "customer:acme", holdId: "h_7" }],
+      [
+        "https://example.com/v1/budgets/authorize",
+        { key: "customer:acme", amount: "0.05", idempotencyKey: "msg_timeout" },
+      ],
+      [
+        "https://example.com/v1/budgets/settle",
+        { key: "customer:acme", holdId: "h_7", amount: "0.031" },
+      ],
+    ])
+  })
+
+  it("lets the caller release after confirming zero usage", async () => {
+    const { budget, requests } = createClient([json(authorized), json(released)])
+    const error = await budget
+      .spend({ estimate: "0.05", idempotencyKey: "msg_canceled" }, async () => {
+        throw new Error("provider rejected the request before starting")
+      })
+      .catch((caught: unknown) => caught)
+
+    if (!(error instanceof BudgetRecoveryError)) throw error
+    const recovery = await error.hold.release()
+
+    expect(recovery).toEqual({ result: released })
+    expect(requests.map(({ url }) => url)).toEqual([
+      "https://example.com/v1/budgets/authorize",
+      "https://example.com/v1/budgets/release",
+    ])
+  })
+
+  it("does not repeat work when authorization replays", async () => {
+    const { budget, requests } = createClient([json({ ...authorized, replayed: true })])
+    let executions = 0
+
+    const error = await budget
+      .spend({ estimate: "0.05", idempotencyKey: "msg_replay" }, async () => {
+        executions += 1
+        return { value: "duplicate work", actual: "0.031" }
+      })
+      .catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(BudgetRecoveryError)
+    expect(error).toMatchObject({
+      reason: "authorization_replayed",
+      idempotencyKey: "msg_replay",
+      hold: { id: "h_7", key: "customer:acme", amount: "0.05" },
+    })
+    expect(executions).toBe(0)
+    expect(requests).toEqual([
+      {
+        method: "POST",
+        url: "https://example.com/v1/budgets/authorize",
+        body: { key: "customer:acme", amount: "0.05", idempotencyKey: "msg_replay" },
+      },
     ])
   })
 
@@ -315,7 +461,7 @@ describe("budget.spend", () => {
     let ran = false
 
     const error = await budget
-      .spend({ estimate: "1" }, async () => {
+      .spend({ estimate: "1", idempotencyKey: "msg_denied" }, async () => {
         ran = true
         return { value: "unreachable", actual: "1" }
       })
@@ -327,40 +473,112 @@ describe("budget.spend", () => {
       message: "Budget exceeded: limit month (wait_for_reset)",
       blocked: { reason: "limit", ...blocked },
       balance,
+      idempotencyKey: "msg_denied",
     })
   })
 
-  it("throws BudgetExceededError with an unavailable block when Unprice is unreachable", async () => {
-    const { budget } = createClient([new TypeError("fetch failed")])
+  it("exposes a generated key to recover an uncertain authorization", async () => {
+    const { budget, requests } = createClient([
+      new TypeError("fetch failed"),
+      json({ ...authorized, replayed: true }),
+    ])
+    let executions = 0
+    const work = async () => {
+      executions += 1
+      return { value: "unreachable", actual: "1" }
+    }
 
     const error = await budget
-      .spend({ estimate: "1" }, async () => ({ value: "unreachable", actual: "1" }))
+      .spend({ estimate: "1", ttlMs: 30_000 }, work)
       .catch((caught: unknown) => caught)
 
-    expect(error).toBeInstanceOf(BudgetExceededError)
+    if (!(error instanceof BudgetExceededError)) throw error
     expect(error).toMatchObject({
       message: "Budget unavailable: fetch failed",
       blocked: { reason: "unavailable", remedy: "retry" },
       balance: null,
     })
+    expect(error.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/)
+
+    const recovery = await budget
+      .spend({ estimate: "1", ttlMs: 30_000, idempotencyKey: error.idempotencyKey }, work)
+      .catch((caught: unknown) => caught)
+
+    expect(recovery).toMatchObject({
+      reason: "authorization_replayed",
+      idempotencyKey: error.idempotencyKey,
+      hold: { id: "h_7" },
+    })
+    expect(executions).toBe(0)
+    expect(requests.map(({ body }) => body)).toEqual([
+      {
+        key: "customer:acme",
+        amount: "1",
+        ttlMs: 30_000,
+        idempotencyKey: error.idempotencyKey,
+      },
+      {
+        key: "customer:acme",
+        amount: "1",
+        ttlMs: 30_000,
+        idempotencyKey: error.idempotencyKey,
+      },
+    ])
+  })
+
+  it("keeps the same generated key across transport retries", async () => {
+    const { budget, requests } = createClient(
+      [new TypeError("response lost after commit"), json({ ...authorized, replayed: true })],
+      1
+    )
+    let executions = 0
+    const error = await budget
+      .spend({ estimate: "0.05" }, async () => {
+        executions += 1
+        return { value: "unreachable", actual: "0.031" }
+      })
+      .catch((caught: unknown) => caught)
+
+    if (!(error instanceof BudgetRecoveryError)) throw error
+    expect(error.reason).toBe("authorization_replayed")
+    expect(error.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/)
+    expect(executions).toBe(0)
+    expect(requests.map(({ body }) => body)).toEqual([
+      { key: "customer:acme", amount: "0.05", idempotencyKey: error.idempotencyKey },
+      { key: "customer:acme", amount: "0.05", idempotencyKey: error.idempotencyKey },
+    ])
   })
 
   it("throws BudgetRequestError when the API rejects the authorization", async () => {
     const { budget } = createClient([conflict()])
 
     const error = await budget
-      .spend({ estimate: "1" }, async () => ({ value: "unreachable", actual: "1" }))
+      .spend({ estimate: "1", idempotencyKey: "msg_conflict" }, async () => ({
+        value: "unreachable",
+        actual: "1",
+      }))
       .catch((caught: unknown) => caught)
 
     expect(error).toBeInstanceOf(BudgetRequestError)
-    expect(error).toMatchObject({ error: { code: "CONFLICT", requestId: "req_2" } })
+    expect(error).toMatchObject({
+      error: { code: "CONFLICT", requestId: "req_2" },
+      idempotencyKey: "msg_conflict",
+    })
   })
 
   it("throws BudgetSettleError carrying the value and actual when the settle fails", async () => {
-    const { budget, requests } = createClient([json(authorized), new TypeError("fetch failed")])
+    const { budget, requests } = createClient([
+      json(authorized),
+      new TypeError("fetch failed"),
+      json({ ...settled, replayed: true }),
+    ])
+    let executions = 0
 
     const error = await budget
-      .spend({ estimate: "0.05" }, async () => ({ value: "the answer", actual: 0.031 }))
+      .spend({ estimate: "0.05", idempotencyKey: "msg_settle" }, async () => {
+        executions += 1
+        return { value: "the answer", actual: 0.031 }
+      })
       .catch((caught: unknown) => caught)
 
     expect(error).toBeInstanceOf(BudgetSettleError)
@@ -372,17 +590,139 @@ describe("budget.spend", () => {
       value: error.value,
       actual: error.actual,
       holdId: error.hold.id,
-      code: error.error.code,
+      code: error.error?.code,
+      idempotencyKey: error.idempotencyKey,
     }).toEqual({
       message: "Settle failed for hold h_7: FETCH_ERROR fetch failed",
       value: "the answer",
       actual: 0.031,
       holdId: "h_7",
       code: "FETCH_ERROR",
+      idempotencyKey: "msg_settle",
     })
+    const recovery = await error.hold.settle({ amount: error.actual })
+
+    expect(recovery).toEqual({ result: { ...settled, replayed: true } })
+    expect(executions).toBe(1)
+    expect(requests.map(({ url }) => url)).toEqual([
+      "https://example.com/v1/budgets/authorize",
+      "https://example.com/v1/budgets/settle",
+      "https://example.com/v1/budgets/settle",
+    ])
+    expect(requests.slice(1).map(({ body }) => body)).toEqual([
+      { key: "customer:acme", holdId: "h_7", amount: "0.031" },
+      { key: "customer:acme", holdId: "h_7", amount: "0.031" },
+    ])
+  })
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
+    "preserves recovery details when final usage %s cannot be serialized",
+    async (actual) => {
+      const { budget, requests } = createClient([json(authorized)])
+      const value = { answer: "the work completed" }
+      let executions = 0
+
+      const error = await budget
+        .spend({ estimate: "0.05", idempotencyKey: "msg_invalid_actual" }, async () => {
+          executions += 1
+          return { value, actual }
+        })
+        .catch((caught: unknown) => caught)
+
+      if (!(error instanceof BudgetSettleError)) throw error
+      expect(error.value).toBe(value)
+      expect(error.actual).toBe(actual)
+      expect(error.cause).toBeInstanceOf(RangeError)
+      expect(error.error).toBeUndefined()
+      expect(error.idempotencyKey).toBe("msg_invalid_actual")
+      expect(error.hold).toMatchObject({ id: "h_7", key: "customer:acme", amount: "0.05" })
+      expect(executions).toBe(1)
+      expect(requests.map(({ url }) => url)).toEqual(["https://example.com/v1/budgets/authorize"])
+    }
+  )
+
+  it("preserves recovery details when settlement rejects outside its API result", async () => {
+    const { budget, requests } = createClient([json(authorized), json(settled)])
+    const cause = new TypeError("settlement transport rejected")
+    const value = { answer: "the work completed" }
+    let executions = 0
+
+    const error = await budget
+      .spend({ estimate: "0.05", idempotencyKey: "msg_rejected_settle" }, async (hold) => {
+        executions += 1
+        vi.spyOn(hold, "settle").mockRejectedValueOnce(cause)
+        return { value, actual: "0.031" }
+      })
+      .catch((caught: unknown) => caught)
+
+    if (!(error instanceof BudgetSettleError)) throw error
+    expect(error.value).toBe(value)
+    expect(error.actual).toBe("0.031")
+    expect(error.cause).toBe(cause)
+    expect(error.error).toBeUndefined()
+    expect(error.idempotencyKey).toBe("msg_rejected_settle")
+    expect(error.hold).toMatchObject({ id: "h_7", key: "customer:acme", amount: "0.05" })
+    expect(requests.map(({ url }) => url)).toEqual(["https://example.com/v1/budgets/authorize"])
+
+    await expect(error.hold.settle({ amount: error.actual })).resolves.toEqual({ result: settled })
+    expect(executions).toBe(1)
     expect(requests.map(({ url }) => url)).toEqual([
       "https://example.com/v1/budgets/authorize",
       "https://example.com/v1/budgets/settle",
     ])
+  })
+
+  it("preserves excess usage and the hold when the server rejects settlement", async () => {
+    const rejection = {
+      code: "CONFLICT",
+      message: "Hold h_7 permits 0.05, not 0.06",
+      docs: "https://docs.unprice.dev/api-reference/errors/code/CONFLICT",
+      requestId: "req_excess",
+    }
+    const { budget, requests } = createClient([
+      json(authorized),
+      json({ error: rejection }, 409),
+      json({ error: rejection }, 409),
+    ])
+    let executions = 0
+
+    const error = await budget
+      .spend({ estimate: "0.05", idempotencyKey: "msg_excess" }, async () => {
+        executions += 1
+        return { value: "provider exceeded its configured maximum", actual: "0.06" }
+      })
+      .catch((caught: unknown) => caught)
+
+    if (!(error instanceof BudgetSettleError)) throw error
+    expect(error).toMatchObject({
+      name: "BudgetSettleError",
+      value: "provider exceeded its configured maximum",
+      actual: "0.06",
+      idempotencyKey: "msg_excess",
+      hold: { id: "h_7", key: "customer:acme", amount: "0.05" },
+      error: rejection,
+    })
+    expect(executions).toBe(1)
+    expect(requests).toEqual([
+      {
+        method: "POST",
+        url: "https://example.com/v1/budgets/authorize",
+        body: { key: "customer:acme", amount: "0.05", idempotencyKey: "msg_excess" },
+      },
+      {
+        method: "POST",
+        url: "https://example.com/v1/budgets/settle",
+        body: { key: "customer:acme", holdId: "h_7", amount: "0.06" },
+      },
+    ])
+
+    const retried = await error.hold.settle({ amount: error.actual })
+
+    expect(retried).toEqual({ error: rejection })
+    expect(requests[2]).toEqual({
+      method: "POST",
+      url: "https://example.com/v1/budgets/settle",
+      body: { key: "customer:acme", holdId: "h_7", amount: "0.06" },
+    })
   })
 })

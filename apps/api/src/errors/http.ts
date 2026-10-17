@@ -1,5 +1,11 @@
 import { z } from "@hono/zod-openapi"
-import { budgetClosedDetailsSchema, budgetExceededDetailsSchema } from "@unprice/db/validators"
+import {
+  budgetClosedDetailsSchema,
+  budgetExceededDetailsSchema,
+  budgetHoldAmountExceededDetailsSchema,
+  budgetLimitBelowUsageDetailsSchema,
+  budgetWindowCapacityExceededDetailsSchema,
+} from "@unprice/db/validators"
 import { FetchError } from "@unprice/error"
 import { type DomainErrorKind, resolveDomainErrorKind } from "@unprice/services"
 import { UnPriceWalletError } from "@unprice/services/wallet"
@@ -64,6 +70,9 @@ export const apiErrorDetailsSchema = z.discriminatedUnion("kind", [
   configErrorDetailsSchema,
   budgetExceededDetailsSchema,
   budgetClosedDetailsSchema,
+  budgetHoldAmountExceededDetailsSchema,
+  budgetLimitBelowUsageDetailsSchema,
+  budgetWindowCapacityExceededDetailsSchema,
 ])
 
 export type ApiErrorDetails = z.infer<typeof apiErrorDetailsSchema>

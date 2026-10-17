@@ -40,10 +40,11 @@ export type BudgetHold = {
   readonly id: string
   readonly key: string
   readonly amount: string
+  /** Deadline for the work. Capacity stays reserved until explicit settlement or release. */
   readonly expiresAt: number
   /**
-   * Safe to retry: the hold id is the idempotency key, so the same amount replays. A hold retires
-   * 24 hours after it closes or lapses; after that this returns a 409 instead of counting twice.
+   * Final usage must not exceed the authorized amount. An excess returns 409 and keeps the hold
+   * open. The same settled amount replays for 24 hours after closure; later retries return 409.
    */
   settle(input: { amount: AmountInput }): Promise<ApiResult<BudgetSettlement>>
   /** Safe to retry. Call it only when the work produced no usage. */
@@ -59,18 +60,22 @@ export type BudgetCharge =
   | BudgetDenial
 
 export type AuthorizeBudgetInput = {
+  /** Maximum usage the work can incur. Enforce this maximum in the provider integration. */
   amount: AmountInput
   ttlMs?: number
-  /** Defaults to a random UUID per call. Pass your own to make the call replayable. */
-  idempotencyKey?: string
+  /** Keep this key and reuse it if the authorization response is lost. */
+  idempotencyKey: string
 }
 
-export type ChargeBudgetInput = { amount: AmountInput; idempotencyKey?: string }
+export type ChargeBudgetInput = {
+  amount: AmountInput
+  /** Keep this key and reuse it if the charge response is lost. */
+  idempotencyKey: string
+}
 
 /**
- * Usage that already happened. Never denied by a limit. Pass the event id so a retry does not count
- * twice: within 8 days, the same key and amount replay instead of counting again, and the same key
- * with another amount is a 409.
+ * Usage that already happened. Hard limits can reject it, so authorize before work that needs
+ * guaranteed capacity. Within 8 days, the same event key and amount replay; another amount is 409.
  */
 export type RecordBudgetInput = {
   amount: AmountInput
@@ -83,7 +88,13 @@ export type RecordBudgetInput = {
   occurredAt: number
 }
 
-export type SpendBudgetInput = { estimate: AmountInput } & Pick<AuthorizeBudgetInput, "ttlMs">
+export type SpendBudgetInput = {
+  /** Maximum authorized usage, which the callback's provider integration must enforce. */
+  estimate: AmountInput
+  ttlMs?: number
+  /** Defaults to a random UUID, which budget errors expose for recovery. */
+  idempotencyKey?: string
+}
 
 export type BudgetHandle = {
   readonly key: string
@@ -93,11 +104,13 @@ export type BudgetHandle = {
   record(input: RecordBudgetInput): Promise<ApiResult<OperationResponse<"budgets.record">>>
   get(): Promise<ApiResult<OperationResponse<"budgets.get">>>
   /**
-   * Authorizes the estimate, runs `fn`, and settles the actual it returns. Releases the hold and
-   * rethrows when `fn` throws.
+   * Authorizes `estimate` as the maximum usage, runs `fn` for a new authorization, and settles
+   * usage within that maximum. The callback must enforce the maximum at the provider.
+   * Failure or timeout retains the hold because the work may have incurred cost.
    *
    * @throws BudgetExceededError when the budget denies the estimate or cannot be reached.
    * @throws BudgetRequestError when the API rejects the authorization.
+   * @throws BudgetRecoveryError when authorization replays or `fn` throws. Recover with its hold.
    * @throws BudgetSettleError when `fn` succeeded but the settle failed.
    */
   spend<T>(
@@ -110,7 +123,10 @@ export class BudgetExceededError extends Error {
   readonly blocked: BudgetBlocked
   readonly balance: BudgetBalance | null
 
-  constructor(denial: BudgetDenial) {
+  constructor(
+    denial: BudgetDenial,
+    readonly idempotencyKey: string
+  ) {
     super(
       denial.blocked.reason === "limit"
         ? `Budget exceeded: limit ${denial.blocked.limitId} (${denial.blocked.remedy})`
@@ -123,31 +139,76 @@ export class BudgetExceededError extends Error {
 }
 
 export class BudgetRequestError extends Error {
-  constructor(readonly error: ApiError) {
+  constructor(
+    readonly error: ApiError,
+    readonly idempotencyKey: string
+  ) {
     super(`Budget request failed: ${error.code} ${error.message}`)
     this.name = "BudgetRequestError"
   }
 }
 
 /**
- * The work ran and produced `value`, but its usage was not settled. Retry
- * `error.hold.settle({ amount: error.actual })`: the hold id makes the retry safe, while recording
- * the usage separately would count it twice if the first settle did commit. Retry within 24 hours
- * of the hold lapsing; after that the hold is retired and the settle returns a 409.
+ * The SDK cannot determine the work's usage. Recover through `hold`; never rerun the callback
+ * without checking the provider's result. Release only after confirming that usage is zero.
+ */
+export class BudgetRecoveryError extends Error {
+  readonly reason: "work_failed" | "authorization_replayed"
+  readonly hold: BudgetHold
+  readonly idempotencyKey: string
+
+  constructor(
+    input: {
+      hold: BudgetHold
+      idempotencyKey: string
+    } & ({ reason: "work_failed"; cause: unknown } | { reason: "authorization_replayed" })
+  ) {
+    super(
+      input.reason === "work_failed"
+        ? `Work failed for hold ${input.hold.id}; recover its usage before releasing`
+        : `Authorization replayed for hold ${input.hold.id}; work was not run`,
+      input.reason === "work_failed" ? { cause: input.cause } : undefined
+    )
+    this.name = "BudgetRecoveryError"
+    this.reason = input.reason
+    this.hold = input.hold
+    this.idempotencyKey = input.idempotencyKey
+  }
+}
+
+/**
+ * The work produced `value`, but settlement failed. After a transport failure, retry the same
+ * hold and actual amount. An amount above the hold requires reconciliation, not a smaller claim.
+ * Do not release or record separately. The first settle may have committed, and excess usage
+ * must not be hidden. A closed hold retains its replay result for 24 hours.
  */
 export class BudgetSettleError extends Error {
   readonly value: unknown
   readonly actual: AmountInput
   readonly hold: BudgetHold
-  readonly error: ApiError
+  readonly error: ApiError | undefined
+  readonly idempotencyKey: string
 
-  constructor(input: { value: unknown; actual: AmountInput; hold: BudgetHold; error: ApiError }) {
-    super(`Settle failed for hold ${input.hold.id}: ${input.error.code} ${input.error.message}`)
+  constructor(
+    input: {
+      value: unknown
+      actual: AmountInput
+      hold: BudgetHold
+      idempotencyKey: string
+    } & ({ error: ApiError } | { cause: unknown })
+  ) {
+    super(
+      "error" in input
+        ? `Settle failed for hold ${input.hold.id}: ${input.error.code} ${input.error.message}`
+        : `Settle failed for hold ${input.hold.id}`,
+      "cause" in input ? { cause: input.cause } : undefined
+    )
     this.name = "BudgetSettleError"
     this.value = input.value
     this.actual = input.actual
     this.hold = input.hold
-    this.error = input.error
+    this.error = "error" in input ? input.error : undefined
+    this.idempotencyKey = input.idempotencyKey
   }
 }
 
@@ -213,7 +274,7 @@ export const createBudgetHandle = (budgets: BudgetResources, key: string): Budge
       ...options,
       key,
       amount: toDecimal(amount),
-      idempotencyKey: idempotencyKey ?? newIdempotencyKey(),
+      idempotencyKey,
     })
 
     if (response.error) {
@@ -240,7 +301,7 @@ export const createBudgetHandle = (budgets: BudgetResources, key: string): Budge
       const response = await budgets.charge({
         key,
         amount: toDecimal(amount),
-        idempotencyKey: idempotencyKey ?? newIdempotencyKey(),
+        idempotencyKey,
       })
 
       if (response.error) {
@@ -256,29 +317,41 @@ export const createBudgetHandle = (budgets: BudgetResources, key: string): Budge
 
     get: () => budgets.get({ key }),
 
-    spend: async ({ estimate, ...options }, fn) => {
-      const authorized = await authorize({ ...options, amount: estimate })
+    spend: async ({ estimate, idempotencyKey = newIdempotencyKey(), ...options }, fn) => {
+      const authorized = await authorize({ ...options, amount: estimate, idempotencyKey })
 
       if (authorized.error) {
-        throw new BudgetRequestError(authorized.error)
+        throw new BudgetRequestError(authorized.error, idempotencyKey)
       }
 
       if (!authorized.result.allowed) {
-        throw new BudgetExceededError(authorized.result)
+        throw new BudgetExceededError(authorized.result, idempotencyKey)
       }
 
       const { hold } = authorized.result
+      if (authorized.result.replayed) {
+        throw new BudgetRecoveryError({ reason: "authorization_replayed", hold, idempotencyKey })
+      }
       let outcome: Awaited<ReturnType<typeof fn>>
 
       try {
         outcome = await fn(hold)
-      } catch (error) {
-        // A failed release leaves the hold to lapse at its TTL; the caller's error matters more.
-        await hold.release()
-        throw error
+      } catch (cause) {
+        throw new BudgetRecoveryError({ reason: "work_failed", cause, hold, idempotencyKey })
       }
 
-      const settled = await hold.settle({ amount: outcome.actual })
+      let settled: ApiResult<BudgetSettlement>
+      try {
+        settled = await hold.settle({ amount: outcome.actual })
+      } catch (cause) {
+        throw new BudgetSettleError({
+          value: outcome.value,
+          actual: outcome.actual,
+          hold,
+          cause,
+          idempotencyKey,
+        })
+      }
 
       if (settled.error) {
         throw new BudgetSettleError({
@@ -286,6 +359,7 @@ export const createBudgetHandle = (budgets: BudgetResources, key: string): Budge
           actual: outcome.actual,
           hold,
           error: settled.error,
+          idempotencyKey,
         })
       }
 

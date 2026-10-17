@@ -106,7 +106,7 @@ describe("authorize and settle", () => {
       replayed: false,
       balance: { remaining: $(20), held: $(80) },
     })
-    expect(held.wakeAt).toBe(t0 + 45 * minute)
+    expect(held.wakeAt).toBeNull()
 
     const settled = ok(store.run(settle("h_1", 55), t0 + minute))
     expect(store.rows.get("h_1")).toMatchObject({
@@ -114,29 +114,33 @@ describe("authorize and settle", () => {
         status: "settled",
         closedAt: t0 + minute,
         actual: $(55),
-        covered: $(55),
-        released: $(25),
-        overrun: $(0),
-        late: false,
         crossed: [],
       },
     })
-    expect(settled.outcome).toMatchObject({ late: false, expired: false, replayed: false })
+    expect(settled.outcome).toMatchObject({ released: $(25), expired: false, replayed: false })
     expect(remaining(settled)).toEqual([["month", $(45)]])
     expect(settled.wakeAt).toBe(t0 + minute + day)
   })
 
-  it("consumes an actual above the hold as overrun and reports the crossing", () => {
+  it("rejects actual usage above its reservation without changing the hold", () => {
     const store = budgetWith(month100)
     ok(store.run(authorize("k1", 80), t0))
-
-    const settled = ok(store.run(settle("h_1", 130), t0))
-    expect(settled.outcome).toMatchObject({
-      covered: $(80),
+    const writes = store.writes
+    expect(rejection(store.run(settle("h_1", 130), t0))).toEqual({
+      code: "HOLD_AMOUNT_EXCEEDED",
+      holdId: "h_1",
+      maximum: $(80),
+      actual: $(130),
+    })
+    expect([store.writes, store.ledger.held, store.ledger.usage.never.consumed]).toEqual([
+      writes,
+      $(80),
+      $(0),
+    ])
+    expect(ok(store.run(settle("h_1", 80), t0)).outcome).toMatchObject({
+      actual: $(80),
       released: $(0),
-      overrun: $(50),
-      crossed: ["month"],
-      balance: { remaining: $(-30) },
+      balance: { remaining: $(20) },
     })
   })
 })
@@ -255,7 +259,7 @@ describe("idempotency", () => {
     const replay = ok(store.run(settle("h_1", 55), t0))
     expect([replay.write, replay.outcome]).toMatchObject([
       false,
-      { covered: $(55), released: $(25), replayed: true },
+      { actual: $(55), released: $(25), replayed: true },
     ])
     expect(rejection(store.run(settle("h_1", 56), t0))).toEqual({
       code: "HOLD_CLOSED",
@@ -295,7 +299,7 @@ describe("idempotency", () => {
   })
 })
 
-describe("expiry, lapse, and late usage", () => {
+describe("expiry and final settlement", () => {
   it("derives expiry from the clock and still covers a settle after expiry", () => {
     const store = budgetWith(month100)
     ok(store.run(authorize("k1", 80, minute), t0))
@@ -304,51 +308,37 @@ describe("expiry, lapse, and late usage", () => {
     expect([read.write, remaining(read)]).toEqual([false, [["month", $(20)]]])
 
     expect(ok(store.run(settle("h_1", 50), t0 + 2 * minute)).outcome).toMatchObject({
-      covered: $(50),
+      actual: $(50),
       released: $(30),
-      late: false,
       expired: true,
     })
   })
 
-  it("lapses after twice the TTL past expiry, then consumes a late settle", () => {
-    const store = budgetWith(month100)
+  it("keeps an uncertain reservation across alarms and a window reset", () => {
+    const store = budgetWith({ limits: [{ id: "daily", amount: "100", window: "day" }] })
     ok(store.run(authorize("k1", 80, minute), t0))
-
-    const swept = ok(store.run({ type: "sweep" }, t0 + 3 * minute))
-    expect(swept.outcome).toEqual({ type: "sweep", lapsed: 1 })
-    expect([store.ledger.held, store.rows.get("h_1")]).toMatchObject([
-      $(0),
-      { state: { status: "lapsed", lapsedAt: t0 + 3 * minute } },
-    ])
-    expect(swept.wakeAt).toBe(t0 + 3 * minute + day)
-
-    const late = ok(store.run(settle("h_1", 30), t0 + 4 * minute))
-    expect(late.outcome).toMatchObject({
-      covered: $(0),
-      released: $(0),
-      overrun: $(30),
-      late: true,
-      expired: true,
-      balance: { remaining: $(70), held: $(0) },
-    })
-  })
-
-  it("lapses a due hold inside any accepted command, but not inside a denial", () => {
-    const store = budgetWith(month100)
-    ok(store.run(authorize("k1", 80, minute), t0))
-
-    rejection(store.run(charge("c1", 101), t0 + 3 * minute))
+    store.alarm(t0 + day)
     expect(store.ledger.held).toBe($(80))
+    expect(rejection(store.run(charge("other", 21), t0 + day)).code).toBe("LIMIT_EXCEEDED")
+    ok(store.run(charge("other", 20), t0 + day))
+    expect(ok(store.run(settle("h_1", 70), t0 + day)).outcome).toMatchObject({
+      actual: $(70),
+      released: $(10),
+      expired: true,
+      balance: { remaining: $(10), held: $(0) },
+    })
+  })
 
-    const charged = ok(store.run(charge("c2", 90), t0 + 3 * minute))
-    expect(
-      charged.operations.map((row) => [row.id, row.kind === "hold" ? row.state.status : row.kind])
-    ).toEqual([
-      ["h_1", "lapsed"],
-      ["o:c2", "charge"],
-    ])
-    expect(remaining(charged)).toEqual([["month", $(10)]])
+  it("does not admit a record against unresolved capacity", () => {
+    const store = budgetWith(month100)
+    ok(store.run(authorize("k1", 80, minute), t0))
+    expect(rejection(store.run(record("event", 21), t0 + 3 * minute)).code).toBe("LIMIT_EXCEEDED")
+    expect(store.ledger.held).toBe($(80))
+    expect(ok(store.run(record("event", 20), t0 + 3 * minute)).outcome).toMatchObject({
+      amount: $(20),
+      replayed: false,
+      balance: { remaining: $(0) },
+    })
   })
 
   it("retires a hold once its row is purged, so a retried settle never counts twice", () => {
@@ -359,14 +349,13 @@ describe("expiry, lapse, and late usage", () => {
     ok(store.run({ type: "sweep" }, t0 + 3 * minute))
     const purgedAt = t0 + 3 * minute + day
     store.alarm(purgedAt)
-    expect(store.rows.size).toBe(0)
+    expect(store.rows.size).toBe(1)
 
     expect(rejection(store.run(settle("h_1", 25), purgedAt))).toEqual({
       code: "HOLD_RETIRED",
       holdId: "h_1",
     })
-    expect(rejection(store.run(settle("h_2", 1), purgedAt)).code).toBe("HOLD_RETIRED")
-    expect(rejection(store.run(release("h_2"), purgedAt)).code).toBe("HOLD_RETIRED")
+    expect(ok(store.run(release("h_2"), purgedAt)).outcome).toMatchObject({ released: $(5) })
     expect(rejection(store.run(settle("h_3", 1), purgedAt)).code).toBe("HOLD_NOT_FOUND")
     expect(store.ledger.usage.never.consumed).toBe($(25))
   })
@@ -415,6 +404,32 @@ describe("time and config never reset usage", () => {
     )
     expect(remaining(readded)).toEqual([["cap", $(40)]])
     expect(readded.outcome).toMatchObject({ budget: { version: 5 } })
+  })
+
+  it("rejects hard caps below consumed and reserved amounts", () => {
+    const store = budgetWith(month100)
+    ok(store.run(charge("spent", 40), t0))
+    ok(store.run(authorize("pending", 50), t0))
+    const writes = store.writes
+    for (const limits of [
+      [{ id: "month", amount: "80", window: "month" as const }],
+      [{ id: "new", amount: "80", window: "month" as const }],
+    ]) {
+      expect(rejection(store.run(upsert({ limits }), t0))).toMatchObject({
+        code: "LIMIT_BELOW_USAGE",
+        minimum: $(90),
+        requested: $(80),
+      })
+    }
+    expect(store.writes).toBe(writes)
+    const soft = budgetWith({
+      limits: [{ id: "cap", amount: "20", window: "month", enforce: "soft" }],
+    })
+    ok(soft.run(charge("spent", 40), t0))
+    expect(
+      rejection(soft.run(upsert({ limits: [{ id: "cap", amount: "20", window: "month" }] }), t0))
+        .code
+    ).toBe("LIMIT_BELOW_USAGE")
   })
 
   it("refuses to move a limit id to another window and writes nothing", () => {
@@ -503,7 +518,7 @@ describe("closesAt", () => {
       replayed: true,
     })
     expect(ok(store.run(settle("h_1", 25), closesAt)).outcome).toMatchObject({
-      covered: $(25),
+      actual: $(25),
       released: $(5),
       replayed: false,
     })
@@ -590,8 +605,8 @@ describe("anchored windows", () => {
     expect(rejection(moved)).toEqual({
       code: "LIMIT_WINDOW_IMMUTABLE",
       limitId: "billing",
-      current: "month@2026-10-15T00:00:00.000Z",
-      requested: "month@2026-10-01T00:00:00.000Z",
+      current: "month@1970-01-15T00:00:00.000Z",
+      requested: "month@1970-01-01T00:00:00.000Z",
     })
   })
 })
@@ -666,16 +681,16 @@ describe("record dedupe", () => {
   it("keeps a record's row for 8 days, then refuses the replay as too late", () => {
     const store = budgetWith({ limits: [{ id: "life", amount: "100", window: "never" }] })
     ok(store.run(record("r1", 30), t0))
-    ok(store.run(record("r2", 80), t0))
+    ok(store.run(record("r2", 70), t0))
 
     store.alarm(t0 + day)
     expect([...store.rows.keys()]).toEqual(["o:r1", "o:r2"])
-    expect(ok(store.run(record("r2", 80), t0 + 6 * day)).outcome).toMatchObject({
+    expect(ok(store.run(record("r2", 70), t0 + 6 * day)).outcome).toMatchObject({
       type: "record",
-      amount: $(80),
-      crossed: ["life"],
+      amount: $(70),
+      crossed: [],
       replayed: true,
-      balance: { remaining: $(-10) },
+      balance: { remaining: $(0) },
     })
     expect(rejection(store.run(record("r1", 31), t0 + 6 * day)).code).toBe("IDEMPOTENCY_CONFLICT")
     expect(rejection(store.run(charge("r1", 30), t0 + 6 * day)).code).toBe("IDEMPOTENCY_CONFLICT")
@@ -752,7 +767,7 @@ describe("config schema", () => {
         { id: "m", amount: "12.5", window: "month" },
         { id: "billing", amount: "1", window: "month", anchor: "2026-10-15T09:30:00+02:00" },
       ],
-      onUnavailable: { allowUpTo: "3" },
+      onUnavailable: "deny",
       closesAt: "2026-12-31T23:59:59Z",
     })
     expect(parsed).toEqual({
@@ -767,7 +782,7 @@ describe("config schema", () => {
         },
       ],
       holds: { defaultTtlMs: 900_000, maxTtlMs: 86_400_000 },
-      onUnavailable: { allowUpTo: BigInt(300_000_000) },
+      onUnavailable: "deny",
       closesAt: Date.parse("2026-12-31T23:59:59.000Z"),
     })
     expect(formatBudgetConfig(parsed)).toEqual({
@@ -782,11 +797,21 @@ describe("config schema", () => {
         },
       ],
       holds: { defaultTtlMs: 900_000, maxTtlMs: 86_400_000 },
-      onUnavailable: { allowUpTo: "3" },
+      onUnavailable: "deny",
       closesAt: "2026-12-31T23:59:59.000Z",
     })
     expect(config(formatBudgetConfig(parsed))).toEqual(parsed)
     expect(config({ limits: [] }).closesAt).toBe(null)
+  })
+
+  it("rejects fail-open policies at the boundary", () => {
+    for (const onUnavailable of ["allow", { allowUpTo: "1" }]) {
+      expect(
+        upsertBudgetInputSchema.safeParse({ key: "k", unit: "USD", limits: [], onUnavailable })
+          .success
+      ).toBe(false)
+    }
+    expect(config({ limits: [] }).onUnavailable).toBe("deny")
   })
 
   it("rejects duplicate ids, bad amounts, and inverted TTL bounds", () => {
@@ -832,7 +857,7 @@ describe("config schema", () => {
 })
 
 describe("checkTransition", () => {
-  it("catches a settle that does not return the uncovered part of the hold", () => {
+  it("catches a settle that keeps the unused part of the hold held", () => {
     const hold: HoldOperation = {
       kind: "hold",
       id: "h_1",
@@ -841,30 +866,53 @@ describe("checkTransition", () => {
       ttlMs: minute,
       createdAt: t0,
       expiresAt: t0 + minute,
-      lapsesAt: t0 + 3 * minute,
       state: { status: "open" },
     }
-    const broken: HoldOperation = {
+    const settled: HoldOperation = {
       ...hold,
-      state: {
-        status: "settled",
-        closedAt: t0,
-        actual: $(55),
-        covered: $(55),
-        released: $(0),
-        overrun: $(0),
-        late: false,
-        crossed: [],
-      },
+      state: { status: "settled", closedAt: t0, actual: $(55), crossed: [] },
     }
     const before = { ...emptyLedger, lastAt: t0, holdSeq: 1, held: $(80) }
     const after = { ...before, held: $(25), usage: consume(before.usage, $(55)) }
     expect(
-      checkTransition({ before, after, limits: [], steps: [[hold, broken]], periods: [] })
-    ).toEqual([
-      "row h_1 covered + released != 8000000000",
-      "ledger held moved -5500000000, rows say -8000000000",
-    ])
+      checkTransition({
+        before,
+        after,
+        limits: [],
+        resultingLimits: [],
+        steps: [[hold, settled]],
+        periods: [],
+      })
+    ).toEqual(["ledger held moved -5500000000, rows say -8000000000"])
+  })
+
+  it("catches a settle above its hold", () => {
+    const hold: HoldOperation = {
+      kind: "hold",
+      id: "h_1",
+      idempotencyKey: "k1",
+      amount: $(80),
+      ttlMs: minute,
+      createdAt: t0,
+      expiresAt: t0 + minute,
+      state: { status: "open" },
+    }
+    const settled: HoldOperation = {
+      ...hold,
+      state: { status: "settled", closedAt: t0, actual: $(90), crossed: [] },
+    }
+    const before = { ...emptyLedger, lastAt: t0, holdSeq: 1, held: $(80) }
+    const after = { ...before, held: $(0), usage: consume(before.usage, $(90)) }
+    expect(
+      checkTransition({
+        before,
+        after,
+        limits: [],
+        resultingLimits: [],
+        steps: [[hold, settled]],
+        periods: [],
+      })
+    ).toEqual(["row h_1 settled 9000000000 of 8000000000"])
   })
 })
 
@@ -874,7 +922,6 @@ describe("history does not slow the hot path", () => {
       budget: null,
       ledger: emptyLedger,
       target: null,
-      due: [],
       history: [],
     }
     const first = transition({ view: state, command: upsert(month100), clockMs: t0 })

@@ -2,15 +2,15 @@
  * Pure budget core (ADR-0006 B1-B3, B7). No clock, no I/O.
  *
  * `decide` owns every policy rule and returns the change a command makes, or a rejection.
- * `transition` sweeps first (lapses due holds, rolls ended windows), decides, applies the change to
- * the ledger, and checks conservation. A store keeps what it returns in one transaction: the
- * ledger (one row, the authoritative balance), one row per operation (open hold, closed
- * tombstone, idempotency record), and the window history.
+ * `transition` rolls ended windows, decides, applies the change to the ledger, and checks
+ * conservation. A store keeps what it returns in one transaction: the ledger (one row, the
+ * authoritative balance), one row per operation (open hold, closed tombstone, idempotency
+ * record), and the window history.
  */
 
 import { Err, Ok, type Result } from "@unprice/error"
 import { type BudgetRecord, type ConfigChange, WINDOW_HISTORY_PERIODS, isClosed } from "./config"
-import { balanceOf, decide, holdNumber, lapse } from "./decide"
+import { balanceOf, decide, holdNumber } from "./decide"
 import { type RowStep, checkTransition } from "./invariants"
 import { consume, dueAt, rollUsage, trackLimits } from "./ledger"
 import type {
@@ -18,7 +18,6 @@ import type {
   BudgetCommand,
   BudgetOutcome,
   BudgetView,
-  HoldOperation,
   Ledger,
   Operation,
   UnPriceBudgetError,
@@ -32,29 +31,20 @@ export type BudgetReader = {
   readLedger(): Ledger
   readOperation(id: string): Operation | null
   readOperationByKey(idempotencyKey: string): Operation | null
-  /** Open holds with `lapsesAt <= at`, earliest first, at most `limit`. */
-  readDueHolds(at: number, limit: number): HoldOperation[]
   /** Up to `limit` stored periods of each window id, newest first. */
   readHistory(windowIds: readonly WindowId[], limit: number): WindowPeriod[]
 }
 
 /**
- * What `transition` reads for one command: the row it addresses, up to `dueLimit` due holds, and
- * the history a `get` returns.
+ * Loads the addressed operation and the history a `get` returns.
  */
-export function loadView(
-  reader: BudgetReader,
-  command: BudgetCommand,
-  clockMs: number,
-  dueLimit: number
-): BudgetView {
+export function loadView(reader: BudgetReader, command: BudgetCommand): BudgetView {
   const ledger = reader.readLedger()
   const budget = reader.readBudget()
   return {
     budget,
     ledger,
     target: targetOf(reader, command),
-    due: reader.readDueHolds(Math.max(clockMs, ledger.lastAt), dueLimit),
     history:
       command.type === "get" && budget
         ? reader.readHistory(limitedWindows(budget), WINDOW_HISTORY_PERIODS)
@@ -95,6 +85,8 @@ export type BudgetTransition = Readonly<{
   operations: readonly Operation[]
   /** Ended periods to add to the window history. */
   periods: readonly WindowPeriod[]
+  /** Anchored schedules whose inactive current period ended. */
+  retiredWindows: readonly WindowId[]
   outcome: BudgetOutcome
   /**
    * Earliest `dueAt` among the written rows; the store only ever lowers its alarm to it. A window
@@ -105,10 +97,8 @@ export type BudgetTransition = Readonly<{
 }>
 
 /**
- * The one call a store makes per command: clamp the clock, lapse the due holds it loaded and roll
- * ended windows, decide, apply, check, outcome. A rejection returns Err and the store writes
- * nothing, not even the lapses or rolls. Throws when an invariant breaks (a programmer error that
- * must abort the transaction).
+ * Clamps the clock, rolls ended windows, decides, applies and checks the change.
+ * A rejection writes nothing. An invariant failure throws and must abort the transaction.
  */
 export function transition(params: {
   view: BudgetView
@@ -122,49 +112,36 @@ export function transition(params: {
   // A closed row answers only until its retention ends, however late the alarm purges it.
   const expired = view.target && isExpired(view.target, now) ? view.target : null
   const live = expired ? null : view.target
-  const read = new Map<string, Operation>(view.due.map((hold) => [hold.id, hold]))
-  if (live) read.set(live.id, live)
   const limits = view.budget?.config.limits ?? []
   const rolled = rollUsage(view.ledger.usage, now, limits)
-  const lapsed = lapse(read.values(), now)
-  const swept = new Map<string, Operation>(lapsed.rows.map((row) => [row.id, row]))
-  const rows = new Map(swept)
-  const sweptLedger: Ledger = {
-    ...view.ledger,
-    held: view.ledger.held + lapsed.held,
-    usage: rolled.usage,
-  }
-  const target = live ? (swept.get(live.id) ?? live) : null
+  const rolledLedger: Ledger = { ...view.ledger, usage: rolled.usage }
 
-  const decided = decide(command, { budget: view.budget, ledger: sweptLedger, target }, now)
+  const decided = decide(command, { budget: view.budget, ledger: rolledLedger, target: live }, now)
   if (decided.err) return Err(decided.err)
   const change = decided.val
-  for (const row of change.rows) rows.set(row.id, row)
 
   const budget = change.configured?.budget ?? view.budget
   const usage = change.configured
-    ? trackLimits(sweptLedger.usage, change.configured.budget.config.limits, now)
-    : sweptLedger.usage
+    ? trackLimits(rolledLedger.usage, change.configured.budget.config.limits, now)
+    : rolledLedger.usage
   const ledger: Ledger = {
     lastAt: now,
     holdSeq: change.rows.reduce(
       (seq, row) => (row.kind === "hold" ? Math.max(seq, holdNumber(row.id)) : seq),
-      sweptLedger.holdSeq
+      rolledLedger.holdSeq
     ),
-    held: sweptLedger.held + change.held,
+    held: rolledLedger.held + change.held,
     usage: consume(usage, change.consumed),
   }
-  const operations = [...rows.values()]
+  const operations = change.rows
   const { periods } = rolled
 
   const violations = checkTransition({
     before: view.ledger,
     after: ledger,
     limits,
-    steps: [
-      ...lapsed.rows.map((row): RowStep => [read.get(row.id), row]),
-      ...change.rows.map((row): RowStep => [swept.get(row.id) ?? read.get(row.id), row]),
-    ],
+    resultingLimits: budget?.config.limits ?? [],
+    steps: change.rows.map((row): RowStep => [live ?? undefined, row]),
     periods,
   })
   if (violations.length > 0) {
@@ -174,7 +151,7 @@ export function transition(params: {
   let wakeAt: number | null = null
   for (const operation of operations) {
     const due = dueAt(operation)
-    if (wakeAt === null || due < wakeAt) wakeAt = due
+    if (due !== null && (wakeAt === null || due < wakeAt)) wakeAt = due
   }
   // A sweep always moves the budget's clock to now, so the purge after it never runs ahead of a
   // later command's clamped clock.
@@ -182,6 +159,7 @@ export function transition(params: {
     budget !== null &&
     (operations.length > 0 ||
       periods.length > 0 ||
+      rolled.retired.length > 0 ||
       change.configured !== undefined ||
       command.type === "sweep")
 
@@ -193,6 +171,7 @@ export function transition(params: {
     purged: expired && change.rows.length > 0 ? [expired] : [],
     operations,
     periods,
+    retiredWindows: rolled.retired,
     outcome: outcomeOf(command, {
       budget,
       ledger,
@@ -200,16 +179,16 @@ export function transition(params: {
       replayed: change.rows.length === 0,
       changes: change.configured?.changes ?? [],
       history: [...periods, ...view.history],
-      lapsed: lapsed.rows.length,
       now,
     }),
     wakeAt,
   })
 }
 
+/** Past its retention. An open hold has none, so it never expires. */
 function isExpired(row: Operation, now: number): boolean {
-  const open = row.kind === "hold" && row.state.status === "open"
-  return !open && dueAt(row) <= now
+  const due = dueAt(row)
+  return due !== null && due <= now
 }
 
 function outcomeOf(
@@ -222,12 +201,11 @@ function outcomeOf(
     changes: readonly ConfigChange[]
     /** This transition's periods, then the stored ones. */
     history: readonly WindowPeriod[]
-    lapsed: number
     now: number
   }>
 ): BudgetOutcome {
   const { budget, ledger, row, replayed, now } = params
-  if (command.type === "sweep") return { type: "sweep", lapsed: params.lapsed }
+  if (command.type === "sweep") return { type: "sweep" }
   if (!budget) throw new Error(`${command.type} accepted without a budget`)
   const balance = balanceOf({ budget, ledger }, now)
 
@@ -255,16 +233,23 @@ function outcomeOf(
       if (row?.kind !== "hold" || row.state.status !== "released") {
         throw new Error(`release of ${command.holdId} produced no released row`)
       }
-      const { released } = row.state
-      return { type: "release", holdId: row.id, released, replayed, balance }
+      return { type: "release", holdId: row.id, released: row.amount, replayed, balance }
     }
     case "settle": {
       if (row?.kind !== "hold" || row.state.status !== "settled") {
         throw new Error(`settle of ${command.holdId} produced no settled row`)
       }
-      const { closedAt, status: _, ...settled } = row.state
-      const expired = settled.late || closedAt >= row.expiresAt
-      return { type: "settle", holdId: row.id, ...settled, expired, replayed, balance }
+      const { actual, closedAt, crossed } = row.state
+      return {
+        type: "settle",
+        holdId: row.id,
+        actual,
+        released: row.amount - actual,
+        expired: closedAt >= row.expiresAt,
+        crossed,
+        replayed,
+        balance,
+      }
     }
   }
 }

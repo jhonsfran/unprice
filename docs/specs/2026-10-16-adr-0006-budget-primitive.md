@@ -4,6 +4,11 @@
 
 Accepted
 
+Amended on 2026-10-17. An estimate is a maximum authorization, not an expected cost.
+Hard limits cannot accept excess consumption. Unresolved holds keep their reservation until
+explicit final settlement or release. This amendment replaces the earlier overrun and timeout
+reclamation rules.
+
 ## Date
 
 2026-10-16
@@ -38,6 +43,9 @@ Complaints: limits that silently changed from hard to soft (OpenAI), status code
 layer (LiteLLM), budgets that cannot be edited (Portkey).
 
 ### Established patterns this design copies
+
+The lifecycle follows these patterns, but automatic timeout reclamation and overcapture do not
+apply to hard budgets. A timer cannot prove that external work stopped or consumed nothing.
 
 - **Telecom online charging** (RFC 4006, 3GPP TS 32.299) is the closest match. A session reserves
   units (CCR-Initial), reports usage and gets more (CCR-Update), and closes (CCR-Terminate, unused
@@ -92,9 +100,8 @@ Budget
   pricing    none | rows (inline) | rateCard { id }            // ADR-0005 rows; one pure rate()
   funding    none | grant | wallet | creditLine { limit } | parent { key } | webhook { url }
   refill     { target?, lowWater?, maxOutstanding? }           // adaptive by default
-  overrun    { tolerance: 0 }                                  // above it, usage is recorded as debt
   holds      { defaultTtl: "15m", maxTtl: "24h" }
-  onUnavailable  deny | allow | { allowUpTo }                  // default deny; SDK-side, overridable per call
+  onUnavailable  deny                                       // no permission without authorization
   events     [threshold, exhausted, hold.expired, funding.requested, funding.failed] -> webhook
 ```
 
@@ -110,6 +117,9 @@ Budget
   credits budget). Every applicable limit is checked; the tightest wins; the response names it.
 - Changing `enforce` between hard and soft writes an audit entry and emits an event. It is never
   changed by Unprice.
+- Adding or lowering a hard limit, including a change from soft to hard, must preserve
+  `consumed + held <= amount`. Otherwise upsert returns 409 `LIMIT_BELOW_USAGE` and keeps the
+  previous configuration.
 - A window is a UTC calendar window (`hour`, `day`, `week` from Monday, `month`, `never`) or an
   anchored one: `window: "month", anchor: "2026-10-15T00:00:00Z"` repeats every month from the
   anchor, forward and backward. A monthly anchor keeps its day of month and time of day; in a month
@@ -144,7 +154,7 @@ authorize { key, estimate: { amount } | { usage }, ttl?, idempotencyKey }
 settle    { key, holdId, actual: { amount } | { usage } }                  // closes the hold
 release   { key, holdId }                                                 // nothing consumed
 charge    { key, amount | usage, idempotencyKey }   // gated one-shot: denied if it does not fit
-record    { key, amount | usage, idempotencyKey, occurredAt }   // already happened: never denied
+record    { key, amount | usage, idempotencyKey, occurredAt }   // deduplicated debit; hard limits apply
 get       { key } -> { budget, history }            // history: last 12 ended periods per window
 ```
 
@@ -158,45 +168,60 @@ settle(actual 55)   held 80 -> 0          consumed 0 -> 55   available 20 -> 45
 
 - The hold id is the idempotency key for `settle` and `release`. Settling again with the same
   amount replays the first result; a different amount, or a release after a settle, returns 409.
-  A hold's row is kept for 24 hours after it closes or lapses. After that the hold is retired, and
+  A hold's row is kept for 24 hours after it closes. After that the hold is retired, and
   settle and release return 409 `HOLD_RETIRED` (B3).
-- `authorize` holds the estimate against every limit on the key. If `usage` is passed, the budget's
+- `authorize` holds the maximum permitted amount against every limit on the key. The caller must
+  bound the underlying operation to this amount before work starts. If `usage` is passed, the budget's
   pricing turns it into an amount first; a usage without a price row is denied (`NOT_PRICED`), never
   priced at zero.
 - `settle` is final in the first release: it consumes the actual amount and releases the rest of the
   hold in one transaction, exactly once. Long work uses several holds. (A non-final settle, the
   telecom CCR-Update, is a later addition with a cumulative-total contract.)
-- An actual above the hold consumes the excess from available capacity up to `overrun.tolerance`.
-  Anything beyond that is still consumed and recorded as debt; remaining can go negative, and a
-  negative remaining denies every new hold until funding catches up.
+- An actual above the hold returns 409 `HOLD_AMOUNT_EXCEEDED`. The hold and balance stay unchanged.
+  The server never clamps usage or accepts debt. More work requires another authorization before
+  that work starts. Settlement is final, so the caller must stop the operation before releasing
+  its unused reservation.
 - `charge` is for cheap work that is gated before it runs. `record` is for usage that already
-  happened (event ingestion, provider callbacks). `record` is never denied by a limit, because
-  denying it cannot undo the work. It carries `occurredAt`, the epoch milliseconds the usage
-  happened, like the event API's `timestamp`; the window rules are in B3.
+  happened. Both reject a debit that would exceed a hard limit, including outstanding reservations.
+  A report after work cannot grant permission retroactively. Use authorization before work when
+  the operation needs a spending guarantee. `record` carries `occurredAt`, the epoch milliseconds
+  the usage happened; the window rules are in B3.
 - When a counter's period ends, the next accepted command (or alarm sweep) rolls it and, if the
   period had usage and a limit used that window when it ended, writes a `{ windowId, start, end,
   consumed }` period to the window history. A counter keeps its period's start, so the period is
   the same however late the next command comes, and nothing wakes at a boundary. An idle gap of
   many periods writes one, for the last period with usage. `get` returns the last 12 per window
   that has a limit, newest first, and the store keeps no more than that.
+- Equivalent anchored schedules share one counter. Identity uses UTC time of day for daily
+  schedules, position within the week for weekly schedules, and day plus time for monthly
+  schedules. Monthly days 30 and 31 remain distinct. Anchored and calendar counters also remain
+  distinct because they can have different tracking start times.
+- Keep at most 32 retained anchored schedules, in addition to the five calendar counters. Removing
+  a limit retains its counter until the period ends. A configuration that adds a distinct schedule
+  beyond the bound returns 409 `WINDOW_CAPACITY_EXCEEDED`; it never deletes live usage to fit.
+- A soft threshold reports `crossed` when actual consumption moves from at most the threshold to
+  above it. A reservation or its release does not trigger a consumption crossing. Replays preserve
+  the original crossing result.
 - Every response carries `remaining` for each limit, and the HTTP adapter copies it into response
   headers. A denial is always HTTP 402 with `blockedBy` (the limit or the funding source) and a
   remedy.
 
-### B3. Holds expire; late usage is accepted within retention
+### B3. Unresolved holds retain their reservation
 
-- Every hold has a TTL (default 15 minutes, maximum 24 hours). At TTL the alarm marks it `expired`
-  and keeps it counted. After a grace of twice the TTL it releases the remainder (the telecom Tcc
-  rule).
-- A settle that arrives after expiry, or after the hold lapsed, is accepted and consumes, even if it
-  pushes remaining below zero. It counts against the window it arrives in, not the window the work
-  ran in: an amount is priced and attributed when it is written.
-- This holds until the hold's retention ends, 24 hours after it closes or lapses, by the budget's
+- Every hold has a TTL (default 15 minutes, maximum 24 hours). Expiry tells the caller that work
+  must stop and needs recovery. It does not return capacity, close the hold, or start retention.
+  Open holds remain reserved across window resets until explicit final settlement or release.
+- A late settlement of an open hold is accepted only within its reserved maximum. It counts
+  against the window it arrives in. The reservation still counts in that window, so settlement
+  replaces reserved capacity with consumption without increasing the total commitment.
+- Release asserts that no usage occurred and the operation cannot continue. A timeout or callback
+  exception does not establish either fact. Settle known final partial usage instead.
+- A closed hold's retention ends 24 hours after settlement or release, by the budget's
   clock and however late the alarm purges the row. After that the row is retired, and a retired
   row cannot tell a first settle from a retry of one that committed.
   Accepting it would count a retried settle twice, so the hold is retired: settle and release
-  return 409 `HOLD_RETIRED`. Retention is the setting for how late is too late. A caller that knows
-  its settle never committed reports that usage with `record` and its own idempotency key.
+  return 409 `HOLD_RETIRED`. A failed settlement of an unresolved hold can still be retried with
+  its hold id because unresolved holds do not enter retention.
 - Holds and settles carry the authorization timestamp. Prices are resolved at that timestamp
   (ADR-0005), so a price change between authorize and settle never changes what one call costs.
 - `record` accepts usage whose `occurredAt` is within the last 7 days and at most 5 minutes
@@ -285,8 +310,9 @@ close: final capture, then source.release(key = "rel:{budget}:{epoch}")
 - A child budget with `funding: { parent: { key } }` reserves chunks from the parent through B5. The
   parent debits its own available capacity before it grants (demarcation). A child never raises its
   own limit.
-- Every grant is a lease with an epoch. The child stops spending at expiry; the parent reclaims the
-  unreported remainder after twice the TTL; a late report is applied as consumption, never dropped.
+- Every grant is a lease with an epoch. The child stops spending at expiry. The parent keeps
+  unreported capacity reserved until final usage is known; elapsed time cannot return it.
+  A final report consumes at most the grant and releases its unused remainder.
 - Limits stack: the child's own limits apply, and its capacity can never exceed what the parent
   granted. A denial names which layer blocked.
 - Near the parent's limit, chunks shrink, and the last capacity is served pass-through.
@@ -300,28 +326,35 @@ close: final capture, then source.release(key = "rel:{budget}:{epoch}")
 3. Idempotency is the key plus the request it was first used with: the verb, the amount, and an
    authorize's requested TTL, compared field by field. The same key with a different request
    returns 409.
-4. Alarms are sweepers: they scan for due work, catch every error, and re-arm for the next due
-   row, or for a retry after an error. They never throw.
+4. Alarms purge terminal receipts in bounded batches and re-arm for the next due row. A sweep
+   failure schedules a retry. A failure to schedule the next alarm propagates so the platform
+   can retry it.
 5. Every transition asserts `funded = available + held + consumed + grantedToChildren`.
 6. Webhook events leave through an outbox table written in the same transaction as the change.
 7. The ledger row is the balance, and the operation rows are the only other state: each verb
    returns the rows it writes and its held and consumed deltas, and nothing keeps a journal to
    rebuild state from. Each transition checks every row step against the hold lifecycle (open to
-   lapsed, settled, or released; lapsed to settled or released) and that the ledger moved by
-   exactly what the rows say.
+   settled or released), the reserved maximum, and the ledger deltas. Time alone never returns
+   a reservation.
 8. Window history is written in the same transaction as the roll: a period inserts a
    `budget_window_history` row and deletes that window's periods beyond the 12 `get` returns. A
    roll happens only inside an accepted command or the alarm's sweep, so a denial still writes
    nothing. Each transition checks per counter that a counter that kept its period grew by what
    the rows consumed, and one that rolled reported its old period when it had usage on a limited
    window.
-9. The alarm wakes only for a due row: a hold to lapse or a row whose retention ended. A budget
+9. The alarm wakes only for a terminal row whose retention ended. A budget
    with none sleeps until a command writes one, and window boundaries need no wake (B2). The sweep
    first moves the budget's clock to now, then purges in bounded batches: a command clamps its
    clock to the budget's, so a purge never runs ahead of a later command's clock and a replay
    cannot count twice.
 10. A Durable Object gets its storage on its budget's first upsert. Any other verb on a key that
     was never upserted answers `BUDGET_NOT_FOUND` without writing.
+11. An operation row stores its payload without `kind` and `id`, which have their own columns.
+    Exact key lookup uses the payload's idempotency key through an expression index, and a partial
+    due index holds only settled, released, and charge/record rows, so open holds never slow the
+    alarm.
+12. Cleanup removes at most 2,048 terminal rows per alarm, with a one-second continuation while
+    more are due. Retiring an anchored counter deletes its window history in the same transaction.
 
 ### B8. Unprice's own billing runs on budgets
 
@@ -349,7 +382,8 @@ What the SDK copies and avoids (Autumn and Polar read on 2026-10-16):
   ingestion: one runaway call is never capped); allow decisions in the browser (Autumn deprecated its
   React checks); ingestion with no batching or retry (Polar).
 
-The surface separates definition from use:
+The surface separates definition from use. In this example, `runBoundedOperation` is application
+code that enforces its `maximumCost` and stops before returning final usage.
 
 ```ts
 const unprice = new Unprice({ token: process.env.UNPRICE_TOKEN! })
@@ -359,22 +393,25 @@ await unprice.budgets.upsert({ key: "customer:acme", unit: "USD", limits: [{ amo
 
 // Use: a handle is local and cheap; it never creates or changes a budget
 const acme = unprice.budget("customer:acme")
-const hold = await acme.authorize({ amount: 0.05 })      // { allowed, remaining, blockedBy? }
+const hold = await acme.authorize({ amount: 0.05, idempotencyKey: request.id })
 await hold.settle({ amount: 0.031 })                    // or hold.release()
 
-// The same thing in one call: authorize, run, settle the returned actual, release on throw
-const text = await acme.spend({ estimate: 0.05 }, async () => {
-  const r = await generateText({ model, prompt })
+// The provider operation must enforce the authorized maximum.
+const text = await acme.spend({ estimate: 0.05, idempotencyKey: operationId }, async (hold) => {
+  const r = await runBoundedOperation({ maximumCost: hold.amount })
   return { value: r.text, actual: costOf(r.usage) }
 })
 ```
 
 - `spend` throws `BudgetExceededError { blockedBy, remaining, remedy }`; `authorize` returns
   `allowed: false` instead.
-- The failure policy is the builder's choice. A budget stores `onUnavailable: "deny" | "allow" |
-  { allowUpTo: amount }` (default `"deny"`), and a call can override it. The SDK applies it when
-  Unprice cannot be reached within the call's timeout, marks the response `degraded: true`, and
-  reports any spend it allowed once the connection returns, through `record`, so nothing is lost.
+- An unavailable authorization denies work. A per-request fail-open allowance cannot preserve a
+  shared hard cap under concurrent requests.
+- Manual `authorize` and `charge` require a caller-owned idempotency key. The caller keeps that
+  key before sending and reuses it after an uncertain response.
+- `spend` keeps one stable idempotency key. Replayed authorization does not run the callback again.
+  A callback failure retains the hold and returns recovery access. A settlement failure preserves
+  the callback result, actual amount, hold, and key. Neither failure releases capacity.
 - `budget.child({ key, limits, ttl })` upserts a child funded by the handle's budget (B6).
 - `budget.wrap(price, fn)` returns `fn` with a charge in front, for tool `execute` functions.
 - The SDK never runs in a browser.
@@ -401,11 +438,11 @@ The code a builder writes is the same in every mode. The mode only changes where
   the refill arrives, `authorize` waits for it (one round trip) or denies.
 - The Durable Object pushes snapshots (`version`, `remaining`, `coldUntil`) so the local balance
   knows what the server has already counted. Each response carries `fresh: boolean`.
-- **Overshoot**: none beyond the per-call estimate error. Every process spends only inside its own
+- **Overshoot**: none. Every call stays within its authorized maximum, and every process spends inside its own
   pre-debited lease. The price is stranded capacity: at most the sum of unused leases.
 - **A crash loses the buffer, not the cap.** At lease expiry the unreported remainder stays counted
-  as consumed and `unreconciled`, never billed. A late report converts it; the window end releases
-  it. This is stricter than B3 for holds, because a lost process cannot settle late.
+  against capacity until final reconciliation. A timer or window reset cannot prove that the
+  capacity is unused. This future lease mode must preserve the same rule as unresolved holds.
 - **Where it can run**: long-lived processes (Node servers, agent runners, containers). Not in
   Workers, Lambda, or Vercel functions: their memory can be dropped or frozen between invocations,
   so they use `remote`, with settles sent through `waitUntil`.
@@ -443,8 +480,8 @@ await unprice.budgets.upsert({ key: "customer:acme", unit: "USD", closesAt: "202
   limits: [{ amount: 50, window: "month", anchor: "2026-10-15T00:00:00Z" }] })
 const { budget, history } = await unprice.budgets.get({ key: "customer:acme" })   // history: ended cycles
 const acme = unprice.budget("customer:acme")
-const answer = await acme.spend({ estimate: 0.05 }, async () => {
-  const r = await generateText({ model: openai("gpt-4.1"), prompt })
+const answer = await acme.spend({ estimate: 0.05, idempotencyKey: operationId }, async (hold) => {
+  const r = await runBoundedOperation({ maximumCost: hold.amount })
   return { value: r.text, actual: costOf(r.usage) }
 })
 
@@ -465,7 +502,7 @@ const sub = await run.child({ key: `run:${runId}/sub:${i}`, limits: [{ amount: 0
 
 // 5. Free-tier abuse guard: a counter, no money
 await unprice.budgets.upsert({ key: `user:${userId}`, unit: "units:generations", limits: [{ amount: 100, window: "day" }] })
-const { allowed } = await unprice.budget(`user:${userId}`).charge({ amount: 1 })
+const { allowed } = await unprice.budget(`user:${userId}`).charge({ amount: 1, idempotencyKey: request.id })
 
 // 6. Team LLM spend inside a company: org → team → key, every layer applies
 await unprice.budgets.upsert({ key: "org:acme", unit: "USD", limits: [{ amount: 5000, window: "month" }] })
@@ -516,7 +553,7 @@ await hold.settle({ usage: { feature: "model_call",
 // 12. Trial: $5 that expires on day 14
 { key: "customer:acme", unit: "USD", funding: { grant: { amount: 5, expiresAt: trialEnd } } }
 
-// Event ingestion records usage that already happened; it is never denied by a limit.
+// Event ingestion applies a debit only if every hard limit has room.
 // occurredAt is the event's own time and bounds acceptance (7 days); the same key and amount
 // count once within 8 days.
 await unprice.budget("customer:acme").record({ usage: { feature: "image", properties: {} },
@@ -555,6 +592,8 @@ Steps 0 to 3 are the first release: a budget a builder can adopt without any oth
   to 1,000 requests per second, unmeasured for this workload). The escape is a child budget per hot
   key; splitting one feature across Durable Objects would need tier ranges and is not designed.
 - Chunks strand capacity in children; near a limit the protocol shrinks chunks and loses throughput.
+- Unresolved holds retain storage and capacity until the caller confirms a final result. This
+  cost is required to protect the cap without guessing the usage after a timeout.
 - No volume pricing; builders who want it get graduated tiers.
 - Latency numbers in B10 are estimates or third-party figures until the Worker → Durable Object hop
   and the hibernated wake are measured.
@@ -565,7 +604,8 @@ Steps 0 to 3 are the first release: a budget a builder can adopt without any oth
 - Never expose a Durable Object id, a parent, or a funding source in the public API. The key is the
   address.
 - Never price a usage without a row at zero. Deny it.
-- Never drop usage that happened inside retention: late settles and late reports consume.
+- Never accept actual usage above the authorized maximum or bypass a hard limit with `record`.
+- Never return an unresolved reservation because a timeout passed.
 - Never accept a settle the store can no longer deduplicate. A retired hold returns 409.
 - Never release capacity that a pending capture still covers.
 - Never `await` between a check and the debit it guards.

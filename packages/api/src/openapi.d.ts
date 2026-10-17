@@ -135,7 +135,7 @@ export interface paths {
     put?: never
     /**
      * create or update a budget
-     * @description Create the budget at a key, or update its limits and hold settings. Sending the same definition again changes nothing. The unit cannot change after creation.
+     * @description Create the budget at a key, or update its limits and hold settings. Sending the same definition again changes nothing. The unit cannot change after creation. A hard cap below current consumption plus outstanding reservations returns 409.
      */
     post: operations["budgets.upsert"]
     delete?: never
@@ -154,8 +154,8 @@ export interface paths {
     get?: never
     put?: never
     /**
-     * hold an amount against a budget before work runs
-     * @description Hold an estimate against every hard limit of the budget, or return 402 with the limit that blocked it. Settle the hold with the actual amount, or release it. A retry with the same idempotency key returns the same hold. A budget past its closesAt returns 409.
+     * reserve the maximum permitted usage before work runs
+     * @description Reserve the maximum permitted usage against every hard limit of the budget, or return 402 with the limit that blocked it. The caller must enforce this maximum during work. Settle final usage up to the reserved amount, or release only after confirming zero usage and no continuing work. Expiry never releases capacity. A retry with the same idempotency key returns the same hold. A budget past its closesAt returns 409.
      */
     post: operations["budgets.authorize"]
     delete?: never
@@ -175,7 +175,7 @@ export interface paths {
     put?: never
     /**
      * settle a hold with the actual amount
-     * @description Consume the actual amount and release the rest of the hold. An actual above the hold, or a settle after the hold lapsed, is still consumed. The hold id is the idempotency key: the same amount replays, another amount returns 409. A hold retires 1 day after it closes or lapses; settling or releasing it after that returns 409.
+     * @description Settle final usage after work has stopped and release the unused reservation. Actual usage must not exceed the authorized amount. A larger amount returns 409 and leaves the reservation unchanged. Expired open holds still settle against their reservation. The hold id is the idempotency key: the same amount replays, another amount returns 409. A hold retires 1 day after it closes; settling or releasing it after that returns 409.
      */
     post: operations["budgets.settle"]
     delete?: never
@@ -195,7 +195,7 @@ export interface paths {
     put?: never
     /**
      * release a hold without consuming
-     * @description Return the whole hold to the budget. Releasing twice changes nothing; releasing a settled hold returns 409.
+     * @description Return the whole hold only after confirming zero usage and no continuing work. Releasing twice changes nothing; releasing a settled hold returns 409.
      */
     post: operations["budgets.release"]
     delete?: never
@@ -235,7 +235,7 @@ export interface paths {
     put?: never
     /**
      * record usage that already happened
-     * @description Consume an amount for work that already ran. Never denied by a limit, so remaining can go negative. Usage must have occurred within the last 7 days (409 beyond it). For 8 days, a retry with the same idempotency key and amount replays instead of counting twice, and the same key with another amount returns 409.
+     * @description Consume an amount for work that already ran. Every hard limit must have enough remaining capacity. A denial returns 402 and records no usage. Usage must have occurred within the last 7 days (409 beyond it). For 8 days, a retry with the same idempotency key and amount replays instead of counting twice, and the same key with another amount returns 409.
      */
     post: operations["budgets.record"]
     delete?: never
@@ -766,7 +766,7 @@ export interface components {
           | {
               /** @enum {string} */
               kind: "budget_exceeded"
-              /** @description Among hard limits the request would exceed, the one that resets last; that limit decides when the request can pass */
+              /** @description A failing hard limit smaller than the request, or otherwise the one that resets last. Other limits can also block the request. The remedy considers all failing limits. */
               blocked: {
                 limitId: string
                 /**
@@ -775,14 +775,14 @@ export interface components {
                  * @enum {string}
                  */
                 window: "hour" | "day" | "week" | "month" | "never"
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description A decimal amount in the budget's unit */
                 remaining: string
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description A decimal amount in the budget's unit */
                 held: string
                 /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
                 /**
-                 * @description release_holds: open holds on this limit would make room. wait_for_reset: the limit has room after resetsAt. raise_limit: the amount does not fit this limit.
+                 * @description release_holds: releasing holds makes the request fit all failing limits. wait_for_reset: resetting the failing windows makes the request fit with holds unchanged. raise_limit: neither action alone is sufficient; one or more limits need a change.
                  * @enum {string}
                  */
                 remedy: "release_holds" | "wait_for_reset" | "raise_limit"
@@ -801,7 +801,7 @@ export interface components {
                    */
                   window: "hour" | "day" | "week" | "month" | "never"
                   /**
-                   * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
                    * @example hard
                    * @enum {string}
                    */
@@ -812,7 +812,7 @@ export interface components {
                   consumed: string
                   /** @description Held by open holds */
                   held: string
-                  /** @description amount - consumed - held; negative after an overrun or a record */
+                  /** @description amount - consumed - held; negative only for a soft limit */
                   remaining: string
                   /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
@@ -826,6 +826,34 @@ export interface components {
               kind: "budget_closed"
               /** @description When the budget closed, in epoch milliseconds */
               closedAt: number
+            }
+          | {
+              /** @enum {string} */
+              kind: "hold_amount_exceeded"
+              /**
+               * @description The hold, as returned by authorize
+               * @example h_42
+               */
+              holdId: string
+              /** @description A decimal amount in the budget's unit */
+              maximum: string
+              /** @description A decimal amount in the budget's unit */
+              actual: string
+            }
+          | {
+              /** @enum {string} */
+              kind: "limit_below_usage"
+              limitId: string
+              /** @description A decimal amount in the budget's unit */
+              minimum: string
+              /** @description A decimal amount in the budget's unit */
+              requested: string
+            }
+          | {
+              /** @enum {string} */
+              kind: "window_capacity_exceeded"
+              maximum: number
+              retained: number
             }
       }
     }
@@ -870,7 +898,7 @@ export interface components {
           | {
               /** @enum {string} */
               kind: "budget_exceeded"
-              /** @description Among hard limits the request would exceed, the one that resets last; that limit decides when the request can pass */
+              /** @description A failing hard limit smaller than the request, or otherwise the one that resets last. Other limits can also block the request. The remedy considers all failing limits. */
               blocked: {
                 limitId: string
                 /**
@@ -879,14 +907,14 @@ export interface components {
                  * @enum {string}
                  */
                 window: "hour" | "day" | "week" | "month" | "never"
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description A decimal amount in the budget's unit */
                 remaining: string
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description A decimal amount in the budget's unit */
                 held: string
                 /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
                 /**
-                 * @description release_holds: open holds on this limit would make room. wait_for_reset: the limit has room after resetsAt. raise_limit: the amount does not fit this limit.
+                 * @description release_holds: releasing holds makes the request fit all failing limits. wait_for_reset: resetting the failing windows makes the request fit with holds unchanged. raise_limit: neither action alone is sufficient; one or more limits need a change.
                  * @enum {string}
                  */
                 remedy: "release_holds" | "wait_for_reset" | "raise_limit"
@@ -905,7 +933,7 @@ export interface components {
                    */
                   window: "hour" | "day" | "week" | "month" | "never"
                   /**
-                   * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
                    * @example hard
                    * @enum {string}
                    */
@@ -916,7 +944,7 @@ export interface components {
                   consumed: string
                   /** @description Held by open holds */
                   held: string
-                  /** @description amount - consumed - held; negative after an overrun or a record */
+                  /** @description amount - consumed - held; negative only for a soft limit */
                   remaining: string
                   /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
@@ -930,6 +958,34 @@ export interface components {
               kind: "budget_closed"
               /** @description When the budget closed, in epoch milliseconds */
               closedAt: number
+            }
+          | {
+              /** @enum {string} */
+              kind: "hold_amount_exceeded"
+              /**
+               * @description The hold, as returned by authorize
+               * @example h_42
+               */
+              holdId: string
+              /** @description A decimal amount in the budget's unit */
+              maximum: string
+              /** @description A decimal amount in the budget's unit */
+              actual: string
+            }
+          | {
+              /** @enum {string} */
+              kind: "limit_below_usage"
+              limitId: string
+              /** @description A decimal amount in the budget's unit */
+              minimum: string
+              /** @description A decimal amount in the budget's unit */
+              requested: string
+            }
+          | {
+              /** @enum {string} */
+              kind: "window_capacity_exceeded"
+              maximum: number
+              retained: number
             }
       }
     }
@@ -974,7 +1030,7 @@ export interface components {
           | {
               /** @enum {string} */
               kind: "budget_exceeded"
-              /** @description Among hard limits the request would exceed, the one that resets last; that limit decides when the request can pass */
+              /** @description A failing hard limit smaller than the request, or otherwise the one that resets last. Other limits can also block the request. The remedy considers all failing limits. */
               blocked: {
                 limitId: string
                 /**
@@ -983,14 +1039,14 @@ export interface components {
                  * @enum {string}
                  */
                 window: "hour" | "day" | "week" | "month" | "never"
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description A decimal amount in the budget's unit */
                 remaining: string
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description A decimal amount in the budget's unit */
                 held: string
                 /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
                 /**
-                 * @description release_holds: open holds on this limit would make room. wait_for_reset: the limit has room after resetsAt. raise_limit: the amount does not fit this limit.
+                 * @description release_holds: releasing holds makes the request fit all failing limits. wait_for_reset: resetting the failing windows makes the request fit with holds unchanged. raise_limit: neither action alone is sufficient; one or more limits need a change.
                  * @enum {string}
                  */
                 remedy: "release_holds" | "wait_for_reset" | "raise_limit"
@@ -1009,7 +1065,7 @@ export interface components {
                    */
                   window: "hour" | "day" | "week" | "month" | "never"
                   /**
-                   * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
                    * @example hard
                    * @enum {string}
                    */
@@ -1020,7 +1076,7 @@ export interface components {
                   consumed: string
                   /** @description Held by open holds */
                   held: string
-                  /** @description amount - consumed - held; negative after an overrun or a record */
+                  /** @description amount - consumed - held; negative only for a soft limit */
                   remaining: string
                   /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
@@ -1034,6 +1090,34 @@ export interface components {
               kind: "budget_closed"
               /** @description When the budget closed, in epoch milliseconds */
               closedAt: number
+            }
+          | {
+              /** @enum {string} */
+              kind: "hold_amount_exceeded"
+              /**
+               * @description The hold, as returned by authorize
+               * @example h_42
+               */
+              holdId: string
+              /** @description A decimal amount in the budget's unit */
+              maximum: string
+              /** @description A decimal amount in the budget's unit */
+              actual: string
+            }
+          | {
+              /** @enum {string} */
+              kind: "limit_below_usage"
+              limitId: string
+              /** @description A decimal amount in the budget's unit */
+              minimum: string
+              /** @description A decimal amount in the budget's unit */
+              requested: string
+            }
+          | {
+              /** @enum {string} */
+              kind: "window_capacity_exceeded"
+              maximum: number
+              retained: number
             }
       }
     }
@@ -1078,7 +1162,7 @@ export interface components {
           | {
               /** @enum {string} */
               kind: "budget_exceeded"
-              /** @description Among hard limits the request would exceed, the one that resets last; that limit decides when the request can pass */
+              /** @description A failing hard limit smaller than the request, or otherwise the one that resets last. Other limits can also block the request. The remedy considers all failing limits. */
               blocked: {
                 limitId: string
                 /**
@@ -1087,14 +1171,14 @@ export interface components {
                  * @enum {string}
                  */
                 window: "hour" | "day" | "week" | "month" | "never"
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description A decimal amount in the budget's unit */
                 remaining: string
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description A decimal amount in the budget's unit */
                 held: string
                 /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
                 /**
-                 * @description release_holds: open holds on this limit would make room. wait_for_reset: the limit has room after resetsAt. raise_limit: the amount does not fit this limit.
+                 * @description release_holds: releasing holds makes the request fit all failing limits. wait_for_reset: resetting the failing windows makes the request fit with holds unchanged. raise_limit: neither action alone is sufficient; one or more limits need a change.
                  * @enum {string}
                  */
                 remedy: "release_holds" | "wait_for_reset" | "raise_limit"
@@ -1113,7 +1197,7 @@ export interface components {
                    */
                   window: "hour" | "day" | "week" | "month" | "never"
                   /**
-                   * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
                    * @example hard
                    * @enum {string}
                    */
@@ -1124,7 +1208,7 @@ export interface components {
                   consumed: string
                   /** @description Held by open holds */
                   held: string
-                  /** @description amount - consumed - held; negative after an overrun or a record */
+                  /** @description amount - consumed - held; negative only for a soft limit */
                   remaining: string
                   /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
@@ -1138,6 +1222,34 @@ export interface components {
               kind: "budget_closed"
               /** @description When the budget closed, in epoch milliseconds */
               closedAt: number
+            }
+          | {
+              /** @enum {string} */
+              kind: "hold_amount_exceeded"
+              /**
+               * @description The hold, as returned by authorize
+               * @example h_42
+               */
+              holdId: string
+              /** @description A decimal amount in the budget's unit */
+              maximum: string
+              /** @description A decimal amount in the budget's unit */
+              actual: string
+            }
+          | {
+              /** @enum {string} */
+              kind: "limit_below_usage"
+              limitId: string
+              /** @description A decimal amount in the budget's unit */
+              minimum: string
+              /** @description A decimal amount in the budget's unit */
+              requested: string
+            }
+          | {
+              /** @enum {string} */
+              kind: "window_capacity_exceeded"
+              maximum: number
+              retained: number
             }
       }
     }
@@ -1182,7 +1294,7 @@ export interface components {
           | {
               /** @enum {string} */
               kind: "budget_exceeded"
-              /** @description Among hard limits the request would exceed, the one that resets last; that limit decides when the request can pass */
+              /** @description A failing hard limit smaller than the request, or otherwise the one that resets last. Other limits can also block the request. The remedy considers all failing limits. */
               blocked: {
                 limitId: string
                 /**
@@ -1191,14 +1303,14 @@ export interface components {
                  * @enum {string}
                  */
                 window: "hour" | "day" | "week" | "month" | "never"
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description A decimal amount in the budget's unit */
                 remaining: string
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description A decimal amount in the budget's unit */
                 held: string
                 /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
                 /**
-                 * @description release_holds: open holds on this limit would make room. wait_for_reset: the limit has room after resetsAt. raise_limit: the amount does not fit this limit.
+                 * @description release_holds: releasing holds makes the request fit all failing limits. wait_for_reset: resetting the failing windows makes the request fit with holds unchanged. raise_limit: neither action alone is sufficient; one or more limits need a change.
                  * @enum {string}
                  */
                 remedy: "release_holds" | "wait_for_reset" | "raise_limit"
@@ -1217,7 +1329,7 @@ export interface components {
                    */
                   window: "hour" | "day" | "week" | "month" | "never"
                   /**
-                   * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
                    * @example hard
                    * @enum {string}
                    */
@@ -1228,7 +1340,7 @@ export interface components {
                   consumed: string
                   /** @description Held by open holds */
                   held: string
-                  /** @description amount - consumed - held; negative after an overrun or a record */
+                  /** @description amount - consumed - held; negative only for a soft limit */
                   remaining: string
                   /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
@@ -1242,6 +1354,34 @@ export interface components {
               kind: "budget_closed"
               /** @description When the budget closed, in epoch milliseconds */
               closedAt: number
+            }
+          | {
+              /** @enum {string} */
+              kind: "hold_amount_exceeded"
+              /**
+               * @description The hold, as returned by authorize
+               * @example h_42
+               */
+              holdId: string
+              /** @description A decimal amount in the budget's unit */
+              maximum: string
+              /** @description A decimal amount in the budget's unit */
+              actual: string
+            }
+          | {
+              /** @enum {string} */
+              kind: "limit_below_usage"
+              limitId: string
+              /** @description A decimal amount in the budget's unit */
+              minimum: string
+              /** @description A decimal amount in the budget's unit */
+              requested: string
+            }
+          | {
+              /** @enum {string} */
+              kind: "window_capacity_exceeded"
+              maximum: number
+              retained: number
             }
       }
     }
@@ -1286,7 +1426,7 @@ export interface components {
           | {
               /** @enum {string} */
               kind: "budget_exceeded"
-              /** @description Among hard limits the request would exceed, the one that resets last; that limit decides when the request can pass */
+              /** @description A failing hard limit smaller than the request, or otherwise the one that resets last. Other limits can also block the request. The remedy considers all failing limits. */
               blocked: {
                 limitId: string
                 /**
@@ -1295,14 +1435,14 @@ export interface components {
                  * @enum {string}
                  */
                 window: "hour" | "day" | "week" | "month" | "never"
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description A decimal amount in the budget's unit */
                 remaining: string
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description A decimal amount in the budget's unit */
                 held: string
                 /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
                 /**
-                 * @description release_holds: open holds on this limit would make room. wait_for_reset: the limit has room after resetsAt. raise_limit: the amount does not fit this limit.
+                 * @description release_holds: releasing holds makes the request fit all failing limits. wait_for_reset: resetting the failing windows makes the request fit with holds unchanged. raise_limit: neither action alone is sufficient; one or more limits need a change.
                  * @enum {string}
                  */
                 remedy: "release_holds" | "wait_for_reset" | "raise_limit"
@@ -1321,7 +1461,7 @@ export interface components {
                    */
                   window: "hour" | "day" | "week" | "month" | "never"
                   /**
-                   * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
                    * @example hard
                    * @enum {string}
                    */
@@ -1332,7 +1472,7 @@ export interface components {
                   consumed: string
                   /** @description Held by open holds */
                   held: string
-                  /** @description amount - consumed - held; negative after an overrun or a record */
+                  /** @description amount - consumed - held; negative only for a soft limit */
                   remaining: string
                   /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
@@ -1346,6 +1486,34 @@ export interface components {
               kind: "budget_closed"
               /** @description When the budget closed, in epoch milliseconds */
               closedAt: number
+            }
+          | {
+              /** @enum {string} */
+              kind: "hold_amount_exceeded"
+              /**
+               * @description The hold, as returned by authorize
+               * @example h_42
+               */
+              holdId: string
+              /** @description A decimal amount in the budget's unit */
+              maximum: string
+              /** @description A decimal amount in the budget's unit */
+              actual: string
+            }
+          | {
+              /** @enum {string} */
+              kind: "limit_below_usage"
+              limitId: string
+              /** @description A decimal amount in the budget's unit */
+              minimum: string
+              /** @description A decimal amount in the budget's unit */
+              requested: string
+            }
+          | {
+              /** @enum {string} */
+              kind: "window_capacity_exceeded"
+              maximum: number
+              retained: number
             }
       }
     }
@@ -1390,7 +1558,7 @@ export interface components {
           | {
               /** @enum {string} */
               kind: "budget_exceeded"
-              /** @description Among hard limits the request would exceed, the one that resets last; that limit decides when the request can pass */
+              /** @description A failing hard limit smaller than the request, or otherwise the one that resets last. Other limits can also block the request. The remedy considers all failing limits. */
               blocked: {
                 limitId: string
                 /**
@@ -1399,14 +1567,14 @@ export interface components {
                  * @enum {string}
                  */
                 window: "hour" | "day" | "week" | "month" | "never"
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description A decimal amount in the budget's unit */
                 remaining: string
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description A decimal amount in the budget's unit */
                 held: string
                 /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
                 /**
-                 * @description release_holds: open holds on this limit would make room. wait_for_reset: the limit has room after resetsAt. raise_limit: the amount does not fit this limit.
+                 * @description release_holds: releasing holds makes the request fit all failing limits. wait_for_reset: resetting the failing windows makes the request fit with holds unchanged. raise_limit: neither action alone is sufficient; one or more limits need a change.
                  * @enum {string}
                  */
                 remedy: "release_holds" | "wait_for_reset" | "raise_limit"
@@ -1425,7 +1593,7 @@ export interface components {
                    */
                   window: "hour" | "day" | "week" | "month" | "never"
                   /**
-                   * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
                    * @example hard
                    * @enum {string}
                    */
@@ -1436,7 +1604,7 @@ export interface components {
                   consumed: string
                   /** @description Held by open holds */
                   held: string
-                  /** @description amount - consumed - held; negative after an overrun or a record */
+                  /** @description amount - consumed - held; negative only for a soft limit */
                   remaining: string
                   /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
@@ -1450,6 +1618,34 @@ export interface components {
               kind: "budget_closed"
               /** @description When the budget closed, in epoch milliseconds */
               closedAt: number
+            }
+          | {
+              /** @enum {string} */
+              kind: "hold_amount_exceeded"
+              /**
+               * @description The hold, as returned by authorize
+               * @example h_42
+               */
+              holdId: string
+              /** @description A decimal amount in the budget's unit */
+              maximum: string
+              /** @description A decimal amount in the budget's unit */
+              actual: string
+            }
+          | {
+              /** @enum {string} */
+              kind: "limit_below_usage"
+              limitId: string
+              /** @description A decimal amount in the budget's unit */
+              minimum: string
+              /** @description A decimal amount in the budget's unit */
+              requested: string
+            }
+          | {
+              /** @enum {string} */
+              kind: "window_capacity_exceeded"
+              maximum: number
+              retained: number
             }
       }
     }
@@ -1494,7 +1690,7 @@ export interface components {
           | {
               /** @enum {string} */
               kind: "budget_exceeded"
-              /** @description Among hard limits the request would exceed, the one that resets last; that limit decides when the request can pass */
+              /** @description A failing hard limit smaller than the request, or otherwise the one that resets last. Other limits can also block the request. The remedy considers all failing limits. */
               blocked: {
                 limitId: string
                 /**
@@ -1503,14 +1699,14 @@ export interface components {
                  * @enum {string}
                  */
                 window: "hour" | "day" | "week" | "month" | "never"
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description A decimal amount in the budget's unit */
                 remaining: string
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description A decimal amount in the budget's unit */
                 held: string
                 /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
                 /**
-                 * @description release_holds: open holds on this limit would make room. wait_for_reset: the limit has room after resetsAt. raise_limit: the amount does not fit this limit.
+                 * @description release_holds: releasing holds makes the request fit all failing limits. wait_for_reset: resetting the failing windows makes the request fit with holds unchanged. raise_limit: neither action alone is sufficient; one or more limits need a change.
                  * @enum {string}
                  */
                 remedy: "release_holds" | "wait_for_reset" | "raise_limit"
@@ -1529,7 +1725,7 @@ export interface components {
                    */
                   window: "hour" | "day" | "week" | "month" | "never"
                   /**
-                   * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
                    * @example hard
                    * @enum {string}
                    */
@@ -1540,7 +1736,7 @@ export interface components {
                   consumed: string
                   /** @description Held by open holds */
                   held: string
-                  /** @description amount - consumed - held; negative after an overrun or a record */
+                  /** @description amount - consumed - held; negative only for a soft limit */
                   remaining: string
                   /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
@@ -1554,6 +1750,34 @@ export interface components {
               kind: "budget_closed"
               /** @description When the budget closed, in epoch milliseconds */
               closedAt: number
+            }
+          | {
+              /** @enum {string} */
+              kind: "hold_amount_exceeded"
+              /**
+               * @description The hold, as returned by authorize
+               * @example h_42
+               */
+              holdId: string
+              /** @description A decimal amount in the budget's unit */
+              maximum: string
+              /** @description A decimal amount in the budget's unit */
+              actual: string
+            }
+          | {
+              /** @enum {string} */
+              kind: "limit_below_usage"
+              limitId: string
+              /** @description A decimal amount in the budget's unit */
+              minimum: string
+              /** @description A decimal amount in the budget's unit */
+              requested: string
+            }
+          | {
+              /** @enum {string} */
+              kind: "window_capacity_exceeded"
+              maximum: number
+              retained: number
             }
       }
     }
@@ -1598,7 +1822,7 @@ export interface components {
           | {
               /** @enum {string} */
               kind: "budget_exceeded"
-              /** @description Among hard limits the request would exceed, the one that resets last; that limit decides when the request can pass */
+              /** @description A failing hard limit smaller than the request, or otherwise the one that resets last. Other limits can also block the request. The remedy considers all failing limits. */
               blocked: {
                 limitId: string
                 /**
@@ -1607,14 +1831,14 @@ export interface components {
                  * @enum {string}
                  */
                 window: "hour" | "day" | "week" | "month" | "never"
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description A decimal amount in the budget's unit */
                 remaining: string
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description A decimal amount in the budget's unit */
                 held: string
                 /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
                 /**
-                 * @description release_holds: open holds on this limit would make room. wait_for_reset: the limit has room after resetsAt. raise_limit: the amount does not fit this limit.
+                 * @description release_holds: releasing holds makes the request fit all failing limits. wait_for_reset: resetting the failing windows makes the request fit with holds unchanged. raise_limit: neither action alone is sufficient; one or more limits need a change.
                  * @enum {string}
                  */
                 remedy: "release_holds" | "wait_for_reset" | "raise_limit"
@@ -1633,7 +1857,7 @@ export interface components {
                    */
                   window: "hour" | "day" | "week" | "month" | "never"
                   /**
-                   * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
                    * @example hard
                    * @enum {string}
                    */
@@ -1644,7 +1868,7 @@ export interface components {
                   consumed: string
                   /** @description Held by open holds */
                   held: string
-                  /** @description amount - consumed - held; negative after an overrun or a record */
+                  /** @description amount - consumed - held; negative only for a soft limit */
                   remaining: string
                   /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
@@ -1658,6 +1882,34 @@ export interface components {
               kind: "budget_closed"
               /** @description When the budget closed, in epoch milliseconds */
               closedAt: number
+            }
+          | {
+              /** @enum {string} */
+              kind: "hold_amount_exceeded"
+              /**
+               * @description The hold, as returned by authorize
+               * @example h_42
+               */
+              holdId: string
+              /** @description A decimal amount in the budget's unit */
+              maximum: string
+              /** @description A decimal amount in the budget's unit */
+              actual: string
+            }
+          | {
+              /** @enum {string} */
+              kind: "limit_below_usage"
+              limitId: string
+              /** @description A decimal amount in the budget's unit */
+              minimum: string
+              /** @description A decimal amount in the budget's unit */
+              requested: string
+            }
+          | {
+              /** @enum {string} */
+              kind: "window_capacity_exceeded"
+              maximum: number
+              retained: number
             }
       }
     }
@@ -1702,7 +1954,7 @@ export interface components {
           | {
               /** @enum {string} */
               kind: "budget_exceeded"
-              /** @description Among hard limits the request would exceed, the one that resets last; that limit decides when the request can pass */
+              /** @description A failing hard limit smaller than the request, or otherwise the one that resets last. Other limits can also block the request. The remedy considers all failing limits. */
               blocked: {
                 limitId: string
                 /**
@@ -1711,14 +1963,14 @@ export interface components {
                  * @enum {string}
                  */
                 window: "hour" | "day" | "week" | "month" | "never"
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description A decimal amount in the budget's unit */
                 remaining: string
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description A decimal amount in the budget's unit */
                 held: string
                 /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
                 /**
-                 * @description release_holds: open holds on this limit would make room. wait_for_reset: the limit has room after resetsAt. raise_limit: the amount does not fit this limit.
+                 * @description release_holds: releasing holds makes the request fit all failing limits. wait_for_reset: resetting the failing windows makes the request fit with holds unchanged. raise_limit: neither action alone is sufficient; one or more limits need a change.
                  * @enum {string}
                  */
                 remedy: "release_holds" | "wait_for_reset" | "raise_limit"
@@ -1737,7 +1989,7 @@ export interface components {
                    */
                   window: "hour" | "day" | "week" | "month" | "never"
                   /**
-                   * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
                    * @example hard
                    * @enum {string}
                    */
@@ -1748,7 +2000,7 @@ export interface components {
                   consumed: string
                   /** @description Held by open holds */
                   held: string
-                  /** @description amount - consumed - held; negative after an overrun or a record */
+                  /** @description amount - consumed - held; negative only for a soft limit */
                   remaining: string
                   /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
@@ -1762,6 +2014,34 @@ export interface components {
               kind: "budget_closed"
               /** @description When the budget closed, in epoch milliseconds */
               closedAt: number
+            }
+          | {
+              /** @enum {string} */
+              kind: "hold_amount_exceeded"
+              /**
+               * @description The hold, as returned by authorize
+               * @example h_42
+               */
+              holdId: string
+              /** @description A decimal amount in the budget's unit */
+              maximum: string
+              /** @description A decimal amount in the budget's unit */
+              actual: string
+            }
+          | {
+              /** @enum {string} */
+              kind: "limit_below_usage"
+              limitId: string
+              /** @description A decimal amount in the budget's unit */
+              minimum: string
+              /** @description A decimal amount in the budget's unit */
+              requested: string
+            }
+          | {
+              /** @enum {string} */
+              kind: "window_capacity_exceeded"
+              maximum: number
+              retained: number
             }
       }
     }
@@ -2630,7 +2910,7 @@ export interface operations {
           /** @description Up to 16 limits. Every hard limit must have room for a hold or charge. An empty list makes a budget that only counts. */
           limits: {
             /**
-             * @description Unique within the budget. Defaults to the window name. The id fixes the limit's window and anchor: changing either under the same id returns 409, so use a new id for a new window.
+             * @description Unique within the budget. Defaults to the window name. The id fixes the limit's recurring schedule. Equivalent UTC anchors share usage. A different schedule under the same id returns 409, so use a new id for a different schedule.
              * @example month
              */
             id?: string
@@ -2647,7 +2927,7 @@ export interface operations {
             window: "hour" | "day" | "week" | "month" | "never"
             /**
              * Format: date-time
-             * @description Anchors a day, week, or month window: periods start at this instant and repeat every window. A month anchored on the 31st starts on the last day of shorter months. Usage counts from the moment the anchor is first set.
+             * @description Anchors a day, week, or month window: periods start at this instant and repeat every window. A month anchored on the 31st starts on the last day of shorter months. Equivalent UTC anchors share one counter. Usage counts from the moment the schedule is first tracked. Removed schedules retain current usage until their period ends. A budget retains at most 32 distinct anchored schedules.
              * @example 2026-10-15T00:00:00Z
              */
             anchor?: string
@@ -2678,18 +2958,11 @@ export interface operations {
             maxTtlMs?: number
           }
           /**
-           * @description What a client should do when it cannot reach Unprice: deny, allow, or allow up to an amount per call. Stored for clients to read; the API never applies it. Defaults to deny.
+           * @description Deny new work when Unprice cannot be reached. Defaults to deny.
            * @example deny
+           * @enum {string}
            */
-          onUnavailable?:
-            | ("deny" | "allow")
-            | {
-                /**
-                 * @description A non-negative decimal string in the budget's unit, with at most 8 decimal places. Strings keep amounts exact.
-                 * @example 0.05
-                 */
-                allowUpTo: string
-              }
+          onUnavailable?: "deny"
         }
       }
     }
@@ -2704,7 +2977,7 @@ export interface operations {
             /** @description What this upsert changed; empty when it changed nothing */
             changes: {
               /**
-               * @description limit.added, limit.removed, limit.amount, limit.enforce, limits.order, holds, onUnavailable, or closesAt. Creating a budget lists each limit as limit.added.
+               * @description limit.added, limit.removed, limit.amount, limit.enforce, limits.order, holds, or closesAt. Creating a budget lists each limit as limit.added.
                * @example limit.amount
                */
               change: string
@@ -2726,7 +2999,7 @@ export interface operations {
               version: number
               limits: {
                 id: string
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description A decimal amount in the budget's unit */
                 amount: string
                 /**
                  * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
@@ -2737,7 +3010,7 @@ export interface operations {
                 /** @description The anchor instant of an anchored window, as an ISO 8601 string */
                 anchor?: string
                 /**
-                 * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                 * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
                  * @example hard
                  * @enum {string}
                  */
@@ -2747,12 +3020,8 @@ export interface operations {
                 defaultTtlMs: number
                 maxTtlMs: number
               }
-              onUnavailable:
-                | ("deny" | "allow")
-                | {
-                    /** @description A decimal amount in the budget's unit; negative after an overrun */
-                    allowUpTo: string
-                  }
+              /** @enum {string} */
+              onUnavailable: "deny"
               /** @description When the budget closes, or null */
               closesAt: string | null
               /** @description True from closesAt on */
@@ -2771,7 +3040,7 @@ export interface operations {
                    */
                   window: "hour" | "day" | "week" | "month" | "never"
                   /**
-                   * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
                    * @example hard
                    * @enum {string}
                    */
@@ -2782,7 +3051,7 @@ export interface operations {
                   consumed: string
                   /** @description Held by open holds */
                   held: string
-                  /** @description amount - consumed - held; negative after an overrun or a record */
+                  /** @description amount - consumed - held; negative only for a soft limit */
                   remaining: string
                   /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
@@ -2894,12 +3163,12 @@ export interface operations {
            */
           key: string
           /**
-           * @description The estimate to hold against every hard limit. Settle the actual amount later, or release the hold.
+           * @description The maximum permitted usage to reserve against every hard limit. Settle final usage up to this amount, or release after confirming zero usage and no continuing work.
            * @example 0.05
            */
           amount: string
           /**
-           * @description How long the hold reserves capacity, in milliseconds. Defaults to the budget's holds.defaultTtlMs and must not exceed holds.maxTtlMs. An expired hold keeps counting for 2 more TTLs, then lapses and returns its amount.
+           * @description The execution deadline, in milliseconds. Defaults to the budget's holds.defaultTtlMs and must not exceed holds.maxTtlMs. Expiry does not release capacity. An unresolved hold remains reserved until explicit settlement or release.
            * @example 60000
            */
           ttlMs?: number
@@ -2928,7 +3197,7 @@ export interface operations {
             holdId: string
             /** @description The amount held */
             amount: string
-            /** @description When the hold expires, in epoch milliseconds. Settle before then. */
+            /** @description The deadline for work, in epoch milliseconds. Capacity remains reserved until explicit settlement or release. */
             expiresAt: number
             /** @description True when this answer replays an earlier request instead of applying it again */
             replayed: boolean
@@ -2946,7 +3215,7 @@ export interface operations {
                  */
                 window: "hour" | "day" | "week" | "month" | "never"
                 /**
-                 * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                 * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
                  * @example hard
                  * @enum {string}
                  */
@@ -2957,7 +3226,7 @@ export interface operations {
                 consumed: string
                 /** @description Held by open holds */
                 held: string
-                /** @description amount - consumed - held; negative after an overrun or a record */
+                /** @description amount - consumed - held; negative only for a soft limit */
                 remaining: string
                 /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
@@ -3082,7 +3351,7 @@ export interface operations {
            */
           holdId: string
           /**
-           * @description The actual usage. Up to the hold's amount is covered by the hold and the rest is returned; anything above it is consumed as overrun.
+           * @description Final usage after work has stopped. Must not exceed the authorized amount. Settlement returns the unused reservation. An amount above the reservation returns 409 and leaves the hold unchanged.
            * @example 0.05
            */
           amount: string
@@ -3104,17 +3373,11 @@ export interface operations {
             holdId: string
             /** @description The amount settled */
             actual: string
-            /** @description The part of actual the hold covered */
-            covered: string
             /** @description The unused part of the hold, returned */
             released: string
-            /** @description actual - covered: consumed beyond the hold */
-            overrun: string
-            /** @description The hold had lapsed, so the whole actual was consumed without cover */
-            late: boolean
             /** @description Settled at or after the hold's expiresAt */
             expired: boolean
-            /** @description Ids of the limits this request took from non-negative to negative remaining */
+            /** @description Soft limit ids whose consumed amount first exceeded the threshold. Reservations do not trigger crossings. Replays preserve the original result. */
             crossed: string[]
             /** @description True when this answer replays an earlier request instead of applying it again */
             replayed: boolean
@@ -3132,7 +3395,7 @@ export interface operations {
                  */
                 window: "hour" | "day" | "week" | "month" | "never"
                 /**
-                 * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                 * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
                  * @example hard
                  * @enum {string}
                  */
@@ -3143,7 +3406,7 @@ export interface operations {
                 consumed: string
                 /** @description Held by open holds */
                 held: string
-                /** @description amount - consumed - held; negative after an overrun or a record */
+                /** @description amount - consumed - held; negative only for a soft limit */
                 remaining: string
                 /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
@@ -3274,7 +3537,7 @@ export interface operations {
              * @example h_42
              */
             holdId: string
-            /** @description The amount returned; 0 when the hold had already lapsed */
+            /** @description The amount returned: the whole hold */
             released: string
             /** @description True when this answer replays an earlier request instead of applying it again */
             replayed: boolean
@@ -3292,7 +3555,7 @@ export interface operations {
                  */
                 window: "hour" | "day" | "week" | "month" | "never"
                 /**
-                 * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                 * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
                  * @example hard
                  * @enum {string}
                  */
@@ -3303,7 +3566,7 @@ export interface operations {
                 consumed: string
                 /** @description Held by open holds */
                 held: string
-                /** @description amount - consumed - held; negative after an overrun or a record */
+                /** @description amount - consumed - held; negative only for a soft limit */
                 remaining: string
                 /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
@@ -3438,7 +3701,7 @@ export interface operations {
             allowed: true
             /** @description The amount consumed */
             amount: string
-            /** @description Ids of the limits this request took from non-negative to negative remaining */
+            /** @description Soft limit ids whose consumed amount first exceeded the threshold. Reservations do not trigger crossings. Replays preserve the original result. */
             crossed: string[]
             /** @description True when this answer replays an earlier request instead of applying it again */
             replayed: boolean
@@ -3456,7 +3719,7 @@ export interface operations {
                  */
                 window: "hour" | "day" | "week" | "month" | "never"
                 /**
-                 * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                 * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
                  * @example hard
                  * @enum {string}
                  */
@@ -3467,7 +3730,7 @@ export interface operations {
                 consumed: string
                 /** @description Held by open holds */
                 held: string
-                /** @description amount - consumed - held; negative after an overrun or a record */
+                /** @description amount - consumed - held; negative only for a soft limit */
                 remaining: string
                 /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
@@ -3587,7 +3850,7 @@ export interface operations {
            */
           key: string
           /**
-           * @description The amount the usage cost. Never denied by a limit.
+           * @description The amount to record, checked against every hard limit. Recording after work does not authorize that work retroactively.
            * @example 0.05
            */
           amount: string
@@ -3614,7 +3877,7 @@ export interface operations {
           "application/json": {
             /** @description The amount consumed */
             amount: string
-            /** @description Ids of the limits this request took from non-negative to negative remaining */
+            /** @description Soft limit ids whose consumed amount first exceeded the threshold. Reservations do not trigger crossings. Replays preserve the original result. */
             crossed: string[]
             /** @description True when this answer replays an earlier request instead of applying it again */
             replayed: boolean
@@ -3632,7 +3895,7 @@ export interface operations {
                  */
                 window: "hour" | "day" | "week" | "month" | "never"
                 /**
-                 * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                 * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
                  * @example hard
                  * @enum {string}
                  */
@@ -3643,7 +3906,7 @@ export interface operations {
                 consumed: string
                 /** @description Held by open holds */
                 held: string
-                /** @description amount - consumed - held; negative after an overrun or a record */
+                /** @description amount - consumed - held; negative only for a soft limit */
                 remaining: string
                 /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
@@ -3670,6 +3933,15 @@ export interface operations {
         }
         content: {
           "application/json": components["schemas"]["ErrUnauthorized"]
+        }
+      }
+      /** @description The request does not fit the budget. `details.blocked` names the limit that blocked it and the remedy that would let it through. */
+      402: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrBudgetExceeded"]
         }
       }
       /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
@@ -3766,7 +4038,7 @@ export interface operations {
               version: number
               limits: {
                 id: string
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description A decimal amount in the budget's unit */
                 amount: string
                 /**
                  * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
@@ -3777,7 +4049,7 @@ export interface operations {
                 /** @description The anchor instant of an anchored window, as an ISO 8601 string */
                 anchor?: string
                 /**
-                 * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                 * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
                  * @example hard
                  * @enum {string}
                  */
@@ -3787,12 +4059,8 @@ export interface operations {
                 defaultTtlMs: number
                 maxTtlMs: number
               }
-              onUnavailable:
-                | ("deny" | "allow")
-                | {
-                    /** @description A decimal amount in the budget's unit; negative after an overrun */
-                    allowUpTo: string
-                  }
+              /** @enum {string} */
+              onUnavailable: "deny"
               /** @description When the budget closes, or null */
               closesAt: string | null
               /** @description True from closesAt on */
@@ -3811,7 +4079,7 @@ export interface operations {
                    */
                   window: "hour" | "day" | "week" | "month" | "never"
                   /**
-                   * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @description hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.
                    * @example hard
                    * @enum {string}
                    */
@@ -3822,7 +4090,7 @@ export interface operations {
                   consumed: string
                   /** @description Held by open holds */
                   held: string
-                  /** @description amount - consumed - held; negative after an overrun or a record */
+                  /** @description amount - consumed - held; negative only for a soft limit */
                   remaining: string
                   /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null

@@ -12,9 +12,9 @@ export const route = createRoute(
     {
       path: "/v1/budgets/authorize",
       operationId: "budgets.authorize",
-      summary: "hold an amount against a budget before work runs",
+      summary: "reserve the maximum permitted usage before work runs",
       description:
-        "Hold an estimate against every hard limit of the budget, or return 402 with the limit that blocked it. Settle the hold with the actual amount, or release it. A retry with the same idempotency key returns the same hold. A budget past its closesAt returns 409.",
+        "Reserve the maximum permitted usage against every hard limit of the budget, or return 402 with the limit that blocked it. The caller must enforce this maximum during work. Settle final usage up to the reserved amount, or release only after confirming zero usage and no continuing work. Expiry never releases capacity. A retry with the same idempotency key returns the same hold. A budget past its closesAt returns 409.",
       method: "post",
       tags: ["budgets"],
       request: {

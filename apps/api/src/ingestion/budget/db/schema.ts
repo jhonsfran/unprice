@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm"
 import {
   customType,
   index,
@@ -35,28 +36,23 @@ export const budgetLedger = sqliteTable("budget_ledger", {
   usageJson: text("usage_json").notNull(),
 })
 
-/**
- * Holds, charges, and records. The row is the open hold, the closed tombstone, and the idempotency
- * record at once. `due_at` is `dueAt(operation)`: lapse time for open holds, the end of retention
- * for everything else.
- */
 export const budgetOperations = sqliteTable(
   "budget_operations",
   {
     /** `h_<n>` for a hold; `o:<key_hash>` for a charge or record. */
     id: text("id").primaryKey(),
     kind: text("kind", { enum: ["hold", "charge", "record"] }).notNull(),
-    status: text("status", {
-      enum: ["open", "lapsed", "settled", "released", "done"],
-    }).notNull(),
-    /** sha256 of the idempotency key. */
-    keyHash: text("key_hash").notNull(),
+    status: text("status", { enum: ["open", "settled", "released", "done"] }).notNull(),
+    /** End of retention; 0 for an open hold, which the partial index leaves out. */
     dueAt: integer("due_at").notNull(),
+    /** The operation without `kind` and `id`, with tagged bigints. */
     dataJson: text("data_json").notNull(),
   },
   (table) => ({
-    due: index("budget_operations_due_at_idx").on(table.dueAt),
-    key: uniqueIndex("budget_operations_key_hash_idx").on(table.keyHash),
+    due: index("budget_operations_terminal_due_idx")
+      .on(table.dueAt)
+      .where(sql`status IN ('done', 'settled', 'released')`),
+    key: uniqueIndex("budget_operations_key_idx").on(sql`data_json ->> '$.idempotencyKey'`),
   })
 )
 

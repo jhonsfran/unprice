@@ -15,12 +15,12 @@ export type BudgetStoreTx = BudgetReader & {
   commit(
     transition: Pick<
       BudgetTransition,
-      "budget" | "ledger" | "purged" | "operations" | "periods" | "now"
+      "budget" | "ledger" | "purged" | "operations" | "periods" | "retiredWindows" | "now"
     >
   ): void
   /** Deletes up to `limit` closed rows whose retention ended by `now`. */
   purgeOperations(now: number, limit: number): void
-  /** The earliest `due_at` of any row: the next lapse or end of retention. */
+  /** The earliest end of retention among closed rows. Open holds have no cleanup deadline. */
   nextDueAt(): number | null
 }
 

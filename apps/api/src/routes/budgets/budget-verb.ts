@@ -83,6 +83,38 @@ function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): Unprice
         message,
         details: { kind: "budget_closed", closedAt: rejection.closedAt },
       })
+    case "HOLD_AMOUNT_EXCEEDED":
+      return new UnpriceApiError({
+        code: "CONFLICT",
+        message,
+        details: {
+          kind: "hold_amount_exceeded",
+          holdId: rejection.holdId,
+          maximum: formatAmount(rejection.maximum),
+          actual: formatAmount(rejection.actual),
+        },
+      })
+    case "LIMIT_BELOW_USAGE":
+      return new UnpriceApiError({
+        code: "CONFLICT",
+        message,
+        details: {
+          kind: "limit_below_usage",
+          limitId: rejection.limitId,
+          minimum: formatAmount(rejection.minimum),
+          requested: formatAmount(rejection.requested),
+        },
+      })
+    case "WINDOW_CAPACITY_EXCEEDED":
+      return new UnpriceApiError({
+        code: "CONFLICT",
+        message,
+        details: {
+          kind: "window_capacity_exceeded",
+          maximum: rejection.maximum,
+          retained: rejection.retained,
+        },
+      })
     case "IDEMPOTENCY_CONFLICT":
     case "HOLD_CLOSED":
     case "HOLD_RETIRED":

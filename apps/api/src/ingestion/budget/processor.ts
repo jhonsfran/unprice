@@ -8,9 +8,7 @@ import {
 import type { BudgetReply, BudgetRequest } from "@unprice/services/use-cases"
 import type { BudgetProcessorDeps, BudgetStoreTx } from "./ports"
 
-export const INLINE_SWEEP_LIMIT = 32
-export const ALARM_SWEEP_LIMIT = 256
-export const ALARM_PURGE_LIMIT = 512
+export const ALARM_PURGE_LIMIT = 2048
 export const ALARM_CONTINUE_MS = 1_000
 export const ALARM_RETRY_MS = 30_000
 
@@ -26,32 +24,28 @@ type Committed =
 export class BudgetProcessor {
   /** The alarm this object last set. Lowered synchronously so concurrent commands never raise it. */
   private armedAt: number | null = null
+  private pendingAt: number | null = null
 
   constructor(private readonly deps: BudgetProcessorDeps) {}
 
   async initialize(): Promise<void> {
     this.armedAt = await this.deps.scheduler.getAlarm()
-    if (this.armedAt === null && this.deps.store.atomically((tx) => tx.readBudget()) !== null) {
-      await this.lowerAlarm(this.deps.clock.now())
+    if (this.armedAt === null) {
+      await this.lowerAlarm(this.deps.store.atomically((tx) => tx.nextDueAt()))
     }
   }
 
   async execute(request: BudgetRequest): Promise<BudgetReply> {
     const clockMs = this.deps.clock.now()
-    const committed = this.deps.store.atomically((tx) =>
-      commit(tx, request, clockMs, INLINE_SWEEP_LIMIT)
-    )
+    const committed = this.deps.store.atomically((tx) => commit(tx, request, clockMs))
     if (!committed.ok) return committed
     await this.lowerAlarm(committed.wakeAt)
     return { ok: true, outcome: committed.outcome }
   }
 
-  /**
-   * Sweeper: lapses due holds, rolls ended windows, purges rows whose retention ended, and re-arms
-   * for the next due row. A budget with no rows due sleeps until a command writes one.
-   */
   async alarm(): Promise<void> {
     this.armedAt = null
+    this.pendingAt = null
     const now = this.deps.clock.now()
     let next: number | null
     try {
@@ -65,28 +59,28 @@ export class BudgetProcessor {
       await this.lowerAlarm(next)
     } catch (error) {
       this.deps.logger.error("budget alarm could not re-arm", { error: errorMessage(error) })
+      throw error
     }
   }
 
   private async lowerAlarm(at: number | null): Promise<void> {
-    if (at === null || (this.armedAt !== null && this.armedAt <= at)) return
-    this.armedAt = at
+    if (at !== null && (this.pendingAt === null || at < this.pendingAt)) this.pendingAt = at
+    const pending = this.pendingAt
+    if (pending === null) return
+    if (this.armedAt !== null && this.armedAt <= pending) return
+    this.armedAt = pending
     try {
-      await this.deps.scheduler.setAlarm(at)
+      await this.deps.scheduler.setAlarm(pending)
+      if (this.pendingAt === pending) this.pendingAt = null
     } catch (error) {
-      this.armedAt = null
+      if (this.armedAt === pending) this.armedAt = null
       throw error
     }
   }
 }
 
-function commit(
-  tx: BudgetStoreTx,
-  command: BudgetCommand,
-  clockMs: number,
-  dueLimit: number
-): Committed {
-  const view = loadView(tx, command, clockMs, dueLimit)
+function commit(tx: BudgetStoreTx, command: BudgetCommand, clockMs: number): Committed {
+  const view = loadView(tx, command)
   const result = transition({ view, command, clockMs })
   if (result.err) return { ok: false, rejection: result.err.rejection }
 
@@ -98,7 +92,7 @@ function commit(
 /** Returns the next wake, or null when nothing is due. */
 function sweep(tx: BudgetStoreTx, clockMs: number): number | null {
   if (tx.readBudget() === null) return null
-  const swept = commit(tx, { type: "sweep" }, clockMs, ALARM_SWEEP_LIMIT)
+  const swept = commit(tx, { type: "sweep" }, clockMs)
   if (!swept.ok) throw new Error(`budget sweep rejected: ${swept.rejection.code}`)
   // The sweep moved the budget's clock to `now`, so purging at it never runs ahead of a command.
   tx.purgeOperations(swept.now, ALARM_PURGE_LIMIT)

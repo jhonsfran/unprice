@@ -2,6 +2,7 @@ export * from "./client"
 export * from "./errors"
 export {
   BudgetExceededError,
+  BudgetRecoveryError,
   BudgetRequestError,
   BudgetSettleError,
 } from "./budgets"

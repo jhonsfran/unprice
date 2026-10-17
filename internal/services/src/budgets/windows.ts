@@ -38,7 +38,24 @@ export function isAnchoredWindow(window: BudgetWindow): window is AnchoredWindow
 export function windowIdOf(spec: WindowSpec): WindowId {
   if (spec.anchor === undefined) return spec.window
   if (!isAnchoredWindow(spec.window)) throw new Error(`window ${spec.window} cannot be anchored`)
-  return `${spec.window}@${new Date(spec.anchor).toISOString()}`
+  return `${spec.window}@${new Date(representativeAnchor(spec.window, spec.anchor)).toISOString()}`
+}
+
+function representativeAnchor(window: AnchoredWindow, anchor: number): number {
+  if (window === "month") {
+    const date = new Date(anchor)
+    return Date.UTC(
+      1970,
+      0,
+      date.getUTCDate(),
+      date.getUTCHours(),
+      date.getUTCMinutes(),
+      date.getUTCSeconds(),
+      date.getUTCMilliseconds()
+    )
+  }
+  const length = window === "day" ? DAY_MS : WEEK_MS
+  return ((anchor % length) + length) % length
 }
 
 export function windowSpecOf(id: WindowId): WindowSpec {

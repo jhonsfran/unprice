@@ -48,18 +48,14 @@ type ModelHold = {
   key: string
   amount: bigint
   expiresAt: number
-  lapsesAt: number
-  status: "open" | "lapsed" | "settled" | "released"
+  status: "open" | "settled" | "released"
   changedAt: number
   settle?: Settled
   released?: bigint
 }
 type Settled = {
   actual: bigint
-  covered: bigint
   released: bigint
-  overrun: bigint
-  late: boolean
   expired: boolean
   crossed: string[]
 }
@@ -128,9 +124,24 @@ function rangeOf(window: Window, anchor: number | undefined, t: number): Range {
 }
 
 function idOf(limit: { window: Window; anchor?: number }): string {
-  return limit.anchor === undefined
-    ? limit.window
-    : `${limit.window}@${new Date(limit.anchor).toISOString()}`
+  if (limit.anchor === undefined) return limit.window
+  const date = new Date(limit.anchor)
+  const dd =
+    limit.window === "month"
+      ? date.getUTCDate()
+      : limit.window === "week"
+        ? 1 + ((date.getUTCDay() + 3) % 7)
+        : 1
+  const anchor = Date.UTC(
+    1970,
+    0,
+    dd,
+    date.getUTCHours(),
+    date.getUTCMinutes(),
+    date.getUTCSeconds(),
+    date.getUTCMilliseconds()
+  )
+  return `${limit.window}@${new Date(anchor).toISOString()}`
 }
 
 /**
@@ -170,15 +181,9 @@ class ReferenceBudget {
     return now < rec.createdAt + (rec.verb === "record" ? 8 * day : day)
   }
 
-  /** The alarm: lapses due holds and moves the clock to `clock`, then drops what expired. */
   alarm(clock: number) {
     if (!this.config) return
     const now = Math.max(clock, this.lastWriteAt)
-    for (const hold of this.holds.values()) {
-      if (hold.status === "open" && hold.lapsesAt <= now) {
-        Object.assign(hold, { status: "lapsed", changedAt: now })
-      }
-    }
     this.lastWriteAt = now
     this.rolledCount = this.rolledPeriods(now).length
     for (const [key, rec] of this.keyed) if (!this.keyedLive(rec, now)) this.keyed.delete(key)
@@ -216,6 +221,7 @@ class ReferenceBudget {
   rolledPeriods(now: number): Period[] {
     const periods = new Map<string, Period>()
     for (const segment of this.segments) {
+      if (segment.anchor !== undefined && this.segmentAt(segment.id, now) !== segment) continue
       for (const c of this.countedBy(segment)) {
         const range = rangeOf(segment.window, segment.anchor, c.at)
         if (range.end === null || range.end > now) continue
@@ -252,7 +258,7 @@ class ReferenceBudget {
     if (!config) throw new Error("no config")
     let held = ZERO
     for (const hold of this.holds.values()) {
-      if (hold.status === "open" && hold.lapsesAt > now) held += hold.amount
+      if (hold.status === "open") held += hold.amount
     }
     const limits = config.limits.map((limit) => {
       const range = rangeOf(limit.window, limit.anchor, now)
@@ -271,9 +277,11 @@ class ReferenceBudget {
     return { held, limits, remaining }
   }
 
-  crossed(now: number, delta: bigint): string[] {
+  crossed(now: number, amount: bigint): string[] {
     return this.balance(now)
-      .limits.filter((l) => l.remaining >= ZERO && l.remaining + delta < ZERO)
+      .limits.filter(
+        (l) => l.enforce === "soft" && l.consumed <= l.amount && l.consumed + amount > l.amount
+      )
       .map((l) => l.id)
   }
 
@@ -287,27 +295,26 @@ class ReferenceBudget {
       if (pick.resetsAt !== null && (l.resetsAt === null || l.resetsAt > pick.resetsAt)) pick = l
     }
     let remedy = "raise_limit"
-    if (amount <= pick.amount) {
-      if (pick.held > ZERO && pick.remaining + pick.held - amount >= ZERO) remedy = "release_holds"
-      else if (pick.window !== "never") remedy = "wait_for_reset"
-    }
+    if (failing.every((l) => l.consumed + amount <= l.amount)) remedy = "release_holds"
+    else if (failing.every((l) => l.resetsAt !== null && l.held + amount <= l.amount))
+      remedy = "wait_for_reset"
+    if (remedy === "raise_limit") pick = failing.find((limit) => amount > limit.amount) ?? pick
     return { limitId: pick.id, remedy }
   }
 
   apply(command: BudgetCommand, clock: number): Expected {
     const now = Math.max(clock, this.lastWriteAt)
-    const due = [...this.holds.values()].filter((h) => h.status === "open" && h.lapsesAt <= now)
-    const decided = this.decide(command, now, due.length)
+    const decided = this.decide(command, now)
     if ("error" in decided) return decided
-    for (const hold of due) {
-      // Only an accepted command persists the lapse.
-      if (hold.status === "open") Object.assign(hold, { status: "lapsed", changedAt: now })
-    }
     // An accepted command also persists the roll of every reported period that ended, and a sweep
     // always moves the clock.
     const rolled = this.rolledPeriods(now).length
     const sweep = command.type === "sweep" && this.config !== null
-    if (decided.wrote || due.length > 0 || rolled > this.rolledCount || sweep) {
+    const retired = this.segments.some(
+      (segment) =>
+        segment.until !== null && segment.until > this.lastWriteAt && segment.until <= now
+    )
+    if (decided.wrote || rolled > this.rolledCount || sweep || retired) {
       this.lastWriteAt = now
     }
     this.rolledCount = rolled
@@ -316,14 +323,10 @@ class ReferenceBudget {
 
   private decide(
     command: BudgetCommand,
-    now: number,
-    lapsing: number
+    now: number
   ):
     | { error: string; limitId?: string; remedy?: string }
     | { outcome: Record<string, unknown>; wrote: boolean; checkBalance: boolean } {
-    const isLapsed = (h: ModelHold) =>
-      h.status === "lapsed" || (h.status === "open" && h.lapsesAt <= now)
-
     if (command.type === "upsert") {
       const next: ModelConfig = {
         limits: command.config.limits.map((l) => ({ ...l })),
@@ -336,7 +339,45 @@ class ReferenceBudget {
       if (next.limits.some((l) => (windowOf.get(l.id) ?? idOf(l)) !== idOf(l))) {
         return { error: "LIMIT_WINDOW_IMMUTABLE" }
       }
-      const same = this.config && stringify(this.config) === stringify(next)
+      const configIdentity = (value: ModelConfig) => ({
+        ...value,
+        limits: value.limits.map((limit) => ({
+          ...limit,
+          anchor: limit.anchor === undefined ? undefined : idOf(limit),
+        })),
+      })
+      const same =
+        this.config && stringify(configIdentity(this.config)) === stringify(configIdentity(next))
+      const retained = new Set(
+        this.segments
+          .filter(
+            (segment) =>
+              segment.anchor !== undefined && (segment.until === null || segment.until > now)
+          )
+          .map((segment) => segment.id)
+      )
+      const added = new Set(
+        next.limits
+          .filter((limit) => limit.anchor !== undefined && !retained.has(idOf(limit)))
+          .map(idOf)
+      )
+      if (added.size > 0 && retained.size + added.size > 32)
+        return { error: "WINDOW_CAPACITY_EXCEEDED" }
+      if (!same && this.config) {
+        const held = [...this.holds.values()].reduce(
+          (sum, hold) => sum + (hold.status === "open" ? hold.amount : ZERO),
+          ZERO
+        )
+        for (const limit of next.limits) {
+          const segment = this.segmentAt(idOf(limit), now)
+          const consumed = segment
+            ? this.counted(segment, rangeOf(limit.window, limit.anchor, now))
+            : ZERO
+          if (limit.enforce === "hard" && limit.amount < consumed + held) {
+            return { error: "LIMIT_BELOW_USAGE" }
+          }
+        }
+      }
       if (!same) {
         this.unit = command.unit
         this.config = next
@@ -347,8 +388,7 @@ class ReferenceBudget {
       const closed = next.closesAt !== null && now >= next.closesAt
       return { outcome: { version: this.version, closed }, wrote: !same, checkBalance: true }
     }
-    if (command.type === "sweep")
-      return { outcome: { lapsed: lapsing }, wrote: false, checkBalance: false }
+    if (command.type === "sweep") return { outcome: {}, wrote: false, checkBalance: false }
     const config = this.config
     if (!config) return { error: "BUDGET_NOT_FOUND" }
     if (command.type === "get") {
@@ -374,7 +414,7 @@ class ReferenceBudget {
             checkBalance: true,
           }
         }
-        const released = isLapsed(hold) ? ZERO : hold.amount
+        const released = hold.amount
         Object.assign(hold, { status: "released", changedAt: now, released })
         return { outcome: { released, replayed: false }, wrote: true, checkBalance: true }
       }
@@ -386,18 +426,13 @@ class ReferenceBudget {
           : { error: "HOLD_CLOSED" }
       }
       if (hold.status === "released") return { error: "HOLD_CLOSED" }
+      if (actual > hold.amount) return { error: "HOLD_AMOUNT_EXCEEDED" }
 
-      const open = !isLapsed(hold)
-      const covered = open ? (actual < hold.amount ? actual : hold.amount) : ZERO
-      const released = open ? hold.amount - covered : ZERO
       const settled: Settled = {
         actual,
-        covered,
-        released,
-        overrun: actual - covered,
-        late: !open,
-        expired: !open || now >= hold.expiresAt,
-        crossed: this.crossed(now, covered + released - actual),
+        released: hold.amount - actual,
+        expired: now >= hold.expiresAt,
+        crossed: this.crossed(now, actual),
       }
       this.consumptions.push({ at: now, amount: actual })
       Object.assign(hold, { status: "settled", changedAt: now, settle: settled })
@@ -436,11 +471,9 @@ class ReferenceBudget {
     if (config.closesAt !== null && now >= config.closesAt + grace) {
       return { error: "BUDGET_CLOSED" }
     }
-    if (command.type !== "record") {
-      const blocked = this.block(now, amount)
-      if (blocked) return { error: "LIMIT_EXCEEDED", ...blocked }
-    }
-    const crossed = this.crossed(now, -amount)
+    const blocked = this.block(now, amount)
+    if (blocked) return { error: "LIMIT_EXCEEDED", ...blocked }
+    const crossed = this.crossed(now, amount)
     const rec: KeyedRecord = {
       verb: command.type,
       amount,
@@ -464,7 +497,6 @@ class ReferenceBudget {
       key: command.idempotencyKey,
       amount,
       expiresAt,
-      lapsesAt: expiresAt + 2 * effectiveTtl,
       status: "open",
       changedAt: now,
     })
@@ -814,6 +846,10 @@ describe("budget core against a reference model", () => {
                   ? outcome.budget.balance
                   : null
             const reference = model.balance(now)
+            for (const limit of balance?.limits ?? []) {
+              if (limit.enforce === "hard")
+                expect(limit.consumed + limit.held <= limit.amount).toBe(true)
+            }
             expect(balance && balanceView(balance)).toEqual({
               remaining: reference.remaining,
               held: reference.held,

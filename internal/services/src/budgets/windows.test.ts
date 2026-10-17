@@ -80,10 +80,21 @@ describe("anchoredWindowBounds", () => {
 })
 
 describe("window ids", () => {
+  it.each([
+    ["day", "1969-12-20T09:30:00.123Z", "day@1970-01-01T09:30:00.123Z"],
+    ["week", "1969-12-18T09:30:00.123Z", "week@1970-01-01T09:30:00.123Z"],
+    ["week", "1969-12-17T09:30:00.123Z", "week@1970-01-07T09:30:00.123Z"],
+  ] as const)("normalizes a pre-epoch %s anchor", (window, anchor, expected) => {
+    expect(windowIdOf({ window, anchor: at(anchor) })).toBe(expected)
+    expect(windowBounds(windowSpecOf(expected), at("2026-10-15T09:30:00.123Z"))).toEqual(
+      windowBounds({ window, anchor: at(anchor) }, at("2026-10-15T09:30:00.123Z"))
+    )
+  })
+
   it("names a calendar window by itself and an anchored one by its anchor", () => {
     const anchored = { window: "month", anchor: at("2026-10-15T00:00:00+02:00") } as const
     expect(windowIdOf({ window: "day" })).toBe("day")
-    expect(windowIdOf(anchored)).toBe("month@2026-10-14T22:00:00.000Z")
+    expect(windowIdOf(anchored)).toBe("month@1970-01-14T22:00:00.000Z")
     expect(windowSpecOf("month@2026-10-14T22:00:00.000Z")).toEqual(anchored)
     expect(windowSpecOf("week")).toEqual({ window: "week" })
     expect(() => windowIdOf({ window: "hour", anchor: 0 })).toThrow("hour cannot be anchored")

@@ -111,8 +111,64 @@ describe("budgets API", () => {
       Object.keys(document.paths[path]?.post?.responses ?? {}).filter((status) => status === "402")
     expect([statuses("/v1/budgets/authorize"), statuses("/v1/budgets/record")]).toEqual([
       ["402"],
-      [],
+      ["402"],
     ])
+  })
+
+  it("returns settlement maximum and actual on an over-reservation conflict", async () => {
+    rejectWith({ code: "HOLD_AMOUNT_EXCEEDED", holdId: "h_1", maximum: usd(10), actual: usd(11) })
+    const response = await call("/v1/budgets/settle", { key: "k", holdId: "h_1", amount: "11" })
+    expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: "CONFLICT",
+        details: { kind: "hold_amount_exceeded", holdId: "h_1", maximum: "10", actual: "11" },
+      },
+    })
+  })
+
+  it("returns the minimum cap when a configuration is below committed usage", async () => {
+    rejectWith({
+      code: "LIMIT_BELOW_USAGE",
+      limitId: "month",
+      minimum: usd(90),
+      requested: usd(80),
+    })
+    const response = await call("/v1/budgets/upsert", {
+      key: "k",
+      unit: "USD",
+      limits: [{ id: "month", amount: "80", window: "month" }],
+    })
+    expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: "CONFLICT",
+        details: { kind: "limit_below_usage", limitId: "month", minimum: "90", requested: "80" },
+      },
+    })
+  })
+
+  it.each(["allow", { allowUpTo: "1" }])("refuses fail-open policy %j", async (onUnavailable) => {
+    const response = await call("/v1/budgets/upsert", {
+      key: "k",
+      unit: "USD",
+      limits: [],
+      onUnavailable,
+    })
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ error: { code: "BAD_REQUEST" } })
+  })
+
+  it("returns the retained schedule bound on a configuration conflict", async () => {
+    rejectWith({ code: "WINDOW_CAPACITY_EXCEEDED", maximum: 32, retained: 32 })
+    const response = await call("/v1/budgets/upsert", { key: "k", unit: "USD", limits: [] })
+    expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: "CONFLICT",
+        details: { kind: "window_capacity_exceeded", maximum: 32, retained: 32 },
+      },
+    })
   })
 
   it("rejects a request without a valid key", async () => {

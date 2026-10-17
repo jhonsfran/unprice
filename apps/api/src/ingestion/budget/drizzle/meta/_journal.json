@@ -8,6 +8,13 @@
       "when": 1792208694660,
       "tag": "0000_flashy_hex",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1792216719516,
+      "tag": "0001_budget_receipt_indexes",
+      "breakpoints": true
     }
   ]
 }

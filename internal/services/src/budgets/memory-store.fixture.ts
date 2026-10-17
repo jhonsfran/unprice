@@ -4,7 +4,6 @@ import {
   type BudgetReader,
   type BudgetRecord,
   type BudgetTransition,
-  type HoldOperation,
   type Ledger,
   type Operation,
   type UnPriceBudgetError,
@@ -18,9 +17,9 @@ import {
 } from "./index"
 
 /**
- * Test double for the Durable Object store: rows indexed by id and idempotency key, a due-hold
- * scan, the window history, and the alarm's sweep and purge. Loads its view the way the store
- * does and writes a transition only when it is Ok and says to write.
+ * Test double for the Durable Object store: rows indexed by id and idempotency key, the window
+ * history, and the alarm's sweep and purge. Loads its view the way the store does and writes a
+ * transition only when it is Ok and says to write.
  */
 export class MemoryBudgetStore implements BudgetReader {
   budget: BudgetRecord | null = null
@@ -33,13 +32,14 @@ export class MemoryBudgetStore implements BudgetReader {
   private readonly byKey = new Map<string, string>()
 
   run(command: BudgetCommand, clockMs: number): Result<BudgetTransition, UnPriceBudgetError> {
-    const view = loadView(this, command, clockMs, Number.MAX_SAFE_INTEGER)
+    const view = loadView(this, command)
     const result = transition({ view, command, clockMs })
     if (result.err || !result.val.write) return result
-    const { budget, ledger, purged, operations, periods } = result.val
+    const { budget, ledger, purged, operations, periods, retiredWindows } = result.val
     this.writes += 1
     if (budget) this.budget = budget
     this.ledger = ledger
+    for (const id of retiredWindows) this.history.delete(id)
     for (const period of periods) {
       const kept = [period, ...(this.history.get(period.windowId) ?? [])]
       this.history.set(period.windowId, kept.slice(0, WINDOW_HISTORY_PERIODS))
@@ -58,8 +58,8 @@ export class MemoryBudgetStore implements BudgetReader {
     const swept = this.run({ type: "sweep" }, clockMs)
     if (swept.err) throw swept.err
     for (const [id, operation] of this.rows) {
-      const open = operation.kind === "hold" && operation.state.status === "open"
-      if (open || dueAt(operation) > swept.val.now) continue
+      const due = dueAt(operation)
+      if (due === null || due > swept.val.now) continue
       this.rows.delete(id)
       this.byKey.delete(operation.idempotencyKey)
     }
@@ -84,19 +84,5 @@ export class MemoryBudgetStore implements BudgetReader {
 
   readHistory(windowIds: readonly WindowId[], limit: number) {
     return windowIds.flatMap((id) => (this.history.get(id) ?? []).slice(0, limit))
-  }
-
-  readDueHolds(at: number, limit: number) {
-    const due: HoldOperation[] = []
-    for (const operation of this.rows.values()) {
-      if (
-        operation.kind === "hold" &&
-        operation.state.status === "open" &&
-        operation.lapsesAt <= at
-      ) {
-        due.push(operation)
-      }
-    }
-    return due.sort((a, b) => a.lapsesAt - b.lapsesAt).slice(0, limit)
   }
 }

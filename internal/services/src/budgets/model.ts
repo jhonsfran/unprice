@@ -37,7 +37,7 @@ export type WindowPeriod = Readonly<{
  * - `lastAt` is the budget's clock: when it last wrote. `transition` clamps to it, so windows only
  *   roll forward and nothing is purged ahead of a later command's clock.
  * - `holdSeq` counts holds ever placed. `h_<n>` with n <= holdSeq was minted.
- * - `held` = sum of `amount` over open holds (including expired ones not yet lapsed).
+ * - `held` = sum of `amount` over open holds, expired ones included.
  * - `usage` has all five canonical windows plus anchored ones; `usage.never.consumed` is lifetime
  *   consumption. Every consumption adds to every counter.
  */
@@ -62,28 +62,15 @@ export const emptyLedger: Ledger = {
 }
 
 /**
- * A hold is open until it is settled, released, or lapses. "Expired" is not a stored state: it is
- * `now >= expiresAt` on an open hold, which still counts and still settles normally.
- * Per state: open counts `amount`; lapsed returned `amount`; settled has covered + released =
- * amount (both 0 when late, because the lapse already returned it); released returned `released`.
+ * A hold stays open until it is settled or released. `expiresAt` is the deadline for the work, not
+ * a state: an expired hold keeps counting, because a timer cannot prove the work stopped.
+ * Per state: open counts `amount`; settled consumed `actual` (at most `amount`) and returned the
+ * rest; released returned `amount`.
  */
 export type HoldState =
   | Readonly<{ status: "open" }>
-  | Readonly<{ status: "lapsed"; lapsedAt: number }>
-  | Readonly<{
-      status: "settled"
-      closedAt: number
-      actual: Amount
-      /** Consumed out of the hold. */
-      covered: Amount
-      /** Returned to capacity by this settle (0 when late, because the lapse already returned it). */
-      released: Amount
-      /** Consumed beyond the hold: actual - covered. */
-      overrun: Amount
-      late: boolean
-      crossed: readonly string[]
-    }>
-  | Readonly<{ status: "released"; closedAt: number; released: Amount }>
+  | Readonly<{ status: "settled"; closedAt: number; actual: Amount; crossed: readonly string[] }>
+  | Readonly<{ status: "released"; closedAt: number }>
 
 /**
  * Operation rows are the idempotency record: the same key with the same request replays from the
@@ -98,7 +85,6 @@ export type HoldOperation = Readonly<{
   ttlMs: number | null
   createdAt: number
   expiresAt: number
-  lapsesAt: number
   state: HoldState
 }>
 
@@ -118,8 +104,7 @@ export type ChargeOperation = Readonly<{
 export type Operation = HoldOperation | ChargeOperation
 
 /**
- * What `transition` reads. Never the full history: only the row the command addresses and the
- * open holds the store found due.
+ * What `transition` reads. Only the addressed row and requested window history.
  */
 export type BudgetView = Readonly<{
   budget: BudgetRecord | null
@@ -129,8 +114,6 @@ export type BudgetView = Readonly<{
    * id for settle and release. Null when it never existed or was purged.
    */
   target: Operation | null
-  /** Open holds with `lapsesAt <= max(clock, ledger.lastAt)`, any subset; the alarm sweeps the rest. */
-  due: readonly HoldOperation[]
   /** For `get`: up to WINDOW_HISTORY_PERIODS stored periods per limited window id, newest first. */
   history: readonly WindowPeriod[]
 }>
@@ -195,7 +178,7 @@ export type BudgetSnapshot = Readonly<
 /** What would let the same request through. */
 export type BlockedRemedy = "release_holds" | "wait_for_reset" | "raise_limit"
 
-/** The blocking limit: among failing hard limits, the one that resets last. */
+/** A limit smaller than the request, or otherwise the failing limit that resets last. */
 export type Blocked = Readonly<{
   limitId: string
   window: BudgetWindow
@@ -220,11 +203,8 @@ export type BudgetOutcome =
       type: "settle"
       holdId: string
       actual: Amount
-      covered: Amount
+      /** The unused part of the hold, returned: amount - actual. */
       released: Amount
-      overrun: Amount
-      /** The hold had lapsed before this settle; nothing was covered. */
-      late: boolean
       /** Settled at or after `expiresAt`. */
       expired: boolean
       crossed: readonly string[]
@@ -245,7 +225,7 @@ export type BudgetOutcome =
       replayed: boolean
       balance: BudgetBalance
     }>
-  | Readonly<{ type: "sweep"; lapsed: number }>
+  | Readonly<{ type: "sweep" }>
 
 /** The outcome a command of type `T` answers with. */
 export type OutcomeOf<T extends BudgetOutcome["type"]> = BudgetOutcome & Readonly<{ type: T }>
@@ -262,10 +242,13 @@ export function isOutcomeOf<T extends BudgetOutcome["type"]>(
 
 export type BudgetRejection =
   | Readonly<{ code: "BUDGET_NOT_FOUND" }>
+  | Readonly<{ code: "WINDOW_CAPACITY_EXCEEDED"; maximum: number; retained: number }>
   | Readonly<{ code: "INVALID_TTL"; ttlMs: number; minTtlMs: number; maxTtlMs: number }>
   | Readonly<{ code: "LIMIT_EXCEEDED"; blocked: Blocked; balance: BudgetBalance }>
   | Readonly<{ code: "HOLD_NOT_FOUND"; holdId: string }>
   | Readonly<{ code: "HOLD_CLOSED"; holdId: string; status: "settled" | "released" }>
+  | Readonly<{ code: "HOLD_AMOUNT_EXCEEDED"; holdId: string; maximum: Amount; actual: Amount }>
+  | Readonly<{ code: "LIMIT_BELOW_USAGE"; limitId: string; minimum: Amount; requested: Amount }>
   /** Minted, but its row was purged after retention, so its outcome is no longer known. */
   | Readonly<{ code: "HOLD_RETIRED"; holdId: string }>
   | Readonly<{ code: "IDEMPOTENCY_CONFLICT"; idempotencyKey: string }>
@@ -300,6 +283,8 @@ function rejectionMessage(rejection: BudgetRejection): string {
   switch (rejection.code) {
     case "BUDGET_NOT_FOUND":
       return "Budget does not exist"
+    case "WINDOW_CAPACITY_EXCEEDED":
+      return `Budget retains ${rejection.retained} anchored schedules; at most ${rejection.maximum} can remain active or in their current period`
     case "INVALID_TTL":
       return `Hold TTL must be between ${rejection.minTtlMs} and ${rejection.maxTtlMs} ms, got ${rejection.ttlMs}`
     case "LIMIT_EXCEEDED":
@@ -308,6 +293,10 @@ function rejectionMessage(rejection: BudgetRejection): string {
       return `Hold ${rejection.holdId} does not exist`
     case "HOLD_CLOSED":
       return `Hold ${rejection.holdId} is already ${rejection.status}`
+    case "HOLD_AMOUNT_EXCEEDED":
+      return `Hold ${rejection.holdId} permits ${formatAmount(rejection.maximum)}, not ${formatAmount(rejection.actual)}`
+    case "LIMIT_BELOW_USAGE":
+      return `Limit ${rejection.limitId} must cover ${formatAmount(rejection.minimum)} consumed or held`
     case "HOLD_RETIRED":
       return `Hold ${rejection.holdId} closed past its retention and can no longer be settled or released`
     case "IDEMPOTENCY_CONFLICT":

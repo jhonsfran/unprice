@@ -14,7 +14,7 @@ export const route = createRoute(
       operationId: "budgets.release",
       summary: "release a hold without consuming",
       description:
-        "Return the whole hold to the budget. Releasing twice changes nothing; releasing a settled hold returns 409.",
+        "Return the whole hold only after confirming zero usage and no continuing work. Releasing twice changes nothing; releasing a settled hold returns 409.",
       method: "post",
       tags: ["budgets"],
       request: {

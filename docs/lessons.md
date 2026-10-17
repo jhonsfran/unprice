@@ -223,6 +223,16 @@ patterns. Keep it cheap to load and useful.
   `@unprice/services/budgets` (`transition`); a DO persists the returned ledger, rows, and periods
   in one transaction. When adding a verb, extend the reference model in `budget.properties.test.ts`
   (its own calendar math, no core imports beyond the API) instead of asserting the core's totals.
+- 2026-10-17: A budget estimate is the maximum authorized usage. Reject settlement above the
+  reservation and apply hard limits to `record`; do not treat either path as permission for debt.
+- 2026-10-17: Keep unresolved BudgetDO holds reserved across timeouts and window resets. Only
+  final settlement or explicit zero-usage release can return capacity; see ADR-0006 B2-B3.
+- 2026-10-17: No BudgetDO data has shipped (see 136ab303a). Change its stored format without
+  read-compat, startup repair, or legacy states; keep its migrations append-only and wipe local
+  `.wrangler` budget state after a format change.
+- 2026-10-17: The installed Drizzle SQLite generator splits commas in index expressions. For
+  budget key lookup, use `data_json ->> '$.idempotencyKey'`, generate through
+  `bin/migrate.dev budget`, and verify index selection with `EXPLAIN QUERY PLAN` in workerd.
 - 2026-10-16: Budget amounts are `@unprice/money` `Amount` (bigint at `LEDGER_SCALE`) and the wire
   patterns live in `@unprice/db/validators`; never redeclare them in the budget core.
 - 2026-10-16: `Omit` over a generic `BudgetOutcome & { type: T }` does not narrow; strip `type` at

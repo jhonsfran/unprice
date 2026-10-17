@@ -27,7 +27,9 @@ export type CheckedTransition = Readonly<{
   after: Ledger
   /** The limits in force before the transition, which decide what a roll reports. */
   limits: readonly BudgetLimit[]
-  /** Every row step in order: a hold that lapses and then settles takes two. */
+  /** The limits in force after it, whose hard caps the transition must not push further past. */
+  resultingLimits: readonly BudgetLimit[]
+  /** Every operation row changed by the command. */
   steps: readonly RowStep[]
   periods: readonly WindowPeriod[]
 }>
@@ -40,6 +42,7 @@ export type CheckedTransition = Readonly<{
  *    what the rows consumed; one that moved to a new period holds only that, and its old period
  *    is reported when it had usage on a limited window.
  * 4. Held and every counter are non-negative.
+ * 5. No hard limit's consumed + held grows past its amount.
  */
 export function checkTransition(transition: CheckedTransition): string[] {
   const { before, after, steps } = transition
@@ -56,47 +59,38 @@ export function checkTransition(transition: CheckedTransition): string[] {
   }
   if (after.held < ZERO) violations.push(`ledger held ${after.held} is negative`)
   violations.push(...counterViolations(transition, consumed))
+  for (const limit of transition.resultingLimits) {
+    if (limit.enforce !== "hard") continue
+    const id = windowIdOf(limit)
+    const current = after.usage[id]
+    const previous = before.usage[id]
+    const priorConsumed = previous?.start === current?.start ? (previous?.consumed ?? ZERO) : ZERO
+    const priorExposure = priorConsumed + before.held
+    const exposure = (current?.consumed ?? ZERO) + after.held
+    const increasesHardLimitExcess = exposure > limit.amount && exposure > priorExposure
+    if (increasesHardLimitExcess) {
+      violations.push(`limit ${limit.id} committed ${exposure} beyond ${limit.amount}`)
+    }
+  }
   return violations
 }
 
-/** The hold lifecycle: open -> lapsed | settled | released, lapsed -> settled | released. */
+/** The hold lifecycle: open -> settled | released, with actual within the hold. */
 function stepViolations(prior: Operation | undefined, row: Operation): string[] {
   const at = `row ${row.id}`
   if (row.amount < ZERO) return [`${at} amount ${row.amount} is negative`]
   if (row.kind !== "hold") return prior ? [`${at} ${row.kind} was written twice`] : []
-  if (!prior) return row.state.status === "open" ? [] : [`${at} was created ${row.state.status}`]
+  const status = row.state.status
+  if (!prior) return status === "open" ? [] : [`${at} was created ${status}`]
   if (prior.kind !== "hold" || prior.amount !== row.amount) return [`${at} changed identity`]
-
-  const from = prior.state.status
-  const state = row.state
-  switch (state.status) {
-    case "lapsed":
-      return from === "open" ? [] : [`${at} lapsed from ${from}`]
-    case "released": {
-      const expected = from === "open" ? row.amount : ZERO
-      if (from !== "open" && from !== "lapsed") return [`${at} released from ${from}`]
-      return state.released === expected ? [] : [`${at} released ${state.released} of ${expected}`]
-    }
-    case "settled": {
-      if (from !== "open" && from !== "lapsed") return [`${at} settled from ${from}`]
-      const violations: string[] = []
-      const { actual, covered, released, overrun, late } = state
-      if (covered < ZERO || released < ZERO || overrun < ZERO) {
-        violations.push(`${at} settled with a negative part`)
-      }
-      if (actual !== covered + overrun)
-        violations.push(`${at} actual ${actual} != covered + overrun`)
-      if (late !== (from === "lapsed"))
-        violations.push(`${at} late=${late} settling a ${from} hold`)
-      const returnable = from === "open" ? row.amount : ZERO
-      if (covered + released !== returnable) {
-        violations.push(`${at} covered + released != ${returnable}`)
-      }
-      return violations
-    }
-    case "open":
-      return [`${at} reopened from ${from}`]
+  if (prior.state.status !== "open" || status === "open") {
+    return [`${at} moved from ${prior.state.status} to ${status}`]
   }
+  if (row.state.status === "settled") {
+    const { actual } = row.state
+    if (actual < ZERO || actual > row.amount) return [`${at} settled ${actual} of ${row.amount}`]
+  }
+  return []
 }
 
 function counterViolations(

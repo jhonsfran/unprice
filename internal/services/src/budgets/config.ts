@@ -8,8 +8,8 @@ import type { Amount } from "@unprice/money"
 export type { BudgetConfig, BudgetConfigInput } from "@unprice/db/validators"
 export {
   DEFAULT_HOLD_TTL_MS,
-  HOLD_LAPSE_TTL_MULTIPLIER,
   MAX_HOLD_TTL_MS,
+  MAX_RETAINED_ANCHORED_WINDOWS,
   MIN_HOLD_TTL_MS,
   OPERATION_RETENTION_MS,
   RECORD_ACCEPT_WINDOW_MS,
@@ -51,7 +51,6 @@ export type ConfigChange =
     }>
   | Readonly<{ change: "limits.order" }>
   | Readonly<{ change: "holds" }>
-  | Readonly<{ change: "onUnavailable" }>
   | Readonly<{ change: "closesAt" }>
 
 export function diffConfig(prev: BudgetConfig, next: BudgetConfig): ConfigChange[] {
@@ -96,17 +95,6 @@ export function diffConfig(prev: BudgetConfig, next: BudgetConfig): ConfigChange
   ) {
     changes.push({ change: "holds" })
   }
-  if (!sameUnavailable(prev.onUnavailable, next.onUnavailable)) {
-    changes.push({ change: "onUnavailable" })
-  }
   if (prev.closesAt !== next.closesAt) changes.push({ change: "closesAt" })
   return changes
-}
-
-function sameUnavailable(
-  a: BudgetConfig["onUnavailable"],
-  b: BudgetConfig["onUnavailable"]
-): boolean {
-  if (typeof a === "string" || typeof b === "string") return a === b
-  return a.allowUpTo === b.allowUpTo
 }

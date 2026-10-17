@@ -18,7 +18,7 @@ export const route = createRoute(
       path: "/v1/budgets/settle",
       operationId: "budgets.settle",
       summary: "settle a hold with the actual amount",
-      description: `Consume the actual amount and release the rest of the hold. An actual above the hold, or a settle after the hold lapsed, is still consumed. The hold id is the idempotency key: the same amount replays, another amount returns 409. A hold retires ${describeDuration(OPERATION_RETENTION_MS)} after it closes or lapses; settling or releasing it after that returns 409.`,
+      description: `Settle final usage after work has stopped and release the unused reservation. Actual usage must not exceed the authorized amount. A larger amount returns 409 and leaves the reservation unchanged. Expired open holds still settle against their reservation. The hold id is the idempotency key: the same amount replays, another amount returns 409. A hold retires ${describeDuration(OPERATION_RETENTION_MS)} after it closes; settling or releasing it after that returns 409.`,
       method: "post",
       tags: ["budgets"],
       request: {

@@ -14,7 +14,7 @@ export const route = createRoute(
       operationId: "budgets.upsert",
       summary: "create or update a budget",
       description:
-        "Create the budget at a key, or update its limits and hold settings. Sending the same definition again changes nothing. The unit cannot change after creation.",
+        "Create the budget at a key, or update its limits and hold settings. Sending the same definition again changes nothing. The unit cannot change after creation. A hard cap below current consumption plus outstanding reservations returns 409.",
       method: "post",
       tags: ["budgets"],
       request: {

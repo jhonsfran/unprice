@@ -15,17 +15,16 @@ export const BUDGET_WINDOWS = ["hour", "day", "week", "month", "never"] as const
 export const BUDGET_ANCHORED_WINDOWS = ["day", "week", "month"] as const
 
 export const MAX_BUDGET_LIMITS = 16
+export const MAX_RETAINED_ANCHORED_WINDOWS = 32
 
 export const MIN_HOLD_TTL_MS = 1_000
 export const DEFAULT_HOLD_TTL_MS = 15 * 60 * 1000
 export const MAX_HOLD_TTL_MS = 24 * 60 * 60 * 1000
-/** RFC 4006 Tcc: an expired hold keeps counting for this many TTLs before it lapses. */
-export const HOLD_LAPSE_TTL_MULTIPLIER = 2
 /**
- * Closed holds, lapsed holds, and charge rows answer this long after they close. They are the
- * idempotency record and the tombstone that answers replays and late settles; after it, a hold is
- * retired and can no longer be settled or released. A budget accepts `record` this long past its
- * `closesAt`.
+ * Settled and released holds and charge rows answer this long after they close; an open hold has
+ * no retention and stays until it is settled or released. They are the idempotency record and the
+ * tombstone that answers replays; after it, a hold is retired and can no longer be settled or
+ * released. A budget accepts `record` this long past its `closesAt`.
  */
 export const OPERATION_RETENTION_MS = 24 * 60 * 60 * 1000
 /** `record` accepts usage that occurred at most this long ago (`TOO_LATE` beyond it). */
@@ -87,7 +86,7 @@ function toAmount(text: string, ctx: z.RefinementCtx): Amount {
 
 const budgetDecimalSchema = z
   .string()
-  .openapi({ description: "A decimal amount in the budget's unit; negative after an overrun" })
+  .openapi({ description: "A decimal amount in the budget's unit" })
 
 export const budgetHoldIdSchema = z
   .string()
@@ -102,7 +101,7 @@ export const budgetWindowSchema = z.enum(BUDGET_WINDOWS).openapi({
 
 const budgetEnforceSchema = z.enum(["hard", "soft"]).openapi({
   description:
-    "hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+    "hard denies authorize, charge and record that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
   example: "hard",
 })
 
@@ -131,7 +130,8 @@ const budgetReplayedSchema = z.boolean().openapi({
 })
 
 const budgetCrossedSchema = z.array(z.string()).openapi({
-  description: "Ids of the limits this request took from non-negative to negative remaining",
+  description:
+    "Soft limit ids whose consumed amount first exceeded the threshold. Reservations do not trigger crossings. Replays preserve the original result.",
 })
 
 export const upsertBudgetInputSchema = z
@@ -154,14 +154,14 @@ export const upsertBudgetInputSchema = z
               .optional()
               .openapi({
                 description:
-                  "Unique within the budget. Defaults to the window name. The id fixes the limit's window and anchor: changing either under the same id returns 409, so use a new id for a new window.",
+                  "Unique within the budget. Defaults to the window name. The id fixes the limit's recurring schedule. Equivalent UTC anchors share usage. A different schedule under the same id returns 409, so use a new id for a different schedule.",
                 example: "month",
               }),
             amount: budgetAmountInputSchema.transform(toAmount),
             window: budgetWindowSchema,
             anchor: budgetInstantInputSchema.optional().openapi({
               description:
-                "Anchors a day, week, or month window: periods start at this instant and repeat every window. A month anchored on the 31st starts on the last day of shorter months. Usage counts from the moment the anchor is first set.",
+                "Anchors a day, week, or month window: periods start at this instant and repeat every window. A month anchored on the 31st starts on the last day of shorter months. Equivalent UTC anchors share one counter. Usage counts from the moment the schedule is first tracked. Removed schedules retain current usage until their period ends. A budget retains at most 32 distinct anchored schedules.",
               example: "2026-10-15T00:00:00Z",
             }),
             enforce: budgetEnforceSchema.optional().openapi({ description: "Defaults to hard" }),
@@ -200,17 +200,10 @@ export const upsertBudgetInputSchema = z
       .openapi({
         description: `Hold timing. Both TTLs must be between ${MIN_HOLD_TTL_MS} and ${MAX_HOLD_TTL_MS} ms, and the default must not exceed the max.`,
       }),
-    onUnavailable: z
-      .union([
-        z.enum(["deny", "allow"]),
-        z.object({ allowUpTo: budgetAmountInputSchema.transform(toAmount) }),
-      ])
-      .optional()
-      .openapi({
-        description:
-          "What a client should do when it cannot reach Unprice: deny, allow, or allow up to an amount per call. Stored for clients to read; the API never applies it. Defaults to deny.",
-        example: "deny",
-      }),
+    onUnavailable: z.literal("deny").optional().openapi({
+      description: "Deny new work when Unprice cannot be reached. Defaults to deny.",
+      example: "deny",
+    }),
   })
   .strict()
   .transform(({ key, unit, limits, holds, onUnavailable, closesAt }) => ({
@@ -269,10 +262,7 @@ export function formatBudgetConfig(config: BudgetConfig) {
       ...(anchor === undefined ? {} : { anchor: new Date(anchor).toISOString() }),
     })),
     holds: { ...config.holds },
-    onUnavailable:
-      typeof config.onUnavailable === "string"
-        ? config.onUnavailable
-        : { allowUpTo: formatAmount(config.onUnavailable.allowUpTo) },
+    onUnavailable: "deny" as const,
     closesAt: config.closesAt === null ? null : new Date(config.closesAt).toISOString(),
   } satisfies BudgetConfigInput
 }
@@ -283,18 +273,13 @@ export const authorizeBudgetInputSchema = z
     amount: budgetAmountInputSchema
       .openapi({
         description:
-          "The estimate to hold against every hard limit. Settle the actual amount later, or release the hold.",
+          "The maximum permitted usage to reserve against every hard limit. Settle final usage up to this amount, or release after confirming zero usage and no continuing work.",
       })
       .transform(toAmount),
-    ttlMs: z
-      .number()
-      .int()
-      .positive()
-      .optional()
-      .openapi({
-        description: `How long the hold reserves capacity, in milliseconds. Defaults to the budget's holds.defaultTtlMs and must not exceed holds.maxTtlMs. An expired hold keeps counting for ${HOLD_LAPSE_TTL_MULTIPLIER} more TTLs, then lapses and returns its amount.`,
-        example: 60_000,
-      }),
+    ttlMs: z.number().int().positive().optional().openapi({
+      description: `The execution deadline, in milliseconds. Defaults to the budget's holds.defaultTtlMs and must not exceed holds.maxTtlMs. Expiry does not release capacity. An unresolved hold remains reserved until explicit settlement or release.`,
+      example: 60_000,
+    }),
     idempotencyKey: budgetIdempotencyKeySchema,
   })
   .strict()
@@ -307,7 +292,7 @@ export const settleBudgetInputSchema = z
     amount: budgetAmountInputSchema
       .openapi({
         description:
-          "The actual usage. Up to the hold's amount is covered by the hold and the rest is returned; anything above it is consumed as overrun.",
+          "Final usage after work has stopped. Must not exceed the authorized amount. Settlement returns the unused reservation. An amount above the reservation returns 409 and leaves the hold unchanged.",
       })
       .transform(toAmount),
   })
@@ -331,7 +316,10 @@ export const chargeBudgetInputSchema = z
 export const recordBudgetInputSchema = chargeBudgetInputSchema
   .extend({
     amount: budgetAmountInputSchema
-      .openapi({ description: "The amount the usage cost. Never denied by a limit." })
+      .openapi({
+        description:
+          "The amount to record, checked against every hard limit. Recording after work does not authorize that work retroactively.",
+      })
       .transform(toAmount),
     idempotencyKey: budgetIdempotencyKeySchema.openapi({
       description: `Up to 256 characters, usually the event id. For ${describeDuration(RECORD_DEDUPE_MS)}, the same key with the same amount replays instead of counting again, and with another amount returns 409.`,
@@ -364,7 +352,7 @@ export const budgetBalanceSchema = z.object({
       consumed: budgetDecimalSchema.openapi({ description: "Used in the current period" }),
       held: budgetDecimalSchema.openapi({ description: "Held by open holds" }),
       remaining: budgetDecimalSchema.openapi({
-        description: "amount - consumed - held; negative after an overrun or a record",
+        description: "amount - consumed - held; negative only for a soft limit",
       }),
       resetsAt: budgetResetsAtSchema,
     })
@@ -395,7 +383,7 @@ export const budgetSchema = z.object({
     })
   ),
   holds: z.object({ defaultTtlMs: z.number().int(), maxTtlMs: z.number().int() }),
-  onUnavailable: z.union([z.enum(["deny", "allow"]), z.object({ allowUpTo: budgetDecimalSchema })]),
+  onUnavailable: z.literal("deny"),
   closesAt: z.string().nullable().openapi({ description: "When the budget closes, or null" }),
   closed: z.boolean().openapi({ description: "True from closesAt on" }),
   balance: budgetBalanceSchema,
@@ -417,7 +405,7 @@ export const upsertBudgetResponseSchema = z.object({
       z.object({
         change: z.string().openapi({
           description:
-            "limit.added, limit.removed, limit.amount, limit.enforce, limits.order, holds, onUnavailable, or closesAt. Creating a budget lists each limit as limit.added.",
+            "limit.added, limit.removed, limit.amount, limit.enforce, limits.order, holds, or closesAt. Creating a budget lists each limit as limit.added.",
           example: "limit.amount",
         }),
         limitId: z.string().optional().openapi({ description: "The limit that changed" }),
@@ -441,7 +429,8 @@ export const authorizeBudgetResponseSchema = z.object({
   holdId: budgetHoldIdSchema,
   amount: budgetDecimalSchema.openapi({ description: "The amount held" }),
   expiresAt: budgetEpochMsSchema.openapi({
-    description: "When the hold expires, in epoch milliseconds. Settle before then.",
+    description:
+      "The deadline for work, in epoch milliseconds. Capacity remains reserved until explicit settlement or release.",
   }),
   replayed: budgetReplayedSchema,
   balance: budgetBalanceSchema,
@@ -450,14 +439,7 @@ export const authorizeBudgetResponseSchema = z.object({
 export const settleBudgetResponseSchema = z.object({
   holdId: budgetHoldIdSchema,
   actual: budgetDecimalSchema.openapi({ description: "The amount settled" }),
-  covered: budgetDecimalSchema.openapi({ description: "The part of actual the hold covered" }),
   released: budgetDecimalSchema.openapi({ description: "The unused part of the hold, returned" }),
-  overrun: budgetDecimalSchema.openapi({
-    description: "actual - covered: consumed beyond the hold",
-  }),
-  late: z.boolean().openapi({
-    description: "The hold had lapsed, so the whole actual was consumed without cover",
-  }),
   expired: z.boolean().openapi({ description: "Settled at or after the hold's expiresAt" }),
   crossed: budgetCrossedSchema,
   replayed: budgetReplayedSchema,
@@ -467,7 +449,7 @@ export const settleBudgetResponseSchema = z.object({
 export const releaseBudgetResponseSchema = z.object({
   holdId: budgetHoldIdSchema,
   released: budgetDecimalSchema.openapi({
-    description: "The amount returned; 0 when the hold had already lapsed",
+    description: "The amount returned: the whole hold",
   }),
   replayed: budgetReplayedSchema,
   balance: budgetBalanceSchema,
@@ -500,12 +482,12 @@ export const budgetExceededDetailsSchema = z.object({
       resetsAt: budgetResetsAtSchema,
       remedy: z.enum(["release_holds", "wait_for_reset", "raise_limit"]).openapi({
         description:
-          "release_holds: open holds on this limit would make room. wait_for_reset: the limit has room after resetsAt. raise_limit: the amount does not fit this limit.",
+          "release_holds: releasing holds makes the request fit all failing limits. wait_for_reset: resetting the failing windows makes the request fit with holds unchanged. raise_limit: neither action alone is sufficient; one or more limits need a change.",
       }),
     })
     .openapi({
       description:
-        "Among hard limits the request would exceed, the one that resets last; that limit decides when the request can pass",
+        "A failing hard limit smaller than the request, or otherwise the one that resets last. Other limits can also block the request. The remedy considers all failing limits.",
     }),
   balance: budgetBalanceSchema,
 })
@@ -527,3 +509,23 @@ export type RecordBudgetInput = z.infer<typeof recordBudgetInputSchema>
 export type BudgetBalanceResponse = z.infer<typeof budgetBalanceSchema>
 export type BudgetResponse = z.infer<typeof budgetSchema>
 export type BudgetExceededDetails = z.infer<typeof budgetExceededDetailsSchema>
+
+export const budgetHoldAmountExceededDetailsSchema = z.object({
+  kind: z.literal("hold_amount_exceeded"),
+  holdId: budgetHoldIdSchema,
+  maximum: budgetDecimalSchema,
+  actual: budgetDecimalSchema,
+})
+
+export const budgetLimitBelowUsageDetailsSchema = z.object({
+  kind: z.literal("limit_below_usage"),
+  limitId: z.string(),
+  minimum: budgetDecimalSchema,
+  requested: budgetDecimalSchema,
+})
+
+export const budgetWindowCapacityExceededDetailsSchema = z.object({
+  kind: z.literal("window_capacity_exceeded"),
+  maximum: z.number().int().nonnegative(),
+  retained: z.number().int().nonnegative(),
+})
