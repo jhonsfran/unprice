@@ -93,6 +93,32 @@ Ingestion tests (`sync-ingestion`, `async-ingestion`, `idempotency`, `limit-enfo
 | `wallet: returns current available balance` | `wallet.balance` returns display-ready `available` and `held` amounts |
 | `wallet: credits reconcile to available balance` | Active credit availability does not exceed wallet availability |
 
+## Budget E2E tests
+
+`pnpm --filter @unprice/tiny-tools e2e:budget:local` walks one budget through every verb. It needs
+only `UNPRICE_TOKEN`; it creates a fresh budget at `e2e:budget/run:<timestamp>` each run. Steps
+share the budget and assert the exact balance each one leaves.
+
+| Test | What it checks |
+|---|---|
+| `upsert: creates the budget` | Each limit is reported as `limit.added`; currency shorthand expands to `money:USD` |
+| `upsert: the same definition changes nothing` | No changes, version stays 1 |
+| `get: returns the definition and history` | Limits, hold settings, and a history array |
+| `authorize: holds the estimate and replays by key` | Held amount and remaining; the same idempotency key returns the same hold |
+| `settle: consumes the actual, returns the rest, replays` | covered, released, overrun; same amount replays, another amount is a 409 |
+| `release: returns the whole hold, replays` | Releases the full hold; a second release replays |
+| `charge: consumes once per idempotency key` | Replays by key; the same key with another amount is a 409 |
+| `charge: decimal amounts stay exact` | `0.1 + 0.2` adds to exactly `0.3` |
+| `spend: authorizes the estimate and settles the actual` | The SDK's `spend` helper settles what the callback returns |
+| `soft limit: reports crossing without denying` | A soft limit appears in `crossed` and goes negative |
+| `hard limit: denies with the blocking limit and remedy` | `raise_limit`, `wait_for_reset`, and `release_holds` remedies |
+| `record: never denied, counted once per key and amount` | Pushes remaining negative; a retry with another `occurredAt` replays, another amount is a 409 |
+| `errors: maps rejections to statuses` | Unknown hold 404, TTL over max 400, unit change 409, usage older than 7 days 409, nine decimals 400, unknown budget 404 |
+| `closesAt: stops new spend, keeps settle and record` | Authorize after close is 409 `budget_closed`; an open hold still settles; record still counts |
+
+The hard limit is monthly, so a run that straddles a UTC month boundary fails its balance
+assertions.
+
 ## Exit codes
 
 - `0`: all tests passed

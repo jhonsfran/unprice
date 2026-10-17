@@ -175,7 +175,7 @@ export interface paths {
     put?: never
     /**
      * settle a hold with the actual amount
-     * @description Consume the actual amount and release the rest of the hold. An actual above the hold, or a settle after the hold lapsed, is still consumed. The hold id is the idempotency key: the same amount replays, another amount returns 409. A hold retires 24 hours after it closes or lapses; settling or releasing it after that returns 409.
+     * @description Consume the actual amount and release the rest of the hold. An actual above the hold, or a settle after the hold lapsed, is still consumed. The hold id is the idempotency key: the same amount replays, another amount returns 409. A hold retires 1 day after it closes or lapses; settling or releasing it after that returns 409.
      */
     post: operations["budgets.settle"]
     delete?: never
@@ -235,7 +235,7 @@ export interface paths {
     put?: never
     /**
      * record usage that already happened
-     * @description Consume an amount for work that already ran. Never denied by a limit, so remaining can go negative. Usage must have occurred within the last 7 days (409 beyond it), and a retry with the same idempotency key and occurredAt is never counted twice within 8 days.
+     * @description Consume an amount for work that already ran. Never denied by a limit, so remaining can go negative. Usage must have occurred within the last 7 days (409 beyond it). For 8 days, a retry with the same idempotency key and amount replays instead of counting twice, and the same key with another amount returns 409.
      */
     post: operations["budgets.record"]
     delete?: never
@@ -766,45 +766,65 @@ export interface components {
           | {
               /** @enum {string} */
               kind: "budget_exceeded"
+              /** @description Among hard limits the request would exceed, the one that resets last; that limit decides when the request can pass */
               blocked: {
                 limitId: string
-                /** @enum {string} */
+                /**
+                 * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                 * @example month
+                 * @enum {string}
+                 */
                 window: "hour" | "day" | "week" | "month" | "never"
                 /** @description A decimal amount in the budget's unit; negative after an overrun */
                 remaining: string
                 /** @description A decimal amount in the budget's unit; negative after an overrun */
                 held: string
+                /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
-                /** @enum {string} */
+                /**
+                 * @description release_holds: open holds on this limit would make room. wait_for_reset: the limit has room after resetsAt. raise_limit: the amount does not fit this limit.
+                 * @enum {string}
+                 */
                 remedy: "release_holds" | "wait_for_reset" | "raise_limit"
               }
               balance: {
                 /** @description The least remaining over hard limits; null when the budget has no hard limit */
                 remaining: string | null
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description The sum of open holds */
                 held: string
                 limits: {
                   id: string
-                  /** @enum {string} */
+                  /**
+                   * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                   * @example month
+                   * @enum {string}
+                   */
                   window: "hour" | "day" | "week" | "month" | "never"
-                  /** @enum {string} */
+                  /**
+                   * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @example hard
+                   * @enum {string}
+                   */
                   enforce: "hard" | "soft"
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description The limit */
                   amount: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description Used in the current period */
                   consumed: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description Held by open holds */
                   held: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description amount - consumed - held; negative after an overrun or a record */
                   remaining: string
+                  /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
                 }[]
+                /** @description When this balance was computed, in epoch milliseconds */
                 asOf: number
               }
             }
           | {
               /** @enum {string} */
               kind: "budget_closed"
+              /** @description When the budget closed, in epoch milliseconds */
               closedAt: number
             }
       }
@@ -850,45 +870,65 @@ export interface components {
           | {
               /** @enum {string} */
               kind: "budget_exceeded"
+              /** @description Among hard limits the request would exceed, the one that resets last; that limit decides when the request can pass */
               blocked: {
                 limitId: string
-                /** @enum {string} */
+                /**
+                 * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                 * @example month
+                 * @enum {string}
+                 */
                 window: "hour" | "day" | "week" | "month" | "never"
                 /** @description A decimal amount in the budget's unit; negative after an overrun */
                 remaining: string
                 /** @description A decimal amount in the budget's unit; negative after an overrun */
                 held: string
+                /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
-                /** @enum {string} */
+                /**
+                 * @description release_holds: open holds on this limit would make room. wait_for_reset: the limit has room after resetsAt. raise_limit: the amount does not fit this limit.
+                 * @enum {string}
+                 */
                 remedy: "release_holds" | "wait_for_reset" | "raise_limit"
               }
               balance: {
                 /** @description The least remaining over hard limits; null when the budget has no hard limit */
                 remaining: string | null
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description The sum of open holds */
                 held: string
                 limits: {
                   id: string
-                  /** @enum {string} */
+                  /**
+                   * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                   * @example month
+                   * @enum {string}
+                   */
                   window: "hour" | "day" | "week" | "month" | "never"
-                  /** @enum {string} */
+                  /**
+                   * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @example hard
+                   * @enum {string}
+                   */
                   enforce: "hard" | "soft"
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description The limit */
                   amount: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description Used in the current period */
                   consumed: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description Held by open holds */
                   held: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description amount - consumed - held; negative after an overrun or a record */
                   remaining: string
+                  /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
                 }[]
+                /** @description When this balance was computed, in epoch milliseconds */
                 asOf: number
               }
             }
           | {
               /** @enum {string} */
               kind: "budget_closed"
+              /** @description When the budget closed, in epoch milliseconds */
               closedAt: number
             }
       }
@@ -934,45 +974,65 @@ export interface components {
           | {
               /** @enum {string} */
               kind: "budget_exceeded"
+              /** @description Among hard limits the request would exceed, the one that resets last; that limit decides when the request can pass */
               blocked: {
                 limitId: string
-                /** @enum {string} */
+                /**
+                 * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                 * @example month
+                 * @enum {string}
+                 */
                 window: "hour" | "day" | "week" | "month" | "never"
                 /** @description A decimal amount in the budget's unit; negative after an overrun */
                 remaining: string
                 /** @description A decimal amount in the budget's unit; negative after an overrun */
                 held: string
+                /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
-                /** @enum {string} */
+                /**
+                 * @description release_holds: open holds on this limit would make room. wait_for_reset: the limit has room after resetsAt. raise_limit: the amount does not fit this limit.
+                 * @enum {string}
+                 */
                 remedy: "release_holds" | "wait_for_reset" | "raise_limit"
               }
               balance: {
                 /** @description The least remaining over hard limits; null when the budget has no hard limit */
                 remaining: string | null
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description The sum of open holds */
                 held: string
                 limits: {
                   id: string
-                  /** @enum {string} */
+                  /**
+                   * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                   * @example month
+                   * @enum {string}
+                   */
                   window: "hour" | "day" | "week" | "month" | "never"
-                  /** @enum {string} */
+                  /**
+                   * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @example hard
+                   * @enum {string}
+                   */
                   enforce: "hard" | "soft"
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description The limit */
                   amount: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description Used in the current period */
                   consumed: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description Held by open holds */
                   held: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description amount - consumed - held; negative after an overrun or a record */
                   remaining: string
+                  /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
                 }[]
+                /** @description When this balance was computed, in epoch milliseconds */
                 asOf: number
               }
             }
           | {
               /** @enum {string} */
               kind: "budget_closed"
+              /** @description When the budget closed, in epoch milliseconds */
               closedAt: number
             }
       }
@@ -1018,45 +1078,65 @@ export interface components {
           | {
               /** @enum {string} */
               kind: "budget_exceeded"
+              /** @description Among hard limits the request would exceed, the one that resets last; that limit decides when the request can pass */
               blocked: {
                 limitId: string
-                /** @enum {string} */
+                /**
+                 * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                 * @example month
+                 * @enum {string}
+                 */
                 window: "hour" | "day" | "week" | "month" | "never"
                 /** @description A decimal amount in the budget's unit; negative after an overrun */
                 remaining: string
                 /** @description A decimal amount in the budget's unit; negative after an overrun */
                 held: string
+                /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
-                /** @enum {string} */
+                /**
+                 * @description release_holds: open holds on this limit would make room. wait_for_reset: the limit has room after resetsAt. raise_limit: the amount does not fit this limit.
+                 * @enum {string}
+                 */
                 remedy: "release_holds" | "wait_for_reset" | "raise_limit"
               }
               balance: {
                 /** @description The least remaining over hard limits; null when the budget has no hard limit */
                 remaining: string | null
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description The sum of open holds */
                 held: string
                 limits: {
                   id: string
-                  /** @enum {string} */
+                  /**
+                   * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                   * @example month
+                   * @enum {string}
+                   */
                   window: "hour" | "day" | "week" | "month" | "never"
-                  /** @enum {string} */
+                  /**
+                   * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @example hard
+                   * @enum {string}
+                   */
                   enforce: "hard" | "soft"
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description The limit */
                   amount: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description Used in the current period */
                   consumed: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description Held by open holds */
                   held: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description amount - consumed - held; negative after an overrun or a record */
                   remaining: string
+                  /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
                 }[]
+                /** @description When this balance was computed, in epoch milliseconds */
                 asOf: number
               }
             }
           | {
               /** @enum {string} */
               kind: "budget_closed"
+              /** @description When the budget closed, in epoch milliseconds */
               closedAt: number
             }
       }
@@ -1102,45 +1182,65 @@ export interface components {
           | {
               /** @enum {string} */
               kind: "budget_exceeded"
+              /** @description Among hard limits the request would exceed, the one that resets last; that limit decides when the request can pass */
               blocked: {
                 limitId: string
-                /** @enum {string} */
+                /**
+                 * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                 * @example month
+                 * @enum {string}
+                 */
                 window: "hour" | "day" | "week" | "month" | "never"
                 /** @description A decimal amount in the budget's unit; negative after an overrun */
                 remaining: string
                 /** @description A decimal amount in the budget's unit; negative after an overrun */
                 held: string
+                /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
-                /** @enum {string} */
+                /**
+                 * @description release_holds: open holds on this limit would make room. wait_for_reset: the limit has room after resetsAt. raise_limit: the amount does not fit this limit.
+                 * @enum {string}
+                 */
                 remedy: "release_holds" | "wait_for_reset" | "raise_limit"
               }
               balance: {
                 /** @description The least remaining over hard limits; null when the budget has no hard limit */
                 remaining: string | null
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description The sum of open holds */
                 held: string
                 limits: {
                   id: string
-                  /** @enum {string} */
+                  /**
+                   * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                   * @example month
+                   * @enum {string}
+                   */
                   window: "hour" | "day" | "week" | "month" | "never"
-                  /** @enum {string} */
+                  /**
+                   * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @example hard
+                   * @enum {string}
+                   */
                   enforce: "hard" | "soft"
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description The limit */
                   amount: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description Used in the current period */
                   consumed: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description Held by open holds */
                   held: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description amount - consumed - held; negative after an overrun or a record */
                   remaining: string
+                  /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
                 }[]
+                /** @description When this balance was computed, in epoch milliseconds */
                 asOf: number
               }
             }
           | {
               /** @enum {string} */
               kind: "budget_closed"
+              /** @description When the budget closed, in epoch milliseconds */
               closedAt: number
             }
       }
@@ -1186,45 +1286,65 @@ export interface components {
           | {
               /** @enum {string} */
               kind: "budget_exceeded"
+              /** @description Among hard limits the request would exceed, the one that resets last; that limit decides when the request can pass */
               blocked: {
                 limitId: string
-                /** @enum {string} */
+                /**
+                 * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                 * @example month
+                 * @enum {string}
+                 */
                 window: "hour" | "day" | "week" | "month" | "never"
                 /** @description A decimal amount in the budget's unit; negative after an overrun */
                 remaining: string
                 /** @description A decimal amount in the budget's unit; negative after an overrun */
                 held: string
+                /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
-                /** @enum {string} */
+                /**
+                 * @description release_holds: open holds on this limit would make room. wait_for_reset: the limit has room after resetsAt. raise_limit: the amount does not fit this limit.
+                 * @enum {string}
+                 */
                 remedy: "release_holds" | "wait_for_reset" | "raise_limit"
               }
               balance: {
                 /** @description The least remaining over hard limits; null when the budget has no hard limit */
                 remaining: string | null
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description The sum of open holds */
                 held: string
                 limits: {
                   id: string
-                  /** @enum {string} */
+                  /**
+                   * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                   * @example month
+                   * @enum {string}
+                   */
                   window: "hour" | "day" | "week" | "month" | "never"
-                  /** @enum {string} */
+                  /**
+                   * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @example hard
+                   * @enum {string}
+                   */
                   enforce: "hard" | "soft"
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description The limit */
                   amount: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description Used in the current period */
                   consumed: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description Held by open holds */
                   held: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description amount - consumed - held; negative after an overrun or a record */
                   remaining: string
+                  /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
                 }[]
+                /** @description When this balance was computed, in epoch milliseconds */
                 asOf: number
               }
             }
           | {
               /** @enum {string} */
               kind: "budget_closed"
+              /** @description When the budget closed, in epoch milliseconds */
               closedAt: number
             }
       }
@@ -1270,45 +1390,65 @@ export interface components {
           | {
               /** @enum {string} */
               kind: "budget_exceeded"
+              /** @description Among hard limits the request would exceed, the one that resets last; that limit decides when the request can pass */
               blocked: {
                 limitId: string
-                /** @enum {string} */
+                /**
+                 * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                 * @example month
+                 * @enum {string}
+                 */
                 window: "hour" | "day" | "week" | "month" | "never"
                 /** @description A decimal amount in the budget's unit; negative after an overrun */
                 remaining: string
                 /** @description A decimal amount in the budget's unit; negative after an overrun */
                 held: string
+                /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
-                /** @enum {string} */
+                /**
+                 * @description release_holds: open holds on this limit would make room. wait_for_reset: the limit has room after resetsAt. raise_limit: the amount does not fit this limit.
+                 * @enum {string}
+                 */
                 remedy: "release_holds" | "wait_for_reset" | "raise_limit"
               }
               balance: {
                 /** @description The least remaining over hard limits; null when the budget has no hard limit */
                 remaining: string | null
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description The sum of open holds */
                 held: string
                 limits: {
                   id: string
-                  /** @enum {string} */
+                  /**
+                   * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                   * @example month
+                   * @enum {string}
+                   */
                   window: "hour" | "day" | "week" | "month" | "never"
-                  /** @enum {string} */
+                  /**
+                   * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @example hard
+                   * @enum {string}
+                   */
                   enforce: "hard" | "soft"
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description The limit */
                   amount: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description Used in the current period */
                   consumed: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description Held by open holds */
                   held: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description amount - consumed - held; negative after an overrun or a record */
                   remaining: string
+                  /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
                 }[]
+                /** @description When this balance was computed, in epoch milliseconds */
                 asOf: number
               }
             }
           | {
               /** @enum {string} */
               kind: "budget_closed"
+              /** @description When the budget closed, in epoch milliseconds */
               closedAt: number
             }
       }
@@ -1354,45 +1494,65 @@ export interface components {
           | {
               /** @enum {string} */
               kind: "budget_exceeded"
+              /** @description Among hard limits the request would exceed, the one that resets last; that limit decides when the request can pass */
               blocked: {
                 limitId: string
-                /** @enum {string} */
+                /**
+                 * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                 * @example month
+                 * @enum {string}
+                 */
                 window: "hour" | "day" | "week" | "month" | "never"
                 /** @description A decimal amount in the budget's unit; negative after an overrun */
                 remaining: string
                 /** @description A decimal amount in the budget's unit; negative after an overrun */
                 held: string
+                /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
-                /** @enum {string} */
+                /**
+                 * @description release_holds: open holds on this limit would make room. wait_for_reset: the limit has room after resetsAt. raise_limit: the amount does not fit this limit.
+                 * @enum {string}
+                 */
                 remedy: "release_holds" | "wait_for_reset" | "raise_limit"
               }
               balance: {
                 /** @description The least remaining over hard limits; null when the budget has no hard limit */
                 remaining: string | null
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description The sum of open holds */
                 held: string
                 limits: {
                   id: string
-                  /** @enum {string} */
+                  /**
+                   * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                   * @example month
+                   * @enum {string}
+                   */
                   window: "hour" | "day" | "week" | "month" | "never"
-                  /** @enum {string} */
+                  /**
+                   * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @example hard
+                   * @enum {string}
+                   */
                   enforce: "hard" | "soft"
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description The limit */
                   amount: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description Used in the current period */
                   consumed: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description Held by open holds */
                   held: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description amount - consumed - held; negative after an overrun or a record */
                   remaining: string
+                  /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
                 }[]
+                /** @description When this balance was computed, in epoch milliseconds */
                 asOf: number
               }
             }
           | {
               /** @enum {string} */
               kind: "budget_closed"
+              /** @description When the budget closed, in epoch milliseconds */
               closedAt: number
             }
       }
@@ -1438,45 +1598,65 @@ export interface components {
           | {
               /** @enum {string} */
               kind: "budget_exceeded"
+              /** @description Among hard limits the request would exceed, the one that resets last; that limit decides when the request can pass */
               blocked: {
                 limitId: string
-                /** @enum {string} */
+                /**
+                 * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                 * @example month
+                 * @enum {string}
+                 */
                 window: "hour" | "day" | "week" | "month" | "never"
                 /** @description A decimal amount in the budget's unit; negative after an overrun */
                 remaining: string
                 /** @description A decimal amount in the budget's unit; negative after an overrun */
                 held: string
+                /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
-                /** @enum {string} */
+                /**
+                 * @description release_holds: open holds on this limit would make room. wait_for_reset: the limit has room after resetsAt. raise_limit: the amount does not fit this limit.
+                 * @enum {string}
+                 */
                 remedy: "release_holds" | "wait_for_reset" | "raise_limit"
               }
               balance: {
                 /** @description The least remaining over hard limits; null when the budget has no hard limit */
                 remaining: string | null
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description The sum of open holds */
                 held: string
                 limits: {
                   id: string
-                  /** @enum {string} */
+                  /**
+                   * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                   * @example month
+                   * @enum {string}
+                   */
                   window: "hour" | "day" | "week" | "month" | "never"
-                  /** @enum {string} */
+                  /**
+                   * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @example hard
+                   * @enum {string}
+                   */
                   enforce: "hard" | "soft"
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description The limit */
                   amount: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description Used in the current period */
                   consumed: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description Held by open holds */
                   held: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description amount - consumed - held; negative after an overrun or a record */
                   remaining: string
+                  /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
                 }[]
+                /** @description When this balance was computed, in epoch milliseconds */
                 asOf: number
               }
             }
           | {
               /** @enum {string} */
               kind: "budget_closed"
+              /** @description When the budget closed, in epoch milliseconds */
               closedAt: number
             }
       }
@@ -1522,45 +1702,65 @@ export interface components {
           | {
               /** @enum {string} */
               kind: "budget_exceeded"
+              /** @description Among hard limits the request would exceed, the one that resets last; that limit decides when the request can pass */
               blocked: {
                 limitId: string
-                /** @enum {string} */
+                /**
+                 * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                 * @example month
+                 * @enum {string}
+                 */
                 window: "hour" | "day" | "week" | "month" | "never"
                 /** @description A decimal amount in the budget's unit; negative after an overrun */
                 remaining: string
                 /** @description A decimal amount in the budget's unit; negative after an overrun */
                 held: string
+                /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
-                /** @enum {string} */
+                /**
+                 * @description release_holds: open holds on this limit would make room. wait_for_reset: the limit has room after resetsAt. raise_limit: the amount does not fit this limit.
+                 * @enum {string}
+                 */
                 remedy: "release_holds" | "wait_for_reset" | "raise_limit"
               }
               balance: {
                 /** @description The least remaining over hard limits; null when the budget has no hard limit */
                 remaining: string | null
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description The sum of open holds */
                 held: string
                 limits: {
                   id: string
-                  /** @enum {string} */
+                  /**
+                   * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                   * @example month
+                   * @enum {string}
+                   */
                   window: "hour" | "day" | "week" | "month" | "never"
-                  /** @enum {string} */
+                  /**
+                   * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @example hard
+                   * @enum {string}
+                   */
                   enforce: "hard" | "soft"
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description The limit */
                   amount: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description Used in the current period */
                   consumed: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description Held by open holds */
                   held: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description amount - consumed - held; negative after an overrun or a record */
                   remaining: string
+                  /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
                 }[]
+                /** @description When this balance was computed, in epoch milliseconds */
                 asOf: number
               }
             }
           | {
               /** @enum {string} */
               kind: "budget_closed"
+              /** @description When the budget closed, in epoch milliseconds */
               closedAt: number
             }
       }
@@ -2418,7 +2618,7 @@ export interface operations {
       content: {
         "application/json": {
           /**
-           * @description The budget's key, chosen by you
+           * @description The budget's key, chosen by you and unique within the project. Up to 128 letters, digits, and `: / _ . @ -`, starting with a letter or digit.
            * @example customer:acme
            */
           key: string
@@ -2427,15 +2627,23 @@ export interface operations {
            * @example USD
            */
           unit: string
+          /** @description Up to 16 limits. Every hard limit must have room for a hold or charge. An empty list makes a budget that only counts. */
           limits: {
-            /** @description Defaults to the window name */
+            /**
+             * @description Unique within the budget. Defaults to the window name.
+             * @example month
+             */
             id?: string
             /**
-             * @description A decimal amount in the budget's unit
+             * @description A non-negative decimal string in the budget's unit, with at most 8 decimal places. Strings keep amounts exact.
              * @example 0.05
              */
             amount: string
-            /** @enum {string} */
+            /**
+             * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+             * @example month
+             * @enum {string}
+             */
             window: "hour" | "day" | "week" | "month" | "never"
             /**
              * Format: date-time
@@ -2443,24 +2651,41 @@ export interface operations {
              * @example 2026-10-15T00:00:00Z
              */
             anchor?: string
-            /** @enum {string} */
+            /**
+             * @description Defaults to hard
+             * @example hard
+             * @enum {string}
+             */
             enforce?: "hard" | "soft"
           }[]
           /**
            * Format: date-time
-           * @description When the budget closes. From then on authorize and charge return 409, record is accepted for 24 hours more, and settle and release keep working. Omit or send null to keep it open.
+           * @description When the budget closes. From then on authorize and charge return 409, record is accepted for 1 day more, and settle and release keep working. Omit or send null to keep it open.
            * @example 2026-12-31T23:59:59Z
            */
           closesAt?: string | null
+          /** @description Hold timing. Both TTLs must be between 1000 and 86400000 ms, and the default must not exceed the max. */
           holds?: {
+            /**
+             * @description TTL for an authorize that sends no ttlMs, in milliseconds. Defaults to 900000 (15 minutes).
+             * @example 900000
+             */
             defaultTtlMs?: number
+            /**
+             * @description The largest ttlMs an authorize may ask for, in milliseconds. Defaults to 86400000 (1 day).
+             * @example 86400000
+             */
             maxTtlMs?: number
           }
+          /**
+           * @description What a client should do when it cannot reach Unprice: deny, allow, or allow up to an amount per call. Stored for clients to read; the API never applies it. Defaults to deny.
+           * @example deny
+           */
           onUnavailable?:
             | ("deny" | "allow")
             | {
                 /**
-                 * @description A decimal amount in the budget's unit
+                 * @description A non-negative decimal string in the budget's unit, with at most 8 decimal places. Strings keep amounts exact.
                  * @example 0.05
                  */
                 allowUpTo: string
@@ -2476,24 +2701,46 @@ export interface operations {
         }
         content: {
           "application/json": {
+            /** @description What this upsert changed; empty when it changed nothing */
             changes: {
+              /**
+               * @description limit.added, limit.removed, limit.amount, limit.window, limit.enforce, limits.order, holds, onUnavailable, or closesAt. Creating a budget lists each limit as limit.added.
+               * @example limit.amount
+               */
               change: string
+              /** @description The limit that changed */
               limitId?: string
+              /** @description The previous value */
               from?: string
+              /** @description The new value */
               to?: string
             }[]
             budget: {
               key: string
+              /**
+               * @description money:<code>, credits:<id>, or units:<slug>
+               * @example money:USD
+               */
               unit: string
+              /** @description Increments on every upsert that changes the budget */
               version: number
               limits: {
                 id: string
                 /** @description A decimal amount in the budget's unit; negative after an overrun */
                 amount: string
-                /** @enum {string} */
+                /**
+                 * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                 * @example month
+                 * @enum {string}
+                 */
                 window: "hour" | "day" | "week" | "month" | "never"
+                /** @description The anchor instant of an anchored window, as an ISO 8601 string */
                 anchor?: string
-                /** @enum {string} */
+                /**
+                 * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                 * @example hard
+                 * @enum {string}
+                 */
                 enforce: "hard" | "soft"
               }[]
               holds: {
@@ -2506,29 +2753,41 @@ export interface operations {
                     /** @description A decimal amount in the budget's unit; negative after an overrun */
                     allowUpTo: string
                   }
+              /** @description When the budget closes, or null */
               closesAt: string | null
+              /** @description True from closesAt on */
               closed: boolean
               balance: {
                 /** @description The least remaining over hard limits; null when the budget has no hard limit */
                 remaining: string | null
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description The sum of open holds */
                 held: string
                 limits: {
                   id: string
-                  /** @enum {string} */
+                  /**
+                   * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                   * @example month
+                   * @enum {string}
+                   */
                   window: "hour" | "day" | "week" | "month" | "never"
-                  /** @enum {string} */
+                  /**
+                   * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @example hard
+                   * @enum {string}
+                   */
                   enforce: "hard" | "soft"
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description The limit */
                   amount: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description Used in the current period */
                   consumed: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description Held by open holds */
                   held: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description amount - consumed - held; negative after an overrun or a record */
                   remaining: string
+                  /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
                 }[]
+                /** @description When this balance was computed, in epoch milliseconds */
                 asOf: number
               }
             }
@@ -2630,16 +2889,24 @@ export interface operations {
       content: {
         "application/json": {
           /**
-           * @description The budget's key, chosen by you
+           * @description The budget's key, chosen by you and unique within the project. Up to 128 letters, digits, and `: / _ . @ -`, starting with a letter or digit.
            * @example customer:acme
            */
           key: string
           /**
-           * @description A decimal amount in the budget's unit
+           * @description The estimate to hold against every hard limit. Settle the actual amount later, or release the hold.
            * @example 0.05
            */
           amount: string
+          /**
+           * @description How long the hold reserves capacity, in milliseconds. Defaults to the budget's holds.defaultTtlMs and must not exceed holds.maxTtlMs. An expired hold keeps counting for 2 more TTLs, then lapses and returns its amount.
+           * @example 60000
+           */
           ttlMs?: number
+          /**
+           * @description Up to 256 characters. A retry with the same key and the same request replays the first answer; the same key with a different request returns 409.
+           * @example run_8f2c:step_3
+           */
           idempotencyKey: string
         }
       }
@@ -2654,33 +2921,48 @@ export interface operations {
           "application/json": {
             /** @enum {boolean} */
             allowed: true
-            /** @example h_42 */
+            /**
+             * @description The hold, as returned by authorize
+             * @example h_42
+             */
             holdId: string
-            /** @description A decimal amount in the budget's unit; negative after an overrun */
+            /** @description The amount held */
             amount: string
+            /** @description When the hold expires, in epoch milliseconds. Settle before then. */
             expiresAt: number
+            /** @description True when this answer replays an earlier request instead of applying it again */
             replayed: boolean
             balance: {
               /** @description The least remaining over hard limits; null when the budget has no hard limit */
               remaining: string | null
-              /** @description A decimal amount in the budget's unit; negative after an overrun */
+              /** @description The sum of open holds */
               held: string
               limits: {
                 id: string
-                /** @enum {string} */
+                /**
+                 * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                 * @example month
+                 * @enum {string}
+                 */
                 window: "hour" | "day" | "week" | "month" | "never"
-                /** @enum {string} */
+                /**
+                 * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                 * @example hard
+                 * @enum {string}
+                 */
                 enforce: "hard" | "soft"
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description The limit */
                 amount: string
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description Used in the current period */
                 consumed: string
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description Held by open holds */
                 held: string
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description amount - consumed - held; negative after an overrun or a record */
                 remaining: string
+                /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
               }[]
+              /** @description When this balance was computed, in epoch milliseconds */
               asOf: number
             }
           }
@@ -2790,14 +3072,17 @@ export interface operations {
       content: {
         "application/json": {
           /**
-           * @description The budget's key, chosen by you
+           * @description The budget's key, chosen by you and unique within the project. Up to 128 letters, digits, and `: / _ . @ -`, starting with a letter or digit.
            * @example customer:acme
            */
           key: string
-          /** @example h_42 */
+          /**
+           * @description The hold, as returned by authorize
+           * @example h_42
+           */
           holdId: string
           /**
-           * @description A decimal amount in the budget's unit
+           * @description The actual usage. Up to the hold's amount is covered by the hold and the rest is returned; anything above it is consumed as overrun.
            * @example 0.05
            */
           amount: string
@@ -2812,41 +3097,58 @@ export interface operations {
         }
         content: {
           "application/json": {
-            /** @example h_42 */
+            /**
+             * @description The hold, as returned by authorize
+             * @example h_42
+             */
             holdId: string
-            /** @description A decimal amount in the budget's unit; negative after an overrun */
+            /** @description The amount settled */
             actual: string
-            /** @description A decimal amount in the budget's unit; negative after an overrun */
+            /** @description The part of actual the hold covered */
             covered: string
-            /** @description A decimal amount in the budget's unit; negative after an overrun */
+            /** @description The unused part of the hold, returned */
             released: string
-            /** @description A decimal amount in the budget's unit; negative after an overrun */
+            /** @description actual - covered: consumed beyond the hold */
             overrun: string
+            /** @description The hold had lapsed, so the whole actual was consumed without cover */
             late: boolean
+            /** @description Settled at or after the hold's expiresAt */
             expired: boolean
+            /** @description Ids of the limits this request took from non-negative to negative remaining */
             crossed: string[]
+            /** @description True when this answer replays an earlier request instead of applying it again */
             replayed: boolean
             balance: {
               /** @description The least remaining over hard limits; null when the budget has no hard limit */
               remaining: string | null
-              /** @description A decimal amount in the budget's unit; negative after an overrun */
+              /** @description The sum of open holds */
               held: string
               limits: {
                 id: string
-                /** @enum {string} */
+                /**
+                 * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                 * @example month
+                 * @enum {string}
+                 */
                 window: "hour" | "day" | "week" | "month" | "never"
-                /** @enum {string} */
+                /**
+                 * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                 * @example hard
+                 * @enum {string}
+                 */
                 enforce: "hard" | "soft"
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description The limit */
                 amount: string
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description Used in the current period */
                 consumed: string
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description Held by open holds */
                 held: string
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description amount - consumed - held; negative after an overrun or a record */
                 remaining: string
+                /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
               }[]
+              /** @description When this balance was computed, in epoch milliseconds */
               asOf: number
             }
           }
@@ -2947,11 +3249,14 @@ export interface operations {
       content: {
         "application/json": {
           /**
-           * @description The budget's key, chosen by you
+           * @description The budget's key, chosen by you and unique within the project. Up to 128 letters, digits, and `: / _ . @ -`, starting with a letter or digit.
            * @example customer:acme
            */
           key: string
-          /** @example h_42 */
+          /**
+           * @description The hold, as returned by authorize
+           * @example h_42
+           */
           holdId: string
         }
       }
@@ -2964,32 +3269,46 @@ export interface operations {
         }
         content: {
           "application/json": {
-            /** @example h_42 */
+            /**
+             * @description The hold, as returned by authorize
+             * @example h_42
+             */
             holdId: string
-            /** @description A decimal amount in the budget's unit; negative after an overrun */
+            /** @description The amount returned; 0 when the hold had already lapsed */
             released: string
+            /** @description True when this answer replays an earlier request instead of applying it again */
             replayed: boolean
             balance: {
               /** @description The least remaining over hard limits; null when the budget has no hard limit */
               remaining: string | null
-              /** @description A decimal amount in the budget's unit; negative after an overrun */
+              /** @description The sum of open holds */
               held: string
               limits: {
                 id: string
-                /** @enum {string} */
+                /**
+                 * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                 * @example month
+                 * @enum {string}
+                 */
                 window: "hour" | "day" | "week" | "month" | "never"
-                /** @enum {string} */
+                /**
+                 * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                 * @example hard
+                 * @enum {string}
+                 */
                 enforce: "hard" | "soft"
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description The limit */
                 amount: string
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description Used in the current period */
                 consumed: string
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description Held by open holds */
                 held: string
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description amount - consumed - held; negative after an overrun or a record */
                 remaining: string
+                /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
               }[]
+              /** @description When this balance was computed, in epoch milliseconds */
               asOf: number
             }
           }
@@ -3090,15 +3409,19 @@ export interface operations {
       content: {
         "application/json": {
           /**
-           * @description The budget's key, chosen by you
+           * @description The budget's key, chosen by you and unique within the project. Up to 128 letters, digits, and `: / _ . @ -`, starting with a letter or digit.
            * @example customer:acme
            */
           key: string
           /**
-           * @description A decimal amount in the budget's unit
+           * @description The amount to consume now, checked against every hard limit
            * @example 0.05
            */
           amount: string
+          /**
+           * @description Up to 256 characters. A retry with the same key and the same request replays the first answer; the same key with a different request returns 409.
+           * @example run_8f2c:step_3
+           */
           idempotencyKey: string
         }
       }
@@ -3113,31 +3436,43 @@ export interface operations {
           "application/json": {
             /** @enum {boolean} */
             allowed: true
-            /** @description A decimal amount in the budget's unit; negative after an overrun */
+            /** @description The amount consumed */
             amount: string
+            /** @description Ids of the limits this request took from non-negative to negative remaining */
             crossed: string[]
+            /** @description True when this answer replays an earlier request instead of applying it again */
             replayed: boolean
             balance: {
               /** @description The least remaining over hard limits; null when the budget has no hard limit */
               remaining: string | null
-              /** @description A decimal amount in the budget's unit; negative after an overrun */
+              /** @description The sum of open holds */
               held: string
               limits: {
                 id: string
-                /** @enum {string} */
+                /**
+                 * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                 * @example month
+                 * @enum {string}
+                 */
                 window: "hour" | "day" | "week" | "month" | "never"
-                /** @enum {string} */
+                /**
+                 * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                 * @example hard
+                 * @enum {string}
+                 */
                 enforce: "hard" | "soft"
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description The limit */
                 amount: string
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description Used in the current period */
                 consumed: string
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description Held by open holds */
                 held: string
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description amount - consumed - held; negative after an overrun or a record */
                 remaining: string
+                /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
               }[]
+              /** @description When this balance was computed, in epoch milliseconds */
               asOf: number
             }
           }
@@ -3247,18 +3582,22 @@ export interface operations {
       content: {
         "application/json": {
           /**
-           * @description The budget's key, chosen by you
+           * @description The budget's key, chosen by you and unique within the project. Up to 128 letters, digits, and `: / _ . @ -`, starting with a letter or digit.
            * @example customer:acme
            */
           key: string
           /**
-           * @description A decimal amount in the budget's unit
+           * @description The amount the usage cost. Never denied by a limit.
            * @example 0.05
            */
           amount: string
+          /**
+           * @description Up to 256 characters, usually the event id. For 8 days, the same key with the same amount replays instead of counting again, and with another amount returns 409.
+           * @example evt_01J9Z3
+           */
           idempotencyKey: string
           /**
-           * @description When the usage happened, in epoch milliseconds. Must be within the last 7 days and at most 5 minutes ahead. Send the same value on a retry.
+           * @description When the usage happened, in epoch milliseconds: the event's own time, not the time of the call. Must be within the last 7 days and at most 5 minutes ahead. It bounds acceptance only; usage counts in the window it arrives in.
            * @example 1792000000000
            */
           occurredAt: number
@@ -3273,31 +3612,43 @@ export interface operations {
         }
         content: {
           "application/json": {
-            /** @description A decimal amount in the budget's unit; negative after an overrun */
+            /** @description The amount consumed */
             amount: string
+            /** @description Ids of the limits this request took from non-negative to negative remaining */
             crossed: string[]
+            /** @description True when this answer replays an earlier request instead of applying it again */
             replayed: boolean
             balance: {
               /** @description The least remaining over hard limits; null when the budget has no hard limit */
               remaining: string | null
-              /** @description A decimal amount in the budget's unit; negative after an overrun */
+              /** @description The sum of open holds */
               held: string
               limits: {
                 id: string
-                /** @enum {string} */
+                /**
+                 * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                 * @example month
+                 * @enum {string}
+                 */
                 window: "hour" | "day" | "week" | "month" | "never"
-                /** @enum {string} */
+                /**
+                 * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                 * @example hard
+                 * @enum {string}
+                 */
                 enforce: "hard" | "soft"
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description The limit */
                 amount: string
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description Used in the current period */
                 consumed: string
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description Held by open holds */
                 held: string
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description amount - consumed - held; negative after an overrun or a record */
                 remaining: string
+                /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                 resetsAt: number | null
               }[]
+              /** @description When this balance was computed, in epoch milliseconds */
               asOf: number
             }
           }
@@ -3406,16 +3757,30 @@ export interface operations {
           "application/json": {
             budget: {
               key: string
+              /**
+               * @description money:<code>, credits:<id>, or units:<slug>
+               * @example money:USD
+               */
               unit: string
+              /** @description Increments on every upsert that changes the budget */
               version: number
               limits: {
                 id: string
                 /** @description A decimal amount in the budget's unit; negative after an overrun */
                 amount: string
-                /** @enum {string} */
+                /**
+                 * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                 * @example month
+                 * @enum {string}
+                 */
                 window: "hour" | "day" | "week" | "month" | "never"
+                /** @description The anchor instant of an anchored window, as an ISO 8601 string */
                 anchor?: string
-                /** @enum {string} */
+                /**
+                 * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                 * @example hard
+                 * @enum {string}
+                 */
                 enforce: "hard" | "soft"
               }[]
               holds: {
@@ -3428,38 +3793,53 @@ export interface operations {
                     /** @description A decimal amount in the budget's unit; negative after an overrun */
                     allowUpTo: string
                   }
+              /** @description When the budget closes, or null */
               closesAt: string | null
+              /** @description True from closesAt on */
               closed: boolean
               balance: {
                 /** @description The least remaining over hard limits; null when the budget has no hard limit */
                 remaining: string | null
-                /** @description A decimal amount in the budget's unit; negative after an overrun */
+                /** @description The sum of open holds */
                 held: string
                 limits: {
                   id: string
-                  /** @enum {string} */
+                  /**
+                   * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                   * @example month
+                   * @enum {string}
+                   */
                   window: "hour" | "day" | "week" | "month" | "never"
-                  /** @enum {string} */
+                  /**
+                   * @description hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.
+                   * @example hard
+                   * @enum {string}
+                   */
                   enforce: "hard" | "soft"
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description The limit */
                   amount: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description Used in the current period */
                   consumed: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description Held by open holds */
                   held: string
-                  /** @description A decimal amount in the budget's unit; negative after an overrun */
+                  /** @description amount - consumed - held; negative after an overrun or a record */
                   remaining: string
+                  /** @description When the limit's current period ends, in epoch milliseconds; null for never */
                   resetsAt: number | null
                 }[]
+                /** @description When this balance was computed, in epoch milliseconds */
                 asOf: number
               }
             }
-            /** @description The last 12 ended periods with usage of each limited window, newest first. Hourly periods are kept 30 days. */
+            /** @description The last 12 ended periods with usage of each limited window, newest first. Older periods are not kept. */
             history: {
+              /** @example month */
               windowId: string
+              /** @description Period start, in epoch milliseconds */
               start: number
+              /** @description Period end (exclusive), in epoch milliseconds */
               end: number
-              /** @description A decimal amount in the budget's unit; negative after an overrun */
+              /** @description Used in the period */
               consumed: string
             }[]
           }

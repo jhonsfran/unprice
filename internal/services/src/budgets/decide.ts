@@ -13,6 +13,7 @@ import {
   RECORD_ACCEPT_WINDOW_MS,
   RECORD_FUTURE_SKEW_MS,
   diffConfig,
+  isClosed,
 } from "./config"
 import { countersOf } from "./evolve"
 import {
@@ -114,7 +115,7 @@ function crossings(balance: BudgetBalance, delta: SignedAmount): string[] {
  */
 export function decide(
   command: BudgetCommand,
-  view: Pick<BudgetView, "budget" | "ledger" | "target" | "seenRecordKey">,
+  view: Pick<BudgetView, "budget" | "ledger" | "target" | "receipt">,
   now: number
 ): Result<Fact[], UnPriceBudgetError> {
   if (command.type === "upsert") return decideUpsert(command, view.budget)
@@ -173,21 +174,20 @@ function decideUpsert(
 function decideKeyed(
   command: Extract<BudgetCommand, { type: "authorize" | "charge" | "record" }>,
   state: Funded,
-  { target, seenRecordKey }: Pick<BudgetView, "target" | "seenRecordKey">,
+  { target, receipt }: Pick<BudgetView, "target" | "receipt">,
   now: number
 ): Result<Fact[], UnPriceBudgetError> {
   const amount = command.cost.amount
-  if (target) {
-    if (target.idempotencyKey !== command.idempotencyKey) {
-      throw new Error(`target ${target.id} is not the row for key ${command.idempotencyKey}`)
-    }
+  if (target && target.idempotencyKey !== command.idempotencyKey) {
+    throw new Error(`target ${target.id} is not the row for key ${command.idempotencyKey}`)
+  }
+  // The row answers for a day; a record's receipt answers the same way for RECORD_DEDUPE_MS.
+  const prior = target ?? (receipt && { kind: "record" as const, ...receipt })
+  if (prior) {
     const kind = command.type === "authorize" ? "hold" : command.type
-    if (target.kind === kind && target.requestHash === command.requestHash) return Ok([])
+    if (prior.kind === kind && prior.requestHash === command.requestHash) return Ok([])
     return reject({ code: "IDEMPOTENCY_CONFLICT", idempotencyKey: command.idempotencyKey })
   }
-  // The row is purged after a day but the key is kept for RECORD_DEDUPE_MS: a duplicate still
-  // never counts twice, though a changed payload can no longer be told apart from a retry.
-  if (command.type === "record" && seenRecordKey) return Ok([])
 
   let ttlMs = 0
   if (command.type === "authorize") {
@@ -212,10 +212,10 @@ function decideKeyed(
     const oldestAccepted = now - RECORD_ACCEPT_WINDOW_MS
     if (occurredAt < oldestAccepted) return reject({ code: "TOO_LATE", occurredAt, oldestAccepted })
   }
-  const { closesAt } = state.budget.config
+  const { config } = state.budget
   const grace = command.type === "record" ? OPERATION_RETENTION_MS : 0
-  if (closesAt !== null && now >= closesAt + grace) {
-    return reject({ code: "BUDGET_CLOSED", closedAt: closesAt })
+  if (config.closesAt !== null && isClosed(config, now, grace)) {
+    return reject({ code: "BUDGET_CLOSED", closedAt: config.closesAt })
   }
 
   const balance = balanceOf(state, now)

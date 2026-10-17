@@ -5,11 +5,13 @@ import {
   type Ledger,
   type Operation,
   RECORD_DEDUPE_MS,
+  WINDOW_HISTORY_PERIODS,
   type WindowId,
   dueAt,
   emptyLedger,
+  periodOf,
 } from "@unprice/services/budgets"
-import { and, asc, desc, eq, gt, inArray, lt, lte, min, ne } from "drizzle-orm"
+import { and, asc, desc, eq, gt, inArray, lt, lte, min, ne, notInArray } from "drizzle-orm"
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite"
 import * as schema from "./db/schema"
 import type { BudgetStore, BudgetStoreTx, Sync } from "./ports"
@@ -103,14 +105,16 @@ function bind(
         .map((row) => decode<HoldOperation>(row.data))
     },
 
-    readRecordKey(idempotencyKey, at) {
-      const keys = schema.budgetRecordKeys
+    readRecordReceipt(idempotencyKey, at) {
+      const receipts = schema.budgetRecordReceipts
       const row = db
-        .select({ keyHash: keys.keyHash })
-        .from(keys)
-        .where(and(eq(keys.keyHash, sha256HexSync(idempotencyKey)), gt(keys.expiresAt, at)))
+        .select()
+        .from(receipts)
+        .where(and(eq(receipts.keyHash, sha256HexSync(idempotencyKey)), gt(receipts.expiresAt, at)))
         .get()
-      return row !== undefined
+      if (!row) return null
+      const { requestHash, amount, crossedJson } = row
+      return { requestHash, amount, crossed: decode<string[]>(crossedJson) }
     },
 
     readHistory(windowIds, limit) {
@@ -160,15 +164,32 @@ function bind(
         db.insert(schema.budgetEntries)
           .values({ seq: entry.seq, at: entry.at, type: entry.type, factJson: encode(entry) })
           .run()
-        if (entry.type === "window.rolled") {
-          const { windowId, start, end, consumed } = entry
-          db.insert(schema.budgetWindowHistory).values({ windowId, start, end, consumed }).run()
+        for (const period of periodOf(entry)) {
+          const history = schema.budgetWindowHistory
+          const ofWindow = eq(history.windowId, period.windowId)
+          db.insert(history).values(period).run()
+          // Keep what `get` can return and no more.
+          const kept = db
+            .select({ start: history.start })
+            .from(history)
+            .where(ofWindow)
+            .orderBy(desc(history.start))
+            .limit(WINDOW_HISTORY_PERIODS)
+          db.delete(history)
+            .where(and(ofWindow, notInArray(history.start, kept)))
+            .run()
         }
         if (entry.type === "recorded") {
-          const key = { expiresAt: entry.at + RECORD_DEDUPE_MS }
-          db.insert(schema.budgetRecordKeys)
-            .values({ keyHash: sha256HexSync(entry.idempotencyKey), ...key })
-            .onConflictDoUpdate({ target: schema.budgetRecordKeys.keyHash, set: key })
+          // A key whose dedupe ended but is not purged yet is recorded again: replace its receipt.
+          const receipt = {
+            requestHash: entry.requestHash,
+            amount: entry.amount,
+            crossedJson: encode(entry.crossed),
+            expiresAt: entry.at + RECORD_DEDUPE_MS,
+          }
+          db.insert(schema.budgetRecordReceipts)
+            .values({ keyHash: sha256HexSync(entry.idempotencyKey), ...receipt })
+            .onConflictDoUpdate({ target: schema.budgetRecordReceipts.keyHash, set: receipt })
             .run()
         }
       }
@@ -212,29 +233,15 @@ function bind(
       db.delete(entries).where(inArray(entries.seq, expired)).run()
     },
 
-    purgeRecordKeys(at, limit) {
-      const keys = schema.budgetRecordKeys
+    purgeRecordReceipts(at, limit) {
+      const receipts = schema.budgetRecordReceipts
       const expired = db
-        .select({ keyHash: keys.keyHash })
-        .from(keys)
-        .where(lte(keys.expiresAt, at))
-        .orderBy(asc(keys.expiresAt))
+        .select({ keyHash: receipts.keyHash })
+        .from(receipts)
+        .where(lte(receipts.expiresAt, at))
+        .orderBy(asc(receipts.expiresAt))
         .limit(limit)
-      db.delete(keys).where(inArray(keys.keyHash, expired)).run()
-    },
-
-    pruneHourlyHistory(before, limit) {
-      const history = schema.budgetWindowHistory
-      const hourly = and(eq(history.windowId, "hour"), lt(history.start, before))
-      const expired = db
-        .select({ start: history.start })
-        .from(history)
-        .where(hourly)
-        .orderBy(asc(history.start))
-        .limit(limit)
-      db.delete(history)
-        .where(and(hourly, inArray(history.start, expired)))
-        .run()
+      db.delete(receipts).where(inArray(receipts.keyHash, expired)).run()
     },
 
     nextDueAt() {
@@ -246,12 +253,12 @@ function bind(
       )
     },
 
-    oldestRecordKeyExpiresAt() {
-      const keys = schema.budgetRecordKeys
+    oldestReceiptExpiresAt() {
+      const receipts = schema.budgetRecordReceipts
       return (
         db
-          .select({ at: min(keys.expiresAt) })
-          .from(keys)
+          .select({ at: min(receipts.expiresAt) })
+          .from(receipts)
           .get()?.at ?? null
       )
     },

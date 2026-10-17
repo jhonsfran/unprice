@@ -72,8 +72,9 @@ export const budgetOperations = sqliteTable(
 )
 
 /**
- * One row per `window.rolled` fact: a period of a window that ended with usage. Hourly rows are
- * pruned after 30 days; the rest are a few rows a month and kept.
+ * One row per `window.rolled` fact: a period of a window that ended with usage. The commit that
+ * inserts a period deletes that window's periods beyond WINDOW_HISTORY_PERIODS, the most `get`
+ * returns.
  */
 export const budgetWindowHistory = sqliteTable(
   "budget_window_history",
@@ -87,14 +88,18 @@ export const budgetWindowHistory = sqliteTable(
 )
 
 /**
- * sha256 of every recorded idempotency key, kept RECORD_DEDUPE_MS: it outlives the record's
- * operation row, so a replay within 8 days is never counted twice.
+ * What every `recorded` fact leaves for RECORD_DEDUPE_MS, keyed by the sha256 of its idempotency
+ * key: it outlives the record's operation row, so for 8 days a replay answers as the row did and a
+ * changed request under the same key is a conflict.
  */
-export const budgetRecordKeys = sqliteTable(
-  "budget_record_keys",
+export const budgetRecordReceipts = sqliteTable(
+  "budget_record_receipts",
   {
     keyHash: text("key_hash").primaryKey(),
+    requestHash: text("request_hash").notNull(),
+    amount: amount("amount").notNull(),
+    crossedJson: text("crossed_json").notNull(),
     expiresAt: integer("expires_at").notNull(),
   },
-  (table) => ({ expires: index("budget_record_keys_expires_at_idx").on(table.expiresAt) })
+  (table) => ({ expires: index("budget_record_receipts_expires_at_idx").on(table.expiresAt) })
 )

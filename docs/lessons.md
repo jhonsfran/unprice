@@ -234,8 +234,8 @@ patterns. Keep it cheap to load and useful.
   loses its type parameter through the stub, so narrow the result at the caller instead.
 - 2026-10-16: Budget window rolls are `window.rolled` facts that `transition` emits before the
   command's facts; `BudgetSqliteStore.commit` derives `budget_window_history` and
-  `budget_record_keys` from entries, so add new budget projections there, not in the processor.
-- 2026-10-16: Never purge budget state keyed on time past `ledger.lastAt` (`recordKeysPurgeAt`):
+  `budget_record_receipts` from entries, so add new budget projections there, not in the processor.
+- 2026-10-16: Never purge budget state keyed on time past `ledger.lastAt` (`receiptsPurgeAt`):
   commands clamp to `lastAt`, so a purge at a later raw clock lets a skewed-back command re-accept
   a replay. The property test's `-3d` clock jumps catch this.
 - 2026-10-16: An error escaping a DO method (RPC or `runInDurableObject` instance call) shows up as
@@ -955,3 +955,19 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-09-19: Contract tests that assert exact alarm timestamps must clear the alarm the DO's own
   bootstrap arms (`RunBudgetDO.workers.test.ts`), or a lifecycle alarm that happens to fall
   earlier silently swallows the `setAlarm` the test is asserting on.
+- 2026-10-16: k6 cannot share state across VUs, so a load test that must compare a server total
+  with what the client saw uses a `Counter` that VUs add to and `teardown` subtracts from, with a
+  `count==0` threshold (`tooling/k6/budgets.ts`). Counters accept negative values, and a non-zero
+  total fails the run with exit 99.
+- 2026-10-16: k6 in Docker Desktop against a local `wrangler dev` occasionally reuses a keep-alive
+  connection the server already closed and gets `EOF` (status 0). It is the client pool, not the
+  API: the same load is clean with `K6_NO_CONNECTION_REUSE=true` and with Node's `fetch`. Check
+  for it before chasing a server bug.
+- 2026-10-16: A dedupe that relies on a client-sent timestamp (`record`'s `occurredAt` bounding
+  replays past the 8-day receipt) breaks the moment the SDK defaults that timestamp to the time of
+  the call: a retry gets a fresh time and passes the bound. Require it in the SDK, and keep clock
+  values out of the request hash so a re-stamped retry replays instead of conflicting.
+- 2026-10-16: Don't store a flag the config already implies. The budget's anchored counters used
+  an `orphan` flag for "no limit references this"; `rollCounters` now reads that from the limits in
+  force, so the flag cannot drift from the config. Likewise, don't wake an alarm for a roll a
+  counter can replay later from its own period start.

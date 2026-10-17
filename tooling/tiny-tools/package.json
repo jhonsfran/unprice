@@ -13,6 +13,8 @@
     "e2e:usage:local": "UNPRICE_API_URL=http://localhost:8787 node --env-file-if-exists=.env --import=tsx plan-usage.ts",
     "e2e:wallet": "node --env-file-if-exists=.env --import=tsx plan-wallet.ts",
     "e2e:wallet:local": "UNPRICE_API_URL=http://localhost:8787 node --env-file-if-exists=.env --import=tsx plan-wallet.ts",
+    "e2e:budget": "node --env-file-if-exists=.env --import=tsx plan-budget.ts",
+    "e2e:budget:local": "UNPRICE_API_URL=http://localhost:8787 node --env-file-if-exists=.env --import=tsx plan-budget.ts",
     "clean": "git clean -xdf .next .turbo node_modules",
     "with-env": "infisical run --env=preview --path=/app --"
   },

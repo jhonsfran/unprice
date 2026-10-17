@@ -117,7 +117,9 @@
                           },
                           "window": {
                             "type": "string",
-                            "enum": ["hour", "day", "week", "month", "never"]
+                            "enum": ["hour", "day", "week", "month", "never"],
+                            "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                            "example": "month"
                           },
                           "remaining": {
                             "type": "string",
@@ -129,14 +131,24 @@
                           },
                           "resetsAt": {
                             "type": "integer",
-                            "nullable": true
+                            "nullable": true,
+                            "description": "When the limit's current period ends, in epoch milliseconds; null for never"
                           },
                           "remedy": {
                             "type": "string",
-                            "enum": ["release_holds", "wait_for_reset", "raise_limit"]
+                            "enum": ["release_holds", "wait_for_reset", "raise_limit"],
+                            "description": "release_holds: open holds on this limit would make room. wait_for_reset: the limit has room after resetsAt. raise_limit: the amount does not fit this limit."
                           }
                         },
-                        "required": ["limitId", "window", "remaining", "held", "resetsAt", "remedy"]
+                        "required": [
+                          "limitId",
+                          "window",
+                          "remaining",
+                          "held",
+                          "resetsAt",
+                          "remedy"
+                        ],
+                        "description": "Among hard limits the request would exceed, the one that resets last; that limit decides when the request can pass"
                       },
                       "balance": {
                         "type": "object",
@@ -148,7 +160,7 @@
                           },
                           "held": {
                             "type": "string",
-                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                            "description": "The sum of open holds"
                           },
                           "limits": {
                             "type": "array",
@@ -160,31 +172,36 @@
                                 },
                                 "window": {
                                   "type": "string",
-                                  "enum": ["hour", "day", "week", "month", "never"]
+                                  "enum": ["hour", "day", "week", "month", "never"],
+                                  "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                                  "example": "month"
                                 },
                                 "enforce": {
                                   "type": "string",
-                                  "enum": ["hard", "soft"]
+                                  "enum": ["hard", "soft"],
+                                  "description": "hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                  "example": "hard"
                                 },
                                 "amount": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "The limit"
                                 },
                                 "consumed": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "Used in the current period"
                                 },
                                 "held": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "Held by open holds"
                                 },
                                 "remaining": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "amount - consumed - held; negative after an overrun or a record"
                                 },
                                 "resetsAt": {
                                   "type": "integer",
-                                  "nullable": true
+                                  "nullable": true,
+                                  "description": "When the limit's current period ends, in epoch milliseconds; null for never"
                                 }
                               },
                               "required": [
@@ -200,7 +217,8 @@
                             }
                           },
                           "asOf": {
-                            "type": "integer"
+                            "type": "integer",
+                            "description": "When this balance was computed, in epoch milliseconds"
                           }
                         },
                         "required": ["remaining", "held", "limits", "asOf"]
@@ -216,7 +234,8 @@
                         "enum": ["budget_closed"]
                       },
                       "closedAt": {
-                        "type": "integer"
+                        "type": "integer",
+                        "description": "When the budget closed, in epoch milliseconds"
                       }
                     },
                     "required": ["kind", "closedAt"]
@@ -302,7 +321,9 @@
                           },
                           "window": {
                             "type": "string",
-                            "enum": ["hour", "day", "week", "month", "never"]
+                            "enum": ["hour", "day", "week", "month", "never"],
+                            "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                            "example": "month"
                           },
                           "remaining": {
                             "type": "string",
@@ -314,14 +335,24 @@
                           },
                           "resetsAt": {
                             "type": "integer",
-                            "nullable": true
+                            "nullable": true,
+                            "description": "When the limit's current period ends, in epoch milliseconds; null for never"
                           },
                           "remedy": {
                             "type": "string",
-                            "enum": ["release_holds", "wait_for_reset", "raise_limit"]
+                            "enum": ["release_holds", "wait_for_reset", "raise_limit"],
+                            "description": "release_holds: open holds on this limit would make room. wait_for_reset: the limit has room after resetsAt. raise_limit: the amount does not fit this limit."
                           }
                         },
-                        "required": ["limitId", "window", "remaining", "held", "resetsAt", "remedy"]
+                        "required": [
+                          "limitId",
+                          "window",
+                          "remaining",
+                          "held",
+                          "resetsAt",
+                          "remedy"
+                        ],
+                        "description": "Among hard limits the request would exceed, the one that resets last; that limit decides when the request can pass"
                       },
                       "balance": {
                         "type": "object",
@@ -333,7 +364,7 @@
                           },
                           "held": {
                             "type": "string",
-                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                            "description": "The sum of open holds"
                           },
                           "limits": {
                             "type": "array",
@@ -345,31 +376,36 @@
                                 },
                                 "window": {
                                   "type": "string",
-                                  "enum": ["hour", "day", "week", "month", "never"]
+                                  "enum": ["hour", "day", "week", "month", "never"],
+                                  "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                                  "example": "month"
                                 },
                                 "enforce": {
                                   "type": "string",
-                                  "enum": ["hard", "soft"]
+                                  "enum": ["hard", "soft"],
+                                  "description": "hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                  "example": "hard"
                                 },
                                 "amount": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "The limit"
                                 },
                                 "consumed": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "Used in the current period"
                                 },
                                 "held": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "Held by open holds"
                                 },
                                 "remaining": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "amount - consumed - held; negative after an overrun or a record"
                                 },
                                 "resetsAt": {
                                   "type": "integer",
-                                  "nullable": true
+                                  "nullable": true,
+                                  "description": "When the limit's current period ends, in epoch milliseconds; null for never"
                                 }
                               },
                               "required": [
@@ -385,7 +421,8 @@
                             }
                           },
                           "asOf": {
-                            "type": "integer"
+                            "type": "integer",
+                            "description": "When this balance was computed, in epoch milliseconds"
                           }
                         },
                         "required": ["remaining", "held", "limits", "asOf"]
@@ -401,7 +438,8 @@
                         "enum": ["budget_closed"]
                       },
                       "closedAt": {
-                        "type": "integer"
+                        "type": "integer",
+                        "description": "When the budget closed, in epoch milliseconds"
                       }
                     },
                     "required": ["kind", "closedAt"]
@@ -487,7 +525,9 @@
                           },
                           "window": {
                             "type": "string",
-                            "enum": ["hour", "day", "week", "month", "never"]
+                            "enum": ["hour", "day", "week", "month", "never"],
+                            "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                            "example": "month"
                           },
                           "remaining": {
                             "type": "string",
@@ -499,14 +539,24 @@
                           },
                           "resetsAt": {
                             "type": "integer",
-                            "nullable": true
+                            "nullable": true,
+                            "description": "When the limit's current period ends, in epoch milliseconds; null for never"
                           },
                           "remedy": {
                             "type": "string",
-                            "enum": ["release_holds", "wait_for_reset", "raise_limit"]
+                            "enum": ["release_holds", "wait_for_reset", "raise_limit"],
+                            "description": "release_holds: open holds on this limit would make room. wait_for_reset: the limit has room after resetsAt. raise_limit: the amount does not fit this limit."
                           }
                         },
-                        "required": ["limitId", "window", "remaining", "held", "resetsAt", "remedy"]
+                        "required": [
+                          "limitId",
+                          "window",
+                          "remaining",
+                          "held",
+                          "resetsAt",
+                          "remedy"
+                        ],
+                        "description": "Among hard limits the request would exceed, the one that resets last; that limit decides when the request can pass"
                       },
                       "balance": {
                         "type": "object",
@@ -518,7 +568,7 @@
                           },
                           "held": {
                             "type": "string",
-                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                            "description": "The sum of open holds"
                           },
                           "limits": {
                             "type": "array",
@@ -530,31 +580,36 @@
                                 },
                                 "window": {
                                   "type": "string",
-                                  "enum": ["hour", "day", "week", "month", "never"]
+                                  "enum": ["hour", "day", "week", "month", "never"],
+                                  "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                                  "example": "month"
                                 },
                                 "enforce": {
                                   "type": "string",
-                                  "enum": ["hard", "soft"]
+                                  "enum": ["hard", "soft"],
+                                  "description": "hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                  "example": "hard"
                                 },
                                 "amount": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "The limit"
                                 },
                                 "consumed": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "Used in the current period"
                                 },
                                 "held": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "Held by open holds"
                                 },
                                 "remaining": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "amount - consumed - held; negative after an overrun or a record"
                                 },
                                 "resetsAt": {
                                   "type": "integer",
-                                  "nullable": true
+                                  "nullable": true,
+                                  "description": "When the limit's current period ends, in epoch milliseconds; null for never"
                                 }
                               },
                               "required": [
@@ -570,7 +625,8 @@
                             }
                           },
                           "asOf": {
-                            "type": "integer"
+                            "type": "integer",
+                            "description": "When this balance was computed, in epoch milliseconds"
                           }
                         },
                         "required": ["remaining", "held", "limits", "asOf"]
@@ -586,7 +642,8 @@
                         "enum": ["budget_closed"]
                       },
                       "closedAt": {
-                        "type": "integer"
+                        "type": "integer",
+                        "description": "When the budget closed, in epoch milliseconds"
                       }
                     },
                     "required": ["kind", "closedAt"]
@@ -672,7 +729,9 @@
                           },
                           "window": {
                             "type": "string",
-                            "enum": ["hour", "day", "week", "month", "never"]
+                            "enum": ["hour", "day", "week", "month", "never"],
+                            "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                            "example": "month"
                           },
                           "remaining": {
                             "type": "string",
@@ -684,14 +743,24 @@
                           },
                           "resetsAt": {
                             "type": "integer",
-                            "nullable": true
+                            "nullable": true,
+                            "description": "When the limit's current period ends, in epoch milliseconds; null for never"
                           },
                           "remedy": {
                             "type": "string",
-                            "enum": ["release_holds", "wait_for_reset", "raise_limit"]
+                            "enum": ["release_holds", "wait_for_reset", "raise_limit"],
+                            "description": "release_holds: open holds on this limit would make room. wait_for_reset: the limit has room after resetsAt. raise_limit: the amount does not fit this limit."
                           }
                         },
-                        "required": ["limitId", "window", "remaining", "held", "resetsAt", "remedy"]
+                        "required": [
+                          "limitId",
+                          "window",
+                          "remaining",
+                          "held",
+                          "resetsAt",
+                          "remedy"
+                        ],
+                        "description": "Among hard limits the request would exceed, the one that resets last; that limit decides when the request can pass"
                       },
                       "balance": {
                         "type": "object",
@@ -703,7 +772,7 @@
                           },
                           "held": {
                             "type": "string",
-                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                            "description": "The sum of open holds"
                           },
                           "limits": {
                             "type": "array",
@@ -715,31 +784,36 @@
                                 },
                                 "window": {
                                   "type": "string",
-                                  "enum": ["hour", "day", "week", "month", "never"]
+                                  "enum": ["hour", "day", "week", "month", "never"],
+                                  "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                                  "example": "month"
                                 },
                                 "enforce": {
                                   "type": "string",
-                                  "enum": ["hard", "soft"]
+                                  "enum": ["hard", "soft"],
+                                  "description": "hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                  "example": "hard"
                                 },
                                 "amount": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "The limit"
                                 },
                                 "consumed": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "Used in the current period"
                                 },
                                 "held": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "Held by open holds"
                                 },
                                 "remaining": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "amount - consumed - held; negative after an overrun or a record"
                                 },
                                 "resetsAt": {
                                   "type": "integer",
-                                  "nullable": true
+                                  "nullable": true,
+                                  "description": "When the limit's current period ends, in epoch milliseconds; null for never"
                                 }
                               },
                               "required": [
@@ -755,7 +829,8 @@
                             }
                           },
                           "asOf": {
-                            "type": "integer"
+                            "type": "integer",
+                            "description": "When this balance was computed, in epoch milliseconds"
                           }
                         },
                         "required": ["remaining", "held", "limits", "asOf"]
@@ -771,7 +846,8 @@
                         "enum": ["budget_closed"]
                       },
                       "closedAt": {
-                        "type": "integer"
+                        "type": "integer",
+                        "description": "When the budget closed, in epoch milliseconds"
                       }
                     },
                     "required": ["kind", "closedAt"]
@@ -857,7 +933,9 @@
                           },
                           "window": {
                             "type": "string",
-                            "enum": ["hour", "day", "week", "month", "never"]
+                            "enum": ["hour", "day", "week", "month", "never"],
+                            "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                            "example": "month"
                           },
                           "remaining": {
                             "type": "string",
@@ -869,14 +947,24 @@
                           },
                           "resetsAt": {
                             "type": "integer",
-                            "nullable": true
+                            "nullable": true,
+                            "description": "When the limit's current period ends, in epoch milliseconds; null for never"
                           },
                           "remedy": {
                             "type": "string",
-                            "enum": ["release_holds", "wait_for_reset", "raise_limit"]
+                            "enum": ["release_holds", "wait_for_reset", "raise_limit"],
+                            "description": "release_holds: open holds on this limit would make room. wait_for_reset: the limit has room after resetsAt. raise_limit: the amount does not fit this limit."
                           }
                         },
-                        "required": ["limitId", "window", "remaining", "held", "resetsAt", "remedy"]
+                        "required": [
+                          "limitId",
+                          "window",
+                          "remaining",
+                          "held",
+                          "resetsAt",
+                          "remedy"
+                        ],
+                        "description": "Among hard limits the request would exceed, the one that resets last; that limit decides when the request can pass"
                       },
                       "balance": {
                         "type": "object",
@@ -888,7 +976,7 @@
                           },
                           "held": {
                             "type": "string",
-                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                            "description": "The sum of open holds"
                           },
                           "limits": {
                             "type": "array",
@@ -900,31 +988,36 @@
                                 },
                                 "window": {
                                   "type": "string",
-                                  "enum": ["hour", "day", "week", "month", "never"]
+                                  "enum": ["hour", "day", "week", "month", "never"],
+                                  "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                                  "example": "month"
                                 },
                                 "enforce": {
                                   "type": "string",
-                                  "enum": ["hard", "soft"]
+                                  "enum": ["hard", "soft"],
+                                  "description": "hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                  "example": "hard"
                                 },
                                 "amount": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "The limit"
                                 },
                                 "consumed": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "Used in the current period"
                                 },
                                 "held": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "Held by open holds"
                                 },
                                 "remaining": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "amount - consumed - held; negative after an overrun or a record"
                                 },
                                 "resetsAt": {
                                   "type": "integer",
-                                  "nullable": true
+                                  "nullable": true,
+                                  "description": "When the limit's current period ends, in epoch milliseconds; null for never"
                                 }
                               },
                               "required": [
@@ -940,7 +1033,8 @@
                             }
                           },
                           "asOf": {
-                            "type": "integer"
+                            "type": "integer",
+                            "description": "When this balance was computed, in epoch milliseconds"
                           }
                         },
                         "required": ["remaining", "held", "limits", "asOf"]
@@ -956,7 +1050,8 @@
                         "enum": ["budget_closed"]
                       },
                       "closedAt": {
-                        "type": "integer"
+                        "type": "integer",
+                        "description": "When the budget closed, in epoch milliseconds"
                       }
                     },
                     "required": ["kind", "closedAt"]
@@ -1042,7 +1137,9 @@
                           },
                           "window": {
                             "type": "string",
-                            "enum": ["hour", "day", "week", "month", "never"]
+                            "enum": ["hour", "day", "week", "month", "never"],
+                            "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                            "example": "month"
                           },
                           "remaining": {
                             "type": "string",
@@ -1054,14 +1151,24 @@
                           },
                           "resetsAt": {
                             "type": "integer",
-                            "nullable": true
+                            "nullable": true,
+                            "description": "When the limit's current period ends, in epoch milliseconds; null for never"
                           },
                           "remedy": {
                             "type": "string",
-                            "enum": ["release_holds", "wait_for_reset", "raise_limit"]
+                            "enum": ["release_holds", "wait_for_reset", "raise_limit"],
+                            "description": "release_holds: open holds on this limit would make room. wait_for_reset: the limit has room after resetsAt. raise_limit: the amount does not fit this limit."
                           }
                         },
-                        "required": ["limitId", "window", "remaining", "held", "resetsAt", "remedy"]
+                        "required": [
+                          "limitId",
+                          "window",
+                          "remaining",
+                          "held",
+                          "resetsAt",
+                          "remedy"
+                        ],
+                        "description": "Among hard limits the request would exceed, the one that resets last; that limit decides when the request can pass"
                       },
                       "balance": {
                         "type": "object",
@@ -1073,7 +1180,7 @@
                           },
                           "held": {
                             "type": "string",
-                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                            "description": "The sum of open holds"
                           },
                           "limits": {
                             "type": "array",
@@ -1085,31 +1192,36 @@
                                 },
                                 "window": {
                                   "type": "string",
-                                  "enum": ["hour", "day", "week", "month", "never"]
+                                  "enum": ["hour", "day", "week", "month", "never"],
+                                  "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                                  "example": "month"
                                 },
                                 "enforce": {
                                   "type": "string",
-                                  "enum": ["hard", "soft"]
+                                  "enum": ["hard", "soft"],
+                                  "description": "hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                  "example": "hard"
                                 },
                                 "amount": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "The limit"
                                 },
                                 "consumed": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "Used in the current period"
                                 },
                                 "held": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "Held by open holds"
                                 },
                                 "remaining": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "amount - consumed - held; negative after an overrun or a record"
                                 },
                                 "resetsAt": {
                                   "type": "integer",
-                                  "nullable": true
+                                  "nullable": true,
+                                  "description": "When the limit's current period ends, in epoch milliseconds; null for never"
                                 }
                               },
                               "required": [
@@ -1125,7 +1237,8 @@
                             }
                           },
                           "asOf": {
-                            "type": "integer"
+                            "type": "integer",
+                            "description": "When this balance was computed, in epoch milliseconds"
                           }
                         },
                         "required": ["remaining", "held", "limits", "asOf"]
@@ -1141,7 +1254,8 @@
                         "enum": ["budget_closed"]
                       },
                       "closedAt": {
-                        "type": "integer"
+                        "type": "integer",
+                        "description": "When the budget closed, in epoch milliseconds"
                       }
                     },
                     "required": ["kind", "closedAt"]
@@ -1227,7 +1341,9 @@
                           },
                           "window": {
                             "type": "string",
-                            "enum": ["hour", "day", "week", "month", "never"]
+                            "enum": ["hour", "day", "week", "month", "never"],
+                            "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                            "example": "month"
                           },
                           "remaining": {
                             "type": "string",
@@ -1239,14 +1355,24 @@
                           },
                           "resetsAt": {
                             "type": "integer",
-                            "nullable": true
+                            "nullable": true,
+                            "description": "When the limit's current period ends, in epoch milliseconds; null for never"
                           },
                           "remedy": {
                             "type": "string",
-                            "enum": ["release_holds", "wait_for_reset", "raise_limit"]
+                            "enum": ["release_holds", "wait_for_reset", "raise_limit"],
+                            "description": "release_holds: open holds on this limit would make room. wait_for_reset: the limit has room after resetsAt. raise_limit: the amount does not fit this limit."
                           }
                         },
-                        "required": ["limitId", "window", "remaining", "held", "resetsAt", "remedy"]
+                        "required": [
+                          "limitId",
+                          "window",
+                          "remaining",
+                          "held",
+                          "resetsAt",
+                          "remedy"
+                        ],
+                        "description": "Among hard limits the request would exceed, the one that resets last; that limit decides when the request can pass"
                       },
                       "balance": {
                         "type": "object",
@@ -1258,7 +1384,7 @@
                           },
                           "held": {
                             "type": "string",
-                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                            "description": "The sum of open holds"
                           },
                           "limits": {
                             "type": "array",
@@ -1270,31 +1396,36 @@
                                 },
                                 "window": {
                                   "type": "string",
-                                  "enum": ["hour", "day", "week", "month", "never"]
+                                  "enum": ["hour", "day", "week", "month", "never"],
+                                  "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                                  "example": "month"
                                 },
                                 "enforce": {
                                   "type": "string",
-                                  "enum": ["hard", "soft"]
+                                  "enum": ["hard", "soft"],
+                                  "description": "hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                  "example": "hard"
                                 },
                                 "amount": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "The limit"
                                 },
                                 "consumed": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "Used in the current period"
                                 },
                                 "held": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "Held by open holds"
                                 },
                                 "remaining": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "amount - consumed - held; negative after an overrun or a record"
                                 },
                                 "resetsAt": {
                                   "type": "integer",
-                                  "nullable": true
+                                  "nullable": true,
+                                  "description": "When the limit's current period ends, in epoch milliseconds; null for never"
                                 }
                               },
                               "required": [
@@ -1310,7 +1441,8 @@
                             }
                           },
                           "asOf": {
-                            "type": "integer"
+                            "type": "integer",
+                            "description": "When this balance was computed, in epoch milliseconds"
                           }
                         },
                         "required": ["remaining", "held", "limits", "asOf"]
@@ -1326,7 +1458,8 @@
                         "enum": ["budget_closed"]
                       },
                       "closedAt": {
-                        "type": "integer"
+                        "type": "integer",
+                        "description": "When the budget closed, in epoch milliseconds"
                       }
                     },
                     "required": ["kind", "closedAt"]
@@ -1412,7 +1545,9 @@
                           },
                           "window": {
                             "type": "string",
-                            "enum": ["hour", "day", "week", "month", "never"]
+                            "enum": ["hour", "day", "week", "month", "never"],
+                            "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                            "example": "month"
                           },
                           "remaining": {
                             "type": "string",
@@ -1424,14 +1559,24 @@
                           },
                           "resetsAt": {
                             "type": "integer",
-                            "nullable": true
+                            "nullable": true,
+                            "description": "When the limit's current period ends, in epoch milliseconds; null for never"
                           },
                           "remedy": {
                             "type": "string",
-                            "enum": ["release_holds", "wait_for_reset", "raise_limit"]
+                            "enum": ["release_holds", "wait_for_reset", "raise_limit"],
+                            "description": "release_holds: open holds on this limit would make room. wait_for_reset: the limit has room after resetsAt. raise_limit: the amount does not fit this limit."
                           }
                         },
-                        "required": ["limitId", "window", "remaining", "held", "resetsAt", "remedy"]
+                        "required": [
+                          "limitId",
+                          "window",
+                          "remaining",
+                          "held",
+                          "resetsAt",
+                          "remedy"
+                        ],
+                        "description": "Among hard limits the request would exceed, the one that resets last; that limit decides when the request can pass"
                       },
                       "balance": {
                         "type": "object",
@@ -1443,7 +1588,7 @@
                           },
                           "held": {
                             "type": "string",
-                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                            "description": "The sum of open holds"
                           },
                           "limits": {
                             "type": "array",
@@ -1455,31 +1600,36 @@
                                 },
                                 "window": {
                                   "type": "string",
-                                  "enum": ["hour", "day", "week", "month", "never"]
+                                  "enum": ["hour", "day", "week", "month", "never"],
+                                  "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                                  "example": "month"
                                 },
                                 "enforce": {
                                   "type": "string",
-                                  "enum": ["hard", "soft"]
+                                  "enum": ["hard", "soft"],
+                                  "description": "hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                  "example": "hard"
                                 },
                                 "amount": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "The limit"
                                 },
                                 "consumed": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "Used in the current period"
                                 },
                                 "held": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "Held by open holds"
                                 },
                                 "remaining": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "amount - consumed - held; negative after an overrun or a record"
                                 },
                                 "resetsAt": {
                                   "type": "integer",
-                                  "nullable": true
+                                  "nullable": true,
+                                  "description": "When the limit's current period ends, in epoch milliseconds; null for never"
                                 }
                               },
                               "required": [
@@ -1495,7 +1645,8 @@
                             }
                           },
                           "asOf": {
-                            "type": "integer"
+                            "type": "integer",
+                            "description": "When this balance was computed, in epoch milliseconds"
                           }
                         },
                         "required": ["remaining", "held", "limits", "asOf"]
@@ -1511,7 +1662,8 @@
                         "enum": ["budget_closed"]
                       },
                       "closedAt": {
-                        "type": "integer"
+                        "type": "integer",
+                        "description": "When the budget closed, in epoch milliseconds"
                       }
                     },
                     "required": ["kind", "closedAt"]
@@ -1597,7 +1749,9 @@
                           },
                           "window": {
                             "type": "string",
-                            "enum": ["hour", "day", "week", "month", "never"]
+                            "enum": ["hour", "day", "week", "month", "never"],
+                            "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                            "example": "month"
                           },
                           "remaining": {
                             "type": "string",
@@ -1609,14 +1763,24 @@
                           },
                           "resetsAt": {
                             "type": "integer",
-                            "nullable": true
+                            "nullable": true,
+                            "description": "When the limit's current period ends, in epoch milliseconds; null for never"
                           },
                           "remedy": {
                             "type": "string",
-                            "enum": ["release_holds", "wait_for_reset", "raise_limit"]
+                            "enum": ["release_holds", "wait_for_reset", "raise_limit"],
+                            "description": "release_holds: open holds on this limit would make room. wait_for_reset: the limit has room after resetsAt. raise_limit: the amount does not fit this limit."
                           }
                         },
-                        "required": ["limitId", "window", "remaining", "held", "resetsAt", "remedy"]
+                        "required": [
+                          "limitId",
+                          "window",
+                          "remaining",
+                          "held",
+                          "resetsAt",
+                          "remedy"
+                        ],
+                        "description": "Among hard limits the request would exceed, the one that resets last; that limit decides when the request can pass"
                       },
                       "balance": {
                         "type": "object",
@@ -1628,7 +1792,7 @@
                           },
                           "held": {
                             "type": "string",
-                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                            "description": "The sum of open holds"
                           },
                           "limits": {
                             "type": "array",
@@ -1640,31 +1804,36 @@
                                 },
                                 "window": {
                                   "type": "string",
-                                  "enum": ["hour", "day", "week", "month", "never"]
+                                  "enum": ["hour", "day", "week", "month", "never"],
+                                  "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                                  "example": "month"
                                 },
                                 "enforce": {
                                   "type": "string",
-                                  "enum": ["hard", "soft"]
+                                  "enum": ["hard", "soft"],
+                                  "description": "hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                  "example": "hard"
                                 },
                                 "amount": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "The limit"
                                 },
                                 "consumed": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "Used in the current period"
                                 },
                                 "held": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "Held by open holds"
                                 },
                                 "remaining": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "amount - consumed - held; negative after an overrun or a record"
                                 },
                                 "resetsAt": {
                                   "type": "integer",
-                                  "nullable": true
+                                  "nullable": true,
+                                  "description": "When the limit's current period ends, in epoch milliseconds; null for never"
                                 }
                               },
                               "required": [
@@ -1680,7 +1849,8 @@
                             }
                           },
                           "asOf": {
-                            "type": "integer"
+                            "type": "integer",
+                            "description": "When this balance was computed, in epoch milliseconds"
                           }
                         },
                         "required": ["remaining", "held", "limits", "asOf"]
@@ -1696,7 +1866,8 @@
                         "enum": ["budget_closed"]
                       },
                       "closedAt": {
-                        "type": "integer"
+                        "type": "integer",
+                        "description": "When the budget closed, in epoch milliseconds"
                       }
                     },
                     "required": ["kind", "closedAt"]
@@ -1782,7 +1953,9 @@
                           },
                           "window": {
                             "type": "string",
-                            "enum": ["hour", "day", "week", "month", "never"]
+                            "enum": ["hour", "day", "week", "month", "never"],
+                            "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                            "example": "month"
                           },
                           "remaining": {
                             "type": "string",
@@ -1794,14 +1967,24 @@
                           },
                           "resetsAt": {
                             "type": "integer",
-                            "nullable": true
+                            "nullable": true,
+                            "description": "When the limit's current period ends, in epoch milliseconds; null for never"
                           },
                           "remedy": {
                             "type": "string",
-                            "enum": ["release_holds", "wait_for_reset", "raise_limit"]
+                            "enum": ["release_holds", "wait_for_reset", "raise_limit"],
+                            "description": "release_holds: open holds on this limit would make room. wait_for_reset: the limit has room after resetsAt. raise_limit: the amount does not fit this limit."
                           }
                         },
-                        "required": ["limitId", "window", "remaining", "held", "resetsAt", "remedy"]
+                        "required": [
+                          "limitId",
+                          "window",
+                          "remaining",
+                          "held",
+                          "resetsAt",
+                          "remedy"
+                        ],
+                        "description": "Among hard limits the request would exceed, the one that resets last; that limit decides when the request can pass"
                       },
                       "balance": {
                         "type": "object",
@@ -1813,7 +1996,7 @@
                           },
                           "held": {
                             "type": "string",
-                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                            "description": "The sum of open holds"
                           },
                           "limits": {
                             "type": "array",
@@ -1825,31 +2008,36 @@
                                 },
                                 "window": {
                                   "type": "string",
-                                  "enum": ["hour", "day", "week", "month", "never"]
+                                  "enum": ["hour", "day", "week", "month", "never"],
+                                  "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                                  "example": "month"
                                 },
                                 "enforce": {
                                   "type": "string",
-                                  "enum": ["hard", "soft"]
+                                  "enum": ["hard", "soft"],
+                                  "description": "hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                  "example": "hard"
                                 },
                                 "amount": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "The limit"
                                 },
                                 "consumed": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "Used in the current period"
                                 },
                                 "held": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "Held by open holds"
                                 },
                                 "remaining": {
                                   "type": "string",
-                                  "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                  "description": "amount - consumed - held; negative after an overrun or a record"
                                 },
                                 "resetsAt": {
                                   "type": "integer",
-                                  "nullable": true
+                                  "nullable": true,
+                                  "description": "When the limit's current period ends, in epoch milliseconds; null for never"
                                 }
                               },
                               "required": [
@@ -1865,7 +2053,8 @@
                             }
                           },
                           "asOf": {
-                            "type": "integer"
+                            "type": "integer",
+                            "description": "When this balance was computed, in epoch milliseconds"
                           }
                         },
                         "required": ["remaining", "held", "limits", "asOf"]
@@ -1881,7 +2070,8 @@
                         "enum": ["budget_closed"]
                       },
                       "closedAt": {
-                        "type": "integer"
+                        "type": "integer",
+                        "description": "When the budget closed, in epoch milliseconds"
                       }
                     },
                     "required": ["kind", "closedAt"]
@@ -3312,7 +3502,7 @@
                   "key": {
                     "type": "string",
                     "pattern": "^[A-Za-z0-9][A-Za-z0-9:/_.@-]{0,127}$",
-                    "description": "The budget's key, chosen by you",
+                    "description": "The budget's key, chosen by you and unique within the project. Up to 128 letters, digits, and `: / _ . @ -`, starting with a letter or digit.",
                     "example": "customer:acme"
                   },
                   "unit": {
@@ -3328,17 +3518,20 @@
                       "properties": {
                         "id": {
                           "type": "string",
-                          "description": "Defaults to the window name"
+                          "description": "Unique within the budget. Defaults to the window name.",
+                          "example": "month"
                         },
                         "amount": {
                           "type": "string",
                           "pattern": "^\\d{1,19}(\\.\\d{1,8})?$",
-                          "description": "A decimal amount in the budget's unit",
+                          "description": "A non-negative decimal string in the budget's unit, with at most 8 decimal places. Strings keep amounts exact.",
                           "example": "0.05"
                         },
                         "window": {
                           "type": "string",
-                          "enum": ["hour", "day", "week", "month", "never"]
+                          "enum": ["hour", "day", "week", "month", "never"],
+                          "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                          "example": "month"
                         },
                         "anchor": {
                           "type": "string",
@@ -3348,31 +3541,39 @@
                         },
                         "enforce": {
                           "type": "string",
-                          "enum": ["hard", "soft"]
+                          "enum": ["hard", "soft"],
+                          "description": "Defaults to hard",
+                          "example": "hard"
                         }
                       },
                       "required": ["amount", "window"]
                     },
-                    "maxItems": 16
+                    "maxItems": 16,
+                    "description": "Up to 16 limits. Every hard limit must have room for a hold or charge. An empty list makes a budget that only counts."
                   },
                   "closesAt": {
                     "type": "string",
                     "nullable": true,
                     "format": "date-time",
-                    "description": "When the budget closes. From then on authorize and charge return 409, record is accepted for 24 hours more, and settle and release keep working. Omit or send null to keep it open.",
+                    "description": "When the budget closes. From then on authorize and charge return 409, record is accepted for 1 day more, and settle and release keep working. Omit or send null to keep it open.",
                     "example": "2026-12-31T23:59:59Z"
                   },
                   "holds": {
                     "type": "object",
                     "properties": {
                       "defaultTtlMs": {
-                        "type": "integer"
+                        "type": "integer",
+                        "description": "TTL for an authorize that sends no ttlMs, in milliseconds. Defaults to 900000 (15 minutes).",
+                        "example": 900000
                       },
                       "maxTtlMs": {
-                        "type": "integer"
+                        "type": "integer",
+                        "description": "The largest ttlMs an authorize may ask for, in milliseconds. Defaults to 86400000 (1 day).",
+                        "example": 86400000
                       }
                     },
-                    "additionalProperties": false
+                    "additionalProperties": false,
+                    "description": "Hold timing. Both TTLs must be between 1000 and 86400000 ms, and the default must not exceed the max."
                   },
                   "onUnavailable": {
                     "anyOf": [
@@ -3386,13 +3587,15 @@
                           "allowUpTo": {
                             "type": "string",
                             "pattern": "^\\d{1,19}(\\.\\d{1,8})?$",
-                            "description": "A decimal amount in the budget's unit",
+                            "description": "A non-negative decimal string in the budget's unit, with at most 8 decimal places. Strings keep amounts exact.",
                             "example": "0.05"
                           }
                         },
                         "required": ["allowUpTo"]
                       }
-                    ]
+                    ],
+                    "description": "What a client should do when it cannot reach Unprice: deny, allow, or allow up to an amount per call. Stored for clients to read; the API never applies it. Defaults to deny.",
+                    "example": "deny"
                   }
                 },
                 "required": ["key", "unit", "limits"],
@@ -3415,20 +3618,26 @@
                         "type": "object",
                         "properties": {
                           "change": {
-                            "type": "string"
+                            "type": "string",
+                            "description": "limit.added, limit.removed, limit.amount, limit.window, limit.enforce, limits.order, holds, onUnavailable, or closesAt. Creating a budget lists each limit as limit.added.",
+                            "example": "limit.amount"
                           },
                           "limitId": {
-                            "type": "string"
+                            "type": "string",
+                            "description": "The limit that changed"
                           },
                           "from": {
-                            "type": "string"
+                            "type": "string",
+                            "description": "The previous value"
                           },
                           "to": {
-                            "type": "string"
+                            "type": "string",
+                            "description": "The new value"
                           }
                         },
                         "required": ["change"]
-                      }
+                      },
+                      "description": "What this upsert changed; empty when it changed nothing"
                     },
                     "budget": {
                       "type": "object",
@@ -3437,10 +3646,13 @@
                           "type": "string"
                         },
                         "unit": {
-                          "type": "string"
+                          "type": "string",
+                          "description": "money:<code>, credits:<id>, or units:<slug>",
+                          "example": "money:USD"
                         },
                         "version": {
-                          "type": "integer"
+                          "type": "integer",
+                          "description": "Increments on every upsert that changes the budget"
                         },
                         "limits": {
                           "type": "array",
@@ -3456,14 +3668,19 @@
                               },
                               "window": {
                                 "type": "string",
-                                "enum": ["hour", "day", "week", "month", "never"]
+                                "enum": ["hour", "day", "week", "month", "never"],
+                                "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                                "example": "month"
                               },
                               "anchor": {
-                                "type": "string"
+                                "type": "string",
+                                "description": "The anchor instant of an anchored window, as an ISO 8601 string"
                               },
                               "enforce": {
                                 "type": "string",
-                                "enum": ["hard", "soft"]
+                                "enum": ["hard", "soft"],
+                                "description": "hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                "example": "hard"
                               }
                             },
                             "required": ["id", "amount", "window", "enforce"]
@@ -3501,10 +3718,12 @@
                         },
                         "closesAt": {
                           "type": "string",
-                          "nullable": true
+                          "nullable": true,
+                          "description": "When the budget closes, or null"
                         },
                         "closed": {
-                          "type": "boolean"
+                          "type": "boolean",
+                          "description": "True from closesAt on"
                         },
                         "balance": {
                           "type": "object",
@@ -3516,7 +3735,7 @@
                             },
                             "held": {
                               "type": "string",
-                              "description": "A decimal amount in the budget's unit; negative after an overrun"
+                              "description": "The sum of open holds"
                             },
                             "limits": {
                               "type": "array",
@@ -3528,31 +3747,36 @@
                                   },
                                   "window": {
                                     "type": "string",
-                                    "enum": ["hour", "day", "week", "month", "never"]
+                                    "enum": ["hour", "day", "week", "month", "never"],
+                                    "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                                    "example": "month"
                                   },
                                   "enforce": {
                                     "type": "string",
-                                    "enum": ["hard", "soft"]
+                                    "enum": ["hard", "soft"],
+                                    "description": "hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                    "example": "hard"
                                   },
                                   "amount": {
                                     "type": "string",
-                                    "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                    "description": "The limit"
                                   },
                                   "consumed": {
                                     "type": "string",
-                                    "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                    "description": "Used in the current period"
                                   },
                                   "held": {
                                     "type": "string",
-                                    "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                    "description": "Held by open holds"
                                   },
                                   "remaining": {
                                     "type": "string",
-                                    "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                    "description": "amount - consumed - held; negative after an overrun or a record"
                                   },
                                   "resetsAt": {
                                     "type": "integer",
-                                    "nullable": true
+                                    "nullable": true,
+                                    "description": "When the limit's current period ends, in epoch milliseconds; null for never"
                                   }
                                 },
                                 "required": [
@@ -3568,7 +3792,8 @@
                               }
                             },
                             "asOf": {
-                              "type": "integer"
+                              "type": "integer",
+                              "description": "When this balance was computed, in epoch milliseconds"
                             }
                           },
                           "required": ["remaining", "held", "limits", "asOf"]
@@ -3712,24 +3937,28 @@
                   "key": {
                     "type": "string",
                     "pattern": "^[A-Za-z0-9][A-Za-z0-9:/_.@-]{0,127}$",
-                    "description": "The budget's key, chosen by you",
+                    "description": "The budget's key, chosen by you and unique within the project. Up to 128 letters, digits, and `: / _ . @ -`, starting with a letter or digit.",
                     "example": "customer:acme"
                   },
                   "amount": {
                     "type": "string",
                     "pattern": "^\\d{1,19}(\\.\\d{1,8})?$",
-                    "description": "A decimal amount in the budget's unit",
+                    "description": "The estimate to hold against every hard limit. Settle the actual amount later, or release the hold.",
                     "example": "0.05"
                   },
                   "ttlMs": {
                     "type": "integer",
                     "minimum": 0,
-                    "exclusiveMinimum": true
+                    "exclusiveMinimum": true,
+                    "description": "How long the hold reserves capacity, in milliseconds. Defaults to the budget's holds.defaultTtlMs and must not exceed holds.maxTtlMs. An expired hold keeps counting for 2 more TTLs, then lapses and returns its amount.",
+                    "example": 60000
                   },
                   "idempotencyKey": {
                     "type": "string",
                     "minLength": 1,
-                    "maxLength": 256
+                    "maxLength": 256,
+                    "description": "Up to 256 characters. A retry with the same key and the same request replays the first answer; the same key with a different request returns 409.",
+                    "example": "run_8f2c:step_3"
                   }
                 },
                 "required": ["key", "amount", "idempotencyKey"],
@@ -3753,17 +3982,20 @@
                     "holdId": {
                       "type": "string",
                       "pattern": "^h_[1-9][0-9]{0,15}$",
+                      "description": "The hold, as returned by authorize",
                       "example": "h_42"
                     },
                     "amount": {
                       "type": "string",
-                      "description": "A decimal amount in the budget's unit; negative after an overrun"
+                      "description": "The amount held"
                     },
                     "expiresAt": {
-                      "type": "integer"
+                      "type": "integer",
+                      "description": "When the hold expires, in epoch milliseconds. Settle before then."
                     },
                     "replayed": {
-                      "type": "boolean"
+                      "type": "boolean",
+                      "description": "True when this answer replays an earlier request instead of applying it again"
                     },
                     "balance": {
                       "type": "object",
@@ -3775,7 +4007,7 @@
                         },
                         "held": {
                           "type": "string",
-                          "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          "description": "The sum of open holds"
                         },
                         "limits": {
                           "type": "array",
@@ -3787,31 +4019,36 @@
                               },
                               "window": {
                                 "type": "string",
-                                "enum": ["hour", "day", "week", "month", "never"]
+                                "enum": ["hour", "day", "week", "month", "never"],
+                                "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                                "example": "month"
                               },
                               "enforce": {
                                 "type": "string",
-                                "enum": ["hard", "soft"]
+                                "enum": ["hard", "soft"],
+                                "description": "hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                "example": "hard"
                               },
                               "amount": {
                                 "type": "string",
-                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                "description": "The limit"
                               },
                               "consumed": {
                                 "type": "string",
-                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                "description": "Used in the current period"
                               },
                               "held": {
                                 "type": "string",
-                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                "description": "Held by open holds"
                               },
                               "remaining": {
                                 "type": "string",
-                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                "description": "amount - consumed - held; negative after an overrun or a record"
                               },
                               "resetsAt": {
                                 "type": "integer",
-                                "nullable": true
+                                "nullable": true,
+                                "description": "When the limit's current period ends, in epoch milliseconds; null for never"
                               }
                             },
                             "required": [
@@ -3827,7 +4064,8 @@
                           }
                         },
                         "asOf": {
-                          "type": "integer"
+                          "type": "integer",
+                          "description": "When this balance was computed, in epoch milliseconds"
                         }
                       },
                       "required": ["remaining", "held", "limits", "asOf"]
@@ -3945,7 +4183,7 @@
       "post": {
         "operationId": "budgets.settle",
         "summary": "settle a hold with the actual amount",
-        "description": "Consume the actual amount and release the rest of the hold. An actual above the hold, or a settle after the hold lapsed, is still consumed. The hold id is the idempotency key: the same amount replays, another amount returns 409. A hold retires 24 hours after it closes or lapses; settling or releasing it after that returns 409.",
+        "description": "Consume the actual amount and release the rest of the hold. An actual above the hold, or a settle after the hold lapsed, is still consumed. The hold id is the idempotency key: the same amount replays, another amount returns 409. A hold retires 1 day after it closes or lapses; settling or releasing it after that returns 409.",
         "tags": ["budgets"],
         "x-unprice": {
           "audience": "public",
@@ -3968,18 +4206,19 @@
                   "key": {
                     "type": "string",
                     "pattern": "^[A-Za-z0-9][A-Za-z0-9:/_.@-]{0,127}$",
-                    "description": "The budget's key, chosen by you",
+                    "description": "The budget's key, chosen by you and unique within the project. Up to 128 letters, digits, and `: / _ . @ -`, starting with a letter or digit.",
                     "example": "customer:acme"
                   },
                   "holdId": {
                     "type": "string",
                     "pattern": "^h_[1-9][0-9]{0,15}$",
+                    "description": "The hold, as returned by authorize",
                     "example": "h_42"
                   },
                   "amount": {
                     "type": "string",
                     "pattern": "^\\d{1,19}(\\.\\d{1,8})?$",
-                    "description": "A decimal amount in the budget's unit",
+                    "description": "The actual usage. Up to the hold's amount is covered by the hold and the rest is returned; anything above it is consumed as overrun.",
                     "example": "0.05"
                   }
                 },
@@ -4000,38 +4239,43 @@
                     "holdId": {
                       "type": "string",
                       "pattern": "^h_[1-9][0-9]{0,15}$",
+                      "description": "The hold, as returned by authorize",
                       "example": "h_42"
                     },
                     "actual": {
                       "type": "string",
-                      "description": "A decimal amount in the budget's unit; negative after an overrun"
+                      "description": "The amount settled"
                     },
                     "covered": {
                       "type": "string",
-                      "description": "A decimal amount in the budget's unit; negative after an overrun"
+                      "description": "The part of actual the hold covered"
                     },
                     "released": {
                       "type": "string",
-                      "description": "A decimal amount in the budget's unit; negative after an overrun"
+                      "description": "The unused part of the hold, returned"
                     },
                     "overrun": {
                       "type": "string",
-                      "description": "A decimal amount in the budget's unit; negative after an overrun"
+                      "description": "actual - covered: consumed beyond the hold"
                     },
                     "late": {
-                      "type": "boolean"
+                      "type": "boolean",
+                      "description": "The hold had lapsed, so the whole actual was consumed without cover"
                     },
                     "expired": {
-                      "type": "boolean"
+                      "type": "boolean",
+                      "description": "Settled at or after the hold's expiresAt"
                     },
                     "crossed": {
                       "type": "array",
                       "items": {
                         "type": "string"
-                      }
+                      },
+                      "description": "Ids of the limits this request took from non-negative to negative remaining"
                     },
                     "replayed": {
-                      "type": "boolean"
+                      "type": "boolean",
+                      "description": "True when this answer replays an earlier request instead of applying it again"
                     },
                     "balance": {
                       "type": "object",
@@ -4043,7 +4287,7 @@
                         },
                         "held": {
                           "type": "string",
-                          "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          "description": "The sum of open holds"
                         },
                         "limits": {
                           "type": "array",
@@ -4055,31 +4299,36 @@
                               },
                               "window": {
                                 "type": "string",
-                                "enum": ["hour", "day", "week", "month", "never"]
+                                "enum": ["hour", "day", "week", "month", "never"],
+                                "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                                "example": "month"
                               },
                               "enforce": {
                                 "type": "string",
-                                "enum": ["hard", "soft"]
+                                "enum": ["hard", "soft"],
+                                "description": "hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                "example": "hard"
                               },
                               "amount": {
                                 "type": "string",
-                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                "description": "The limit"
                               },
                               "consumed": {
                                 "type": "string",
-                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                "description": "Used in the current period"
                               },
                               "held": {
                                 "type": "string",
-                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                "description": "Held by open holds"
                               },
                               "remaining": {
                                 "type": "string",
-                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                "description": "amount - consumed - held; negative after an overrun or a record"
                               },
                               "resetsAt": {
                                 "type": "integer",
-                                "nullable": true
+                                "nullable": true,
+                                "description": "When the limit's current period ends, in epoch milliseconds; null for never"
                               }
                             },
                             "required": [
@@ -4095,7 +4344,8 @@
                           }
                         },
                         "asOf": {
-                          "type": "integer"
+                          "type": "integer",
+                          "description": "When this balance was computed, in epoch milliseconds"
                         }
                       },
                       "required": ["remaining", "held", "limits", "asOf"]
@@ -4237,12 +4487,13 @@
                   "key": {
                     "type": "string",
                     "pattern": "^[A-Za-z0-9][A-Za-z0-9:/_.@-]{0,127}$",
-                    "description": "The budget's key, chosen by you",
+                    "description": "The budget's key, chosen by you and unique within the project. Up to 128 letters, digits, and `: / _ . @ -`, starting with a letter or digit.",
                     "example": "customer:acme"
                   },
                   "holdId": {
                     "type": "string",
                     "pattern": "^h_[1-9][0-9]{0,15}$",
+                    "description": "The hold, as returned by authorize",
                     "example": "h_42"
                   }
                 },
@@ -4263,14 +4514,16 @@
                     "holdId": {
                       "type": "string",
                       "pattern": "^h_[1-9][0-9]{0,15}$",
+                      "description": "The hold, as returned by authorize",
                       "example": "h_42"
                     },
                     "released": {
                       "type": "string",
-                      "description": "A decimal amount in the budget's unit; negative after an overrun"
+                      "description": "The amount returned; 0 when the hold had already lapsed"
                     },
                     "replayed": {
-                      "type": "boolean"
+                      "type": "boolean",
+                      "description": "True when this answer replays an earlier request instead of applying it again"
                     },
                     "balance": {
                       "type": "object",
@@ -4282,7 +4535,7 @@
                         },
                         "held": {
                           "type": "string",
-                          "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          "description": "The sum of open holds"
                         },
                         "limits": {
                           "type": "array",
@@ -4294,31 +4547,36 @@
                               },
                               "window": {
                                 "type": "string",
-                                "enum": ["hour", "day", "week", "month", "never"]
+                                "enum": ["hour", "day", "week", "month", "never"],
+                                "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                                "example": "month"
                               },
                               "enforce": {
                                 "type": "string",
-                                "enum": ["hard", "soft"]
+                                "enum": ["hard", "soft"],
+                                "description": "hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                "example": "hard"
                               },
                               "amount": {
                                 "type": "string",
-                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                "description": "The limit"
                               },
                               "consumed": {
                                 "type": "string",
-                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                "description": "Used in the current period"
                               },
                               "held": {
                                 "type": "string",
-                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                "description": "Held by open holds"
                               },
                               "remaining": {
                                 "type": "string",
-                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                "description": "amount - consumed - held; negative after an overrun or a record"
                               },
                               "resetsAt": {
                                 "type": "integer",
-                                "nullable": true
+                                "nullable": true,
+                                "description": "When the limit's current period ends, in epoch milliseconds; null for never"
                               }
                             },
                             "required": [
@@ -4334,7 +4592,8 @@
                           }
                         },
                         "asOf": {
-                          "type": "integer"
+                          "type": "integer",
+                          "description": "When this balance was computed, in epoch milliseconds"
                         }
                       },
                       "required": ["remaining", "held", "limits", "asOf"]
@@ -4465,19 +4724,21 @@
                   "key": {
                     "type": "string",
                     "pattern": "^[A-Za-z0-9][A-Za-z0-9:/_.@-]{0,127}$",
-                    "description": "The budget's key, chosen by you",
+                    "description": "The budget's key, chosen by you and unique within the project. Up to 128 letters, digits, and `: / _ . @ -`, starting with a letter or digit.",
                     "example": "customer:acme"
                   },
                   "amount": {
                     "type": "string",
                     "pattern": "^\\d{1,19}(\\.\\d{1,8})?$",
-                    "description": "A decimal amount in the budget's unit",
+                    "description": "The amount to consume now, checked against every hard limit",
                     "example": "0.05"
                   },
                   "idempotencyKey": {
                     "type": "string",
                     "minLength": 1,
-                    "maxLength": 256
+                    "maxLength": 256,
+                    "description": "Up to 256 characters. A retry with the same key and the same request replays the first answer; the same key with a different request returns 409.",
+                    "example": "run_8f2c:step_3"
                   }
                 },
                 "required": ["key", "amount", "idempotencyKey"],
@@ -4500,16 +4761,18 @@
                     },
                     "amount": {
                       "type": "string",
-                      "description": "A decimal amount in the budget's unit; negative after an overrun"
+                      "description": "The amount consumed"
                     },
                     "crossed": {
                       "type": "array",
                       "items": {
                         "type": "string"
-                      }
+                      },
+                      "description": "Ids of the limits this request took from non-negative to negative remaining"
                     },
                     "replayed": {
-                      "type": "boolean"
+                      "type": "boolean",
+                      "description": "True when this answer replays an earlier request instead of applying it again"
                     },
                     "balance": {
                       "type": "object",
@@ -4521,7 +4784,7 @@
                         },
                         "held": {
                           "type": "string",
-                          "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          "description": "The sum of open holds"
                         },
                         "limits": {
                           "type": "array",
@@ -4533,31 +4796,36 @@
                               },
                               "window": {
                                 "type": "string",
-                                "enum": ["hour", "day", "week", "month", "never"]
+                                "enum": ["hour", "day", "week", "month", "never"],
+                                "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                                "example": "month"
                               },
                               "enforce": {
                                 "type": "string",
-                                "enum": ["hard", "soft"]
+                                "enum": ["hard", "soft"],
+                                "description": "hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                "example": "hard"
                               },
                               "amount": {
                                 "type": "string",
-                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                "description": "The limit"
                               },
                               "consumed": {
                                 "type": "string",
-                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                "description": "Used in the current period"
                               },
                               "held": {
                                 "type": "string",
-                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                "description": "Held by open holds"
                               },
                               "remaining": {
                                 "type": "string",
-                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                "description": "amount - consumed - held; negative after an overrun or a record"
                               },
                               "resetsAt": {
                                 "type": "integer",
-                                "nullable": true
+                                "nullable": true,
+                                "description": "When the limit's current period ends, in epoch milliseconds; null for never"
                               }
                             },
                             "required": [
@@ -4573,7 +4841,8 @@
                           }
                         },
                         "asOf": {
-                          "type": "integer"
+                          "type": "integer",
+                          "description": "When this balance was computed, in epoch milliseconds"
                         }
                       },
                       "required": ["remaining", "held", "limits", "asOf"]
@@ -4691,7 +4960,7 @@
       "post": {
         "operationId": "budgets.record",
         "summary": "record usage that already happened",
-        "description": "Consume an amount for work that already ran. Never denied by a limit, so remaining can go negative. Usage must have occurred within the last 7 days (409 beyond it), and a retry with the same idempotency key and occurredAt is never counted twice within 8 days.",
+        "description": "Consume an amount for work that already ran. Never denied by a limit, so remaining can go negative. Usage must have occurred within the last 7 days (409 beyond it). For 8 days, a retry with the same idempotency key and amount replays instead of counting twice, and the same key with another amount returns 409.",
         "tags": ["budgets"],
         "x-unprice": {
           "audience": "public",
@@ -4714,24 +4983,26 @@
                   "key": {
                     "type": "string",
                     "pattern": "^[A-Za-z0-9][A-Za-z0-9:/_.@-]{0,127}$",
-                    "description": "The budget's key, chosen by you",
+                    "description": "The budget's key, chosen by you and unique within the project. Up to 128 letters, digits, and `: / _ . @ -`, starting with a letter or digit.",
                     "example": "customer:acme"
                   },
                   "amount": {
                     "type": "string",
                     "pattern": "^\\d{1,19}(\\.\\d{1,8})?$",
-                    "description": "A decimal amount in the budget's unit",
+                    "description": "The amount the usage cost. Never denied by a limit.",
                     "example": "0.05"
                   },
                   "idempotencyKey": {
                     "type": "string",
                     "minLength": 1,
-                    "maxLength": 256
+                    "maxLength": 256,
+                    "description": "Up to 256 characters, usually the event id. For 8 days, the same key with the same amount replays instead of counting again, and with another amount returns 409.",
+                    "example": "evt_01J9Z3"
                   },
                   "occurredAt": {
                     "type": "integer",
                     "minimum": 0,
-                    "description": "When the usage happened, in epoch milliseconds. Must be within the last 7 days and at most 5 minutes ahead. Send the same value on a retry.",
+                    "description": "When the usage happened, in epoch milliseconds: the event's own time, not the time of the call. Must be within the last 7 days and at most 5 minutes ahead. It bounds acceptance only; usage counts in the window it arrives in.",
                     "example": 1792000000000
                   }
                 },
@@ -4751,16 +5022,18 @@
                   "properties": {
                     "amount": {
                       "type": "string",
-                      "description": "A decimal amount in the budget's unit; negative after an overrun"
+                      "description": "The amount consumed"
                     },
                     "crossed": {
                       "type": "array",
                       "items": {
                         "type": "string"
-                      }
+                      },
+                      "description": "Ids of the limits this request took from non-negative to negative remaining"
                     },
                     "replayed": {
-                      "type": "boolean"
+                      "type": "boolean",
+                      "description": "True when this answer replays an earlier request instead of applying it again"
                     },
                     "balance": {
                       "type": "object",
@@ -4772,7 +5045,7 @@
                         },
                         "held": {
                           "type": "string",
-                          "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          "description": "The sum of open holds"
                         },
                         "limits": {
                           "type": "array",
@@ -4784,31 +5057,36 @@
                               },
                               "window": {
                                 "type": "string",
-                                "enum": ["hour", "day", "week", "month", "never"]
+                                "enum": ["hour", "day", "week", "month", "never"],
+                                "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                                "example": "month"
                               },
                               "enforce": {
                                 "type": "string",
-                                "enum": ["hard", "soft"]
+                                "enum": ["hard", "soft"],
+                                "description": "hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                "example": "hard"
                               },
                               "amount": {
                                 "type": "string",
-                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                "description": "The limit"
                               },
                               "consumed": {
                                 "type": "string",
-                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                "description": "Used in the current period"
                               },
                               "held": {
                                 "type": "string",
-                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                "description": "Held by open holds"
                               },
                               "remaining": {
                                 "type": "string",
-                                "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                "description": "amount - consumed - held; negative after an overrun or a record"
                               },
                               "resetsAt": {
                                 "type": "integer",
-                                "nullable": true
+                                "nullable": true,
+                                "description": "When the limit's current period ends, in epoch milliseconds; null for never"
                               }
                             },
                             "required": [
@@ -4824,7 +5102,8 @@
                           }
                         },
                         "asOf": {
-                          "type": "integer"
+                          "type": "integer",
+                          "description": "When this balance was computed, in epoch milliseconds"
                         }
                       },
                       "required": ["remaining", "held", "limits", "asOf"]
@@ -4949,7 +5228,7 @@
             "schema": {
               "type": "string",
               "pattern": "^[A-Za-z0-9][A-Za-z0-9:/_.@-]{0,127}$",
-              "description": "The budget's key, chosen by you",
+              "description": "The budget's key, chosen by you and unique within the project. Up to 128 letters, digits, and `: / _ . @ -`, starting with a letter or digit.",
               "example": "customer:acme"
             },
             "required": true,
@@ -4972,10 +5251,13 @@
                           "type": "string"
                         },
                         "unit": {
-                          "type": "string"
+                          "type": "string",
+                          "description": "money:<code>, credits:<id>, or units:<slug>",
+                          "example": "money:USD"
                         },
                         "version": {
-                          "type": "integer"
+                          "type": "integer",
+                          "description": "Increments on every upsert that changes the budget"
                         },
                         "limits": {
                           "type": "array",
@@ -4991,14 +5273,19 @@
                               },
                               "window": {
                                 "type": "string",
-                                "enum": ["hour", "day", "week", "month", "never"]
+                                "enum": ["hour", "day", "week", "month", "never"],
+                                "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                                "example": "month"
                               },
                               "anchor": {
-                                "type": "string"
+                                "type": "string",
+                                "description": "The anchor instant of an anchored window, as an ISO 8601 string"
                               },
                               "enforce": {
                                 "type": "string",
-                                "enum": ["hard", "soft"]
+                                "enum": ["hard", "soft"],
+                                "description": "hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                "example": "hard"
                               }
                             },
                             "required": ["id", "amount", "window", "enforce"]
@@ -5036,10 +5323,12 @@
                         },
                         "closesAt": {
                           "type": "string",
-                          "nullable": true
+                          "nullable": true,
+                          "description": "When the budget closes, or null"
                         },
                         "closed": {
-                          "type": "boolean"
+                          "type": "boolean",
+                          "description": "True from closesAt on"
                         },
                         "balance": {
                           "type": "object",
@@ -5051,7 +5340,7 @@
                             },
                             "held": {
                               "type": "string",
-                              "description": "A decimal amount in the budget's unit; negative after an overrun"
+                              "description": "The sum of open holds"
                             },
                             "limits": {
                               "type": "array",
@@ -5063,31 +5352,36 @@
                                   },
                                   "window": {
                                     "type": "string",
-                                    "enum": ["hour", "day", "week", "month", "never"]
+                                    "enum": ["hour", "day", "week", "month", "never"],
+                                    "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                                    "example": "month"
                                   },
                                   "enforce": {
                                     "type": "string",
-                                    "enum": ["hard", "soft"]
+                                    "enum": ["hard", "soft"],
+                                    "description": "hard denies authorize and charge that would exceed the limit; soft never denies and only reports the limit in `crossed`.",
+                                    "example": "hard"
                                   },
                                   "amount": {
                                     "type": "string",
-                                    "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                    "description": "The limit"
                                   },
                                   "consumed": {
                                     "type": "string",
-                                    "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                    "description": "Used in the current period"
                                   },
                                   "held": {
                                     "type": "string",
-                                    "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                    "description": "Held by open holds"
                                   },
                                   "remaining": {
                                     "type": "string",
-                                    "description": "A decimal amount in the budget's unit; negative after an overrun"
+                                    "description": "amount - consumed - held; negative after an overrun or a record"
                                   },
                                   "resetsAt": {
                                     "type": "integer",
-                                    "nullable": true
+                                    "nullable": true,
+                                    "description": "When the limit's current period ends, in epoch milliseconds; null for never"
                                   }
                                 },
                                 "required": [
@@ -5103,7 +5397,8 @@
                               }
                             },
                             "asOf": {
-                              "type": "integer"
+                              "type": "integer",
+                              "description": "When this balance was computed, in epoch milliseconds"
                             }
                           },
                           "required": ["remaining", "held", "limits", "asOf"]
@@ -5127,22 +5422,25 @@
                         "type": "object",
                         "properties": {
                           "windowId": {
-                            "type": "string"
+                            "type": "string",
+                            "example": "month"
                           },
                           "start": {
-                            "type": "integer"
+                            "type": "integer",
+                            "description": "Period start, in epoch milliseconds"
                           },
                           "end": {
-                            "type": "integer"
+                            "type": "integer",
+                            "description": "Period end (exclusive), in epoch milliseconds"
                           },
                           "consumed": {
                             "type": "string",
-                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                            "description": "Used in the period"
                           }
                         },
                         "required": ["windowId", "start", "end", "consumed"]
                       },
-                      "description": "The last 12 ended periods with usage of each limited window, newest first. Hourly periods are kept 30 days."
+                      "description": "The last 12 ended periods with usage of each limited window, newest first. Older periods are not kept."
                     }
                   },
                   "required": ["budget", "history"]

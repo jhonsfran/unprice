@@ -1,5 +1,10 @@
 import { createRoute } from "@hono/zod-openapi"
-import { settleBudgetInputSchema, settleBudgetResponseSchema } from "@unprice/db/validators"
+import {
+  OPERATION_RETENTION_MS,
+  describeDuration,
+  settleBudgetInputSchema,
+  settleBudgetResponseSchema,
+} from "@unprice/db/validators"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
@@ -13,8 +18,7 @@ export const route = createRoute(
       path: "/v1/budgets/settle",
       operationId: "budgets.settle",
       summary: "settle a hold with the actual amount",
-      description:
-        "Consume the actual amount and release the rest of the hold. An actual above the hold, or a settle after the hold lapsed, is still consumed. The hold id is the idempotency key: the same amount replays, another amount returns 409. A hold retires 24 hours after it closes or lapses; settling or releasing it after that returns 409.",
+      description: `Consume the actual amount and release the rest of the hold. An actual above the hold, or a settle after the hold lapsed, is still consumed. The hold id is the idempotency key: the same amount replays, another amount returns 409. A hold retires ${describeDuration(OPERATION_RETENTION_MS)} after it closes or lapses; settling or releasing it after that returns 409.`,
       method: "post",
       tags: ["budgets"],
       request: {

@@ -362,7 +362,7 @@ describe("BudgetDO alarm", () => {
     })
   })
 
-  it("wakes at a window boundary, rolls the period into history, and serves it on get", async () => {
+  it("rolls a period into history on the next command and keeps twelve per window", async () => {
     const key = "customer:roll"
     const stub = stubFor(key)
     const t0 = midMonthAhead()
@@ -373,33 +373,50 @@ describe("BudgetDO alarm", () => {
       await instance.execute({ type: "get" })
       await state.storage.deleteAlarm()
       const processor = realStorageProcessor(state, () => now)
+      const hourly = (window_id: string) =>
+        state.storage.sql
+          .exec(
+            "SELECT window_id, start, end, consumed FROM budget_window_history WHERE window_id = ? ORDER BY start DESC",
+            window_id
+          )
+          .toArray()
 
       await processor.execute(
         upsert(key, { limits: [{ id: "hourly", amount: "10", window: "hour" }] })
       )
-      await expect(state.storage.getAlarm()).resolves.toBe(boundary)
-      await processor.execute({ type: "charge", idempotencyKey: "c1", cost: { amount: units(4) } })
+      // No wake at the boundary: the journal prune is the only work.
+      await expect(state.storage.getAlarm()).resolves.toBe(t0 + 24 * HOUR)
+      await processor.execute({ type: "charge", idempotencyKey: "c0", cost: { amount: units(4) } })
 
-      now = boundary
-      await processor.alarm()
-      expect(
-        state.storage.sql
-          .exec("SELECT window_id, start, end, consumed FROM budget_window_history")
-          .toArray()
-      ).toEqual([
-        { window_id: "hour", start: boundary - HOUR, end: boundary, consumed: "400000000" },
-      ])
-      await expect(state.storage.getAlarm()).resolves.toBe(boundary + HOUR)
-
+      now = boundary + 5 * MINUTE
       const read = outcome(await processor.execute({ type: "get" }), "get")
       expect(read.history).toEqual([
         { windowId: "hour", start: boundary - HOUR, end: boundary, consumed: units(4) },
       ])
       expect(read.budget.balance.limits[0]?.consumed).toBe(BigInt(0))
+      expect(hourly("hour")).toEqual([
+        { window_id: "hour", start: boundary - HOUR, end: boundary, consumed: "400000000" },
+      ])
+
+      for (let i = 1; i <= 13; i++) {
+        now = boundary + i * HOUR
+        await processor.execute({
+          type: "charge",
+          idempotencyKey: `c${i}`,
+          cost: { amount: units(1) },
+        })
+      }
+      // Thirteen periods rolled with usage (the empty one at `boundary` never rolls); the oldest went.
+      const kept = hourly("hour")
+      expect([kept.length, kept[0]?.start, kept[11]?.start]).toEqual([
+        12,
+        boundary + 12 * HOUR,
+        boundary + HOUR,
+      ])
     })
   })
 
-  it("replays a record after its row is purged without counting it again", async () => {
+  it("answers a record from its receipt after the row is purged, conflicts included", async () => {
     const key = "customer:record-replay"
     const stub = stubFor(key)
     const t0 = midMonthAhead()
@@ -424,17 +441,22 @@ describe("BudgetDO alarm", () => {
       await processor.alarm()
       const count = (table: string) =>
         state.storage.sql.exec(`SELECT count(*) AS n FROM ${table}`).one()
-      expect([count("budget_operations"), count("budget_record_keys")]).toEqual([
+      expect([count("budget_operations"), count("budget_record_receipts")]).toEqual([
         { n: 0 },
         { n: 1 },
       ])
 
-      const replay = outcome(await processor.execute(request), "record")
+      const replay = outcome(await processor.execute({ ...request, occurredAt: t0 + 1 }), "record")
       expect([replay.replayed, replay.amount, replay.balance.remaining]).toEqual([
         true,
         units(4),
         units(46),
       ])
+      const changed = { ...request, cost: { amount: units(5) } }
+      expect(rejection(await processor.execute(changed))).toEqual({
+        code: "IDEMPOTENCY_CONFLICT",
+        idempotencyKey: "evt_1",
+      })
     })
   })
 

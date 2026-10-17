@@ -4,7 +4,7 @@ import {
   type BudgetOutcome,
   type BudgetRejection,
   loadView,
-  recordKeysPurgeAt,
+  receiptsPurgeAt,
   requestFingerprint,
   transition,
 } from "@unprice/services/budgets"
@@ -22,8 +22,6 @@ export const ALARM_RETRY_MS = 30_000
 export const ALARM_HEARTBEAT_MS = 24 * HOUR_MS
 /** Journal entries stay in the object this long before the alarm prunes them. */
 export const JOURNAL_RETENTION_MS = 24 * HOUR_MS
-/** Hourly window history is kept this long; every other window's history is kept. */
-export const HOURLY_HISTORY_RETENTION_MS = 30 * 24 * HOUR_MS
 
 type Committed =
   | { ok: true; outcome: BudgetOutcome; wakeAt: number | null }
@@ -59,8 +57,8 @@ export class BudgetProcessor {
   }
 
   /**
-   * Sweeper: rolls ended windows, lapses due holds, purges expired rows and record keys, prunes
-   * the journal and hourly history, always re-arms.
+   * Sweeper: rolls ended windows, lapses due holds, purges expired rows and record receipts,
+   * prunes the journal, always re-arms.
    */
   async alarm(): Promise<void> {
     this.armedAt = null
@@ -115,29 +113,23 @@ function commit(
   return { ok: true, outcome, wakeAt: wakeAt === null ? pruneAt : Math.min(wakeAt, pruneAt) }
 }
 
-/**
- * Returns the next wake, or null when the object holds no budget and so has no work. The sweep's
- * own wake includes the next period end of every limited window, so an idle budget still rolls
- * (and records its history) at the boundary.
- */
+/** Returns the next wake, or null when the object holds no budget and so has no work. */
 function sweep(tx: BudgetStoreTx, now: number): number | null {
   if (tx.readBudget() === null) return null
-  const swept = commit(tx, { type: "sweep" }, now, ALARM_SWEEP_LIMIT)
+  commit(tx, { type: "sweep" }, now, ALARM_SWEEP_LIMIT)
   tx.purgeOperations(now, ALARM_PURGE_LIMIT)
   tx.pruneJournal(now - JOURNAL_RETENTION_MS, ALARM_PRUNE_LIMIT)
-  const keysAt = recordKeysPurgeAt(now, tx.readLedger())
-  tx.purgeRecordKeys(keysAt, ALARM_PURGE_LIMIT)
-  tx.pruneHourlyHistory(now - HOURLY_HISTORY_RETENTION_MS, ALARM_PRUNE_LIMIT)
+  const receiptsAt = receiptsPurgeAt(now, tx.readLedger())
+  tx.purgeRecordReceipts(receiptsAt, ALARM_PURGE_LIMIT)
 
   const oldestEntryAt = tx.oldestEntryAt()
-  const oldestKeyAt = tx.oldestRecordKeyExpiresAt()
+  const oldestReceiptAt = tx.oldestReceiptExpiresAt()
   const work = [
     tx.nextDueAt(),
     oldestEntryAt === null ? null : oldestEntryAt + JOURNAL_RETENTION_MS,
-    swept.ok ? swept.wakeAt : null,
-    // A backlog the capped purge left behind continues; a key the ledger's clock has not passed
-    // yet waits for the next sweep instead of spinning the alarm.
-    oldestKeyAt !== null && oldestKeyAt <= keysAt ? now : null,
+    // A backlog the capped purge left behind continues; a receipt the ledger's clock has not
+    // passed yet waits for the next sweep instead of spinning the alarm.
+    oldestReceiptAt !== null && oldestReceiptAt <= receiptsAt ? now : null,
   ].filter((at): at is number => at !== null)
   // Work a capped batch left behind is already due, so the floor is also the continuation delay,
   // and it keeps a row the sweep cannot clear from spinning the alarm.

@@ -57,10 +57,8 @@ function oneShot(
   occurredAt = t0
 ): BudgetCommand {
   const cost = { amount }
-  if (type === "charge") {
-    return { type, idempotencyKey: key, cost, requestHash: requestFingerprint({ type, cost }) }
-  }
-  const requestHash = requestFingerprint({ type, cost, occurredAt })
+  const requestHash = requestFingerprint({ type, cost })
+  if (type === "charge") return { type, idempotencyKey: key, cost, requestHash }
   return { type, idempotencyKey: key, cost, occurredAt, requestHash }
 }
 
@@ -598,11 +596,12 @@ describe("window history", () => {
 
   it("rolls a period with usage into one fact, inside an accepted command only", () => {
     const store = new MemoryBudgetStore()
-    expect(ok(store.run(upsert(daily50), t0)).wakeAt).toBe(oct15)
+    // No wake at the boundary: the next command rolls the period the same however late it comes.
+    expect(ok(store.run(upsert(daily50), t0)).wakeAt).toBeNull()
     ok(store.run(charge("c1", 20), t0))
 
     expect(rejection(store.run(charge("big", 51), t0 + day)).code).toBe("LIMIT_EXCEEDED")
-    expect(store.history).toEqual([])
+    expect(store.history.size).toBe(0)
 
     const read = ok(store.run({ type: "get" }, t0 + 3 * day))
     expect(read.entries).toEqual([
@@ -632,7 +631,7 @@ describe("window history", () => {
     expect(ok(store.run({ type: "get" }, t0 + 3 * day)).entries).toEqual([])
   })
 
-  it("returns the last twelve periods of each limited window, newest first", () => {
+  it("keeps and returns the last twelve periods of each window, newest first", () => {
     const store = budgetWith(daily50)
     for (let i = 0; i < 14; i++) ok(store.run(charge(`c${i}`, i + 1), t0 + i * day))
 
@@ -641,6 +640,7 @@ describe("window history", () => {
     expect(read.history.map((period) => [period.start, period.consumed])).toEqual(
       Array.from({ length: 12 }, (_, i) => [oct14 + (13 - i) * day, $(14 - i)])
     )
+    expect([store.history.get("day")?.length, store.history.get("hour")?.length]).toEqual([12, 12])
   })
 })
 
@@ -666,35 +666,43 @@ describe("record dedupe", () => {
     expect([ahead.entries[0]?.at, remaining(ahead)]).toEqual([t0, [["month", $(97)]]])
   })
 
-  it("never counts a key twice within 8 days, even after its row is purged", () => {
-    // Keys are purged only up to the ledger's clock, so the first purge keeps r1 until a write.
+  it("replays a retry with another occurredAt, and conflicts on another amount", () => {
+    const store = budgetWith(month100)
+    ok(store.run(record("r1", 30), t0))
+
+    const retried = ok(store.run(record("r1", 30, t0 + minute), t0 + minute))
+    expect([retried.outcome, retried.entries]).toMatchObject([{ replayed: true }, []])
+    expect(rejection(store.run(record("r1", 31), t0 + minute)).code).toBe("IDEMPOTENCY_CONFLICT")
+  })
+
+  it("answers from the receipt for 8 days after the row is purged, then refuses the replay", () => {
+    // Receipts are purged only up to the ledger's clock, so the first purge keeps r1 until a write.
     const store = budgetWith({ limits: [{ id: "life", amount: "100", window: "never" }] })
     ok(store.run(record("r1", 30), t0))
-    expect(rejection(store.run(record("r1", 30, t0 + 1), t0 + hour)).code).toBe(
-      "IDEMPOTENCY_CONFLICT"
-    )
+    ok(store.run(record("r2", 80), t0))
 
     store.purge(t0 + day)
     expect(store.rows.size).toBe(0)
-    const replay = ok(store.run(record("r1", 30), t0 + 6 * day))
+    const replay = ok(store.run(record("r2", 80), t0 + 6 * day))
     expect(replay.outcome).toMatchObject({
       type: "record",
-      amount: $(30),
-      crossed: [],
+      amount: $(80),
+      crossed: ["life"],
       replayed: true,
-      balance: { remaining: $(70) },
+      balance: { remaining: $(-10) },
     })
     expect(replay.entries.map((entry) => entry.type)).toEqual([
       "window.rolled",
       "window.rolled",
       "window.rolled",
     ])
+    expect(rejection(store.run(record("r1", 31), t0 + 6 * day)).code).toBe("IDEMPOTENCY_CONFLICT")
 
     store.purge(t0 + 8 * day)
-    expect([...store.recordKeys.keys()]).toEqual(["r1"])
-    ok(store.run(record("r2", 1, t0 + 8 * day), t0 + 8 * day))
+    expect([...store.receipts.keys()]).toEqual(["r1", "r2"])
+    ok(store.run(record("r3", 1, t0 + 8 * day), t0 + 8 * day))
     store.purge(t0 + 8 * day)
-    expect([...store.recordKeys.keys()]).toEqual(["r2"])
+    expect([...store.receipts.keys()]).toEqual(["r3"])
     expect(rejection(store.run(record("r1", 30), t0 + 8 * day)).code).toBe("TOO_LATE")
   })
 })
@@ -887,7 +895,7 @@ describe("history does not slow the hot path", () => {
       ledger: emptyLedger,
       target: null,
       due: [],
-      seenRecordKey: false,
+      receipt: null,
       history: [],
     }
     let state = { ...view }

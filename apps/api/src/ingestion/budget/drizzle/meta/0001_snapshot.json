@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "dc15e89c-30f5-47bf-9081-295b45ab5971",
+  "id": "da186110-eb33-472d-8710-c1d8659c8492",
   "prevId": "7c3aa962-a69c-4a48-840a-c8c1c7b01830",
   "tables": {
     "budget_entries": {
@@ -216,13 +216,34 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "budget_record_keys": {
-      "name": "budget_record_keys",
+    "budget_record_receipts": {
+      "name": "budget_record_receipts",
       "columns": {
         "key_hash": {
           "name": "key_hash",
           "type": "text",
           "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "request_hash": {
+          "name": "request_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "amount": {
+          "name": "amount",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "crossed_json": {
+          "name": "crossed_json",
+          "type": "text",
+          "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
@@ -235,8 +256,8 @@
         }
       },
       "indexes": {
-        "budget_record_keys_expires_at_idx": {
-          "name": "budget_record_keys_expires_at_idx",
+        "budget_record_receipts_expires_at_idx": {
+          "name": "budget_record_receipts_expires_at_idx",
           "columns": ["expires_at"],
           "isUnique": false
         }

@@ -10,30 +10,34 @@ import {
   type Ledger,
   type Operation,
   RECORD_DEDUPE_MS,
+  type RecordReceipt,
   type UnPriceBudgetError,
+  WINDOW_HISTORY_PERIODS,
   type WindowId,
   type WindowPeriod,
   dueAt,
   emptyLedger,
   loadView,
-  recordKeysPurgeAt,
+  periodOf,
+  receiptsPurgeAt,
   transition,
   viewState,
 } from "./index"
 
 /**
  * Test double for the Durable Object store: rows indexed by id and idempotency key, a due-hold
- * scan, retention purge, the journal, the window history, and record keys. Loads its view the way
- * the store does and commits a transition only when it is Ok.
+ * scan, retention purge, the journal, the window history, and record receipts. Loads its view the
+ * way the store does and commits a transition only when it is Ok.
  */
 export class MemoryBudgetStore implements BudgetReader {
   budget: BudgetRecord | null = null
   ledger: Ledger = emptyLedger
   readonly rows = new Map<string, Operation>()
   readonly entries: Entry[] = []
-  readonly history: WindowPeriod[] = []
-  /** Record key to the time its dedupe ends. */
-  readonly recordKeys = new Map<string, number>()
+  /** Up to WINDOW_HISTORY_PERIODS periods per window id, newest first, as the store keeps them. */
+  readonly history = new Map<WindowId, WindowPeriod[]>()
+  /** Record key to its receipt and the time its dedupe ends. */
+  readonly receipts = new Map<string, RecordReceipt & { expiresAt: number }>()
   /** The projections the last transition started from, for `checkTransition`. */
   lastBefore: BudgetState | null = null
   private readonly byKey = new Map<string, string>()
@@ -48,12 +52,18 @@ export class MemoryBudgetStore implements BudgetReader {
     this.ledger = next.ledger
     this.entries.push(...entries)
     for (const entry of entries) {
-      if (entry.type === "window.rolled") {
-        const { windowId, start, end, consumed } = entry
-        this.history.push({ windowId, start, end, consumed })
+      for (const period of periodOf(entry)) {
+        const kept = [period, ...(this.history.get(period.windowId) ?? [])]
+        this.history.set(period.windowId, kept.slice(0, WINDOW_HISTORY_PERIODS))
       }
       if (entry.type === "recorded") {
-        this.recordKeys.set(entry.idempotencyKey, entry.at + RECORD_DEDUPE_MS)
+        const { idempotencyKey, requestHash, amount, crossed, at } = entry
+        this.receipts.set(idempotencyKey, {
+          requestHash,
+          amount,
+          crossed,
+          expiresAt: at + RECORD_DEDUPE_MS,
+        })
       }
     }
     for (const operation of operations) {
@@ -63,11 +73,11 @@ export class MemoryBudgetStore implements BudgetReader {
     return result
   }
 
-  /** Deletes every closed row whose retention ended and every expired record key, as the alarm would. */
+  /** Deletes every closed row whose retention ended and every expired receipt, as the alarm would. */
   purge(clockMs: number) {
-    const keysAt = recordKeysPurgeAt(clockMs, this.ledger)
-    for (const [key, expiresAt] of this.recordKeys) {
-      if (expiresAt <= keysAt) this.recordKeys.delete(key)
+    const receiptsAt = receiptsPurgeAt(clockMs, this.ledger)
+    for (const [key, receipt] of this.receipts) {
+      if (receipt.expiresAt <= receiptsAt) this.receipts.delete(key)
     }
     for (const [id, operation] of this.rows) {
       const open = operation.kind === "hold" && operation.state.status === "open"
@@ -94,17 +104,15 @@ export class MemoryBudgetStore implements BudgetReader {
     return id === undefined ? null : this.readOperation(id)
   }
 
-  readRecordKey(idempotencyKey: string, at: number) {
-    return (this.recordKeys.get(idempotencyKey) ?? Number.NEGATIVE_INFINITY) > at
+  readRecordReceipt(idempotencyKey: string, at: number): RecordReceipt | null {
+    const receipt = this.receipts.get(idempotencyKey)
+    if (!receipt || receipt.expiresAt <= at) return null
+    const { requestHash, amount, crossed } = receipt
+    return { requestHash, amount, crossed }
   }
 
   readHistory(windowIds: readonly WindowId[], limit: number) {
-    return windowIds.flatMap((id) =>
-      this.history
-        .filter((period) => period.windowId === id)
-        .sort((a, b) => b.start - a.start)
-        .slice(0, limit)
-    )
+    return windowIds.flatMap((id) => (this.history.get(id) ?? []).slice(0, limit))
   }
 
   readDueHolds(at: number, limit: number) {

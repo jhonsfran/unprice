@@ -10,8 +10,9 @@ import {
   RECORD_FUTURE_SKEW_MS,
   anchoredWindowBounds,
   checkTransition,
+  countersOf,
   emptyLedger,
-  evolveLedger,
+  evolve,
   requestFingerprint,
 } from "./index"
 import { MemoryBudgetStore } from "./memory-store.fixture"
@@ -69,7 +70,6 @@ type KeyedRecord = {
   verb: "authorize" | "charge" | "record"
   amount: bigint
   ttlMs: number | undefined
-  occurredAt: number | undefined
   holdNo: number
   crossed: string[]
   createdAt: number
@@ -151,8 +151,8 @@ class ReferenceBudget {
   readonly consumptions: Array<{ at: number; amount: bigint }> = []
   readonly holds = new Map<number, ModelHold>()
   readonly keyed = new Map<string, KeyedRecord>()
-  /** Record key to when its dedupe ends. */
-  readonly recordKeys = new Map<string, number>()
+  /** Record key to what a replay answers with, until its dedupe ends. */
+  readonly receipts = new Map<string, { amount: bigint; crossed: string[]; until: number }>()
   readonly segments: Segment[] = (["hour", "day", "week", "month", "never"] as const).map(
     (window) => ({ id: window, window, from: 0, until: null })
   )
@@ -170,7 +170,7 @@ class ReferenceBudget {
     }
     // Keys are purged against the ledger's clock, so a clock stepping back cannot reopen one.
     const keysAt = Math.min(clock, this.lastWriteAt)
-    for (const [key, until] of this.recordKeys) if (keysAt >= until) this.recordKeys.delete(key)
+    for (const [key, { until }] of this.receipts) if (keysAt >= until) this.receipts.delete(key)
   }
 
   /** The segment of `id` still counting at `t`, if any. */
@@ -379,12 +379,7 @@ class ReferenceBudget {
     const occurredAt = command.type === "record" ? command.occurredAt : undefined
     const prior = this.keyed.get(command.idempotencyKey)
     if (prior) {
-      if (
-        prior.verb !== command.type ||
-        prior.amount !== amount ||
-        prior.ttlMs !== ttlMs ||
-        prior.occurredAt !== occurredAt
-      ) {
+      if (prior.verb !== command.type || prior.amount !== amount || prior.ttlMs !== ttlMs) {
         return { error: "IDEMPOTENCY_CONFLICT" }
       }
       const outcome =
@@ -397,9 +392,13 @@ class ReferenceBudget {
           : { crossed: prior.crossed, replayed: true }
       return { outcome, wrote: false, checkBalance: true }
     }
-    // A record key outlives its row by days: the replay answers with what it was sent.
-    if (command.type === "record" && (this.recordKeys.get(command.idempotencyKey) ?? 0) > now) {
-      return { outcome: { amount, crossed: [], replayed: true }, wrote: false, checkBalance: true }
+    // A record's receipt outlives its row by days and answers the same way the row did.
+    const receipt =
+      command.type === "record" ? this.receipts.get(command.idempotencyKey) : undefined
+    if (receipt && receipt.until > now) {
+      if (receipt.amount !== amount) return { error: "IDEMPOTENCY_CONFLICT" }
+      const outcome = { amount, crossed: receipt.crossed, replayed: true }
+      return { outcome, wrote: false, checkBalance: true }
     }
 
     const effectiveTtl = ttlMs ?? config.defaultTtlMs
@@ -423,13 +422,14 @@ class ReferenceBudget {
       verb: command.type,
       amount,
       ttlMs,
-      occurredAt,
       holdNo: 0,
       crossed,
       createdAt: now,
     }
     this.keyed.set(command.idempotencyKey, rec)
-    if (command.type === "record") this.recordKeys.set(command.idempotencyKey, now + 8 * day)
+    if (command.type === "record") {
+      this.receipts.set(command.idempotencyKey, { amount, crossed, until: now + 8 * day })
+    }
 
     if (command.type !== "authorize") {
       this.consumptions.push({ at: now, amount })
@@ -643,7 +643,7 @@ function resolve(
         idempotencyKey: planned.idempotencyKey,
         cost,
         occurredAt,
-        requestHash: requestFingerprint({ type: "record", cost, occurredAt }),
+        requestHash: requestFingerprint({ type: "record", cost }),
       }
     }
     default:
@@ -711,7 +711,7 @@ function countersView(store: MemoryBudgetStore, model: ReferenceBudget, now: num
     if (segment.until !== null && now >= segment.until) continue
     expected[segment.id] = model.counted(segment, rangeOf(segment.window, segment.anchor, now))
   }
-  for (const [id, counter] of Object.entries(store.ledger.usage)) {
+  for (const [id, counter] of countersOf(store.ledger.usage)) {
     const segment = model.segmentAt(id, now)
     const range = segment ? rangeOf(segment.window, segment.anchor, now) : null
     const current = id === "never" || counter.start === range?.start
@@ -730,6 +730,8 @@ describe("budget core against a reference model", () => {
         const store = new MemoryBudgetStore()
         const model = new ReferenceBudget()
         let clock = start
+        /** Every event a record counted: its key, amount, and `occurredAt`. */
+        const recordedEvents: string[] = []
         const previous: { command: BudgetCommand; record: BudgetCommand | null } = {
           command: {
             type: "upsert",
@@ -774,6 +776,10 @@ describe("budget core against a reference model", () => {
           if (result.err) throw result.err
 
           const { outcome, entries, next } = result.val
+          if (command.type === "record" && entries.some((e) => e.type === "recorded")) {
+            const { idempotencyKey, cost, occurredAt } = command
+            recordedEvents.push(`${idempotencyKey}|${cost.amount}|${occurredAt}`)
+          }
           const now = Math.max(clock, model.lastWriteAt)
           expect(outcomeFields(outcome, expected.outcome)).toEqual(expected.outcome)
           if (expected.checkBalance) {
@@ -815,15 +821,17 @@ describe("budget core against a reference model", () => {
             expect(now).toBeLessThan(model.config.closesAt)
           }
           expect(checkTransition(store.lastBefore!, entries, next)).toEqual([])
-          expect(store.entries.reduce(evolveLedger, emptyLedger)).toEqual(store.ledger)
+          const folded = store.entries.reduce(evolve, {
+            budget: null,
+            ledger: emptyLedger,
+            operations: new Map(),
+          })
+          expect(folded.ledger).toEqual(store.ledger)
         }
 
-        // One payload is recorded at most once, ever: a replay inside the dedupe window replays,
-        // and one after it is too late.
-        const recorded = store.entries.flatMap((e) =>
-          e.type === "recorded" ? [`${e.idempotencyKey}|${e.requestHash}`] : []
-        )
-        expect(new Set(recorded).size).toBe(recorded.length)
+        // One event is recorded at most once, ever: a retry inside the dedupe window replays, and
+        // one after it is too late, because a retry resends the event's own `occurredAt`.
+        expect(new Set(recordedEvents).size).toBe(recordedEvents.length)
       }),
       { numRuns: runs, seed }
     )

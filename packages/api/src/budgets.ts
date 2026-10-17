@@ -69,17 +69,18 @@ export type ChargeBudgetInput = { amount: AmountInput; idempotencyKey?: string }
 
 /**
  * Usage that already happened. Never denied by a limit. Pass the event id so a retry does not count
- * twice: within 8 days, the same key and `occurredAt` replay instead of counting again.
+ * twice: within 8 days, the same key and amount replay instead of counting again, and the same key
+ * with another amount is a 409.
  */
 export type RecordBudgetInput = {
   amount: AmountInput
   idempotencyKey: string
   /**
-   * When the usage happened, in epoch ms; defaults to the time of this call, which the client's own
-   * retries reuse. Usage older than 7 days is refused (409). Pass the event's own time when you
-   * may retry the call later, so the retry matches.
+   * When the usage happened, in epoch ms: the event's own time, never the time of the call. Usage
+   * older than 7 days is refused (409), which is what stops a retry from counting twice once its
+   * key's 8-day dedupe has ended, so a retry must send the same time.
    */
-  occurredAt?: number
+  occurredAt: number
 }
 
 export type SpendBudgetInput = { estimate: AmountInput } & Pick<AuthorizeBudgetInput, "ttlMs">
@@ -250,13 +251,8 @@ export const createBudgetHandle = (budgets: BudgetResources, key: string): Budge
       return { result: { ...response.result, allowed: true, degraded: false } }
     },
 
-    record: async ({ amount, idempotencyKey, occurredAt }) =>
-      budgets.record({
-        key,
-        amount: toDecimal(amount),
-        idempotencyKey,
-        occurredAt: occurredAt ?? Date.now(),
-      }),
+    record: async ({ amount, ...input }) =>
+      budgets.record({ ...input, key, amount: toDecimal(amount) }),
 
     get: () => budgets.get({ key }),
 

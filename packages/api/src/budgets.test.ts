@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it } from "vitest"
 import { BudgetExceededError, BudgetRequestError, BudgetSettleError } from "./budgets"
 import { Unprice } from "./client"
 
@@ -205,22 +205,19 @@ describe("budget handle", () => {
     expect(authorization.error?.code).toBe("CONFLICT")
   })
 
-  it("records with the time of the call unless the caller passes occurredAt", async () => {
+  it("records with the occurredAt the caller passes", async () => {
     const recorded = { amount: "1", crossed: [], replayed: false, balance }
-    const { budget, requests } = createClient([json(recorded), json(recorded)])
-    vi.useFakeTimers({ now: 1_796_083_200_000 })
-    try {
-      await budget.record({ amount: 1, idempotencyKey: "evt_1" })
-      await budget.record({ amount: 1, idempotencyKey: "evt_2", occurredAt: 1_796_000_000_000 })
-    } finally {
-      vi.useRealTimers()
-    }
+    const { budget, requests } = createClient([json(recorded)])
 
-    const bodies = requests.map((request) => request.body as Record<string, unknown>)
-    expect(bodies.map(({ idempotencyKey, occurredAt }) => [idempotencyKey, occurredAt])).toEqual([
-      ["evt_1", 1_796_083_200_000],
-      ["evt_2", 1_796_000_000_000],
-    ])
+    await budget.record({ amount: 1, idempotencyKey: "evt_2", occurredAt: 1_796_000_000_000 })
+
+    const [body] = requests.map((request) => request.body as Record<string, unknown>)
+    expect(body).toEqual({
+      key: "customer:acme",
+      amount: "1",
+      idempotencyKey: "evt_2",
+      occurredAt: 1_796_000_000_000,
+    })
   })
 
   it("sends number amounts as exact decimal strings and generates idempotency keys", async () => {
@@ -235,7 +232,7 @@ describe("budget handle", () => {
 
     const authorization = await budget.authorize({ amount: 0.1 + 0.2, ttlMs: 30_000 })
     const charge = await budget.charge({ amount: 0.000000014 })
-    const record = await budget.record({ amount: 1250, idempotencyKey: "evt_1" })
+    const record = await budget.record({ amount: 1250, idempotencyKey: "evt_1", occurredAt: 1 })
     if (!authorization.result?.allowed) {
       throw new Error("expected an allowed authorization")
     }

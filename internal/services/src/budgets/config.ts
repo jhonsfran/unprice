@@ -1,35 +1,29 @@
 /** Budget config (ADR-0006 B1): the parsed limits and hold settings, and the audit of an upsert. */
 
-import { MAX_BUDGET_LIMITS } from "@unprice/db/validators"
+import {
+  DEFAULT_HOLD_TTL_MS,
+  MAX_BUDGET_LIMITS,
+  MAX_HOLD_TTL_MS,
+  MIN_HOLD_TTL_MS,
+} from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import { type Amount, formatAmount, parseAmount } from "@unprice/money"
 import { z } from "zod"
 import { UnPriceBudgetError } from "./model"
 import { BUDGET_WINDOWS, type WindowId, isAnchoredWindow, windowIdOf } from "./windows"
 
-export const MIN_HOLD_TTL_MS = 1_000
-export const DEFAULT_HOLD_TTL_MS = 15 * 60 * 1000
-export const MAX_HOLD_TTL_MS = 24 * 60 * 60 * 1000
-/** RFC 4006 Tcc: an expired hold keeps counting for this many TTLs before it lapses. */
-export const HOLD_LAPSE_TTL_MULTIPLIER = 2
-/**
- * Closed holds, lapsed holds, and charge/record rows are kept this long after they close. They
- * are the idempotency record and the tombstone that answers replays and late settles; after it, a
- * hold is retired and can no longer be settled or released.
- */
-export const OPERATION_RETENTION_MS = 24 * 60 * 60 * 1000
-/** `record` accepts usage that occurred at most this long ago (`TOO_LATE` beyond it). */
-export const RECORD_ACCEPT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
-/** `record` rejects `occurredAt` further than this ahead of the budget's clock. */
-export const RECORD_FUTURE_SKEW_MS = 5 * 60 * 1000
-/**
- * A record's key outlives its row: a replay within this long never counts again. It must exceed
- * the accept window plus the skew, so a replay the key no longer catches is already `TOO_LATE`.
- */
-export const RECORD_DEDUPE_MS = 8 * 24 * 60 * 60 * 1000
-
-/** `get` returns this many ended periods per limited window, newest first. */
-export const WINDOW_HISTORY_PERIODS = 12
+// Timing constants live with the wire contract, whose descriptions state them.
+export {
+  DEFAULT_HOLD_TTL_MS,
+  HOLD_LAPSE_TTL_MULTIPLIER,
+  MAX_HOLD_TTL_MS,
+  MIN_HOLD_TTL_MS,
+  OPERATION_RETENTION_MS,
+  RECORD_ACCEPT_WINDOW_MS,
+  RECORD_DEDUPE_MS,
+  RECORD_FUTURE_SKEW_MS,
+  WINDOW_HISTORY_PERIODS,
+} from "@unprice/db/validators"
 
 const instantSchema = z
   .string()
@@ -134,9 +128,12 @@ export function formatBudgetConfig(config: BudgetConfig) {
   } satisfies BudgetConfigInput
 }
 
-/** True from `closesAt` on: authorize and charge are refused, `record` only within its grace. */
-export function isClosed(config: BudgetConfig, now: number): boolean {
-  return config.closesAt !== null && now >= config.closesAt
+/**
+ * True from `closesAt + graceMs` on. Authorize and charge are refused from `closesAt`, `record`
+ * from `closesAt + OPERATION_RETENTION_MS`.
+ */
+export function isClosed(config: BudgetConfig, now: number, graceMs = 0): boolean {
+  return config.closesAt !== null && now >= config.closesAt + graceMs
 }
 
 export type BudgetRecord = Readonly<{

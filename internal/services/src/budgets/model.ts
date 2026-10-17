@@ -18,16 +18,16 @@ const ZERO = BigInt(0)
 
 // Projections
 
-/**
- * One usage counter: consumption since `start`, the start of the period it is in. `orphan` marks an
- * anchored counter no limit references any more; it is dropped when its period ends, so removing
- * and re-adding a limit inside one period never resets it.
- */
-export type WindowUsage = Readonly<{ start: number; consumed: Amount; orphan?: true }>
+/** One usage counter: consumption since `start`, the start of the period it is in. */
+export type WindowUsage = Readonly<{ start: number; consumed: Amount }>
 
-/** The five calendar counters always; one counter per anchored window id a limit references. */
+/**
+ * The five calendar counters always, and one per anchored window id a limit references. An
+ * anchored counter no limit references any more stays until its period ends, so removing and
+ * re-adding a limit inside one period never resets it.
+ */
 export type WindowCounters = Readonly<
-  Record<BudgetWindow, WindowUsage> & { [id: AnchoredWindowId]: WindowUsage }
+  Record<BudgetWindow, WindowUsage> & Partial<Record<AnchoredWindowId, WindowUsage>>
 >
 
 /** A period of one window that ended with usage: the payload of `window.rolled`. */
@@ -102,6 +102,16 @@ export type HoldOperation = Readonly<{
   state: HoldState
 }>
 
+/**
+ * What a `recorded` fact leaves behind for RECORD_DEDUPE_MS, after its row is purged: enough to
+ * answer a replay as the row would and to tell a changed request from a retry.
+ */
+export type RecordReceipt = Readonly<{
+  requestHash: string
+  amount: Amount
+  crossed: readonly string[]
+}>
+
 /** A charge or record row; id `o_<seq>` of its entry. Pure idempotency record. */
 export type ChargeOperation = Readonly<{
   kind: "charge" | "record"
@@ -130,11 +140,11 @@ export type BudgetView = Readonly<{
   /** Open holds with `lapsesAt <= max(clock, ledger.lastAt)`, any subset; the alarm sweeps the rest. */
   due: readonly HoldOperation[]
   /**
-   * For `record` without a row: whether its key was recorded within RECORD_DEDUPE_MS. Keys outlive
-   * rows, so a replay after the row's purge is still caught.
+   * For `record` without a row: the receipt its key left within RECORD_DEDUPE_MS. Receipts outlive
+   * rows, so a replay after the row's purge is still answered, and a changed request still conflicts.
    */
-  seenRecordKey: boolean
-  /** For `get`: up to HISTORY_PERIODS stored periods per limited window id, newest first. */
+  receipt: RecordReceipt | null
+  /** For `get`: up to WINDOW_HISTORY_PERIODS stored periods per limited window id, newest first. */
   history: readonly WindowPeriod[]
 }>
 
@@ -226,21 +236,16 @@ export type BudgetCommand =
 type KeyedCommand = Extract<BudgetCommand, { idempotencyKey: string }>
 
 /**
- * Canonical request text for the idempotency hash. Excludes the key and every clock value, and
- * includes the verb, so one key reused across verbs conflicts.
+ * Canonical request text for the idempotency hash. Excludes the key and every clock value, so a
+ * record retried with another `occurredAt` is the same request, and includes the verb, so one key
+ * reused across verbs conflicts.
  */
 export function requestFingerprint(
-  command: Pick<KeyedCommand, "type" | "cost"> & { ttlMs?: number; occurredAt?: number }
+  command: Pick<KeyedCommand, "type" | "cost"> & { ttlMs?: number }
 ): string {
   const amount = command.cost.amount.toString()
-  switch (command.type) {
-    case "authorize":
-      return `authorize|${amount}|${command.ttlMs ?? "default"}`
-    case "record":
-      return `record|${amount}|${command.occurredAt}`
-    case "charge":
-      return `charge|${amount}`
-  }
+  if (command.type !== "authorize") return `${command.type}|${amount}`
+  return `authorize|${amount}|${command.ttlMs ?? "default"}`
 }
 
 // Outcomes

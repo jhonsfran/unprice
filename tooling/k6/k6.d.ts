@@ -19,6 +19,8 @@ declare module "k6/http" {
     body: string | null
     headers: Record<string, string>
     status_text?: string
+    /** Set when no HTTP response arrived (status 0): the transport error. */
+    error: string
     timings: {
       duration: number
     }
@@ -27,11 +29,15 @@ declare module "k6/http" {
 
   export type BatchRequest = [method: string, url: string, body: string | null, params?: Params]
 
+  export type ResponseCallback = { readonly __brand: "ResponseCallback" }
+
   const http: {
     post(url: string, body: string, params?: Params): Response
     get(url: string, params?: Params): Response
     request(method: string, url: string, body?: string | null, params?: Params): Response
     batch(requests: BatchRequest[]): Response[]
+    expectedStatuses(...statuses: number[]): ResponseCallback
+    setResponseCallback(callback: ResponseCallback): void
   }
 
   export default http
@@ -50,7 +56,7 @@ declare module "k6/execution" {
 declare module "k6/metrics" {
   export class Counter {
     constructor(name: string)
-    add(value: number): void
+    add(value: number, tags?: Record<string, string>): void
   }
 
   export class Trend {

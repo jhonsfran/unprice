@@ -1,7 +1,7 @@
 /** Folds (ADR-0006 B7): arithmetic only, no policy. Every fact carries its own deltas. */
 
 import type { Amount, SignedAmount } from "@unprice/money"
-import { type BudgetLimit, OPERATION_RETENTION_MS } from "./config"
+import { type BudgetLimit, type BudgetRecord, OPERATION_RETENTION_MS } from "./config"
 import type {
   BudgetState,
   Entry,
@@ -51,63 +51,70 @@ export function countersOf(usage: WindowCounters): Array<[WindowId, WindowUsage]
   return Object.entries(usage) as Array<[WindowId, WindowUsage]>
 }
 
-/**
- * Moves every counter forward (only) to the period containing `at`, and drops an orphan whose
- * period ended. Unchanged counters keep identity.
- */
-export function rollCounters(usage: WindowCounters, at: number): WindowCounters {
-  const next: Record<string, WindowUsage> = {}
-  for (const [id, counter] of countersOf(usage)) {
-    const start = windowBounds(windowSpecOf(id), at).start
-    if (start <= counter.start) next[id] = counter
-    else if (!counter.orphan) next[id] = { start, consumed: ZERO }
-  }
-  return next as WindowCounters
+/** The calendar counters are always present, so a map built from a ledger's counters is complete. */
+function countersFrom(entries: Iterable<[WindowId, WindowUsage]>): WindowCounters {
+  return Object.fromEntries(entries) as WindowCounters
+}
+
+/** Anchored window ids the limits reference. Calendar ids are always kept, so they never appear. */
+function anchoredIdsOf(limits: readonly BudgetLimit[]): Set<WindowId> {
+  return new Set(limits.filter((limit) => limit.anchor !== undefined).map(windowIdOf))
 }
 
 /**
- * After a config change: one counter per anchored window id the limits reference, a new one
- * counting from `at`, and the rest marked orphan until their period ends.
+ * Moves every counter forward (only) to the period containing `at`. An anchored counter that no
+ * limit in `limits` references is dropped when its period ends instead. Unchanged counters keep
+ * identity.
  */
+export function rollCounters(
+  usage: WindowCounters,
+  at: number,
+  limits: readonly BudgetLimit[]
+): WindowCounters {
+  const referenced = anchoredIdsOf(limits)
+  return countersFrom(
+    countersOf(usage).flatMap(([id, counter]): Array<[WindowId, WindowUsage]> => {
+      const start = windowBounds(windowSpecOf(id), at).start
+      if (start <= counter.start) return [[id, counter]]
+      if (id.includes("@") && !referenced.has(id)) return []
+      return [[id, { start, consumed: ZERO }]]
+    })
+  )
+}
+
+/** After a config change: a counter for every anchored window id that has none, counting from `at`. */
 function trackLimits(
   usage: WindowCounters,
   limits: readonly BudgetLimit[],
   at: number
 ): WindowCounters {
-  const referenced = new Set(
-    limits.filter((limit) => limit.anchor !== undefined).map((limit) => windowIdOf(limit))
-  )
-  const next: Record<string, WindowUsage> = {}
-  for (const [id, counter] of countersOf(usage)) {
-    const orphan = id.includes("@") && !referenced.has(id)
-    next[id] = orphan === Boolean(counter.orphan) ? counter : withOrphan(counter, orphan)
-  }
-  for (const id of referenced) {
-    next[id] ??= { start: windowBounds(windowSpecOf(id), at).start, consumed: ZERO }
-  }
-  return next as WindowCounters
-}
-
-function withOrphan({ start, consumed }: WindowUsage, orphan: boolean): WindowUsage {
-  return orphan ? { start, consumed, orphan } : { start, consumed }
+  const added = [...anchoredIdsOf(limits)]
+    .filter((id) => usage[id] === undefined)
+    .map((id): [WindowId, WindowUsage] => [
+      id,
+      { start: windowBounds(windowSpecOf(id), at).start, consumed: ZERO },
+    ])
+  return added.length === 0 ? usage : countersFrom([...countersOf(usage), ...added])
 }
 
 /**
- * Folds one entry into the ledger: rolls every counter forward to `entry.at`, follows a config
- * change, then applies `ledgerDelta`, adding consumption to every counter.
+ * Folds one entry into the ledger: rolls every counter forward to `entry.at` under the limits of
+ * `budget` (the config in force before the entry), follows a config change, then applies
+ * `ledgerDelta`, adding consumption to every counter.
  */
-export function evolveLedger(ledger: Ledger, entry: Entry): Ledger {
+export function evolveLedger(ledger: Ledger, entry: Entry, budget: BudgetRecord | null): Ledger {
   const delta = ledgerDelta(entry)
-  let usage = rollCounters(ledger.usage, entry.at)
+  let usage = rollCounters(ledger.usage, entry.at, budget?.config.limits ?? [])
   if (entry.type === "budget.configured") {
     usage = trackLimits(usage, entry.budget.config.limits, entry.at)
   }
   if (delta.consumed !== ZERO) {
-    const added: Record<string, WindowUsage> = {}
-    for (const [id, counter] of countersOf(usage)) {
-      added[id] = { ...counter, consumed: counter.consumed + delta.consumed }
-    }
-    usage = added as WindowCounters
+    usage = countersFrom(
+      countersOf(usage).map(([id, counter]): [WindowId, WindowUsage] => [
+        id,
+        { start: counter.start, consumed: counter.consumed + delta.consumed },
+      ])
+    )
   }
   return {
     seq: entry.seq,
@@ -209,7 +216,7 @@ export function evolve(state: BudgetState, entry: Entry): BudgetState {
   }
   return {
     budget: entry.type === "budget.configured" ? entry.budget : state.budget,
-    ledger: evolveLedger(state.ledger, entry),
+    ledger: evolveLedger(state.ledger, entry, state.budget),
     operations,
   }
 }
@@ -232,10 +239,10 @@ export function dueAt(operation: Operation): number {
 }
 
 /**
- * Record keys whose dedupe ended by this time may be purged. It never runs ahead of the ledger's
- * clock: a command clamps to `lastAt`, so a key purged at a later raw clock could otherwise let a
- * skewed-back command accept a replay that is still inside the accept window.
+ * Record receipts whose dedupe ended by this time may be purged. It never runs ahead of the
+ * ledger's clock: a command clamps to `lastAt`, so a receipt purged at a later raw clock could
+ * otherwise let a skewed-back command accept a replay that is still inside the accept window.
  */
-export function recordKeysPurgeAt(clockMs: number, ledger: Ledger): number {
+export function receiptsPurgeAt(clockMs: number, ledger: Ledger): number {
   return Math.min(clockMs, ledger.lastAt)
 }

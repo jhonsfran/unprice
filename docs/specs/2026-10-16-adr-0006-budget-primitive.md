@@ -168,10 +168,12 @@ settle(actual 55)   held 80 -> 0          consumed 0 -> 55   available 20 -> 45
   happened (event ingestion, provider callbacks). `record` is never denied by a limit, because
   denying it cannot undo the work. It carries `occurredAt`, the epoch milliseconds the usage
   happened, like the event API's `timestamp`; the window rules are in B3.
-- When a counter's period ends, the next accepted command (or the alarm at the boundary) writes a
+- When a counter's period ends, the next accepted command (or alarm sweep) writes a
   `window.rolled { windowId, start, end, consumed }` fact for the period that ended, only when it
-  had usage. An idle gap of many periods writes one fact, for the last period with usage. `get`
-  returns the last 12 of these per window that has a limit, newest first.
+  had usage. A counter keeps its period's start, so the fact is the same however late the next
+  command comes, and nothing wakes at a boundary. An idle gap of many periods writes one fact, for
+  the last period with usage. `get` returns the last 12 of these per window that has a limit,
+  newest first, and the store keeps no more than that.
 - Every response carries `remaining` for each limit, and the HTTP adapter copies it into response
   headers. A denial is always HTTP 402 with `blockedBy` (the limit or the funding source) and a
   remedy.
@@ -195,14 +197,14 @@ settle(actual 55)   held 80 -> 0          consumed 0 -> 55   available 20 -> 45
   ahead. Older usage returns 409 `TOO_LATE`; a future time returns 400 `INVALID_OCCURRED_AT`.
   `occurredAt` only bounds acceptance: the amount counts against the window it arrives in, like a
   late settle.
-- A record's key outlives its row. The row answers replays for 24 hours like every operation; the
-  key's hash is kept 8 days, longer than the 7-day accept window plus the skew, so a replay the key
-  no longer catches is already too late. Between 24 hours and 8 days a replay returns `replayed:
-  true` with the amount it was sent with and the current balance, and never counts again.
-  `occurredAt` is part of the request hash, so a retry must resend the same value. Only the hash
-  is kept after the row is purged, so a changed payload under a reused key is a 409 conflict for
-  24 hours and a silent replay after that: conflicts are detected for a day, duplicates for 8
-  days.
+- A record leaves a receipt that outlives its row: its key hash, request hash, amount, and
+  crossings, kept 8 days, longer than the 7-day accept window plus the skew. For those 8 days the
+  receipt answers exactly as the row did: the same key and amount replay with the original
+  response, and another amount under the same key is a 409 conflict. After them, a replay is
+  already too late. `occurredAt` is not part of the request hash: a retry is the same event even
+  if the caller stamps it again. It must still be the event's own time, because the 7-day
+  `TOO_LATE` bound is what stops a retry once its receipt is gone; the SDK requires it and never
+  defaults it to the time of the call.
 
 ### B4. Pricing inside a budget, including credits
 
@@ -297,16 +299,17 @@ close: final capture, then source.release(key = "rel:{budget}:{epoch}")
 6. Webhook events leave through an outbox table written in the same transaction as the change.
 7. The ledger row is the balance. Journal entries are an audit trail that the alarm prunes after
    24 hours; nothing replays them to rebuild state.
-8. Window history and record keys are projections of facts written in the same transaction:
-   `window.rolled` inserts a `budget_window_history` row, `recorded` inserts its key hash into
-   `budget_record_keys`. A roll happens only inside an accepted command or the alarm's sweep, so a
-   denial still writes nothing. Each transition checks per counter that consumed after plus what
-   rolled out equals consumed before plus what it consumed.
-9. The alarm also wakes at the next period end of any window that has a limit, so an idle budget
-   rolls within a second of the boundary. A budget without limits keeps the 24-hour heartbeat. The
-   sweep prunes hourly history after 30 days (other windows are kept) and purges expired record
-   keys in bounded batches, never past the ledger's clock: a command clamps its clock to the
-   ledger's, and a key purged at a later raw clock could otherwise let a replay count twice.
+8. Window history and record receipts are projections of facts written in the same transaction:
+   `window.rolled` inserts a `budget_window_history` row and deletes that window's periods beyond
+   the 12 `get` returns, and `recorded` inserts its receipt into `budget_record_receipts`. A roll
+   happens only inside an accepted command or the alarm's sweep, so a denial still writes nothing.
+   Each transition checks per counter that consumed after plus what rolled out equals consumed
+   before plus what it consumed.
+9. The alarm wakes only for work: due holds, the journal prune, and receipts to purge; a budget
+   with none keeps the 24-hour heartbeat. Window boundaries need no wake (B2). The sweep purges
+   expired receipts in bounded batches, never past the ledger's clock: a command clamps its clock
+   to the ledger's, and a receipt purged at a later raw clock could otherwise let a replay count
+   twice.
 
 ### B8. Unprice's own billing runs on budgets
 
@@ -502,7 +505,8 @@ await hold.settle({ usage: { feature: "model_call",
 { key: "customer:acme", unit: "USD", funding: { grant: { amount: 5, expiresAt: trialEnd } } }
 
 // Event ingestion records usage that already happened; it is never denied by a limit.
-// occurredAt bounds acceptance (7 days) and makes a replay within 8 days count once.
+// occurredAt is the event's own time and bounds acceptance (7 days); the same key and amount
+// count once within 8 days.
 await unprice.budget("customer:acme").record({ usage: { feature: "image", properties: {} },
   idempotencyKey: eventId, occurredAt: event.timestamp })
 ```
