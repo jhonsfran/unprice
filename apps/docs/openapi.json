@@ -3518,6 +3518,7 @@
                       "properties": {
                         "id": {
                           "type": "string",
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$",
                           "description": "Unique within the budget. Defaults to the window name.",
                           "example": "month"
                         },
@@ -3563,11 +3564,15 @@
                     "properties": {
                       "defaultTtlMs": {
                         "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 86400000,
                         "description": "TTL for an authorize that sends no ttlMs, in milliseconds. Defaults to 900000 (15 minutes).",
                         "example": 900000
                       },
                       "maxTtlMs": {
                         "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 86400000,
                         "description": "The largest ttlMs an authorize may ask for, in milliseconds. Defaults to 86400000 (1 day).",
                         "example": 86400000
                       }

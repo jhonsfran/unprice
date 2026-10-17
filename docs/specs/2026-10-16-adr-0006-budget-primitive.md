@@ -168,12 +168,12 @@ settle(actual 55)   held 80 -> 0          consumed 0 -> 55   available 20 -> 45
   happened (event ingestion, provider callbacks). `record` is never denied by a limit, because
   denying it cannot undo the work. It carries `occurredAt`, the epoch milliseconds the usage
   happened, like the event API's `timestamp`; the window rules are in B3.
-- When a counter's period ends, the next accepted command (or alarm sweep) writes a
-  `window.rolled { windowId, start, end, consumed }` fact for the period that ended, only when it
-  had usage. A counter keeps its period's start, so the fact is the same however late the next
-  command comes, and nothing wakes at a boundary. An idle gap of many periods writes one fact, for
-  the last period with usage. `get` returns the last 12 of these per window that has a limit,
-  newest first, and the store keeps no more than that.
+- When a counter's period ends, the next accepted command (or alarm sweep) rolls it and, if the
+  period had usage and a limit used that window when it ended, writes a `{ windowId, start, end,
+  consumed }` period to the window history. A counter keeps its period's start, so the period is
+  the same however late the next command comes, and nothing wakes at a boundary. An idle gap of
+  many periods writes one, for the last period with usage. `get` returns the last 12 per window
+  that has a limit, newest first, and the store keeps no more than that.
 - Every response carries `remaining` for each limit, and the HTTP adapter copies it into response
   headers. A denial is always HTTP 402 with `blockedBy` (the limit or the funding source) and a
   remedy.
@@ -186,8 +186,9 @@ settle(actual 55)   held 80 -> 0          consumed 0 -> 55   available 20 -> 45
 - A settle that arrives after expiry, or after the hold lapsed, is accepted and consumes, even if it
   pushes remaining below zero. It counts against the window it arrives in, not the window the work
   ran in: an amount is priced and attributed when it is written.
-- This holds until the hold's retention ends, 24 hours after it closes or lapses. After that the
-  row is purged, and a purged row cannot tell a first settle from a retry of one that committed.
+- This holds until the hold's retention ends, 24 hours after it closes or lapses, by the budget's
+  clock and however late the alarm purges the row. After that the row is retired, and a retired
+  row cannot tell a first settle from a retry of one that committed.
   Accepting it would count a retried settle twice, so the hold is retired: settle and release
   return 409 `HOLD_RETIRED`. Retention is the setting for how late is too late. A caller that knows
   its settle never committed reports that usage with `record` and its own idempotency key.
@@ -197,14 +198,13 @@ settle(actual 55)   held 80 -> 0          consumed 0 -> 55   available 20 -> 45
   ahead. Older usage returns 409 `TOO_LATE`; a future time returns 400 `INVALID_OCCURRED_AT`.
   `occurredAt` only bounds acceptance: the amount counts against the window it arrives in, like a
   late settle.
-- A record leaves a receipt that outlives its row: its key hash, request hash, amount, and
-  crossings, kept 8 days, longer than the 7-day accept window plus the skew. For those 8 days the
-  receipt answers exactly as the row did: the same key and amount replay with the original
-  response, and another amount under the same key is a 409 conflict. After them, a replay is
-  already too late. `occurredAt` is not part of the request hash: a retry is the same event even
-  if the caller stamps it again. It must still be the event's own time, because the 7-day
-  `TOO_LATE` bound is what stops a retry once its receipt is gone; the SDK requires it and never
-  defaults it to the time of the call.
+- A record's row is kept 8 days, longer than the 7-day accept window plus the skew. For those 8
+  days the same key and amount replay with the original response, and another amount, or another
+  verb, under the same key is a 409 conflict. After them, a replay is already too late.
+  `occurredAt` is not part of what a retry must repeat: a retry is the same event even if the
+  caller stamps it again. It must still be the event's own time, because the 7-day `TOO_LATE`
+  bound is what stops a retry once its row is gone; the SDK requires it and never defaults it to
+  the time of the call.
 
 ### B4. Pricing inside a budget, including credits
 
@@ -292,24 +292,31 @@ close: final capture, then source.release(key = "rel:{budget}:{epoch}")
 1. Check and debit in one synchronous block. An `await` on another Durable Object or on Postgres
    lets other requests interleave, so no check survives an `await`.
 2. Persist intent before any remote call; use deterministic ids; a replay returns the same answer.
-3. Idempotency is the key plus a payload hash. The same key with a different payload returns 409.
-4. Alarms are sweepers: they scan for due work, catch every error, and always re-arm. They never
-   throw and never delete themselves.
+3. Idempotency is the key plus the request it was first used with: the verb, the amount, and an
+   authorize's requested TTL, compared field by field. The same key with a different request
+   returns 409.
+4. Alarms are sweepers: they scan for due work, catch every error, and re-arm for the next due
+   row, or for a retry after an error. They never throw.
 5. Every transition asserts `funded = available + held + consumed + grantedToChildren`.
 6. Webhook events leave through an outbox table written in the same transaction as the change.
-7. The ledger row is the balance. Journal entries are an audit trail that the alarm prunes after
-   24 hours; nothing replays them to rebuild state.
-8. Window history and record receipts are projections of facts written in the same transaction:
-   `window.rolled` inserts a `budget_window_history` row and deletes that window's periods beyond
-   the 12 `get` returns, and `recorded` inserts its receipt into `budget_record_receipts`. A roll
-   happens only inside an accepted command or the alarm's sweep, so a denial still writes nothing.
-   Each transition checks per counter that consumed after plus what rolled out equals consumed
-   before plus what it consumed.
-9. The alarm wakes only for work: due holds, the journal prune, and receipts to purge; a budget
-   with none keeps the 24-hour heartbeat. Window boundaries need no wake (B2). The sweep purges
-   expired receipts in bounded batches, never past the ledger's clock: a command clamps its clock
-   to the ledger's, and a receipt purged at a later raw clock could otherwise let a replay count
-   twice.
+7. The ledger row is the balance, and the operation rows are the only other state: each verb
+   returns the rows it writes and its held and consumed deltas, and nothing keeps a journal to
+   rebuild state from. Each transition checks every row step against the hold lifecycle (open to
+   lapsed, settled, or released; lapsed to settled or released) and that the ledger moved by
+   exactly what the rows say.
+8. Window history is written in the same transaction as the roll: a period inserts a
+   `budget_window_history` row and deletes that window's periods beyond the 12 `get` returns. A
+   roll happens only inside an accepted command or the alarm's sweep, so a denial still writes
+   nothing. Each transition checks per counter that a counter that kept its period grew by what
+   the rows consumed, and one that rolled reported its old period when it had usage on a limited
+   window.
+9. The alarm wakes only for a due row: a hold to lapse or a row whose retention ended. A budget
+   with none sleeps until a command writes one, and window boundaries need no wake (B2). The sweep
+   first moves the budget's clock to now, then purges in bounded batches: a command clamps its
+   clock to the budget's, so a purge never runs ahead of a later command's clock and a replay
+   cannot count twice.
+10. A Durable Object gets its storage on its budget's first upsert. Any other verb on a key that
+    was never upserted answers `BUDGET_NOT_FOUND` without writing.
 
 ### B8. Unprice's own billing runs on budgets
 

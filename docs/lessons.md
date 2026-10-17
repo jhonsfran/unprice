@@ -220,7 +220,7 @@ patterns. Keep it cheap to load and useful.
   persist quantity ranges on the intent too, and seal nullable legacy quantity snapshots before
   retries or cumulative bucket updates so wallet payload hashes cannot drift.
 - 2026-10-16: The budget primitive (ADR-0006) keeps its state machine pure in
-  `@unprice/services/budgets` (`transition`); a DO persists the returned ledger, rows, and entries
+  `@unprice/services/budgets` (`transition`); a DO persists the returned ledger, rows, and periods
   in one transaction. When adding a verb, extend the reference model in `budget.properties.test.ts`
   (its own calendar math, no core imports beyond the API) instead of asserting the core's totals.
 - 2026-10-16: Budget amounts are `@unprice/money` `Amount` (bigint at `LEDGER_SCALE`) and the wire
@@ -232,12 +232,12 @@ patterns. Keep it cheap to load and useful.
 - 2026-10-16: Workers RPC carries `bigint` both ways, but DO SQLite rejects a bigint binding
   ("Cannot convert a BigInt value to a number"); store amounts as TEXT. A generic DO RPC method
   loses its type parameter through the stub, so narrow the result at the caller instead.
-- 2026-10-16: Budget window rolls are `window.rolled` facts that `transition` emits before the
-  command's facts; `BudgetSqliteStore.commit` derives `budget_window_history` and
-  `budget_record_receipts` from entries, so add new budget projections there, not in the processor.
-- 2026-10-16: Never purge budget state keyed on time past `ledger.lastAt` (`receiptsPurgeAt`):
-  commands clamp to `lastAt`, so a purge at a later raw clock lets a skewed-back command re-accept
-  a replay. The property test's `-3d` clock jumps catch this.
+- 2026-10-16: A budget verb returns a `Change` (rows written, held and consumed deltas) and
+  `transition` applies it; there are no facts or journal. Window rolls come back as `periods` that
+  `BudgetSqliteStore.commit` inserts, so add new budget outputs to `BudgetTransition`, not the processor.
+- 2026-10-16: Never purge budget state keyed on time past `ledger.lastAt`: commands clamp to
+  `lastAt`, so a purge at a later raw clock lets a skewed-back command re-accept a replay. A
+  `sweep` always writes `lastAt = now` first, and the alarm purges at that clock.
 - 2026-10-16: An error escaping a DO method (RPC or `runInDurableObject` instance call) shows up as
   an unhandled rejection in vitest-pool-workers; test rollback paths through the processor.
 - 2026-10-15: When reviewing run hierarchy, trace funding through `RunBudgetProcessor` and
@@ -971,3 +971,15 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   an `orphan` flag for "no limit references this"; `rollCounters` now reads that from the limits in
   force, so the flag cannot drift from the config. Likewise, don't wake an alarm for a roll a
   counter can replay later from its own period start.
+- 2026-10-16: A closed budget row answers until its `dueAt` by the clamped clock, not until the
+  alarm purges it. A keyed command that reuses an expired row's key returns that row in `purged`,
+  and the store deletes it before inserting (the `key_hash` index is unique).
+- 2026-10-16: To rewrite the budget core, freeze the old core next to it and diff every outcome
+  with fast-check across monotone, disjoint-key, and skewed clocks. On a skewed clock, purge the
+  frozen store only up to its own `lastAt`, or the harness reports false divergences.
+- 2026-10-16: Budget DO migrations are append-only once pushed (preview deploys run them). Keep
+  each `drizzle-kit generate` to drops or to creates: a create and a drop together prompt for a
+  rename, which cannot be answered non-interactively.
+- 2026-10-16: `BudgetDO` creates its schema on the first upsert; any other verb on an empty object
+  answers `BUDGET_NOT_FOUND` without writing. A test that builds its own processor over
+  `state.storage` must run `migrate` first.

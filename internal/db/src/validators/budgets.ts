@@ -22,10 +22,10 @@ export const MAX_HOLD_TTL_MS = 24 * 60 * 60 * 1000
 /** RFC 4006 Tcc: an expired hold keeps counting for this many TTLs before it lapses. */
 export const HOLD_LAPSE_TTL_MULTIPLIER = 2
 /**
- * Closed holds, lapsed holds, and charge/record rows are kept this long after they close. They
- * are the idempotency record and the tombstone that answers replays and late settles; after it, a
- * hold is retired and can no longer be settled or released. A budget accepts `record` this long
- * past its `closesAt`.
+ * Closed holds, lapsed holds, and charge rows answer this long after they close. They are the
+ * idempotency record and the tombstone that answers replays and late settles; after it, a hold is
+ * retired and can no longer be settled or released. A budget accepts `record` this long past its
+ * `closesAt`.
  */
 export const OPERATION_RETENTION_MS = 24 * 60 * 60 * 1000
 /** `record` accepts usage that occurred at most this long ago (`TOO_LATE` beyond it). */
@@ -33,9 +33,9 @@ export const RECORD_ACCEPT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 /** `record` rejects `occurredAt` further than this ahead of the budget's clock. */
 export const RECORD_FUTURE_SKEW_MS = 5 * 60 * 1000
 /**
- * A record's receipt outlives its row: within this long a replay never counts again and a changed
- * request under the same key is a conflict. It must exceed the accept window plus the skew, so a
- * replay the receipt no longer catches is already `TOO_LATE`.
+ * A record's row answers this long: within it a replay never counts again and a changed request
+ * under the same key is a conflict. It must exceed the accept window plus the skew, so a replay
+ * the row no longer catches is already `TOO_LATE`.
  */
 export const RECORD_DEDUPE_MS = 8 * 24 * 60 * 60 * 1000
 /** `get` returns this many ended periods per limited window, newest first; no more are kept. */
