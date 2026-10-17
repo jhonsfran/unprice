@@ -1,6 +1,6 @@
 import { reset, runInDurableObject } from "cloudflare:test"
 import { env } from "cloudflare:workers"
-import { parseBudgetConfig } from "@unprice/services/budgets"
+import { upsertBudgetInputSchema } from "@unprice/db/validators"
 import { afterEach, describe, expect, it } from "vitest"
 import {
   budgetNamespace,
@@ -39,16 +39,8 @@ describe("Durable Object workers runtime bindings", () => {
   it("binds BudgetDO inside workerd", async () => {
     const { BudgetDO } = await import("~/ingestion/budget/BudgetDO")
     const stub = budgetNamespace(env).getByName("test:workers:budget:smoke")
-    const config = parseBudgetConfig({ limits: [] })
-    if (config.err) throw config.err
-
-    const reply = await stub.execute({
-      type: "upsert",
-      key: "smoke",
-      projectId: "proj_1",
-      unit: "money:USD",
-      config: config.val,
-    })
+    const parsed = upsertBudgetInputSchema.parse({ key: "smoke", unit: "USD", limits: [] })
+    const reply = await stub.execute({ type: "upsert", projectId: "proj_1", ...parsed })
 
     expect(reply.ok).toBe(true)
     await runInDurableObject(stub, async (instance: InstanceType<typeof BudgetDO>, state) => {

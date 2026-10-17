@@ -92,8 +92,6 @@ function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): Unprice
     case "BUDGET_NOT_FOUND":
     case "HOLD_NOT_FOUND":
       return new UnpriceApiError({ code: "NOT_FOUND", message })
-    case "INVALID_AMOUNT":
-    case "INVALID_CONFIG":
     case "INVALID_TTL":
     case "INVALID_OCCURRED_AT":
       return new UnpriceApiError({ code: "BAD_REQUEST", message })

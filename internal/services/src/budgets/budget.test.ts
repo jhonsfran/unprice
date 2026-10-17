@@ -1,3 +1,4 @@
+import { upsertBudgetInputSchema } from "@unprice/db/validators"
 import { formatAmount } from "@unprice/money"
 import { describe, expect, it } from "vitest"
 import {
@@ -10,7 +11,6 @@ import {
   consume,
   emptyLedger,
   formatBudgetConfig,
-  parseBudgetConfig,
   transition,
 } from "./index"
 import { MemoryBudgetStore } from "./memory-store.fixture"
@@ -27,10 +27,18 @@ const $ = (units: number) => BigInt(units) * BigInt(100_000_000)
 
 const month100: BudgetConfigInput = { limits: [{ id: "month", amount: "100", window: "month" }] }
 
+const wire = (input: BudgetConfigInput) =>
+  upsertBudgetInputSchema.safeParse({ key: "customer:acme", unit: "USD", ...input })
+
 function config(input: BudgetConfigInput) {
-  const parsed = parseBudgetConfig(input)
-  if (parsed.err) throw parsed.err
-  return parsed.val
+  const parsed = wire(input)
+  if (!parsed.success) throw parsed.error
+  return parsed.data.config
+}
+
+function issues(input: BudgetConfigInput) {
+  const parsed = wire(input)
+  return parsed.success ? [] : parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`)
 }
 
 function upsert(input: BudgetConfigInput, unit = "money:USD"): BudgetCommand {
@@ -759,52 +767,44 @@ describe("config schema", () => {
   })
 
   it("rejects duplicate ids, bad amounts, and inverted TTL bounds", () => {
-    const amounts = parseBudgetConfig({
-      limits: [
-        { id: "a", amount: "1.123456789", window: "day" },
-        { id: "b", amount: "99999999999", window: "day" },
-      ],
-    })
-    expect(amounts.err?.rejection).toEqual({
-      code: "INVALID_CONFIG",
-      issues: [
-        "limits.0.amount: invalid amount: not_decimal",
-        "limits.1.amount: invalid amount: too_large",
-      ],
-    })
+    expect(
+      issues({
+        limits: [
+          { id: "a", amount: "1.123456789", window: "day" },
+          { id: "b", amount: "99999999999", window: "day" },
+        ],
+      })
+    ).toEqual([
+      "limits.0.amount: a non-negative decimal string with at most 8 decimal places",
+      "limits.1.amount: invalid amount: too_large",
+    ])
 
     expect(
-      parseBudgetConfig({
+      issues({
         limits: [
           { id: "a", amount: "1", window: "day" },
           { id: "a", amount: "2", window: "day" },
         ],
         holds: { defaultTtlMs: hour, maxTtlMs: minute },
-      }).err?.rejection
-    ).toEqual({
-      code: "INVALID_CONFIG",
-      issues: [
-        "limits.1.id: duplicate limit id a",
-        "holds.defaultTtlMs: defaultTtlMs must not exceed maxTtlMs",
-      ],
-    })
+      })
+    ).toEqual([
+      "limits.1.id: duplicate limit id a",
+      "holds.defaultTtlMs: defaultTtlMs must not exceed maxTtlMs",
+    ])
 
     expect(
-      parseBudgetConfig({
+      issues({
         limits: [
           { id: "h", amount: "1", window: "hour", anchor: "2026-10-15T00:00:00Z" },
           { id: "d", amount: "1", window: "day", anchor: "2026-10-15" },
         ],
         closesAt: "1969-12-31T23:59:59Z",
-      }).err?.rejection
-    ).toEqual({
-      code: "INVALID_CONFIG",
-      issues: [
-        "limits.0.anchor: only day, week, and month windows take an anchor",
-        "limits.1.anchor: Invalid datetime",
-        "closesAt: must not be before 1970",
-      ],
-    })
+      })
+    ).toEqual([
+      "limits.0.anchor: only day, week, and month windows take an anchor",
+      "limits.1.anchor: Invalid datetime",
+      "closesAt: must not be before 1970",
+    ])
   })
 })
 

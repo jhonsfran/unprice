@@ -1,10 +1,7 @@
 import { evictDurableObject, reset, runInDurableObject } from "cloudflare:test"
 import { env } from "cloudflare:workers"
-import {
-  type BudgetConfigInput,
-  type BudgetOutcome,
-  parseBudgetConfig,
-} from "@unprice/services/budgets"
+import { type BudgetConfigInput, upsertBudgetInputSchema } from "@unprice/db/validators"
+import type { BudgetOutcome } from "@unprice/services/budgets"
 import type { BudgetReply, BudgetRequest } from "@unprice/services/use-cases"
 import { drizzle } from "drizzle-orm/durable-sqlite"
 import { afterEach, describe, expect, it } from "vitest"
@@ -37,9 +34,8 @@ function stubFor(key = `customer:${crypto.randomUUID()}`) {
 }
 
 function upsert(key: string, config: BudgetConfigInput): BudgetRequest {
-  const parsed = parseBudgetConfig(config)
-  if (parsed.err) throw parsed.err
-  return { type: "upsert", key, projectId: "proj_1", unit: "money:USD", config: parsed.val }
+  const parsed = upsertBudgetInputSchema.parse({ key, unit: "USD", ...config })
+  return { type: "upsert", projectId: "proj_1", ...parsed }
 }
 
 const fiftyPerMonth: BudgetConfigInput = {

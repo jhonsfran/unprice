@@ -424,7 +424,7 @@ describe("budgets API", () => {
     })
   })
 
-  it("returns 400 for a config the core rejects before reaching the budget", async () => {
+  it("returns 400 for a config the boundary rejects before reaching the budget", async () => {
     const response = await call("/v1/budgets/upsert", {
       key: "customer:acme",
       unit: "USD",
@@ -436,7 +436,7 @@ describe("budgets API", () => {
 
     expect(response.status).toBe(400)
     expect(((await response.json()) as { error: { message: string } }).error.message).toBe(
-      "Invalid budget config: limits.1.id: duplicate limit id month"
+      "limits.1.id: duplicate limit id month"
     )
     expect(mocks.execute).toHaveBeenCalledTimes(0)
   })

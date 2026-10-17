@@ -1,18 +1,12 @@
-/** Budget config (ADR-0006 B1): the parsed limits and hold settings, and the audit of an upsert. */
+/** Budget config (ADR-0006 B1): the stored record, and the audit of an upsert. */
 
-import {
-  DEFAULT_HOLD_TTL_MS,
-  MAX_BUDGET_LIMITS,
-  MAX_HOLD_TTL_MS,
-  MIN_HOLD_TTL_MS,
-} from "@unprice/db/validators"
-import { Err, Ok, type Result } from "@unprice/error"
-import { type Amount, formatAmount, parseAmount } from "@unprice/money"
-import { z } from "zod"
-import { UnPriceBudgetError } from "./model"
-import { BUDGET_WINDOWS, type WindowId, isAnchoredWindow, windowIdOf } from "./windows"
+import type { BudgetConfig } from "@unprice/db/validators"
+import type { Amount } from "@unprice/money"
+import { type WindowId, windowIdOf } from "./windows"
 
-// Timing constants live with the wire contract, whose descriptions state them.
+// The wire schema parses a config into these types; the timing constants live with it, whose
+// descriptions state them.
+export type { BudgetConfig, BudgetConfigInput } from "@unprice/db/validators"
 export {
   DEFAULT_HOLD_TTL_MS,
   HOLD_LAPSE_TTL_MULTIPLIER,
@@ -23,110 +17,10 @@ export {
   RECORD_DEDUPE_MS,
   RECORD_FUTURE_SKEW_MS,
   WINDOW_HISTORY_PERIODS,
+  formatBudgetConfig,
 } from "@unprice/db/validators"
 
-const instantSchema = z
-  .string()
-  .datetime({ offset: true })
-  .transform((text) => Date.parse(text))
-  .refine((at) => at >= 0, "must not be before 1970")
-
-const amountSchema = z.string().transform((text, ctx): Amount => {
-  const parsed = parseAmount(text)
-  if (parsed.ok) return parsed.amount
-  ctx.addIssue({ code: z.ZodIssueCode.custom, message: `invalid amount: ${parsed.reason}` })
-  return z.NEVER
-})
-
-const ttlSchema = z.number().int().min(MIN_HOLD_TTL_MS).max(MAX_HOLD_TTL_MS)
-
-const budgetLimitSchema = z
-  .object({
-    id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/, "letters, digits and _ . : -"),
-    amount: amountSchema,
-    window: z.enum(BUDGET_WINDOWS),
-    /** Epoch ms; periods of `window` start here instead of on the UTC calendar. */
-    anchor: instantSchema.optional(),
-    enforce: z.enum(["hard", "soft"]).default("hard"),
-  })
-  .refine((limit) => limit.anchor === undefined || isAnchoredWindow(limit.window), {
-    path: ["anchor"],
-    message: "only day, week, and month windows take an anchor",
-  })
-
-/**
- * Invariants:
- * - limit ids are unique, at most MAX_BUDGET_LIMITS limits
- * - every amount is a parsed `Amount` in [0, AMOUNT_MAX]
- * - MIN_HOLD_TTL_MS <= defaultTtlMs <= maxTtlMs <= MAX_HOLD_TTL_MS
- * - `closesAt` is null, or the epoch ms at which the budget stops admitting new spend
- * Usage is counted per window id, not per limit, so renaming a limit, changing its window, or
- * removing and re-adding it never resets or forgets consumption. A window id no limit used before
- * (a new anchor) starts counting when it is added; it cannot backfill.
- */
-export const budgetConfigSchema = z
-  .object({
-    limits: z.array(budgetLimitSchema).max(MAX_BUDGET_LIMITS),
-    holds: z
-      .object({
-        defaultTtlMs: ttlSchema.default(DEFAULT_HOLD_TTL_MS),
-        maxTtlMs: ttlSchema.default(MAX_HOLD_TTL_MS),
-      })
-      .default({}),
-    /** Stored here and applied by the SDK (B9). The core never reads it. */
-    onUnavailable: z
-      .union([z.enum(["deny", "allow"]), z.object({ allowUpTo: amountSchema })])
-      .default("deny"),
-    closesAt: instantSchema.nullable().default(null),
-  })
-  .superRefine((config, ctx) => {
-    const seen = new Set<string>()
-    config.limits.forEach((limit, index) => {
-      if (seen.has(limit.id)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["limits", index, "id"],
-          message: `duplicate limit id ${limit.id}`,
-        })
-      }
-      seen.add(limit.id)
-    })
-    if (config.holds.defaultTtlMs > config.holds.maxTtlMs) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["holds", "defaultTtlMs"],
-        message: "defaultTtlMs must not exceed maxTtlMs",
-      })
-    }
-  })
-
-export type BudgetConfig = z.output<typeof budgetConfigSchema>
-export type BudgetConfigInput = z.input<typeof budgetConfigSchema>
 export type BudgetLimit = BudgetConfig["limits"][number]
-
-export function parseBudgetConfig(input: unknown): Result<BudgetConfig, UnPriceBudgetError> {
-  const parsed = budgetConfigSchema.safeParse(input)
-  if (parsed.success) return Ok(parsed.data)
-  const issues = parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`)
-  return Err(new UnPriceBudgetError({ code: "INVALID_CONFIG", issues }))
-}
-
-/** The JSON-safe form of a config; `parseBudgetConfig(formatBudgetConfig(c))` returns `c`. */
-export function formatBudgetConfig(config: BudgetConfig) {
-  return {
-    limits: config.limits.map(({ anchor, ...limit }) => ({
-      ...limit,
-      amount: formatAmount(limit.amount),
-      ...(anchor === undefined ? {} : { anchor: new Date(anchor).toISOString() }),
-    })),
-    holds: { ...config.holds },
-    onUnavailable:
-      typeof config.onUnavailable === "string"
-        ? config.onUnavailable
-        : { allowUpTo: formatAmount(config.onUnavailable.allowUpTo) },
-    closesAt: config.closesAt === null ? null : new Date(config.closesAt).toISOString(),
-  } satisfies BudgetConfigInput
-}
 
 /**
  * True from `closesAt + graceMs` on. Authorize and charge are refused from `closesAt`, `record`

@@ -4,13 +4,7 @@
  */
 
 import { BaseError, Err, type Result } from "@unprice/error"
-import {
-  AMOUNT_MAX,
-  type Amount,
-  LEDGER_SCALE,
-  type SignedAmount,
-  formatAmount,
-} from "@unprice/money"
+import { type Amount, type SignedAmount, formatAmount } from "@unprice/money"
 import type { BudgetConfig, BudgetLimit, BudgetRecord, ConfigChange } from "./config"
 import type { AnchoredWindowId, BudgetWindow, WindowId } from "./windows"
 
@@ -265,8 +259,6 @@ export function isOutcomeOf<T extends BudgetOutcome["type"]>(
 
 export type BudgetRejection =
   | Readonly<{ code: "BUDGET_NOT_FOUND" }>
-  | Readonly<{ code: "INVALID_CONFIG"; issues: readonly string[] }>
-  | Readonly<{ code: "INVALID_AMOUNT"; amount: string; reason: "not_decimal" | "too_large" }>
   | Readonly<{ code: "INVALID_TTL"; ttlMs: number; minTtlMs: number; maxTtlMs: number }>
   | Readonly<{ code: "LIMIT_EXCEEDED"; blocked: Blocked; balance: BudgetBalance }>
   | Readonly<{ code: "HOLD_NOT_FOUND"; holdId: string }>
@@ -298,12 +290,6 @@ function rejectionMessage(rejection: BudgetRejection): string {
   switch (rejection.code) {
     case "BUDGET_NOT_FOUND":
       return "Budget does not exist"
-    case "INVALID_CONFIG":
-      return `Invalid budget config: ${rejection.issues.join("; ")}`
-    case "INVALID_AMOUNT":
-      return rejection.reason === "too_large"
-        ? `Amount ${rejection.amount} is above the maximum ${formatAmount(AMOUNT_MAX)}`
-        : `Amount ${rejection.amount} is not a non-negative decimal with at most ${LEDGER_SCALE} places`
     case "INVALID_TTL":
       return `Hold TTL must be between ${rejection.minTtlMs} and ${rejection.maxTtlMs} ms, got ${rejection.ttlMs}`
     case "LIMIT_EXCEEDED":
