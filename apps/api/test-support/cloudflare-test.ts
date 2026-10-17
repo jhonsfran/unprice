@@ -56,7 +56,7 @@ async function clearNamespace(namespace: DurableObjectNamespace<unknown>) {
 }
 
 function getResettableNamespaces() {
-  return [env.entitlementwindow, env.runbudget].filter(isDurableObjectNamespace)
+  return [env.entitlementwindow, env.runbudget, env.budget].filter(isDurableObjectNamespace)
 }
 
 export async function reset() {

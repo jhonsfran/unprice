@@ -105,6 +105,10 @@
           {
             "name": "runbudget",
             "class_name": "RunBudgetDO"
+          },
+          {
+            "name": "budget",
+            "class_name": "BudgetDO"
           }
         ]
       },
@@ -128,6 +132,10 @@
         {
           "tag": "v6",
           "new_sqlite_classes": ["RunBudgetDO"]
+        },
+        {
+          "tag": "v7",
+          "new_sqlite_classes": ["BudgetDO"]
         }
       ]
     },
@@ -233,6 +241,10 @@
           {
             "name": "runbudget",
             "class_name": "RunBudgetDO"
+          },
+          {
+            "name": "budget",
+            "class_name": "BudgetDO"
           }
         ]
       },
@@ -256,6 +268,10 @@
         {
           "tag": "v6",
           "new_sqlite_classes": ["RunBudgetDO"]
+        },
+        {
+          "tag": "v7",
+          "new_sqlite_classes": ["BudgetDO"]
         }
       ]
     },
@@ -339,6 +355,10 @@
           {
             "name": "runbudget",
             "class_name": "RunBudgetDO"
+          },
+          {
+            "name": "budget",
+            "class_name": "BudgetDO"
           }
         ]
       },
@@ -368,6 +388,10 @@
         {
           "tag": "v6",
           "new_sqlite_classes": ["RunBudgetDO"]
+        },
+        {
+          "tag": "v7",
+          "new_sqlite_classes": ["BudgetDO"]
         }
       ]
     }

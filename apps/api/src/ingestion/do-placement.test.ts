@@ -6,6 +6,7 @@ import {
   DO_JURISDICTION,
   DO_LOCATION_HINT,
   durableObjectJurisdiction,
+  getBudgetStub,
   getEntitlementWindowStub,
   getRunBudgetStub,
   isJurisdictionSupported,
@@ -54,6 +55,22 @@ describe("durable object placement", () => {
     expect(harness.jurisdiction).toHaveBeenCalledWith("eu")
     expect(harness.getByName).toHaveBeenCalledWith(
       "preview:proj_123:cus_123:brun_123",
+      DO_LOCATION_HINT
+    )
+  })
+
+  it("scopes the budget to the EU jurisdiction with the key as the name's tail", () => {
+    const harness = createNamespaceHarness()
+    const env = {
+      APP_ENV: "preview",
+      budget: harness.namespace,
+    } as unknown as Pick<Env, "APP_ENV" | "budget">
+
+    getBudgetStub(env, { projectId: "proj_123", key: "customer:acme/run:1" })
+
+    expect(harness.jurisdiction).toHaveBeenCalledWith("eu")
+    expect(harness.getByName).toHaveBeenCalledWith(
+      "preview:proj_123:budget:customer:acme/run:1",
       DO_LOCATION_HINT
     )
   })
@@ -147,7 +164,10 @@ describe("durable object placement guards", () => {
     // `env.entitlementwindow.<anything>` — the form that skips the
     // jurisdiction. Wiring (`entitlementwindow: c.env.entitlementwindow,`) has
     // no trailing access and stays legal.
-    const reachThrough = /\.\s*(entitlementwindow|runbudget)\s*\.\s*\w/
+    // `budget` is also an ordinary field name (`decision.budget.runId`), so
+    // that binding is matched only when read off an env.
+    const reachThrough =
+      /\.\s*(entitlementwindow|runbudget)\s*\.\s*\w|\benv\s*\.\s*budget\s*\.\s*\w/
     expect(offenders(reachThrough, { includeTests: true, allow: [PLACEMENT_MODULE] })).toEqual([])
   })
 

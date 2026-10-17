@@ -219,6 +219,38 @@ patterns. Keep it cheap to load and useful.
 - 2026-07-11: RunBudget alarms must flush captureable bucket spend even before an intent exists;
   persist quantity ranges on the intent too, and seal nullable legacy quantity snapshots before
   retries or cumulative bucket updates so wallet payload hashes cannot drift.
+- 2026-10-16: The budget primitive (ADR-0006) keeps its state machine pure in
+  `@unprice/services/budgets` (`transition`); a DO persists the returned ledger, rows, and periods
+  in one transaction. When adding a verb, extend the reference model in `budget.properties.test.ts`
+  (its own calendar math, no core imports beyond the API) instead of asserting the core's totals.
+- 2026-10-17: A budget estimate is the maximum authorized usage. Reject settlement above the
+  reservation; do not treat it as permission for debt. `record` reports work that already ran, so
+  it always counts, even past a hard limit: refusing it loses the count, not the spend.
+- 2026-10-17: Keep unresolved BudgetDO holds reserved across timeouts and window resets. Only
+  final settlement or explicit zero-usage release can return capacity; see ADR-0006 B2-B3.
+- 2026-10-17: No BudgetDO data has shipped (see 136ab303a). Change its stored format without
+  read-compat, startup repair, or legacy states; keep its migrations append-only and wipe local
+  `.wrangler` budget state after a format change.
+- 2026-10-17: The installed Drizzle SQLite generator splits commas in index expressions. For
+  budget key lookup, use `data_json ->> '$.idempotencyKey'`, generate through
+  `bin/migrate.dev budget`, and verify index selection with `EXPLAIN QUERY PLAN` in workerd.
+- 2026-10-16: Budget amounts are `@unprice/money` `Amount` (bigint at `LEDGER_SCALE`) and the wire
+  patterns live in `@unprice/db/validators`; never redeclare them in the budget core.
+- 2026-10-16: `Omit` over a generic `BudgetOutcome & { type: T }` does not narrow; strip `type` at
+  the route where `T` is concrete (`const { type: _, ...outcome } = await runBudgetVerb(...)`).
+- 2026-10-16: `internal/services` targets ES2018, so bigint literals (`1n`) fail tsc; use
+  `BigInt(1)` in budget code and tests.
+- 2026-10-16: Workers RPC carries `bigint` both ways, but DO SQLite rejects a bigint binding
+  ("Cannot convert a BigInt value to a number"); store amounts as TEXT. A generic DO RPC method
+  loses its type parameter through the stub, so narrow the result at the caller instead.
+- 2026-10-16: A budget verb returns a `Change` (rows written, held and consumed deltas) and
+  `transition` applies it; there are no facts or journal. Window rolls come back as `periods` that
+  `BudgetSqliteStore.commit` inserts, so add new budget outputs to `BudgetTransition`, not the processor.
+- 2026-10-16: Never purge budget state keyed on time past `ledger.lastAt`: commands clamp to
+  `lastAt`, so a purge at a later raw clock lets a skewed-back command re-accept a replay. A
+  `sweep` always writes `lastAt = now` first, and the alarm purges at that clock.
+- 2026-10-16: An error escaping a DO method (RPC or `runInDurableObject` instance call) shows up as
+  an unhandled rejection in vitest-pool-workers; test rollback paths through the processor.
 - 2026-10-15: When reviewing run hierarchy, trace funding through `RunBudgetProcessor` and
   `WalletService.lockCustomer`; separate run DOs share customer funds, while `parentRunId` alone
   does not enforce a recursive parent budget.
@@ -633,6 +665,8 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-06-20: Run `pnpm --filter @unprice/api generate` with the API dev server running before
   SDK contract work is complete; it updates `apps/docs/openapi.json`,
   `packages/api/src/openapi.d.ts`, and `packages/api/src/generated/sdk-resources.ts` together.
+- 2026-10-16: `pnpm generate` writes `openapi.d.ts` unformatted (4 spaces, semicolons), which
+  diffs every line; run `pnpm biome format packages/api/src/openapi.d.ts --write` afterwards.
 - 2026-05-08: Public Hono routes callable from `@unprice/api` need SDK-shaped `operationId`s.
 - 2026-05-08: Align first OpenAPI tag and first `/v1` path segment with the SDK namespace.
 - 2026-05-08: Keep SDK resource methods as one-object calls grouped by product concepts.
@@ -932,3 +966,31 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-09-19: Contract tests that assert exact alarm timestamps must clear the alarm the DO's own
   bootstrap arms (`RunBudgetDO.workers.test.ts`), or a lifecycle alarm that happens to fall
   earlier silently swallows the `setAlarm` the test is asserting on.
+- 2026-10-16: k6 cannot share state across VUs, so a load test that must compare a server total
+  with what the client saw uses a `Counter` that VUs add to and `teardown` subtracts from, with a
+  `count==0` threshold (`tooling/k6/budgets.ts`). Counters accept negative values, and a non-zero
+  total fails the run with exit 99.
+- 2026-10-16: k6 in Docker Desktop against a local `wrangler dev` occasionally reuses a keep-alive
+  connection the server already closed and gets `EOF` (status 0). It is the client pool, not the
+  API: the same load is clean with `K6_NO_CONNECTION_REUSE=true` and with Node's `fetch`. Check
+  for it before chasing a server bug.
+- 2026-10-16: A dedupe that relies on a client-sent timestamp (`record`'s `occurredAt` bounding
+  replays past the 8-day receipt) breaks the moment the SDK defaults that timestamp to the time of
+  the call: a retry gets a fresh time and passes the bound. Require it in the SDK, and keep clock
+  values out of the request hash so a re-stamped retry replays instead of conflicting.
+- 2026-10-16: Don't store a flag the config already implies. The budget's anchored counters used
+  an `orphan` flag for "no limit references this"; `rollCounters` now reads that from the limits in
+  force, so the flag cannot drift from the config. Likewise, don't wake an alarm for a roll a
+  counter can replay later from its own period start.
+- 2026-10-16: A closed budget row answers until its `dueAt` by the clamped clock, not until the
+  alarm purges it. A keyed command that reuses an expired row's key returns that row in `purged`,
+  and the store deletes it before inserting (the `key_hash` index is unique).
+- 2026-10-16: To rewrite the budget core, freeze the old core next to it and diff every outcome
+  with fast-check across monotone, disjoint-key, and skewed clocks. On a skewed clock, purge the
+  frozen store only up to its own `lastAt`, or the harness reports false divergences.
+- 2026-10-16: Budget DO migrations are append-only once pushed (preview deploys run them). Keep
+  each `drizzle-kit generate` to drops or to creates: a create and a drop together prompt for a
+  rename, which cannot be answered non-interactively.
+- 2026-10-16: `BudgetDO` creates its schema on the first upsert; any other verb on an empty object
+  answers `BUDGET_NOT_FOUND` without writing. A test that builds its own processor over
+  `state.storage` must run `migrate` first.

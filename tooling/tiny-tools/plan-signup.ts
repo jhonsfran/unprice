@@ -1,4 +1,5 @@
 import { Unprice, type operations } from "@unprice/api"
+import { assert, colors, isRecord, passed, step } from "./harness"
 
 type ListPlanVersionsRequest =
   operations["planVersions.list"]["requestBody"]["content"]["application/json"]
@@ -22,14 +23,6 @@ const CURRENCY = getOptionalEnvValue("CURRENCY", CURRENCIES)
 const CREDIT_LINE_POLICY = getOptionalEnvValue("CREDIT_LINE_POLICY", CREDIT_LINE_POLICIES)
 const CREDIT_LINE_AMOUNT = getOptionalNonNegativeIntegerEnvValue("CREDIT_LINE_AMOUNT")
 const EXPECTED_CREDIT_LINE_POLICY = CREDIT_LINE_POLICY ?? "uncapped"
-
-const colors = {
-  green: (s: string) => `\x1b[32m${s}\x1b[0m`,
-  red: (s: string) => `\x1b[31m${s}\x1b[0m`,
-  yellow: (s: string) => `\x1b[33m${s}\x1b[0m`,
-  cyan: (s: string) => `\x1b[36m${s}\x1b[0m`,
-  dim: (s: string) => `\x1b[2m${s}\x1b[0m`,
-}
 
 if (!UNPRICE_TOKEN) {
   console.error(colors.red("UNPRICE_TOKEN env var is required"))
@@ -72,16 +65,6 @@ function getOptionalNonNegativeIntegerEnvValue(name: string): number | null {
   throw new Error(`${name} must be a non-negative integer. Received: ${rawValue}`)
 }
 
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) {
-    throw new Error(`Assertion failed: ${message}`)
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
-}
-
 function getFeatureSlugFromEntitlement(entitlement: unknown): string | null {
   if (!isRecord(entitlement)) return null
 
@@ -102,24 +85,6 @@ function getFeatureSlugFromEntitlement(entitlement: unknown): string | null {
 
 function getFeatureSlugFromPlanFeature(planFeature: PlanVersion["planFeatures"][number]): string {
   return planFeature.feature.slug
-}
-
-async function step(name: string, fn: () => Promise<void>): Promise<void> {
-  const start = performance.now()
-
-  try {
-    await fn()
-    const ms = (performance.now() - start).toFixed(0)
-    console.info(`  ${colors.green("PASS")} ${name} ${colors.dim(`(${ms}ms)`)}`)
-  } catch (err) {
-    const ms = (performance.now() - start).toFixed(0)
-    console.error(
-      `  ${colors.red("FAIL")} ${name} ${colors.dim(`(${ms}ms)`)}\n    ${
-        err instanceof Error ? err.message : String(err)
-      }`
-    )
-    throw err
-  }
 }
 
 async function planPreflight(): Promise<void> {
@@ -312,7 +277,7 @@ async function main(): Promise<void> {
   await step("subscription: new customer has active subscription", subscriptionCheck)
   await step("entitlements: new customer receives plan features", entitlementsCheck)
 
-  console.info(`\n  ${colors.green("4 passed")}\n`)
+  console.info(`\n  ${colors.green(`${passed()} passed`)}\n`)
 }
 
 main().catch(() => {

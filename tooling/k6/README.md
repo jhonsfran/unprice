@@ -99,6 +99,59 @@ The final output includes `OVERSPEND_SUMMARY_JSON` with the accepted, budget-den
 unexpected-failure counts plus the invariant result. Local verification is limited to
 typechecking and bundling; running `overspend` sends requests to the configured target API.
 
+## Budgets: concurrency, accuracy, and latency
+
+`budgets.ts` load-tests the budget primitive (`/v1/budgets/*`). It needs only `UNPRICE_TOKEN` and
+`BASE_URL`: setup creates fresh budgets under `k6:budgets/<timestamp>`, so runs never share state.
+
+```bash
+pnpm --filter @unprice/k6 budgets
+```
+
+Two scenarios run at a fixed arrival rate:
+
+| Scenario | Traffic | Budget |
+|---|---|---|
+| `gated` | 55% authorize→settle (actual ≤ estimate), 15% authorize→release, 30% charge | `KEYS` budgets, each with one hard lifetime limit of `LIMIT` |
+| `recorded` | record at `RECORD_RATE`/s | its own budget with a 1-unit limit, which record runs past |
+
+Amounts are random multiples of 0.0001 up to 1. `DUPLICATE_PERCENT` of the final writes (settle,
+release, charge, record) go out twice in one `http.batch`, the way a client retry races its
+original. With the defaults, the budget runs out about halfway through the run, so admits and
+denials race on the same counter.
+
+What fails the run (exit 99):
+
+| Property | Check |
+|---|---|
+| Accuracy | `budget_drift_ticks == 0`: every applied amount adds to it, and teardown subtracts what each budget consumed. Any lost or double-counted amount leaves it non-zero. |
+| Idempotency | Of the copies that succeed, exactly one applies and the rest replay it. |
+| Concurrency | Teardown: no hard limit consumed past its amount, no hold left open, remaining = limit − consumed. |
+| Decisions | Every answer is a 200 or a 402 that names the limit with a remedy a lifetime limit allows. Anything else counts in `budget_unexpected`. |
+| Latency | `p(95) < P95_MS` and `p(99) < P99_MS` for each verb, from `http_req_duration{name:POST /v1/budgets/<verb>}`. |
+
+Knobs (env or `.env`):
+
+```env
+RATE=50              # gated iterations per second
+DURATION=30s
+VUS=50               # pre-allocated VUs for gated
+KEYS=1               # 1 = every request contends on one budget; raise to spread over budgets
+LIMIT=200            # hard lifetime limit per gated budget, in whole units
+RECORD_RATE=5        # record requests per second; 0 disables the scenario (default RATE/10)
+DUPLICATE_PERCENT=10
+P95_MS=500
+P99_MS=1500
+```
+
+Measure the hot path with `KEYS=1`: every request then serializes through one Durable Object.
+Raise `KEYS` to measure throughput across budgets; `LIMIT` is per budget, so scale it down to keep
+the budgets running out mid-run.
+
+Against a local `wrangler dev` through Docker Desktop, k6 can reuse a pooled keep-alive connection
+the server already closed, and that request fails with `EOF` (status 0, counted as unexpected).
+Set `K6_NO_CONNECTION_REUSE=true` for local runs; keep reuse on for preview and production.
+
 ## Ingestion failure test
 
 The ingestion failure script sends valid usage events with the non-production failure-test header.

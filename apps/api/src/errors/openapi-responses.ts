@@ -41,3 +41,12 @@ export const openApiErrorResponses = {
     "The server has encountered a situation it does not know how to handle."
   ),
 }
+
+/** Budget operations that gate work add the 402 a denial returns. */
+export const openApiBudgetErrorResponses = {
+  ...openApiErrorResponses,
+  [HttpStatusCodes.PAYMENT_REQUIRED]: jsonContent(
+    errorSchemaFactory(z.enum(["BUDGET_EXCEEDED"])).openapi("ErrBudgetExceeded"),
+    "The request does not fit the budget. `details.blocked` names the limit that blocked it and the remedy that would let it through."
+  ),
+}

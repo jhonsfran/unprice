@@ -111,6 +111,82 @@ For streaming APIs, reserve before `streamText`, settle from `onFinish`, and app
 provider-specific decision on errors. The lower-level `runs` API remains available for workflows
 that need several usage events or a serializable run identifier.
 
+## Budgets
+
+A budget enforces hard usage caps under a key you choose. `estimate` is the maximum authorized
+usage. Actual usage must stay within that amount. Define the budget once with `budgets.upsert`,
+then take a handle with `unprice.budget(key)`. The handle never creates or changes the budget.
+
+```ts
+await unprice.budgets.upsert({
+  key: "customer:acme",
+  unit: "USD",
+  limits: [{ amount: "50", window: "month" }],
+})
+
+const acme = unprice.budget("customer:acme")
+const maxOutputTokens = 256
+const maximumCost = maximumCostOf({ model, prompt, maxOutputTokens })
+
+const text = await acme.spend(
+  { estimate: maximumCost, idempotencyKey: request.id },
+  async () => {
+    const r = await generateText({ model, prompt, maxOutputTokens })
+    return { value: r.text, actual: costOf(r.usage) }
+  }
+)
+```
+
+`maximumCostOf` and `costOf` are application functions. Calculate the maximum from every billable
+unit, including input usage and the configured output limit. The provider integration must enforce
+that limit across the whole callback. A budget cannot stop an external provider by itself.
+
+`spend` reserves that maximum, runs the function for a new authorization, and settles its final
+usage. Pass a stable `idempotencyKey` for each operation. If omitted, `spend` generates one and
+includes it as `error.idempotencyKey` in its budget errors.
+
+If the function throws, `spend` throws `BudgetRecoveryError` with `reason: "work_failed"`, the
+original `cause`, and the hold. It retains the hold because a provider timeout can follow billable
+work. Check the provider's result, then settle known usage with `error.hold.settle({ amount })`.
+Call `error.hold.release()` only after confirming that usage is zero. A zero-usage result can also
+return `actual: 0` from the function.
+
+If authorization replays, `spend` throws `BudgetRecoveryError` with
+`reason: "authorization_replayed"` and the hold. It does not run the function again. Recover the
+provider's result and settle through that hold. The key protects budget accounting within its
+retention period. It does not provide exactly-once provider execution. Use the provider's own
+idempotency or a durable workflow when the work must survive process failure.
+
+`BudgetExceededError` means the budget denied the estimate or Unprice could not be reached
+(`error.blocked.reason === "unavailable"`). `BudgetRequestError` means the API rejected the
+authorization. Retry an uncertain authorization with the same estimate, TTL, and
+`error.idempotencyKey`; the first request may have committed.
+
+`BudgetSettleError` retains the work's `value`, `actual`, hold, and key when settlement fails.
+An API failure is in `error.error`. A thrown validation or transport failure is in `error.cause`.
+After a transport failure, retry `error.hold.settle({ amount: error.actual })`. Do not rerun the
+work or `record` that usage, because the first settle may have committed. Usage above the maximum
+returns 409 and keeps the hold open. Reconcile that provider failure. Do not clamp the amount or
+release the hold to conceal the excess.
+
+For manual control, `acme.authorize({ amount, idempotencyKey })` returns `{ result }` or `{ error }`.
+The result is `{ allowed: true, hold }` or `{ allowed: false, blocked }`.
+Manual `authorize` and `charge` require a caller-provided key. Keep it before sending, then retry
+an uncertain result with the same key and input. `hold.settle({ amount })` and `hold.release()`
+are safe to retry because the hold id is the idempotency key. A work deadline never releases
+capacity automatically.
+Open holds stay reserved until final settlement or explicit release. A closed hold retains its
+result for 24 hours; later retries return 409 instead of counting twice.
+`acme.charge({ amount, idempotencyKey })` gates a one-shot amount, and
+`acme.record({ amount, idempotencyKey, occurredAt })` reports usage that already happened. It
+always counts, even past a hard limit, and its `crossed` names each limit it passed; that limit
+then denies `authorize` and `charge`. Authorize before work that needs guaranteed capacity.
+The API also rejects a lower hard cap when consumption plus open holds would exceed it.
+Pass the event's id as the record key and its own time as `occurredAt`, never the call time.
+For 8 days the same key and amount count once and another amount returns 409. Usage older than
+7 days returns 409, so a retry that resends the event's time cannot count twice.
+Amounts accept numbers or decimal strings and come back as decimal strings.
+
 ## Monetization configuration
 
 `monetization.get` and `monetization.apply` let you describe a project's plans, features, and

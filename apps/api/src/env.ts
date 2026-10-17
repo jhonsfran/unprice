@@ -5,6 +5,7 @@ import { env as envDb } from "@unprice/db/env"
 import { env as envObservability } from "@unprice/observability/env"
 import { env as envServices } from "@unprice/services/env"
 import { z } from "zod"
+import type { BudgetDO } from "~/ingestion/budget/BudgetDO"
 import type { EntitlementWindowDO } from "~/ingestion/entitlements/EntitlementWindowDO"
 import type { RunBudgetDO } from "~/ingestion/run-budget/RunBudgetDO"
 import type { DurableObjectProject } from "./project/do"
@@ -105,6 +106,7 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
         (ns) => typeof ns === "object"
       ),
       runbudget: z.custom<DurableObjectNamespace<RunBudgetDO>>((ns) => typeof ns === "object"),
+      budget: z.custom<DurableObjectNamespace<BudgetDO>>((ns) => typeof ns === "object"),
       RL_FREE_1000_60s: cloudflareRatelimiter,
       RL_FREE_6000_60s: cloudflareRatelimiter,
       CLOUDFLARE_ZONE_ID: z.string().optional(),
