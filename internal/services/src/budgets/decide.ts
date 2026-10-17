@@ -5,7 +5,16 @@
 
 import { Ok, type Result } from "@unprice/error"
 import type { Amount, SignedAmount } from "@unprice/money"
-import { type BudgetRecord, HOLD_LAPSE_TTL_MULTIPLIER, MIN_HOLD_TTL_MS, diffConfig } from "./config"
+import {
+  type BudgetRecord,
+  HOLD_LAPSE_TTL_MULTIPLIER,
+  MIN_HOLD_TTL_MS,
+  OPERATION_RETENTION_MS,
+  RECORD_ACCEPT_WINDOW_MS,
+  RECORD_FUTURE_SKEW_MS,
+  diffConfig,
+} from "./config"
+import { countersOf } from "./evolve"
 import {
   type Blocked,
   type BlockedRemedy,
@@ -20,7 +29,7 @@ import {
   type UnPriceBudgetError,
   reject,
 } from "./model"
-import { budgetWindowBounds } from "./windows"
+import { windowBounds, windowIdOf, windowSpecOf } from "./windows"
 
 const ZERO = BigInt(0)
 
@@ -34,9 +43,9 @@ export function balanceOf(state: Funded, now: number): BudgetBalance {
   const at = Math.max(now, ledger.lastAt)
   let remaining: SignedAmount | null = null
   const limits = state.budget.config.limits.map((limit): LimitBalance => {
-    const bounds = budgetWindowBounds(limit.window, at)
-    const usage = ledger.usage[limit.window]
-    const consumed = bounds.start > usage.start ? ZERO : usage.consumed
+    const bounds = windowBounds(limit, at)
+    const usage = ledger.usage[windowIdOf(limit)]
+    const consumed = !usage || bounds.start > usage.start ? ZERO : usage.consumed
     const limitRemaining = limit.amount - consumed - ledger.held
     if (limit.enforce === "hard" && (remaining === null || limitRemaining < remaining)) {
       remaining = limitRemaining
@@ -105,7 +114,7 @@ function crossings(balance: BudgetBalance, delta: SignedAmount): string[] {
  */
 export function decide(
   command: BudgetCommand,
-  view: Pick<BudgetView, "budget" | "ledger" | "target">,
+  view: Pick<BudgetView, "budget" | "ledger" | "target" | "seenRecordKey">,
   now: number
 ): Result<Fact[], UnPriceBudgetError> {
   if (command.type === "upsert") return decideUpsert(command, view.budget)
@@ -120,7 +129,7 @@ export function decide(
     case "authorize":
     case "charge":
     case "record":
-      return decideKeyed(command, state, view.target, now)
+      return decideKeyed(command, state, view, now)
     case "settle":
       return decideSettle(command, state, view.target, now)
     case "release":
@@ -164,7 +173,7 @@ function decideUpsert(
 function decideKeyed(
   command: Extract<BudgetCommand, { type: "authorize" | "charge" | "record" }>,
   state: Funded,
-  target: Operation | null,
+  { target, seenRecordKey }: Pick<BudgetView, "target" | "seenRecordKey">,
   now: number
 ): Result<Fact[], UnPriceBudgetError> {
   const amount = command.cost.amount
@@ -176,6 +185,9 @@ function decideKeyed(
     if (target.kind === kind && target.requestHash === command.requestHash) return Ok([])
     return reject({ code: "IDEMPOTENCY_CONFLICT", idempotencyKey: command.idempotencyKey })
   }
+  // The row is purged after a day but the key is kept for RECORD_DEDUPE_MS: a duplicate still
+  // never counts twice, though a changed payload can no longer be told apart from a retry.
+  if (command.type === "record" && seenRecordKey) return Ok([])
 
   let ttlMs = 0
   if (command.type === "authorize") {
@@ -189,6 +201,21 @@ function decideKeyed(
         maxTtlMs: holds.maxTtlMs,
       })
     }
+  }
+
+  if (command.type === "record") {
+    const { occurredAt } = command
+    const latestAccepted = now + RECORD_FUTURE_SKEW_MS
+    if (occurredAt > latestAccepted) {
+      return reject({ code: "INVALID_OCCURRED_AT", occurredAt, latestAccepted })
+    }
+    const oldestAccepted = now - RECORD_ACCEPT_WINDOW_MS
+    if (occurredAt < oldestAccepted) return reject({ code: "TOO_LATE", occurredAt, oldestAccepted })
+  }
+  const { closesAt } = state.budget.config
+  const grace = command.type === "record" ? OPERATION_RETENTION_MS : 0
+  if (closesAt !== null && now >= closesAt + grace) {
+    return reject({ code: "BUDGET_CLOSED", closedAt: closesAt })
   }
 
   const balance = balanceOf(state, now)
@@ -317,6 +344,29 @@ function wasMinted(holdId: string, ledger: Ledger): boolean {
 
 function holdNumber(holdId: string): number {
   return Number(holdId.slice(2))
+}
+
+/**
+ * One `window.rolled` per counter whose period ended by `now` with usage in it. An idle gap of many
+ * periods yields one fact, for the last period that had usage.
+ */
+export function rollFacts(ledger: Ledger, now: number): Fact[] {
+  const facts: Fact[] = []
+  for (const [windowId, counter] of countersOf(ledger.usage)) {
+    if (counter.consumed === ZERO) continue
+    const spec = windowSpecOf(windowId)
+    if (windowBounds(spec, now).start <= counter.start) continue
+    const { end } = windowBounds(spec, counter.start)
+    if (end === null) throw new Error(`window ${windowId} rolled but never ends`)
+    facts.push({
+      type: "window.rolled",
+      windowId,
+      start: counter.start,
+      end,
+      consumed: counter.consumed,
+    })
+  }
+  return facts
 }
 
 /** Open holds past `lapsesAt`, in lapse order. */

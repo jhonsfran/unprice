@@ -1,6 +1,7 @@
 import type {
   AuthorizeBudgetInput,
   ChargeBudgetInput,
+  RecordBudgetInput,
   ReleaseBudgetInput,
   SettleBudgetInput,
   UpsertBudgetInput,
@@ -17,7 +18,7 @@ export type BudgetVerbRequest =
   | ({ type: "settle" } & Omit<SettleBudgetInput, "key">)
   | ({ type: "release" } & Omit<ReleaseBudgetInput, "key">)
   | ({ type: "charge" } & Omit<ChargeBudgetInput, "key">)
-  | ({ type: "record" } & Omit<ChargeBudgetInput, "key">)
+  | ({ type: "record" } & Omit<RecordBudgetInput, "key">)
   | { type: "get" }
 
 export type ExecuteBudgetCommandDeps = { budgets: BudgetClient }
@@ -62,6 +63,7 @@ function toBudgetRequest({
         limits: request.limits.map((limit) => ({ ...limit, id: limit.id ?? limit.window })),
         holds: request.holds,
         onUnavailable: request.onUnavailable,
+        closesAt: request.closesAt,
       })
       if (config.err) return config
       const unit = /^[A-Z]{3}$/.test(request.unit) ? `money:${request.unit}` : request.unit
@@ -80,12 +82,20 @@ function toBudgetRequest({
     }
     case "release":
       return Ok({ type: "release", holdId: request.holdId })
-    case "charge":
+    case "charge": {
+      const amount = amountOf(request.amount)
+      if (amount.err) return amount
+      return Ok({
+        type: "charge",
+        idempotencyKey: request.idempotencyKey,
+        cost: { amount: amount.val },
+      })
+    }
     case "record": {
       const amount = amountOf(request.amount)
       if (amount.err) return amount
-      const { type, idempotencyKey } = request
-      return Ok({ type, idempotencyKey, cost: { amount: amount.val } })
+      const { idempotencyKey, occurredAt } = request
+      return Ok({ type: "record", idempotencyKey, occurredAt, cost: { amount: amount.val } })
     }
     case "get":
       return Ok({ type: "get" })

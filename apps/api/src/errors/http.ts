@@ -1,5 +1,5 @@
 import { z } from "@hono/zod-openapi"
-import { budgetExceededDetailsSchema } from "@unprice/db/validators"
+import { budgetClosedDetailsSchema, budgetExceededDetailsSchema } from "@unprice/db/validators"
 import { FetchError } from "@unprice/error"
 import { type DomainErrorKind, resolveDomainErrorKind } from "@unprice/services"
 import { UnPriceWalletError } from "@unprice/services/wallet"
@@ -37,8 +37,8 @@ const ErrorCode = z.enum([
  *
  * This is shared across every error response because `openApiErrorResponses` is,
  * so it is named for the layer that carries it rather than for its first
- * consumer. It is optional everywhere; the `monetization.*` operations and the
- * budget 402 populate it, and every other route omits it. A new kind belongs in
+ * consumer. It is optional everywhere; the `monetization.*` operations, the
+ * budget 402, and the closed-budget 409 populate it, and every other route omits it. A new kind belongs in
  * this same union, discriminated by `kind`, rather than in a parallel field.
  */
 const configErrorDetailsSchema = z.object({
@@ -63,6 +63,7 @@ const configErrorDetailsSchema = z.object({
 export const apiErrorDetailsSchema = z.discriminatedUnion("kind", [
   configErrorDetailsSchema,
   budgetExceededDetailsSchema,
+  budgetClosedDetailsSchema,
 ])
 
 export type ApiErrorDetails = z.infer<typeof apiErrorDetailsSchema>

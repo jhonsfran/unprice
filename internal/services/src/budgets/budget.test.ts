@@ -50,13 +50,23 @@ function authorize(key: string, units: number, ttlMs?: number): BudgetCommand {
   }
 }
 
-function oneShot(type: "charge" | "record", key: string, amount: bigint): BudgetCommand {
+function oneShot(
+  type: "charge" | "record",
+  key: string,
+  amount: bigint,
+  occurredAt = t0
+): BudgetCommand {
   const cost = { amount }
-  return { type, idempotencyKey: key, cost, requestHash: requestFingerprint({ type, cost }) }
+  if (type === "charge") {
+    return { type, idempotencyKey: key, cost, requestHash: requestFingerprint({ type, cost }) }
+  }
+  const requestHash = requestFingerprint({ type, cost, occurredAt })
+  return { type, idempotencyKey: key, cost, occurredAt, requestHash }
 }
 
 const charge = (key: string, units: number) => oneShot("charge", key, $(units))
-const record = (key: string, units: number) => oneShot("record", key, $(units))
+const record = (key: string, units: number, occurredAt = t0) =>
+  oneShot("record", key, $(units), occurredAt)
 const settle = (holdId: string, units: number): BudgetCommand => ({
   type: "settle",
   holdId,
@@ -373,7 +383,7 @@ describe("time and config never reset usage", () => {
     expect(rejection(store.run(charge("c", 90), behind))).toMatchObject({
       blocked: { limitId: "month", remaining: $(10) },
     })
-    const recorded = ok(store.run(record("d", 5), behind))
+    const recorded = ok(store.run(record("d", 5, behind), behind))
     expect(recorded.entries[0]?.at).toBe(Date.parse("2026-11-01T00:00:00.001Z"))
     expect(remaining(recorded)).toEqual([["month", $(5)]])
   })
@@ -447,6 +457,248 @@ describe("time and config never reset usage", () => {
   })
 })
 
+describe("closesAt", () => {
+  it("refuses new spend from closesAt, keeps settling and releasing, and takes records a day more", () => {
+    const closesAt = t0 + hour
+    const store = budgetWith({ ...month100, closesAt: new Date(closesAt).toISOString() })
+    ok(store.run(authorize("k1", 30, 2 * hour), t0))
+    ok(store.run(authorize("k2", 10, 2 * hour), t0))
+    expect(ok(store.run({ type: "get" }, closesAt - 1)).outcome).toMatchObject({
+      budget: { closesAt, closed: false },
+    })
+
+    const closed = { code: "BUDGET_CLOSED", closedAt: closesAt }
+    expect(rejection(store.run(authorize("k3", 1), closesAt))).toEqual(closed)
+    expect(rejection(store.run(charge("c1", 1), closesAt))).toEqual(closed)
+    expect(ok(store.run(authorize("k1", 30, 2 * hour), closesAt)).outcome).toMatchObject({
+      holdId: "h_1",
+      replayed: true,
+    })
+    expect(ok(store.run(settle("h_1", 25), closesAt)).outcome).toMatchObject({
+      covered: $(25),
+      released: $(5),
+      replayed: false,
+    })
+    expect(ok(store.run(release("h_2"), closesAt)).outcome).toMatchObject({ released: $(10) })
+    expect(ok(store.run(record("r1", 5), closesAt + day - 1)).outcome).toMatchObject({
+      replayed: false,
+    })
+    expect(rejection(store.run(record("r2", 5), closesAt + day))).toEqual(closed)
+
+    expect(ok(store.run({ type: "get" }, closesAt + day)).outcome).toMatchObject({
+      budget: { closesAt, closed: true, balance: { held: $(0), limits: [{ consumed: $(30) }] } },
+    })
+
+    const reopened = ok(store.run(upsert({ ...month100, closesAt: null }), closesAt + day))
+    expect(reopened.outcome).toMatchObject({
+      changes: [{ change: "closesAt" }],
+      budget: { closesAt: null, closed: false, version: 2 },
+    })
+    expect(ok(store.run(charge("c1", 1), closesAt + day)).outcome).toMatchObject({
+      replayed: false,
+    })
+  })
+})
+
+describe("anchored windows", () => {
+  const anchor = "2026-10-15T00:00:00.000Z"
+  const withBilling: BudgetConfigInput = {
+    limits: [
+      { id: "month", amount: "100", window: "month" },
+      { id: "billing", amount: "100", window: "month", anchor },
+    ],
+  }
+
+  it("counts from when the anchor is added and keeps counting across remove and re-add", () => {
+    const store = budgetWith(month100)
+    ok(store.run(charge("c1", 10), t0))
+
+    const added = ok(store.run(upsert(withBilling), t0))
+    expect(added.outcome).toMatchObject({
+      changes: [{ change: "limit.added", limitId: "billing" }],
+    })
+    expect(remaining(added)).toEqual([
+      ["month", $(90)],
+      ["billing", $(100)],
+    ])
+    ok(store.run(charge("c2", 20), t0))
+    ok(store.run(upsert(month100), t0 + hour))
+
+    const readded = ok(store.run(upsert(withBilling), t0 + 2 * hour))
+    expect(remaining(readded)).toEqual([
+      ["month", $(70)],
+      ["billing", $(80)],
+    ])
+    expect(readded.outcome).toMatchObject({
+      budget: { balance: { limits: [{ resetsAt: nov1 }, { resetsAt: oct15 }] } },
+    })
+  })
+
+  it("drops an unreferenced anchor when its period ends, so a later re-add starts from zero", () => {
+    const store = budgetWith(withBilling)
+    ok(store.run(charge("c1", 20), t0))
+    ok(store.run(upsert(month100), t0 + hour))
+
+    const readded = ok(store.run(upsert(withBilling), oct15 + hour))
+    expect(remaining(readded)).toEqual([
+      ["month", $(80)],
+      ["billing", $(100)],
+    ])
+    expect(readded.entries.filter((entry) => entry.type === "window.rolled")).toEqual([
+      {
+        type: "window.rolled",
+        windowId: "day",
+        start: Date.parse("2026-10-14T00:00:00.000Z"),
+        end: oct15,
+        consumed: $(20),
+        seq: 5,
+        at: oct15 + hour,
+      },
+      {
+        type: "window.rolled",
+        windowId: "month@2026-10-15T00:00:00.000Z",
+        start: Date.parse("2026-09-15T00:00:00.000Z"),
+        end: oct15,
+        consumed: $(20),
+        seq: 6,
+        at: oct15 + hour,
+      },
+    ])
+  })
+
+  it("names an anchor move as a window change", () => {
+    const store = budgetWith(withBilling)
+    const moved = ok(
+      store.run(
+        upsert({
+          limits: [
+            { id: "month", amount: "100", window: "month" },
+            { id: "billing", amount: "100", window: "month", anchor: "2026-10-01T00:00:00Z" },
+          ],
+        }),
+        t0
+      )
+    )
+    expect(moved.outcome).toMatchObject({
+      changes: [
+        {
+          change: "limit.window",
+          limitId: "billing",
+          from: "month@2026-10-15T00:00:00.000Z",
+          to: "month@2026-10-01T00:00:00.000Z",
+        },
+      ],
+    })
+  })
+})
+
+describe("window history", () => {
+  const daily50: BudgetConfigInput = { limits: [{ id: "daily", amount: "50", window: "day" }] }
+  const oct14 = Date.parse("2026-10-14T00:00:00.000Z")
+
+  it("rolls a period with usage into one fact, inside an accepted command only", () => {
+    const store = new MemoryBudgetStore()
+    expect(ok(store.run(upsert(daily50), t0)).wakeAt).toBe(oct15)
+    ok(store.run(charge("c1", 20), t0))
+
+    expect(rejection(store.run(charge("big", 51), t0 + day)).code).toBe("LIMIT_EXCEEDED")
+    expect(store.history).toEqual([])
+
+    const read = ok(store.run({ type: "get" }, t0 + 3 * day))
+    expect(read.entries).toEqual([
+      {
+        type: "window.rolled",
+        windowId: "hour",
+        start: t0,
+        end: t0 + hour,
+        consumed: $(20),
+        seq: 3,
+        at: t0 + 3 * day,
+      },
+      {
+        type: "window.rolled",
+        windowId: "day",
+        start: oct14,
+        end: oct15,
+        consumed: $(20),
+        seq: 4,
+        at: t0 + 3 * day,
+      },
+    ])
+    expect(read.outcome).toMatchObject({
+      history: [{ windowId: "day", start: oct14, end: oct15, consumed: $(20) }],
+      budget: { balance: { limits: [{ consumed: $(0), remaining: $(50) }] } },
+    })
+    expect(ok(store.run({ type: "get" }, t0 + 3 * day)).entries).toEqual([])
+  })
+
+  it("returns the last twelve periods of each limited window, newest first", () => {
+    const store = budgetWith(daily50)
+    for (let i = 0; i < 14; i++) ok(store.run(charge(`c${i}`, i + 1), t0 + i * day))
+
+    const read = ok(store.run({ type: "get" }, t0 + 14 * day)).outcome
+    if (read.type !== "get") throw new Error("expected get")
+    expect(read.history.map((period) => [period.start, period.consumed])).toEqual(
+      Array.from({ length: 12 }, (_, i) => [oct14 + (13 - i) * day, $(14 - i)])
+    )
+  })
+})
+
+describe("record dedupe", () => {
+  it("accepts usage from the last 7 days up to 5 minutes ahead", () => {
+    const store = budgetWith(month100)
+    expect(rejection(store.run(record("r1", 1, t0 - 7 * day - 1), t0))).toEqual({
+      code: "TOO_LATE",
+      occurredAt: t0 - 7 * day - 1,
+      oldestAccepted: t0 - 7 * day,
+    })
+    expect(rejection(store.run(record("r1", 1, t0 + 5 * minute + 1), t0))).toEqual({
+      code: "INVALID_OCCURRED_AT",
+      occurredAt: t0 + 5 * minute + 1,
+      latestAccepted: t0 + 5 * minute,
+    })
+    expect(store.entries.length).toBe(1)
+
+    expect(ok(store.run(record("r1", 1, t0 - 7 * day), t0)).outcome).toMatchObject({
+      replayed: false,
+    })
+    const ahead = ok(store.run(record("r2", 2, t0 + 5 * minute), t0))
+    expect([ahead.entries[0]?.at, remaining(ahead)]).toEqual([t0, [["month", $(97)]]])
+  })
+
+  it("never counts a key twice within 8 days, even after its row is purged", () => {
+    // Keys are purged only up to the ledger's clock, so the first purge keeps r1 until a write.
+    const store = budgetWith({ limits: [{ id: "life", amount: "100", window: "never" }] })
+    ok(store.run(record("r1", 30), t0))
+    expect(rejection(store.run(record("r1", 30, t0 + 1), t0 + hour)).code).toBe(
+      "IDEMPOTENCY_CONFLICT"
+    )
+
+    store.purge(t0 + day)
+    expect(store.rows.size).toBe(0)
+    const replay = ok(store.run(record("r1", 30), t0 + 6 * day))
+    expect(replay.outcome).toMatchObject({
+      type: "record",
+      amount: $(30),
+      crossed: [],
+      replayed: true,
+      balance: { remaining: $(70) },
+    })
+    expect(replay.entries.map((entry) => entry.type)).toEqual([
+      "window.rolled",
+      "window.rolled",
+      "window.rolled",
+    ])
+
+    store.purge(t0 + 8 * day)
+    expect([...store.recordKeys.keys()]).toEqual(["r1"])
+    ok(store.run(record("r2", 1, t0 + 8 * day), t0 + 8 * day))
+    store.purge(t0 + 8 * day)
+    expect([...store.recordKeys.keys()]).toEqual(["r2"])
+    expect(rejection(store.run(record("r1", 30), t0 + 8 * day)).code).toBe("TOO_LATE")
+  })
+})
+
 describe("amounts and crossings", () => {
   it("adds amounts above 2^53 base units exactly", () => {
     const store = new MemoryBudgetStore()
@@ -500,20 +752,45 @@ describe("amounts and crossings", () => {
 describe("config schema", () => {
   it("fills defaults and round-trips through its JSON form", () => {
     const parsed = config({
-      limits: [{ id: "m", amount: "12.5", window: "month" }],
+      limits: [
+        { id: "m", amount: "12.5", window: "month" },
+        { id: "billing", amount: "1", window: "month", anchor: "2026-10-15T09:30:00+02:00" },
+      ],
       onUnavailable: { allowUpTo: "3" },
+      closesAt: "2026-12-31T23:59:59Z",
     })
     expect(parsed).toEqual({
-      limits: [{ id: "m", amount: BigInt(1_250_000_000), window: "month", enforce: "hard" }],
+      limits: [
+        { id: "m", amount: BigInt(1_250_000_000), window: "month", enforce: "hard" },
+        {
+          id: "billing",
+          amount: BigInt(100_000_000),
+          window: "month",
+          anchor: Date.parse("2026-10-15T07:30:00.000Z"),
+          enforce: "hard",
+        },
+      ],
       holds: { defaultTtlMs: 900_000, maxTtlMs: 86_400_000 },
       onUnavailable: { allowUpTo: BigInt(300_000_000) },
+      closesAt: Date.parse("2026-12-31T23:59:59.000Z"),
     })
     expect(formatBudgetConfig(parsed)).toEqual({
-      limits: [{ id: "m", amount: "12.5", window: "month", enforce: "hard" }],
+      limits: [
+        { id: "m", amount: "12.5", window: "month", enforce: "hard" },
+        {
+          id: "billing",
+          amount: "1",
+          window: "month",
+          anchor: "2026-10-15T07:30:00.000Z",
+          enforce: "hard",
+        },
+      ],
       holds: { defaultTtlMs: 900_000, maxTtlMs: 86_400_000 },
       onUnavailable: { allowUpTo: "3" },
+      closesAt: "2026-12-31T23:59:59.000Z",
     })
     expect(config(formatBudgetConfig(parsed))).toEqual(parsed)
+    expect(config({ limits: [] }).closesAt).toBe(null)
   })
 
   it("rejects duplicate ids, bad amounts, and inverted TTL bounds", () => {
@@ -544,6 +821,23 @@ describe("config schema", () => {
       issues: [
         "limits.1.id: duplicate limit id a",
         "holds.defaultTtlMs: defaultTtlMs must not exceed maxTtlMs",
+      ],
+    })
+
+    expect(
+      parseBudgetConfig({
+        limits: [
+          { id: "h", amount: "1", window: "hour", anchor: "2026-10-15T00:00:00Z" },
+          { id: "d", amount: "1", window: "day", anchor: "2026-10-15" },
+        ],
+        closesAt: "1969-12-31T23:59:59Z",
+      }).err?.rejection
+    ).toEqual({
+      code: "INVALID_CONFIG",
+      issues: [
+        "limits.0.anchor: only day, week, and month windows take an anchor",
+        "limits.1.anchor: Invalid datetime",
+        "closesAt: must not be before 1970",
       ],
     })
   })
@@ -593,6 +887,8 @@ describe("history does not slow the hot path", () => {
       ledger: emptyLedger,
       target: null,
       due: [],
+      seenRecordKey: false,
+      history: [],
     }
     let state = { ...view }
     const first = transition({ view: state, command: upsert(month100), clockMs: t0 })

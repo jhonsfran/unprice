@@ -8,6 +8,13 @@
       "when": 1792191422711,
       "tag": "0000_familiar_kate_bishop",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1792195170958,
+      "tag": "0001_amused_blindfold",
+      "breakpoints": true
     }
   ]
 }

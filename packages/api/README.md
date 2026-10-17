@@ -142,7 +142,10 @@ For manual control, `acme.authorize({ amount })` returns `{ allowed: true, hold 
 `{ allowed: false, blocked }`. `hold.settle({ amount })` and `hold.release()` are safe to retry
 because the hold id is the idempotency key. A settle after the hold expired still counts. A hold
 retires 24 hours after it closes or lapses; after that both return 409 instead of counting twice. `acme.charge` gates a one-shot amount, and
-`acme.record({ amount, idempotencyKey })` reports usage that already happened and is never denied.
+`acme.record({ amount, idempotencyKey, occurredAt? })` reports usage that already happened and is
+never denied by a limit. `occurredAt` defaults to the time of the call; pass the event's own time if
+you may retry later. Usage older than 7 days returns 409, and the same key and `occurredAt` count
+once within 8 days.
 Amounts accept numbers or decimal strings and come back as decimal strings.
 
 ## Monetization configuration

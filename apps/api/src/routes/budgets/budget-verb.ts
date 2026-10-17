@@ -1,5 +1,11 @@
 import { formatAmount } from "@unprice/money"
-import type { BudgetBalance, BudgetOutcome, UnPriceBudgetError } from "@unprice/services/budgets"
+import {
+  type BudgetBalance,
+  type BudgetOutcome,
+  type BudgetSnapshot,
+  type UnPriceBudgetError,
+  formatBudgetConfig,
+} from "@unprice/services/budgets"
 import { type BudgetVerbRequest, executeBudgetCommand } from "@unprice/services/use-cases"
 import type { Context } from "hono"
 import { keyAuth } from "~/auth/key"
@@ -50,6 +56,12 @@ function wire(value: unknown): unknown {
   return value
 }
 
+/** A budget on the wire: its config as it was sent (instants as ISO strings), amounts as decimals. */
+export function budgetToWire(budget: BudgetSnapshot) {
+  const { key, unit, version, closed, balance } = budget
+  return { key, unit, version, ...formatBudgetConfig(budget), closed, balance: toWire(balance) }
+}
+
 function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): UnpriceApiError {
   const { rejection } = error
   const message = error.message
@@ -65,10 +77,17 @@ function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): Unprice
           balance: toWire(rejection.balance),
         },
       })
+    case "BUDGET_CLOSED":
+      return new UnpriceApiError({
+        code: "CONFLICT",
+        message,
+        details: { kind: "budget_closed", closedAt: rejection.closedAt },
+      })
     case "IDEMPOTENCY_CONFLICT":
     case "HOLD_CLOSED":
     case "HOLD_RETIRED":
     case "UNIT_IMMUTABLE":
+    case "TOO_LATE":
       return new UnpriceApiError({ code: "CONFLICT", message })
     case "BUDGET_NOT_FOUND":
     case "HOLD_NOT_FOUND":
@@ -76,6 +95,7 @@ function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): Unprice
     case "INVALID_AMOUNT":
     case "INVALID_CONFIG":
     case "INVALID_TTL":
+    case "INVALID_OCCURRED_AT":
       return new UnpriceApiError({ code: "BAD_REQUEST", message })
   }
 }

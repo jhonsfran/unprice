@@ -1,9 +1,8 @@
 /** Conservation (ADR-0006 B7.5): what every transition must preserve before it may commit. */
 
 import type { Amount } from "@unprice/money"
-import { evolveOperation, ledgerDelta, operationIdOf } from "./evolve"
-import type { BudgetState, Entry, Operation } from "./model"
-import { BUDGET_WINDOWS } from "./windows"
+import { countersOf, evolveOperation, ledgerDelta, operationIdOf } from "./evolve"
+import type { BudgetState, Entry, Ledger, Operation } from "./model"
 
 const ZERO = BigInt(0)
 
@@ -26,6 +25,9 @@ function consumedBy(operation: Operation | undefined): Amount {
  * 3. Per fact: settle has actual = covered + overrun and, unless late, covered + released = the
  *    hold's amount; a lapse or a release from an open hold returns its whole amount.
  * 4. Held, every window's consumed, and every fact amount are non-negative.
+ * 5. Per counter, nothing is lost or counted twice across a roll: consumed after plus what
+ *    `window.rolled` reported equals consumed before plus what this transition consumed. A roll
+ *    reports the counter's period and only a period with usage, once per counter.
  */
 export function checkTransition(
   before: BudgetState,
@@ -83,10 +85,37 @@ export function checkTransition(
   }
 
   if (after.ledger.held < ZERO) violations.push(`ledger held ${after.ledger.held} is negative`)
-  for (const window of BUDGET_WINDOWS) {
-    if (after.ledger.usage[window].consumed < ZERO) {
-      violations.push(`${window} consumed ${after.ledger.usage[window].consumed} is negative`)
+  for (const [id, counter] of countersOf(after.ledger.usage)) {
+    if (counter.consumed < ZERO) violations.push(`${id} consumed ${counter.consumed} is negative`)
+  }
+  violations.push(...rollViolations(before.ledger, entries, after.ledger, consumedDelta))
+  return violations
+}
+
+function rollViolations(
+  before: Ledger,
+  entries: readonly Entry[],
+  after: Ledger,
+  consumedDelta: Amount
+): string[] {
+  const violations: string[] = []
+  const rolled = new Map<string, Amount>()
+  for (const entry of entries) {
+    if (entry.type !== "window.rolled") continue
+    const counter = before.usage[entry.windowId]
+    if (rolled.has(entry.windowId)) violations.push(`${entry.windowId} rolled twice`)
+    if (entry.consumed <= ZERO) violations.push(`${entry.windowId} rolled an empty period`)
+    if (counter?.start !== entry.start || entry.end <= entry.start) {
+      violations.push(`${entry.windowId} rolled [${entry.start}, ${entry.end}), not its period`)
     }
+    rolled.set(entry.windowId, entry.consumed)
+  }
+  const ids = new Set([...Object.keys(before.usage), ...Object.keys(after.usage)])
+  for (const id of ids as Set<keyof Ledger["usage"]>) {
+    const now = after.usage[id]
+    const kept = (now?.consumed ?? ZERO) + (rolled.get(id) ?? ZERO)
+    const owed = (before.usage[id]?.consumed ?? ZERO) + (now ? consumedDelta : ZERO)
+    if (kept !== owed) violations.push(`${id} kept ${kept} of ${owed} consumed`)
   }
   return violations
 }

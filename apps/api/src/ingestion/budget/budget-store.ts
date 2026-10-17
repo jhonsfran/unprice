@@ -4,10 +4,12 @@ import {
   type HoldOperation,
   type Ledger,
   type Operation,
+  RECORD_DEDUPE_MS,
+  type WindowId,
   dueAt,
   emptyLedger,
 } from "@unprice/services/budgets"
-import { and, asc, eq, inArray, lt, lte, min, ne } from "drizzle-orm"
+import { and, asc, desc, eq, gt, inArray, lt, lte, min, ne } from "drizzle-orm"
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite"
 import * as schema from "./db/schema"
 import type { BudgetStore, BudgetStoreTx, Sync } from "./ports"
@@ -101,6 +103,30 @@ function bind(
         .map((row) => decode<HoldOperation>(row.data))
     },
 
+    readRecordKey(idempotencyKey, at) {
+      const keys = schema.budgetRecordKeys
+      const row = db
+        .select({ keyHash: keys.keyHash })
+        .from(keys)
+        .where(and(eq(keys.keyHash, sha256HexSync(idempotencyKey)), gt(keys.expiresAt, at)))
+        .get()
+      return row !== undefined
+    },
+
+    readHistory(windowIds, limit) {
+      const history = schema.budgetWindowHistory
+      return windowIds.flatMap((windowId) =>
+        db
+          .select()
+          .from(history)
+          .where(eq(history.windowId, windowId))
+          .orderBy(desc(history.start))
+          .limit(limit)
+          .all()
+          .map((row) => ({ ...row, windowId: row.windowId as WindowId }))
+      )
+    },
+
     commit({ budget, ledger, entries, operations: changed, now }) {
       if (budget) {
         const record = {
@@ -134,6 +160,17 @@ function bind(
         db.insert(schema.budgetEntries)
           .values({ seq: entry.seq, at: entry.at, type: entry.type, factJson: encode(entry) })
           .run()
+        if (entry.type === "window.rolled") {
+          const { windowId, start, end, consumed } = entry
+          db.insert(schema.budgetWindowHistory).values({ windowId, start, end, consumed }).run()
+        }
+        if (entry.type === "recorded") {
+          const key = { expiresAt: entry.at + RECORD_DEDUPE_MS }
+          db.insert(schema.budgetRecordKeys)
+            .values({ keyHash: sha256HexSync(entry.idempotencyKey), ...key })
+            .onConflictDoUpdate({ target: schema.budgetRecordKeys.keyHash, set: key })
+            .run()
+        }
       }
 
       for (const operation of changed) {
@@ -175,11 +212,46 @@ function bind(
       db.delete(entries).where(inArray(entries.seq, expired)).run()
     },
 
+    purgeRecordKeys(at, limit) {
+      const keys = schema.budgetRecordKeys
+      const expired = db
+        .select({ keyHash: keys.keyHash })
+        .from(keys)
+        .where(lte(keys.expiresAt, at))
+        .orderBy(asc(keys.expiresAt))
+        .limit(limit)
+      db.delete(keys).where(inArray(keys.keyHash, expired)).run()
+    },
+
+    pruneHourlyHistory(before, limit) {
+      const history = schema.budgetWindowHistory
+      const hourly = and(eq(history.windowId, "hour"), lt(history.start, before))
+      const expired = db
+        .select({ start: history.start })
+        .from(history)
+        .where(hourly)
+        .orderBy(asc(history.start))
+        .limit(limit)
+      db.delete(history)
+        .where(and(hourly, inArray(history.start, expired)))
+        .run()
+    },
+
     nextDueAt() {
       return (
         db
           .select({ at: min(operations.dueAt) })
           .from(operations)
+          .get()?.at ?? null
+      )
+    },
+
+    oldestRecordKeyExpiresAt() {
+      const keys = schema.budgetRecordKeys
+      return (
+        db
+          .select({ at: min(keys.expiresAt) })
+          .from(keys)
           .get()?.at ?? null
       )
     },

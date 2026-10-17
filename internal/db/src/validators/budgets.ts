@@ -9,6 +9,9 @@ extendZodWithOpenApi(z)
 
 export const BUDGET_WINDOWS = ["hour", "day", "week", "month", "never"] as const
 
+/** Windows that take an `anchor`: periods of that length starting at the anchor instead of UTC. */
+export const BUDGET_ANCHORED_WINDOWS = ["day", "week", "month"] as const
+
 export const MAX_BUDGET_LIMITS = 16
 
 export const budgetKeyInputSchema = z
@@ -36,6 +39,8 @@ const budgetEnforceSchema = z.enum(["hard", "soft"])
 
 const budgetIdempotencyKeySchema = z.string().min(1).max(256)
 
+const budgetInstantInputSchema = z.string().datetime({ offset: true })
+
 export const upsertBudgetInputSchema = z
   .object({
     key: budgetKeyInputSchema,
@@ -52,10 +57,20 @@ export const upsertBudgetInputSchema = z
           id: z.string().optional().openapi({ description: "Defaults to the window name" }),
           amount: budgetAmountInputSchema,
           window: budgetWindowSchema,
+          anchor: budgetInstantInputSchema.optional().openapi({
+            description:
+              "Anchors a day, week, or month window: periods start at this instant and repeat every window. A month anchored on the 31st starts on the last day of shorter months. Usage counts from the moment the anchor is first set.",
+            example: "2026-10-15T00:00:00Z",
+          }),
           enforce: budgetEnforceSchema.optional(),
         })
       )
       .max(MAX_BUDGET_LIMITS),
+    closesAt: budgetInstantInputSchema.nullable().optional().openapi({
+      description:
+        "When the budget closes. From then on authorize and charge return 409, record is accepted for 24 hours more, and settle and release keep working. Omit or send null to keep it open.",
+      example: "2026-12-31T23:59:59Z",
+    }),
     holds: z
       .object({
         defaultTtlMs: z.number().int().optional(),
@@ -99,7 +114,16 @@ export const chargeBudgetInputSchema = z
   })
   .strict()
 
+/** Record accepts usage that occurred within the last 7 days, and dedupes its key for 8 days. */
 export const recordBudgetInputSchema = chargeBudgetInputSchema
+  .extend({
+    occurredAt: z.number().int().nonnegative().openapi({
+      description:
+        "When the usage happened, in epoch milliseconds. Must be within the last 7 days and at most 5 minutes ahead. Send the same value on a retry.",
+      example: 1_792_000_000_000,
+    }),
+  })
+  .strict()
 
 export const getBudgetQuerySchema = z.object({ key: budgetKeyInputSchema })
 
@@ -132,12 +156,23 @@ export const budgetSchema = z.object({
       id: z.string(),
       amount: budgetDecimalSchema,
       window: budgetWindowSchema,
+      anchor: z.string().optional(),
       enforce: budgetEnforceSchema,
     })
   ),
   holds: z.object({ defaultTtlMs: z.number().int(), maxTtlMs: z.number().int() }),
   onUnavailable: z.union([z.enum(["deny", "allow"]), z.object({ allowUpTo: budgetDecimalSchema })]),
+  closesAt: z.string().nullable(),
+  closed: z.boolean(),
   balance: budgetBalanceSchema,
+})
+
+/** One ended period of a window that had usage; `windowId` is the window, or `<window>@<anchor>`. */
+export const budgetWindowPeriodSchema = z.object({
+  windowId: z.string(),
+  start: z.number().int(),
+  end: z.number().int(),
+  consumed: budgetDecimalSchema,
 })
 
 export const upsertBudgetResponseSchema = z.object({
@@ -152,7 +187,13 @@ export const upsertBudgetResponseSchema = z.object({
   budget: budgetSchema,
 })
 
-export const getBudgetResponseSchema = z.object({ budget: budgetSchema })
+export const getBudgetResponseSchema = z.object({
+  budget: budgetSchema,
+  history: z.array(budgetWindowPeriodSchema).openapi({
+    description:
+      "The last 12 ended periods with usage of each limited window, newest first. Hourly periods are kept 30 days.",
+  }),
+})
 
 export const authorizeBudgetResponseSchema = z.object({
   allowed: z.literal(true),
@@ -212,11 +253,18 @@ export const budgetExceededDetailsSchema = z.object({
   balance: budgetBalanceSchema,
 })
 
+/** `details` on a 409 for a budget past its `closesAt`. */
+export const budgetClosedDetailsSchema = z.object({
+  kind: z.literal("budget_closed"),
+  closedAt: z.number().int(),
+})
+
 export type UpsertBudgetInput = z.infer<typeof upsertBudgetInputSchema>
 export type AuthorizeBudgetInput = z.infer<typeof authorizeBudgetInputSchema>
 export type SettleBudgetInput = z.infer<typeof settleBudgetInputSchema>
 export type ReleaseBudgetInput = z.infer<typeof releaseBudgetInputSchema>
 export type ChargeBudgetInput = z.infer<typeof chargeBudgetInputSchema>
+export type RecordBudgetInput = z.infer<typeof recordBudgetInputSchema>
 export type BudgetBalanceResponse = z.infer<typeof budgetBalanceSchema>
 export type BudgetResponse = z.infer<typeof budgetSchema>
 export type BudgetExceededDetails = z.infer<typeof budgetExceededDetailsSchema>

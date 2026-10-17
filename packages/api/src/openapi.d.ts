@@ -155,7 +155,7 @@ export interface paths {
     put?: never
     /**
      * hold an amount against a budget before work runs
-     * @description Hold an estimate against every hard limit of the budget, or return 402 with the limit that blocked it. Settle the hold with the actual amount, or release it. A retry with the same idempotency key returns the same hold.
+     * @description Hold an estimate against every hard limit of the budget, or return 402 with the limit that blocked it. Settle the hold with the actual amount, or release it. A retry with the same idempotency key returns the same hold. A budget past its closesAt returns 409.
      */
     post: operations["budgets.authorize"]
     delete?: never
@@ -215,7 +215,7 @@ export interface paths {
     put?: never
     /**
      * consume an amount if it fits
-     * @description Consume an amount in one call when it fits every hard limit, or return 402 with the limit that blocked it. For cheap work gated before it runs.
+     * @description Consume an amount in one call when it fits every hard limit, or return 402 with the limit that blocked it. For cheap work gated before it runs. A budget past its closesAt returns 409.
      */
     post: operations["budgets.charge"]
     delete?: never
@@ -235,7 +235,7 @@ export interface paths {
     put?: never
     /**
      * record usage that already happened
-     * @description Consume an amount for work that already ran. Never denied, so remaining can go negative.
+     * @description Consume an amount for work that already ran. Never denied by a limit, so remaining can go negative. Usage must have occurred within the last 7 days (409 beyond it), and a retry with the same idempotency key and occurredAt is never counted twice within 8 days.
      */
     post: operations["budgets.record"]
     delete?: never
@@ -253,7 +253,7 @@ export interface paths {
     }
     /**
      * get a budget and its balance
-     * @description Get the budget at a key with its limits and the current balance of each.
+     * @description Get the budget at a key with its limits, the current balance of each, and the last ended periods with usage of each limited window.
      */
     get: operations["budgets.get"]
     put?: never
@@ -802,6 +802,11 @@ export interface components {
                 asOf: number
               }
             }
+          | {
+              /** @enum {string} */
+              kind: "budget_closed"
+              closedAt: number
+            }
       }
     }
     ErrUnauthorized: {
@@ -880,6 +885,11 @@ export interface components {
                 }[]
                 asOf: number
               }
+            }
+          | {
+              /** @enum {string} */
+              kind: "budget_closed"
+              closedAt: number
             }
       }
     }
@@ -960,6 +970,11 @@ export interface components {
                 asOf: number
               }
             }
+          | {
+              /** @enum {string} */
+              kind: "budget_closed"
+              closedAt: number
+            }
       }
     }
     ErrNotFound: {
@@ -1038,6 +1053,11 @@ export interface components {
                 }[]
                 asOf: number
               }
+            }
+          | {
+              /** @enum {string} */
+              kind: "budget_closed"
+              closedAt: number
             }
       }
     }
@@ -1118,6 +1138,11 @@ export interface components {
                 asOf: number
               }
             }
+          | {
+              /** @enum {string} */
+              kind: "budget_closed"
+              closedAt: number
+            }
       }
     }
     ErrPreconditionFailed: {
@@ -1196,6 +1221,11 @@ export interface components {
                 }[]
                 asOf: number
               }
+            }
+          | {
+              /** @enum {string} */
+              kind: "budget_closed"
+              closedAt: number
             }
       }
     }
@@ -1276,6 +1306,11 @@ export interface components {
                 asOf: number
               }
             }
+          | {
+              /** @enum {string} */
+              kind: "budget_closed"
+              closedAt: number
+            }
       }
     }
     ErrTooManyRequests: {
@@ -1354,6 +1389,11 @@ export interface components {
                 }[]
                 asOf: number
               }
+            }
+          | {
+              /** @enum {string} */
+              kind: "budget_closed"
+              closedAt: number
             }
       }
     }
@@ -1434,6 +1474,11 @@ export interface components {
                 asOf: number
               }
             }
+          | {
+              /** @enum {string} */
+              kind: "budget_closed"
+              closedAt: number
+            }
       }
     }
     ErrBudgetExceeded: {
@@ -1512,6 +1557,11 @@ export interface components {
                 }[]
                 asOf: number
               }
+            }
+          | {
+              /** @enum {string} */
+              kind: "budget_closed"
+              closedAt: number
             }
       }
     }
@@ -2387,9 +2437,21 @@ export interface operations {
             amount: string
             /** @enum {string} */
             window: "hour" | "day" | "week" | "month" | "never"
+            /**
+             * Format: date-time
+             * @description Anchors a day, week, or month window: periods start at this instant and repeat every window. A month anchored on the 31st starts on the last day of shorter months. Usage counts from the moment the anchor is first set.
+             * @example 2026-10-15T00:00:00Z
+             */
+            anchor?: string
             /** @enum {string} */
             enforce?: "hard" | "soft"
           }[]
+          /**
+           * Format: date-time
+           * @description When the budget closes. From then on authorize and charge return 409, record is accepted for 24 hours more, and settle and release keep working. Omit or send null to keep it open.
+           * @example 2026-12-31T23:59:59Z
+           */
+          closesAt?: string | null
           holds?: {
             defaultTtlMs?: number
             maxTtlMs?: number
@@ -2430,6 +2492,7 @@ export interface operations {
                 amount: string
                 /** @enum {string} */
                 window: "hour" | "day" | "week" | "month" | "never"
+                anchor?: string
                 /** @enum {string} */
                 enforce: "hard" | "soft"
               }[]
@@ -2443,6 +2506,8 @@ export interface operations {
                     /** @description A decimal amount in the budget's unit; negative after an overrun */
                     allowUpTo: string
                   }
+              closesAt: string | null
+              closed: boolean
               balance: {
                 /** @description The least remaining over hard limits; null when the budget has no hard limit */
                 remaining: string | null
@@ -3192,6 +3257,11 @@ export interface operations {
            */
           amount: string
           idempotencyKey: string
+          /**
+           * @description When the usage happened, in epoch milliseconds. Must be within the last 7 days and at most 5 minutes ahead. Send the same value on a retry.
+           * @example 1792000000000
+           */
+          occurredAt: number
         }
       }
     }
@@ -3344,6 +3414,7 @@ export interface operations {
                 amount: string
                 /** @enum {string} */
                 window: "hour" | "day" | "week" | "month" | "never"
+                anchor?: string
                 /** @enum {string} */
                 enforce: "hard" | "soft"
               }[]
@@ -3357,6 +3428,8 @@ export interface operations {
                     /** @description A decimal amount in the budget's unit; negative after an overrun */
                     allowUpTo: string
                   }
+              closesAt: string | null
+              closed: boolean
               balance: {
                 /** @description The least remaining over hard limits; null when the budget has no hard limit */
                 remaining: string | null
@@ -3381,6 +3454,14 @@ export interface operations {
                 asOf: number
               }
             }
+            /** @description The last 12 ended periods with usage of each limited window, newest first. Hourly periods are kept 30 days. */
+            history: {
+              windowId: string
+              start: number
+              end: number
+              /** @description A decimal amount in the budget's unit; negative after an overrun */
+              consumed: string
+            }[]
           }
         }
       }

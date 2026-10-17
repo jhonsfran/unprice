@@ -247,6 +247,18 @@ describe("budgets API", () => {
     ["/v1/budgets/release", { code: "HOLD_NOT_FOUND", holdId: "h_1" }, 404, "NOT_FOUND"],
     ["/v1/budgets/record", { code: "BUDGET_NOT_FOUND" }, 404, "NOT_FOUND"],
     [
+      "/v1/budgets/record",
+      { code: "TOO_LATE", occurredAt: 1, oldestAccepted: 604_800_001 },
+      409,
+      "CONFLICT",
+    ],
+    [
+      "/v1/budgets/record",
+      { code: "INVALID_OCCURRED_AT", occurredAt: 400_000, latestAccepted: 300_000 },
+      400,
+      "BAD_REQUEST",
+    ],
+    [
       "/v1/budgets/authorize",
       { code: "INVALID_TTL", ttlMs: 5, minTtlMs: 1_000, maxTtlMs: 86_400_000 },
       400,
@@ -259,7 +271,7 @@ describe("budgets API", () => {
       "/v1/budgets/settle": { key: "k", holdId: "h_1", amount: "1" },
       "/v1/budgets/upsert": { key: "k", unit: "EUR", limits: [] },
       "/v1/budgets/release": { key: "k", holdId: "h_1" },
-      "/v1/budgets/record": { key: "k", amount: "1", idempotencyKey: "r1" },
+      "/v1/budgets/record": { key: "k", amount: "1", idempotencyKey: "r1", occurredAt: 1 },
       "/v1/budgets/authorize": { key: "k", amount: "1", idempotencyKey: "a1", ttlMs: 5 },
     }
 
@@ -267,6 +279,108 @@ describe("budgets API", () => {
 
     expect(response.status).toBe(status)
     expect(((await response.json()) as { error: { code: string } }).error.code).toBe(code)
+  })
+
+  it("returns 409 with closedAt once the budget is past closesAt", async () => {
+    rejectWith({ code: "BUDGET_CLOSED", closedAt: 1_798_761_600_000 })
+
+    const response = await call("/v1/budgets/charge", {
+      key: "customer:acme",
+      amount: "1",
+      idempotencyKey: "c1",
+    })
+
+    expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: "CONFLICT",
+        message: "Budget closed at 2027-01-01T00:00:00.000Z",
+        details: { kind: "budget_closed", closedAt: 1_798_761_600_000 },
+      },
+    })
+  })
+
+  it("requires occurredAt on record and passes it to the budget", async () => {
+    const missing = await call("/v1/budgets/record", {
+      key: "customer:acme",
+      amount: "1",
+      idempotencyKey: "r1",
+    })
+    expect(missing.status).toBe(400)
+
+    rejectWith({ code: "BUDGET_NOT_FOUND" })
+    await call("/v1/budgets/record", {
+      key: "customer:acme",
+      amount: "1",
+      idempotencyKey: "r1",
+      occurredAt: 1_796_083_200_000,
+    })
+    expect(mocks.execute).toHaveBeenCalledWith(
+      { projectId: "proj_123", key: "customer:acme" },
+      {
+        type: "record",
+        idempotencyKey: "r1",
+        occurredAt: 1_796_083_200_000,
+        cost: { amount: usd(1) },
+      }
+    )
+  })
+
+  it("answers a get with instants as sent, the closed flag, and the window history", async () => {
+    const anchor = Date.parse("2026-10-15T00:00:00.000Z")
+    mocks.execute.mockResolvedValue(
+      Ok({
+        type: "get",
+        budget: {
+          key: "customer:acme",
+          unit: "money:USD",
+          version: 2,
+          limits: [{ id: "billing", amount: usd(50), window: "month", anchor, enforce: "hard" }],
+          holds: { defaultTtlMs: 900_000, maxTtlMs: 86_400_000 },
+          onUnavailable: "deny",
+          closesAt: 1_798_761_600_000,
+          closed: false,
+          balance: balance(usd(40)),
+        },
+        history: [
+          {
+            windowId: "month@2026-10-15T00:00:00.000Z",
+            start: Date.parse("2026-09-15T00:00:00.000Z"),
+            end: anchor,
+            consumed: usd(12),
+          },
+        ],
+      })
+    )
+
+    const response = await call("/v1/budgets/get?key=customer:acme")
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      budget: {
+        version: 2,
+        limits: [
+          {
+            id: "billing",
+            amount: "50",
+            window: "month",
+            anchor: "2026-10-15T00:00:00.000Z",
+            enforce: "hard",
+          },
+        ],
+        closesAt: "2027-01-01T00:00:00.000Z",
+        closed: false,
+        balance: { remaining: "40" },
+      },
+      history: [
+        {
+          windowId: "month@2026-10-15T00:00:00.000Z",
+          start: 1_789_430_400_000,
+          end: 1_792_022_400_000,
+          consumed: "12",
+        },
+      ],
+    })
   })
 
   it("reads a budget by the key in the query string", async () => {
@@ -287,7 +401,11 @@ describe("budgets API", () => {
     await call("/v1/budgets/upsert", {
       key: "customer:acme",
       unit: "USD",
-      limits: [{ amount: "50", window: "month" }],
+      limits: [
+        { amount: "50", window: "month" },
+        { id: "billing", amount: "50", window: "month", anchor: "2026-10-15T02:00:00+02:00" },
+      ],
+      closesAt: "2026-12-31T23:59:59Z",
     })
 
     const [, request] = mocks.execute.mock.calls[0] ?? []
@@ -296,7 +414,13 @@ describe("budgets API", () => {
       key: "customer:acme",
       projectId: "proj_123",
       unit: "money:USD",
-      config: { limits: [{ id: "month", amount: usd(50), window: "month", enforce: "hard" }] },
+      config: {
+        limits: [
+          { id: "month", amount: usd(50), window: "month", enforce: "hard" },
+          { id: "billing", window: "month", anchor: Date.parse("2026-10-15T00:00:00.000Z") },
+        ],
+        closesAt: Date.parse("2026-12-31T23:59:59.000Z"),
+      },
     })
   })
 

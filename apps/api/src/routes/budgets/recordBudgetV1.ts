@@ -14,7 +14,7 @@ export const route = createRoute(
       operationId: "budgets.record",
       summary: "record usage that already happened",
       description:
-        "Consume an amount for work that already ran. Never denied, so remaining can go negative.",
+        "Consume an amount for work that already ran. Never denied by a limit, so remaining can go negative. Usage must have occurred within the last 7 days (409 beyond it), and a retry with the same idempotency key and occurredAt is never counted twice within 8 days.",
       method: "post",
       tags: ["budgets"],
       request: {

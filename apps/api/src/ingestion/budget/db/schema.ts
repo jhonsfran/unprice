@@ -1,4 +1,12 @@
-import { customType, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core"
+import {
+  customType,
+  index,
+  integer,
+  primaryKey,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core"
 
 /** DO SQLite cannot bind bigint, and the store never sums in SQL, so amounts are TEXT. */
 const amount = customType<{ data: bigint; driverData: string }>({
@@ -61,4 +69,32 @@ export const budgetOperations = sqliteTable(
     due: index("budget_operations_due_at_idx").on(table.dueAt),
     key: uniqueIndex("budget_operations_key_hash_idx").on(table.keyHash),
   })
+)
+
+/**
+ * One row per `window.rolled` fact: a period of a window that ended with usage. Hourly rows are
+ * pruned after 30 days; the rest are a few rows a month and kept.
+ */
+export const budgetWindowHistory = sqliteTable(
+  "budget_window_history",
+  {
+    windowId: text("window_id").notNull(),
+    start: integer("start").notNull(),
+    end: integer("end").notNull(),
+    consumed: amount("consumed").notNull(),
+  },
+  (table) => ({ pk: primaryKey({ columns: [table.windowId, table.start] }) })
+)
+
+/**
+ * sha256 of every recorded idempotency key, kept RECORD_DEDUPE_MS: it outlives the record's
+ * operation row, so a replay within 8 days is never counted twice.
+ */
+export const budgetRecordKeys = sqliteTable(
+  "budget_record_keys",
+  {
+    keyHash: text("key_hash").primaryKey(),
+    expiresAt: integer("expires_at").notNull(),
+  },
+  (table) => ({ expires: index("budget_record_keys_expires_at_idx").on(table.expiresAt) })
 )

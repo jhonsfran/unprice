@@ -14,7 +14,7 @@ export const route = createRoute(
       operationId: "budgets.authorize",
       summary: "hold an amount against a budget before work runs",
       description:
-        "Hold an estimate against every hard limit of the budget, or return 402 with the limit that blocked it. Settle the hold with the actual amount, or release it. A retry with the same idempotency key returns the same hold.",
+        "Hold an estimate against every hard limit of the budget, or return 402 with the limit that blocked it. Settle the hold with the actual amount, or release it. A retry with the same idempotency key returns the same hold. A budget past its closesAt returns 409.",
       method: "post",
       tags: ["budgets"],
       request: {

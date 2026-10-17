@@ -207,6 +207,19 @@
                       }
                     },
                     "required": ["kind", "blocked", "balance"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["budget_closed"]
+                      },
+                      "closedAt": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": ["kind", "closedAt"]
                   }
                 ]
               }
@@ -379,6 +392,19 @@
                       }
                     },
                     "required": ["kind", "blocked", "balance"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["budget_closed"]
+                      },
+                      "closedAt": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": ["kind", "closedAt"]
                   }
                 ]
               }
@@ -551,6 +577,19 @@
                       }
                     },
                     "required": ["kind", "blocked", "balance"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["budget_closed"]
+                      },
+                      "closedAt": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": ["kind", "closedAt"]
                   }
                 ]
               }
@@ -723,6 +762,19 @@
                       }
                     },
                     "required": ["kind", "blocked", "balance"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["budget_closed"]
+                      },
+                      "closedAt": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": ["kind", "closedAt"]
                   }
                 ]
               }
@@ -895,6 +947,19 @@
                       }
                     },
                     "required": ["kind", "blocked", "balance"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["budget_closed"]
+                      },
+                      "closedAt": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": ["kind", "closedAt"]
                   }
                 ]
               }
@@ -1067,6 +1132,19 @@
                       }
                     },
                     "required": ["kind", "blocked", "balance"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["budget_closed"]
+                      },
+                      "closedAt": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": ["kind", "closedAt"]
                   }
                 ]
               }
@@ -1239,6 +1317,19 @@
                       }
                     },
                     "required": ["kind", "blocked", "balance"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["budget_closed"]
+                      },
+                      "closedAt": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": ["kind", "closedAt"]
                   }
                 ]
               }
@@ -1411,6 +1502,19 @@
                       }
                     },
                     "required": ["kind", "blocked", "balance"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["budget_closed"]
+                      },
+                      "closedAt": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": ["kind", "closedAt"]
                   }
                 ]
               }
@@ -1583,6 +1687,19 @@
                       }
                     },
                     "required": ["kind", "blocked", "balance"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["budget_closed"]
+                      },
+                      "closedAt": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": ["kind", "closedAt"]
                   }
                 ]
               }
@@ -1755,6 +1872,19 @@
                       }
                     },
                     "required": ["kind", "blocked", "balance"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["budget_closed"]
+                      },
+                      "closedAt": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": ["kind", "closedAt"]
                   }
                 ]
               }
@@ -3210,6 +3340,12 @@
                           "type": "string",
                           "enum": ["hour", "day", "week", "month", "never"]
                         },
+                        "anchor": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "Anchors a day, week, or month window: periods start at this instant and repeat every window. A month anchored on the 31st starts on the last day of shorter months. Usage counts from the moment the anchor is first set.",
+                          "example": "2026-10-15T00:00:00Z"
+                        },
                         "enforce": {
                           "type": "string",
                           "enum": ["hard", "soft"]
@@ -3218,6 +3354,13 @@
                       "required": ["amount", "window"]
                     },
                     "maxItems": 16
+                  },
+                  "closesAt": {
+                    "type": "string",
+                    "nullable": true,
+                    "format": "date-time",
+                    "description": "When the budget closes. From then on authorize and charge return 409, record is accepted for 24 hours more, and settle and release keep working. Omit or send null to keep it open.",
+                    "example": "2026-12-31T23:59:59Z"
                   },
                   "holds": {
                     "type": "object",
@@ -3315,6 +3458,9 @@
                                 "type": "string",
                                 "enum": ["hour", "day", "week", "month", "never"]
                               },
+                              "anchor": {
+                                "type": "string"
+                              },
                               "enforce": {
                                 "type": "string",
                                 "enum": ["hard", "soft"]
@@ -3352,6 +3498,13 @@
                               "required": ["allowUpTo"]
                             }
                           ]
+                        },
+                        "closesAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "closed": {
+                          "type": "boolean"
                         },
                         "balance": {
                           "type": "object",
@@ -3428,6 +3581,8 @@
                         "limits",
                         "holds",
                         "onUnavailable",
+                        "closesAt",
+                        "closed",
                         "balance"
                       ]
                     }
@@ -3534,7 +3689,7 @@
       "post": {
         "operationId": "budgets.authorize",
         "summary": "hold an amount against a budget before work runs",
-        "description": "Hold an estimate against every hard limit of the budget, or return 402 with the limit that blocked it. Settle the hold with the actual amount, or release it. A retry with the same idempotency key returns the same hold.",
+        "description": "Hold an estimate against every hard limit of the budget, or return 402 with the limit that blocked it. Settle the hold with the actual amount, or release it. A retry with the same idempotency key returns the same hold. A budget past its closesAt returns 409.",
         "tags": ["budgets"],
         "x-unprice": {
           "audience": "public",
@@ -4287,7 +4442,7 @@
       "post": {
         "operationId": "budgets.charge",
         "summary": "consume an amount if it fits",
-        "description": "Consume an amount in one call when it fits every hard limit, or return 402 with the limit that blocked it. For cheap work gated before it runs.",
+        "description": "Consume an amount in one call when it fits every hard limit, or return 402 with the limit that blocked it. For cheap work gated before it runs. A budget past its closesAt returns 409.",
         "tags": ["budgets"],
         "x-unprice": {
           "audience": "public",
@@ -4536,7 +4691,7 @@
       "post": {
         "operationId": "budgets.record",
         "summary": "record usage that already happened",
-        "description": "Consume an amount for work that already ran. Never denied, so remaining can go negative.",
+        "description": "Consume an amount for work that already ran. Never denied by a limit, so remaining can go negative. Usage must have occurred within the last 7 days (409 beyond it), and a retry with the same idempotency key and occurredAt is never counted twice within 8 days.",
         "tags": ["budgets"],
         "x-unprice": {
           "audience": "public",
@@ -4572,9 +4727,15 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 256
+                  },
+                  "occurredAt": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "When the usage happened, in epoch milliseconds. Must be within the last 7 days and at most 5 minutes ahead. Send the same value on a retry.",
+                    "example": 1792000000000
                   }
                 },
-                "required": ["key", "amount", "idempotencyKey"],
+                "required": ["key", "amount", "idempotencyKey", "occurredAt"],
                 "additionalProperties": false
               }
             }
@@ -4771,7 +4932,7 @@
       "get": {
         "operationId": "budgets.get",
         "summary": "get a budget and its balance",
-        "description": "Get the budget at a key with its limits and the current balance of each.",
+        "description": "Get the budget at a key with its limits, the current balance of each, and the last ended periods with usage of each limited window.",
         "tags": ["budgets"],
         "x-unprice": {
           "audience": "public",
@@ -4832,6 +4993,9 @@
                                 "type": "string",
                                 "enum": ["hour", "day", "week", "month", "never"]
                               },
+                              "anchor": {
+                                "type": "string"
+                              },
                               "enforce": {
                                 "type": "string",
                                 "enum": ["hard", "soft"]
@@ -4869,6 +5033,13 @@
                               "required": ["allowUpTo"]
                             }
                           ]
+                        },
+                        "closesAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "closed": {
+                          "type": "boolean"
                         },
                         "balance": {
                           "type": "object",
@@ -4945,11 +5116,36 @@
                         "limits",
                         "holds",
                         "onUnavailable",
+                        "closesAt",
+                        "closed",
                         "balance"
                       ]
+                    },
+                    "history": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "windowId": {
+                            "type": "string"
+                          },
+                          "start": {
+                            "type": "integer"
+                          },
+                          "end": {
+                            "type": "integer"
+                          },
+                          "consumed": {
+                            "type": "string",
+                            "description": "A decimal amount in the budget's unit; negative after an overrun"
+                          }
+                        },
+                        "required": ["windowId", "start", "end", "consumed"]
+                      },
+                      "description": "The last 12 ended periods with usage of each limited window, newest first. Hourly periods are kept 30 days."
                     }
                   },
-                  "required": ["budget"]
+                  "required": ["budget", "history"]
                 }
               }
             }

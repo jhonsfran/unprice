@@ -87,7 +87,8 @@ layer (LiteLLM), budgets that cannot be edited (Portkey).
 Budget
   key        string the builder owns: "customer:acme", "run:r_9", "acme/images"
   unit       money:<ISO currency> | credits:<creditId> | units:<featureSlug>
-  limits     [{ amount, window: hour|day|week|month|never, feature?, unit?, enforce: hard|soft }]
+  limits     [{ amount, window: hour|day|week|month|never, anchor?, feature?, unit?, enforce: hard|soft }]
+  closesAt   instant?                                        // one-time end: no new spend after it
   pricing    none | rows (inline) | rateCard { id }            // ADR-0005 rows; one pure rate()
   funding    none | grant | wallet | creditLine { limit } | parent { key } | webhook { url }
   refill     { target?, lowWater?, maxOutstanding? }           // adaptive by default
@@ -109,6 +110,26 @@ Budget
   credits budget). Every applicable limit is checked; the tightest wins; the response names it.
 - Changing `enforce` between hard and soft writes an audit entry and emits an event. It is never
   changed by Unprice.
+- A window is a UTC calendar window (`hour`, `day`, `week` from Monday, `month`, `never`) or an
+  anchored one: `window: "month", anchor: "2026-10-15T00:00:00Z"` repeats every month from the
+  anchor, forward and backward. A monthly anchor keeps its day of month and time of day; in a month
+  too short for it, the period starts on the last day (an anchor on the 31st starts Feb 28 or 29
+  and Apr 30). Weekly anchors keep weekday and time; daily anchors keep time of day. Anchors fit
+  billing cycles that start on the signup date.
+- Usage is counted per window id, not per limit. A calendar window's id is its name; an anchored
+  window's id is `<window>@<anchor ISO>`, such as `month@2026-10-15T00:00:00.000Z`. The budget
+  always keeps the five calendar counters, plus one counter per anchored id a limit uses. Every
+  consumption adds to every counter, and counters only roll forward under the clamped clock.
+  Renaming a limit, or removing and re-adding it inside one period, never resets its usage: a
+  counter no limit uses is kept until its period ends and then dropped. A new anchored window
+  counts from the moment it is added; it cannot backfill usage from earlier in its period.
+- `closesAt` is the one-time end of a budget, such as a trial or a campaign. An upsert may set,
+  move, or clear it, and the change is audited like any other. From `closesAt` on, `authorize` and
+  `charge` return 409 `BUDGET_CLOSED` with `closedAt`. `settle` and `release` of holds placed
+  before the close keep working, and `record` is accepted for one more retention period (24
+  hours) so usage that ran before the close can still arrive. Nothing is deleted at close: the
+  balance, the counters, and the window history stay readable, and every snapshot reports
+  `closesAt` and `closed`.
 
 ### B2. Five verbs; consumption happens at settle, charge, or record
 
@@ -118,7 +139,8 @@ authorize { key, estimate: { amount } | { usage }, ttl?, idempotencyKey }
 settle    { key, holdId, actual: { amount } | { usage } }                  // closes the hold
 release   { key, holdId }                                                 // nothing consumed
 charge    { key, amount | usage, idempotencyKey }   // gated one-shot: denied if it does not fit
-record    { key, amount | usage, idempotencyKey }   // usage that already happened: never denied
+record    { key, amount | usage, idempotencyKey, occurredAt }   // already happened: never denied
+get       { key } -> { budget, history }            // history: last 12 ended periods per window
 ```
 
 The lifecycle of one call:
@@ -143,8 +165,13 @@ settle(actual 55)   held 80 -> 0          consumed 0 -> 55   available 20 -> 45
   Anything beyond that is still consumed and recorded as debt; remaining can go negative, and a
   negative remaining denies every new hold until funding catches up.
 - `charge` is for cheap work that is gated before it runs. `record` is for usage that already
-  happened (event ingestion, provider callbacks). `record` is never denied, because denying it
-  cannot undo the work.
+  happened (event ingestion, provider callbacks). `record` is never denied by a limit, because
+  denying it cannot undo the work. It carries `occurredAt`, the epoch milliseconds the usage
+  happened, like the event API's `timestamp`; the window rules are in B3.
+- When a counter's period ends, the next accepted command (or the alarm at the boundary) writes a
+  `window.rolled { windowId, start, end, consumed }` fact for the period that ended, only when it
+  had usage. An idle gap of many periods writes one fact, for the last period with usage. `get`
+  returns the last 12 of these per window that has a limit, newest first.
 - Every response carries `remaining` for each limit, and the HTTP adapter copies it into response
   headers. A denial is always HTTP 402 with `blockedBy` (the limit or the funding source) and a
   remedy.
@@ -164,6 +191,18 @@ settle(actual 55)   held 80 -> 0          consumed 0 -> 55   available 20 -> 45
   its settle never committed reports that usage with `record` and its own idempotency key.
 - Holds and settles carry the authorization timestamp. Prices are resolved at that timestamp
   (ADR-0005), so a price change between authorize and settle never changes what one call costs.
+- `record` accepts usage whose `occurredAt` is within the last 7 days and at most 5 minutes
+  ahead. Older usage returns 409 `TOO_LATE`; a future time returns 400 `INVALID_OCCURRED_AT`.
+  `occurredAt` only bounds acceptance: the amount counts against the window it arrives in, like a
+  late settle.
+- A record's key outlives its row. The row answers replays for 24 hours like every operation; the
+  key's hash is kept 8 days, longer than the 7-day accept window plus the skew, so a replay the key
+  no longer catches is already too late. Between 24 hours and 8 days a replay returns `replayed:
+  true` with the amount it was sent with and the current balance, and never counts again.
+  `occurredAt` is part of the request hash, so a retry must resend the same value. Only the hash
+  is kept after the row is purged, so a changed payload under a reused key is a 409 conflict for
+  24 hours and a silent replay after that: conflicts are detected for a day, duplicates for 8
+  days.
 
 ### B4. Pricing inside a budget, including credits
 
@@ -258,6 +297,16 @@ close: final capture, then source.release(key = "rel:{budget}:{epoch}")
 6. Webhook events leave through an outbox table written in the same transaction as the change.
 7. The ledger row is the balance. Journal entries are an audit trail that the alarm prunes after
    24 hours; nothing replays them to rebuild state.
+8. Window history and record keys are projections of facts written in the same transaction:
+   `window.rolled` inserts a `budget_window_history` row, `recorded` inserts its key hash into
+   `budget_record_keys`. A roll happens only inside an accepted command or the alarm's sweep, so a
+   denial still writes nothing. Each transition checks per counter that consumed after plus what
+   rolled out equals consumed before plus what it consumed.
+9. The alarm also wakes at the next period end of any window that has a limit, so an idle budget
+   rolls within a second of the boundary. A budget without limits keeps the 24-hour heartbeat. The
+   sweep prunes hourly history after 30 days (other windows are kept) and purges expired record
+   keys in bounded batches, never past the ledger's clock: a command clamps its clock to the
+   ledger's, and a key purged at a later raw clock could otherwise let a replay count twice.
 
 ### B8. Unprice's own billing runs on budgets
 
@@ -374,6 +423,10 @@ idempotent upserts and usually live in a deploy script or `unprice.config.ts`.
 ```ts
 // 1. Hard cap per end customer of an AI app; the builder bills elsewhere
 await unprice.budgets.upsert({ key: "customer:acme", unit: "USD", limits: [{ amount: 50, window: "month" }] })
+// ... or per billing cycle from the signup date, and a trial that ends on a date
+await unprice.budgets.upsert({ key: "customer:acme", unit: "USD", closesAt: "2026-11-14T00:00:00Z",
+  limits: [{ amount: 50, window: "month", anchor: "2026-10-15T00:00:00Z" }] })
+const { budget, history } = await unprice.budgets.get({ key: "customer:acme" })   // history: ended cycles
 const acme = unprice.budget("customer:acme")
 const answer = await acme.spend({ estimate: 0.05 }, async () => {
   const r = await generateText({ model: openai("gpt-4.1"), prompt })
@@ -448,8 +501,10 @@ await hold.settle({ usage: { feature: "model_call",
 // 12. Trial: $5 that expires on day 14
 { key: "customer:acme", unit: "USD", funding: { grant: { amount: 5, expiresAt: trialEnd } } }
 
-// Event ingestion records usage that already happened; it is never denied
-await unprice.budget("customer:acme").record({ usage: { feature: "image", properties: {} }, idempotencyKey: eventId })
+// Event ingestion records usage that already happened; it is never denied by a limit.
+// occurredAt bounds acceptance (7 days) and makes a replay within 8 days count once.
+await unprice.budget("customer:acme").record({ usage: { feature: "image", properties: {} },
+  idempotencyKey: eventId, occurredAt: event.timestamp })
 ```
 
 ## Prototype and iteration

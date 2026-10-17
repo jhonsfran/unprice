@@ -16,7 +16,17 @@ import { BudgetProcessor } from "./processor"
 
 const UNIT = BigInt(100_000_000)
 const units = (value: number) => BigInt(Math.round(value * 100)) * (UNIT / BigInt(100))
-const HOUR = 60 * 60 * 1000
+const MINUTE = 60 * 1000
+const HOUR = 60 * MINUTE
+
+/**
+ * 12:30 UTC on the 10th of next month: far enough that real alarms never fire mid-test, and far
+ * from any day, week-of-month, or month boundary an alarm could wake for first.
+ */
+function midMonthAhead() {
+  const now = new Date()
+  return Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 10, 12, 30)
+}
 
 afterEach(async () => {
   await reset()
@@ -123,7 +133,12 @@ describe("BudgetDO verbs", () => {
     expect(charged.balance.remaining).toBe(units(40))
 
     const recorded = outcome(
-      await stub.execute({ type: "record", idempotencyKey: "r1", cost: { amount: units(45) } }),
+      await stub.execute({
+        type: "record",
+        idempotencyKey: "r1",
+        occurredAt: Date.now(),
+        cost: { amount: units(45) },
+      }),
       "record"
     )
     expect(recorded.crossed).toEqual(["month"])
@@ -154,6 +169,31 @@ describe("BudgetDO verbs", () => {
     const read = outcome(await stub.execute({ type: "get" }), "get")
     expect(read.budget.balance.remaining).toBe(-units(5))
     expect(read.budget.balance.limits[0]?.consumed).toBe(units(55))
+  })
+
+  it("refuses spend on a budget past its closesAt and reports it closed", async () => {
+    const key = "customer:closed"
+    const stub = stubFor(key)
+    const closesAt = new Date(Date.now() - MINUTE).toISOString()
+    await stub.execute(upsert(key, { ...fiftyPerMonth, closesAt }))
+
+    expect(
+      rejection(
+        await stub.execute({ type: "authorize", idempotencyKey: "a1", cost: { amount: units(1) } })
+      )
+    ).toEqual({ code: "BUDGET_CLOSED", closedAt: Date.parse(closesAt) })
+    const recorded = outcome(
+      await stub.execute({
+        type: "record",
+        idempotencyKey: "r1",
+        occurredAt: Date.now(),
+        cost: { amount: units(2) },
+      }),
+      "record"
+    )
+    expect(recorded.balance.remaining).toBe(units(48))
+    const read = outcome(await stub.execute({ type: "get" }), "get")
+    expect([read.budget.closesAt, read.budget.closed]).toEqual([Date.parse(closesAt), true])
   })
 
   it("rejects every verb on a key that was never upserted", async () => {
@@ -275,8 +315,7 @@ describe("BudgetDO alarm", () => {
   it("lapses a due hold, prunes the journal, purges the tombstone, and always re-arms", async () => {
     const key = "customer:alarm"
     const stub = stubFor(key)
-    // Far enough ahead that the alarms set here never fire on the real clock mid-test.
-    const t0 = Date.now() + 7 * 24 * HOUR
+    const t0 = midMonthAhead()
     let now = t0
 
     await runInDurableObject(stub, async (instance: BudgetDO, state) => {
@@ -320,6 +359,82 @@ describe("BudgetDO alarm", () => {
         )
       ).toEqual({ code: "HOLD_RETIRED", holdId: "h_1" })
       expect(errors).toEqual([])
+    })
+  })
+
+  it("wakes at a window boundary, rolls the period into history, and serves it on get", async () => {
+    const key = "customer:roll"
+    const stub = stubFor(key)
+    const t0 = midMonthAhead()
+    const boundary = t0 + 30 * MINUTE
+    let now = t0
+
+    await runInDurableObject(stub, async (instance: BudgetDO, state) => {
+      await instance.execute({ type: "get" })
+      await state.storage.deleteAlarm()
+      const processor = realStorageProcessor(state, () => now)
+
+      await processor.execute(
+        upsert(key, { limits: [{ id: "hourly", amount: "10", window: "hour" }] })
+      )
+      await expect(state.storage.getAlarm()).resolves.toBe(boundary)
+      await processor.execute({ type: "charge", idempotencyKey: "c1", cost: { amount: units(4) } })
+
+      now = boundary
+      await processor.alarm()
+      expect(
+        state.storage.sql
+          .exec("SELECT window_id, start, end, consumed FROM budget_window_history")
+          .toArray()
+      ).toEqual([
+        { window_id: "hour", start: boundary - HOUR, end: boundary, consumed: "400000000" },
+      ])
+      await expect(state.storage.getAlarm()).resolves.toBe(boundary + HOUR)
+
+      const read = outcome(await processor.execute({ type: "get" }), "get")
+      expect(read.history).toEqual([
+        { windowId: "hour", start: boundary - HOUR, end: boundary, consumed: units(4) },
+      ])
+      expect(read.budget.balance.limits[0]?.consumed).toBe(BigInt(0))
+    })
+  })
+
+  it("replays a record after its row is purged without counting it again", async () => {
+    const key = "customer:record-replay"
+    const stub = stubFor(key)
+    const t0 = midMonthAhead()
+    let now = t0
+
+    await runInDurableObject(stub, async (instance: BudgetDO, state) => {
+      await instance.execute({ type: "get" })
+      await state.storage.deleteAlarm()
+      const processor = realStorageProcessor(state, () => now)
+      await processor.execute(
+        upsert(key, { limits: [{ id: "life", amount: "50", window: "never" }] })
+      )
+      const request = {
+        type: "record",
+        idempotencyKey: "evt_1",
+        occurredAt: t0,
+        cost: { amount: units(4) },
+      } as const
+      expect(outcome(await processor.execute(request), "record").replayed).toBe(false)
+
+      now = t0 + 25 * HOUR
+      await processor.alarm()
+      const count = (table: string) =>
+        state.storage.sql.exec(`SELECT count(*) AS n FROM ${table}`).one()
+      expect([count("budget_operations"), count("budget_record_keys")]).toEqual([
+        { n: 0 },
+        { n: 1 },
+      ])
+
+      const replay = outcome(await processor.execute(request), "record")
+      expect([replay.replayed, replay.amount, replay.balance.remaining]).toEqual([
+        true,
+        units(4),
+        units(46),
+      ])
     })
   })
 

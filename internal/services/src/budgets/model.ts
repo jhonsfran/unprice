@@ -12,14 +12,31 @@ import {
   formatAmount,
 } from "@unprice/money"
 import type { BudgetConfig, BudgetLimit, BudgetRecord, ConfigChange } from "./config"
-import type { BudgetWindow } from "./windows"
+import type { AnchoredWindowId, BudgetWindow, WindowId } from "./windows"
 
 const ZERO = BigInt(0)
 
 // Projections
 
-export type WindowUsage = Readonly<{ start: number; consumed: Amount }>
+/**
+ * One usage counter: consumption since `start`, the start of the period it is in. `orphan` marks an
+ * anchored counter no limit references any more; it is dropped when its period ends, so removing
+ * and re-adding a limit inside one period never resets it.
+ */
+export type WindowUsage = Readonly<{ start: number; consumed: Amount; orphan?: true }>
 
+/** The five calendar counters always; one counter per anchored window id a limit references. */
+export type WindowCounters = Readonly<
+  Record<BudgetWindow, WindowUsage> & { [id: AnchoredWindowId]: WindowUsage }
+>
+
+/** A period of one window that ended with usage: the payload of `window.rolled`. */
+export type WindowPeriod = Readonly<{
+  windowId: WindowId
+  start: number
+  end: number
+  consumed: Amount
+}>
 /**
  * The aggregate and the authoritative balance: one row, rewritten by every accepted command, O(1)
  * in history.
@@ -27,14 +44,15 @@ export type WindowUsage = Readonly<{ start: number; consumed: Amount }>
  *   `lastAt`, so windows only roll forward.
  * - `holdSeq` counts holds ever placed. `h_<n>` with n <= holdSeq was minted.
  * - `held` = sum of `amount` over open holds (including expired ones not yet lapsed).
- * - `usage` has all five canonical windows; `usage.never.consumed` is lifetime consumption.
+ * - `usage` has all five canonical windows plus anchored ones; `usage.never.consumed` is lifetime
+ *   consumption. Every consumption adds to every counter.
  */
 export type Ledger = Readonly<{
   seq: number
   lastAt: number
   holdSeq: number
   held: Amount
-  usage: Readonly<Record<BudgetWindow, WindowUsage>>
+  usage: WindowCounters
 }>
 
 export const emptyLedger: Ledger = {
@@ -111,6 +129,13 @@ export type BudgetView = Readonly<{
   target: Operation | null
   /** Open holds with `lapsesAt <= max(clock, ledger.lastAt)`, any subset; the alarm sweeps the rest. */
   due: readonly HoldOperation[]
+  /**
+   * For `record` without a row: whether its key was recorded within RECORD_DEDUPE_MS. Keys outlive
+   * rows, so a replay after the row's purge is still caught.
+   */
+  seenRecordKey: boolean
+  /** For `get`: up to HISTORY_PERIODS stored periods per limited window id, newest first. */
+  history: readonly WindowPeriod[]
 }>
 
 /** Projections after folding: the budget, the ledger, and the rows this transition saw. */
@@ -156,6 +181,8 @@ export type Fact =
       amount: Amount
       crossed: readonly string[]
     }>
+  /** A counter left a period that had usage. History only: the roll itself moves no balance. */
+  | (Readonly<{ type: "window.rolled" }> & WindowPeriod)
 
 export type Entry = Readonly<{ seq: number; at: number }> & Fact
 
@@ -185,7 +212,14 @@ export type BudgetCommand =
   | Readonly<{ type: "settle"; holdId: string; cost: Cost }>
   | Readonly<{ type: "release"; holdId: string }>
   | Readonly<{ type: "charge"; idempotencyKey: string; requestHash: string; cost: Cost }>
-  | Readonly<{ type: "record"; idempotencyKey: string; requestHash: string; cost: Cost }>
+  | Readonly<{
+      type: "record"
+      idempotencyKey: string
+      requestHash: string
+      cost: Cost
+      /** Epoch ms the usage happened. Bounds acceptance only; usage counts when it arrives. */
+      occurredAt: number
+    }>
   | Readonly<{ type: "get" }>
   | Readonly<{ type: "sweep" }>
 
@@ -196,11 +230,17 @@ type KeyedCommand = Extract<BudgetCommand, { idempotencyKey: string }>
  * includes the verb, so one key reused across verbs conflicts.
  */
 export function requestFingerprint(
-  command: Pick<KeyedCommand, "type" | "cost"> & { ttlMs?: number }
+  command: Pick<KeyedCommand, "type" | "cost"> & { ttlMs?: number; occurredAt?: number }
 ): string {
   const amount = command.cost.amount.toString()
-  if (command.type !== "authorize") return `${command.type}|${amount}`
-  return `authorize|${amount}|${command.ttlMs ?? "default"}`
+  switch (command.type) {
+    case "authorize":
+      return `authorize|${amount}|${command.ttlMs ?? "default"}`
+    case "record":
+      return `record|${amount}|${command.occurredAt}`
+    case "charge":
+      return `charge|${amount}`
+  }
 }
 
 // Outcomes
@@ -226,7 +266,14 @@ export type BudgetBalance = Readonly<{
 }>
 
 export type BudgetSnapshot = Readonly<
-  { key: string; unit: string; version: number; balance: BudgetBalance } & BudgetConfig
+  {
+    key: string
+    unit: string
+    version: number
+    /** `closesAt` has passed (B1). */
+    closed: boolean
+    balance: BudgetBalance
+  } & BudgetConfig
 >
 
 /** What would let the same request through. */
@@ -244,7 +291,7 @@ export type Blocked = Readonly<{
 
 export type BudgetOutcome =
   | Readonly<{ type: "upsert"; changes: readonly ConfigChange[]; budget: BudgetSnapshot }>
-  | Readonly<{ type: "get"; budget: BudgetSnapshot }>
+  | Readonly<{ type: "get"; budget: BudgetSnapshot; history: readonly WindowPeriod[] }>
   | Readonly<{
       type: "authorize"
       holdId: string
@@ -309,6 +356,10 @@ export type BudgetRejection =
   | Readonly<{ code: "HOLD_RETIRED"; holdId: string }>
   | Readonly<{ code: "IDEMPOTENCY_CONFLICT"; idempotencyKey: string }>
   | Readonly<{ code: "UNIT_IMMUTABLE"; current: string; requested: string }>
+  /** Authorize and charge from `closesAt` on; record from `closesAt + OPERATION_RETENTION_MS`. */
+  | Readonly<{ code: "BUDGET_CLOSED"; closedAt: number }>
+  | Readonly<{ code: "TOO_LATE"; occurredAt: number; oldestAccepted: number }>
+  | Readonly<{ code: "INVALID_OCCURRED_AT"; occurredAt: number; latestAccepted: number }>
 
 export type BudgetErrorCode = BudgetRejection["code"]
 
@@ -348,6 +399,12 @@ function rejectionMessage(rejection: BudgetRejection): string {
       return `Idempotency key ${rejection.idempotencyKey} was used with a different request`
     case "UNIT_IMMUTABLE":
       return `Budget unit is ${rejection.current} and cannot change to ${rejection.requested}`
+    case "BUDGET_CLOSED":
+      return `Budget closed at ${new Date(rejection.closedAt).toISOString()}`
+    case "TOO_LATE":
+      return `Usage at ${rejection.occurredAt} is older than the oldest accepted ${rejection.oldestAccepted}`
+    case "INVALID_OCCURRED_AT":
+      return `occurredAt ${rejection.occurredAt} is ahead of the latest accepted ${rejection.latestAccepted}`
   }
 }
 

@@ -5,13 +5,14 @@
  * projections with arithmetic only. A store keeps three projections in one transaction: the
  * ledger (one row, the authoritative balance), one row per operation (open hold, closed
  * tombstone, idempotency record), and the journal entries, an audit trail it prunes after a day.
- * Every fact carries its own deltas, so the ledger and the operation rows are two independent
- * folds that `checkTransition` compares on every command.
+ * From the same entries it derives the window history (`window.rolled`) and the record keys
+ * (`recorded`). Every fact carries its own deltas, so the ledger and the operation rows are two
+ * independent folds that `checkTransition` compares on every command.
  */
 
 import { Err, Ok, type Result } from "@unprice/error"
-import type { BudgetRecord } from "./config"
-import { balanceOf, decide, lapseFacts } from "./decide"
+import { type BudgetRecord, WINDOW_HISTORY_PERIODS, isClosed } from "./config"
+import { balanceOf, decide, lapseFacts, rollFacts } from "./decide"
 import { dueAt, evolve, operationIdOf } from "./evolve"
 import { checkTransition } from "./invariants"
 import type {
@@ -26,7 +27,9 @@ import type {
   Ledger,
   Operation,
   UnPriceBudgetError,
+  WindowPeriod,
 } from "./model"
+import { type WindowId, windowBounds, windowIdOf } from "./windows"
 
 /** The reads a store answers inside its transaction. Rows come back as domain types. */
 export type BudgetReader = {
@@ -36,9 +39,16 @@ export type BudgetReader = {
   readOperationByKey(idempotencyKey: string): Operation | null
   /** Open holds with `lapsesAt <= at`, earliest first, at most `limit`. */
   readDueHolds(at: number, limit: number): HoldOperation[]
+  /** Whether `recorded` wrote this key and its RECORD_DEDUPE_MS had not passed by `at`. */
+  readRecordKey(idempotencyKey: string, at: number): boolean
+  /** Up to `limit` stored periods of each window id, newest first. */
+  readHistory(windowIds: readonly WindowId[], limit: number): WindowPeriod[]
 }
 
-/** What `transition` reads for one command: the row it addresses and up to `dueLimit` due holds. */
+/**
+ * What `transition` reads for one command: the row it addresses, up to `dueLimit` due holds, a
+ * record's key when its row is gone, and the history a `get` returns.
+ */
 export function loadView(
   reader: BudgetReader,
   command: BudgetCommand,
@@ -46,12 +56,36 @@ export function loadView(
   dueLimit: number
 ): BudgetView {
   const ledger = reader.readLedger()
+  const budget = reader.readBudget()
+  const at = Math.max(clockMs, ledger.lastAt)
+  const target = targetOf(reader, command)
   return {
-    budget: reader.readBudget(),
+    budget,
     ledger,
-    target: targetOf(reader, command),
-    due: reader.readDueHolds(Math.max(clockMs, ledger.lastAt), dueLimit),
+    target,
+    due: reader.readDueHolds(at, dueLimit),
+    seenRecordKey:
+      command.type === "record" && !target && reader.readRecordKey(command.idempotencyKey, at),
+    history:
+      command.type === "get" && budget
+        ? reader.readHistory(limitedWindows(budget), WINDOW_HISTORY_PERIODS)
+        : [],
   }
+}
+
+/** Window ids the budget's limits use, once each, in limit order. */
+function limitedWindows(budget: BudgetRecord): WindowId[] {
+  return [...new Set(budget.config.limits.map((limit) => windowIdOf(limit)))]
+}
+
+/** The next period end among the windows that have a limit: when the alarm rolls an idle budget. */
+function nextPeriodEnd(budget: BudgetRecord | null, now: number): number | null {
+  let next: number | null = null
+  for (const limit of budget?.config.limits ?? []) {
+    const { end } = windowBounds(limit, now)
+    if (end !== null && (next === null || end < next)) next = end
+  }
+  return next
 }
 
 function targetOf(reader: BudgetReader, command: BudgetCommand): Operation | null {
@@ -83,14 +117,17 @@ export type BudgetTransition = Readonly<{
   /** Rows created or changed; the store upserts exactly these. */
   operations: readonly Operation[]
   outcome: BudgetOutcome
-  /** Earliest `dueAt` among the written rows; the store only ever lowers its alarm to it. */
+  /**
+   * Earliest `dueAt` among the written rows, or the next period end of a limited window when
+   * sooner; the store only ever lowers its alarm to it.
+   */
   wakeAt: number | null
 }>
 
 /**
  * The one call a store makes per command:
- * clamp the clock, lapse the due holds it loaded, decide, stamp seqs, fold, check, outcome.
- * A rejection returns Err and the store writes nothing, not even the lapses.
+ * clamp the clock, roll ended windows and lapse the due holds it loaded, decide, stamp seqs, fold,
+ * check, outcome. A rejection returns Err and the store writes nothing, not even the rolls or lapses.
  * A replay is zero command facts; its outcome is read from the row plus the current balance.
  * Throws when an invariant breaks (a programmer error that must abort the transaction).
  */
@@ -104,16 +141,21 @@ export function transition(params: {
   const now = Math.max(clockMs, view.ledger.lastAt)
 
   const before = viewState(view)
-  const lapseEntries = stamp(lapseFacts(before.operations.values(), now), view.ledger.seq, now)
-  const swept = lapseEntries.reduce(evolve, before)
+  const lapses = lapseFacts(before.operations.values(), now)
+  const sweepEntries = stamp([...rollFacts(view.ledger, now), ...lapses], view.ledger.seq, now)
+  const swept = sweepEntries.reduce(evolve, before)
   const target = view.target ? (swept.operations.get(view.target.id) ?? null) : null
 
-  const decided = decide(command, { budget: swept.budget, ledger: swept.ledger, target }, now)
+  const decided = decide(
+    command,
+    { budget: swept.budget, ledger: swept.ledger, target, seenRecordKey: view.seenRecordKey },
+    now
+  )
   if (decided.err) return Err(decided.err)
 
   const commandEntries = stamp(decided.val, swept.ledger.seq, now)
   const next = commandEntries.reduce(evolve, swept)
-  const entries = [...lapseEntries, ...commandEntries]
+  const entries = [...sweepEntries, ...commandEntries]
 
   const violations = checkTransition(before, entries, next)
   if (violations.length > 0) {
@@ -123,7 +165,7 @@ export function transition(params: {
   const operations = [...next.operations.values()].filter(
     (operation) => before.operations.get(operation.id) !== operation
   )
-  let wakeAt: number | null = null
+  let wakeAt = nextPeriodEnd(next.budget, now)
   for (const operation of operations) {
     const due = dueAt(operation)
     if (wakeAt === null || due < wakeAt) wakeAt = due
@@ -134,7 +176,7 @@ export function transition(params: {
     entries,
     next,
     operations,
-    outcome: outcomeOf(command, next, commandEntries, target, lapseEntries.length, now),
+    outcome: outcomeOf(command, { view, next, entries, commandEntries, target, now }),
     wakeAt,
   })
 }
@@ -145,28 +187,39 @@ function stamp(facts: readonly Fact[], seq: number, at: number): Entry[] {
 
 function outcomeOf(
   command: BudgetCommand,
-  next: BudgetState,
-  entries: readonly Entry[],
-  target: Operation | null,
-  lapsed: number,
-  now: number
+  params: Readonly<{
+    view: BudgetView
+    next: BudgetState
+    /** Every entry, rolls and lapses included. */
+    entries: readonly Entry[]
+    commandEntries: readonly Entry[]
+    target: Operation | null
+    now: number
+  }>
 ): BudgetOutcome {
-  if (command.type === "sweep") return { type: "sweep", lapsed }
+  const { view, next, entries, commandEntries, target, now } = params
+  if (command.type === "sweep") {
+    return { type: "sweep", lapsed: entries.filter((e) => e.type === "hold.lapsed").length }
+  }
   const budget = next.budget
   if (!budget) throw new Error(`${command.type} accepted without a budget`)
   const balance = balanceOf({ budget, ledger: next.ledger }, now)
-  const replayed = entries.length === 0
-  const written = entries[0] ? operationIdOf(entries[0]) : null
+  const replayed = commandEntries.length === 0
+  const written = commandEntries[0] ? operationIdOf(commandEntries[0]) : null
   const row = (written === null ? target : next.operations.get(written)) ?? null
 
   switch (command.type) {
     case "upsert": {
-      const fact = entries[0]
+      const fact = commandEntries[0]
       const changes = fact?.type === "budget.configured" ? fact.changes : []
-      return { type: "upsert", changes, budget: snapshotOf(budget, balance) }
+      return { type: "upsert", changes, budget: snapshotOf(budget, balance, now) }
     }
     case "get":
-      return { type: "get", budget: snapshotOf(budget, balance) }
+      return {
+        type: "get",
+        budget: snapshotOf(budget, balance, now),
+        history: historyOf(budget, view.history, entries),
+      }
     case "authorize": {
       if (row?.kind !== "hold") throw new Error("authorize produced no hold row")
       const { id: holdId, amount, expiresAt } = row
@@ -174,6 +227,10 @@ function outcomeOf(
     }
     case "charge":
     case "record": {
+      if (command.type === "record" && !row && view.seenRecordKey) {
+        // Replayed from the key alone: the row with the original crossings was purged.
+        return { type: "record", amount: command.cost.amount, crossed: [], replayed, balance }
+      }
       if (row?.kind !== command.type) throw new Error(`${command.type} produced no row`)
       return { type: command.type, amount: row.amount, crossed: row.crossed, replayed, balance }
     }
@@ -207,7 +264,26 @@ function outcomeOf(
   }
 }
 
-function snapshotOf(budget: BudgetRecord, balance: BudgetBalance) {
+function snapshotOf(budget: BudgetRecord, balance: BudgetBalance, now: number) {
   const { key, unit, version, config } = budget
-  return { key, unit, version, ...config, balance }
+  return { key, unit, version, ...config, closed: isClosed(config, now), balance }
+}
+
+/** Stored periods plus the ones this transition rolled, newest first, per limited window. */
+function historyOf(
+  budget: BudgetRecord,
+  stored: readonly WindowPeriod[],
+  entries: readonly Entry[]
+): WindowPeriod[] {
+  const rolled = entries.flatMap((entry): WindowPeriod[] => {
+    if (entry.type !== "window.rolled") return []
+    const { windowId, start, end, consumed } = entry
+    return [{ windowId, start, end, consumed }]
+  })
+  return limitedWindows(budget).flatMap((id) =>
+    [...rolled, ...stored]
+      .filter((period) => period.windowId === id)
+      .sort((a, b) => b.start - a.start)
+      .slice(0, WINDOW_HISTORY_PERIODS)
+  )
 }

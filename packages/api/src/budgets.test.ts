@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { BudgetExceededError, BudgetRequestError, BudgetSettleError } from "./budgets"
 import { Unprice } from "./client"
 
@@ -203,6 +203,24 @@ describe("budget handle", () => {
 
     expect(authorization.result).toBeUndefined()
     expect(authorization.error?.code).toBe("CONFLICT")
+  })
+
+  it("records with the time of the call unless the caller passes occurredAt", async () => {
+    const recorded = { amount: "1", crossed: [], replayed: false, balance }
+    const { budget, requests } = createClient([json(recorded), json(recorded)])
+    vi.useFakeTimers({ now: 1_796_083_200_000 })
+    try {
+      await budget.record({ amount: 1, idempotencyKey: "evt_1" })
+      await budget.record({ amount: 1, idempotencyKey: "evt_2", occurredAt: 1_796_000_000_000 })
+    } finally {
+      vi.useRealTimers()
+    }
+
+    const bodies = requests.map((request) => request.body as Record<string, unknown>)
+    expect(bodies.map(({ idempotencyKey, occurredAt }) => [idempotencyKey, occurredAt])).toEqual([
+      ["evt_1", 1_796_083_200_000],
+      ["evt_2", 1_796_000_000_000],
+    ])
   })
 
   it("sends number amounts as exact decimal strings and generates idempotency keys", async () => {

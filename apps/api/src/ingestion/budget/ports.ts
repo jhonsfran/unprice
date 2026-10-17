@@ -28,8 +28,13 @@ export type BudgetStoreTx = BudgetReader & {
   purgeOperations(now: number, limit: number): void
   /** Deletes up to `limit` of the oldest journal entries with `at < before`. */
   pruneJournal(before: number, limit: number): void
+  /** Deletes up to `limit` record keys whose dedupe ended by `at`. */
+  purgeRecordKeys(at: number, limit: number): void
+  /** Deletes up to `limit` hourly history rows of periods that started before `before`. */
+  pruneHourlyHistory(before: number, limit: number): void
   nextDueAt(): number | null
   oldestEntryAt(): number | null
+  oldestRecordKeyExpiresAt(): number | null
 }
 
 export type Sync<T> = T extends PromiseLike<unknown> ? never : T

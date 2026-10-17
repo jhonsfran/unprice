@@ -14,7 +14,7 @@ export const route = createRoute(
       operationId: "budgets.charge",
       summary: "consume an amount if it fits",
       description:
-        "Consume an amount in one call when it fits every hard limit, or return 402 with the limit that blocked it. For cheap work gated before it runs.",
+        "Consume an amount in one call when it fits every hard limit, or return 402 with the limit that blocked it. For cheap work gated before it runs. A budget past its closesAt returns 409.",
       method: "post",
       tags: ["budgets"],
       request: {

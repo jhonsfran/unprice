@@ -232,6 +232,12 @@ patterns. Keep it cheap to load and useful.
 - 2026-10-16: Workers RPC carries `bigint` both ways, but DO SQLite rejects a bigint binding
   ("Cannot convert a BigInt value to a number"); store amounts as TEXT. A generic DO RPC method
   loses its type parameter through the stub, so narrow the result at the caller instead.
+- 2026-10-16: Budget window rolls are `window.rolled` facts that `transition` emits before the
+  command's facts; `BudgetSqliteStore.commit` derives `budget_window_history` and
+  `budget_record_keys` from entries, so add new budget projections there, not in the processor.
+- 2026-10-16: Never purge budget state keyed on time past `ledger.lastAt` (`recordKeysPurgeAt`):
+  commands clamp to `lastAt`, so a purge at a later raw clock lets a skewed-back command re-accept
+  a replay. The property test's `-3d` clock jumps catch this.
 - 2026-10-16: An error escaping a DO method (RPC or `runInDurableObject` instance call) shows up as
   an unhandled rejection in vitest-pool-workers; test rollback paths through the processor.
 - 2026-10-15: When reviewing run hierarchy, trace funding through `RunBudgetProcessor` and
