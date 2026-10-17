@@ -1,13 +1,5 @@
-CREATE TABLE `budget_entries` (
-	`seq` integer PRIMARY KEY NOT NULL,
-	`at` integer NOT NULL,
-	`type` text NOT NULL,
-	`fact_json` text NOT NULL
-);
---> statement-breakpoint
 CREATE TABLE `budget_ledger` (
 	`id` integer PRIMARY KEY NOT NULL,
-	`seq` integer NOT NULL,
 	`last_at` integer NOT NULL,
 	`hold_seq` integer NOT NULL,
 	`held` text NOT NULL,
@@ -33,4 +25,12 @@ CREATE TABLE `budget` (
 	`version` integer NOT NULL,
 	`config_json` text NOT NULL,
 	`updated_at` integer NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE `budget_window_history` (
+	`window_id` text NOT NULL,
+	`start` integer NOT NULL,
+	`end` integer NOT NULL,
+	`consumed` text NOT NULL,
+	PRIMARY KEY(`window_id`, `start`)
 );

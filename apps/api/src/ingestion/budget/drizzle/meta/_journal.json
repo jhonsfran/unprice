@@ -5,22 +5,8 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1792191422711,
-      "tag": "0000_familiar_kate_bishop",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1792198952758,
-      "tag": "0001_silly_kitty_pryde",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1792203391575,
-      "tag": "0002_natural_kree",
+      "when": 1792208694660,
+      "tag": "0000_flashy_hex",
       "breakpoints": true
     }
   ]
