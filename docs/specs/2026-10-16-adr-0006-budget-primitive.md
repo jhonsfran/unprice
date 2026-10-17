@@ -123,6 +123,11 @@ Budget
   Renaming a limit, or removing and re-adding it inside one period, never resets its usage: a
   counter no limit uses is kept until its period ends and then dropped. A new anchored window
   counts from the moment it is added; it cannot backfill usage from earlier in its period.
+- A limit's id fixes its window id. An upsert may change a limit's `amount` and `enforce`, so a
+  plan upgrade raises the cap and keeps the period's usage, but moving an id to another window or
+  anchor returns 409 `LIMIT_WINDOW_IMMUTABLE`. A move would restart an anchored count at zero and
+  hand out a fresh period without anyone seeing it; a new window takes a new id, which shows the
+  reset as `limit.added`.
 - `closesAt` is the one-time end of a budget, such as a trial or a campaign. An upsert may set,
   move, or clear it, and the change is audited like any other. From `closesAt` on, `authorize` and
   `charge` return 409 `BUDGET_CLOSED` with `closedAt`. `settle` and `release` of holds placed

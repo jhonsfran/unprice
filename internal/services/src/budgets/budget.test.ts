@@ -387,7 +387,7 @@ describe("time and config never reset usage", () => {
     expect(remaining(recorded)).toEqual([["month", $(5)]])
   })
 
-  it("keeps consumption across rename, window change, and remove then re-add", () => {
+  it("keeps consumption across rename, a new id on another window, and remove then re-add", () => {
     const store = budgetWith({ limits: [{ id: "monthly", amount: "100", window: "month" }] })
     ok(store.run(charge("c1", 60), t0))
 
@@ -403,13 +403,11 @@ describe("time and config never reset usage", () => {
     })
     expect(remaining(renamed)).toEqual([["cap", $(40)]])
 
-    const rewindowed = ok(
-      store.run(upsert({ limits: [{ id: "cap", amount: "100", window: "day" }] }), t0)
+    // Calendar counters always run, so a new id on the day window starts with the day's usage.
+    const daily = ok(
+      store.run(upsert({ limits: [{ id: "daily", amount: "100", window: "day" }] }), t0)
     )
-    expect(rewindowed.outcome).toMatchObject({
-      changes: [{ change: "limit.window", limitId: "cap", from: "month", to: "day" }],
-    })
-    expect(remaining(rewindowed)).toEqual([["cap", $(40)]])
+    expect(remaining(daily)).toEqual([["daily", $(40)]])
 
     ok(store.run(upsert({ limits: [] }), t0))
     const readded = ok(
@@ -417,6 +415,37 @@ describe("time and config never reset usage", () => {
     )
     expect(remaining(readded)).toEqual([["cap", $(40)]])
     expect(readded.outcome).toMatchObject({ budget: { version: 5 } })
+  })
+
+  it("refuses to move a limit id to another window and writes nothing", () => {
+    const store = budgetWith({ limits: [{ id: "cap", amount: "100", window: "month" }] })
+    ok(store.run(charge("c1", 60), t0))
+    const writes = store.writes
+
+    expect(
+      rejection(store.run(upsert({ limits: [{ id: "cap", amount: "100", window: "day" }] }), t0))
+    ).toEqual({
+      code: "LIMIT_WINDOW_IMMUTABLE",
+      limitId: "cap",
+      current: "month",
+      requested: "day",
+    })
+    expect(store.writes).toBe(writes)
+
+    // The amount and enforcement under the same id still change.
+    const raised = ok(
+      store.run(
+        upsert({ limits: [{ id: "cap", amount: "500", window: "month", enforce: "soft" }] }),
+        t0
+      )
+    )
+    expect(raised.outcome).toMatchObject({
+      changes: [
+        { change: "limit.amount", limitId: "cap", from: $(100), to: $(500) },
+        { change: "limit.enforce", limitId: "cap", from: "hard", to: "soft" },
+      ],
+    })
+    expect(remaining(raised)).toEqual([["cap", $(440)]])
   })
 
   it("converges an identical upsert without writing", () => {
@@ -547,28 +576,22 @@ describe("anchored windows", () => {
     expect([readded.periods, store.history.size]).toEqual([[], 0])
   })
 
-  it("names an anchor move as a window change", () => {
+  it("refuses an anchor move under the same id, which would restart the count at zero", () => {
     const store = budgetWith(withBilling)
-    const moved = ok(
-      store.run(
-        upsert({
-          limits: [
-            { id: "month", amount: "100", window: "month" },
-            { id: "billing", amount: "100", window: "month", anchor: "2026-10-01T00:00:00Z" },
-          ],
-        }),
-        t0
-      )
+    const moved = store.run(
+      upsert({
+        limits: [
+          { id: "month", amount: "100", window: "month" },
+          { id: "billing", amount: "100", window: "month", anchor: "2026-10-01T00:00:00Z" },
+        ],
+      }),
+      t0
     )
-    expect(moved.outcome).toMatchObject({
-      changes: [
-        {
-          change: "limit.window",
-          limitId: "billing",
-          from: "month@2026-10-15T00:00:00.000Z",
-          to: "month@2026-10-01T00:00:00.000Z",
-        },
-      ],
+    expect(rejection(moved)).toEqual({
+      code: "LIMIT_WINDOW_IMMUTABLE",
+      limitId: "billing",
+      current: "month@2026-10-15T00:00:00.000Z",
+      requested: "month@2026-10-01T00:00:00.000Z",
     })
   })
 })

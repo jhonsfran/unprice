@@ -2,7 +2,6 @@
 
 import type { BudgetConfig } from "@unprice/db/validators"
 import type { Amount } from "@unprice/money"
-import { type WindowId, windowIdOf } from "./windows"
 
 // The wire schema parses a config into these types; the timing constants live with it, whose
 // descriptions state them.
@@ -44,7 +43,6 @@ export type ConfigChange =
   | Readonly<{ change: "limit.added"; limitId: string }>
   | Readonly<{ change: "limit.removed"; limitId: string }>
   | Readonly<{ change: "limit.amount"; limitId: string; from: Amount; to: Amount }>
-  | Readonly<{ change: "limit.window"; limitId: string; from: WindowId; to: WindowId }>
   | Readonly<{
       change: "limit.enforce"
       limitId: string
@@ -75,8 +73,6 @@ export function diffConfig(prev: BudgetConfig, next: BudgetConfig): ConfigChange
         to: limit.amount,
       })
     }
-    const [from, to] = [windowIdOf(before), windowIdOf(limit)]
-    if (from !== to) changes.push({ change: "limit.window", limitId: limit.id, from, to })
     if (before.enforce !== limit.enforce) {
       changes.push({
         change: "limit.enforce",

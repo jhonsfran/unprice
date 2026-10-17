@@ -2630,7 +2630,7 @@ export interface operations {
           /** @description Up to 16 limits. Every hard limit must have room for a hold or charge. An empty list makes a budget that only counts. */
           limits: {
             /**
-             * @description Unique within the budget. Defaults to the window name.
+             * @description Unique within the budget. Defaults to the window name. The id fixes the limit's window and anchor: changing either under the same id returns 409, so use a new id for a new window.
              * @example month
              */
             id?: string
@@ -2704,7 +2704,7 @@ export interface operations {
             /** @description What this upsert changed; empty when it changed nothing */
             changes: {
               /**
-               * @description limit.added, limit.removed, limit.amount, limit.window, limit.enforce, limits.order, holds, onUnavailable, or closesAt. Creating a budget lists each limit as limit.added.
+               * @description limit.added, limit.removed, limit.amount, limit.enforce, limits.order, holds, onUnavailable, or closesAt. Creating a budget lists each limit as limit.added.
                * @example limit.amount
                */
               change: string

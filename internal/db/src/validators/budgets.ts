@@ -153,7 +153,8 @@ export const upsertBudgetInputSchema = z
               .regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/, "letters, digits and _ . : -")
               .optional()
               .openapi({
-                description: "Unique within the budget. Defaults to the window name.",
+                description:
+                  "Unique within the budget. Defaults to the window name. The id fixes the limit's window and anchor: changing either under the same id returns 409, so use a new id for a new window.",
                 example: "month",
               }),
             amount: budgetAmountInputSchema.transform(toAmount),
@@ -416,7 +417,7 @@ export const upsertBudgetResponseSchema = z.object({
       z.object({
         change: z.string().openapi({
           description:
-            "limit.added, limit.removed, limit.amount, limit.window, limit.enforce, limits.order, holds, onUnavailable, or closesAt. Creating a budget lists each limit as limit.added.",
+            "limit.added, limit.removed, limit.amount, limit.enforce, limits.order, holds, onUnavailable, or closesAt. Creating a budget lists each limit as limit.added.",
           example: "limit.amount",
         }),
         limitId: z.string().optional().openapi({ description: "The limit that changed" }),

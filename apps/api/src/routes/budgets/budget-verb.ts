@@ -87,6 +87,7 @@ function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): Unprice
     case "HOLD_CLOSED":
     case "HOLD_RETIRED":
     case "UNIT_IMMUTABLE":
+    case "LIMIT_WINDOW_IMMUTABLE":
     case "TOO_LATE":
       return new UnpriceApiError({ code: "CONFLICT", message })
     case "BUDGET_NOT_FOUND":

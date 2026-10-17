@@ -267,6 +267,13 @@ export type BudgetRejection =
   | Readonly<{ code: "HOLD_RETIRED"; holdId: string }>
   | Readonly<{ code: "IDEMPOTENCY_CONFLICT"; idempotencyKey: string }>
   | Readonly<{ code: "UNIT_IMMUTABLE"; current: string; requested: string }>
+  /** A limit id names its window id for good: moving it would restart the count at zero. */
+  | Readonly<{
+      code: "LIMIT_WINDOW_IMMUTABLE"
+      limitId: string
+      current: WindowId
+      requested: WindowId
+    }>
   /** Authorize and charge from `closesAt` on; record from `closesAt + OPERATION_RETENTION_MS`. */
   | Readonly<{ code: "BUDGET_CLOSED"; closedAt: number }>
   | Readonly<{ code: "TOO_LATE"; occurredAt: number; oldestAccepted: number }>
@@ -304,6 +311,8 @@ function rejectionMessage(rejection: BudgetRejection): string {
       return `Idempotency key ${rejection.idempotencyKey} was used with a different request`
     case "UNIT_IMMUTABLE":
       return `Budget unit is ${rejection.current} and cannot change to ${rejection.requested}`
+    case "LIMIT_WINDOW_IMMUTABLE":
+      return `Limit ${rejection.limitId} counts over ${rejection.current} and cannot change to ${rejection.requested}; add a limit with a new id instead`
     case "BUDGET_CLOSED":
       return `Budget closed at ${new Date(rejection.closedAt).toISOString()}`
     case "TOO_LATE":

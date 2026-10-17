@@ -332,6 +332,10 @@ class ReferenceBudget {
         closesAt: command.config.closesAt,
       }
       if (this.config && command.unit !== this.unit) return { error: "UNIT_IMMUTABLE" }
+      const windowOf = new Map(this.config?.limits.map((l) => [l.id, idOf(l)]))
+      if (next.limits.some((l) => (windowOf.get(l.id) ?? idOf(l)) !== idOf(l))) {
+        return { error: "LIMIT_WINDOW_IMMUTABLE" }
+      }
       const same = this.config && stringify(this.config) === stringify(next)
       if (!same) {
         this.unit = command.unit
@@ -492,19 +496,23 @@ const anchorArb = fc.constantFrom(
 )
 
 function configArb(scale: bigint): fc.Arbitrary<BudgetConfig> {
+  // Half the ids name their window id, so most upserts pass the fixed-window rule and keep
+  // re-adding the same anchors; the shared names exercise renames and LIMIT_WINDOW_IMMUTABLE.
   const limit = fc
     .record({
-      id: fc.constantFrom("a", "b", "c", "d"),
+      name: fc.constantFrom("a", "b", "c", "d", null, null, null, null),
       amount: fc.integer({ min: 0, max: 900 }).map((k) => BigInt(k) * scale),
       window: windowArb,
       anchor: fc.option(anchorArb, { freq: 2, nil: undefined }),
       enforce: fc.constantFrom<"hard" | "soft">("hard", "hard", "soft"),
     })
-    .map(({ anchor, ...limit }) =>
-      anchor === undefined || limit.window === "hour" || limit.window === "never"
-        ? limit
-        : { ...limit, anchor }
-    )
+    .map(({ name, anchor, ...rest }) => {
+      const limit =
+        anchor === undefined || rest.window === "hour" || rest.window === "never"
+          ? rest
+          : { ...rest, anchor }
+      return { id: name ?? idOf(limit), ...limit }
+    })
   return fc
     .record({
       limits: fc.uniqueArray(limit, { minLength: 1, maxLength: 3, selector: (l) => l.id }),

@@ -172,6 +172,14 @@ function decideUpsert(
   if (budget.unit !== unit) {
     return reject({ code: "UNIT_IMMUTABLE", current: budget.unit, requested: unit })
   }
+  const windows = new Map(budget.config.limits.map((limit) => [limit.id, windowIdOf(limit)]))
+  for (const limit of config.limits) {
+    const current = windows.get(limit.id)
+    const requested = windowIdOf(limit)
+    if (current !== undefined && current !== requested) {
+      return reject({ code: "LIMIT_WINDOW_IMMUTABLE", limitId: limit.id, current, requested })
+    }
+  }
   const changes = diffConfig(budget.config, config)
   if (changes.length === 0) return Ok(unchanged(null))
   const updated = { ...budget, version: budget.version + 1, config }
