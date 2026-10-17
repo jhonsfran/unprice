@@ -4,11 +4,13 @@ import { type BudgetConfigInput, upsertBudgetInputSchema } from "@unprice/db/val
 import type { BudgetOutcome } from "@unprice/services/budgets"
 import type { BudgetReply, BudgetRequest } from "@unprice/services/use-cases"
 import { drizzle } from "drizzle-orm/durable-sqlite"
+import { migrate } from "drizzle-orm/durable-sqlite/migrator"
 import { afterEach, describe, expect, it } from "vitest"
 import { getBudgetStub } from "~/ingestion/do-placement"
 import type { BudgetDO } from "./BudgetDO"
 import { BudgetSqliteStore } from "./budget-store"
 import * as schema from "./db/schema"
+import migrations from "./drizzle/migrations"
 import { BudgetProcessor } from "./processor"
 
 const UNIT = BigInt(100_000_000)
@@ -192,9 +194,20 @@ describe("BudgetDO verbs", () => {
     expect([read.budget.closesAt, read.budget.closed]).toEqual([Date.parse(closesAt), true])
   })
 
-  it("rejects every verb on a key that was never upserted", async () => {
+  it("rejects every verb on a key that was never upserted and stores nothing for it", async () => {
     const stub = stubFor()
     expect(rejection(await stub.execute({ type: "get" }))).toEqual({ code: "BUDGET_NOT_FOUND" })
+    expect(
+      rejection(await stub.execute({ type: "settle", holdId: "h_1", amount: units(1) }))
+    ).toEqual({ code: "BUDGET_NOT_FOUND" })
+
+    await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
+      const tables = state.storage.sql
+        .exec<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table'")
+        .toArray()
+        .filter(({ name }) => !name.startsWith("_cf_"))
+      expect([tables, await state.storage.getAlarm()]).toEqual([[], null])
+    })
   })
 
   it("never lets 100 parallel authorizes exceed a $50 cap", async () => {
@@ -315,9 +328,8 @@ describe("BudgetDO alarm", () => {
     const t0 = midMonthAhead()
     let now = t0
 
-    await runInDurableObject(stub, async (instance: BudgetDO, state) => {
-      await instance.execute({ type: "get" })
-      await state.storage.deleteAlarm()
+    await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
+      await migrate(drizzle(state.storage), migrations)
       const errors: string[] = []
       const processor = realStorageProcessor(state, () => now, errors)
 
@@ -362,9 +374,8 @@ describe("BudgetDO alarm", () => {
     const boundary = t0 + 30 * MINUTE
     let now = t0
 
-    await runInDurableObject(stub, async (instance: BudgetDO, state) => {
-      await instance.execute({ type: "get" })
-      await state.storage.deleteAlarm()
+    await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
+      await migrate(drizzle(state.storage), migrations)
       const processor = realStorageProcessor(state, () => now)
       const hourly = (window_id: string) =>
         state.storage.sql
@@ -415,9 +426,8 @@ describe("BudgetDO alarm", () => {
     const t0 = midMonthAhead()
     let now = t0
 
-    await runInDurableObject(stub, async (instance: BudgetDO, state) => {
-      await instance.execute({ type: "get" })
-      await state.storage.deleteAlarm()
+    await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
+      await migrate(drizzle(state.storage), migrations)
       const processor = realStorageProcessor(state, () => now)
       await processor.execute(
         upsert(key, { limits: [{ id: "life", amount: "50", window: "never" }] })
