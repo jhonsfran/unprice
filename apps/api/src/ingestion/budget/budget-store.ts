@@ -7,7 +7,7 @@ import {
   type Operation,
   WINDOW_HISTORY_PERIODS,
   type WindowId,
-  dueAt,
+  alarmAt,
   emptyLedger,
 } from "@unprice/services/budgets"
 import { and, asc, desc, eq, inArray, lte, min, notInArray, sql } from "drizzle-orm"
@@ -126,6 +126,24 @@ function bind(
     readOperationByKey: (idempotencyKey) =>
       readOperationWhere(eq(sql`${operations.dataJson} ->> '$.idempotencyKey'`, idempotencyKey)),
 
+    readExpiredHolds(now, limit) {
+      return (
+        db
+          .select({ id: operations.id, kind: operations.kind, dataJson: operations.dataJson })
+          .from(operations)
+          .where(and(eq(operations.status, "open"), lte(operations.dueAt, now)))
+          // `h_<n>` sorts by its number once shorter ids come first.
+          .orderBy(asc(operations.dueAt), asc(sql`length(${operations.id})`), asc(operations.id))
+          .limit(limit)
+          .all()
+          .map((row) => {
+            const operation = decodeOperation(row)
+            if (operation.kind !== "hold") throw new Error(`open row ${row.id} is not a hold`)
+            return operation
+          })
+      )
+    },
+
     readHistory(windowIds, limit) {
       const history = schema.budgetWindowHistory
       return windowIds.flatMap((windowId) =>
@@ -198,10 +216,9 @@ function bind(
           .run()
       }
       for (const operation of changed) {
-        // An open hold has no retention end; the due index skips it by status, not by this value.
         const row = {
           status: statusOf(operation),
-          dueAt: dueAt(operation) ?? 0,
+          dueAt: alarmAt(operation),
           dataJson: encodeOperation(operation),
         }
         const insert = db
@@ -230,7 +247,6 @@ function bind(
         db
           .select({ at: min(operations.dueAt) })
           .from(operations)
-          .where(terminal)
           .get()?.at ?? null
       )
     },

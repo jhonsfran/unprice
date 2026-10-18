@@ -116,6 +116,14 @@ that need several usage events or a serializable run identifier.
 A budget enforces hard usage caps under a key you choose. `estimate` is the maximum authorized
 usage. Actual usage must stay within that amount. Define the budget once with `budgets.upsert`,
 then take a handle with `unprice.budget(key)`. The handle never creates or changes the budget.
+Each upsert sends the whole definition; a field it leaves out takes its default, so an omitted
+`closesAt` reopens a closing budget. Instants such as `closesAt` and `anchor` are epoch
+milliseconds.
+
+A runtime key can create a budget and tighten it. Raising or removing a hard limit, making it
+soft, or clearing or postponing `closesAt` needs a **config** key and returns 403 otherwise, so
+code that spends under a cap, or an agent that holds its key, cannot lift the cap. Keep the config
+key out of the environment that spends.
 
 ```ts
 await unprice.budgets.upsert({
@@ -151,16 +159,21 @@ work. Check the provider's result, then settle known usage with `error.hold.sett
 Call `error.hold.release()` only after confirming that usage is zero. A zero-usage result can also
 return `actual: 0` from the function.
 
-If authorization replays, `spend` throws `BudgetRecoveryError` with
-`reason: "authorization_replayed"` and the hold. It does not run the function again. Recover the
-provider's result and settle through that hold. The key protects budget accounting within its
-retention period. It does not provide exactly-once provider execution. Use the provider's own
-idempotency or a durable workflow when the work must survive process failure.
+If an authorization under your own `idempotencyKey` replays, `spend` throws `BudgetRecoveryError`
+with `reason: "authorization_replayed"` and the hold. It does not run the function again. Recover
+the provider's result and settle through that hold. A generated key never leaves the call, so its
+replay only means the client retried a lost response, and `spend` runs the function. The key
+protects budget accounting within its retention period. It does not provide exactly-once provider
+execution. Use the provider's own idempotency or a durable workflow when the work must survive
+process failure.
 
-`BudgetExceededError` means the budget denied the estimate or Unprice could not be reached
-(`error.blocked.reason === "unavailable"`). `BudgetRequestError` means the API rejected the
-authorization. Retry an uncertain authorization with the same estimate, TTL, and
-`error.idempotencyKey`; the first request may have committed.
+`BudgetExceededError` means a limit denied the estimate; `error.blocked` names the limit and the
+remedy. `BudgetUnavailableError` means Unprice could not be reached after the client's retries, and
+the function did not run. The authorization may still have committed, so retry with the same
+estimate, TTL, and `error.idempotencyKey`. If that retry throws `BudgetRecoveryError` with
+`reason: "authorization_replayed"`, the first attempt committed and the work never ran: run it and
+settle through `error.hold`, or release that hold. `BudgetRequestError` means the API rejected the
+authorization.
 
 `BudgetSettleError` retains the work's `value`, `actual`, hold, and key when settlement fails.
 An API failure is in `error.error`. A thrown validation or transport failure is in `error.cause`.
@@ -173,14 +186,15 @@ For manual control, `acme.authorize({ amount, idempotencyKey })` returns `{ resu
 The result is `{ allowed: true, hold }` or `{ allowed: false, blocked }`.
 Manual `authorize` and `charge` require a caller-provided key. Keep it before sending, then retry
 an uncertain result with the same key and input. `hold.settle({ amount })` and `hold.release()`
-are safe to retry because the hold id is the idempotency key. A work deadline never releases
-capacity automatically.
-Open holds stay reserved until final settlement or explicit release. A closed hold retains its
-result for 24 hours; later retries return 409 instead of counting twice.
+are safe to retry because the hold id is the idempotency key. Pass a `ttlMs` that covers the work:
+a hold still open at its `expiresAt` is settled at its full amount, never released. That capacity
+stays used until its window resets, and afterwards only a settle of the full amount succeeds; any
+other settle or release returns 409. A closed hold retains its result for 24 hours; later retries
+return 409 instead of counting twice.
 `acme.charge({ amount, idempotencyKey })` gates a one-shot amount, and
 `acme.record({ amount, idempotencyKey, occurredAt })` reports usage that already happened. It
-always counts, even past a hard limit, and its `crossed` names each limit it passed; that limit
-then denies `authorize` and `charge`. Authorize before work that needs guaranteed capacity.
+always counts, even past a hard limit, and its `crossed` names each limit it passed; a crossed
+hard limit then denies `authorize` and `charge`. Authorize before work that needs guaranteed capacity.
 The API also rejects a lower hard cap when consumption plus open holds would exceed it.
 Pass the event's id as the record key and its own time as `occurredAt`, never the call time.
 For 8 days the same key and amount count once and another amount returns 409. Usage older than

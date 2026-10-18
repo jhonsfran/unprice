@@ -73,13 +73,14 @@ function upsert(key: string, limits = 1, amount = "1000000"): BudgetRequest {
       id: `limit_${i}`,
       amount,
       window: "month",
-      anchor: new Date(Date.UTC(2020, 0, i + 1, 3)).toISOString(),
+      anchor: Date.UTC(2020, 0, i + 1, 3),
     })),
   }
   return {
     type: "upsert",
     projectId: "proj_1",
     ...upsertBudgetInputSchema.parse({ key, unit: "USD", ...config }),
+    mayLoosen: true,
   }
 }
 
@@ -351,10 +352,11 @@ describe("BudgetDO measured work", () => {
                     id: `schedule_${i}`,
                     amount: "1000000",
                     window: "month",
-                    anchor: new Date(Date.UTC(2020 + i, 0, 10, 3)).toISOString(),
+                    anchor: Date.UTC(2020 + i, 0, 10, 3),
                   },
                 ],
               }),
+              mayLoosen: true,
             })
           )
         }
@@ -483,22 +485,18 @@ describe("BudgetDO measured work", () => {
         )
         const after = await inspect(stub)
         receiptCounts.push({ before, after })
-        const recovered = await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
+        // The alarm settled every expired hold at its full amount.
+        const settled = await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
           const clock = clocks.get(state.storage.sql)
           if (!clock) throw new Error("missing clock")
-          for (let i = 1; i <= 64; i++) {
-            accepted(await clock.processor.execute({ type: "release", holdId: `h_${i}` }))
-          }
-          return clock.processor.execute({
-            type: "authorize",
-            idempotencyKey: "after_alarm",
-            amount: UNIT * BigInt(40),
-          })
+          return clock.processor.execute({ type: "get" })
         })
-        const outcome = accepted(recovered)
-        expect(isOutcomeOf(outcome, "authorize") && outcome.balance.remaining).toBe(
-          UNIT * BigInt(24)
-        )
+        const outcome = accepted(settled)
+        const balance = isOutcomeOf(outcome, "get") ? outcome.budget.balance : null
+        expect([balance?.held, balance?.limits[0]?.consumed]).toEqual([
+          BigInt(0),
+          UNIT * BigInt(64),
+        ])
       }
       report(`expiry64:due-receipts=${history}`, admission, admissionMs, {
         admitted,

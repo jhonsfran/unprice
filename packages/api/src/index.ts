@@ -5,6 +5,7 @@ export {
   BudgetRecoveryError,
   BudgetRequestError,
   BudgetSettleError,
+  BudgetUnavailableError,
 } from "./budgets"
 export type {
   AmountInput,

@@ -16,6 +16,7 @@ function upsert(input: BudgetConfigInput): BudgetCommand {
     projectId: "proj_1",
     unit: "money:USD",
     config: parsed.config,
+    mayLoosen: true,
   }
 }
 
@@ -50,7 +51,14 @@ const charge = (key: string, amount: number): BudgetCommand => ({
 describe("canonical budget schedules", () => {
   it("drops retired history when the same update starts tracking the schedule again", () => {
     const config: BudgetConfigInput = {
-      limits: [{ id: "billing", window: "month", anchor: "2020-01-01T00:00:00Z", amount: "100" }],
+      limits: [
+        {
+          id: "billing",
+          window: "month",
+          anchor: Date.parse("2020-01-01T00:00:00Z"),
+          amount: "100",
+        },
+      ],
     }
     const store = create(config)
     ok(store.run(charge("old", 10), now))
@@ -65,13 +73,18 @@ describe("canonical budget schedules", () => {
 
   it("keeps capacity through 1,000 equivalent monthly anchors", () => {
     const store = create({
-      limits: [{ id: "billing", window: "month", anchor: "2020-01-15T09:30:00Z", amount: "100" }],
+      limits: [
+        {
+          id: "billing",
+          window: "month",
+          anchor: Date.parse("2020-01-15T09:30:00Z"),
+          amount: "100",
+        },
+      ],
     })
     ok(store.run(charge("before", 80), now))
     for (let index = 0; index < 1_000; index += 1) {
-      const anchor = new Date(
-        Date.UTC(2000 + Math.floor(index / 12), index % 12, 15, 9, 30)
-      ).toISOString()
+      const anchor = Date.UTC(2000 + Math.floor(index / 12), index % 12, 15, 9, 30)
       ok(
         store.run(
           upsert({ limits: [{ id: "billing", window: "month", anchor, amount: "100" }] }),
@@ -90,7 +103,7 @@ describe("canonical budget schedules", () => {
   it("rejects a new schedule at capacity and preserves removed schedules until their period ends", () => {
     const store = create({ limits: [] })
     for (let index = 0; index < 32; index += 1) {
-      const anchor = new Date(Date.UTC(2026, 9, 1, 0, 0, index)).toISOString()
+      const anchor = Date.UTC(2026, 9, 1, 0, 0, index)
       ok(
         store.run(
           upsert({ limits: [{ id: `schedule_${index}`, window: "month", anchor, amount: "100" }] }),
@@ -105,7 +118,12 @@ describe("canonical budget schedules", () => {
         store.run(
           upsert({
             limits: [
-              { id: "extra", window: "month", anchor: "2026-10-02T00:00:00Z", amount: "100" },
+              {
+                id: "extra",
+                window: "month",
+                anchor: Date.parse("2026-10-02T00:00:00Z"),
+                amount: "100",
+              },
             ],
           }),
           now
@@ -117,7 +135,12 @@ describe("canonical budget schedules", () => {
       store.run(
         upsert({
           limits: [
-            { id: "first_again", window: "month", anchor: "2020-01-01T00:00:00Z", amount: "100" },
+            {
+              id: "first_again",
+              window: "month",
+              anchor: Date.parse("2020-01-01T00:00:00Z"),
+              amount: "100",
+            },
           ],
         }),
         now
@@ -128,7 +151,14 @@ describe("canonical budget schedules", () => {
     ok(
       store.run(
         upsert({
-          limits: [{ id: "extra", window: "month", anchor: "2026-10-02T00:00:00Z", amount: "100" }],
+          limits: [
+            {
+              id: "extra",
+              window: "month",
+              anchor: Date.parse("2026-10-02T00:00:00Z"),
+              amount: "100",
+            },
+          ],
         }),
         nextMonth
       )
@@ -150,7 +180,12 @@ describe("canonical budget schedules", () => {
       store.run(
         upsert({
           limits: [
-            { id: "anchored", window: "day", anchor: "2026-01-01T00:00:00Z", amount: "100" },
+            {
+              id: "anchored",
+              window: "day",
+              anchor: Date.parse("2026-01-01T00:00:00Z"),
+              amount: "100",
+            },
           ],
         }),
         now
@@ -199,7 +234,12 @@ describe("consumed thresholds and actionable denials", () => {
         upsert({
           limits: [
             { id: "monthly", window: "month", amount: "150" },
-            { id: "daily", window: "day", anchor: "2026-01-01T12:00:00Z", amount: "100" },
+            {
+              id: "daily",
+              window: "day",
+              anchor: Date.parse("2026-01-01T12:00:00Z"),
+              amount: "100",
+            },
           ],
         }),
         now

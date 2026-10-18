@@ -41,8 +41,16 @@ function issues(input: BudgetConfigInput) {
   return parsed.success ? [] : parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`)
 }
 
-function upsert(input: BudgetConfigInput, unit = "money:USD"): BudgetCommand {
-  return { type: "upsert", key: "customer:acme", projectId: "proj_1", unit, config: config(input) }
+function upsert(input: BudgetConfigInput, unit = "money:USD", mayLoosen = true): BudgetCommand {
+  const parsed = config(input)
+  return {
+    type: "upsert",
+    key: "customer:acme",
+    projectId: "proj_1",
+    unit,
+    config: parsed,
+    mayLoosen,
+  }
 }
 
 function authorize(key: string, units: number, ttlMs?: number): BudgetCommand {
@@ -106,7 +114,8 @@ describe("authorize and settle", () => {
       replayed: false,
       balance: { remaining: $(20), held: $(80) },
     })
-    expect(held.wakeAt).toBeNull()
+    // The alarm comes back at the hold's expiry to settle it if the caller never does.
+    expect(held.wakeAt).toBe(t0 + 15 * minute)
 
     const settled = ok(store.run(settle("h_1", 55), t0 + minute))
     expect(store.rows.get("h_1")).toMatchObject({
@@ -314,19 +323,70 @@ describe("expiry and final settlement", () => {
     })
   })
 
-  it("keeps an uncertain reservation across alarms and a window reset", () => {
+  it("settles an expired hold at its full amount, and the window reset returns the capacity", () => {
     const store = budgetWith({ limits: [{ id: "daily", amount: "100", window: "day" }] })
     ok(store.run(authorize("k1", 80, minute), t0))
-    store.alarm(t0 + day)
-    expect(store.ledger.held).toBe($(80))
-    expect(rejection(store.run(charge("other", 21), t0 + day)).code).toBe("LIMIT_EXCEEDED")
-    ok(store.run(charge("other", 20), t0 + day))
-    expect(ok(store.run(settle("h_1", 70), t0 + day)).outcome).toMatchObject({
-      actual: $(70),
-      released: $(10),
-      expired: true,
-      balance: { remaining: $(10), held: $(0) },
+    ok(store.run(authorize("k2", 10, hour), t0))
+    const expiredAt = t0 + 2 * minute
+    store.alarm(expiredAt)
+
+    expect(store.rows.get("h_1")).toMatchObject({
+      state: { status: "settled", closedAt: expiredAt, actual: $(80), crossed: [], byExpiry: true },
     })
+    expect(store.rows.get("h_2")).toMatchObject({ state: { status: "open" } })
+    expect([store.ledger.held, store.ledger.usage.day.consumed]).toEqual([$(10), $(80)])
+    expect(rejection(store.run(charge("other", 11), expiredAt)).code).toBe("LIMIT_EXCEEDED")
+
+    // A late settle of the full amount replays; anything else learns the hold expired.
+    expect(ok(store.run(settle("h_1", 80), expiredAt)).outcome).toMatchObject({
+      actual: $(80),
+      released: $(0),
+      expired: true,
+      replayed: true,
+    })
+    const closed = { code: "HOLD_CLOSED", holdId: "h_1", status: "expired" }
+    expect(rejection(store.run(settle("h_1", 70), expiredAt))).toEqual(closed)
+    expect(rejection(store.run(release("h_1"), expiredAt))).toEqual(closed)
+
+    ok(store.run(release("h_2"), expiredAt))
+    expect(remaining(ok(store.run(charge("tomorrow", 100), t0 + day)))).toEqual([["daily", $(0)]])
+  })
+
+  it("settles expired holds earliest first, each crossing limits once", () => {
+    const store = budgetWith({
+      limits: [
+        { id: "hard", amount: "100", window: "month" },
+        { id: "soft", amount: "50", window: "month", enforce: "soft" },
+      ],
+    })
+    ok(store.run(authorize("late", 30, 2 * minute), t0))
+    ok(store.run(authorize("early", 40, minute), t0))
+    const swept = ok(store.run({ type: "sweep" }, t0 + 3 * minute))
+
+    expect(swept.operations.map((row) => [row.id, row.kind === "hold" && row.state])).toEqual([
+      [
+        "h_2",
+        {
+          status: "settled",
+          closedAt: t0 + 3 * minute,
+          actual: $(40),
+          crossed: [],
+          byExpiry: true,
+        },
+      ],
+      [
+        "h_1",
+        {
+          status: "settled",
+          closedAt: t0 + 3 * minute,
+          actual: $(30),
+          crossed: ["soft"],
+          byExpiry: true,
+        },
+      ],
+    ])
+    expect([swept.ledger.held, swept.ledger.usage.month.consumed]).toEqual([$(0), $(70)])
+    expect(swept.wakeAt).toBe(t0 + 3 * minute + day)
   })
 
   it("counts a record past a hard limit and keeps holds, then denies gated spend", () => {
@@ -373,10 +433,10 @@ describe("expiry and final settlement", () => {
   it("retires a hold once its row is purged, so a retried settle never counts twice", () => {
     const store = budgetWith(month100)
     ok(store.run(authorize("k1", 80, minute), t0))
-    ok(store.run(authorize("k2", 5, minute), t0))
     ok(store.run(settle("h_1", 25), t0))
-    ok(store.run({ type: "sweep" }, t0 + 3 * minute))
-    const purgedAt = t0 + 3 * minute + day
+    ok(store.run(authorize("k2", 5, day), t0 + hour))
+    ok(store.run({ type: "sweep" }, t0 + 3 * hour))
+    const purgedAt = t0 + day
     store.alarm(purgedAt)
     expect(store.rows.size).toBe(1)
 
@@ -387,6 +447,69 @@ describe("expiry and final settlement", () => {
     expect(ok(store.run(release("h_2"), purgedAt)).outcome).toMatchObject({ released: $(5) })
     expect(rejection(store.run(settle("h_3", 1), purgedAt)).code).toBe("HOLD_NOT_FOUND")
     expect(store.ledger.usage.never.consumed).toBe($(25))
+  })
+})
+
+describe("who may loosen a budget", () => {
+  const closesAt = t0 + day
+  const base: BudgetConfigInput = {
+    limits: [
+      { id: "month", amount: "100", window: "month" },
+      { id: "watch", amount: "10", window: "day", enforce: "soft" },
+    ],
+    closesAt,
+  }
+  const tighten = (input: BudgetConfigInput) => upsert(input, "money:USD", false)
+
+  it("lets a caller that may not loosen create, repeat, and tighten a budget", () => {
+    const store = new MemoryBudgetStore()
+    ok(store.run(tighten(base), t0))
+    ok(store.run(tighten(base), t0))
+    const tightened = ok(
+      store.run(
+        tighten({
+          limits: [
+            { id: "month", amount: "80", window: "month" },
+            { id: "watch", amount: "1000", window: "day" },
+            { id: "hour", amount: "5", window: "hour" },
+          ],
+          holds: { defaultTtlMs: minute, maxTtlMs: day },
+          closesAt: closesAt - hour,
+        }),
+        t0
+      )
+    )
+    expect(tightened.outcome).toMatchObject({ budget: { version: 2, closesAt: closesAt - hour } })
+  })
+
+  it("refuses every change that lets more spend through, and writes nothing", () => {
+    const store = budgetWith(base)
+    const writes = store.writes
+    const [month, watch] = base.limits
+    const refused = (input: BudgetConfigInput) => rejection(store.run(tighten(input), t0))
+
+    expect(refused({ ...base, limits: [{ ...month!, amount: "101" }, watch!] })).toEqual({
+      code: "LOOSENING_FORBIDDEN",
+      change: { change: "limit.amount", limitId: "month", from: $(100), to: $(101) },
+    })
+    expect(refused({ ...base, limits: [] })).toEqual({
+      code: "LOOSENING_FORBIDDEN",
+      change: { change: "limit.removed", limitId: "month" },
+    })
+    expect(refused({ ...base, limits: [{ ...month!, enforce: "soft" }, watch!] })).toEqual({
+      code: "LOOSENING_FORBIDDEN",
+      change: { change: "limit.enforce", limitId: "month", from: "hard", to: "soft" },
+    })
+    for (const later of [null, closesAt + 1]) {
+      expect(refused({ ...base, closesAt: later })).toEqual({
+        code: "LOOSENING_FORBIDDEN",
+        change: { change: "closesAt" },
+      })
+    }
+    expect(store.writes).toBe(writes)
+    expect(
+      ok(store.run(upsert({ ...base, limits: [], closesAt: null }), t0)).outcome
+    ).toMatchObject({ budget: { version: 2, limits: [], closesAt: null } })
   })
 })
 
@@ -532,7 +655,7 @@ describe("time and config never reset usage", () => {
 describe("closesAt", () => {
   it("refuses new spend from closesAt, keeps settling and releasing, and takes records a day more", () => {
     const closesAt = t0 + hour
-    const store = budgetWith({ ...month100, closesAt: new Date(closesAt).toISOString() })
+    const store = budgetWith({ ...month100, closesAt })
     ok(store.run(authorize("k1", 30, 2 * hour), t0))
     ok(store.run(authorize("k2", 10, 2 * hour), t0))
     expect(ok(store.run({ type: "get" }, closesAt - 1)).outcome).toMatchObject({
@@ -573,7 +696,7 @@ describe("closesAt", () => {
 })
 
 describe("anchored windows", () => {
-  const anchor = "2026-10-15T00:00:00.000Z"
+  const anchor = Date.parse("2026-10-15T00:00:00.000Z")
   const withBilling: BudgetConfigInput = {
     limits: [
       { id: "month", amount: "100", window: "month" },
@@ -626,7 +749,12 @@ describe("anchored windows", () => {
       upsert({
         limits: [
           { id: "month", amount: "100", window: "month" },
-          { id: "billing", amount: "100", window: "month", anchor: "2026-10-01T00:00:00Z" },
+          {
+            id: "billing",
+            amount: "100",
+            window: "month",
+            anchor: Date.parse("2026-10-01T00:00:00Z"),
+          },
         ],
       }),
       t0
@@ -794,10 +922,10 @@ describe("config schema", () => {
     const parsed = config({
       limits: [
         { id: "m", amount: "12.5", window: "month" },
-        { id: "billing", amount: "1", window: "month", anchor: "2026-10-15T09:30:00+02:00" },
+        { id: "billing", amount: "1", window: "month", anchor: Date.parse("2026-10-15T07:30:00Z") },
       ],
       onUnavailable: "deny",
-      closesAt: "2026-12-31T23:59:59Z",
+      closesAt: Date.parse("2026-12-31T23:59:59Z"),
     })
     expect(parsed).toEqual({
       limits: [
@@ -821,13 +949,13 @@ describe("config schema", () => {
           id: "billing",
           amount: "1",
           window: "month",
-          anchor: "2026-10-15T07:30:00.000Z",
+          anchor: Date.parse("2026-10-15T07:30:00.000Z"),
           enforce: "hard",
         },
       ],
       holds: { defaultTtlMs: 900_000, maxTtlMs: 86_400_000 },
       onUnavailable: "deny",
-      closesAt: "2026-12-31T23:59:59.000Z",
+      closesAt: Date.parse("2026-12-31T23:59:59.000Z"),
     })
     expect(config(formatBudgetConfig(parsed))).toEqual(parsed)
     expect(config({ limits: [] }).closesAt).toBe(null)
@@ -872,15 +1000,15 @@ describe("config schema", () => {
     expect(
       issues({
         limits: [
-          { id: "h", amount: "1", window: "hour", anchor: "2026-10-15T00:00:00Z" },
-          { id: "d", amount: "1", window: "day", anchor: "2026-10-15" },
+          { id: "h", amount: "1", window: "hour", anchor: Date.parse("2026-10-15T00:00:00Z") },
+          { id: "d", amount: "1", window: "day", anchor: 1.5 },
         ],
-        closesAt: "1969-12-31T23:59:59Z",
+        closesAt: -1,
       })
     ).toEqual([
       "limits.0.anchor: only day, week, and month windows take an anchor",
-      "limits.1.anchor: Invalid datetime",
-      "closesAt: must not be before 1970",
+      "limits.1.anchor: Expected integer, received float",
+      "closesAt: Number must be greater than or equal to 0",
     ])
   })
 })
@@ -952,6 +1080,7 @@ describe("history does not slow the hot path", () => {
       ledger: emptyLedger,
       target: null,
       history: [],
+      expiredHolds: [],
     }
     const first = transition({ view: state, command: upsert(month100), clockMs: t0 })
     if (first.err) throw first.err

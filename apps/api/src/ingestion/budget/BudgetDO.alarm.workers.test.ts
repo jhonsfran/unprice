@@ -32,9 +32,16 @@ async function created(key: string) {
   const parsed = upsertBudgetInputSchema.parse({
     key,
     unit: "USD",
-    limits: [{ id: "monthly", window: "month", anchor: "2020-01-15T00:00:00Z", amount: "100" }],
+    limits: [
+      { id: "monthly", window: "month", anchor: Date.parse("2020-01-15T00:00:00Z"), amount: "100" },
+    ],
   })
-  const reply = await stub.execute({ type: "upsert", projectId: "proj_1", ...parsed })
+  const reply = await stub.execute({
+    type: "upsert",
+    projectId: "proj_1",
+    ...parsed,
+    mayLoosen: true,
+  })
   expect(reply.ok).toBe(true)
   return stub
 }

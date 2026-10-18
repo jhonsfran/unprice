@@ -181,10 +181,31 @@ class ReferenceBudget {
     return now < rec.createdAt + (rec.verb === "record" ? 8 * day : day)
   }
 
+  /**
+   * A sweep settles each open hold past its expiry at its full amount, earliest expiry first: the
+   * timer cannot prove the work stopped, so the hold counts all it permitted.
+   */
+  private expire(now: number) {
+    const expired = [...this.holds.entries()]
+      .filter(([, hold]) => hold.status === "open" && hold.expiresAt <= now)
+      .sort(([a, x], [b, y]) => x.expiresAt - y.expiresAt || a - b)
+    for (const [, hold] of expired) {
+      const settle = {
+        actual: hold.amount,
+        released: ZERO,
+        expired: true,
+        crossed: this.crossed(now, hold.amount),
+      }
+      this.consumptions.push({ at: now, amount: hold.amount })
+      Object.assign(hold, { status: "settled", changedAt: now, settle })
+    }
+  }
+
   alarm(clock: number) {
     if (!this.config) return
     const now = Math.max(clock, this.lastWriteAt)
     this.lastWriteAt = now
+    this.expire(now)
     this.rolledCount = this.rolledPeriods(now).length
     for (const [key, rec] of this.keyed) if (!this.keyedLive(rec, now)) this.keyed.delete(key)
     for (const [n, hold] of this.holds) if (!this.holdLive(hold, now)) this.holds.delete(n)
@@ -362,6 +383,9 @@ class ReferenceBudget {
       if (added.size > 0 && retained.size + added.size > 32)
         return { error: "WINDOW_CAPACITY_EXCEEDED" }
       if (!same && this.config) {
+        if (!command.mayLoosen && loosens(this.config, next)) {
+          return { error: "LOOSENING_FORBIDDEN" }
+        }
         const held = [...this.holds.values()].reduce(
           (sum, hold) => sum + (hold.status === "open" ? hold.amount : ZERO),
           ZERO
@@ -388,7 +412,10 @@ class ReferenceBudget {
       const closed = next.closesAt !== null && now >= next.closesAt
       return { outcome: { version: this.version, closed }, wrote: !same, checkBalance: true }
     }
-    if (command.type === "sweep") return { outcome: {}, wrote: false, checkBalance: false }
+    if (command.type === "sweep") {
+      if (this.config) this.expire(now)
+      return { outcome: {}, wrote: false, checkBalance: false }
+    }
     const config = this.config
     if (!config) return { error: "BUDGET_NOT_FOUND" }
     if (command.type === "get") {
@@ -506,6 +533,19 @@ class ReferenceBudget {
       checkBalance: true,
     }
   }
+}
+
+/** Whether `next` lets more spend through: a hard limit gone, soft, or higher, or a later close. */
+function loosens(prev: ModelConfig, next: ModelConfig): boolean {
+  const after = new Map(next.limits.map((limit) => [limit.id, limit]))
+  const limitLoosened = prev.limits.some((limit) => {
+    if (limit.enforce !== "hard") return false
+    const kept = after.get(limit.id)
+    return !kept || kept.enforce !== "hard" || kept.amount > limit.amount
+  })
+  const closeLoosened =
+    prev.closesAt !== null && (next.closesAt === null || next.closesAt > prev.closesAt)
+  return limitLoosened || closeLoosened
 }
 
 function stringify(value: unknown) {
@@ -630,14 +670,16 @@ function commandArb(scale: bigint): fc.Arbitrary<Planned> {
     .record({
       config: configArb(scale),
       unit: fc.constantFrom("money:USD", "money:USD", "money:EUR"),
+      mayLoosen: fc.constantFrom(true, true, false),
     })
     .map(
-      ({ config, unit }): Planned => ({
+      ({ config, unit, mayLoosen }): Planned => ({
         type: "upsert",
         key: "customer:acme",
         projectId: "proj_1",
         unit,
         config,
+        mayLoosen,
       })
     )
   return fc.oneof(
@@ -792,6 +834,7 @@ describe("budget core against a reference model", () => {
             projectId: "proj_1",
             unit: "money:USD",
             config,
+            mayLoosen: true,
           },
           record: null,
         }

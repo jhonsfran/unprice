@@ -1,3 +1,4 @@
+import type { ApiKeyExtended } from "@unprice/db/validators"
 import { formatAmount } from "@unprice/money"
 import {
   type BudgetBalance,
@@ -16,18 +17,20 @@ import { CloudflareBudgetClient } from "~/ingestion/budget/client"
 export const BUDGET_REMAINING_HEADER = "Unprice-Budget-Remaining"
 
 /**
- * Authenticates, runs one verb against the budget at `key`, and sets the remaining header.
- * Returns the verb's outcome, or throws the HTTP error its rejection maps to.
+ * Runs one verb against the budget at `key` and sets the remaining header. Authenticates a runtime
+ * key unless the route already authenticated `apiKey` itself. Returns the verb's outcome, or
+ * throws the HTTP error its rejection maps to.
  */
 export async function runBudgetVerb<R extends BudgetVerbRequest>(
   c: Context<HonoEnv>,
   key: string,
-  request: R
+  request: R,
+  apiKey?: Pick<ApiKeyExtended, "projectId">
 ) {
-  const apiKey = await keyAuth(c)
+  const { projectId } = apiKey ?? (await keyAuth(c))
   const result = await executeBudgetCommand(
     { budgets: new CloudflareBudgetClient(c.env) },
-    { projectId: apiKey.projectId, key, request }
+    { projectId, key, request }
   )
   if (result.err) throw budgetApiError(c, result.err)
   setRemaining(c, result.val)
@@ -114,6 +117,11 @@ function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): Unprice
           maximum: rejection.maximum,
           retained: rejection.retained,
         },
+      })
+    case "LOOSENING_FORBIDDEN":
+      return new UnpriceApiError({
+        code: "INSUFFICIENT_PERMISSIONS",
+        message: `${message}. A runtime key can create or tighten a budget; raising or removing a hard limit, making it soft, or clearing or postponing closesAt needs a config key.`,
       })
     case "IDEMPOTENCY_CONFLICT":
     case "HOLD_CLOSED":

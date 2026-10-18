@@ -12,12 +12,13 @@ import { Err, Ok, type Result } from "@unprice/error"
 import { type BudgetRecord, type ConfigChange, WINDOW_HISTORY_PERIODS, isClosed } from "./config"
 import { balanceOf, decide, holdNumber } from "./decide"
 import { type RowStep, checkTransition } from "./invariants"
-import { consume, dueAt, rollUsage, trackLimits } from "./ledger"
+import { alarmAt, consume, dueAt, rollUsage, trackLimits } from "./ledger"
 import type {
   BudgetBalance,
   BudgetCommand,
   BudgetOutcome,
   BudgetView,
+  HoldOperation,
   Ledger,
   Operation,
   UnPriceBudgetError,
@@ -33,14 +34,25 @@ export type BudgetReader = {
   readOperationByKey(idempotencyKey: string): Operation | null
   /** Up to `limit` stored periods of each window id, newest first. */
   readHistory(windowIds: readonly WindowId[], limit: number): WindowPeriod[]
+  /** Up to `limit` open holds with `expiresAt <= now`, by `expiresAt`, then hold number. */
+  readExpiredHolds(now: number, limit: number): HoldOperation[]
 }
 
+/** The most expired holds one sweep settles; the alarm comes back at once for the rest. */
+export const EXPIRED_HOLDS_PER_SWEEP = 256
+
 /**
- * Loads the addressed operation and the history a `get` returns.
+ * Loads the addressed operation, the history a `get` returns, and the expired holds a `sweep`
+ * settles at the clock `transition` will clamp to.
  */
-export function loadView(reader: BudgetReader, command: BudgetCommand): BudgetView {
+export function loadView(
+  reader: BudgetReader,
+  command: BudgetCommand,
+  clockMs: number
+): BudgetView {
   const ledger = reader.readLedger()
   const budget = reader.readBudget()
+  const now = Math.max(clockMs, ledger.lastAt)
   return {
     budget,
     ledger,
@@ -48,6 +60,10 @@ export function loadView(reader: BudgetReader, command: BudgetCommand): BudgetVi
     history:
       command.type === "get" && budget
         ? reader.readHistory(limitedWindows(budget), WINDOW_HISTORY_PERIODS)
+        : [],
+    expiredHolds:
+      command.type === "sweep" && budget
+        ? reader.readExpiredHolds(now, EXPIRED_HOLDS_PER_SWEEP)
         : [],
   }
 }
@@ -89,7 +105,7 @@ export type BudgetTransition = Readonly<{
   retiredWindows: readonly WindowId[]
   outcome: BudgetOutcome
   /**
-   * Earliest `dueAt` among the written rows; the store only ever lowers its alarm to it. A window
+   * Earliest `alarmAt` among the written rows; the store only ever lowers its alarm to it. A window
    * boundary needs no wake: a counter keeps its period's start, so the next command rolls it the
    * same however late it comes.
    */
@@ -110,13 +126,17 @@ export function transition(params: {
   const now = Math.max(clockMs, view.ledger.lastAt)
 
   // A closed row answers only until its retention ends, however late the alarm purges it.
-  const expired = view.target && isExpired(view.target, now) ? view.target : null
-  const live = expired ? null : view.target
+  const pastRetention = view.target && isPastRetention(view.target, now) ? view.target : null
+  const live = pastRetention ? null : view.target
   const limits = view.budget?.config.limits ?? []
   const rolled = rollUsage(view.ledger.usage, now, limits)
   const rolledLedger: Ledger = { ...view.ledger, usage: rolled.usage }
 
-  const decided = decide(command, { budget: view.budget, ledger: rolledLedger, target: live }, now)
+  const decided = decide(
+    command,
+    { budget: view.budget, ledger: rolledLedger, target: live, expiredHolds: view.expiredHolds },
+    now
+  )
   if (decided.err) return Err(decided.err)
   const change = decided.val
 
@@ -135,13 +155,16 @@ export function transition(params: {
   }
   const operations = change.rows
   const { periods } = rolled
+  // A row changes from the addressed one, or from an expired hold a sweep settles; else it is new.
+  const priors = new Map<string, Operation>(view.expiredHolds.map((hold) => [hold.id, hold]))
+  if (live) priors.set(live.id, live)
 
   const violations = checkTransition({
     before: view.ledger,
     after: ledger,
     limits,
     resultingLimits: budget?.config.limits ?? [],
-    steps: change.rows.map((row): RowStep => [live ?? undefined, row]),
+    steps: change.rows.map((row): RowStep => [priors.get(row.id), row]),
     periods,
   })
   if (violations.length > 0) {
@@ -150,8 +173,8 @@ export function transition(params: {
 
   let wakeAt: number | null = null
   for (const operation of operations) {
-    const due = dueAt(operation)
-    if (due !== null && (wakeAt === null || due < wakeAt)) wakeAt = due
+    const due = alarmAt(operation)
+    if (wakeAt === null || due < wakeAt) wakeAt = due
   }
   // A sweep always moves the budget's clock to now, so the purge after it never runs ahead of a
   // later command's clamped clock.
@@ -168,7 +191,7 @@ export function transition(params: {
     write,
     budget: change.configured?.budget ?? null,
     ledger,
-    purged: expired && change.rows.length > 0 ? [expired] : [],
+    purged: pastRetention && change.rows.length > 0 ? [pastRetention] : [],
     operations,
     periods,
     retiredWindows: rolled.retired,
@@ -185,8 +208,8 @@ export function transition(params: {
   })
 }
 
-/** Past its retention. An open hold has none, so it never expires. */
-function isExpired(row: Operation, now: number): boolean {
+/** Past its retention. An open hold has none until it is closed. */
+function isPastRetention(row: Operation, now: number): boolean {
   const due = dueAt(row)
   return due !== null && due <= now
 }

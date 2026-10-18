@@ -5,8 +5,8 @@
 Accepted
 
 Amended on 2026-10-17. An estimate is a maximum authorization, not an expected cost.
-Hard limits cannot accept excess consumption. Unresolved holds keep their reservation until
-explicit final settlement or release. This amendment replaces the earlier overrun and timeout
+Hard limits cannot accept excess consumption. An unresolved hold is settled at its full amount
+when it expires, never released. This amendment replaces the earlier overrun and timeout
 reclamation rules.
 
 ## Date
@@ -96,7 +96,7 @@ Budget
   key        string the builder owns: "customer:acme", "run:r_9", "acme/images"
   unit       money:<ISO currency> | credits:<creditId> | units:<featureSlug>
   limits     [{ amount, window: hour|day|week|month|never, anchor?, feature?, unit?, enforce: hard|soft }]
-  closesAt   instant?                                        // one-time end: no new spend after it
+  closesAt   epoch ms?                                       // one-time end: no new spend after it
   pricing    none | rows (inline) | rateCard { id }            // ADR-0005 rows; one pure rate()
   funding    none | grant | wallet | creditLine { limit } | parent { key } | webhook { url }
   refill     { target?, lowWater?, maxOutstanding? }           // adaptive by default
@@ -117,12 +117,17 @@ Budget
   credits budget). Every applicable limit is checked; the tightest wins; the response names it.
 - Changing `enforce` between hard and soft writes an audit entry and emits an event. It is never
   changed by Unprice.
+- An upsert replaces the whole definition: an omitted field takes its default. Whoever spends
+  under a cap must not be able to lift it, so a runtime key may create a budget, resend it, or
+  tighten it, and only a config key may loosen it: remove, raise, or soften a hard limit, or clear
+  or postpone `closesAt`. A runtime key's loosening upsert returns 403 and changes nothing. Soft
+  limits and hold TTLs never deny, so either key may change them.
 - Adding or lowering a hard limit, including a change from soft to hard, must preserve
   `consumed + held <= amount`. Otherwise upsert returns 409 `LIMIT_BELOW_USAGE` and keeps the
   previous configuration. A hard limit that recorded usage already passed may keep or raise its
   amount, so the rest of the configuration stays editable.
 - A window is a UTC calendar window (`hour`, `day`, `week` from Monday, `month`, `never`) or an
-  anchored one: `window: "month", anchor: "2026-10-15T00:00:00Z"` repeats every month from the
+  anchored one: `window: "month", anchor: Date.parse("2026-10-15T00:00:00Z")` repeats every month from the
   anchor, forward and backward. A monthly anchor keeps its day of month and time of day; in a month
   too short for it, the period starts on the last day (an anchor on the 31st starts Feb 28 or 29
   and Apr 30). Weekly anchors keep weekday and time; daily anchors keep time of day. Anchors fit
@@ -178,7 +183,8 @@ settle(actual 55)   held 80 -> 0          consumed 0 -> 55   available 20 -> 45
 - `settle` is final in the first release: it consumes the actual amount and releases the rest of the
   hold in one transaction, exactly once. Long work uses several holds. (A non-final settle, the
   telecom CCR-Update, is a later addition with a cumulative-total contract.)
-- An actual above the hold returns 409 `HOLD_AMOUNT_EXCEEDED`. The hold and balance stay unchanged.
+- When the actual amount exceeds the hold, settle returns 409 `HOLD_AMOUNT_EXCEEDED`. The hold
+  and balance stay unchanged.
   The server never clamps usage or accepts debt. More work requires another authorization before
   that work starts. Settlement is final, so the caller must stop the operation before releasing
   its unused reservation.
@@ -211,14 +217,18 @@ settle(actual 55)   held 80 -> 0          consumed 0 -> 55   available 20 -> 45
   headers. A denial is always HTTP 402 with `blockedBy` (the limit or the funding source) and a
   remedy.
 
-### B3. Unresolved holds retain their reservation
+### B3. An unresolved hold settles at its full amount when it expires
 
 - Every hold has a TTL (default 15 minutes, maximum 24 hours). Expiry tells the caller that work
-  must stop and needs recovery. It does not return capacity, close the hold, or start retention.
-  Open holds remain reserved across window resets until explicit final settlement or release.
-- A late settlement of an open hold is accepted only within its reserved maximum. It counts
-  against the window it arrives in. The reservation still counts in that window, so settlement
-  replaces reserved capacity with consumption without increasing the total commitment.
+  must stop. A timer cannot prove the work stopped, so expiry never returns capacity: the alarm
+  settles a hold still open at its `expiresAt` at its full amount. The cap holds, because the
+  hold counted that amount already, and the capacity returns when the window rolls instead of
+  never. One crashed worker therefore costs at most its estimate for one period.
+- A settlement of an open hold after `expiresAt` but before the alarm settles it is accepted
+  within its reserved maximum. It counts against the window it arrives in. The reservation still
+  counts in that window, so settlement replaces reserved capacity with consumption without
+  increasing the total commitment. Once the alarm settled it, a settle of the full amount replays
+  and any other settle or release returns 409 `HOLD_CLOSED` with status `expired`.
 - Release asserts that no usage occurred and the operation cannot continue. A timeout or callback
   exception does not establish either fact. Settle known final partial usage instead.
 - A closed hold's retention ends 24 hours after settlement or release, by the budget's
@@ -226,7 +236,7 @@ settle(actual 55)   held 80 -> 0          consumed 0 -> 55   available 20 -> 45
   row cannot tell a first settle from a retry of one that committed.
   Accepting it would count a retried settle twice, so the hold is retired: settle and release
   return 409 `HOLD_RETIRED`. A failed settlement of an unresolved hold can still be retried with
-  its hold id because unresolved holds do not enter retention.
+  its hold id until it expires, because open holds do not enter retention.
 - Holds and settles carry the authorization timestamp. Prices are resolved at that timestamp
   (ADR-0005), so a price change between authorize and settle never changes what one call costs.
 - `record` accepts usage whose `occurredAt` is within the last 7 days and at most 5 minutes
@@ -340,26 +350,27 @@ close: final capture, then source.release(key = "rel:{budget}:{epoch}")
    returns the rows it writes and its held and consumed deltas, and nothing keeps a journal to
    rebuild state from. Each transition checks every row step against the hold lifecycle (open to
    settled or released), the reserved maximum, and the ledger deltas. Time alone never returns
-   a reservation.
+   a reservation: expiry turns it into consumption.
 8. Window history is written in the same transaction as the roll: a period inserts a
    `budget_window_history` row and deletes that window's periods beyond the 12 `get` returns. A
    roll happens only inside an accepted command or the alarm's sweep, so a denial still writes
    nothing. Each transition checks per counter that a counter that kept its period grew by what
    the rows consumed, and one that rolled reported its old period when it had usage on a limited
    window.
-9. The alarm wakes only for a terminal row whose retention ended. A budget
-   with none sleeps until a command writes one, and window boundaries need no wake (B2). The sweep
-   first moves the budget's clock to now, then purges in bounded batches: a command clamps its
-   clock to the budget's, so a purge never runs ahead of a later command's clock and a replay
-   cannot count twice.
+9. The alarm wakes for an open hold's `expiresAt` and for a terminal row whose retention ended.
+   A budget with neither sleeps until a command writes one, and window boundaries need no wake
+   (B2). The sweep first moves the budget's clock to now and settles expired holds, then purges in
+   bounded batches: a command clamps its clock to the budget's, so a purge never runs ahead of a
+   later command's clock and a replay cannot count twice.
 10. A Durable Object gets its storage on its budget's first upsert. Any other verb on a key that
     was never upserted answers `BUDGET_NOT_FOUND` without writing.
 11. An operation row stores its payload without `kind` and `id`, which have their own columns.
-    Exact key lookup uses the payload's idempotency key through an expression index, and a partial
-    due index holds only settled, released, and charge/record rows, so open holds never slow the
-    alarm.
-12. Cleanup removes at most 2,048 terminal rows per alarm, with a one-second continuation while
-    more are due. Retiring an anchored counter deletes its window history in the same transaction.
+    Exact key lookup uses the payload's idempotency key through an expression index, and one due
+    index orders every row by when the alarm must next visit it: an open hold's expiry, or a
+    closed row's end of retention.
+12. One sweep settles at most 256 expired holds and cleanup removes at most 2,048 terminal rows
+    per alarm, with a one-second continuation while more are due. Retiring an anchored counter
+    deletes its window history in the same transaction.
 
 ### B8. Unprice's own billing runs on budgets
 
@@ -481,8 +492,8 @@ idempotent upserts and usually live in a deploy script or `unprice.config.ts`.
 // 1. Hard cap per end customer of an AI app; the builder bills elsewhere
 await unprice.budgets.upsert({ key: "customer:acme", unit: "USD", limits: [{ amount: 50, window: "month" }] })
 // ... or per billing cycle from the signup date, and a trial that ends on a date
-await unprice.budgets.upsert({ key: "customer:acme", unit: "USD", closesAt: "2026-11-14T00:00:00Z",
-  limits: [{ amount: 50, window: "month", anchor: "2026-10-15T00:00:00Z" }] })
+await unprice.budgets.upsert({ key: "customer:acme", unit: "USD", closesAt: Date.parse("2026-11-14T00:00:00Z"),
+  limits: [{ amount: 50, window: "month", anchor: Date.parse("2026-10-15T00:00:00Z") }] })
 const { budget, history } = await unprice.budgets.get({ key: "customer:acme" })   // history: ended cycles
 const acme = unprice.budget("customer:acme")
 const answer = await acme.spend({ estimate: 0.05, idempotencyKey: operationId }, async (hold) => {

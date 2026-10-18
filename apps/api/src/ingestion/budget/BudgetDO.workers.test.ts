@@ -2,7 +2,7 @@ import { evictDurableObject, reset, runInDurableObject } from "cloudflare:test"
 import { env } from "cloudflare:workers"
 import { sha256HexSync } from "@unprice/db/utils"
 import { type BudgetConfigInput, upsertBudgetInputSchema } from "@unprice/db/validators"
-import type { BudgetOutcome } from "@unprice/services/budgets"
+import { type BudgetOutcome, EXPIRED_HOLDS_PER_SWEEP } from "@unprice/services/budgets"
 import type { BudgetReply, BudgetRequest } from "@unprice/services/use-cases"
 import { and, asc, eq, lte, min, sql } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/durable-sqlite"
@@ -13,7 +13,7 @@ import type { BudgetDO } from "./BudgetDO"
 import { BudgetSqliteStore } from "./budget-store"
 import * as schema from "./db/schema"
 import migrations from "./drizzle/migrations"
-import { BudgetProcessor } from "./processor"
+import { ALARM_CONTINUE_MS, BudgetProcessor } from "./processor"
 
 const UNIT = BigInt(100_000_000)
 const units = (value: number) => BigInt(Math.round(value * 100)) * (UNIT / BigInt(100))
@@ -39,7 +39,7 @@ function stubFor(key = `customer:${crypto.randomUUID()}`) {
 
 function upsert(key: string, config: BudgetConfigInput): BudgetRequest {
   const parsed = upsertBudgetInputSchema.parse({ key, unit: "USD", ...config })
-  return { type: "upsert", projectId: "proj_1", ...parsed }
+  return { type: "upsert", projectId: "proj_1", ...parsed, mayLoosen: true }
 }
 
 const fiftyPerMonth: BudgetConfigInput = {
@@ -116,7 +116,28 @@ describe("BudgetDO runtime assumptions", () => {
     })
   })
 
-  it("finds a row by key, and the next due row, through their indexes", async () => {
+  it("gives open holds stored before expiry settlement their expiry as due time", async () => {
+    const stub = stubFor()
+    const expiresAt = midMonthAhead()
+    await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
+      const db = drizzle(state.storage)
+      const entries = migrations.journal.entries.filter((entry) => entry.idx < 2)
+      await migrate(db, { ...migrations, journal: { ...migrations.journal, entries } })
+      const hold = { idempotencyKey: "legacy", amount: { $bigint: "1" }, ttlMs: null, expiresAt }
+      state.storage.sql.exec(
+        "INSERT INTO budget_operations (id, kind, status, due_at, data_json) VALUES ('h_1', 'hold', 'open', 0, ?)",
+        JSON.stringify({ ...hold, createdAt: expiresAt - MINUTE, state: { status: "open" } })
+      )
+
+      await migrate(db, migrations)
+
+      expect(state.storage.sql.exec("SELECT due_at FROM budget_operations").one()).toEqual({
+        due_at: expiresAt,
+      })
+    })
+  })
+
+  it("finds a row by key, the next due row, and expired holds through their indexes", async () => {
     const key = "customer:indexes"
     const stub = stubFor(key)
     await stub.execute(upsert(key, fiftyPerMonth))
@@ -144,12 +165,15 @@ describe("BudgetDO runtime assumptions", () => {
         .where(and(terminal, lte(operations.dueAt, 0)))
         .orderBy(asc(operations.dueAt))
         .limit(2048)
-      const next = db
-        .select({ at: min(operations.dueAt) })
+      const next = db.select({ at: min(operations.dueAt) }).from(operations)
+      const expiredHolds = db
+        .select({ id: operations.id })
         .from(operations)
-        .where(terminal)
-      for (const query of [due, next]) {
-        expect(plan(query.toSQL())).toContain("USING INDEX budget_operations_terminal_due_idx")
+        .where(and(eq(operations.status, "open"), lte(operations.dueAt, 0)))
+        .orderBy(asc(operations.dueAt), asc(sql`length(${operations.id})`), asc(operations.id))
+        .limit(256)
+      for (const query of [due, next, expiredHolds]) {
+        expect(plan(query.toSQL())).toMatch(/USING (COVERING )?INDEX budget_operations_due_idx/)
       }
     })
   })
@@ -225,12 +249,12 @@ describe("BudgetDO verbs", () => {
   it("refuses spend on a budget past its closesAt and reports it closed", async () => {
     const key = "customer:closed"
     const stub = stubFor(key)
-    const closesAt = new Date(Date.now() - MINUTE).toISOString()
+    const closesAt = Date.now() - MINUTE
     await stub.execute(upsert(key, { ...fiftyPerMonth, closesAt }))
 
     expect(
       rejection(await stub.execute({ type: "authorize", idempotencyKey: "a1", amount: units(1) }))
-    ).toEqual({ code: "BUDGET_CLOSED", closedAt: Date.parse(closesAt) })
+    ).toEqual({ code: "BUDGET_CLOSED", closedAt: closesAt })
     const recorded = outcome(
       await stub.execute({
         type: "record",
@@ -242,7 +266,7 @@ describe("BudgetDO verbs", () => {
     )
     expect(recorded.balance.remaining).toBe(units(48))
     const read = outcome(await stub.execute({ type: "get" }), "get")
-    expect([read.budget.closesAt, read.budget.closed]).toEqual([Date.parse(closesAt), true])
+    expect([read.budget.closesAt, read.budget.closed]).toEqual([closesAt, true])
   })
 
   it("rejects every verb on a key that was never upserted and stores nothing for it", async () => {
@@ -373,7 +397,7 @@ describe("BudgetDO verbs", () => {
 })
 
 describe("BudgetDO alarm", () => {
-  it("keeps unresolved capacity across expiry, reset and alarms", async () => {
+  it("settles an expired hold at its full amount when its alarm fires", async () => {
     const key = "customer:uncertain"
     const stub = stubFor(key)
     const t0 = midMonthAhead()
@@ -388,9 +412,13 @@ describe("BudgetDO alarm", () => {
         amount: units(40),
         ttlMs: 1_000,
       })
-      await expect(state.storage.getAlarm()).resolves.toBeNull()
+      await expect(state.storage.getAlarm()).resolves.toBe(t0 + 1_000)
       now += 2 * 24 * HOUR
       await processor.alarm()
+      expect(state.storage.sql.exec("SELECT held FROM budget_ledger").one()).toEqual({ held: "0" })
+      expect(
+        state.storage.sql.exec("SELECT status, due_at FROM budget_operations").toArray()
+      ).toEqual([{ status: "settled", due_at: now + 24 * HOUR }])
       expect(
         rejection(
           await processor.execute({
@@ -401,32 +429,17 @@ describe("BudgetDO alarm", () => {
         ).code
       ).toBe("LIMIT_EXCEEDED")
       expect(
-        rejection(await processor.execute({ type: "settle", holdId: "h_1", amount: units(41) }))
-      ).toEqual({
-        code: "HOLD_AMOUNT_EXCEEDED",
-        holdId: "h_1",
-        maximum: units(40),
-        actual: units(41),
-      })
-      expect(state.storage.sql.exec("SELECT held FROM budget_ledger").one()).toEqual({
-        held: units(40).toString(),
-      })
-      expect(
-        rejection(
-          await processor.execute(
-            upsert(key, { limits: [{ id: "cap", amount: "39", window: "day" }] })
-          )
-        ).code
-      ).toBe("LIMIT_BELOW_USAGE")
+        rejection(await processor.execute({ type: "settle", holdId: "h_1", amount: units(35) }))
+      ).toEqual({ code: "HOLD_CLOSED", holdId: "h_1", status: "expired" })
       const final = outcome(
-        await processor.execute({ type: "settle", holdId: "h_1", amount: units(35) }),
+        await processor.execute({ type: "settle", holdId: "h_1", amount: units(40) }),
         "settle"
       )
-      expect([final.expired, final.actual, final.released, final.balance.remaining]).toEqual([
+      expect([final.expired, final.replayed, final.actual, final.balance.remaining]).toEqual([
         true,
-        units(35),
-        units(5),
-        units(15),
+        true,
+        units(40),
+        units(10),
       ])
       await expect(state.storage.getAlarm()).resolves.toBe(now + 24 * HOUR)
       now += 24 * HOUR
@@ -441,17 +454,18 @@ describe("BudgetDO alarm", () => {
     expect(read.budget.balance.held).toBe(BigInt(0))
   })
 
-  it("keeps 64 expired reservations until explicit recovery releases them", async () => {
+  it("settles expired holds in batches, and the next day has the capacity back", async () => {
     const key = "customer:many-uncertain"
     const stub = stubFor(key)
+    const holds = EXPIRED_HOLDS_PER_SWEEP + 44
     let now = midMonthAhead()
     await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
       await migrate(drizzle(state.storage), migrations)
       const processor = realStorageProcessor(state, () => now)
       await processor.execute(
-        upsert(key, { limits: [{ id: "cap", amount: "64", window: "never" }] })
+        upsert(key, { limits: [{ id: "cap", amount: String(holds), window: "day" }] })
       )
-      for (let i = 0; i < 64; i++) {
+      for (let i = 0; i < holds; i++) {
         outcome(
           await processor.execute({
             type: "authorize",
@@ -462,20 +476,29 @@ describe("BudgetDO alarm", () => {
           "authorize"
         )
       }
-      now += 8 * 24 * HOUR
+      now += HOUR
+      await processor.alarm()
+      // A full batch leaves expired holds behind, so the alarm comes straight back for them.
+      await expect(state.storage.getAlarm()).resolves.toBe(now + ALARM_CONTINUE_MS)
+      expect(outcome(await processor.execute({ type: "get" }), "get").budget.balance.held).toBe(
+        units(44)
+      )
+      now += ALARM_CONTINUE_MS
       await processor.alarm()
     })
     await evictDurableObject(stub)
     await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
       const processor = realStorageProcessor(state, () => now)
-      const request = { type: "authorize", idempotencyKey: "next", amount: units(40) } as const
-      expect(rejection(await processor.execute(request)).code).toBe("LIMIT_EXCEEDED")
-      expect(outcome(await processor.execute({ type: "get" }), "get").budget.balance.held).toBe(
-        units(64)
-      )
-      for (let i = 1; i <= 40; i++) await processor.execute({ type: "release", holdId: `h_${i}` })
+      const request = { type: "authorize", idempotencyKey: "next", amount: units(1) } as const
+      expect(rejection(await processor.execute(request))).toMatchObject({
+        code: "LIMIT_EXCEEDED",
+        blocked: { limitId: "cap", remedy: "wait_for_reset" },
+      })
+      const balance = outcome(await processor.execute({ type: "get" }), "get").budget.balance
+      expect([balance.held, balance.limits[0]?.consumed]).toEqual([BigInt(0), units(holds)])
+      now += 24 * HOUR
       expect(outcome(await processor.execute(request), "authorize").balance.remaining).toBe(
-        BigInt(0)
+        units(holds - 1)
       )
     })
   })

@@ -14,7 +14,7 @@ export const route = createRoute(
       operationId: "budgets.authorize",
       summary: "reserve the maximum permitted usage before work runs",
       description:
-        "Reserve the maximum permitted usage against every hard limit of the budget, or return 402 with the limit that blocked it. The caller must enforce this maximum during work. Settle final usage up to the reserved amount, or release only after confirming zero usage and no continuing work. Expiry never releases capacity. A retry with the same idempotency key returns the same hold. A budget past its closesAt returns 409.",
+        "Reserve the maximum permitted usage against every hard limit of the budget, or return 402 with the limit that blocked it. The caller must enforce this maximum during work. Settle final usage up to the reserved amount, or release only after confirming zero usage and no continuing work. A hold still open at its expiresAt is settled at its full amount, never released. A retry with the same idempotency key and request returns the same hold; the same key with a different amount or ttlMs returns 409. A new authorization on a budget past its closesAt returns 409.",
       method: "post",
       tags: ["budgets"],
       request: {

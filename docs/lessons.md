@@ -994,3 +994,10 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-10-16: `BudgetDO` creates its schema on the first upsert; any other verb on an empty object
   answers `BUDGET_NOT_FOUND` without writing. A test that builds its own processor over
   `state.storage` must run `migrate` first.
+- 2026-10-17: Budget rows have two times: `dueAt` is retention (null while a hold is open) and
+  decides whether a row still answers; `alarmAt` is when the alarm visits (an open hold's expiry)
+  and is what `due_at` stores. Using `alarmAt` for retention would retire live holds.
+- 2026-10-17: `apps/api` tsconfig excludes tests, so a new required field on `BudgetCommand` only
+  fails at runtime in DO tests. Grep `type: "upsert"` and update every helper when it changes.
+- 2026-10-17: After `pnpm --filter @unprice/api generate`, format `packages/api/src/openapi.d.ts`
+  with `./node_modules/.bin/biome format --write`; the raw output is a 19k-line style-only diff.

@@ -76,9 +76,8 @@ export function consume(usage: WindowCounters, amount: Amount): WindowCounters {
 
 /**
  * When a row's retention ends and the alarm may purge it; null for an open hold, which stays until
- * it is settled or released. A record is kept for RECORD_DEDUPE_MS so a retry never counts twice;
- * every other row is purged OPERATION_RETENTION_MS after it closed. A store mirrors this in an
- * indexed `due_at` column.
+ * it is closed. A record is kept for RECORD_DEDUPE_MS so a retry never counts twice; every other
+ * row is purged OPERATION_RETENTION_MS after it closed.
  */
 export function dueAt(operation: Operation): number | null {
   if (operation.kind !== "hold") {
@@ -88,4 +87,15 @@ export function dueAt(operation: Operation): number | null {
   return operation.state.status === "open"
     ? null
     : operation.state.closedAt + OPERATION_RETENTION_MS
+}
+
+/**
+ * When the alarm must next visit a row: an open hold at its `expiresAt`, to settle it; any other
+ * row when its retention ends, to purge it. A store mirrors this in an indexed `due_at` column.
+ */
+export function alarmAt(operation: Operation): number {
+  if (operation.kind === "hold" && operation.state.status === "open") return operation.expiresAt
+  const due = dueAt(operation)
+  if (due === null) throw new Error(`closed row ${operation.id} has no retention end`)
+  return due
 }

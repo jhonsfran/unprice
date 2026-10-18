@@ -213,14 +213,6 @@ describe("BudgetDO storage work", () => {
       const seconds = 4
       await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
         const clock = processor(state, start)
-        for (let i = 0; i < 512; i++)
-          accepted(
-            await clock.processor.execute({
-              type: "authorize",
-              idempotencyKey: `open_${i}`,
-              amount: UNIT,
-            })
-          )
         for (let i = 0; i < initialBacklog; i++)
           accepted(
             await clock.processor.execute({
@@ -242,6 +234,16 @@ describe("BudgetDO storage work", () => {
               })
             )
         }
+        // Opened just before cleanup, so the holds are still open while the receipts are purged.
+        clock.now = start + 8 * DAY - 1000
+        for (let i = 0; i < 512; i++)
+          accepted(
+            await clock.processor.execute({
+              type: "authorize",
+              idempotencyKey: `open_${i}`,
+              amount: UNIT,
+            })
+          )
         observe(state.storage.sql)
         measure(state.storage.sql)
       })

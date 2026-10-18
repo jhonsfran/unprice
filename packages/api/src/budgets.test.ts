@@ -4,6 +4,7 @@ import {
   BudgetRecoveryError,
   BudgetRequestError,
   BudgetSettleError,
+  BudgetUnavailableError,
 } from "./budgets"
 import { Unprice } from "./client"
 
@@ -460,12 +461,12 @@ describe("budget.spend", () => {
       .spend({ estimate: "1", ttlMs: 30_000 }, work)
       .catch((caught: unknown) => caught)
 
-    if (!(error instanceof BudgetExceededError)) throw error
+    if (!(error instanceof BudgetUnavailableError)) throw error
     expect(error).toMatchObject({
       message: "Budget unavailable: fetch failed",
-      blocked: { reason: "unavailable", remedy: "retry" },
-      balance: null,
+      error: { code: "FETCH_ERROR", message: "fetch failed" },
     })
+    expect(error).not.toBeInstanceOf(BudgetExceededError)
     expect(error.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/)
 
     const recovery = await budget
@@ -494,27 +495,27 @@ describe("budget.spend", () => {
     ])
   })
 
-  it("keeps the same generated key across transport retries", async () => {
+  it("runs the work once when a transport retry replays its own generated key", async () => {
     const { budget, requests } = createClient(
-      [new TypeError("response lost after commit"), json({ ...authorized, replayed: true })],
+      [
+        new TypeError("response lost after commit"),
+        json({ ...authorized, replayed: true }),
+        json(settled),
+      ],
       1
     )
     let executions = 0
-    const error = await budget
-      .spend({ estimate: "0.05" }, async () => {
-        executions += 1
-        return { value: "unreachable", actual: "0.031" }
-      })
-      .catch((caught: unknown) => caught)
+    const value = await budget.spend({ estimate: "0.05" }, async () => {
+      executions += 1
+      return { value: "generated", actual: "0.031" }
+    })
 
-    if (!(error instanceof BudgetRecoveryError)) throw error
-    expect(error.reason).toBe("authorization_replayed")
-    expect(error.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/)
-    expect(executions).toBe(0)
-    expect(requests.map(({ body }) => body)).toEqual([
-      { key: "customer:acme", amount: "0.05", idempotencyKey: error.idempotencyKey },
-      { key: "customer:acme", amount: "0.05", idempotencyKey: error.idempotencyKey },
-    ])
+    expect([value, executions]).toEqual(["generated", 1])
+    const [first, retry, settle] = requests.map(({ body }) => body)
+    const generated = { key: "customer:acme", amount: "0.05", idempotencyKey: expect.any(String) }
+    expect([first, retry]).toEqual([generated, generated])
+    expect(retry).toEqual(first)
+    expect(settle).toEqual({ key: "customer:acme", holdId: "h_7", amount: "0.031" })
   })
 
   it("throws BudgetRequestError when the API rejects the authorization", async () => {

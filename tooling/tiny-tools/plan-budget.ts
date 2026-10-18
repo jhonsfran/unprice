@@ -276,7 +276,7 @@ async function closedBudgetStopsNewSpend(): Promise<void> {
   const { changes, budget: closed } = ok(
     await unprice.budgets.upsert({
       ...definition,
-      closesAt: new Date(Date.now() - 1_000).toISOString(),
+      closesAt: Date.now() - 1_000,
     }),
     "upsert closesAt"
   )

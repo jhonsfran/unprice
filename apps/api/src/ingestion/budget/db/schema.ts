@@ -43,15 +43,13 @@ export const budgetOperations = sqliteTable(
     id: text("id").primaryKey(),
     kind: text("kind", { enum: ["hold", "charge", "record"] }).notNull(),
     status: text("status", { enum: ["open", "settled", "released", "done"] }).notNull(),
-    /** End of retention; 0 for an open hold, which the partial index leaves out. */
+    /** When the alarm next visits the row (`alarmAt`): an open hold's expiry, else retention end. */
     dueAt: integer("due_at").notNull(),
     /** The operation without `kind` and `id`, with tagged bigints. */
     dataJson: text("data_json").notNull(),
   },
   (table) => ({
-    due: index("budget_operations_terminal_due_idx")
-      .on(table.dueAt)
-      .where(sql`status IN ('done', 'settled', 'released')`),
+    due: index("budget_operations_due_idx").on(table.dueAt),
     key: uniqueIndex("budget_operations_key_idx").on(sql`data_json ->> '$.idempotencyKey'`),
   })
 )

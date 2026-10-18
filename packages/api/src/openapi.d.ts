@@ -135,7 +135,7 @@ export interface paths {
     put?: never
     /**
      * create or update a budget
-     * @description Create the budget at a key, or update its limits and hold settings. Sending the same definition again changes nothing. The unit cannot change after creation. A hard cap below current consumption plus outstanding reservations returns 409.
+     * @description Create the budget at a key, or replace its definition. Every upsert sends the whole definition: a field it leaves out takes its default, so an omitted closesAt reopens a closing budget and omitted hold TTLs return to their defaults. Sending the same definition again changes nothing. The unit cannot change after creation. A hard cap below current consumption plus outstanding reservations returns 409. A runtime key can create a budget or tighten it; raising or removing a hard limit, making it soft, or clearing or postponing closesAt needs a config key and otherwise returns 403, so whoever spends under a cap cannot lift it.
      */
     post: operations["budgets.upsert"]
     delete?: never
@@ -155,7 +155,7 @@ export interface paths {
     put?: never
     /**
      * reserve the maximum permitted usage before work runs
-     * @description Reserve the maximum permitted usage against every hard limit of the budget, or return 402 with the limit that blocked it. The caller must enforce this maximum during work. Settle final usage up to the reserved amount, or release only after confirming zero usage and no continuing work. Expiry never releases capacity. A retry with the same idempotency key returns the same hold. A budget past its closesAt returns 409.
+     * @description Reserve the maximum permitted usage against every hard limit of the budget, or return 402 with the limit that blocked it. The caller must enforce this maximum during work. Settle final usage up to the reserved amount, or release only after confirming zero usage and no continuing work. A hold still open at its expiresAt is settled at its full amount, never released. A retry with the same idempotency key and request returns the same hold; the same key with a different amount or ttlMs returns 409. A new authorization on a budget past its closesAt returns 409.
      */
     post: operations["budgets.authorize"]
     delete?: never
@@ -2926,11 +2926,10 @@ export interface operations {
              */
             window: "hour" | "day" | "week" | "month" | "never"
             /**
-             * Format: date-time
-             * @description Anchors a day, week, or month window: periods start at this instant and repeat every window. A month anchored on the 31st starts on the last day of shorter months. Equivalent UTC anchors share one counter. Usage counts from the moment the schedule is first tracked. Removed schedules retain current usage until their period ends. A budget retains at most 32 distinct anchored schedules.
-             * @example 2026-10-15T00:00:00Z
+             * @description Anchors a day, week, or month window, in epoch milliseconds: periods start at this instant and repeat every window. A month anchored on the 31st starts on the last day of shorter months. Equivalent UTC anchors share one counter. Usage counts from the moment the schedule is first tracked. Removed schedules retain current usage until their period ends. A budget retains at most 32 distinct anchored schedules.
+             * @example 1792022400000
              */
-            anchor?: string
+            anchor?: number
             /**
              * @description Defaults to hard
              * @example hard
@@ -2939,12 +2938,11 @@ export interface operations {
             enforce?: "hard" | "soft"
           }[]
           /**
-           * Format: date-time
-           * @description When the budget closes. From then on authorize and charge return 409, record is accepted for 1 day more, and settle and release keep working. Omit or send null to keep it open.
-           * @example 2026-12-31T23:59:59Z
+           * @description When the budget closes, in epoch milliseconds. From then on authorize and charge return 409, record is accepted for 1 day more, and settle and release keep working. An upsert replaces the whole definition, so omitting closesAt or sending null leaves the budget open and clears any close time it had.
+           * @example 1798761599000
            */
-          closesAt?: string | null
-          /** @description Hold timing. Both TTLs must be between 1000 and 86400000 ms, and the default must not exceed the max. */
+          closesAt?: number | null
+          /** @description Hold timing. Both TTLs must be between 1000 and 86400000 ms, and the default must not exceed the max. An omitted TTL takes its default on every upsert. */
           holds?: {
             /**
              * @description TTL for an authorize that sends no ttlMs, in milliseconds. Defaults to 900000 (15 minutes).
@@ -3007,8 +3005,8 @@ export interface operations {
                  * @enum {string}
                  */
                 window: "hour" | "day" | "week" | "month" | "never"
-                /** @description The anchor instant of an anchored window, as an ISO 8601 string */
-                anchor?: string
+                /** @description The anchor instant of an anchored window, in epoch milliseconds */
+                anchor?: number
                 /**
                  * @description hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.
                  * @example hard
@@ -3022,8 +3020,8 @@ export interface operations {
               }
               /** @enum {string} */
               onUnavailable: "deny"
-              /** @description When the budget closes, or null */
-              closesAt: string | null
+              /** @description When the budget closes, in epoch milliseconds, or null */
+              closesAt: number | null
               /** @description True from closesAt on */
               closed: boolean
               balance: {
@@ -3168,7 +3166,7 @@ export interface operations {
            */
           amount: string
           /**
-           * @description The execution deadline, in milliseconds. Defaults to the budget's holds.defaultTtlMs and must not exceed holds.maxTtlMs. Expiry does not release capacity. An unresolved hold remains reserved until explicit settlement or release.
+           * @description The execution deadline, in milliseconds. Defaults to the budget's holds.defaultTtlMs and must not exceed holds.maxTtlMs. A hold still open at expiry is settled at its full amount, never released: the capacity stays used until its window resets, and a later settle succeeds only for that amount.
            * @example 60000
            */
           ttlMs?: number
@@ -3197,7 +3195,7 @@ export interface operations {
             holdId: string
             /** @description The amount held */
             amount: string
-            /** @description The deadline for work, in epoch milliseconds. Capacity remains reserved until explicit settlement or release. */
+            /** @description The deadline for work, in epoch milliseconds. A hold still open then is settled at its full amount. */
             expiresAt: number
             /** @description True when this answer replays an earlier request instead of applying it again */
             replayed: boolean
@@ -4037,8 +4035,8 @@ export interface operations {
                  * @enum {string}
                  */
                 window: "hour" | "day" | "week" | "month" | "never"
-                /** @description The anchor instant of an anchored window, as an ISO 8601 string */
-                anchor?: string
+                /** @description The anchor instant of an anchored window, in epoch milliseconds */
+                anchor?: number
                 /**
                  * @description hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.
                  * @example hard
@@ -4052,8 +4050,8 @@ export interface operations {
               }
               /** @enum {string} */
               onUnavailable: "deny"
-              /** @description When the budget closes, or null */
-              closesAt: string | null
+              /** @description When the budget closes, in epoch milliseconds, or null */
+              closesAt: number | null
               /** @description True from closesAt on */
               closed: boolean
               balance: {

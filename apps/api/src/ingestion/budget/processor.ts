@@ -80,7 +80,7 @@ export class BudgetProcessor {
 }
 
 function commit(tx: BudgetStoreTx, command: BudgetCommand, clockMs: number): Committed {
-  const view = loadView(tx, command)
+  const view = loadView(tx, command, clockMs)
   const result = transition({ view, command, clockMs })
   if (result.err) return { ok: false, rejection: result.err.rejection }
 
@@ -89,7 +89,7 @@ function commit(tx: BudgetStoreTx, command: BudgetCommand, clockMs: number): Com
   return { ok: true, outcome, wakeAt: write ? wakeAt : null, now }
 }
 
-/** Returns the next wake, or null when nothing is due. */
+/** Settles expired holds, purges closed rows, and returns the next wake, or null for none. */
 function sweep(tx: BudgetStoreTx, clockMs: number): number | null {
   if (tx.readBudget() === null) return null
   const swept = commit(tx, { type: "sweep" }, clockMs)

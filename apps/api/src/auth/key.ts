@@ -38,15 +38,16 @@ export function shouldBypassApiKeyRateLimit(path: string): boolean {
  * if the key doesnt exist or isn't valid, an error is thrown, which gets handled automatically
  * by hono
  *
- * `opts.requireType` picks the operation surface the route belongs to. It defaults to `runtime`,
- * so every existing route keeps rejecting config keys without changing its call.
+ * `opts.requireType` picks the operation surface the route belongs to: one key type, or every type
+ * the route accepts. It defaults to `runtime`, so every existing route keeps rejecting config keys
+ * without changing its call.
  *
  * This is also where a cached key that predates the `type` column gets resolved, so callers
  * always receive a fully typed `ApiKeyExtended`.
  */
 export async function keyAuth(
   c: Context<HonoEnv>,
-  opts?: { requireType?: ApiKeyType }
+  opts?: { requireType?: ApiKeyType | readonly ApiKeyType[] }
 ): Promise<ApiKeyExtended> {
   const authHeader = c.req.header("authorization")?.trim()
   const authorization = authHeader?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim()
@@ -140,7 +141,7 @@ export async function keyAuth(
   // A cache entry serialized before the `type` column shipped carries no type (see ApiKeyCache).
   // Those are runtime keys. This is the only place that resolves it.
   const keyType: ApiKeyType = key.type ?? DEFAULT_API_KEY_TYPE
-  const requiredType: ApiKeyType = opts?.requireType ?? DEFAULT_API_KEY_TYPE
+  const acceptedTypes: readonly ApiKeyType[] = [opts?.requireType ?? DEFAULT_API_KEY_TYPE].flat()
 
   c.set("isMain", key.project.isMain ?? false)
   c.set("isInternal", key.project.isInternal ?? false)
@@ -197,7 +198,7 @@ export async function keyAuth(
   // The message is identical in both directions on purpose: the caller must not learn which
   // key type this route wants. Because the rejection is opaque to the caller, it has to be
   // legible to us — a bare 403 is indistinguishable from every other FORBIDDEN in the logs.
-  if (keyType !== requiredType) {
+  if (!acceptedTypes.includes(keyType)) {
     logger.set({ error: { type: "INSUFFICIENT_PERMISSIONS" } })
     throw new UnpriceApiError({
       code: "INSUFFICIENT_PERMISSIONS",

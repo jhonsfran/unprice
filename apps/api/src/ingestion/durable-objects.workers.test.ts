@@ -40,7 +40,12 @@ describe("Durable Object workers runtime bindings", () => {
     const { BudgetDO } = await import("~/ingestion/budget/BudgetDO")
     const stub = budgetNamespace(env).getByName("test:workers:budget:smoke")
     const parsed = upsertBudgetInputSchema.parse({ key: "smoke", unit: "USD", limits: [] })
-    const reply = await stub.execute({ type: "upsert", projectId: "proj_1", ...parsed })
+    const reply = await stub.execute({
+      type: "upsert",
+      projectId: "proj_1",
+      ...parsed,
+      mayLoosen: true,
+    })
 
     expect(reply.ok).toBe(true)
     await runInDurableObject(stub, async (instance: InstanceType<typeof BudgetDO>, state) => {

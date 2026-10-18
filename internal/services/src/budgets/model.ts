@@ -37,7 +37,7 @@ export type WindowPeriod = Readonly<{
  * - `lastAt` is the budget's clock: when it last wrote. `transition` clamps to it, so windows only
  *   roll forward and nothing is purged ahead of a later command's clock.
  * - `holdSeq` counts holds ever placed. `h_<n>` with n <= holdSeq was minted.
- * - `held` = sum of `amount` over open holds, expired ones included.
+ * - `held` = sum of `amount` over open holds, including expired ones the alarm has not settled yet.
  * - `usage` has all five canonical windows plus anchored ones; `usage.never.consumed` is lifetime
  *   consumption. Every consumption adds to every counter.
  */
@@ -62,14 +62,22 @@ export const emptyLedger: Ledger = {
 }
 
 /**
- * A hold stays open until it is settled or released. `expiresAt` is the deadline for the work, not
- * a state: an expired hold keeps counting, because a timer cannot prove the work stopped.
+ * A hold stays open until it is settled or released, or until `expiresAt` passes: the alarm then
+ * settles it at its full amount, because a timer cannot prove the work stopped. Counting all of it
+ * keeps the cap, and the capacity returns when the window rolls instead of never.
  * Per state: open counts `amount`; settled consumed `actual` (at most `amount`) and returned the
  * rest; released returned `amount`.
  */
 export type HoldState =
   | Readonly<{ status: "open" }>
-  | Readonly<{ status: "settled"; closedAt: number; actual: Amount; crossed: readonly string[] }>
+  | Readonly<{
+      status: "settled"
+      closedAt: number
+      actual: Amount
+      crossed: readonly string[]
+      /** The alarm settled it at `amount` once `expiresAt` passed; the caller never did. */
+      byExpiry?: true
+    }>
   | Readonly<{ status: "released"; closedAt: number }>
 
 /**
@@ -116,6 +124,8 @@ export type BudgetView = Readonly<{
   target: Operation | null
   /** For `get`: up to WINDOW_HISTORY_PERIODS stored periods per limited window id, newest first. */
   history: readonly WindowPeriod[]
+  /** For `sweep`: open holds whose `expiresAt` passed, earliest first, a bounded batch. */
+  expiredHolds: readonly HoldOperation[]
 }>
 
 // Commands
@@ -127,6 +137,11 @@ export type BudgetCommand =
       projectId: string
       unit: string
       config: BudgetConfig
+      /**
+       * Whether this caller may loosen an existing budget (`loosening`). Without it, an upsert may
+       * create a budget or keep and tighten one, so whoever spends under a cap cannot lift it.
+       */
+      mayLoosen: boolean
     }>
   | Readonly<{ type: "authorize"; idempotencyKey: string; amount: Amount; ttlMs?: number }>
   | Readonly<{ type: "settle"; holdId: string; amount: Amount }>
@@ -246,7 +261,7 @@ export type BudgetRejection =
   | Readonly<{ code: "INVALID_TTL"; ttlMs: number; minTtlMs: number; maxTtlMs: number }>
   | Readonly<{ code: "LIMIT_EXCEEDED"; blocked: Blocked; balance: BudgetBalance }>
   | Readonly<{ code: "HOLD_NOT_FOUND"; holdId: string }>
-  | Readonly<{ code: "HOLD_CLOSED"; holdId: string; status: "settled" | "released" }>
+  | Readonly<{ code: "HOLD_CLOSED"; holdId: string; status: "settled" | "released" | "expired" }>
   | Readonly<{ code: "HOLD_AMOUNT_EXCEEDED"; holdId: string; maximum: Amount; actual: Amount }>
   | Readonly<{ code: "LIMIT_BELOW_USAGE"; limitId: string; minimum: Amount; requested: Amount }>
   /** Minted, but its row was purged after retention, so its outcome is no longer known. */
@@ -262,6 +277,8 @@ export type BudgetRejection =
     }>
   /** Authorize and charge from `closesAt` on; record from `closesAt + OPERATION_RETENTION_MS`. */
   | Readonly<{ code: "BUDGET_CLOSED"; closedAt: number }>
+  /** An upsert without `mayLoosen` would let more spend through. */
+  | Readonly<{ code: "LOOSENING_FORBIDDEN"; change: ConfigChange }>
   | Readonly<{ code: "TOO_LATE"; occurredAt: number; oldestAccepted: number }>
   | Readonly<{ code: "INVALID_OCCURRED_AT"; occurredAt: number; latestAccepted: number }>
 
@@ -292,7 +309,9 @@ function rejectionMessage(rejection: BudgetRejection): string {
     case "HOLD_NOT_FOUND":
       return `Hold ${rejection.holdId} does not exist`
     case "HOLD_CLOSED":
-      return `Hold ${rejection.holdId} is already ${rejection.status}`
+      return rejection.status === "expired"
+        ? `Hold ${rejection.holdId} expired and was settled at its full amount`
+        : `Hold ${rejection.holdId} is already ${rejection.status}`
     case "HOLD_AMOUNT_EXCEEDED":
       return `Hold ${rejection.holdId} permits ${formatAmount(rejection.maximum)}, not ${formatAmount(rejection.actual)}`
     case "LIMIT_BELOW_USAGE":
@@ -307,10 +326,25 @@ function rejectionMessage(rejection: BudgetRejection): string {
       return `Limit ${rejection.limitId} counts over ${rejection.current} and cannot change to ${rejection.requested}; add a limit with a new id instead`
     case "BUDGET_CLOSED":
       return `Budget closed at ${new Date(rejection.closedAt).toISOString()}`
+    case "LOOSENING_FORBIDDEN":
+      return `This caller cannot loosen the budget: the upsert ${describeLoosening(rejection.change)}`
     case "TOO_LATE":
       return `Usage at ${rejection.occurredAt} is older than the oldest accepted ${rejection.oldestAccepted}`
     case "INVALID_OCCURRED_AT":
       return `occurredAt ${rejection.occurredAt} is ahead of the latest accepted ${rejection.latestAccepted}`
+  }
+}
+
+function describeLoosening(change: ConfigChange): string {
+  switch (change.change) {
+    case "limit.removed":
+      return `removes hard limit ${change.limitId}`
+    case "limit.amount":
+      return `raises hard limit ${change.limitId} from ${formatAmount(change.from)} to ${formatAmount(change.to)}`
+    case "limit.enforce":
+      return `makes hard limit ${change.limitId} ${change.to}`
+    default:
+      return "clears or postpones closesAt"
   }
 }
 

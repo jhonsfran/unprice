@@ -4,6 +4,7 @@ import {
   type BudgetReader,
   type BudgetRecord,
   type BudgetTransition,
+  type HoldOperation,
   type Ledger,
   type Operation,
   type UnPriceBudgetError,
@@ -12,6 +13,7 @@ import {
   type WindowPeriod,
   dueAt,
   emptyLedger,
+  holdNumber,
   loadView,
   transition,
 } from "./index"
@@ -32,7 +34,7 @@ export class MemoryBudgetStore implements BudgetReader {
   private readonly byKey = new Map<string, string>()
 
   run(command: BudgetCommand, clockMs: number): Result<BudgetTransition, UnPriceBudgetError> {
-    const view = loadView(this, command)
+    const view = loadView(this, command, clockMs)
     const result = transition({ view, command, clockMs })
     if (result.err || !result.val.write) return result
     const { budget, ledger, purged, operations, periods, retiredWindows } = result.val
@@ -52,7 +54,10 @@ export class MemoryBudgetStore implements BudgetReader {
     return result
   }
 
-  /** What the alarm does: sweeps, which moves the clock to `clockMs`, then purges closed rows. */
+  /**
+   * What the alarm does: sweeps, which moves the clock to `clockMs` and settles expired holds,
+   * then purges closed rows.
+   */
   alarm(clockMs: number) {
     if (!this.budget) return
     const swept = this.run({ type: "sweep" }, clockMs)
@@ -84,5 +89,15 @@ export class MemoryBudgetStore implements BudgetReader {
 
   readHistory(windowIds: readonly WindowId[], limit: number) {
     return windowIds.flatMap((id) => (this.history.get(id) ?? []).slice(0, limit))
+  }
+
+  readExpiredHolds(now: number, limit: number) {
+    return [...this.rows.values()]
+      .filter(
+        (row): row is HoldOperation =>
+          row.kind === "hold" && row.state.status === "open" && row.expiresAt <= now
+      )
+      .sort((a, b) => a.expiresAt - b.expiresAt || holdNumber(a.id) - holdNumber(b.id))
+      .slice(0, limit)
   }
 }

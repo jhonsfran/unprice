@@ -15,6 +15,7 @@ import {
   RECORD_FUTURE_SKEW_MS,
   diffConfig,
   isClosed,
+  loosening,
 } from "./config"
 import {
   type Blocked,
@@ -99,12 +100,16 @@ function resetsLater(a: number | null, b: number | null): boolean {
 }
 
 /**
- * Limits whose consumed amount first exceeds their amount. A hard limit gets there only after
- * recorded usage took the room its holds and charges were checked against.
+ * Limits whose consumed amount first exceeds their amount, after `prior` more was consumed since
+ * `balance` was read. A hard limit gets there only after recorded usage took the room its holds
+ * and charges were checked against.
  */
-function crossings(balance: BudgetBalance, amount: Amount): string[] {
+function crossings(balance: BudgetBalance, amount: Amount, prior = ZERO): string[] {
   return balance.limits
-    .filter((limit) => limit.consumed <= limit.amount && limit.consumed + amount > limit.amount)
+    .filter((limit) => {
+      const consumed = limit.consumed + prior
+      return consumed <= limit.amount && consumed + amount > limit.amount
+    })
     .map((limit) => limit.id)
 }
 
@@ -130,12 +135,18 @@ const unchanged = (row: Operation | null): Change => ({ rows: [], row, held: ZER
  */
 export function decide(
   command: BudgetCommand,
-  view: Pick<BudgetView, "budget" | "ledger" | "target">,
+  view: Pick<BudgetView, "budget" | "ledger" | "target" | "expiredHolds">,
   now: number
 ): Result<Change, UnPriceBudgetError> {
   if (command.type === "upsert") return decideUpsert(command, view.budget, view.ledger, now)
-  if (command.type === "sweep") return Ok(unchanged(null))
   const budget = view.budget
+  if (command.type === "sweep") {
+    return Ok(
+      budget
+        ? decideSweep({ budget, ledger: view.ledger }, view.expiredHolds, now)
+        : unchanged(null)
+    )
+  }
   if (!budget) return reject({ code: "BUDGET_NOT_FOUND" })
   const state = { budget, ledger: view.ledger }
 
@@ -200,6 +211,8 @@ function decideUpsert(
   }
   const changes = diffConfig(budget.config, config)
   if (changes.length === 0) return Ok(unchanged(null))
+  const loosened = command.mayLoosen ? null : loosening(budget.config, config)
+  if (loosened) return reject({ code: "LOOSENING_FORBIDDEN", change: loosened })
   const updated = { ...budget, version: budget.version + 1, config }
   const balance = balanceOf({ budget: updated, ledger }, now)
   const previous = new Map(budget.config.limits.map((limit) => [limit.id, limit]))
@@ -217,6 +230,28 @@ function decideUpsert(
     }
   }
   return Ok({ ...unchanged(null), configured: { budget: updated, changes } })
+}
+
+/**
+ * Settles every expired hold at its full amount: a timer cannot prove the work stopped, so the
+ * hold counts everything it permitted. Held capacity becomes consumption in the current window and
+ * returns when that window rolls. A late settle of the same amount replays; another is refused.
+ */
+function decideSweep(state: Funded, holds: readonly HoldOperation[], now: number): Change {
+  const balance = balanceOf(state, now)
+  let consumed = ZERO
+  const rows = holds.map((hold): HoldOperation => {
+    if (hold.state.status !== "open" || hold.expiresAt > now) {
+      throw new Error(`hold ${hold.id} is not an open hold past its expiry`)
+    }
+    const crossed = crossings(balance, hold.amount, consumed)
+    consumed += hold.amount
+    return {
+      ...hold,
+      state: { status: "settled", closedAt: now, actual: hold.amount, crossed, byExpiry: true },
+    }
+  })
+  return { rows, row: null, held: -consumed, consumed }
 }
 
 /** A keyed command repeats its row when the verb, the amount, and (for a hold) the TTL match. */
@@ -317,7 +352,7 @@ function decideSettle(
   switch (holdState.status) {
     case "settled":
       if (holdState.actual === actual) return Ok(unchanged(hold.val))
-      return reject({ code: "HOLD_CLOSED", holdId, status: "settled" })
+      return reject({ code: "HOLD_CLOSED", holdId, status: closedStatus(hold.val) })
     case "released":
       return reject({ code: "HOLD_CLOSED", holdId, status: "released" })
     case "open": {
@@ -347,12 +382,17 @@ function decideRelease(
     case "released":
       return Ok(unchanged(hold.val))
     case "settled":
-      return reject({ code: "HOLD_CLOSED", holdId: command.holdId, status: "settled" })
+      return reject({ code: "HOLD_CLOSED", holdId: command.holdId, status: closedStatus(hold.val) })
     case "open": {
       const row: HoldOperation = { ...hold.val, state: { status: "released", closedAt: now } }
       return Ok({ rows: [row], row, held: -hold.val.amount, consumed: ZERO })
     }
   }
+}
+
+/** How a settled hold closed: by its caller, or by the alarm at its expiry. */
+function closedStatus(hold: HoldOperation): "settled" | "expired" {
+  return hold.state.status === "settled" && hold.state.byExpiry ? "expired" : "settled"
 }
 
 /**

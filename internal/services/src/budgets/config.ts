@@ -98,3 +98,26 @@ export function diffConfig(prev: BudgetConfig, next: BudgetConfig): ConfigChange
   if (prev.closesAt !== next.closesAt) changes.push({ change: "closesAt" })
   return changes
 }
+
+/**
+ * The first change that lets more spend through: a hard limit removed, raised, or made soft, or a
+ * close time cleared or postponed. Null when `next` only keeps or tightens what `prev` enforced.
+ * Soft limits and hold TTLs never deny, so changing them loosens nothing.
+ */
+export function loosening(prev: BudgetConfig, next: BudgetConfig): ConfigChange | null {
+  const nextById = new Map(next.limits.map((limit) => [limit.id, limit]))
+  for (const before of prev.limits) {
+    if (before.enforce !== "hard") continue
+    const after = nextById.get(before.id)
+    if (!after) return { change: "limit.removed", limitId: before.id }
+    if (after.enforce !== "hard") {
+      return { change: "limit.enforce", limitId: before.id, from: "hard", to: after.enforce }
+    }
+    if (after.amount > before.amount) {
+      return { change: "limit.amount", limitId: before.id, from: before.amount, to: after.amount }
+    }
+  }
+  const postponed =
+    prev.closesAt !== null && (next.closesAt === null || next.closesAt > prev.closesAt)
+  return postponed ? { change: "closesAt" } : null
+}

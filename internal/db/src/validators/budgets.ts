@@ -22,7 +22,7 @@ export const DEFAULT_HOLD_TTL_MS = 15 * 60 * 1000
 export const MAX_HOLD_TTL_MS = 24 * 60 * 60 * 1000
 /**
  * Settled and released holds and charge rows answer this long after they close; an open hold has
- * no retention and stays until it is settled or released. They are the idempotency record and the
+ * no retention until it closes, by its caller or by expiry. They are the idempotency record and the
  * tombstone that answers replays; after it, a hold is retired and can no longer be settled or
  * released. A budget accepts `record` this long past its `closesAt`.
  */
@@ -111,15 +111,12 @@ const budgetIdempotencyKeySchema = z.string().min(1).max(256).openapi({
   example: "run_8f2c:step_3",
 })
 
-const budgetInstantInputSchema = z
-  .string()
-  .datetime({ offset: true })
-  .transform((text) => Date.parse(text))
-  .refine((at) => at >= 0, "must not be before 1970")
+/** Every instant on the wire is epoch milliseconds, like the rest of the API. */
+const budgetEpochMsSchema = z.number().int()
+
+const budgetInstantInputSchema = budgetEpochMsSchema.nonnegative()
 
 const budgetTtlInputSchema = z.number().int().min(MIN_HOLD_TTL_MS).max(MAX_HOLD_TTL_MS)
-
-const budgetEpochMsSchema = z.number().int()
 
 const budgetResetsAtSchema = budgetEpochMsSchema.nullable().openapi({
   description: "When the limit's current period ends, in epoch milliseconds; null for never",
@@ -161,8 +158,8 @@ export const upsertBudgetInputSchema = z
             window: budgetWindowSchema,
             anchor: budgetInstantInputSchema.optional().openapi({
               description:
-                "Anchors a day, week, or month window: periods start at this instant and repeat every window. A month anchored on the 31st starts on the last day of shorter months. Equivalent UTC anchors share one counter. Usage counts from the moment the schedule is first tracked. Removed schedules retain current usage until their period ends. A budget retains at most 32 distinct anchored schedules.",
-              example: "2026-10-15T00:00:00Z",
+                "Anchors a day, week, or month window, in epoch milliseconds: periods start at this instant and repeat every window. A month anchored on the 31st starts on the last day of shorter months. Equivalent UTC anchors share one counter. Usage counts from the moment the schedule is first tracked. Removed schedules retain current usage until their period ends. A budget retains at most 32 distinct anchored schedules.",
+              example: 1_792_022_400_000,
             }),
             enforce: budgetEnforceSchema.optional().openapi({ description: "Defaults to hard" }),
           })
@@ -181,8 +178,8 @@ export const upsertBudgetInputSchema = z
       .nullable()
       .optional()
       .openapi({
-        description: `When the budget closes. From then on authorize and charge return 409, record is accepted for ${describeDuration(OPERATION_RETENTION_MS)} more, and settle and release keep working. Omit or send null to keep it open.`,
-        example: "2026-12-31T23:59:59Z",
+        description: `When the budget closes, in epoch milliseconds. From then on authorize and charge return 409, record is accepted for ${describeDuration(OPERATION_RETENTION_MS)} more, and settle and release keep working. An upsert replaces the whole definition, so omitting closesAt or sending null leaves the budget open and clears any close time it had.`,
+        example: 1_798_761_599_000,
       }),
     holds: z
       .object({
@@ -198,7 +195,7 @@ export const upsertBudgetInputSchema = z
       .strict()
       .optional()
       .openapi({
-        description: `Hold timing. Both TTLs must be between ${MIN_HOLD_TTL_MS} and ${MAX_HOLD_TTL_MS} ms, and the default must not exceed the max.`,
+        description: `Hold timing. Both TTLs must be between ${MIN_HOLD_TTL_MS} and ${MAX_HOLD_TTL_MS} ms, and the default must not exceed the max. An omitted TTL takes its default on every upsert.`,
       }),
     onUnavailable: z.literal("deny").optional().openapi({
       description: "Deny new work when Unprice cannot be reached. Defaults to deny.",
@@ -256,14 +253,10 @@ export type BudgetConfigInput = Omit<z.input<typeof upsertBudgetInputSchema>, "k
 /** The wire form of a config; parsing it back returns the same config. */
 export function formatBudgetConfig(config: BudgetConfig) {
   return {
-    limits: config.limits.map(({ anchor, ...limit }) => ({
-      ...limit,
-      amount: formatAmount(limit.amount),
-      ...(anchor === undefined ? {} : { anchor: new Date(anchor).toISOString() }),
-    })),
+    limits: config.limits.map((limit) => ({ ...limit, amount: formatAmount(limit.amount) })),
     holds: { ...config.holds },
     onUnavailable: "deny" as const,
-    closesAt: config.closesAt === null ? null : new Date(config.closesAt).toISOString(),
+    closesAt: config.closesAt,
   } satisfies BudgetConfigInput
 }
 
@@ -277,7 +270,7 @@ export const authorizeBudgetInputSchema = z
       })
       .transform(toAmount),
     ttlMs: z.number().int().positive().optional().openapi({
-      description: `The execution deadline, in milliseconds. Defaults to the budget's holds.defaultTtlMs and must not exceed holds.maxTtlMs. Expiry does not release capacity. An unresolved hold remains reserved until explicit settlement or release.`,
+      description: `The execution deadline, in milliseconds. Defaults to the budget's holds.defaultTtlMs and must not exceed holds.maxTtlMs. A hold still open at expiry is settled at its full amount, never released: the capacity stays used until its window resets, and a later settle succeeds only for that amount.`,
       example: 60_000,
     }),
     idempotencyKey: budgetIdempotencyKeySchema,
@@ -377,15 +370,17 @@ export const budgetSchema = z.object({
       id: z.string(),
       amount: budgetDecimalSchema,
       window: budgetWindowSchema,
-      anchor: z.string().optional().openapi({
-        description: "The anchor instant of an anchored window, as an ISO 8601 string",
+      anchor: budgetEpochMsSchema.optional().openapi({
+        description: "The anchor instant of an anchored window, in epoch milliseconds",
       }),
       enforce: budgetEnforceSchema,
     })
   ),
   holds: z.object({ defaultTtlMs: z.number().int(), maxTtlMs: z.number().int() }),
   onUnavailable: z.literal("deny"),
-  closesAt: z.string().nullable().openapi({ description: "When the budget closes, or null" }),
+  closesAt: budgetEpochMsSchema
+    .nullable()
+    .openapi({ description: "When the budget closes, in epoch milliseconds, or null" }),
   closed: z.boolean().openapi({ description: "True from closesAt on" }),
   balance: budgetBalanceSchema,
 })
@@ -431,7 +426,7 @@ export const authorizeBudgetResponseSchema = z.object({
   amount: budgetDecimalSchema.openapi({ description: "The amount held" }),
   expiresAt: budgetEpochMsSchema.openapi({
     description:
-      "The deadline for work, in epoch milliseconds. Capacity remains reserved until explicit settlement or release.",
+      "The deadline for work, in epoch milliseconds. A hold still open then is settled at its full amount.",
   }),
   replayed: budgetReplayedSchema,
   balance: budgetBalanceSchema,

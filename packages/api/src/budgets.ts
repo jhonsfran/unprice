@@ -40,7 +40,10 @@ export type BudgetHold = {
   readonly id: string
   readonly key: string
   readonly amount: string
-  /** Deadline for the work. Capacity stays reserved until explicit settlement or release. */
+  /**
+   * Deadline for the work, in epoch ms. A hold still open then is settled at its full amount, so
+   * only a settle of that amount succeeds afterwards.
+   */
   readonly expiresAt: number
   /**
    * Final usage must not exceed the authorized amount. An excess returns 409 and keeps the hold
@@ -93,7 +96,10 @@ export type SpendBudgetInput = {
   /** Maximum authorized usage, which the callback's provider integration must enforce. */
   estimate: AmountInput
   ttlMs?: number
-  /** Defaults to a random UUID, which budget errors expose for recovery. */
+  /**
+   * Defaults to a random UUID, which budget errors expose for recovery. With your own key, a
+   * replay may follow an earlier run of the work, so `spend` throws instead of running it again.
+   */
   idempotencyKey?: string
 }
 
@@ -109,9 +115,11 @@ export type BudgetHandle = {
    * usage within that maximum. The callback must enforce the maximum at the provider.
    * Failure or timeout retains the hold because the work may have incurred cost.
    *
-   * @throws BudgetExceededError when the budget denies the estimate or cannot be reached.
+   * @throws BudgetExceededError when a limit denies the estimate.
+   * @throws BudgetUnavailableError when Unprice cannot be reached after the client's retries.
    * @throws BudgetRequestError when the API rejects the authorization.
-   * @throws BudgetRecoveryError when authorization replays or `fn` throws. Recover with its hold.
+   * @throws BudgetRecoveryError when your idempotency key replays or `fn` throws. Recover with
+   * its hold.
    * @throws BudgetSettleError when `fn` succeeded but the settle failed.
    */
   spend<T>(
@@ -120,22 +128,33 @@ export type BudgetHandle = {
   ): Promise<T>
 }
 
+/** A limit denied the estimate. `blocked` names it and the remedy. */
 export class BudgetExceededError extends Error {
-  readonly blocked: BudgetBlocked
-  readonly balance: BudgetBalance | null
+  readonly blocked: Extract<BudgetBlocked, { reason: "limit" }>
+  readonly balance: BudgetBalance
 
   constructor(
-    denial: BudgetDenial,
+    denial: Extract<BudgetDenial, { degraded: false }>,
     readonly idempotencyKey: string
   ) {
-    super(
-      denial.blocked.reason === "limit"
-        ? `Budget exceeded: limit ${denial.blocked.limitId} (${denial.blocked.remedy})`
-        : `Budget unavailable: ${denial.blocked.error.message}`
-    )
+    super(`Budget exceeded: limit ${denial.blocked.limitId} (${denial.blocked.remedy})`)
     this.name = "BudgetExceededError"
     this.blocked = denial.blocked
     this.balance = denial.balance
+  }
+}
+
+/**
+ * Unprice could not be reached, so nothing ran. The authorization may still have committed:
+ * retry with the same estimate, TTL, and `idempotencyKey` so it replays instead of holding twice.
+ */
+export class BudgetUnavailableError extends Error {
+  constructor(
+    readonly error: ApiError,
+    readonly idempotencyKey: string
+  ) {
+    super(`Budget unavailable: ${error.message}`)
+    this.name = "BudgetUnavailableError"
   }
 }
 
@@ -318,7 +337,8 @@ export const createBudgetHandle = (budgets: BudgetResources, key: string): Budge
 
     get: () => budgets.get({ key }),
 
-    spend: async ({ estimate, idempotencyKey = newIdempotencyKey(), ...options }, fn) => {
+    spend: async ({ estimate, idempotencyKey: ownKey, ...options }, fn) => {
+      const idempotencyKey = ownKey ?? newIdempotencyKey()
       const authorized = await authorize({ ...options, amount: estimate, idempotencyKey })
 
       if (authorized.error) {
@@ -326,11 +346,16 @@ export const createBudgetHandle = (budgets: BudgetResources, key: string): Budge
       }
 
       if (!authorized.result.allowed) {
+        if (authorized.result.degraded) {
+          throw new BudgetUnavailableError(authorized.result.blocked.error, idempotencyKey)
+        }
         throw new BudgetExceededError(authorized.result, idempotencyKey)
       }
 
       const { hold } = authorized.result
-      if (authorized.result.replayed) {
+      // A generated key never left this call, so its replay is the client retrying a lost
+      // response and the work has not run. Your own key may replay a run that already happened.
+      if (authorized.result.replayed && ownKey !== undefined) {
         throw new BudgetRecoveryError({ reason: "authorization_replayed", hold, idempotencyKey })
       }
       let outcome: Awaited<ReturnType<typeof fn>>

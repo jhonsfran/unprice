@@ -186,6 +186,51 @@ describe("budgets API", () => {
   })
 
   it.each([
+    ["runtime", false],
+    ["config", true],
+  ] as const)("lets a %s key upsert, loosening only with a config key", async (type, mayLoosen) => {
+    mocks.keyAuth.mockResolvedValue({ id: "key_1", projectId: "proj_123", type })
+    rejectWith({ code: "BUDGET_NOT_FOUND" })
+
+    await call("/v1/budgets/upsert", { key: "customer:acme", unit: "USD", limits: [] })
+
+    expect(mocks.keyAuth).toHaveBeenCalledWith(expect.anything(), {
+      requireType: ["runtime", "config"],
+    })
+    expect(mocks.execute.mock.calls[0]?.[1]).toMatchObject({ type: "upsert", mayLoosen })
+  })
+
+  it("authenticates every other verb with a runtime key only", async () => {
+    rejectWith({ code: "BUDGET_NOT_FOUND" })
+
+    await call("/v1/budgets/charge", { key: "customer:acme", amount: "1", idempotencyKey: "c1" })
+
+    expect(mocks.keyAuth).toHaveBeenCalledWith(expect.anything())
+  })
+
+  it("returns 403 naming the config key when a runtime key loosens a budget", async () => {
+    rejectWith({
+      code: "LOOSENING_FORBIDDEN",
+      change: { change: "limit.amount", limitId: "month", from: usd(50), to: usd(500) },
+    })
+
+    const response = await call("/v1/budgets/upsert", {
+      key: "customer:acme",
+      unit: "USD",
+      limits: [{ id: "month", amount: "500", window: "month" }],
+    })
+
+    expect(response.status).toBe(403)
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: "INSUFFICIENT_PERMISSIONS",
+        message:
+          "This caller cannot loosen the budget: the upsert raises hard limit month from 50 to 500. A runtime key can create or tighten a budget; raising or removing a hard limit, making it soft, or clearing or postponing closesAt needs a config key.",
+      },
+    })
+  })
+
+  it.each([
     ["an amount with nine decimals", { key: "customer:acme", amount: "0.123456789" }],
     ["a negative amount", { key: "customer:acme", amount: "-1" }],
     ["a key with a space", { key: "customer acme", amount: "1" }],
@@ -381,7 +426,7 @@ describe("budgets API", () => {
     )
   })
 
-  it("answers a get with instants as sent, the closed flag, and the window history", async () => {
+  it("answers a get with instants in epoch ms, the closed flag, and the window history", async () => {
     const anchor = Date.parse("2026-10-15T00:00:00.000Z")
     mocks.execute.mockResolvedValue(
       Ok({
@@ -419,11 +464,11 @@ describe("budgets API", () => {
             id: "billing",
             amount: "50",
             window: "month",
-            anchor: "2026-10-15T00:00:00.000Z",
+            anchor: 1_792_022_400_000,
             enforce: "hard",
           },
         ],
-        closesAt: "2027-01-01T00:00:00.000Z",
+        closesAt: 1_798_761_600_000,
         closed: false,
         balance: { remaining: "40" },
       },
@@ -458,9 +503,9 @@ describe("budgets API", () => {
       unit: "USD",
       limits: [
         { amount: "50", window: "month" },
-        { id: "billing", amount: "50", window: "month", anchor: "2026-10-15T02:00:00+02:00" },
+        { id: "billing", amount: "50", window: "month", anchor: 1_792_022_400_000 },
       ],
-      closesAt: "2026-12-31T23:59:59Z",
+      closesAt: 1_798_761_599_000,
     })
 
     const [, request] = mocks.execute.mock.calls[0] ?? []
