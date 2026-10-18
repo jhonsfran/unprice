@@ -243,6 +243,10 @@ patterns. Keep it cheap to load and useful.
 - 2026-10-18: Budgets use automatic placement (`getBudgetStub`: no jurisdiction, no hint); every
   other DO stays EU-pinned. evlog `keep` rules only add; to except a request, drop the global rule
   and decide in the middleware's `keep` callback (`keepFailedRequest` in `apps/api/src/observability.ts`).
+- 2026-10-18: Outside production, Server-Timing adds `edge`, `isolate`, and `budget;desc="do=<colo> cold|warm"`
+  (`middleware/placement-timing.ts`). BudgetDO returns `placement` beside its RPC reply and learns its colo
+  from a never-awaited `cdn-cgi/trace` fetch in preview only (`local` elsewhere, so tests stay off the network). Local workerd evicts an idle DO after about 10 s, so manual
+  curls see `cold` again.
 - 2026-10-16: Budget amounts are `@unprice/money` `Amount` (bigint at `LEDGER_SCALE`) and the wire
   patterns live in `@unprice/db/validators`; never redeclare them in the budget core.
 - 2026-10-16: `Omit` over a generic `BudgetOutcome & { type: T }` does not narrow; strip `type` at

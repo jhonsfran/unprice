@@ -2,9 +2,12 @@ import { OpenAPIHono } from "@hono/zod-openapi"
 import { Err, Ok } from "@unprice/error"
 import { type BudgetBalance, UnPriceBudgetError } from "@unprice/services/budgets"
 import type { ExecutionContext } from "hono"
+import { timing } from "hono/timing"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { UnpriceApiError, handleError, handleZodError } from "~/errors"
 import type { HonoEnv } from "~/hono/env"
+import type { BudgetPlacement } from "~/ingestion/budget/BudgetDO"
+import { placementTiming } from "~/middleware/placement-timing"
 import { registerAuthorizeBudgetV1 } from "./authorizeBudgetV1"
 import { registerChargeBudgetV1 } from "./chargeBudgetV1"
 import { registerGetBudgetV1 } from "./getBudgetV1"
@@ -13,7 +16,11 @@ import { registerReleaseBudgetV1 } from "./releaseBudgetV1"
 import { registerSettleBudgetV1 } from "./settleBudgetV1"
 import { registerUpsertBudgetV1 } from "./upsertBudgetV1"
 
-const mocks = vi.hoisted(() => ({ keyAuth: vi.fn(), execute: vi.fn() }))
+const mocks = vi.hoisted(() => ({
+  keyAuth: vi.fn(),
+  execute: vi.fn(),
+  placement: undefined as BudgetPlacement | undefined,
+}))
 
 vi.mock("~/auth/key", async (importOriginal) => ({
   ...(await importOriginal<typeof import("~/auth/key")>()),
@@ -23,6 +30,7 @@ vi.mock("~/auth/key", async (importOriginal) => ({
 vi.mock("~/ingestion/budget/client", () => ({
   CloudflareBudgetClient: class {
     execute = mocks.execute
+    placement = mocks.placement
   },
 }))
 
@@ -53,6 +61,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.clearAllMocks()
+  mocks.placement = undefined
 })
 
 function createTestApp() {
@@ -305,6 +314,48 @@ describe("budgets API", () => {
         asOf: 1_796_083_200_000,
       },
     })
+  })
+
+  it("adds placement and cold-start markers to Server-Timing outside production only", async () => {
+    mocks.execute.mockResolvedValue(
+      Ok({
+        type: "authorize",
+        holdId: "h_1",
+        amount: usd(10),
+        expiresAt: 1_796_084_100_000,
+        replayed: false,
+        balance: balance(usd(40), usd(10)),
+      })
+    )
+    const app = new OpenAPIHono<HonoEnv>({ defaultHook: handleZodError })
+    app.use(timing())
+    app.use(placementTiming())
+    registerAuthorizeBudgetV1(app)
+    const serverTiming = async (APP_ENV: string, placement: BudgetPlacement) => {
+      mocks.placement = placement
+      const request = new Request("https://example.com/v1/budgets/authorize", {
+        method: "POST",
+        headers: { authorization: "Bearer key", "content-type": "application/json" },
+        body: JSON.stringify({ key: "customer:acme", amount: "10", idempotencyKey: "a1" }),
+      })
+      const response = await app.fetch(
+        Object.assign(request, { cf: { colo: "EWR" } }),
+        { APP_ENV },
+        { passThroughOnException: vi.fn(), waitUntil: vi.fn() } as unknown as ExecutionContext
+      )
+      expect(response.status).toBe(200)
+      return response.headers.get("Server-Timing")
+    }
+
+    expect(await serverTiming("preview", { colo: "LHR", cold: true })).toMatch(
+      /^edge;desc="EWR",isolate;desc="cold",budget;dur=\d+\.\d;desc="do=LHR cold",total;dur=\d+\.\d;desc="Total Response Time"$/
+    )
+    expect(await serverTiming("preview", { colo: "unknown", cold: false })).toMatch(
+      /^edge;desc="EWR",isolate;desc="warm",budget;dur=\d+\.\d;desc="do=unknown warm",total;/
+    )
+    expect(await serverTiming("production", { colo: "LHR", cold: false })).toMatch(
+      /^budget;dur=\d+\.\d,total;dur=\d+\.\d;desc="Total Response Time"$/
+    )
   })
 
   it("returns 402 with the blocking limit when a charge does not fit", async () => {

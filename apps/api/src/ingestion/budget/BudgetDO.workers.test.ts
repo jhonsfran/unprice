@@ -418,6 +418,19 @@ describe("BudgetDO verbs", () => {
     expect(next.holdId).toBe("h_2")
   })
 
+  it("reports the first request after construction as cold and the rest as warm", async () => {
+    const key = "customer:placement"
+    const stub = stubFor(key)
+    const cold = (reply: { placement?: { cold: boolean } }) => reply.placement?.cold
+
+    expect(cold(await stub.execute({ type: "get" }))).toBe(true)
+    expect(cold(await stub.execute(upsert(key, fiftyPerMonth)))).toBe(false)
+    await evictDurableObject(stub)
+    const revived = getBudgetStub(env, { projectId: "proj_1", key })
+    expect(cold(await revived.execute({ type: "get" }))).toBe(true)
+    expect((await revived.execute({ type: "get" })).placement?.colo).toEqual(expect.any(String))
+  })
+
   it("rolls back the ledger when a later write in the same command fails", async () => {
     const key = "customer:rollback"
     const stub = stubFor(key)

@@ -9,11 +9,12 @@ import {
 } from "@unprice/services/budgets"
 import { type BudgetVerbRequest, executeBudgetCommand } from "@unprice/services/use-cases"
 import type { Context } from "hono"
-import { endTime, startTime } from "hono/timing"
+import { setMetric } from "hono/timing"
 import { keyAuth } from "~/auth/key"
 import { UnpriceApiError } from "~/errors"
 import type { HonoEnv } from "~/hono/env"
 import { CloudflareBudgetClient } from "~/ingestion/budget/client"
+import { budgetPlacementDescription } from "~/middleware/placement-timing"
 
 export const BUDGET_REMAINING_HEADER = "Unprice-Budget-Remaining"
 
@@ -29,13 +30,18 @@ export async function runBudgetVerb<R extends BudgetVerbRequest>(
   apiKey?: Pick<ApiKeyExtended, "projectId">
 ) {
   const { projectId } = apiKey ?? (await keyAuth(c))
+  const budgets = new CloudflareBudgetClient(c.env)
   // The round trip to the budget's Durable Object, apart from key auth and the rest of the Worker.
-  startTime(c, "budget")
-  const result = await executeBudgetCommand(
-    { budgets: new CloudflareBudgetClient(c.env) },
-    { projectId, key, request }
+  // Timed by hand: the object's placement, known only once it answers, joins the entry's desc.
+  const startedAt = performance.now()
+  const result = await executeBudgetCommand({ budgets }, { projectId, key, request }).finally(() =>
+    setMetric(
+      c,
+      "budget",
+      performance.now() - startedAt,
+      budgetPlacementDescription(c.env.APP_ENV, budgets.placement)
+    )
   )
-  endTime(c, "budget")
   if (result.err) throw budgetApiError(c, result.err)
   setRemaining(c, result.val)
   return result.val
