@@ -150,7 +150,10 @@ Budget
   before the close keep working, and `record` is accepted for one more retention period (24
   hours) so usage that ran before the close can still arrive. Nothing is deleted at close: the
   balance, the counters, and the window history stay readable, and every snapshot reports
-  `closesAt` and `closed`.
+  `closesAt` and `closed`. Thirty days after `closesAt`, once no row is left to settle, purge, or
+  replay, the budget deletes its storage: the key then answers like one never upserted, and an
+  upsert creates it anew at version 1. A budget without `closesAt` is kept until it is deleted
+  explicitly, so a per-run budget should set one.
 
 ### B2. Five verbs; consumption happens at settle, charge, or record
 
@@ -363,7 +366,9 @@ close: final capture, then source.release(key = "rel:{budget}:{epoch}")
    bounded batches: a command clamps its clock to the budget's, so a purge never runs ahead of a
    later command's clock and a replay cannot count twice.
 10. A Durable Object gets its storage on its budget's first upsert. Any other verb on a key that
-    was never upserted answers `BUDGET_NOT_FOUND` without writing.
+    was never upserted answers `BUDGET_NOT_FOUND` without writing. A closed budget's alarm wakes
+    30 days after `closesAt` and deletes the storage and the alarm once no row is due, so no
+    object stays billed forever.
 11. An operation row stores its payload without `kind` and `id`, which have their own columns.
     Exact key lookup uses the payload's idempotency key through an expression index, and one due
     index orders every row by when the alarm must next visit it: an open hold's expiry, or a

@@ -6,6 +6,7 @@ import {
   type BudgetConfigInput,
   type BudgetTransition,
   type BudgetView,
+  CLOSED_BUDGET_RETENTION_MS,
   type HoldOperation,
   checkTransition,
   consume,
@@ -653,6 +654,15 @@ describe("time and config never reset usage", () => {
 })
 
 describe("closesAt", () => {
+  it("wakes the alarm for when a closed budget may delete its storage", () => {
+    const store = new MemoryBudgetStore()
+    const closesAt = t0 + hour
+    expect(ok(store.run(upsert({ ...month100, closesAt }), t0)).wakeAt).toBe(
+      closesAt + CLOSED_BUDGET_RETENTION_MS
+    )
+    expect(ok(store.run(upsert({ ...month100, closesAt: null }), t0)).wakeAt).toBeNull()
+  })
+
   it("refuses new spend from closesAt, keeps settling and releasing, and takes records a day more", () => {
     const closesAt = t0 + hour
     const store = budgetWith({ ...month100, closesAt })

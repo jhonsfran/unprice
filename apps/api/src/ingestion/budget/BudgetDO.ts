@@ -16,6 +16,7 @@ export class BudgetDO extends DurableObject {
   /**
    * Settles once the schema exists. Null until the first upsert: a verb on a key that was never
    * upserted must not create storage, or every mistyped key would leave an object behind forever.
+   * Null again once a closed budget deleted its storage.
    */
   private ready: Promise<void> | null
 
@@ -26,6 +27,15 @@ export class BudgetDO extends DurableObject {
     this.processor = new BudgetProcessor({
       clock: { now: () => Date.now() },
       logger: createDoLogger(this.ctx.id.toString()),
+      runtime: {
+        // Nothing interleaves: the next request finds no schema, as for a key never upserted.
+        destroy: () =>
+          this.ctx.blockConcurrencyWhile(async () => {
+            await this.ctx.storage.deleteAlarm()
+            await this.ctx.storage.deleteAll()
+            this.ready = null
+          }),
+      },
       scheduler: {
         getAlarm: () => this.ctx.storage.getAlarm(),
         setAlarm: (at) => this.ctx.storage.setAlarm(at),

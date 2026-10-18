@@ -2,6 +2,7 @@ import {
   type BudgetCommand,
   type BudgetOutcome,
   type BudgetRejection,
+  deletableAt,
   loadView,
   transition,
 } from "@unprice/services/budgets"
@@ -15,6 +16,9 @@ export const ALARM_RETRY_MS = 30_000
 type Committed =
   | { ok: true; outcome: BudgetOutcome; wakeAt: number | null; now: number }
   | { ok: false; rejection: BudgetRejection }
+
+/** What the alarm does after a sweep: wake again (or never), or delete the closed budget. */
+type Swept = { destroy: true } | { destroy: false; next: number | null }
 
 /**
  * Business orchestration for one budget. Every command is one synchronous SQLite transaction
@@ -31,7 +35,12 @@ export class BudgetProcessor {
   async initialize(): Promise<void> {
     this.armedAt = await this.deps.scheduler.getAlarm()
     if (this.armedAt === null) {
-      await this.lowerAlarm(this.deps.store.atomically((tx) => tx.nextDueAt()))
+      await this.lowerAlarm(
+        this.deps.store.atomically((tx) => {
+          const budget = tx.readBudget()
+          return earliest(tx.nextDueAt(), budget && deletableAt(budget.config))
+        })
+      )
     }
   }
 
@@ -47,13 +56,18 @@ export class BudgetProcessor {
     this.armedAt = null
     this.pendingAt = null
     const now = this.deps.clock.now()
-    let next: number | null
+    let swept: Swept
     try {
-      next = this.deps.store.atomically((tx) => sweep(tx, now))
+      swept = this.deps.store.atomically((tx) => sweep(tx, now))
     } catch (error) {
       this.deps.logger.error("budget alarm failed", { error: errorMessage(error) })
-      next = now + ALARM_RETRY_MS
+      swept = { destroy: false, next: now + ALARM_RETRY_MS }
     }
+    if (swept.destroy) {
+      await this.deps.runtime.destroy()
+      return
+    }
+    const { next } = swept
     if (next === null) return
     try {
       await this.lowerAlarm(next)
@@ -89,17 +103,33 @@ function commit(tx: BudgetStoreTx, command: BudgetCommand, clockMs: number): Com
   return { ok: true, outcome, wakeAt: write ? wakeAt : null, now }
 }
 
-/** Settles expired holds, purges closed rows, and returns the next wake, or null for none. */
-function sweep(tx: BudgetStoreTx, clockMs: number): number | null {
-  if (tx.readBudget() === null) return null
+/**
+ * Settles expired holds and purges closed rows. Returns the next wake, null for none, or that a
+ * budget closed for CLOSED_BUDGET_RETENTION_MS with no row left can delete its storage.
+ */
+function sweep(tx: BudgetStoreTx, clockMs: number): Swept {
+  const budget = tx.readBudget()
+  if (budget === null) return { destroy: false, next: null }
   const swept = commit(tx, { type: "sweep" }, clockMs)
   if (!swept.ok) throw new Error(`budget sweep rejected: ${swept.rejection.code}`)
   // The sweep moved the budget's clock to `now`, so purging at it never runs ahead of a command.
   tx.purgeOperations(swept.now, ALARM_PURGE_LIMIT)
-  const next = tx.nextDueAt()
+  const due = tx.nextDueAt()
+  const deletable = deletableAt(budget.config)
+  if (due === null && deletable !== null && swept.now >= deletable) return { destroy: true }
   // Work a capped batch left behind is already due, so the floor is also the continuation delay,
-  // and it keeps a row the sweep cannot clear from spinning the alarm.
-  return next === null ? null : Math.max(next, swept.now + ALARM_CONTINUE_MS)
+  // and it keeps a row the sweep cannot clear from spinning the alarm. A deletion already due
+  // waits for the rows instead.
+  const rows = due === null ? null : Math.max(due, swept.now + ALARM_CONTINUE_MS)
+  return {
+    destroy: false,
+    next: earliest(rows, deletable !== null && deletable > swept.now ? deletable : null),
+  }
+}
+
+function earliest(a: number | null, b: number | null): number | null {
+  if (a === null) return b
+  return b === null ? a : Math.min(a, b)
 }
 
 function errorMessage(error: unknown): string {

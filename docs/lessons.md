@@ -1001,3 +1001,6 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   fails at runtime in DO tests. Grep `type: "upsert"` and update every helper when it changes.
 - 2026-10-17: After `pnpm --filter @unprice/api generate`, format `packages/api/src/openapi.d.ts`
   with `./node_modules/.bin/biome format --write`; the raw output is a 19k-line style-only diff.
+- 2026-10-17: A Durable Object that deletes its own storage must also reset any "schema ready"
+  latch inside the same `blockConcurrencyWhile` (`BudgetDO` sets `ready = null`), or the next
+  request on the live instance runs against dropped tables.

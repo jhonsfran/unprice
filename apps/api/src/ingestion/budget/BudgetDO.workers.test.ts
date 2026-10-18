@@ -1,8 +1,17 @@
-import { evictDurableObject, reset, runInDurableObject } from "cloudflare:test"
+import {
+  evictDurableObject,
+  reset,
+  runDurableObjectAlarm,
+  runInDurableObject,
+} from "cloudflare:test"
 import { env } from "cloudflare:workers"
 import { sha256HexSync } from "@unprice/db/utils"
 import { type BudgetConfigInput, upsertBudgetInputSchema } from "@unprice/db/validators"
-import { type BudgetOutcome, EXPIRED_HOLDS_PER_SWEEP } from "@unprice/services/budgets"
+import {
+  type BudgetOutcome,
+  CLOSED_BUDGET_RETENTION_MS,
+  EXPIRED_HOLDS_PER_SWEEP,
+} from "@unprice/services/budgets"
 import type { BudgetReply, BudgetRequest } from "@unprice/services/use-cases"
 import { and, asc, eq, lte, min, sql } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/durable-sqlite"
@@ -19,6 +28,7 @@ const UNIT = BigInt(100_000_000)
 const units = (value: number) => BigInt(Math.round(value * 100)) * (UNIT / BigInt(100))
 const MINUTE = 60 * 1000
 const HOUR = 60 * MINUTE
+const DAY = 24 * HOUR
 
 /**
  * 12:30 UTC on the 10th of next month: far enough that real alarms never fire mid-test, and far
@@ -53,11 +63,26 @@ function outcome<T extends BudgetOutcome["type"]>(reply: BudgetReply, type: T) {
   return value as BudgetOutcome & { type: T }
 }
 
-/** A processor over the object's real SQLite with an injected clock and the real alarm. */
-function realStorageProcessor(state: DurableObjectState, now: () => number, errors: string[] = []) {
+/**
+ * A processor over the object's real SQLite with an injected clock and the real alarm. Deleting a
+ * closed budget wipes the storage as BudgetDO does and records when it happened in `destroyed`.
+ */
+function realStorageProcessor(
+  state: DurableObjectState,
+  now: () => number,
+  errors: string[] = [],
+  destroyed: number[] = []
+) {
   return new BudgetProcessor({
     clock: { now },
     logger: { error: (message, fields) => errors.push(`${message}: ${fields.error}`) },
+    runtime: {
+      destroy: async () => {
+        await state.storage.deleteAlarm()
+        await state.storage.deleteAll()
+        destroyed.push(now())
+      },
+    },
     scheduler: {
       getAlarm: () => state.storage.getAlarm(),
       setAlarm: (at) => state.storage.setAlarm(at),
@@ -503,6 +528,70 @@ describe("BudgetDO alarm", () => {
     })
   })
 
+  it("deletes a closed budget thirty days after it closes, once its last row is gone", async () => {
+    const key = "customer:closing"
+    const stub = stubFor(key)
+    const t0 = midMonthAhead()
+    const closesAt = t0 + HOUR
+    const deletable = closesAt + CLOSED_BUDGET_RETENTION_MS
+    const destroyed: number[] = []
+    let now = t0
+
+    await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
+      await migrate(drizzle(state.storage), migrations)
+      const processor = realStorageProcessor(state, () => now, [], destroyed)
+      await processor.execute(upsert(key, { ...fiftyPerMonth, closesAt }))
+      await expect(state.storage.getAlarm()).resolves.toBe(deletable)
+
+      // A record still accepted after the close keeps its row for 8 days, well inside the 30.
+      now = closesAt + MINUTE
+      const late = {
+        type: "record",
+        idempotencyKey: "late",
+        occurredAt: closesAt,
+        amount: units(1),
+      } as const
+      outcome(await processor.execute(late), "record")
+      await expect(state.storage.getAlarm()).resolves.toBe(now + 8 * DAY)
+      now += 8 * DAY
+      await processor.alarm()
+      expect(state.storage.sql.exec("SELECT count(*) AS n FROM budget_operations").one()).toEqual({
+        n: 0,
+      })
+      await expect(state.storage.getAlarm()).resolves.toBe(deletable)
+
+      now = deletable - 1
+      await processor.alarm()
+      expect(destroyed).toEqual([])
+      now = deletable
+      await processor.alarm()
+      expect(destroyed).toEqual([deletable])
+      await expect(state.storage.getAlarm()).resolves.toBeNull()
+    })
+    await evictDurableObject(stub)
+    expect(rejection(await stub.execute({ type: "get" }))).toEqual({ code: "BUDGET_NOT_FOUND" })
+  })
+
+  it("answers a deleted budget as never created, and an upsert starts it over", async () => {
+    const key = "customer:closed-long-ago"
+    const stub = stubFor(key)
+    const closesAt = Date.now() - CLOSED_BUDGET_RETENTION_MS - MINUTE
+    outcome(await stub.execute(upsert(key, { ...fiftyPerMonth, closesAt })), "upsert")
+
+    // Its deletion was already due, so the alarm may have run on its own; this runs it otherwise.
+    await runDurableObjectAlarm(stub)
+
+    expect(rejection(await stub.execute({ type: "get" }))).toEqual({ code: "BUDGET_NOT_FOUND" })
+    await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
+      await expect(state.storage.getAlarm()).resolves.toBeNull()
+      expect(
+        state.storage.sql.exec("SELECT name FROM sqlite_master WHERE name = 'budget'").toArray()
+      ).toEqual([])
+    })
+    const recreated = outcome(await stub.execute(upsert(key, fiftyPerMonth)), "upsert")
+    expect([recreated.budget.version, recreated.budget.closesAt]).toEqual([1, null])
+  })
+
   it("rolls a period into history on the next command and keeps twelve per window", async () => {
     const key = "customer:roll"
     const stub = stubFor(key)
@@ -601,6 +690,7 @@ describe("BudgetDO alarm", () => {
   it("propagates a failed attempt to re-arm after a sweep error", async () => {
     const errors: string[] = []
     const processor = new BudgetProcessor({
+      runtime: { destroy: async () => {} },
       clock: { now: () => Date.now() },
       logger: { error: (message) => errors.push(message) },
       scheduler: {
@@ -628,6 +718,7 @@ describe("BudgetDO alarm", () => {
       await instance.execute(upsert(key, fiftyPerMonth))
       const errors: string[] = []
       const processor = new BudgetProcessor({
+        runtime: { destroy: async () => {} },
         clock: { now: () => t0 },
         logger: { error: (message, fields) => errors.push(`${message}: ${fields.error}`) },
         scheduler: {

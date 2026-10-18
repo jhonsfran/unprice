@@ -4,6 +4,12 @@ export type BudgetClock = { now(): number }
 
 export type BudgetLogger = { error(message: string, fields: Record<string, unknown>): void }
 
+/** Host facilities for one budget's object. */
+export type BudgetRuntime = {
+  /** Deletes all of the object's storage and its alarm; afterwards the key has no budget. */
+  destroy(): Promise<void>
+}
+
 export type BudgetScheduler = {
   getAlarm(): Promise<number | null>
   setAlarm(at: number): Promise<void>
@@ -37,6 +43,7 @@ export type BudgetStore = {
 export type BudgetProcessorDeps = {
   clock: BudgetClock
   logger: BudgetLogger
+  runtime: BudgetRuntime
   scheduler: BudgetScheduler
   store: BudgetStore
 }

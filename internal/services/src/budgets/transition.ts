@@ -9,7 +9,13 @@
  */
 
 import { Err, Ok, type Result } from "@unprice/error"
-import { type BudgetRecord, type ConfigChange, WINDOW_HISTORY_PERIODS, isClosed } from "./config"
+import {
+  type BudgetRecord,
+  type ConfigChange,
+  WINDOW_HISTORY_PERIODS,
+  deletableAt,
+  isClosed,
+} from "./config"
 import { balanceOf, decide, holdNumber } from "./decide"
 import { type RowStep, checkTransition } from "./invariants"
 import { alarmAt, consume, dueAt, rollUsage, trackLimits } from "./ledger"
@@ -105,9 +111,9 @@ export type BudgetTransition = Readonly<{
   retiredWindows: readonly WindowId[]
   outcome: BudgetOutcome
   /**
-   * Earliest `alarmAt` among the written rows; the store only ever lowers its alarm to it. A window
-   * boundary needs no wake: a counter keeps its period's start, so the next command rolls it the
-   * same however late it comes.
+   * Earliest `alarmAt` among the written rows, and a new config's `deletableAt`; the store only
+   * ever lowers its alarm to it. A window boundary needs no wake: a counter keeps its period's
+   * start, so the next command rolls it the same however late it comes.
    */
   wakeAt: number | null
 }>
@@ -171,7 +177,7 @@ export function transition(params: {
     throw new Error(`budget transition breaks invariants: ${violations.join("; ")}`)
   }
 
-  let wakeAt: number | null = null
+  let wakeAt = change.configured ? deletableAt(change.configured.budget.config) : null
   for (const operation of operations) {
     const due = alarmAt(operation)
     if (wakeAt === null || due < wakeAt) wakeAt = due

@@ -110,6 +110,7 @@ function processor(state: DurableObjectState, now: number) {
   const clock = {
     now,
     processor: new BudgetProcessor({
+      runtime: { destroy: async () => {} },
       clock: { now: () => clock.now },
       logger: {
         error: (message) => {

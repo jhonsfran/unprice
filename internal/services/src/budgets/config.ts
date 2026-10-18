@@ -1,12 +1,13 @@
 /** Budget config (ADR-0006 B1): the stored record, and the audit of an upsert. */
 
-import type { BudgetConfig } from "@unprice/db/validators"
+import { type BudgetConfig, CLOSED_BUDGET_RETENTION_MS } from "@unprice/db/validators"
 import type { Amount } from "@unprice/money"
 
 // The wire schema parses a config into these types; the timing constants live with it, whose
 // descriptions state them.
 export type { BudgetConfig, BudgetConfigInput } from "@unprice/db/validators"
 export {
+  CLOSED_BUDGET_RETENTION_MS,
   DEFAULT_HOLD_TTL_MS,
   MAX_HOLD_TTL_MS,
   MAX_RETAINED_ANCHORED_WINDOWS,
@@ -27,6 +28,14 @@ export type BudgetLimit = BudgetConfig["limits"][number]
  */
 export function isClosed(config: BudgetConfig, now: number, graceMs = 0): boolean {
   return config.closesAt !== null && now >= config.closesAt + graceMs
+}
+
+/**
+ * When a closed budget may delete its storage, CLOSED_BUDGET_RETENTION_MS after `closesAt`; null
+ * for a budget that never closes. The alarm deletes it only once no row is left.
+ */
+export function deletableAt(config: BudgetConfig): number | null {
+  return config.closesAt === null ? null : config.closesAt + CLOSED_BUDGET_RETENTION_MS
 }
 
 export type BudgetRecord = Readonly<{

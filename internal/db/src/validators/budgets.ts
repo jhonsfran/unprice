@@ -39,6 +39,11 @@ export const RECORD_FUTURE_SKEW_MS = 5 * 60 * 1000
 export const RECORD_DEDUPE_MS = 8 * 24 * 60 * 60 * 1000
 /** `get` returns this many ended periods per limited window, newest first; no more are kept. */
 export const WINDOW_HISTORY_PERIODS = 12
+/**
+ * A budget with a `closesAt` deletes its storage this long after it closes, once no row is left to
+ * settle, purge, or replay. Until then the closed budget stays readable.
+ */
+export const CLOSED_BUDGET_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 
 const DURATION_UNITS = [
   ["day", 24 * 60 * 60 * 1000],
@@ -178,7 +183,7 @@ export const upsertBudgetInputSchema = z
       .nullable()
       .optional()
       .openapi({
-        description: `When the budget closes, in epoch milliseconds. From then on authorize and charge return 409, record is accepted for ${describeDuration(OPERATION_RETENTION_MS)} more, and settle and release keep working. An upsert replaces the whole definition, so omitting closesAt or sending null leaves the budget open and clears any close time it had.`,
+        description: `When the budget closes, in epoch milliseconds. From then on authorize and charge return 409, record is accepted for ${describeDuration(OPERATION_RETENTION_MS)} more, and settle and release keep working. ${describeDuration(CLOSED_BUDGET_RETENTION_MS)} after closesAt, once nothing is left to settle or replay, the budget is deleted: get returns 404 and an upsert creates it anew. An upsert replaces the whole definition, so omitting closesAt or sending null leaves the budget open and clears any close time it had.`,
         example: 1_798_761_599_000,
       }),
     holds: z

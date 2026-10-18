@@ -20,6 +20,7 @@ function processor(
   setAlarm = (at: number) => state.storage.setAlarm(at)
 ) {
   return new BudgetProcessor({
+    runtime: { destroy: async () => {} },
     clock: { now: () => now },
     logger: { error: () => {} },
     scheduler: { getAlarm: () => state.storage.getAlarm(), setAlarm },

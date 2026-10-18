@@ -118,7 +118,8 @@ usage. Actual usage must stay within that amount. Define the budget once with `b
 then take a handle with `unprice.budget(key)`. The handle never creates or changes the budget.
 Each upsert sends the whole definition; a field it leaves out takes its default, so an omitted
 `closesAt` reopens a closing budget. Instants such as `closesAt` and `anchor` are epoch
-milliseconds.
+milliseconds. A budget with `closesAt` is deleted 30 days after it closes; `get` then returns 404,
+and an upsert creates it anew. Give short-lived budgets, such as one per run, a `closesAt`.
 
 A runtime key can create a budget and tighten it. Raising or removing a hard limit, making it
 soft, or clearing or postponing `closesAt` needs a **config** key and returns 403 otherwise, so

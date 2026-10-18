@@ -402,6 +402,7 @@ describe("BudgetDO measured work", () => {
           const clock = {
             now: start,
             processor: new BudgetProcessor({
+              runtime: { destroy: async () => {} },
               clock: { now: () => clock.now },
               logger: {
                 error: (message) => {

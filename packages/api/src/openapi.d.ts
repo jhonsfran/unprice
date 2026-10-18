@@ -2938,7 +2938,7 @@ export interface operations {
             enforce?: "hard" | "soft"
           }[]
           /**
-           * @description When the budget closes, in epoch milliseconds. From then on authorize and charge return 409, record is accepted for 1 day more, and settle and release keep working. An upsert replaces the whole definition, so omitting closesAt or sending null leaves the budget open and clears any close time it had.
+           * @description When the budget closes, in epoch milliseconds. From then on authorize and charge return 409, record is accepted for 1 day more, and settle and release keep working. 30 days after closesAt, once nothing is left to settle or replay, the budget is deleted: get returns 404 and an upsert creates it anew. An upsert replaces the whole definition, so omitting closesAt or sending null leaves the budget open and clears any close time it had.
            * @example 1798761599000
            */
           closesAt?: number | null
