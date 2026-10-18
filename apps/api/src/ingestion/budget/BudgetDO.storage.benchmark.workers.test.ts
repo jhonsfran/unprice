@@ -87,6 +87,11 @@ function accepted(reply: BudgetReply) {
   return reply.outcome
 }
 
+function rejection(reply: BudgetReply) {
+  if (reply.ok) throw new Error(`expected a rejection, got ${reply.outcome.type}`)
+  return reply.rejection
+}
+
 function stubFor(key: string) {
   return getBudgetStub(env, { projectId: "proj_1", key })
 }
@@ -185,15 +190,14 @@ describe("BudgetDO storage work", () => {
         report(`${replay ? "replay" : "record"}:key-length=${keyLength}`, samples, rpcMs)
       }
       expect(
-        await stub.execute({
-          type: "charge",
-          idempotencyKey: requestKey(0, keyLength),
-          amount: UNIT,
-        })
-      ).toEqual({
-        ok: false,
-        rejection: { code: "IDEMPOTENCY_CONFLICT", idempotencyKey: requestKey(0, keyLength) },
-      })
+        rejection(
+          await stub.execute({
+            type: "charge",
+            idempotencyKey: requestKey(0, keyLength),
+            amount: UNIT,
+          })
+        )
+      ).toEqual({ code: "IDEMPOTENCY_CONFLICT", idempotencyKey: requestKey(0, keyLength) })
       const current = accepted(await stub.execute({ type: "get" }))
       expect(isOutcomeOf(current, "get") && current.budget.balance.remaining).toBe(
         BigInt(1_000_000 - HISTORY - SAMPLES) * UNIT
