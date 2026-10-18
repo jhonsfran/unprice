@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { Unprice, type operations } from "@unprice/api"
+import { assert, colors, isRecord, passed, step } from "./harness"
 
 type GetEntitlementsResponse =
   operations["access.entitlements.list"]["responses"][200]["content"]["application/json"]
@@ -21,13 +22,6 @@ const USAGE_AMOUNT = getPositiveNumberEnvValue("USAGE_AMOUNT", 5)
 const BULK_USAGE_EVENTS = getPositiveIntegerEnvValue("BULK_USAGE_EVENTS", 25)
 const BULK_USAGE_AMOUNT = getPositiveNumberEnvValue("BULK_USAGE_AMOUNT", 1)
 const TOTAL_USAGE_AMOUNT = getOptionalPositiveNumberEnvValue("TOTAL_USAGE_AMOUNT")
-
-const colors = {
-  green: (s: string) => `\x1b[32m${s}\x1b[0m`,
-  red: (s: string) => `\x1b[31m${s}\x1b[0m`,
-  cyan: (s: string) => `\x1b[36m${s}\x1b[0m`,
-  dim: (s: string) => `\x1b[2m${s}\x1b[0m`,
-}
 
 if (!UNPRICE_TOKEN) {
   console.error(colors.red("UNPRICE_TOKEN env var is required"))
@@ -83,16 +77,6 @@ function getPositiveIntegerEnvValue(name: string, defaultValue: number): number 
   }
 
   throw new Error(`${name} must be a positive integer. Received: ${value}`)
-}
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) {
-    throw new Error(`Assertion failed: ${message}`)
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
 }
 
 function getFeatureSlugFromEntitlement(entitlement: unknown): string | null {
@@ -267,24 +251,6 @@ function expectedUsageAfter(
   }
 
   return usageAmounts.at(-1) ?? previousUsage
-}
-
-async function step(name: string, fn: () => Promise<void>): Promise<void> {
-  const start = performance.now()
-
-  try {
-    await fn()
-    const ms = (performance.now() - start).toFixed(0)
-    console.info(`  ${colors.green("PASS")} ${name} ${colors.dim(`(${ms}ms)`)}`)
-  } catch (err) {
-    const ms = (performance.now() - start).toFixed(0)
-    console.error(
-      `  ${colors.red("FAIL")} ${name} ${colors.dim(`(${ms}ms)`)}\n    ${
-        err instanceof Error ? err.message : String(err)
-      }`
-    )
-    throw err
-  }
 }
 
 async function discoverUsageFeature(): Promise<void> {
@@ -511,7 +477,9 @@ async function main(): Promise<void> {
   await step("sync ingestion: reports bulk usage events", ingestBulkUsage)
   await step("verification: bulk usage delta is reflected", verifyBulkUsageDelta)
 
-  console.info(`\n  ${colors.green("5 passed")} (${ingestedEvents} usage events ingested)\n`)
+  console.info(
+    `\n  ${colors.green(`${passed()} passed`)} (${ingestedEvents} usage events ingested)\n`
+  )
 }
 
 main().catch(() => {

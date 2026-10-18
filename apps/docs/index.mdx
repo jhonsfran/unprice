@@ -81,5 +81,7 @@ logic into your application.
 
 The hosted runtime, database, and usage analytics run in EU regions. Per-customer Durable Object
 state — wallet reservations, run budgets, idempotency keys — is pinned to Cloudflare's EU
-jurisdiction, so it is never placed or migrated outside it. If you run Unprice yourself, your data
+jurisdiction, so it is never placed or migrated outside it. Budgets (`/v1/budgets`) are the
+exception: Cloudflare creates each budget near its first request so checks stay fast wherever your
+backend runs, so a budget's state may live outside the EU. If you run Unprice yourself, your data
 lives wherever you deploy it.

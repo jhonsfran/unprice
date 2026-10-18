@@ -1,4 +1,8 @@
-import { buildIngestionWindowName, buildRunBudgetName } from "@unprice/services/ingestion"
+import {
+  buildBudgetName,
+  buildIngestionWindowName,
+  buildRunBudgetName,
+} from "@unprice/services/ingestion"
 import type { Env } from "~/env"
 
 /**
@@ -6,10 +10,11 @@ import type { Env } from "~/env"
  *
  * Every DO in this app holds customer money state — entitlement windows carry
  * wallet reservations, run budgets carry allocations and idempotency keys — so
- * all of it is pinned to the EU jurisdiction. `jurisdiction()` is a guarantee
- * (Cloudflare will not place or migrate the object outside the EU), unlike
- * `locationHint`, which is only honoured at creation. The hint is kept on top
- * of it to bias placement toward Western Europe *within* the jurisdiction.
+ * all of it except budgets (see below) is pinned to the EU jurisdiction.
+ * `jurisdiction()` is a guarantee (Cloudflare will not place or migrate the
+ * object outside the EU), unlike `locationHint`, which is only honoured at
+ * creation. The hint is kept on top of it to bias placement toward Western
+ * Europe *within* the jurisdiction.
  *
  * Everything goes through this module on purpose. Jurisdiction is part of a
  * DO's identity: `ns.idFromName(x)` and `ns.jurisdiction("eu").idFromName(x)`
@@ -37,6 +42,16 @@ import type { Env } from "~/env"
  * emitting billing facts for state the EU objects know nothing about. Deleting
  * them is an ops step (Cloudflare API, per namespace), not something this
  * module can do.
+ *
+ * BUDGETS ARE THE EXCEPTION (2026-10-18): a budget (ADR-0006) is checked before
+ * every model call from wherever the customer's backend runs, so it uses
+ * automatic placement: no jurisdiction and no hint, and Cloudflare creates each
+ * object near its first request and never moves it. Budget state is therefore
+ * not guaranteed to stay in the EU; a per-project residency setting would
+ * bring the jurisdiction back for projects that need it. The switch changed
+ * every budget object ID. No budget data had shipped to production; preview
+ * objects left behind settle open holds at expiry and delete themselves 30
+ * days after closesAt, and the rest stay until preview storage is wiped.
  */
 export const DO_JURISDICTION = "eu" as const satisfies DurableObjectJurisdiction
 
@@ -90,8 +105,14 @@ export function runBudgetNamespace(env: Pick<Env, "APP_ENV" | "runbudget">): Env
     : env.runbudget
 }
 
+/** The budget namespace, unscoped on purpose: budgets use automatic placement (see above). */
+export function budgetNamespace(env: Pick<Env, "budget">): Env["budget"] {
+  return env.budget
+}
+
 export type EntitlementWindowStub = ReturnType<Env["entitlementwindow"]["getByName"]>
 export type RunBudgetStub = ReturnType<Env["runbudget"]["getByName"]>
+export type BudgetStub = ReturnType<Env["budget"]["getByName"]>
 
 /**
  * The canonical entitlement-window address: EU jurisdiction, Western Europe
@@ -127,5 +148,18 @@ export function getRunBudgetStub(
       runId: params.runId,
     }),
     DO_LOCATION_HINT
+  )
+}
+
+/**
+ * The canonical budget address: automatic placement, so no jurisdiction and no location hint. Every
+ * verb must resolve through here, or a key would end up with two objects.
+ */
+export function getBudgetStub(
+  env: Pick<Env, "APP_ENV" | "budget">,
+  params: { projectId: string; key: string }
+): BudgetStub {
+  return budgetNamespace(env).getByName(
+    buildBudgetName({ appEnv: env.APP_ENV, projectId: params.projectId, key: params.key })
   )
 }

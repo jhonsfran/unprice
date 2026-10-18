@@ -566,6 +566,7 @@ describe("Unprice client", () => {
       | "PAYLOAD_TOO_LARGE"
       | "TOO_MANY_REQUESTS"
       | "INTERNAL_SERVER_ERROR"
+      | "BUDGET_EXCEEDED"
       | "FETCH_ERROR"
     >()
     expectTypeOf<{

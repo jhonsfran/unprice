@@ -6,33 +6,39 @@ packages:
 
 overrides:
   "adm-zip@^0.5.0": 0.6.1
-  "brace-expansion@^1.1.0": 1.1.18
-  "brace-expansion@^2.0.0": 2.1.4
-  "brace-expansion@^5.0.0": 5.0.9
-  axios: 1.18.0
+  "brace-expansion@^1.1.0": 1.1.21
+  "brace-expansion@^2.0.0": 2.1.7
+  "brace-expansion@^5.0.0": 5.0.12
+  axios: 1.20.0
+  basic-ftp: 6.2.3
   date-fns: ^3.3.1
   deepmerge-ts: 8.0.0
-  engine.io: 6.6.7
-  fast-uri: 3.1.6
+  engine.io: 6.6.11
+  fast-uri: 3.1.8
   fast-xml-parser: 5.10.1
+  handlebars: 4.7.10
+  http-cache-semantics: 4.3.0
   "js-yaml@^3.0.0": 3.15.2
   "js-yaml@^4.0.0": 4.3.2
-  nodemailer: 9.1.0
+  "@modelcontextprotocol/sdk": 1.32.1
+  nodemailer: 10.1.0
   "nanoid@^3.0.0": 3.3.18
   "nanoid@^5.0.0": 5.1.16
   ip-address: 10.3.1
   postcss: 8.5.18
-  "sharp@^0.33.0": 0.35.4
-  "sharp@^0.34.0": 0.35.4
-  "sharp@^0.35.0": 0.35.4
+  proxy-addr: 2.0.8
+  "sharp@^0.33.0": 0.35.5
+  "sharp@^0.34.0": 0.35.5
+  "sharp@^0.35.0": 0.35.5
   browserslist: 4.28.7
   smol-toml: 1.7.1
-  shell-quote: 1.9.0
+  shell-quote: 1.12.0
   socket.io-parser: 4.2.7
+  source-map-js: 1.2.2
   systeminformation: 5.31.7
   "tar@^6.0.0": 7.5.22
   "tar@^7.0.0": 7.5.22
-  undici: 7.29.0
+  undici: 7.30.0
   vite: 6.4.3
 
 packageExtensions:

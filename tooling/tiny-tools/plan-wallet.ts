@@ -1,4 +1,5 @@
 import { Unprice } from "@unprice/api"
+import { assert, colors, isRecord, passed, step } from "./harness"
 
 type Currency = "USD" | "EUR"
 
@@ -30,13 +31,6 @@ const UNPRICE_API_URL = process.env.UNPRICE_API_URL || "http://localhost:8787"
 const CUSTOMER_ID = process.env.CUSTOMER_ID?.trim() || ""
 const PROJECT_ID = process.env.PROJECT_ID?.trim() || ""
 
-const colors = {
-  green: (s: string) => `\x1b[32m${s}\x1b[0m`,
-  red: (s: string) => `\x1b[31m${s}\x1b[0m`,
-  cyan: (s: string) => `\x1b[36m${s}\x1b[0m`,
-  dim: (s: string) => `\x1b[2m${s}\x1b[0m`,
-}
-
 if (!UNPRICE_TOKEN) {
   console.error(colors.red("UNPRICE_TOKEN env var is required"))
   process.exit(1)
@@ -52,19 +46,8 @@ const unprice = new Unprice({
   baseUrl: UNPRICE_API_URL,
 })
 
-let passed = 0
 let walletSnapshot: WalletSnapshot | null = null
 let cappedEntitlementCount = 0
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) {
-    throw new Error(`Assertion failed: ${message}`)
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
-}
 
 function isCurrency(value: unknown): value is Currency {
   return value === "USD" || value === "EUR"
@@ -157,25 +140,6 @@ function getFeatureSlug(entitlement: unknown): string {
   return typeof feature.slug === "string" && feature.slug.trim() ? feature.slug : "unknown"
 }
 
-async function step(name: string, fn: () => Promise<void>): Promise<void> {
-  const start = performance.now()
-
-  try {
-    await fn()
-    passed++
-    const ms = (performance.now() - start).toFixed(0)
-    console.info(`  ${colors.green("PASS")} ${name} ${colors.dim(`(${ms}ms)`)}`)
-  } catch (err) {
-    const ms = (performance.now() - start).toFixed(0)
-    console.error(
-      `  ${colors.red("FAIL")} ${name} ${colors.dim(`(${ms}ms)`)}\n    ${
-        err instanceof Error ? err.message : String(err)
-      }`
-    )
-    throw err
-  }
-}
-
 async function verifyCappedEntitlement(): Promise<void> {
   const { result, error } = await unprice.access.entitlements.list({
     customerId: CUSTOMER_ID,
@@ -249,7 +213,7 @@ async function main(): Promise<void> {
   await step("wallet: credits reconcile to available balance", verifyCreditsReconcile)
 
   console.info(
-    `\n  ${colors.green(`${passed} passed`)} (${cappedEntitlementCount} capped entitlement(s))\n`
+    `\n  ${colors.green(`${passed()} passed`)} (${cappedEntitlementCount} capped entitlement(s))\n`
   )
 }
 

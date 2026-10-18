@@ -14,6 +14,13 @@ export const sdkOperationIds = [
   "analytics.charges.explain",
   "analytics.usage.currentBillingPeriod",
   "analytics.usage.get",
+  "budgets.authorize",
+  "budgets.charge",
+  "budgets.get",
+  "budgets.record",
+  "budgets.release",
+  "budgets.settle",
+  "budgets.upsert",
   "customers.changePlan",
   "customers.signUp",
   "features.list",
@@ -83,6 +90,29 @@ export type GeneratedSdkResources = {
         req: OperationInput<"analytics.usage.get">
       ) => Promise<ApiResult<OperationResponse<"analytics.usage.get">>>
     }
+  }
+  budgets: {
+    authorize: (
+      req: OperationInput<"budgets.authorize">
+    ) => Promise<ApiResult<OperationResponse<"budgets.authorize">>>
+    charge: (
+      req: OperationInput<"budgets.charge">
+    ) => Promise<ApiResult<OperationResponse<"budgets.charge">>>
+    get: (
+      req: OperationInput<"budgets.get">
+    ) => Promise<ApiResult<OperationResponse<"budgets.get">>>
+    record: (
+      req: OperationInput<"budgets.record">
+    ) => Promise<ApiResult<OperationResponse<"budgets.record">>>
+    release: (
+      req: OperationInput<"budgets.release">
+    ) => Promise<ApiResult<OperationResponse<"budgets.release">>>
+    settle: (
+      req: OperationInput<"budgets.settle">
+    ) => Promise<ApiResult<OperationResponse<"budgets.settle">>>
+    upsert: (
+      req: OperationInput<"budgets.upsert">
+    ) => Promise<ApiResult<OperationResponse<"budgets.upsert">>>
   }
   customers: {
     changePlan: (
@@ -190,6 +220,15 @@ export function createGeneratedSdkResources(
           toResult(openapi.POST("/v1/analytics/usage/current-billing-period", { body })),
         get: (body) => toResult(openapi.POST("/v1/analytics/usage/get", { body })),
       },
+    },
+    budgets: {
+      authorize: (body) => toResult(openapi.POST("/v1/budgets/authorize", { body })),
+      charge: (body) => toResult(openapi.POST("/v1/budgets/charge", { body })),
+      get: (query) => toResult(openapi.GET("/v1/budgets/get", { params: { query } })),
+      record: (body) => toResult(openapi.POST("/v1/budgets/record", { body })),
+      release: (body) => toResult(openapi.POST("/v1/budgets/release", { body })),
+      settle: (body) => toResult(openapi.POST("/v1/budgets/settle", { body })),
+      upsert: (body) => toResult(openapi.POST("/v1/budgets/upsert", { body })),
     },
     customers: {
       changePlan: (body) => toResult(openapi.POST("/v1/customers/change-plan", { body })),

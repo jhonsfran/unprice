@@ -16,6 +16,12 @@ export NVM_DIR="$HOME/.nvm"
 # shellcheck disable=SC1090
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
 
+if [ "${1:-}" = "budget" ]; then
+  nvm use
+  shift
+  exec corepack pnpm --filter api db:generate:ingestion:budget "$@"
+fi
+
 echo "Starting up"
 
 # lets check first that docker, tb cli and node are installed

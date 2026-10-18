@@ -18,8 +18,10 @@ import {
 // one endpoint at a time so they never contend with each other. Scenarios
 // run sequentially: a short warm-up (cache fill, not recorded), then
 // access.check, usage.record, and usage.consume at a constant arrival rate,
-// plus an optional cold-path scenario that signs up brand-new customers and
-// times their first check (new Durable Object + cache miss).
+// optional budget scenarios (BUDGETS=1: authorize then settle, charge, record,
+// get against one budget created in setup), plus an optional cold-path
+// scenario that signs up brand-new customers and times their first check (new
+// Durable Object + cache miss).
 //
 // No latency thresholds on purpose — this script produces numbers, it does
 // not gate on them. The summary prints a percentile table and one
@@ -30,6 +32,11 @@ const recordDuration = new Trend("record_duration", true)
 const consumeDuration = new Trend("consume_duration", true)
 const signupDuration = new Trend("signup_duration", true)
 const firstCheckDuration = new Trend("first_check_duration", true)
+const budgetAuthorizeDuration = new Trend("budget_authorize_duration", true)
+const budgetSettleDuration = new Trend("budget_settle_duration", true)
+const budgetChargeDuration = new Trend("budget_charge_duration", true)
+const budgetRecordDuration = new Trend("budget_record_duration", true)
+const budgetGetDuration = new Trend("budget_get_duration", true)
 
 const apiErrors = new Counter("api_errors")
 const consumeDenied = new Counter("consume_denied")
@@ -44,6 +51,7 @@ const RATE = positiveInteger(__ENV.RATE, 20)
 const DURATION_SECONDS = parseDurationSeconds(__ENV.DURATION || "60s")
 const COLD_SIGNUPS = nonNegativeInteger(__ENV.COLD_SIGNUPS, 0)
 const PLAN_SLUG = __ENV.PLAN_SLUG || ""
+const BUDGETS = __ENV.BUDGETS === "1"
 
 const WARMUP_SECONDS = 10
 // 5s of quiet between scenarios so one endpoint's tail never lands inside
@@ -55,6 +63,7 @@ let sdk: K6SdkClient | null = null
 type BenchData = {
   checkFeatureSlug: string
   usageEvent: UsageEventTarget
+  budgetKey: string | null
 }
 
 const scenarioStart = (index: number) =>
@@ -87,13 +96,23 @@ const scenarios: Record<string, unknown> = {
   usage_consume: constantRate("usageConsume", 2),
 }
 
+// Each budget scenario is one verb at a constant rate, after the usage ones. A
+// spend is authorize then settle, so its rate counts spends, not requests.
+const BUDGET_SCENARIOS = ["budgetSpend", "budgetCharge", "budgetRecord", "budgetGet"] as const
+
+if (BUDGETS) {
+  BUDGET_SCENARIOS.forEach((exec, index) => {
+    scenarios[exec] = constantRate(exec, 3 + index)
+  })
+}
+
 if (COLD_SIGNUPS > 0) {
   scenarios.cold_check = {
     executor: "per-vu-iterations",
     exec: "coldCheck",
     vus: Math.min(5, COLD_SIGNUPS),
     iterations: Math.ceil(COLD_SIGNUPS / Math.min(5, COLD_SIGNUPS)),
-    startTime: scenarioStart(3),
+    startTime: scenarioStart(BUDGETS ? 3 + BUDGET_SCENARIOS.length : 3),
     maxDuration: "5m",
   }
 }
@@ -128,7 +147,25 @@ export async function setup(): Promise<BenchData> {
     "check feature slug resolved": () => checkFeatureSlug.length > 0,
   })
 
-  return { checkFeatureSlug, usageEvent }
+  return { checkFeatureSlug, usageEvent, budgetKey: BUDGETS ? await createLatencyBudget() : null }
+}
+
+// One budget for every budget scenario, with a limit no run reaches. It closes
+// after a day, so its Durable Object deletes itself 30 days later.
+async function createLatencyBudget(): Promise<string> {
+  const key = `k6-latency:${Date.now()}`
+  const { error } = await getSdk().budgets.upsert({
+    key,
+    unit: "units:k6",
+    limits: [{ id: "never", amount: "1000000000", window: "never" }],
+    closesAt: Date.now() + 24 * 60 * 60 * 1000,
+  })
+
+  if (error) fail(`budgets.upsert ${key}: ${describeSdkError({ error })}`)
+
+  // Creates the object, so the first measured call is not the cold one.
+  await getSdk().budgets.get({ key })
+  return key
 }
 
 // Fills the API-key, grant-context, and Durable Object caches before the
@@ -184,6 +221,62 @@ export async function usageConsume(data: BenchData): Promise<void> {
   }
 }
 
+export async function budgetSpend(data: BenchData): Promise<void> {
+  const key = budgetKeyOf(data)
+  const authorized = await timeSdkCall(budgetAuthorizeDuration, () =>
+    getSdk().budgets.authorize({ key, amount: "0.8", idempotencyKey: uniqueKey("lat-hold") })
+  )
+
+  recordApiResult("budgets.authorize", authorized)
+
+  const holdId = authorized.result?.holdId
+
+  if (!holdId) {
+    return
+  }
+
+  const settled = await timeSdkCall(budgetSettleDuration, () =>
+    getSdk().budgets.settle({ key, holdId, amount: "0.55" })
+  )
+
+  recordApiResult("budgets.settle", settled)
+}
+
+export async function budgetCharge(data: BenchData): Promise<void> {
+  const key = budgetKeyOf(data)
+  const result = await timeSdkCall(budgetChargeDuration, () =>
+    getSdk().budgets.charge({ key, amount: "0.1", idempotencyKey: uniqueKey("lat-charge") })
+  )
+
+  recordApiResult("budgets.charge", result)
+}
+
+export async function budgetRecord(data: BenchData): Promise<void> {
+  const key = budgetKeyOf(data)
+  const result = await timeSdkCall(budgetRecordDuration, () =>
+    getSdk().budgets.record({
+      key,
+      amount: "0.02",
+      idempotencyKey: uniqueKey("lat-budget-record"),
+      occurredAt: Date.now(),
+    })
+  )
+
+  recordApiResult("budgets.record", result)
+}
+
+export async function budgetGet(data: BenchData): Promise<void> {
+  const key = budgetKeyOf(data)
+  const result = await timeSdkCall(budgetGetDuration, () => getSdk().budgets.get({ key }))
+
+  recordApiResult("budgets.get", result)
+}
+
+function budgetKeyOf(data: BenchData): string {
+  if (!data.budgetKey) fail("budget scenarios ran without a budget; set BUDGETS=1")
+  return data.budgetKey
+}
+
 // Cold path: a brand-new customer means a new Durable Object and a grant
 // -context cache miss, so the first check pays the full cost. Creates real
 // customers in the target project — run it only against a disposable
@@ -237,6 +330,11 @@ const REPORT_ROWS: Array<{ metric: string; label: string }> = [
   { metric: "check_duration", label: "access.check (warm)" },
   { metric: "record_duration", label: "usage.record (async)" },
   { metric: "consume_duration", label: "usage.consume (sync)" },
+  { metric: "budget_authorize_duration", label: "budgets.authorize" },
+  { metric: "budget_settle_duration", label: "budgets.settle" },
+  { metric: "budget_charge_duration", label: "budgets.charge" },
+  { metric: "budget_record_duration", label: "budgets.record" },
+  { metric: "budget_get_duration", label: "budgets.get" },
   { metric: "signup_duration", label: "customers.signUp (cold)" },
   { metric: "first_check_duration", label: "access.check (first, cold)" },
 ]
@@ -313,6 +411,7 @@ export function handleSummary(data: SummaryData): Record<string, string> {
     ratePerSecond: RATE,
     durationSecondsPerScenario: DURATION_SECONDS,
     coldSignups: COLD_SIGNUPS,
+    budgets: BUDGETS,
     apiErrors: errors,
     consumeDenied: denied,
     httpReqFailedRate: failedRate,

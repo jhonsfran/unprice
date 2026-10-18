@@ -251,4 +251,5 @@ export type {
   LedgerParty,
 } from "./wallet/get-customer-ledger"
 export * from "./runs"
+export * from "./budgets"
 export * from "./ingestion"

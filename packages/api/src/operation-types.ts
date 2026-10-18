@@ -96,6 +96,18 @@ type _UsageRecordInputCheck = AssertAssignable<
   }
 >
 
+type _BudgetsAuthorizeInputCheck = AssertAssignable<
+  OperationInput<"budgets.authorize">,
+  {
+    key: string
+    amount: string
+    ttlMs?: number
+    idempotencyKey: string
+  }
+>
+
+type _BudgetsGetInputCheck = AssertAssignable<OperationInput<"budgets.get">, { key: string }>
+
 type _FeaturesListInputCheck = AssertAssignable<OperationInput<"features.list">, EmptyObject>
 
 type _ExplainChargeOptionalDefaultsInputCheck = AssertAssignable<

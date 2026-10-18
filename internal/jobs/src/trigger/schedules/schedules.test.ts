@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
   billingBatchTrigger: vi.fn(),
@@ -98,6 +98,12 @@ vi.mock("../tasks/renew", () => ({
     batchTrigger: mocks.renewBatchTrigger,
   },
 }))
+
+// Loading a schedule pulls in the service graph, which under Turbo contention can outlast one
+// test's timeout. Load them once here, so each test's import is a cache hit.
+beforeAll(async () => {
+  await Promise.all([import("./billing"), import("./invoicing"), import("./renew")])
+}, 120_000)
 
 describe("billingSchedule", () => {
   beforeEach(() => {

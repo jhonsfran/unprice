@@ -12,6 +12,7 @@ import serveEmojiFavicon from "stoker/middlewares/serve-emoji-favicon"
 export { DurableObjectProject } from "~/project/do"
 export { EntitlementWindowDO } from "~/ingestion/entitlements/EntitlementWindowDO"
 export { RunBudgetDO } from "~/ingestion/run-budget/RunBudgetDO"
+export { BudgetDO } from "~/ingestion/budget/BudgetDO"
 
 import { registerUpdateACLV1 } from "./routes/access/updateACLV1"
 import { registerExplainChargeV1 } from "./routes/analytics/explainChargeV1"
@@ -19,6 +20,13 @@ import { registerGetCurrentBillingPeriodUsageV1 } from "./routes/analytics/getCu
 import { registerGetIngestionStatusV1 } from "./routes/analytics/getIngestionStatusV1"
 import { registerGetAnalyticsUsageV1 } from "./routes/analytics/getUsageV1"
 import { registerFlushReservationsForInvoicingV1 } from "./routes/billing/flushReservationsForInvoicingV1"
+import { registerAuthorizeBudgetV1 } from "./routes/budgets/authorizeBudgetV1"
+import { registerChargeBudgetV1 } from "./routes/budgets/chargeBudgetV1"
+import { registerGetBudgetV1 } from "./routes/budgets/getBudgetV1"
+import { registerRecordBudgetV1 } from "./routes/budgets/recordBudgetV1"
+import { registerReleaseBudgetV1 } from "./routes/budgets/releaseBudgetV1"
+import { registerSettleBudgetV1 } from "./routes/budgets/settleBudgetV1"
+import { registerUpsertBudgetV1 } from "./routes/budgets/upsertBudgetV1"
 import { registerChangePlanV1 } from "./routes/customers/changePlanV1"
 import { registerSignUpV1 } from "./routes/customers/signUpV1"
 import { registerGetCurrentEntitlementsV1 } from "./routes/entitlements/getCurrentEntitlementsV1"
@@ -178,6 +186,15 @@ registerApplyRunSyncEventV1(app)
 registerSettleRunV1(app)
 registerEndRunV1(app)
 registerGetRunV1(app)
+
+// Budget routes
+registerUpsertBudgetV1(app)
+registerAuthorizeBudgetV1(app)
+registerSettleBudgetV1(app)
+registerReleaseBudgetV1(app)
+registerChargeBudgetV1(app)
+registerRecordBudgetV1(app)
+registerGetBudgetV1(app)
 
 // Billing routes
 registerFlushReservationsForInvoicingV1(app)

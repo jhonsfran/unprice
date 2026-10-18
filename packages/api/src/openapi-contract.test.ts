@@ -99,6 +99,20 @@ describe("OpenAPI SDK contract", () => {
     expect(isRecord(paths["/v1/monetization/get"])).toBe(true)
   })
 
+  it("exposes the budget operations in the checked-in OpenAPI document", () => {
+    expect(collectOpenApiSdkOperationIds(getPaths(readOpenApiDocument()))).toEqual(
+      expect.arrayContaining([
+        "budgets.upsert",
+        "budgets.authorize",
+        "budgets.settle",
+        "budgets.release",
+        "budgets.charge",
+        "budgets.record",
+        "budgets.get",
+      ])
+    )
+  })
+
   it("does not expose stale removed operations in the OpenAPI SDK surface", () => {
     const sdkOperationIds = collectOpenApiSdkOperationIds(getPaths(readOpenApiDocument()))
 

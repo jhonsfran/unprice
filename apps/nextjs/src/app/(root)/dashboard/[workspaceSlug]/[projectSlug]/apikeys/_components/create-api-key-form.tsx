@@ -72,7 +72,8 @@ const API_KEY_TYPE_OPTIONS: Record<ApiKeyType, { label: string; description: str
   },
   config: {
     label: "Config",
-    description: "Reads and applies your monetization configuration. Never touches the money path.",
+    description:
+      "Reads and applies your monetization configuration and can raise budget caps. Never spends.",
   },
 }
 
@@ -243,8 +244,9 @@ function ApiKeyCreatedSecret({
         <div className="flex min-w-0 flex-col gap-1 rounded-md border border-border/60 bg-card/70 p-3 text-sm">
           <p className="font-medium">Store it as UNPRICE_CONFIG_TOKEN</p>
           <p className="text-muted-foreground text-xs">
-            Put it in the environment your coding agent reads. A config key only reads and applies
-            your monetization configuration, so it cannot check access, record usage, or spend.
+            Put it in the environment your coding agent reads. A config key reads and applies your
+            monetization configuration and can raise or remove budget caps. It cannot check access,
+            record usage, or spend.
           </p>
         </div>
       ) : (

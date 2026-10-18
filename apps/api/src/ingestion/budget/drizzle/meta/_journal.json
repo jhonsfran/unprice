@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1792208694660,
+      "tag": "0000_flashy_hex",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1792216719516,
+      "tag": "0001_budget_receipt_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1792281705879,
+      "tag": "0002_open_hold_expiry",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1792281720228,
+      "tag": "0003_open_hold_due_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1792342647170,
+      "tag": "0004_ledger_operations_hold_key_index",
+      "breakpoints": true
+    }
+  ]
+}

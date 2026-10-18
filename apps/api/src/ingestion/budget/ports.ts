@@ -1,0 +1,49 @@
+import type { BudgetReader, BudgetTransition } from "@unprice/services/budgets"
+
+export type BudgetClock = { now(): number }
+
+export type BudgetLogger = { error(message: string, fields: Record<string, unknown>): void }
+
+/** Host facilities for one budget's object. */
+export type BudgetRuntime = {
+  /** Deletes all of the object's storage and its alarm; afterwards the key has no budget. */
+  destroy(): Promise<void>
+}
+
+export type BudgetScheduler = {
+  getAlarm(): Promise<number | null>
+  setAlarm(at: number): Promise<void>
+}
+
+/** Synchronous reads and writes bound to one SQLite transaction. Rows come back as domain types. */
+export type BudgetStoreTx = BudgetReader & {
+  /** Writes what an accepted transition returned. */
+  commit(
+    transition: Pick<
+      BudgetTransition,
+      "budget" | "ledger" | "purged" | "operations" | "periods" | "retiredWindows" | "now"
+    >
+  ): void
+  /** Deletes up to `limit` closed rows whose retention ended by `now`. */
+  purgeOperations(now: number, limit: number): void
+  /** The earliest `alarmAt` of any row: an open hold's expiry or a closed row's retention end. */
+  nextDueAt(): number | null
+}
+
+export type Sync<T> = T extends PromiseLike<unknown> ? never : T
+
+/**
+ * One SQLite transaction. The callback type rejects a Promise: an await inside would let another
+ * request interleave between check and debit, and writes before it could commit alone.
+ */
+export type BudgetStore = {
+  atomically<T>(fn: (tx: BudgetStoreTx) => Sync<T>): T
+}
+
+export type BudgetProcessorDeps = {
+  clock: BudgetClock
+  logger: BudgetLogger
+  runtime: BudgetRuntime
+  scheduler: BudgetScheduler
+  store: BudgetStore
+}

@@ -1,6 +1,10 @@
 import { resolve } from "node:path"
 import { cloudflareTest } from "@cloudflare/vitest-pool-workers"
-import { defineConfig } from "vitest/config"
+import { configDefaults, defineConfig } from "vitest/config"
+
+// Benchmarks seed thousands of rows and assert no timings, so only `test:workers:bench` runs them.
+const BENCHMARKS = "src/**/*.benchmark.workers.test.ts"
+const benchmarking = process.env.UNPRICE_BENCHMARKS === "1"
 
 Object.assign(process.env, {
   NODE_ENV: "test",
@@ -54,7 +58,8 @@ export default defineConfig({
     },
   },
   test: {
-    include: ["src/**/*.workers.test.ts"],
+    include: benchmarking ? [BENCHMARKS] : ["src/**/*.workers.test.ts"],
+    exclude: benchmarking ? configDefaults.exclude : [...configDefaults.exclude, BENCHMARKS],
     pool: "@cloudflare/vitest-pool-workers",
     testTimeout: 20_000,
     env: {

@@ -138,7 +138,7 @@ const verifiedKey = (type?: ApiKeyType) => ({
 
 function createKeyAuthApp(opts: {
   key: ReturnType<typeof verifiedKey>
-  requireType?: ApiKeyType
+  requireType?: ApiKeyType | readonly ApiKeyType[]
 }) {
   const app = new OpenAPIHono<HonoEnv>()
   const verifyApiKey = vi.fn().mockResolvedValue(Ok(opts.key as unknown as ApiKeyExtended))
@@ -225,6 +225,21 @@ describe("keyAuth key type boundary", () => {
     // the caller must not be able to tell which type it is missing
     await expect(configOnRuntime.json()).resolves.toEqual(await runtimeOnConfig.json())
   })
+
+  it.each(["runtime", "config"] as const)(
+    "accepts a %s key on a route that accepts both types",
+    async (type) => {
+      const { request } = createKeyAuthApp({
+        key: verifiedKey(type),
+        requireType: ["runtime", "config"],
+      })
+
+      const response = await request()
+
+      expect(response.status).toBe(200)
+      await expect(response.json()).resolves.toEqual({ id: "apikey_123", type })
+    }
+  )
 
   it("treats a key row without a type as a runtime key", async () => {
     const { request } = createKeyAuthApp({ key: verifiedKey() })

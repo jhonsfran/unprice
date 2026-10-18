@@ -5,6 +5,13 @@ import { route as analyticsCurrentBillingPeriodUsageRoute } from "~/routes/analy
 import { route as ingestionEventsStatusRoute } from "~/routes/analytics/getIngestionStatusV1"
 import { route as analyticsUsageRoute } from "~/routes/analytics/getUsageV1"
 import { route as billingReservationsFlushForInvoicingRoute } from "~/routes/billing/flushReservationsForInvoicingV1"
+import { route as budgetsAuthorizeRoute } from "~/routes/budgets/authorizeBudgetV1"
+import { route as budgetsChargeRoute } from "~/routes/budgets/chargeBudgetV1"
+import { route as budgetsGetRoute } from "~/routes/budgets/getBudgetV1"
+import { route as budgetsRecordRoute } from "~/routes/budgets/recordBudgetV1"
+import { route as budgetsReleaseRoute } from "~/routes/budgets/releaseBudgetV1"
+import { route as budgetsSettleRoute } from "~/routes/budgets/settleBudgetV1"
+import { route as budgetsUpsertRoute } from "~/routes/budgets/upsertBudgetV1"
 import { route as customersChangePlanRoute } from "~/routes/customers/changePlanV1"
 import { route as customersSignUpRoute } from "~/routes/customers/signUpV1"
 import { route as accessEntitlementsCurrentRoute } from "~/routes/entitlements/getCurrentEntitlementsV1"
@@ -62,6 +69,13 @@ const routes = [
   runsSettleRoute,
   runsEndRoute,
   runsGetRoute,
+  budgetsUpsertRoute,
+  budgetsAuthorizeRoute,
+  budgetsSettleRoute,
+  budgetsReleaseRoute,
+  budgetsChargeRoute,
+  budgetsRecordRoute,
+  budgetsGetRoute,
   customersSignUpRoute,
   customersChangePlanRoute,
   featuresListRoute,
@@ -100,6 +114,13 @@ const expectedRoutes = new Map<string, string>([
   ["runs.settle", "POST /v1/runs/settle/{runId}"],
   ["runs.end", "POST /v1/runs/end/{runId}"],
   ["runs.get", "GET /v1/runs/get/{runId}"],
+  ["budgets.upsert", "POST /v1/budgets/upsert"],
+  ["budgets.authorize", "POST /v1/budgets/authorize"],
+  ["budgets.settle", "POST /v1/budgets/settle"],
+  ["budgets.release", "POST /v1/budgets/release"],
+  ["budgets.charge", "POST /v1/budgets/charge"],
+  ["budgets.record", "POST /v1/budgets/record"],
+  ["budgets.get", "GET /v1/budgets/get"],
   ["customers.signUp", "POST /v1/customers/sign-up"],
   ["customers.changePlan", "POST /v1/customers/change-plan"],
   ["features.list", "GET /v1/features/list"],
@@ -155,6 +176,13 @@ const expectedSdkPublicOperations = [
   "runs.settle",
   "runs.end",
   "runs.get",
+  "budgets.upsert",
+  "budgets.authorize",
+  "budgets.settle",
+  "budgets.release",
+  "budgets.charge",
+  "budgets.record",
+  "budgets.get",
   "customers.signUp",
   "customers.changePlan",
   "features.list",
