@@ -55,7 +55,13 @@ Knobs (env or `.env`):
 RATE=20        # requests per second per scenario
 DURATION=60s   # measured window per scenario ("60s", "2m")
 FEATURE_SLUG=  # optional; defaults to the first usage-metered entitlement
+BUDGETS=1      # optional; adds budgets.authorize then settle, charge, record, and get
 ```
+
+With `BUDGETS=1`, setup creates one budget (`k6-latency:<timestamp>`, closing after a day, so it
+deletes itself 30 days later) and times each verb against it after the usage scenarios. A spend
+scenario's rate counts authorize-then-settle pairs. The API's `Server-Timing` header carries a
+`budget` mark: the round trip to the budget's Durable Object, apart from key auth and the Worker.
 
 The optional cold path signs up new customers and times their first check. This includes a new
 Durable Object and a grant-context cache miss. It creates real
