@@ -1,5 +1,10 @@
 import createOpenApiClient, { type Client as OpenApiClient } from "openapi-fetch"
 import { version } from "../package.json"
+import {
+  type LocalBudgetHandle,
+  type LocalBudgetOptions,
+  createLocalBudgetHandle,
+} from "./budget-local"
 import { type BudgetHandle, createBudgetHandle } from "./budgets"
 import type { ApiError, ErrorResponse } from "./errors"
 import {
@@ -206,9 +211,21 @@ export class Unprice implements GeneratedSdkResources {
     this.monetization = resources.monetization
   }
 
-  /** A local handle bound to one budget key. It never creates or changes the budget. */
-  budget(key: string): BudgetHandle {
-    return createBudgetHandle(this.budgets, key)
+  /**
+   * A handle bound to one budget key. It never creates or changes the budget. With
+   * `{ mode: "local" }`, a long-lived process spends from a lease held in its memory.
+   */
+  budget(key: string): BudgetHandle
+  budget(key: string, options: LocalBudgetOptions): LocalBudgetHandle
+  budget(key: string, options?: LocalBudgetOptions): BudgetHandle | LocalBudgetHandle {
+    const remote = createBudgetHandle(this.budgets, key)
+    if (!options) return remote
+    return createLocalBudgetHandle({
+      transport: this.budgets,
+      remote,
+      key,
+      lease: options.lease,
+    })
   }
 
   private getHeaders(): Record<string, string> {

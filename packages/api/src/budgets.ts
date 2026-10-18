@@ -232,7 +232,7 @@ export class BudgetSettleError extends Error {
   }
 }
 
-const toDecimal = (amount: AmountInput): string => {
+export const toDecimal = (amount: AmountInput): string => {
   if (typeof amount === "string") {
     return amount
   }
@@ -248,7 +248,7 @@ const toDecimal = (amount: AmountInput): string => {
 const newIdempotencyKey = () => globalThis.crypto.randomUUID()
 
 // Only a transport failure is "unavailable". An API error response means Unprice answered.
-const toDenial = (error: ApiError): BudgetDenial | null => {
+export const toDenial = (error: ApiError): BudgetDenial | null => {
   if (error.code === "FETCH_ERROR") {
     return {
       allowed: false,
@@ -283,6 +283,64 @@ const createHold = (
     budgets.settle({ key, holdId: authorized.holdId, amount: toDecimal(amount) }),
   release: () => budgets.release({ key, holdId: authorized.holdId }),
 })
+
+/** `spend` over any `authorize`, so the remote and local handles share one contract. */
+export const createSpend =
+  (authorize: BudgetHandle["authorize"]): BudgetHandle["spend"] =>
+  async ({ estimate, idempotencyKey: ownKey, ...options }, fn) => {
+    const idempotencyKey = ownKey ?? newIdempotencyKey()
+    const authorized = await authorize({ ...options, amount: estimate, idempotencyKey })
+
+    if (authorized.error) {
+      throw new BudgetRequestError(authorized.error, idempotencyKey)
+    }
+
+    if (!authorized.result.allowed) {
+      if (authorized.result.degraded) {
+        throw new BudgetUnavailableError(authorized.result.blocked.error, idempotencyKey)
+      }
+      throw new BudgetExceededError(authorized.result, idempotencyKey)
+    }
+
+    const { hold } = authorized.result
+    // A generated key never left this call, so its replay is the client retrying a lost
+    // response and the work has not run. Your own key may replay a run that already happened.
+    if (authorized.result.replayed && ownKey !== undefined) {
+      throw new BudgetRecoveryError({ reason: "authorization_replayed", hold, idempotencyKey })
+    }
+    let outcome: Awaited<ReturnType<typeof fn>>
+
+    try {
+      outcome = await fn(hold)
+    } catch (cause) {
+      throw new BudgetRecoveryError({ reason: "work_failed", cause, hold, idempotencyKey })
+    }
+
+    let settled: ApiResult<BudgetSettlement>
+    try {
+      settled = await hold.settle({ amount: outcome.actual })
+    } catch (cause) {
+      throw new BudgetSettleError({
+        value: outcome.value,
+        actual: outcome.actual,
+        hold,
+        cause,
+        idempotencyKey,
+      })
+    }
+
+    if (settled.error) {
+      throw new BudgetSettleError({
+        value: outcome.value,
+        actual: outcome.actual,
+        hold,
+        error: settled.error,
+        idempotencyKey,
+      })
+    }
+
+    return outcome.value
+  }
 
 export const createBudgetHandle = (budgets: BudgetResources, key: string): BudgetHandle => {
   const authorize = async ({
@@ -337,59 +395,6 @@ export const createBudgetHandle = (budgets: BudgetResources, key: string): Budge
 
     get: () => budgets.get({ key }),
 
-    spend: async ({ estimate, idempotencyKey: ownKey, ...options }, fn) => {
-      const idempotencyKey = ownKey ?? newIdempotencyKey()
-      const authorized = await authorize({ ...options, amount: estimate, idempotencyKey })
-
-      if (authorized.error) {
-        throw new BudgetRequestError(authorized.error, idempotencyKey)
-      }
-
-      if (!authorized.result.allowed) {
-        if (authorized.result.degraded) {
-          throw new BudgetUnavailableError(authorized.result.blocked.error, idempotencyKey)
-        }
-        throw new BudgetExceededError(authorized.result, idempotencyKey)
-      }
-
-      const { hold } = authorized.result
-      // A generated key never left this call, so its replay is the client retrying a lost
-      // response and the work has not run. Your own key may replay a run that already happened.
-      if (authorized.result.replayed && ownKey !== undefined) {
-        throw new BudgetRecoveryError({ reason: "authorization_replayed", hold, idempotencyKey })
-      }
-      let outcome: Awaited<ReturnType<typeof fn>>
-
-      try {
-        outcome = await fn(hold)
-      } catch (cause) {
-        throw new BudgetRecoveryError({ reason: "work_failed", cause, hold, idempotencyKey })
-      }
-
-      let settled: ApiResult<BudgetSettlement>
-      try {
-        settled = await hold.settle({ amount: outcome.actual })
-      } catch (cause) {
-        throw new BudgetSettleError({
-          value: outcome.value,
-          actual: outcome.actual,
-          hold,
-          cause,
-          idempotencyKey,
-        })
-      }
-
-      if (settled.error) {
-        throw new BudgetSettleError({
-          value: outcome.value,
-          actual: outcome.actual,
-          hold,
-          error: settled.error,
-          idempotencyKey,
-        })
-      }
-
-      return outcome.value
-    },
+    spend: createSpend(authorize),
   }
 }

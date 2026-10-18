@@ -42,6 +42,7 @@
   },
   "devDependencies": {
     "@types/node": "24.13.2",
+    "fast-check": "^4.5.3",
     "openapi-typescript": "7.0.0-next.7",
     "tsup": "^8.4.0",
     "typescript": "^5.3.3",

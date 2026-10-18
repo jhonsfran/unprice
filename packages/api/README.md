@@ -206,6 +206,39 @@ For 8 days the same key and amount count once and another amount returns 409. Us
 7 days returns 409, so a retry that resends the event's time cannot count twice.
 Amounts accept numbers or decimal strings and come back as decimal strings.
 
+### Local mode
+
+A long-lived process, such as an API server, a queue worker, or an agent runner, can spend from a
+lease held in its own memory. Unprice debits the lease up front, and `authorize`, `settle`,
+`release`, `charge`, and `spend` then answer in memory with the same contract and shapes, without
+a network round trip. `record` and `get` still call the API.
+
+```ts
+const acme = unprice.budget("customer:acme", { mode: "local", lease: { amount: "5" } })
+
+const text = await acme.spend({ estimate: maximumCost }, async () => {
+  const r = await generateText({ model, prompt, maxOutputTokens })
+  return { value: r.text, actual: costOf(r.usage) }
+})
+
+process.on("SIGTERM", () => void acme.close())
+```
+
+The handle reports consumption every `flushIntervalMs` (1 second) and tops the lease back up to
+`amount` in the background once it falls below `lowWater` (a quarter of `amount`). Only a request
+the lease cannot cover waits for a refill, and when the budget has no room left it gets the usual
+limit denial. If Unprice cannot be reached, spending continues within the lease until its
+deadline; then `authorize` and `charge` deny as `degraded`.
+
+Use local mode only in long-lived processes, and call `close()` before the process exits. `close`
+reports final usage, counts open holds at their full amount, and returns the rest of the lease.
+A process that crashes or never closes keeps its cap: the lease expires after `ttlMs` (60 seconds)
+and counts in full, so that capacity stays used until its window resets. Short-lived functions,
+such as serverless and edge handlers, should use the default handle.
+
+Local answers carry the balance from the last report, and their `crossed` is empty. Idempotency
+keys replay for the life of the lease, up to its most recent 100,000 keys.
+
 ## Monetization configuration
 
 `monetization.get` and `monetization.apply` let you describe a project's plans, features, and
