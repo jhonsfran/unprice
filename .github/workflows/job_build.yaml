@@ -80,6 +80,15 @@ jobs:
           DATABASE_URL: postgresql://postgresql:postgresql@localhost:5432/unprice
           NODE_ENV: test
 
+      # Kept out of `test:workers` so local runs and the pre-commit hook stay fast. They gate
+      # correctness and log SQL row counts per verb (BUDGET_BENCHMARK lines); no timing gates.
+      - name: Run Durable Object benchmarks
+        run: pnpm --filter api test:workers:bench
+        env:
+          DATABASE_URL: postgresql://postgresql:postgresql@localhost:5432/unprice
+          NODE_ENV: test
+          SKIP_ENV_VALIDATION: "1"
+
       - name: React Doctor (errors only)
         uses: millionco/react-doctor@v2
         with:

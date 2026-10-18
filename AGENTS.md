@@ -132,6 +132,7 @@ contain compatible background; keep them aligned when changing architecture rule
   - `pnpm test`
   - `pnpm test`
   - `pnpm test:workers`
+  - `pnpm --filter api test:workers:bench` (Durable Object benchmarks; not part of `test:workers`)
   - `pnpm typecheck`
   - `pnpm --filter @unprice/services test:integration`
 - Use `pnpm validate` when checking or validating changes. Targeted commands are for local
