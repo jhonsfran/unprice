@@ -240,6 +240,128 @@ describe("BudgetDO measured work", () => {
     }, 120_000)
   }
 
+  it("measures lease grant, reports, close, and expiry with 1000 receipts", async () => {
+    const stub = await prepare("bench:lease", 1, 1000)
+    const before = await inspect(stub)
+    const series = {
+      grant: [] as SqlSample[],
+      report: [] as SqlSample[],
+      renewal: [] as SqlSample[],
+      idleWake: [] as SqlSample[],
+      final: [] as SqlSample[],
+      expiry: [] as SqlSample[],
+    }
+    const ms: Record<keyof typeof series, number[]> = {
+      grant: [],
+      report: [],
+      renewal: [],
+      idleWake: [],
+      final: [],
+      expiry: [],
+    }
+    await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
+      const sql = state.storage.sql
+      const clock = {
+        now: Date.now() + 1_000,
+        processor: new BudgetProcessor({
+          runtime: { destroy: async () => {} },
+          clock: { now: () => clock.now },
+          logger: {
+            error: (message) => {
+              throw new Error(message)
+            },
+          },
+          scheduler: {
+            getAlarm: () => state.storage.getAlarm(),
+            setAlarm: (at) => state.storage.setAlarm(at),
+          },
+          store: new BudgetSqliteStore(drizzle(state.storage, { schema, logger: false })),
+        }),
+      }
+      const measured = async <T>(name: keyof typeof series, run: () => Promise<T>) => {
+        sqlSample(sql)
+        const start = performance.now()
+        const result = await run()
+        ms[name].push(performance.now() - start)
+        series[name].push(sqlSample(sql))
+        return result
+      }
+      const report = (leaseKey: string, seq: number, captured: number, extend = 0) =>
+        clock.processor.execute({
+          type: "report",
+          leaseKey,
+          seq,
+          request: {
+            final: false,
+            captured: UNIT * BigInt(captured),
+            extend: UNIT * BigInt(extend),
+          },
+        })
+
+      for (let i = 0; i < SAMPLES; i++) {
+        const leaseKey = `lease_${i}`
+        const start = clock.now
+        const granted = accepted(
+          await measured("grant", () =>
+            clock.processor.execute({
+              type: "lease",
+              leaseKey,
+              amount: UNIT * BigInt(10),
+              ttlMs: 60_000,
+            })
+          )
+        )
+        expect(isOutcomeOf(granted, "lease") && granted.lease.granted).toBe(UNIT * BigInt(10))
+        clock.now = start + 1_000
+        const plain = accepted(await measured("report", () => report(leaseKey, 1, 1)))
+        expect(isOutcomeOf(plain, "report") && plain.lease.expiresAt).toBe(start + 60_000)
+        clock.now = start + 41_000
+        const renewed = accepted(await measured("renewal", () => report(leaseKey, 2, 2, 1)))
+        expect(isOutcomeOf(renewed, "report") && renewed.lease.expiresAt).toBe(start + 101_000)
+        clock.now = start + 61_000
+        await measured("idleWake", () => clock.processor.alarm())
+        clock.now = start + 62_000
+        const closed = accepted(
+          await measured("final", () =>
+            clock.processor.execute({
+              type: "report",
+              leaseKey,
+              seq: 3,
+              request: { final: true, captured: UNIT * BigInt(3) },
+            })
+          )
+        )
+        expect(isOutcomeOf(closed, "report") && closed.released).toBe(UNIT * BigInt(8))
+        clock.now = start + 120_000
+      }
+
+      for (let i = 0; i < SAMPLES; i++) {
+        accepted(
+          await clock.processor.execute({
+            type: "lease",
+            leaseKey: `expiring_${i}`,
+            amount: UNIT,
+            ttlMs: 1_000,
+          })
+        )
+        clock.now += 2_000
+        await measured("expiry", () => clock.processor.alarm())
+      }
+      const current = accepted(await clock.processor.execute({ type: "get" }))
+      expect(isOutcomeOf(current, "get") && current.budget.balance.held).toBe(BigInt(0))
+      expect(isOutcomeOf(current, "get") && current.budget.balance.remaining).toBe(
+        BigInt(1_000_000 - 1000 - 3 * SAMPLES - SAMPLES) * UNIT
+      )
+      sqlSample(sql)
+    })
+    const after = await inspect(stub)
+    expect(after.receipts).toBe(1000 + 2 * SAMPLES)
+    const transport = "runInDurableObject with real SQLite and injected clock"
+    for (const name of Object.keys(series) as Array<keyof typeof series>) {
+      report(`lease:${name}:history=1000`, series[name], ms[name], { before, after, transport })
+    }
+  }, 120_000)
+
   it("measures replay and denied admission with 1000 receipts", async () => {
     const stub = await prepare("bench:replay-denial", 1, 1000, "1000")
     const before = await inspect(stub)

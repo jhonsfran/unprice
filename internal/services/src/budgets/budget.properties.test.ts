@@ -59,6 +59,26 @@ type Settled = {
   expired: boolean
   crossed: string[]
 }
+type Denial = { code: string; limitId?: string; remedy?: string }
+type ModelReport = {
+  seq: number
+  final: boolean
+  captured: bigint
+  extend: bigint
+  extended: bigint
+  denied: Denial | null
+  crossed: string[]
+}
+type ModelLease = {
+  requested: bigint
+  ttlMs: number
+  granted: bigint
+  captured: bigint
+  expiresAt: number
+  status: "open" | "closed" | "expired"
+  changedAt: number
+  last: ModelReport | null
+}
 type KeyedRecord = {
   verb: "authorize" | "charge" | "record"
   amount: bigint
@@ -164,9 +184,12 @@ class ReferenceBudget {
     release: 0,
     charge: 0,
     record: 0,
+    lease: 0,
+    report: 0,
   }
   readonly consumptions: Array<{ at: number; amount: bigint }> = []
   readonly holds = new Map<number, ModelHold>()
+  readonly leases = new Map<string, ModelLease>()
   readonly keyed = new Map<string, KeyedRecord>()
   /** Every config in force, with when it took effect: a period reports under the one at its end. */
   readonly configs: Array<{ at: number; ids: Set<string> }> = []
@@ -182,6 +205,10 @@ class ReferenceBudget {
     return hold.status === "open" || now < hold.changedAt + day
   }
 
+  private leaseLive(lease: ModelLease, now: number) {
+    return lease.status === "open" || now < lease.changedAt + day
+  }
+
   private keyedLive(rec: KeyedRecord, now: number) {
     if (rec.verb === "authorize") {
       const hold = this.holds.get(rec.holdNo)
@@ -191,14 +218,31 @@ class ReferenceBudget {
   }
 
   /**
-   * A sweep settles each open hold past its expiry at its full amount, earliest expiry first: the
-   * timer cannot prove the work stopped, so the hold counts all it permitted.
+   * A sweep settles each open hold past its expiry at its full amount, and consumes each open
+   * lease's whole grant, earliest expiry first and holds before leases: the timer cannot prove the
+   * work or the process stopped, so each counts all it permitted.
    */
   private expire(now: number) {
-    const expired = [...this.holds.entries()]
-      .filter(([, hold]) => hold.status === "open" && hold.expiresAt <= now)
-      .sort(([a, x], [b, y]) => x.expiresAt - y.expiresAt || a - b)
-    for (const [, hold] of expired) {
+    const due = [
+      ...[...this.holds.entries()]
+        .filter(([, hold]) => hold.status === "open" && hold.expiresAt <= now)
+        .map(([n, hold]) => ({ at: hold.expiresAt, rank: n, hold, lease: undefined })),
+      ...[...this.leases.values()]
+        .filter((lease) => lease.status === "open" && lease.expiresAt <= now)
+        .map((lease) => ({
+          at: lease.expiresAt,
+          rank: Number.MAX_SAFE_INTEGER,
+          hold: undefined,
+          lease,
+        })),
+    ].sort((x, y) => x.at - y.at || x.rank - y.rank)
+    for (const { hold, lease } of due) {
+      if (lease) {
+        this.consumptions.push({ at: now, amount: lease.granted - lease.captured })
+        Object.assign(lease, { captured: lease.granted, status: "expired", changedAt: now })
+        continue
+      }
+      if (!hold) continue
       const settle = {
         actual: hold.amount,
         released: ZERO,
@@ -218,6 +262,7 @@ class ReferenceBudget {
     this.rolledCount = this.rolledPeriods(now).length
     for (const [key, rec] of this.keyed) if (!this.keyedLive(rec, now)) this.keyed.delete(key)
     for (const [n, hold] of this.holds) if (!this.holdLive(hold, now)) this.holds.delete(n)
+    for (const [key, lease] of this.leases) if (!this.leaseLive(lease, now)) this.leases.delete(key)
   }
 
   /** The segment of `id` still counting at `t`, if any. */
@@ -283,13 +328,20 @@ class ReferenceBudget {
     }
   }
 
+  /** Open holds count their amount; open leases what they were granted and have not reported. */
+  held(): bigint {
+    let held = ZERO
+    for (const hold of this.holds.values()) if (hold.status === "open") held += hold.amount
+    for (const lease of this.leases.values()) {
+      if (lease.status === "open") held += lease.granted - lease.captured
+    }
+    return held
+  }
+
   balance(now: number) {
     const config = this.config
     if (!config) throw new Error("no config")
-    let held = ZERO
-    for (const hold of this.holds.values()) {
-      if (hold.status === "open") held += hold.amount
-    }
+    const held = this.held()
     const limits = config.limits.map((limit) => {
       const range = rangeOf(limit.window, limit.anchor, now)
       const segment = this.segmentAt(idOf(limit), now)
@@ -328,6 +380,130 @@ class ReferenceBudget {
       remedy = "wait_for_reset"
     if (remedy === "raise_limit") pick = failing.find((limit) => amount > limit.amount) ?? pick
     return { limitId: pick.id, remedy }
+  }
+
+  /** What fits under every hard limit, never negative; null with no hard limit. */
+  private room(now: number): bigint | null {
+    const { remaining } = this.balance(now)
+    if (remaining === null) return null
+    return remaining > ZERO ? remaining : ZERO
+  }
+
+  private leaseView(leaseKey: string, lease: ModelLease) {
+    const { granted, captured, expiresAt, status } = lease
+    return { leaseKey, seq: lease.last?.seq ?? 0, granted, captured, expiresAt, status }
+  }
+
+  private reported(leaseKey: string, lease: ModelLease, replayed: boolean) {
+    const last = lease.last
+    if (!last) throw new Error(`lease ${leaseKey} has no report`)
+    return {
+      lease: this.leaseView(leaseKey, lease),
+      extension: { requested: last.extend, granted: last.extended, denied: last.denied },
+      released: last.final ? lease.granted - lease.captured : ZERO,
+      crossed: last.crossed,
+      replayed,
+    }
+  }
+
+  /** B10: debit first, grant what fits under every hard limit, refuse when nothing fits. */
+  private grant(
+    command: Extract<BudgetCommand, { type: "lease" }>,
+    config: ModelConfig,
+    now: number
+  ) {
+    const { leaseKey, amount, ttlMs } = command
+    const stored = this.leases.get(leaseKey)
+    const prior = stored && this.leaseLive(stored, now) ? stored : undefined
+    if (prior) {
+      if (prior.requested !== amount || prior.ttlMs !== ttlMs) {
+        return { error: "IDEMPOTENCY_CONFLICT" }
+      }
+      const outcome = { lease: this.leaseView(leaseKey, prior), replayed: true }
+      return { outcome, wrote: false, checkBalance: true }
+    }
+    if (ttlMs < 1_000 || ttlMs > config.maxTtlMs) return { error: "INVALID_TTL" }
+    if (config.closesAt !== null && now >= config.closesAt) return { error: "BUDGET_CLOSED" }
+    const room = this.room(now)
+    const granted = room === null || room >= amount ? amount : room
+    const blocked = granted === ZERO ? this.block(now, amount) : null
+    if (blocked) return { error: "LIMIT_EXCEEDED", ...blocked }
+    const lease: ModelLease = {
+      requested: amount,
+      ttlMs,
+      granted,
+      captured: ZERO,
+      expiresAt: now + ttlMs,
+      status: "open",
+      changedAt: now,
+      last: null,
+    }
+    // Newest last, so a planned report can name a lease by its distance from the newest.
+    this.leases.delete(leaseKey)
+    this.leases.set(leaseKey, lease)
+    const outcome = { lease: this.leaseView(leaseKey, lease), replayed: false }
+    return { outcome, wrote: true, checkBalance: true }
+  }
+
+  /**
+   * A cumulative capture moves the reported part from held to consumed. A non-final report then
+   * extends by what fits after it and renews below half the TTL; a final one returns the rest.
+   */
+  private report(
+    command: Extract<BudgetCommand, { type: "report" }>,
+    config: ModelConfig,
+    now: number
+  ) {
+    const { leaseKey, seq, request } = command
+    const stored = this.leases.get(leaseKey)
+    const lease = stored && this.leaseLive(stored, now) ? stored : undefined
+    if (!lease) return { error: "LEASE_NOT_FOUND" }
+    const extend = request.final ? ZERO : request.extend
+    const last = lease.last
+    const retry =
+      last?.seq === seq &&
+      last.final === request.final &&
+      last.captured === request.captured &&
+      last.extend === extend
+    if (retry)
+      return { outcome: this.reported(leaseKey, lease, true), wrote: false, checkBalance: true }
+    if (lease.status !== "open") return { error: "LEASE_CLOSED" }
+    if (seq !== (last?.seq ?? 0) + 1) return { error: "LEASE_SEQ_CONFLICT" }
+    if (request.captured < lease.captured || request.captured > lease.granted) {
+      return { error: "LEASE_CAPTURE_OUT_OF_RANGE" }
+    }
+    if (!request.final && now >= lease.expiresAt) return { error: "LEASE_CLOSED" }
+
+    const delta = request.captured - lease.captured
+    const crossed = this.crossed(now, delta)
+    if (delta > ZERO) this.consumptions.push({ at: now, amount: delta })
+    lease.captured = request.captured
+    let extended = ZERO
+    let denied: Denial | null = null
+    if (request.final) {
+      Object.assign(lease, { status: "closed", changedAt: now })
+    } else {
+      const closed = config.closesAt !== null && now >= config.closesAt
+      const room = closed ? ZERO : this.room(now)
+      extended = room === null || room >= extend ? extend : room
+      if (extended < extend) {
+        denied = closed
+          ? { code: "BUDGET_CLOSED" }
+          : { code: "LIMIT_EXCEEDED", ...this.block(now, extend) }
+      }
+      lease.granted += extended
+      if (2 * (lease.expiresAt - now) < lease.ttlMs) lease.expiresAt = now + lease.ttlMs
+    }
+    lease.last = {
+      seq,
+      final: request.final,
+      captured: request.captured,
+      extend,
+      extended,
+      denied,
+      crossed,
+    }
+    return { outcome: this.reported(leaseKey, lease, false), wrote: true, checkBalance: true }
   }
 
   apply(command: BudgetCommand, clock: number): Expected {
@@ -402,10 +578,7 @@ class ReferenceBudget {
         if (!command.mayLoosen && loosens(this.config, next)) {
           return { error: "LOOSENING_FORBIDDEN" }
         }
-        const held = [...this.holds.values()].reduce(
-          (sum, hold) => sum + (hold.status === "open" ? hold.amount : ZERO),
-          ZERO
-        )
+        const held = this.held()
         for (const limit of next.limits) {
           const segment = this.segmentAt(idOf(limit), now)
           const consumed = segment
@@ -481,6 +654,8 @@ class ReferenceBudget {
       Object.assign(hold, { status: "settled", changedAt: now, settle: settled })
       return { outcome: { ...settled, replayed: false }, wrote: true, checkBalance: true }
     }
+    if (command.type === "lease") return this.grant(command, config, now)
+    if (command.type === "report") return this.report(command, config, now)
 
     const amount = command.amount
     const ttlMs = command.type === "authorize" ? command.ttlMs : undefined
@@ -637,6 +812,19 @@ type Planned =
   | { type: "record-ref"; idempotencyKey: string; amount: bigint; occurredOffset: number }
   | { type: "retry" }
   | { type: "retry-record" }
+  /**
+   * A report on a lease named by its distance from the newest one (else `leaseKey`): the next seq
+   * or another, and a capture relative to the lease's state. Opens `leaseKey` when none exists.
+   */
+  | {
+      type: "report-ref"
+      offset: number
+      leaseKey: string
+      seqOffset: number
+      capture: "same" | "half" | "all" | "below" | "above"
+      final: boolean
+      extend: bigint
+    }
 
 function commandArb(scale: bigint): fc.Arbitrary<Planned> {
   const amount = fc
@@ -698,8 +886,35 @@ function commandArb(scale: bigint): fc.Arbitrary<Planned> {
         mayLoosen,
       })
     )
+  const leaseKey = fc.constantFrom("l0", "l1", "l2")
+  const lease = fc
+    .record({
+      leaseKey,
+      amount,
+      ttlMs: fc.constantFrom(second, minute, 15 * minute, hour, hour, 2 * hour, 500),
+    })
+    .map((planned): Planned => ({ type: "lease", ...planned }))
+  const report = fc
+    .record({
+      offset: fc.constantFrom(0, 0, 0, 1, 2),
+      leaseKey,
+      seqOffset: fc.constantFrom(1, 1, 1, 1, 0, 2),
+      capture: fc.constantFrom<"same" | "half" | "all" | "below" | "above">(
+        "same",
+        "half",
+        "half",
+        "all",
+        "below",
+        "above"
+      ),
+      final: fc.constantFrom(false, false, false, false, false, true),
+      extend: amount,
+    })
+    .map((planned): Planned => ({ type: "report-ref", ...planned }))
   return fc.oneof(
     { weight: 5, arbitrary: authorize },
+    { weight: 3, arbitrary: lease },
+    { weight: 5, arbitrary: report },
     {
       weight: 4,
       arbitrary: fc
@@ -726,10 +941,10 @@ function commandArb(scale: bigint): fc.Arbitrary<Planned> {
 function resolve(
   planned: Planned,
   previous: { command: BudgetCommand; record: BudgetCommand | null },
-  holdCount: number,
+  model: ReferenceBudget,
   clock: number
 ): BudgetCommand {
-  const holdId = (offset: number) => `h_${Math.max(0, holdCount - offset)}`
+  const holdId = (offset: number) => `h_${Math.max(0, model.holdCount - offset)}`
   switch (planned.type) {
     case "retry":
       return previous.command
@@ -746,6 +961,29 @@ function resolve(
         amount: planned.amount,
         occurredAt: clock + planned.occurredOffset,
       }
+    case "report-ref": {
+      const { extend } = planned
+      const keys = [...model.leases.keys()]
+      // With no lease to report on, open one, so most reports find a lease.
+      if (keys.length === 0) {
+        return { type: "lease", leaseKey: planned.leaseKey, amount: extend, ttlMs: hour }
+      }
+      const leaseKey = keys.at(-1 - planned.offset) ?? planned.leaseKey
+      const lease = model.leases.get(leaseKey)
+      const seq = (lease?.last?.seq ?? 0) + planned.seqOffset
+      const base = lease?.captured ?? ZERO
+      const granted = lease?.granted ?? ZERO
+      const captured = {
+        same: base,
+        half: base + (granted - base) / BigInt(2),
+        all: granted,
+        below: base > ZERO ? base - BigInt(1) : ZERO,
+        above: granted + BigInt(1),
+      }[planned.capture]
+      return planned.final
+        ? { type: "report", leaseKey, seq, request: { final: true, captured } }
+        : { type: "report", leaseKey, seq, request: { final: false, captured, extend } }
+    }
     default:
       return planned
   }
@@ -765,11 +1003,18 @@ function advance(clock: number, by: number | "hour-edge" | "day-edge"): number {
   return clock + by
 }
 
-const scenarioArb = scaleArb.chain((scale) =>
+/** Seconds between calls, so leases live through many reports before they expire. */
+const steadyAdvanceArb = fc.constantFrom(0, second, 10 * second, minute)
+
+const scenarioArb = fc.tuple(scaleArb, fc.boolean()).chain(([scale, steady]) =>
   fc.record({
     config: configArb(scale),
     steps: fc.array(
-      fc.record({ advanceMs: advanceArb, alarm: fc.boolean(), planned: commandArb(scale) }),
+      fc.record({
+        advanceMs: steady ? steadyAdvanceArb : advanceArb,
+        alarm: fc.boolean(),
+        planned: commandArb(scale),
+      }),
       {
         minLength: 15,
         maxLength: 80,
@@ -788,10 +1033,17 @@ function balanceView(balance: BudgetBalance) {
 
 function outcomeFields(outcome: BudgetOutcome, expected: Record<string, unknown>) {
   const picked: Record<string, unknown> = {}
-  const source =
-    outcome.type === "upsert" || outcome.type === "get"
-      ? { version: outcome.budget.version, closed: outcome.budget.closed }
-      : outcome
+  let source: object = outcome
+  if (outcome.type === "upsert" || outcome.type === "get") {
+    source = { version: outcome.budget.version, closed: outcome.budget.closed }
+  } else if (outcome.type === "report") {
+    const { denied } = outcome.extension
+    const projected =
+      denied?.code === "LIMIT_EXCEEDED"
+        ? { code: denied.code, limitId: denied.blocked.limitId, remedy: denied.blocked.remedy }
+        : denied && { code: denied.code }
+    source = { ...outcome, extension: { ...outcome.extension, denied: projected } }
+  }
   for (const key of Object.keys(expected)) picked[key] = (source as Record<string, unknown>)[key]
   return picked
 }
@@ -863,7 +1115,7 @@ describe("budget core against a reference model", () => {
 
         for (const step of all) {
           clock = advance(clock, step.advanceMs)
-          const command = resolve(step.planned, previous, model.holdCount, clock)
+          const command = resolve(step.planned, previous, model, clock)
           previous.command = command
           if (command.type === "record") previous.record = command
           if (step.alarm) {
@@ -908,7 +1160,10 @@ describe("budget core against a reference model", () => {
             const reference = model.balance(now)
             // Only a record passes a hard limit, so admitted gated spend always fits.
             const admitted =
-              (outcome.type === "authorize" || outcome.type === "charge") && !outcome.replayed
+              (outcome.type === "authorize" ||
+                outcome.type === "charge" ||
+                outcome.type === "lease") &&
+              !outcome.replayed
             for (const limit of admitted ? (balance?.limits ?? []) : []) {
               if (limit.enforce === "hard")
                 expect(limit.consumed + limit.held <= limit.amount).toBe(true)
@@ -938,7 +1193,9 @@ describe("budget core against a reference model", () => {
             )
           }
           if (
-            (command.type === "authorize" || command.type === "charge") &&
+            (command.type === "authorize" ||
+              command.type === "charge" ||
+              command.type === "lease") &&
             !("replayed" in outcome && outcome.replayed) &&
             model.config?.closesAt != null
           ) {

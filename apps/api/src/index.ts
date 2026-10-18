@@ -23,8 +23,10 @@ import { registerFlushReservationsForInvoicingV1 } from "./routes/billing/flushR
 import { registerAuthorizeBudgetV1 } from "./routes/budgets/authorizeBudgetV1"
 import { registerChargeBudgetV1 } from "./routes/budgets/chargeBudgetV1"
 import { registerGetBudgetV1 } from "./routes/budgets/getBudgetV1"
+import { registerLeaseBudgetV1 } from "./routes/budgets/leaseBudgetV1"
 import { registerRecordBudgetV1 } from "./routes/budgets/recordBudgetV1"
 import { registerReleaseBudgetV1 } from "./routes/budgets/releaseBudgetV1"
+import { registerReportBudgetV1 } from "./routes/budgets/reportBudgetV1"
 import { registerSettleBudgetV1 } from "./routes/budgets/settleBudgetV1"
 import { registerUpsertBudgetV1 } from "./routes/budgets/upsertBudgetV1"
 import { registerChangePlanV1 } from "./routes/customers/changePlanV1"
@@ -195,6 +197,8 @@ registerReleaseBudgetV1(app)
 registerChargeBudgetV1(app)
 registerRecordBudgetV1(app)
 registerGetBudgetV1(app)
+registerLeaseBudgetV1(app)
+registerReportBudgetV1(app)
 
 // Billing routes
 registerFlushReservationsForInvoicingV1(app)
