@@ -179,11 +179,20 @@ describe("BudgetDO runtime assumptions", () => {
           .map((row) => String(row.detail))
           .join("; ")
 
-      const byKey = db
+      // A hold by its key needs the literal `kind = 'hold'` to match the partial index; a charge or
+      // record is read by its id.
+      const holdByKey = db
         .select({ dataJson: operations.dataJson })
         .from(operations)
-        .where(eq(sql`${operations.dataJson} ->> '$.idempotencyKey'`, "k"))
-      expect(plan(byKey.toSQL())).toContain("USING INDEX budget_operations_key_idx")
+        .where(
+          sql`${operations.kind} = 'hold' AND ${operations.dataJson} ->> '$.idempotencyKey' = ${"k"}`
+        )
+      expect(plan(holdByKey.toSQL())).toContain("USING INDEX budget_operations_hold_key_idx")
+      const byId = db
+        .select({ dataJson: operations.dataJson })
+        .from(operations)
+        .where(eq(operations.id, "o:hash"))
+      expect(plan(byId.toSQL())).toMatch(/USING INDEX sqlite_autoindex_budget_operations_1/)
       const due = db
         .select({ id: operations.id })
         .from(operations)
@@ -266,9 +275,32 @@ describe("BudgetDO verbs", () => {
       rejection(await stub.execute({ type: "settle", holdId: "h_99", amount: units(1) }))
     ).toEqual({ code: "HOLD_NOT_FOUND", holdId: "h_99" })
 
+    // A charge or record key and a hold key are one namespace, through the id and the hold index.
+    expect(
+      rejection(
+        await stub.execute({
+          type: "record",
+          idempotencyKey: "a1",
+          occurredAt: Date.now(),
+          amount: units(1),
+        })
+      )
+    ).toMatchObject({ code: "IDEMPOTENCY_CONFLICT" })
+    expect(
+      rejection(await stub.execute({ type: "authorize", idempotencyKey: "c1", amount: units(1) }))
+    ).toMatchObject({ code: "IDEMPOTENCY_CONFLICT" })
+
     const read = outcome(await stub.execute({ type: "get" }), "get")
     expect(read.budget.balance.remaining).toBe(BigInt(0))
     expect(read.budget.balance.limits[0]?.consumed).toBe(units(50))
+    expect(read.budget.operations).toEqual({
+      upsert: 1,
+      authorize: 1,
+      settle: 1,
+      release: 0,
+      charge: 1,
+      record: 1,
+    })
   })
 
   it("refuses spend on a budget past its closesAt and reports it closed", async () => {

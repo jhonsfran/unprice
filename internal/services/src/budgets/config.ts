@@ -5,7 +5,7 @@ import type { Amount } from "@unprice/money"
 
 // The wire schema parses a config into these types; the timing constants live with it, whose
 // descriptions state them.
-export type { BudgetConfig, BudgetConfigInput } from "@unprice/db/validators"
+export type { BudgetConfig, BudgetConfigInput, BudgetOperations } from "@unprice/db/validators"
 export {
   CLOSED_BUDGET_RETENTION_MS,
   DEFAULT_HOLD_TTL_MS,
@@ -129,4 +129,19 @@ export function loosening(prev: BudgetConfig, next: BudgetConfig): ConfigChange 
   const postponed =
     prev.closesAt !== null && (next.closesAt === null || next.closesAt > prev.closesAt)
   return postponed ? { change: "closesAt" } : null
+}
+
+/**
+ * The close a caller that may not loosen gets: never before `now`, or before a close the budget
+ * already passed. A close in the past would bring forward the deletion that follows it, after which
+ * an upsert creates the budget anew without its caps.
+ */
+export function closeNoEarlierThanNow(
+  prev: BudgetConfig,
+  next: BudgetConfig,
+  now: number
+): BudgetConfig {
+  if (next.closesAt === null) return next
+  const floor = prev.closesAt === null ? now : Math.min(prev.closesAt, now)
+  return next.closesAt >= floor ? next : { ...next, closesAt: floor }
 }

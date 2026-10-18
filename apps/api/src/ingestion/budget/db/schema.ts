@@ -34,6 +34,9 @@ export const budgetLedger = sqliteTable("budget_ledger", {
   holdSeq: integer("hold_seq").notNull(),
   held: amount("held").notNull(),
   usageJson: text("usage_json").notNull(),
+  operationsJson: text("operations_json")
+    .notNull()
+    .default('{"upsert":0,"authorize":0,"settle":0,"release":0,"charge":0,"record":0}'),
 })
 
 export const budgetOperations = sqliteTable(
@@ -50,7 +53,11 @@ export const budgetOperations = sqliteTable(
   },
   (table) => ({
     due: index("budget_operations_due_idx").on(table.dueAt),
-    key: uniqueIndex("budget_operations_key_idx").on(sql`data_json ->> '$.idempotencyKey'`),
+    // Only holds: a charge or record is found by its id, the key's hash, so indexing its key too
+    // would cost a row write on every one.
+    holdKey: uniqueIndex("budget_operations_hold_key_idx")
+      .on(sql`data_json ->> '$.idempotencyKey'`)
+      .where(sql`kind = 'hold'`),
   })
 )
 

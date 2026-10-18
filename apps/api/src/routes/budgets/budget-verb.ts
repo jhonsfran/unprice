@@ -9,6 +9,7 @@ import {
 } from "@unprice/services/budgets"
 import { type BudgetVerbRequest, executeBudgetCommand } from "@unprice/services/use-cases"
 import type { Context } from "hono"
+import { endTime, startTime } from "hono/timing"
 import { keyAuth } from "~/auth/key"
 import { UnpriceApiError } from "~/errors"
 import type { HonoEnv } from "~/hono/env"
@@ -28,10 +29,13 @@ export async function runBudgetVerb<R extends BudgetVerbRequest>(
   apiKey?: Pick<ApiKeyExtended, "projectId">
 ) {
   const { projectId } = apiKey ?? (await keyAuth(c))
+  // The round trip to the budget's Durable Object, apart from key auth and the rest of the Worker.
+  startTime(c, "budget")
   const result = await executeBudgetCommand(
     { budgets: new CloudflareBudgetClient(c.env) },
     { projectId, key, request }
   )
+  endTime(c, "budget")
   if (result.err) throw budgetApiError(c, result.err)
   setRemaining(c, result.val)
   return result.val
@@ -59,10 +63,14 @@ function wire(value: unknown): unknown {
   return value
 }
 
-/** A budget on the wire: its config as it was sent (instants as ISO strings), amounts as decimals. */
+/**
+ * A budget on the wire: its config with every default filled, amounts as decimals, and closesAt in
+ * epoch ms, as `formatBudgetConfig` returns it.
+ */
 export function budgetToWire(budget: BudgetSnapshot) {
-  const { key, unit, version, closed, balance } = budget
-  return { key, unit, version, ...formatBudgetConfig(budget), closed, balance: toWire(balance) }
+  const { key, unit, version, closed, balance, operations } = budget
+  const config = formatBudgetConfig(budget)
+  return { key, unit, version, ...config, closed, balance: toWire(balance), operations }
 }
 
 function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): UnpriceApiError {

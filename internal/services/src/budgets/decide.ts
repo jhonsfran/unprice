@@ -13,6 +13,7 @@ import {
   OPERATION_RETENTION_MS,
   RECORD_ACCEPT_WINDOW_MS,
   RECORD_FUTURE_SKEW_MS,
+  closeNoEarlierThanNow,
   diffConfig,
   isClosed,
   loosening,
@@ -209,11 +210,12 @@ function decideUpsert(
       retained: retained.size,
     })
   }
-  const changes = diffConfig(budget.config, config)
+  const next = command.mayLoosen ? config : closeNoEarlierThanNow(budget.config, config, now)
+  const changes = diffConfig(budget.config, next)
   if (changes.length === 0) return Ok(unchanged(null))
-  const loosened = command.mayLoosen ? null : loosening(budget.config, config)
+  const loosened = command.mayLoosen ? null : loosening(budget.config, next)
   if (loosened) return reject({ code: "LOOSENING_FORBIDDEN", change: loosened })
-  const updated = { ...budget, version: budget.version + 1, config }
+  const updated = { ...budget, version: budget.version + 1, config: next }
   const balance = balanceOf({ budget: updated, ledger }, now)
   const previous = new Map(budget.config.limits.map((limit) => [limit.id, limit]))
   for (const limit of balance.limits) {

@@ -121,7 +121,10 @@ Budget
   under a cap must not be able to lift it, so a runtime key may create a budget, resend it, or
   tighten it, and only a config key may loosen it: remove, raise, or soften a hard limit, or clear
   or postpone `closesAt`. A runtime key's loosening upsert returns 403 and changes nothing. Soft
-  limits and hold TTLs never deny, so either key may change them.
+  limits and hold TTLs never deny, so either key may change them. A runtime key also cannot close
+  a budget in the past: an earlier `closesAt` takes effect now, and one earlier than a close the
+  budget already passed changes nothing. A past close would bring forward the deletion 30 days
+  after it, and the same key could then recreate the budget without its caps.
 - Adding or lowering a hard limit, including a change from soft to hard, must preserve
   `consumed + held <= amount`. Otherwise upsert returns 409 `LIMIT_BELOW_USAGE` and keeps the
   previous configuration. A hard limit that recorded usage already passed may keep or raise its
@@ -154,6 +157,13 @@ Budget
   replay, the budget deletes its storage: the key then answers like one never upserted, and an
   upsert creates it anew at version 1. A budget without `closesAt` is kept until it is deleted
   explicitly, so a per-run budget should set one.
+- Every snapshot reports `operations`: the accepted calls that changed the budget, per verb, since
+  it was created. Replays, rejections, reads, upserts that changed nothing, and the alarm's expiry
+  settlements are not counted. The counts ride on the ledger row every such call rewrites, so they
+  cost no write. Billing per project needs its own count across budgets.
+- A budget's Durable Object uses automatic placement: Cloudflare creates it near its first request
+  and never moves it. Unlike the other objects, it is not pinned to the EU jurisdiction; a
+  per-project residency setting can bring that back.
 
 ### B2. Five verbs; consumption happens at settle, charge, or record
 

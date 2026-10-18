@@ -183,7 +183,7 @@ export const upsertBudgetInputSchema = z
       .nullable()
       .optional()
       .openapi({
-        description: `When the budget closes, in epoch milliseconds. From then on authorize and charge return 409, record is accepted for ${describeDuration(OPERATION_RETENTION_MS)} more, and settle and release keep working. ${describeDuration(CLOSED_BUDGET_RETENTION_MS)} after closesAt, once nothing is left to settle or replay, the budget is deleted: get returns 404 and an upsert creates it anew. An upsert replaces the whole definition, so omitting closesAt or sending null leaves the budget open and clears any close time it had.`,
+        description: `When the budget closes, in epoch milliseconds. From then on authorize and charge return 409, record is accepted for ${describeDuration(OPERATION_RETENTION_MS)} more, and settle and release keep working. ${describeDuration(CLOSED_BUDGET_RETENTION_MS)} after closesAt, once nothing is left to settle or replay, the budget is deleted: get returns 404 and an upsert creates it anew. An upsert replaces the whole definition, so omitting closesAt or sending null leaves the budget open and clears any close time it had. A runtime key cannot close a budget in the past: an earlier closesAt takes effect now.`,
         example: 1_798_761_599_000,
       }),
     holds: z
@@ -361,6 +361,23 @@ export const budgetBalanceSchema = z.object({
   }),
 })
 
+const operationCount = z.number().int().nonnegative()
+
+/** Accepted calls that changed the budget, per verb, since it was created. */
+export const budgetOperationsSchema = z
+  .object({
+    upsert: operationCount,
+    authorize: operationCount,
+    settle: operationCount,
+    release: operationCount,
+    charge: operationCount,
+    record: operationCount,
+  })
+  .openapi({
+    description:
+      "Accepted calls that changed the budget, per verb, since it was created. Replays, rejections, reads, upserts that changed nothing, and holds the alarm settled at expiry are not counted.",
+  })
+
 export const budgetSchema = z.object({
   key: z.string(),
   unit: z.string().openapi({
@@ -388,6 +405,7 @@ export const budgetSchema = z.object({
     .openapi({ description: "When the budget closes, in epoch milliseconds, or null" }),
   closed: z.boolean().openapi({ description: "True from closesAt on" }),
   balance: budgetBalanceSchema,
+  operations: budgetOperationsSchema,
 })
 
 /** One ended period of a window that had usage; `windowId` is the window, or `<window>@<anchor>`. */
@@ -509,6 +527,7 @@ export type ChargeBudgetInput = z.infer<typeof chargeBudgetInputSchema>
 export type RecordBudgetInput = z.infer<typeof recordBudgetInputSchema>
 export type BudgetBalanceResponse = z.infer<typeof budgetBalanceSchema>
 export type BudgetResponse = z.infer<typeof budgetSchema>
+export type BudgetOperations = z.infer<typeof budgetOperationsSchema>
 export type BudgetExceededDetails = z.infer<typeof budgetExceededDetailsSchema>
 
 export const budgetHoldAmountExceededDetailsSchema = z.object({

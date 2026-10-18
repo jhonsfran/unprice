@@ -10,13 +10,14 @@
 
 import { Err, Ok, type Result } from "@unprice/error"
 import {
+  type BudgetOperations,
   type BudgetRecord,
   type ConfigChange,
   WINDOW_HISTORY_PERIODS,
   deletableAt,
   isClosed,
 } from "./config"
-import { balanceOf, decide, holdNumber } from "./decide"
+import { type Change, balanceOf, decide, holdNumber } from "./decide"
 import { type RowStep, checkTransition } from "./invariants"
 import { alarmAt, consume, dueAt, rollUsage, trackLimits } from "./ledger"
 import type {
@@ -158,6 +159,7 @@ export function transition(params: {
     ),
     held: rolledLedger.held + change.held,
     usage: consume(usage, change.consumed),
+    operations: countCall(rolledLedger.operations, command, change),
   }
   const operations = change.rows
   const { periods } = rolled
@@ -214,6 +216,20 @@ export function transition(params: {
   })
 }
 
+/**
+ * Counts a caller's command that changed the budget. A replay, an upsert that changed nothing, and
+ * the alarm's sweep (which settles expired holds) are not counted.
+ */
+function countCall(
+  operations: BudgetOperations,
+  command: BudgetCommand,
+  change: Pick<Change, "rows" | "configured">
+): BudgetOperations {
+  if (command.type === "get" || command.type === "sweep") return operations
+  if (change.rows.length === 0 && change.configured === undefined) return operations
+  return { ...operations, [command.type]: operations[command.type] + 1 }
+}
+
 /** Past its retention. An open hold has none until it is closed. */
 function isPastRetention(row: Operation, now: number): boolean {
   const due = dueAt(row)
@@ -240,11 +256,15 @@ function outcomeOf(
 
   switch (command.type) {
     case "upsert":
-      return { type: "upsert", changes: params.changes, budget: snapshotOf(budget, balance, now) }
+      return {
+        type: "upsert",
+        changes: params.changes,
+        budget: snapshotOf(budget, ledger, balance, now),
+      }
     case "get":
       return {
         type: "get",
-        budget: snapshotOf(budget, balance, now),
+        budget: snapshotOf(budget, ledger, balance, now),
         history: historyOf(budget, params.history),
       }
     case "authorize": {
@@ -283,9 +303,10 @@ function outcomeOf(
   }
 }
 
-function snapshotOf(budget: BudgetRecord, balance: BudgetBalance, now: number) {
+function snapshotOf(budget: BudgetRecord, ledger: Ledger, balance: BudgetBalance, now: number) {
   const { key, unit, version, config } = budget
-  return { key, unit, version, ...config, closed: isClosed(config, now), balance }
+  const closed = isClosed(config, now)
+  return { key, unit, version, ...config, closed, balance, operations: ledger.operations }
 }
 
 /** Up to WINDOW_HISTORY_PERIODS periods per limited window, newest first. */

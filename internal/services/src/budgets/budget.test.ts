@@ -512,6 +512,57 @@ describe("who may loosen a budget", () => {
       ok(store.run(upsert({ ...base, limits: [], closesAt: null }), t0)).outcome
     ).toMatchObject({ budget: { version: 2, limits: [], closesAt: null } })
   })
+
+  it("closes a budget no earlier than now, so a past close cannot bring its deletion forward", () => {
+    const store = budgetWith(month100)
+    const longAgo = t0 - 40 * day
+
+    // Deleting the budget at once would let the same caller recreate it without its caps.
+    const closed = ok(store.run(tighten({ ...month100, closesAt: longAgo }), t0))
+    expect(closed.outcome).toMatchObject({ budget: { version: 2, closesAt: t0, closed: true } })
+    expect(closed.wakeAt).toBe(t0 + CLOSED_BUDGET_RETENTION_MS)
+
+    // Retried, or sent earlier still, the close stays where it took effect.
+    for (const closesAt of [longAgo, t0 - hour]) {
+      const repeated = ok(store.run(tighten({ ...month100, closesAt }), t0 + hour))
+      expect(repeated.write).toBe(false)
+      expect(repeated.outcome).toMatchObject({ budget: { version: 2, closesAt: t0 } })
+    }
+
+    // A caller that may loosen sets any close, past ones included.
+    expect(
+      ok(store.run(upsert({ ...month100, closesAt: longAgo }), t0 + hour)).outcome
+    ).toMatchObject({ budget: { version: 3, closesAt: longAgo } })
+  })
+})
+
+describe("operation counts", () => {
+  it("counts each accepted call that changed the budget, per verb", () => {
+    const store = budgetWith(month100)
+    ok(store.run(authorize("k1", 10), t0))
+    ok(store.run(authorize("k1", 10), t0))
+    ok(store.run(settle("h_1", 4), t0))
+    ok(store.run(settle("h_1", 4), t0))
+    ok(store.run(authorize("k2", 5), t0))
+    ok(store.run(release("h_2"), t0))
+    ok(store.run(charge("c1", 1), t0))
+    ok(store.run(charge("c1", 1), t0))
+    ok(store.run(record("r1", 2), t0))
+    rejection(store.run(authorize("k3", 1000), t0))
+    ok(store.run(upsert(month100), t0))
+    ok(store.run(upsert({ limits: [{ id: "month", amount: "90", window: "month" }] }), t0))
+    // The alarm settling an expired hold is not a call.
+    ok(store.run(authorize("k4", 1, minute), t0))
+    store.alarm(t0 + 2 * minute)
+
+    const read = ok(store.run({ type: "get" }, t0 + 2 * minute)).outcome
+    expect(read).toMatchObject({
+      budget: {
+        operations: { upsert: 2, authorize: 3, settle: 1, release: 1, charge: 1, record: 1 },
+      },
+    })
+    expect(store.ledger.operations).toEqual(read.type === "get" ? read.budget.operations : null)
+  })
 })
 
 describe("time and config never reset usage", () => {

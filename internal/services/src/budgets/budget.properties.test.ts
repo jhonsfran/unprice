@@ -156,6 +156,15 @@ class ReferenceBudget {
   lastWriteAt = 0
   holdCount = 0
   rolledCount = 0
+  /** Accepted calls that changed the budget, per verb. */
+  readonly calls: Record<string, number> = {
+    upsert: 0,
+    authorize: 0,
+    settle: 0,
+    release: 0,
+    charge: 0,
+    record: 0,
+  }
   readonly consumptions: Array<{ at: number; amount: bigint }> = []
   readonly holds = new Map<number, ModelHold>()
   readonly keyed = new Map<string, KeyedRecord>()
@@ -336,6 +345,7 @@ class ReferenceBudget {
     if (decided.wrote || rolled > this.rolledCount || sweep || retired) {
       this.lastWriteAt = now
     }
+    if (decided.wrote) this.calls[command.type] = (this.calls[command.type] ?? 0) + 1
     this.rolledCount = rolled
     return { outcome: decided.outcome, checkBalance: decided.checkBalance }
   }
@@ -352,6 +362,12 @@ class ReferenceBudget {
         defaultTtlMs: command.config.holds.defaultTtlMs,
         maxTtlMs: command.config.holds.maxTtlMs,
         closesAt: command.config.closesAt,
+      }
+      // A caller that may not loosen cannot close the budget before now, or before a close it
+      // already passed: the deletion after a past close would let it recreate the budget uncapped.
+      if (this.config && !command.mayLoosen && next.closesAt !== null) {
+        const floor = this.config.closesAt === null ? now : Math.min(this.config.closesAt, now)
+        next.closesAt = Math.max(next.closesAt, floor)
       }
       if (this.config && command.unit !== this.unit) return { error: "UNIT_IMMUTABLE" }
       const windowOf = new Map(this.config?.limits.map((l) => [l.id, idOf(l)]))
@@ -904,6 +920,7 @@ describe("budget core against a reference model", () => {
           }
           const counters = countersView(ledger, model, now)
           expect(counters.actual).toEqual(counters.expected)
+          expect(ledger.operations).toEqual(model.calls)
           const rolled = model.rolledPeriods(now)
           expect(rolledInStore(store)).toEqual(keptPeriods(rolled))
           if (outcome.type === "get" && model.config) {

@@ -5,7 +5,13 @@
 
 import { BaseError, Err, type Result } from "@unprice/error"
 import { type Amount, type SignedAmount, formatAmount } from "@unprice/money"
-import type { BudgetConfig, BudgetLimit, BudgetRecord, ConfigChange } from "./config"
+import type {
+  BudgetConfig,
+  BudgetLimit,
+  BudgetOperations,
+  BudgetRecord,
+  ConfigChange,
+} from "./config"
 import type { AnchoredWindowId, BudgetWindow, WindowId } from "./windows"
 
 const ZERO = BigInt(0)
@@ -40,12 +46,15 @@ export type WindowPeriod = Readonly<{
  * - `held` = sum of `amount` over open holds, including expired ones the alarm has not settled yet.
  * - `usage` has all five canonical windows plus anchored ones; `usage.never.consumed` is lifetime
  *   consumption. Every consumption adds to every counter.
+ * - `operations` counts the accepted calls that changed the budget, per verb. It rides on the row
+ *   every such call rewrites anyway, so counting costs no write.
  */
 export type Ledger = Readonly<{
   lastAt: number
   holdSeq: number
   held: Amount
   usage: WindowCounters
+  operations: BudgetOperations
 }>
 
 export const emptyLedger: Ledger = {
@@ -59,6 +68,7 @@ export const emptyLedger: Ledger = {
     month: { start: 0, consumed: ZERO },
     never: { start: 0, consumed: ZERO },
   },
+  operations: { upsert: 0, authorize: 0, settle: 0, release: 0, charge: 0, record: 0 },
 }
 
 /**
@@ -187,6 +197,7 @@ export type BudgetSnapshot = Readonly<
     /** `closesAt` has passed (B1). */
     closed: boolean
     balance: BudgetBalance
+    operations: BudgetOperations
   } & BudgetConfig
 >
 

@@ -2938,7 +2938,7 @@ export interface operations {
             enforce?: "hard" | "soft"
           }[]
           /**
-           * @description When the budget closes, in epoch milliseconds. From then on authorize and charge return 409, record is accepted for 1 day more, and settle and release keep working. 30 days after closesAt, once nothing is left to settle or replay, the budget is deleted: get returns 404 and an upsert creates it anew. An upsert replaces the whole definition, so omitting closesAt or sending null leaves the budget open and clears any close time it had.
+           * @description When the budget closes, in epoch milliseconds. From then on authorize and charge return 409, record is accepted for 1 day more, and settle and release keep working. 30 days after closesAt, once nothing is left to settle or replay, the budget is deleted: get returns 404 and an upsert creates it anew. An upsert replaces the whole definition, so omitting closesAt or sending null leaves the budget open and clears any close time it had. A runtime key cannot close a budget in the past: an earlier closesAt takes effect now.
            * @example 1798761599000
            */
           closesAt?: number | null
@@ -3056,6 +3056,15 @@ export interface operations {
                 }[]
                 /** @description When this balance was computed, in epoch milliseconds */
                 asOf: number
+              }
+              /** @description Accepted calls that changed the budget, per verb, since it was created. Replays, rejections, reads, upserts that changed nothing, and holds the alarm settled at expiry are not counted. */
+              operations: {
+                upsert: number
+                authorize: number
+                settle: number
+                release: number
+                charge: number
+                record: number
               }
             }
           }
@@ -4086,6 +4095,15 @@ export interface operations {
                 }[]
                 /** @description When this balance was computed, in epoch milliseconds */
                 asOf: number
+              }
+              /** @description Accepted calls that changed the budget, per verb, since it was created. Replays, rejections, reads, upserts that changed nothing, and holds the alarm settled at expiry are not counted. */
+              operations: {
+                upsert: number
+                authorize: number
+                settle: number
+                release: number
+                charge: number
+                record: number
               }
             }
             /** @description The last 12 ended periods with usage of each limited window, newest first. Older periods are not kept. */

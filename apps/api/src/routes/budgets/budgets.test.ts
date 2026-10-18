@@ -440,7 +440,7 @@ describe("budgets API", () => {
     )
   })
 
-  it("answers a get with instants in epoch ms, the closed flag, and the window history", async () => {
+  it("answers a get with instants in epoch ms, the closed flag, the operation counts, and the window history", async () => {
     const anchor = Date.parse("2026-10-15T00:00:00.000Z")
     mocks.execute.mockResolvedValue(
       Ok({
@@ -455,6 +455,7 @@ describe("budgets API", () => {
           closesAt: 1_798_761_600_000,
           closed: false,
           balance: balance(usd(40)),
+          operations: { upsert: 2, authorize: 7, settle: 6, release: 1, charge: 3, record: 4 },
         },
         history: [
           {
@@ -485,6 +486,7 @@ describe("budgets API", () => {
         closesAt: 1_798_761_600_000,
         closed: false,
         balance: { remaining: "40" },
+        operations: { upsert: 2, authorize: 7, settle: 6, release: 1, charge: 3, record: 4 },
       },
       history: [
         {

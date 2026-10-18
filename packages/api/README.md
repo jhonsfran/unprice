@@ -123,8 +123,12 @@ and an upsert creates it anew. Give short-lived budgets, such as one per run, a 
 
 A runtime key can create a budget and tighten it. Raising or removing a hard limit, making it
 soft, or clearing or postponing `closesAt` needs a **config** key and returns 403 otherwise, so
-code that spends under a cap, or an agent that holds its key, cannot lift the cap. Keep the config
+code that spends under a cap, or an agent that holds its key, cannot lift the cap. A runtime key
+also cannot close a budget in the past: an earlier `closesAt` takes effect now. Keep the config
 key out of the environment that spends.
+
+Every budget snapshot carries `operations`, the accepted calls that changed the budget per verb
+since it was created. Replays, rejections, and reads are not counted.
 
 ```ts
 await unprice.budgets.upsert({

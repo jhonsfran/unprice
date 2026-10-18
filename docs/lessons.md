@@ -234,6 +234,15 @@ patterns. Keep it cheap to load and useful.
 - 2026-10-17: The installed Drizzle SQLite generator splits commas in index expressions. For
   budget key lookup, use `data_json ->> '$.idempotencyKey'`, generate through
   `bin/migrate.dev budget`, and verify index selection with `EXPLAIN QUERY PLAN` in workerd.
+- 2026-10-18: Measure BudgetDO row writes with `pnpm --filter api test:workers:bench` before and
+  after; do not predict them. The ledger row costs 2 rows written as an upsert or a plain UPDATE;
+  each secondary index entry a row touches costs 1.
+- 2026-10-18: A partial SQLite index (`budget_operations_hold_key_idx ... WHERE kind = 'hold'`) is
+  used only when the query repeats the predicate as a literal; drizzle's `eq(kind, "hold")` binds a
+  parameter and falls back to a scan.
+- 2026-10-18: Budgets use automatic placement (`getBudgetStub`: no jurisdiction, no hint); every
+  other DO stays EU-pinned. evlog `keep` rules only add; to except a request, drop the global rule
+  and decide in the middleware's `keep` callback (`keepFailedRequest` in `apps/api/src/observability.ts`).
 - 2026-10-16: Budget amounts are `@unprice/money` `Amount` (bigint at `LEDGER_SCALE`) and the wire
   patterns live in `@unprice/db/validators`; never redeclare them in the budget core.
 - 2026-10-16: `Omit` over a generic `BudgetOutcome & { type: T }` does not narrow; strip `type` at

@@ -10,7 +10,7 @@ import {
   alarmAt,
   emptyLedger,
 } from "@unprice/services/budgets"
-import { and, asc, desc, eq, inArray, lte, min, notInArray, sql } from "drizzle-orm"
+import { type SQL, and, asc, desc, eq, inArray, lte, min, notInArray, sql } from "drizzle-orm"
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite"
 import * as schema from "./db/schema"
 import type { BudgetStore, BudgetStoreTx, Sync } from "./ports"
@@ -80,7 +80,7 @@ function bind(
 ): BudgetStoreTx {
   const operations = schema.budgetOperations
   const terminal = sql`${operations.status} IN ('done', 'settled', 'released')`
-  const readOperationWhere = (where: ReturnType<typeof eq>) => {
+  const readOperationWhere = (where: SQL) => {
     const row = db
       .select({ id: operations.id, kind: operations.kind, dataJson: operations.dataJson })
       .from(operations)
@@ -118,13 +118,19 @@ function bind(
         holdSeq: row.holdSeq,
         held: row.held,
         usage: decode<Ledger["usage"]>(row.usageJson),
+        operations: decode<Ledger["operations"]>(row.operationsJson),
       }
     },
 
     readOperation: (id) => readOperationWhere(eq(operations.id, id)),
 
+    // A charge or record by its id; a hold through the partial key index, whose `kind = 'hold'`
+    // must be a literal for SQLite to use it.
     readOperationByKey: (idempotencyKey) =>
-      readOperationWhere(eq(sql`${operations.dataJson} ->> '$.idempotencyKey'`, idempotencyKey)),
+      readOperationWhere(eq(operations.id, `o:${sha256HexSync(idempotencyKey)}`)) ??
+      readOperationWhere(
+        sql`${operations.kind} = 'hold' AND ${operations.dataJson} ->> '$.idempotencyKey' = ${idempotencyKey}`
+      ),
 
     readExpiredHolds(now, limit) {
       return (
@@ -179,6 +185,7 @@ function bind(
         holdSeq: ledger.holdSeq,
         held: ledger.held,
         usageJson: encode(ledger.usage),
+        operationsJson: encode(ledger.operations),
       }
       db.insert(schema.budgetLedger)
         .values({ id: SINGLETON_ID, ...ledgerRow })
