@@ -8,6 +8,7 @@ import {
   initObservability,
   sharedSamplingConfig,
 } from "@unprice/observability"
+import type { TailSamplingContext } from "evlog"
 import { evlog } from "evlog/hono"
 import { resolveSampleRate } from "~/sampling"
 
@@ -25,6 +26,8 @@ export const apiDrain = createUnpriceDrain({
 // Init evlog global (once per isolate)
 // ============================================
 
+const sampling = sharedSamplingConfig(env.APP_ENV)
+
 initObservability({
   env: {
     service: "api",
@@ -32,14 +35,26 @@ initObservability({
     version: env.VERSION ?? "unknown",
   },
   drain: apiDrain,
-  sampling: sharedSamplingConfig(env.APP_ENV),
+  // `keepFailedRequest` keeps failed requests instead of the status rule, which cannot except one.
+  sampling: { ...sampling, keep: sampling.keep?.filter((rule) => rule.status === undefined) },
 })
 
 // ============================================
 // Hono middleware (evlog/hono does request lifecycle)
 // ============================================
 
-export const apiEvlog = evlog()
+/**
+ * Keeps every request that ended with status 400 or more, except a budget's 402. A denial is the
+ * budget doing its job, and an agent that keeps retrying against a blocked budget would otherwise
+ * send one event per retry; denials stay in the info sample.
+ */
+export function keepFailedRequest(ctx: TailSamplingContext): void {
+  if (ctx.status === undefined || ctx.status < 400) return
+  if (ctx.status === 402 && ctx.path?.startsWith("/v1/budgets/")) return
+  ctx.shouldKeep = true
+}
+
+export const apiEvlog = evlog({ keep: keepFailedRequest })
 
 // ============================================
 // Helpers for route handlers and DOs

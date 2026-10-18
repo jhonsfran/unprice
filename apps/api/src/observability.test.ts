@@ -1,3 +1,4 @@
+import type { TailSamplingContext } from "evlog"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 const metricsLogger = {
@@ -194,5 +195,37 @@ describe("createDoLogger", () => {
         type: "log",
       })
     )
+  })
+})
+
+describe("keepFailedRequest", () => {
+  function keeps(
+    keep: (ctx: TailSamplingContext) => void,
+    status: number | undefined,
+    path: string
+  ) {
+    const ctx: TailSamplingContext = { status, path, context: {} }
+    keep(ctx)
+    return ctx.shouldKeep === true
+  }
+
+  it("keeps every failed request except a budget denial", async () => {
+    const { keepFailedRequest: keep } = await loadObservability()
+
+    expect(keeps(keep, 402, "/v1/budgets/authorize")).toBe(false)
+    expect(keeps(keep, 402, "/v1/budgets/charge")).toBe(false)
+    expect(keeps(keep, 409, "/v1/budgets/authorize")).toBe(true)
+    expect(keeps(keep, 500, "/v1/budgets/settle")).toBe(true)
+    expect(keeps(keep, 402, "/v1/usage/consume")).toBe(true)
+    expect(keeps(keep, 400, "/v1/access/check")).toBe(true)
+    expect(keeps(keep, 200, "/v1/budgets/authorize")).toBe(false)
+    expect(keeps(keep, undefined, "/v1/budgets/authorize")).toBe(false)
+  })
+
+  it("is the request middleware's tail sampler", async () => {
+    const { keepFailedRequest } = await loadObservability()
+    const { evlog } = await import("evlog/hono")
+
+    expect(evlog).toHaveBeenCalledWith({ keep: keepFailedRequest })
   })
 })
