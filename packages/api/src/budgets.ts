@@ -1,3 +1,4 @@
+import type { UnpriceOptions } from "./client"
 import type { ApiError, ErrorResponse } from "./errors"
 import type { GeneratedSdkResources } from "./generated/sdk-resources"
 import type { OperationResponse } from "./operation-types"
@@ -35,6 +36,12 @@ export type BudgetDenial =
 
 export type BudgetSettlement = OperationResponse<"budgets.settle">
 export type BudgetRelease = OperationResponse<"budgets.release">
+
+/** How `spend` settles: before it returns, or through the client's `waitUntil`. */
+export type SpendSettlement = {
+  waitUntil?: UnpriceOptions["waitUntil"]
+  onSettleError?: UnpriceOptions["onSettleError"]
+}
 
 export type BudgetHold = {
   readonly id: string
@@ -120,7 +127,8 @@ export type BudgetHandle = {
    * @throws BudgetRequestError when the API rejects the authorization.
    * @throws BudgetRecoveryError when your idempotency key replays or `fn` throws. Recover with
    * its hold.
-   * @throws BudgetSettleError when `fn` succeeded but the settle failed.
+   * @throws BudgetSettleError when `fn` succeeded but the settle failed. With the client's
+   * `waitUntil`, `spend` returns once `fn` finishes and passes this error to `onSettleError`.
    */
   spend<T>(
     input: SpendBudgetInput,
@@ -286,7 +294,10 @@ const createHold = (
 
 /** `spend` over any `authorize`, so the remote and local handles share one contract. */
 export const createSpend =
-  (authorize: BudgetHandle["authorize"]): BudgetHandle["spend"] =>
+  (
+    authorize: BudgetHandle["authorize"],
+    { waitUntil, onSettleError }: SpendSettlement = {}
+  ): BudgetHandle["spend"] =>
   async ({ estimate, idempotencyKey: ownKey, ...options }, fn) => {
     const idempotencyKey = ownKey ?? newIdempotencyKey()
     const authorized = await authorize({ ...options, amount: estimate, idempotencyKey })
@@ -316,33 +327,46 @@ export const createSpend =
       throw new BudgetRecoveryError({ reason: "work_failed", cause, hold, idempotencyKey })
     }
 
-    let settled: ApiResult<BudgetSettlement>
-    try {
-      settled = await hold.settle({ amount: outcome.actual })
-    } catch (cause) {
-      throw new BudgetSettleError({
-        value: outcome.value,
-        actual: outcome.actual,
-        hold,
-        cause,
-        idempotencyKey,
-      })
+    const failure = settleOutcome(hold, outcome, idempotencyKey)
+    if (waitUntil) {
+      waitUntil(
+        failure.then((error) => {
+          if (error) onSettleError?.(error)
+        })
+      )
+      return outcome.value
     }
 
-    if (settled.error) {
-      throw new BudgetSettleError({
-        value: outcome.value,
-        actual: outcome.actual,
-        hold,
-        error: settled.error,
-        idempotencyKey,
-      })
-    }
-
+    const error = await failure
+    if (error) throw error
     return outcome.value
   }
 
-export const createBudgetHandle = (budgets: BudgetResources, key: string): BudgetHandle => {
+// Resolves with the failure instead of rejecting, so a background settle never rejects.
+const settleOutcome = async (
+  hold: BudgetHold,
+  { value, actual }: { value: unknown; actual: AmountInput },
+  idempotencyKey: string
+): Promise<BudgetSettleError | null> => {
+  let settled: ApiResult<BudgetSettlement>
+  try {
+    settled = await hold.settle({ amount: actual })
+  } catch (cause) {
+    return new BudgetSettleError({ value, actual, hold, cause, idempotencyKey })
+  }
+
+  if (settled.error) {
+    return new BudgetSettleError({ value, actual, hold, error: settled.error, idempotencyKey })
+  }
+
+  return null
+}
+
+export const createBudgetHandle = (
+  budgets: BudgetResources,
+  key: string,
+  settlement?: SpendSettlement
+): BudgetHandle => {
   const authorize = async ({
     amount,
     idempotencyKey,
@@ -395,6 +419,6 @@ export const createBudgetHandle = (budgets: BudgetResources, key: string): Budge
 
     get: () => budgets.get({ key }),
 
-    spend: createSpend(authorize),
+    spend: createSpend(authorize, settlement),
   }
 }

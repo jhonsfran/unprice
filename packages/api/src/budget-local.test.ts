@@ -7,9 +7,9 @@ import {
   type LeaseTransport,
   type LocalBudgetHandle,
   type LocalLeaseOptions,
-  createLocalBudgetHandle,
+  createLocalLeases,
 } from "./budget-local"
-import { type BudgetHandle, createBudgetHandle } from "./budgets"
+import { type BudgetHandle, type SpendSettlement, createBudgetHandle } from "./budgets"
 import { Unprice } from "./client"
 import type { ApiError } from "./errors"
 import type { GeneratedSdkResources } from "./generated/sdk-resources"
@@ -212,15 +212,43 @@ const remote = createBudgetHandle({} as GeneratedSdkResources["budgets"], "custo
 const createHandle = (
   server: ReturnType<typeof createServer>,
   lease: LocalLeaseOptions,
-  base: BudgetHandle = remote
+  settlement: SpendSettlement = {}
 ) =>
-  createLocalBudgetHandle({
-    transport: server.transport,
-    remote: base,
-    key: "customer:acme",
-    lease,
-    now: () => Date.now(),
+  createLocalLeases({ transport: server.transport, settlement, now: () => Date.now() }).budget(
+    remote,
+    "customer:acme",
+    lease
+  )
+
+const statusOf: Partial<Record<ApiError["code"], number>> = {
+  BAD_REQUEST: 400,
+  BUDGET_EXCEEDED: 402,
+  NOT_FOUND: 404,
+  CONFLICT: 409,
+}
+
+/** A client whose budget routes are answered by the fake server. */
+const clientFor = (server: ReturnType<typeof createServer>) =>
+  new Unprice({
+    token: "test-token",
+    baseUrl: "https://example.com",
+    disableTelemetry: true,
+    retry: { attempts: 0 },
+    fetch: async (request) => {
+      const body: unknown = await request.json()
+      const answer = request.url.endsWith("/lease")
+        ? await server.transport.lease(body as LeaseRequest)
+        : await server.transport.report(body as LeaseReportRequest)
+      if (answer.error?.code === "FETCH_ERROR") throw new TypeError(answer.error.message)
+      return new Response(JSON.stringify(answer.error ? { error: answer.error } : answer.result), {
+        status: answer.error ? (statusOf[answer.error.code] ?? 500) : 200,
+        headers: { "content-type": "application/json" },
+      })
+    },
   })
+
+const progress = (server: ReturnType<typeof createServer>) =>
+  server.reports().map(({ seq, captured, final }) => [seq, captured, final])
 
 const allowedHold = async (handle: BudgetHandle, amount: string, idempotencyKey: string) => {
   const authorized = await handle.authorize({ amount, idempotencyKey })
@@ -429,7 +457,7 @@ describe("local budget handle", () => {
 
   it("reports changed consumption each flush interval and renews before the last third", async () => {
     const server = createServer("10")
-    const local = createHandle(server, { amount: "1" })
+    const local = createHandle(server, { amount: "1", idleMs: Number.POSITIVE_INFINITY })
     await local.charge({ amount: "0.1", idempotencyKey: "c1" })
 
     await vi.advanceTimersByTimeAsync(1_000)
@@ -444,6 +472,73 @@ describe("local budget handle", () => {
     ])
     const [lease] = server.state.leases.values()
     expect(lease?.expiresAt).toBe(Date.now() - 1_000 + 60_000)
+  })
+
+  it("returns an idle lease, and the next call takes a new one", async () => {
+    const server = createServer("10")
+    const local = createHandle(server, { amount: "1" })
+    await local.spend({ estimate: "0.2" }, async () => ({ value: "done", actual: "0.15" }))
+
+    await vi.advanceTimersByTimeAsync(9_000)
+    expect(progress(server)).toEqual([[1, "0.15", false]])
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(progress(server)).toEqual([
+      [1, "0.15", false],
+      [2, "0.15", true],
+    ])
+    expect(server.state.room).toBe(units("9.85"))
+
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(server.reports()).toHaveLength(2)
+    await allowedHold(local, "0.1", "next")
+    expect(server.requests.map(([path]) => path)).toEqual(["lease", "report", "report", "lease"])
+  })
+
+  it("keeps a lease with an open hold however long it idles", async () => {
+    const server = createServer("10")
+    const local = createHandle(server, { amount: "1" })
+    const hold = await allowedHold(local, "0.2", "running")
+
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(server.reports()).toEqual([])
+
+    await hold.settle({ amount: "0.1" })
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(progress(server)).toEqual([
+      [1, "0.1", false],
+      [2, "0.1", true],
+    ])
+  })
+
+  it("resends an idle lease's final report whose answer was lost", async () => {
+    const server = createServer("10")
+    const onError = vi.fn()
+    const local = createHandle(server, { amount: "1", onError })
+    await local.charge({ amount: "0.3", idempotencyKey: "c1" })
+    await vi.advanceTimersByTimeAsync(1_000)
+    server.state.lose = 1
+
+    await vi.advanceTimersByTimeAsync(9_000)
+    expect(onError).toHaveBeenCalledWith(unreachable)
+    await vi.advanceTimersByTimeAsync(5_000)
+
+    expect(progress(server)).toEqual([
+      [1, "0.3", false],
+      [2, "0.3", true],
+      [2, "0.3", true],
+    ])
+    expect(server.state.room).toBe(units("9.7"))
+  })
+
+  it("refuses an idleMs that is not positive", () => {
+    const server = createServer("10")
+
+    expect(() => createHandle(server, { amount: "1", idleMs: 0 })).toThrow(
+      new RangeError("lease.idleMs must be positive, received 0")
+    )
+    expect(() => createHandle(server, { amount: "1", idleMs: Number.NaN })).toThrow(
+      new RangeError("lease.idleMs must be positive, received NaN")
+    )
   })
 
   it("opens a new lease after the server refuses a report", async () => {
@@ -479,6 +574,26 @@ describe("local budget handle", () => {
     expect(server.reports().map(({ captured, final }) => [captured, final])).toEqual([
       ["0.15", true],
     ])
+  })
+
+  it("settles spend in memory through the client's waitUntil", async () => {
+    const server = createServer("10")
+    const background: Array<Promise<unknown>> = []
+    const local = createHandle(
+      server,
+      { amount: "1" },
+      { waitUntil: (promise) => void background.push(promise) }
+    )
+
+    const value = await local.spend({ estimate: "0.2" }, async () => ({
+      value: "done",
+      actual: "0.15",
+    }))
+
+    expect(value).toBe("done")
+    await expect(Promise.all(background)).resolves.toEqual([undefined])
+    await local.close()
+    expect(progress(server)).toEqual([[1, "0.15", true]])
   })
 
   it("refuses a malformed amount the way the API does", async () => {
@@ -554,5 +669,116 @@ describe("Unprice.budget local mode", () => {
         },
       ],
     ])
+  })
+})
+
+describe("Unprice local leases", () => {
+  const local = { mode: "local", lease: { amount: "5" } } as const
+
+  beforeEach(() => {
+    vi.useFakeTimers({ now: 1_792_000_000_000 })
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it("opens one lease per key however many handles spend from it", async () => {
+    const server = createServer("100")
+    const unprice = clientFor(server)
+
+    const authorized = await Promise.all(
+      Array.from({ length: 1_000 }, (_, i) =>
+        unprice
+          .budget("customer:acme", local)
+          .authorize({ amount: "0.001", idempotencyKey: `req_${i}` })
+      )
+    )
+
+    expect(authorized.filter(({ result }) => result?.allowed)).toHaveLength(1_000)
+    expect(server.requests.map(([path]) => path)).toEqual(["lease"])
+  })
+
+  it("refuses other lease options while the key's lease is open", async () => {
+    const server = createServer("100")
+    const unprice = clientFor(server)
+    await unprice.budget("customer:acme", local).charge({ amount: "0.5", idempotencyKey: "c1" })
+
+    expect(() =>
+      unprice.budget("customer:acme", { mode: "local", lease: { amount: "10" } })
+    ).toThrow(
+      new RangeError("Budget customer:acme already has an open local lease with other options")
+    )
+    expect(
+      unprice.budget("customer:acme", { mode: "local", lease: { amount: "5", idleMs: 10_000 } }).key
+    ).toBe("customer:acme")
+  })
+
+  it("forgets a key once its lease is returned", async () => {
+    const server = createServer("100")
+    const unprice = clientFor(server)
+    await unprice.budget("customer:acme", local).charge({ amount: "0.5", idempotencyKey: "c1" })
+
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(progress(server)).toEqual([
+      [1, "0.5", false],
+      [2, "0.5", true],
+    ])
+    const larger = unprice.budget("customer:acme", { mode: "local", lease: { amount: "10" } })
+    await larger.charge({ amount: "0.1", idempotencyKey: "c2" })
+
+    const amounts = server.requests.flatMap(([path, body]) =>
+      path === "lease" ? [(body as LeaseRequest).amount] : []
+    )
+    expect(amounts).toEqual(["5", "10"])
+  })
+
+  it("lets a kept handle open the key's next lease, shared with new handles", async () => {
+    const server = createServer("100")
+    const unprice = clientFor(server)
+    const kept = unprice.budget("customer:acme", local)
+    await kept.charge({ amount: "0.5", idempotencyKey: "c1" })
+    await vi.advanceTimersByTimeAsync(10_000)
+
+    const charged = await Promise.all([
+      kept.charge({ amount: "0.1", idempotencyKey: "c2" }),
+      unprice.budget("customer:acme", local).charge({ amount: "0.1", idempotencyKey: "c3" }),
+    ])
+
+    expect(charged.map(({ result }) => result?.allowed)).toEqual([true, true])
+    expect(server.requests.map(([path]) => path)).toEqual(["lease", "report", "report", "lease"])
+  })
+
+  it("closes every open lease with one final report per key", async () => {
+    const server = createServer("100")
+    const unprice = clientFor(server)
+    const keys = ["customer:acme", "customer:globex", "run:r_42"]
+    for (const key of keys) {
+      await unprice.budget(key, local).charge({ amount: "0.25", idempotencyKey: `c_${key}` })
+    }
+
+    expect(await unprice.close()).toEqual([])
+
+    const finals = server
+      .reports()
+      .map(({ key, captured, final }) => [key, captured, final])
+      .sort(([a], [b]) => String(a).localeCompare(String(b)))
+    expect(finals).toEqual([
+      ["customer:acme", "0.25", true],
+      ["customer:globex", "0.25", true],
+      ["run:r_42", "0.25", true],
+    ])
+    expect(server.state.room).toBe(units("99.25"))
+    expect(unprice.budget("run:r_42", { mode: "local", lease: { amount: "1" } }).key).toBe(
+      "run:r_42"
+    )
+  })
+
+  it("resolves close with the keys whose lease was not returned", async () => {
+    const server = createServer("100")
+    const unprice = clientFor(server)
+    await unprice.budget("customer:acme", local).charge({ amount: "0.25", idempotencyKey: "c1" })
+    server.state.down = true
+
+    expect(await unprice.close()).toEqual([{ key: "customer:acme", error: unreachable }])
   })
 })

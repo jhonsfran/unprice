@@ -3,9 +3,15 @@ import { version } from "../package.json"
 import {
   type LocalBudgetHandle,
   type LocalBudgetOptions,
-  createLocalBudgetHandle,
+  type LocalLeases,
+  createLocalLeases,
 } from "./budget-local"
-import { type BudgetHandle, createBudgetHandle } from "./budgets"
+import {
+  type BudgetHandle,
+  type BudgetSettleError,
+  type SpendSettlement,
+  createBudgetHandle,
+} from "./budgets"
 import type { ApiError, ErrorResponse } from "./errors"
 import {
   type GeneratedSdkResources,
@@ -88,6 +94,19 @@ export type UnpriceOptions = {
    * Additional headers to send with the request.
    */
   headers?: Record<string, string>
+
+  /**
+   * Keeps the runtime alive for work after the response, such as `waitUntil` from
+   * `@vercel/functions` or Cloudflare's `ctx.waitUntil`. With it, `spend` returns once the work
+   * finishes and settles in the background.
+   */
+  waitUntil?: (promise: Promise<unknown>) => void
+
+  /**
+   * A background settle that failed. Its hold stays open and counts its full estimate when it
+   * expires, so usage can be over-counted, never under-counted.
+   */
+  onSettleError?: (error: BudgetSettleError) => void
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -137,6 +156,8 @@ export class Unprice implements GeneratedSdkResources {
   private readonly headers: Record<string, string>
   private readonly fetchImpl: (input: Request) => Promise<Response>
   private readonly openapi: OpenApiClient<paths>
+  private readonly settlement: SpendSettlement
+  private readonly local: LocalLeases
   public readonly access: GeneratedSdkResources["access"]
   public readonly usage: GeneratedSdkResources["usage"]
   public readonly runs: GeneratedSdkResources["runs"]
@@ -170,6 +191,7 @@ export class Unprice implements GeneratedSdkResources {
 
     this.headers = opts.headers ?? {}
     this.cache = opts.cache ?? "no-store"
+    this.settlement = { waitUntil: opts.waitUntil, onSettleError: opts.onSettleError }
     /**
      * Even though TypeScript should prevent this, some people still pass undefined or empty strings.
      */
@@ -198,6 +220,7 @@ export class Unprice implements GeneratedSdkResources {
     this.runs = resources.runs
     this.reservations = createReservations(resources.runs)
     this.budgets = resources.budgets
+    this.local = createLocalLeases({ transport: this.budgets, settlement: this.settlement })
     this.customers = resources.customers
     this.features = resources.features
     this.planVersions = resources.planVersions
@@ -213,19 +236,26 @@ export class Unprice implements GeneratedSdkResources {
 
   /**
    * A handle bound to one budget key. It never creates or changes the budget. With
-   * `{ mode: "local" }`, a long-lived process spends from a lease held in its memory.
+   * `{ mode: "local" }`, a long-lived process spends from a lease held in its memory, one lease
+   * per key however many handles it takes.
+   *
+   * @throws RangeError when the key has an open local lease with other lease options.
    */
   budget(key: string): BudgetHandle
   budget(key: string, options: LocalBudgetOptions): LocalBudgetHandle
   budget(key: string, options?: LocalBudgetOptions): BudgetHandle | LocalBudgetHandle {
-    const remote = createBudgetHandle(this.budgets, key)
+    const remote = createBudgetHandle(this.budgets, key, this.settlement)
     if (!options) return remote
-    return createLocalBudgetHandle({
-      transport: this.budgets,
-      remote,
-      key,
-      lease: options.lease,
-    })
+    return this.local.budget(remote, key, options.lease)
+  }
+
+  /**
+   * Final-reports every open local lease, returning its unused capacity. Call it before the
+   * process exits. Resolves with the keys whose lease was not returned; those expire and count in
+   * full.
+   */
+  close(): Promise<Array<{ key: string; error: ApiError }>> {
+    return this.local.close()
   }
 
   private getHeaders(): Record<string, string> {

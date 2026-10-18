@@ -7,6 +7,7 @@ import {
   type BudgetDenial,
   type BudgetHandle,
   type BudgetHold,
+  type SpendSettlement,
   createSpend,
   toDenial,
 } from "./budgets"
@@ -29,6 +30,7 @@ import type { ApiResult } from "./result"
 const ZERO = BigInt(0)
 const DEFAULT_LEASE_TTL_MS = 60_000
 const DEFAULT_FLUSH_INTERVAL_MS = 1_000
+const DEFAULT_IDLE_MS = 10_000
 
 export type LeaseRequest = OperationInput<"budgets.lease">
 export type LeaseReportRequest = OperationInput<"budgets.report">
@@ -50,13 +52,21 @@ export type LocalLeaseOptions = {
   ttlMs?: number
   /** How often consumption is reported while it changes. Defaults to 1 s. */
   flushIntervalMs?: number
+  /**
+   * Returns the lease after this long without a local authorize, charge, settle, or release, once
+   * no hold is open. The next call takes a new lease. Defaults to 10 s; `Infinity` keeps it.
+   */
+  idleMs?: number
   /** Background report failures. Spending continues within the lease until its deadline. */
   onError?: (error: ApiError) => void
 }
 
 export type LocalBudgetOptions = { mode: "local"; lease: LocalLeaseOptions }
 
-/** The BudgetHandle contract, answered from a lease held in this process (ADR-0006 B10). */
+/**
+ * The BudgetHandle contract, answered from a lease held in this process (ADR-0006 B10). Every
+ * handle for a key on one client spends from the same lease.
+ */
 export type LocalBudgetHandle = BudgetHandle & {
   readonly mode: "local"
   /** Reports consumption now. Null when nothing was unreported or no lease is open. */
@@ -66,6 +76,25 @@ export type LocalBudgetHandle = BudgetHandle & {
    * process never closes expires and counts in full. A later call opens a new lease.
    */
   close(): Promise<ApiResult<LeaseReportResponse | null>>
+}
+
+/** The client's local leases: at most one per key, and nothing kept for a key without one. */
+export type LocalLeases = {
+  budget(remote: BudgetHandle, key: string, options: LocalLeaseOptions): LocalBudgetHandle
+  /** Final-reports every open lease. Resolves with the keys whose lease was not returned. */
+  close(): Promise<Array<{ key: string; error: ApiError }>>
+}
+
+type LeaseSettings = Readonly<{
+  amount: Units
+  lowWater: Units
+  ttlMs: number
+  flushIntervalMs: number
+  idleMs: number
+}>
+
+type Shell = Pick<LocalBudgetHandle, "authorize" | "charge" | "flush" | "close"> & {
+  readonly settings: LeaseSettings
 }
 
 type Lease = {
@@ -88,30 +117,109 @@ type Spent<T> = Readonly<{ lease: Lease; value: T }> | ApiResult<BudgetDenial>
 // Survives wall-clock steps, so a deadline cannot move later while the process runs.
 const monotonicNow = () => performance.timeOrigin + performance.now()
 
-export const createLocalBudgetHandle = ({
+export const createLocalLeases = ({
   transport,
-  remote,
-  key,
-  lease: options,
+  settlement,
   now = monotonicNow,
 }: {
   transport: LeaseTransport
-  remote: BudgetHandle
-  key: string
-  lease: LocalLeaseOptions
+  settlement?: SpendSettlement
   now?: () => number
-}): LocalBudgetHandle => {
-  const amount = optionUnits(options.amount, "lease.amount")
-  if (amount === ZERO) throw new RangeError("lease.amount must be positive")
-  const lowWater =
-    options.lowWater === undefined
-      ? amount / BigInt(4)
-      : optionUnits(options.lowWater, "lease.lowWater")
-  const ttlMs = options.ttlMs ?? DEFAULT_LEASE_TTL_MS
-  const flushIntervalMs = options.flushIntervalMs ?? DEFAULT_FLUSH_INTERVAL_MS
+}): LocalLeases => {
+  const shells = new Map<string, Shell>()
+
+  const live = (key: string, settings: LeaseSettings) => {
+    const shell = shells.get(key)
+    if (shell && !sameSettings(shell.settings, settings)) {
+      throw new RangeError(`Budget ${key} already has an open local lease with other options`)
+    }
+    return shell
+  }
+
+  const budget: LocalLeases["budget"] = (remote, key, options) => {
+    const settings = leaseSettings(options)
+    live(key, settings)
+    // Resolved per call, so a handle kept past its lease's end shares the key's next lease.
+    const shell = () => {
+      const open = live(key, settings)
+      if (open) return open
+      const created = createShell({
+        transport,
+        key,
+        settings,
+        onError: options.onError,
+        now,
+        forget: () => {
+          if (shells.get(key) === created) shells.delete(key)
+        },
+      })
+      shells.set(key, created)
+      return created
+    }
+    const authorize: BudgetHandle["authorize"] = async (input) => shell().authorize(input)
+
+    return {
+      key,
+      mode: "local",
+      authorize,
+      charge: async (input) => shell().charge(input),
+      record: remote.record,
+      get: remote.get,
+      spend: createSpend(authorize, settlement),
+      flush: async () => shells.get(key)?.flush() ?? { result: null },
+      close: async () => shells.get(key)?.close() ?? { result: null },
+    }
+  }
+
+  const close: LocalLeases["close"] = async () => {
+    const closed = await Promise.all(
+      Array.from(shells, async ([key, shell]) => ({ key, closed: await shell.close() }))
+    )
+    return closed.flatMap(({ key, closed: { error } }) => (error ? [{ key, error }] : []))
+  }
+
+  return { budget, close }
+}
+
+const createShell = ({
+  transport,
+  key,
+  settings,
+  onError,
+  now,
+  forget,
+}: {
+  transport: LeaseTransport
+  key: string
+  settings: LeaseSettings
+  onError: LocalLeaseOptions["onError"]
+  now: () => number
+  /** Drops this shell from the registry. */
+  forget: () => void
+}): Shell => {
+  const { amount, lowWater, ttlMs, flushIntervalMs, idleMs } = settings
 
   let epoch: Epoch = { phase: "idle", replay: null }
   let timer: ReturnType<typeof setInterval> | null = null
+  let calls = 0
+  let activeAt = now()
+
+  // Only between calls, so no call goes on to open a lease from a shell the registry dropped.
+  const forgetIfDone = () => {
+    if (calls === 0 && epoch.phase === "idle" && epoch.replay === null) forget()
+  }
+
+  const tracked =
+    <A extends unknown[], R>(call: (...args: A) => Promise<R>) =>
+    async (...args: A): Promise<R> => {
+      calls += 1
+      try {
+        return await call(...args)
+      } finally {
+        calls -= 1
+        forgetIfDone()
+      }
+    }
 
   const topUp = (ledger: LeaseLedger): Units => {
     const available = ledger.available()
@@ -124,6 +232,7 @@ export const createLocalBudgetHandle = ({
       epoch = { phase: "idle", replay: null }
       if (timer) clearInterval(timer)
       timer = null
+      forgetIfDone()
     }
   }
 
@@ -184,20 +293,24 @@ export const createLocalBudgetHandle = ({
     return lease.inFlight
   }
 
-  // After a call, only a refill below low water starts; the timer also retries a lost report,
-  // reports changed consumption, and renews the lease before its last third.
+  // After a call, only a refill below low water starts. The timer also retries a lost report,
+  // reports changed consumption, renews the lease before its last third, and returns it when idle.
   const reportInBackground = (lease: Lease, periodic: boolean) => {
     const { ledger } = lease
-    if (lease.inFlight || ledger.phase !== "open") return
+    if (lease.inFlight || ledger.phase === "ended") return
     const at = now()
     ledger.expire(at)
+    // A final report counts open holds in full, so a lease under running work is never idle.
+    const final = periodic && at - activeAt >= idleMs && ledger.totals().held === ZERO
     const low = lease.denied === null && ledger.available() < lowWater
-    const due = periodic
-      ? low || ledger.pending !== null || ledger.dirty() || ledger.deadline - at < ttlMs / 3
-      : low && ledger.pending === null
+    const due =
+      final ||
+      (periodic
+        ? low || ledger.pending !== null || ledger.dirty() || ledger.deadline - at < ttlMs / 3
+        : low && ledger.pending === null)
     if (!due) return
-    void send(lease, { final: false, extend: topUp(ledger) }).then((sent) => {
-      if (sent.error) options.onError?.(sent.error)
+    void send(lease, { final, extend: topUp(ledger) }).then((sent) => {
+      if (sent.error) onError?.(sent.error)
     })
   }
 
@@ -217,7 +330,8 @@ export const createLocalBudgetHandle = ({
         lease = granted.result
       }
 
-      const decision = attempt(lease.ledger, now())
+      activeAt = now()
+      const decision = attempt(lease.ledger, activeAt)
       if (decision.kind === "ok") {
         reportInBackground(lease, false)
         return { lease, value: decision.value }
@@ -253,7 +367,8 @@ export const createLocalBudgetHandle = ({
     settle: async ({ amount: input }) => {
       const actual = toUnits(input)
       if (actual === null) return { error: invalidAmount(input) }
-      const decision = lease.ledger.settle(hold.id, actual, now())
+      activeAt = now()
+      const decision = lease.ledger.settle(hold.id, actual, activeAt)
       if (decision.kind === "rejected") return { error: localError(decision.rejection) }
       const { value } = decision
       return {
@@ -269,7 +384,8 @@ export const createLocalBudgetHandle = ({
       }
     },
     release: async () => {
-      const decision = lease.ledger.release(hold.id, now())
+      activeAt = now()
+      const decision = lease.ledger.release(hold.id, activeAt)
       if (decision.kind === "rejected") return { error: localError(decision.rejection) }
       const { value } = decision
       return {
@@ -360,17 +476,37 @@ export const createLocalBudgetHandle = ({
   }
 
   return {
-    key,
-    mode: "local",
-    authorize,
-    charge,
-    record: remote.record,
-    get: remote.get,
-    spend: createSpend(authorize),
+    settings,
+    authorize: tracked(authorize),
+    charge: tracked(charge),
     flush,
-    close,
+    close: tracked(close),
   }
 }
+
+function leaseSettings(options: LocalLeaseOptions): LeaseSettings {
+  const amount = optionUnits(options.amount, "lease.amount")
+  if (amount === ZERO) throw new RangeError("lease.amount must be positive")
+  const idleMs = options.idleMs ?? DEFAULT_IDLE_MS
+  if (!(idleMs > 0)) throw new RangeError(`lease.idleMs must be positive, received ${idleMs}`)
+  return {
+    amount,
+    lowWater:
+      options.lowWater === undefined
+        ? amount / BigInt(4)
+        : optionUnits(options.lowWater, "lease.lowWater"),
+    ttlMs: options.ttlMs ?? DEFAULT_LEASE_TTL_MS,
+    flushIntervalMs: options.flushIntervalMs ?? DEFAULT_FLUSH_INTERVAL_MS,
+    idleMs,
+  }
+}
+
+const sameSettings = (a: LeaseSettings, b: LeaseSettings) =>
+  a.amount === b.amount &&
+  a.lowWater === b.lowWater &&
+  a.ttlMs === b.ttlMs &&
+  a.flushIntervalMs === b.flushIntervalMs &&
+  a.idleMs === b.idleMs
 
 function optionUnits(amount: AmountInput, name: string): Units {
   const units = toUnits(amount)
