@@ -340,7 +340,9 @@ export const budgetBalanceSchema = z.object({
   remaining: budgetDecimalSchema.nullable().openapi({
     description: "The least remaining over hard limits; null when the budget has no hard limit",
   }),
-  held: budgetDecimalSchema.openapi({ description: "The sum of open holds" }),
+  held: budgetDecimalSchema.openapi({
+    description: "The sum of open holds and the unreported part of open leases",
+  }),
   limits: z.array(
     z.object({
       id: z.string(),
@@ -348,7 +350,7 @@ export const budgetBalanceSchema = z.object({
       enforce: budgetEnforceSchema,
       amount: budgetDecimalSchema.openapi({ description: "The limit" }),
       consumed: budgetDecimalSchema.openapi({ description: "Used in the current period" }),
-      held: budgetDecimalSchema.openapi({ description: "Held by open holds" }),
+      held: budgetDecimalSchema.openapi({ description: "Held by open holds and leases" }),
       remaining: budgetDecimalSchema.openapi({
         description:
           "amount - consumed - held; negative for a soft limit, or a hard limit a record passed",
@@ -372,10 +374,12 @@ export const budgetOperationsSchema = z
     release: operationCount,
     charge: operationCount,
     record: operationCount,
+    lease: operationCount,
+    report: operationCount,
   })
   .openapi({
     description:
-      "Accepted calls that changed the budget, per verb, since it was created. Replays, rejections, reads, upserts that changed nothing, and holds the alarm settled at expiry are not counted.",
+      "Accepted calls that changed the budget, per verb, since it was created. Replays, rejections, reads, upserts that changed nothing, and holds and leases the alarm closed at expiry are not counted.",
   })
 
 export const budgetSchema = z.object({
@@ -517,6 +521,129 @@ export const budgetClosedDetailsSchema = z.object({
   closedAt: budgetEpochMsSchema.openapi({
     description: "When the budget closed, in epoch milliseconds",
   }),
+})
+
+const budgetLeaseKeySchema = z.string().min(1).max(256).openapi({
+  description:
+    "Up to 256 characters, one per lease, chosen by the client. Retrying a grant with the same key, amount, and ttlMs replays it; another amount or ttlMs returns 409. Lease keys and idempotency keys are separate.",
+  example: "lease_01J9Z3",
+})
+
+export const leaseBudgetInputSchema = z
+  .object({
+    key: budgetKeyInputSchema,
+    leaseKey: budgetLeaseKeySchema,
+    amount: budgetAmountInputSchema
+      .openapi({
+        description:
+          "Capacity to debit now against every hard limit and spend locally. Near a limit less is granted; when nothing fits, 402.",
+      })
+      .transform(toAmount),
+    ttlMs: z
+      .number()
+      .int()
+      .positive()
+      .openapi({
+        description: `How long the lease lives without a report, in milliseconds: at least ${MIN_HOLD_TTL_MS} and at most the budget's holds.maxTtlMs. A report renews it once less than half remains. A lease still open at expiry counts its whole grant as used until the window resets.`,
+        example: 60_000,
+      }),
+  })
+  .strict()
+
+const reportFields = {
+  key: budgetKeyInputSchema,
+  leaseKey: budgetLeaseKeySchema,
+  seq: z.number().int().positive().openapi({
+    description:
+      "1 for the first report on a lease, then one more each time. Resending the last seq with the same body replays its answer; any other seq returns 409.",
+    example: 1,
+  }),
+  captured: budgetAmountInputSchema
+    .openapi({
+      description:
+        "Usage spent from the lease so far, cumulative: never below the last report and never above the grant. A lost report is covered by the next.",
+    })
+    .transform(toAmount),
+}
+
+export const reportBudgetInputSchema = z.discriminatedUnion("final", [
+  z
+    .object({
+      ...reportFields,
+      final: z.literal(false),
+      extend: budgetAmountInputSchema
+        .openapi({
+          description:
+            "More capacity to add to the lease. Near a hard limit less is granted, and the capture still applies.",
+        })
+        .transform(toAmount),
+    })
+    .strict(),
+  z
+    .object({
+      ...reportFields,
+      final: z.literal(true).openapi({
+        description:
+          "Closes the lease: counts `captured` and returns the rest of the grant. After expiresAt only a final report is accepted, until the expired lease is counted.",
+      }),
+    })
+    .strict(),
+])
+
+const budgetLeaseSchema = z.object({
+  leaseKey: z.string(),
+  seq: z
+    .number()
+    .int()
+    .nonnegative()
+    .openapi({ description: "The last report applied; 0 before the first" }),
+  granted: budgetDecimalSchema.openapi({
+    description: "Debited for this lease so far: the grant plus every extension",
+  }),
+  captured: budgetDecimalSchema.openapi({ description: "Usage reported so far" }),
+  expiresAt: budgetEpochMsSchema.openapi({
+    description:
+      "When the lease expires without a report, in epoch milliseconds. At expiry its whole grant counts as used.",
+  }),
+  status: z.enum(["open", "closed", "expired"]),
+})
+
+const budgetLeaseTermsSchema = z
+  .object({
+    holds: z.object({ defaultTtlMs: z.number().int(), maxTtlMs: z.number().int() }),
+    closesAt: budgetEpochMsSchema.nullable(),
+  })
+  .openapi({
+    description: "The budget's hold TTL bounds and close time, so holds spent locally follow them",
+  })
+
+export const leaseBudgetResponseSchema = z.object({
+  lease: budgetLeaseSchema,
+  terms: budgetLeaseTermsSchema,
+  replayed: budgetReplayedSchema,
+  balance: budgetBalanceSchema,
+})
+
+export const reportBudgetResponseSchema = z.object({
+  lease: budgetLeaseSchema,
+  terms: budgetLeaseTermsSchema,
+  extension: z.object({
+    requested: budgetDecimalSchema,
+    granted: budgetDecimalSchema,
+    denied: z
+      .discriminatedUnion("kind", [budgetExceededDetailsSchema, budgetClosedDetailsSchema])
+      .nullable()
+      .openapi({
+        description:
+          "Why less than requested was granted, shaped like the error details of a denied charge; null when all of it was",
+      }),
+  }),
+  released: budgetDecimalSchema.openapi({
+    description: "A final report's unused grant, returned; 0 otherwise",
+  }),
+  crossed: budgetCrossedSchema,
+  replayed: budgetReplayedSchema,
+  balance: budgetBalanceSchema,
 })
 
 export type UpsertBudgetInput = z.infer<typeof upsertBudgetInputSchema>

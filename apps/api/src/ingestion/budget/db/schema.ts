@@ -42,11 +42,14 @@ export const budgetLedger = sqliteTable("budget_ledger", {
 export const budgetOperations = sqliteTable(
   "budget_operations",
   {
-    /** `h_<n>` for a hold; `o:<key_hash>` for a charge or record. */
+    /** `h_<n>` for a hold; `o:<key_hash>` for a charge or record; `l:<key_hash>` for a lease. */
     id: text("id").primaryKey(),
-    kind: text("kind", { enum: ["hold", "charge", "record"] }).notNull(),
+    kind: text("kind", { enum: ["hold", "charge", "record", "lease"] }).notNull(),
     status: text("status", { enum: ["open", "settled", "released", "done"] }).notNull(),
-    /** When the alarm next visits the row (`alarmAt`): an open hold's expiry, else retention end. */
+    /**
+     * When the alarm next visits the row (`alarmAt`): an open hold's or lease's expiry, else
+     * retention end.
+     */
     dueAt: integer("due_at").notNull(),
     /** The operation without `kind` and `id`, with tagged bigints. */
     dataJson: text("data_json").notNull(),

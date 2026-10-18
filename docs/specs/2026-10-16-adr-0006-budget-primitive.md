@@ -481,6 +481,26 @@ The code a builder writes is the same in every mode. The mode only changes where
   Workers, Lambda, or Vercel functions: their memory can be dropped or frozen between invocations,
   so they use `remote`, with settles sent through `waitUntil`.
 
+**Slice 1 (2026-10-18).** The first `local` slice runs over HTTP; the socket and pushed snapshots
+come later with the same two commands.
+
+- `POST /v1/budgets/lease` debits `min(amount, room)` under every hard limit. Nothing fitting is a
+  402. A lease is a row in `budget_operations` (`l:<key hash>`), so the alarm, retention, and
+  conservation checks that cover holds cover it too.
+- `POST /v1/budgets/report` takes reports numbered from 1. `captured` is cumulative, so a lost
+  report is covered by the next and no capture is ever abandoned. A report may extend by what
+  fits (a short extension is part of the answer, never an error, so the capture always counts),
+  renews the lease once less than half its TTL remains, or, when final, returns the unused grant.
+  Past `expiresAt` only a final report is accepted, like a late settle.
+- An unreported lease expires like an unresolved hold (B3): its whole grant counts as consumed in
+  the current window and returns when that window rolls.
+- The SDK flushes every second when its capture changed, below its low-water mark, and before a
+  third of the TTL is left. The 100-entry trigger is dropped: a cumulative report carries no
+  entries, so flushing at 100 would only add writes. The default lease TTL is 60 seconds.
+- Rows written per call, measured with `pnpm --filter api test:workers:bench`: grant 4, report 3
+  with or without renewal, final report 3, expiry of one lease 3, and 1 for the stale alarm a
+  renewal leaves armed.
+
 ### B11. Inside an LLM loop
 
 For a run with a local lease, the journey of one agent step:

@@ -10,7 +10,7 @@ import { type BudgetConfigInput, upsertBudgetInputSchema } from "@unprice/db/val
 import {
   type BudgetOutcome,
   CLOSED_BUDGET_RETENTION_MS,
-  EXPIRED_HOLDS_PER_SWEEP,
+  EXPIRED_PER_SWEEP,
 } from "@unprice/services/budgets"
 import type { BudgetReply, BudgetRequest } from "@unprice/services/use-cases"
 import { and, asc, eq, lte, min, sql } from "drizzle-orm"
@@ -200,13 +200,13 @@ describe("BudgetDO runtime assumptions", () => {
         .orderBy(asc(operations.dueAt))
         .limit(2048)
       const next = db.select({ at: min(operations.dueAt) }).from(operations)
-      const expiredHolds = db
+      const expired = db
         .select({ id: operations.id })
         .from(operations)
         .where(and(eq(operations.status, "open"), lte(operations.dueAt, 0)))
         .orderBy(asc(operations.dueAt), asc(sql`length(${operations.id})`), asc(operations.id))
         .limit(256)
-      for (const query of [due, next, expiredHolds]) {
+      for (const query of [due, next, expired]) {
         expect(plan(query.toSQL())).toMatch(/USING (COVERING )?INDEX budget_operations_due_idx/)
       }
     })
@@ -300,7 +300,102 @@ describe("BudgetDO verbs", () => {
       release: 0,
       charge: 1,
       record: 1,
+      lease: 0,
+      report: 0,
     })
+  })
+
+  it("grants, reports on, and closes a lease end to end, keyed by its key's hash", async () => {
+    const key = "customer:lease"
+    const stub = stubFor(key)
+    await stub.execute(upsert(key, fiftyPerMonth))
+
+    const granted = outcome(
+      await stub.execute({ type: "lease", leaseKey: "proc-1", amount: units(20), ttlMs: MINUTE }),
+      "lease"
+    )
+    expect(granted.lease).toEqual({
+      leaseKey: "proc-1",
+      seq: 0,
+      granted: units(20),
+      captured: BigInt(0),
+      expiresAt: granted.balance.asOf + MINUTE,
+      status: "open",
+    })
+    expect([granted.balance.remaining, granted.balance.held]).toEqual([units(30), units(20)])
+
+    const reported = outcome(
+      await stub.execute({
+        type: "report",
+        leaseKey: "proc-1",
+        seq: 1,
+        request: { final: false, captured: units(5), extend: units(40) },
+      }),
+      "report"
+    )
+    expect([reported.lease.granted, reported.lease.captured, reported.extension]).toEqual([
+      units(50),
+      units(5),
+      {
+        requested: units(40),
+        granted: units(30),
+        denied: {
+          code: "LIMIT_EXCEEDED",
+          blocked: {
+            limitId: "month",
+            window: "month",
+            remaining: units(30),
+            held: units(15),
+            resetsAt: reported.balance.limits[0]?.resetsAt,
+            remedy: "release_holds",
+          },
+        },
+      },
+    ])
+
+    const final: BudgetRequest = {
+      type: "report",
+      leaseKey: "proc-1",
+      seq: 2,
+      request: { final: true, captured: units(12) },
+    }
+    const closed = outcome(await stub.execute(final), "report")
+    expect([closed.lease.status, closed.released, closed.balance.remaining]).toEqual([
+      "closed",
+      units(38),
+      units(38),
+    ])
+    expect(outcome(await stub.execute(final), "report").replayed).toBe(true)
+    expect(
+      rejection(
+        await stub.execute({
+          type: "report",
+          leaseKey: "proc-2",
+          seq: 1,
+          request: { final: true, captured: BigInt(0) },
+        })
+      )
+    ).toEqual({ code: "LEASE_NOT_FOUND", leaseKey: "proc-2" })
+    // A lease key and an idempotency key are separate namespaces.
+    expect(
+      outcome(
+        await stub.execute({ type: "charge", idempotencyKey: "proc-1", amount: units(1) }),
+        "charge"
+      ).replayed
+    ).toBe(false)
+
+    await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
+      expect(
+        state.storage.sql
+          .exec("SELECT id, status FROM budget_operations WHERE kind = 'lease'")
+          .toArray()
+      ).toEqual([{ id: `l:${sha256HexSync("proc-1")}`, status: "done" }])
+    })
+    const read = outcome(await stub.execute({ type: "get" }), "get")
+    expect([read.budget.balance.held, read.budget.operations]).toEqual([
+      BigInt(0),
+      { upsert: 1, authorize: 0, settle: 0, release: 0, charge: 1, record: 0, lease: 1, report: 2 },
+    ])
   })
 
   it("refuses spend on a budget past its closesAt and reports it closed", async () => {
@@ -511,10 +606,87 @@ describe("BudgetDO alarm", () => {
     expect(read.budget.balance.held).toBe(BigInt(0))
   })
 
+  it("expires an unreported lease into consumption of its whole grant when its alarm fires", async () => {
+    const key = "customer:lease-expiry"
+    const stub = stubFor(key)
+    const t0 = midMonthAhead()
+    let now = t0
+    const report = (seq: number, captured: number): BudgetRequest => ({
+      type: "report",
+      leaseKey: "proc-1",
+      seq,
+      request: { final: false, captured: units(captured), extend: BigInt(0) },
+    })
+    await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
+      await migrate(drizzle(state.storage), migrations)
+      const processor = realStorageProcessor(state, () => now)
+      await processor.execute(upsert(key, { limits: [{ id: "cap", amount: "50", window: "day" }] }))
+      outcome(
+        await processor.execute({
+          type: "lease",
+          leaseKey: "proc-1",
+          amount: units(40),
+          ttlMs: 10_000,
+        }),
+        "lease"
+      )
+      await expect(state.storage.getAlarm()).resolves.toBe(t0 + 10_000)
+
+      now = t0 + 1_000
+      expect(outcome(await processor.execute(report(1, 10)), "report").lease.expiresAt).toBe(
+        t0 + 10_000
+      )
+      now = t0 + 7_000
+      expect(outcome(await processor.execute(report(2, 15)), "report").lease.expiresAt).toBe(
+        t0 + 17_000
+      )
+      // The renewal left the earlier alarm armed; its wake finds nothing due and re-arms.
+      now = t0 + 10_000
+      await processor.alarm()
+      await expect(state.storage.getAlarm()).resolves.toBe(t0 + 17_000)
+
+      now = t0 + 20_000
+      await processor.alarm()
+      expect(state.storage.sql.exec("SELECT held FROM budget_ledger").one()).toEqual({ held: "0" })
+      expect(
+        state.storage.sql.exec("SELECT status, due_at FROM budget_operations").toArray()
+      ).toEqual([{ status: "done", due_at: now + DAY }])
+      const read = outcome(await processor.execute({ type: "get" }), "get")
+      expect([read.budget.balance.remaining, read.budget.balance.limits[0]?.consumed]).toEqual([
+        units(10),
+        units(40),
+      ])
+      expect(
+        rejection(
+          await processor.execute({
+            type: "report",
+            leaseKey: "proc-1",
+            seq: 3,
+            request: { final: true, captured: units(20) },
+          })
+        )
+      ).toEqual({ code: "LEASE_CLOSED", leaseKey: "proc-1", status: "expired" })
+
+      now += DAY
+      await processor.alarm()
+      expect(rejection(await processor.execute(report(3, 20))).code).toBe("LEASE_NOT_FOUND")
+      expect(
+        outcome(
+          await processor.execute({
+            type: "charge",
+            idempotencyKey: "next-day",
+            amount: units(50),
+          }),
+          "charge"
+        ).balance.remaining
+      ).toBe(BigInt(0))
+    })
+  })
+
   it("settles expired holds in batches, and the next day has the capacity back", async () => {
     const key = "customer:many-uncertain"
     const stub = stubFor(key)
-    const holds = EXPIRED_HOLDS_PER_SWEEP + 44
+    const holds = EXPIRED_PER_SWEEP + 44
     let now = midMonthAhead()
     await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
       await migrate(drizzle(state.storage), migrations)

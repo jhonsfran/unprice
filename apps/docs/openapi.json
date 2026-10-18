@@ -160,7 +160,7 @@
                           },
                           "held": {
                             "type": "string",
-                            "description": "The sum of open holds"
+                            "description": "The sum of open holds and the unreported part of open leases"
                           },
                           "limits": {
                             "type": "array",
@@ -192,7 +192,7 @@
                                 },
                                 "held": {
                                   "type": "string",
-                                  "description": "Held by open holds"
+                                  "description": "Held by open holds and leases"
                                 },
                                 "remaining": {
                                   "type": "string",
@@ -427,7 +427,7 @@
                           },
                           "held": {
                             "type": "string",
-                            "description": "The sum of open holds"
+                            "description": "The sum of open holds and the unreported part of open leases"
                           },
                           "limits": {
                             "type": "array",
@@ -459,7 +459,7 @@
                                 },
                                 "held": {
                                   "type": "string",
-                                  "description": "Held by open holds"
+                                  "description": "Held by open holds and leases"
                                 },
                                 "remaining": {
                                   "type": "string",
@@ -694,7 +694,7 @@
                           },
                           "held": {
                             "type": "string",
-                            "description": "The sum of open holds"
+                            "description": "The sum of open holds and the unreported part of open leases"
                           },
                           "limits": {
                             "type": "array",
@@ -726,7 +726,7 @@
                                 },
                                 "held": {
                                   "type": "string",
-                                  "description": "Held by open holds"
+                                  "description": "Held by open holds and leases"
                                 },
                                 "remaining": {
                                   "type": "string",
@@ -961,7 +961,7 @@
                           },
                           "held": {
                             "type": "string",
-                            "description": "The sum of open holds"
+                            "description": "The sum of open holds and the unreported part of open leases"
                           },
                           "limits": {
                             "type": "array",
@@ -993,7 +993,7 @@
                                 },
                                 "held": {
                                   "type": "string",
-                                  "description": "Held by open holds"
+                                  "description": "Held by open holds and leases"
                                 },
                                 "remaining": {
                                   "type": "string",
@@ -1228,7 +1228,7 @@
                           },
                           "held": {
                             "type": "string",
-                            "description": "The sum of open holds"
+                            "description": "The sum of open holds and the unreported part of open leases"
                           },
                           "limits": {
                             "type": "array",
@@ -1260,7 +1260,7 @@
                                 },
                                 "held": {
                                   "type": "string",
-                                  "description": "Held by open holds"
+                                  "description": "Held by open holds and leases"
                                 },
                                 "remaining": {
                                   "type": "string",
@@ -1495,7 +1495,7 @@
                           },
                           "held": {
                             "type": "string",
-                            "description": "The sum of open holds"
+                            "description": "The sum of open holds and the unreported part of open leases"
                           },
                           "limits": {
                             "type": "array",
@@ -1527,7 +1527,7 @@
                                 },
                                 "held": {
                                   "type": "string",
-                                  "description": "Held by open holds"
+                                  "description": "Held by open holds and leases"
                                 },
                                 "remaining": {
                                   "type": "string",
@@ -1762,7 +1762,7 @@
                           },
                           "held": {
                             "type": "string",
-                            "description": "The sum of open holds"
+                            "description": "The sum of open holds and the unreported part of open leases"
                           },
                           "limits": {
                             "type": "array",
@@ -1794,7 +1794,7 @@
                                 },
                                 "held": {
                                   "type": "string",
-                                  "description": "Held by open holds"
+                                  "description": "Held by open holds and leases"
                                 },
                                 "remaining": {
                                   "type": "string",
@@ -2029,7 +2029,7 @@
                           },
                           "held": {
                             "type": "string",
-                            "description": "The sum of open holds"
+                            "description": "The sum of open holds and the unreported part of open leases"
                           },
                           "limits": {
                             "type": "array",
@@ -2061,7 +2061,7 @@
                                 },
                                 "held": {
                                   "type": "string",
-                                  "description": "Held by open holds"
+                                  "description": "Held by open holds and leases"
                                 },
                                 "remaining": {
                                   "type": "string",
@@ -2296,7 +2296,7 @@
                           },
                           "held": {
                             "type": "string",
-                            "description": "The sum of open holds"
+                            "description": "The sum of open holds and the unreported part of open leases"
                           },
                           "limits": {
                             "type": "array",
@@ -2328,7 +2328,7 @@
                                 },
                                 "held": {
                                   "type": "string",
-                                  "description": "Held by open holds"
+                                  "description": "Held by open holds and leases"
                                 },
                                 "remaining": {
                                   "type": "string",
@@ -2563,7 +2563,7 @@
                           },
                           "held": {
                             "type": "string",
-                            "description": "The sum of open holds"
+                            "description": "The sum of open holds and the unreported part of open leases"
                           },
                           "limits": {
                             "type": "array",
@@ -2595,7 +2595,7 @@
                                 },
                                 "held": {
                                   "type": "string",
-                                  "description": "Held by open holds"
+                                  "description": "Held by open holds and leases"
                                 },
                                 "remaining": {
                                   "type": "string",
@@ -4340,7 +4340,7 @@
                             },
                             "held": {
                               "type": "string",
-                              "description": "The sum of open holds"
+                              "description": "The sum of open holds and the unreported part of open leases"
                             },
                             "limits": {
                               "type": "array",
@@ -4372,7 +4372,7 @@
                                   },
                                   "held": {
                                     "type": "string",
-                                    "description": "Held by open holds"
+                                    "description": "Held by open holds and leases"
                                   },
                                   "remaining": {
                                     "type": "string",
@@ -4429,6 +4429,14 @@
                             "record": {
                               "type": "integer",
                               "minimum": 0
+                            },
+                            "lease": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "report": {
+                              "type": "integer",
+                              "minimum": 0
                             }
                           },
                           "required": [
@@ -4437,9 +4445,11 @@
                             "settle",
                             "release",
                             "charge",
-                            "record"
+                            "record",
+                            "lease",
+                            "report"
                           ],
-                          "description": "Accepted calls that changed the budget, per verb, since it was created. Replays, rejections, reads, upserts that changed nothing, and holds the alarm settled at expiry are not counted."
+                          "description": "Accepted calls that changed the budget, per verb, since it was created. Replays, rejections, reads, upserts that changed nothing, and holds and leases the alarm closed at expiry are not counted."
                         }
                       },
                       "required": [
@@ -4651,7 +4661,7 @@
                         },
                         "held": {
                           "type": "string",
-                          "description": "The sum of open holds"
+                          "description": "The sum of open holds and the unreported part of open leases"
                         },
                         "limits": {
                           "type": "array",
@@ -4683,7 +4693,7 @@
                               },
                               "held": {
                                 "type": "string",
-                                "description": "Held by open holds"
+                                "description": "Held by open holds and leases"
                               },
                               "remaining": {
                                 "type": "string",
@@ -4919,7 +4929,7 @@
                         },
                         "held": {
                           "type": "string",
-                          "description": "The sum of open holds"
+                          "description": "The sum of open holds and the unreported part of open leases"
                         },
                         "limits": {
                           "type": "array",
@@ -4951,7 +4961,7 @@
                               },
                               "held": {
                                 "type": "string",
-                                "description": "Held by open holds"
+                                "description": "Held by open holds and leases"
                               },
                               "remaining": {
                                 "type": "string",
@@ -5164,7 +5174,7 @@
                         },
                         "held": {
                           "type": "string",
-                          "description": "The sum of open holds"
+                          "description": "The sum of open holds and the unreported part of open leases"
                         },
                         "limits": {
                           "type": "array",
@@ -5196,7 +5206,7 @@
                               },
                               "held": {
                                 "type": "string",
-                                "description": "Held by open holds"
+                                "description": "Held by open holds and leases"
                               },
                               "remaining": {
                                 "type": "string",
@@ -5413,7 +5423,7 @@
                         },
                         "held": {
                           "type": "string",
-                          "description": "The sum of open holds"
+                          "description": "The sum of open holds and the unreported part of open leases"
                         },
                         "limits": {
                           "type": "array",
@@ -5445,7 +5455,7 @@
                               },
                               "held": {
                                 "type": "string",
-                                "description": "Held by open holds"
+                                "description": "Held by open holds and leases"
                               },
                               "remaining": {
                                 "type": "string",
@@ -5674,7 +5684,7 @@
                         },
                         "held": {
                           "type": "string",
-                          "description": "The sum of open holds"
+                          "description": "The sum of open holds and the unreported part of open leases"
                         },
                         "limits": {
                           "type": "array",
@@ -5706,7 +5716,7 @@
                               },
                               "held": {
                                 "type": "string",
-                                "description": "Held by open holds"
+                                "description": "Held by open holds and leases"
                               },
                               "remaining": {
                                 "type": "string",
@@ -5955,7 +5965,7 @@
                             },
                             "held": {
                               "type": "string",
-                              "description": "The sum of open holds"
+                              "description": "The sum of open holds and the unreported part of open leases"
                             },
                             "limits": {
                               "type": "array",
@@ -5987,7 +5997,7 @@
                                   },
                                   "held": {
                                     "type": "string",
-                                    "description": "Held by open holds"
+                                    "description": "Held by open holds and leases"
                                   },
                                   "remaining": {
                                     "type": "string",
@@ -6044,6 +6054,14 @@
                             "record": {
                               "type": "integer",
                               "minimum": 0
+                            },
+                            "lease": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "report": {
+                              "type": "integer",
+                              "minimum": 0
                             }
                           },
                           "required": [
@@ -6052,9 +6070,11 @@
                             "settle",
                             "release",
                             "charge",
-                            "record"
+                            "record",
+                            "lease",
+                            "report"
                           ],
-                          "description": "Accepted calls that changed the budget, per verb, since it was created. Replays, rejections, reads, upserts that changed nothing, and holds the alarm settled at expiry are not counted."
+                          "description": "Accepted calls that changed the budget, per verb, since it was created. Replays, rejections, reads, upserts that changed nothing, and holds and leases the alarm closed at expiry are not counted."
                         }
                       },
                       "required": [
@@ -6098,6 +6118,835 @@
                     }
                   },
                   "required": ["budget", "history"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrBadRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Although the HTTP standard specifies \"unauthorized\", semantically this response means \"unauthenticated\". That is, the client must authenticate itself to get the requested response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrUnauthorized"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrForbidden"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrNotFound"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "This response is sent when a request conflicts with the current state of the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrConflict"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrPreconditionFailed"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request payload is larger than the server is willing to process.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrPayloadTooLarge"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The user has sent too many requests in a given amount of time (\"rate limiting\")",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrTooManyRequests"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server has encountered a situation it does not know how to handle.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrInternalServerError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/budgets/lease": {
+      "post": {
+        "operationId": "budgets.lease",
+        "summary": "debit capacity for a long-lived process to spend locally",
+        "description": "Debit capacity against every hard limit before it is spent, for a long-lived process to authorize, settle, and charge in its own memory. Near a limit less than asked for is granted; when nothing fits, 402. Report usage to /v1/budgets/report before expiresAt, or the whole grant counts as used. A retry with the same lease key, amount, and ttlMs returns the same lease. A budget past its closesAt returns 409.",
+        "tags": ["budgets"],
+        "x-unprice": {
+          "audience": "public",
+          "category": "runtime",
+          "docs": {
+            "expose": false
+          },
+          "sdk": {
+            "path": ["budgets", "lease"]
+          }
+        },
+        "requestBody": {
+          "description": "The lease request",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9:/_.@-]{0,127}$",
+                    "description": "The budget's key, chosen by you and unique within the project. Up to 128 letters, digits, and `: / _ . @ -`, starting with a letter or digit.",
+                    "example": "customer:acme"
+                  },
+                  "leaseKey": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "description": "Up to 256 characters, one per lease, chosen by the client. Retrying a grant with the same key, amount, and ttlMs replays it; another amount or ttlMs returns 409. Lease keys and idempotency keys are separate.",
+                    "example": "lease_01J9Z3"
+                  },
+                  "amount": {
+                    "type": "string",
+                    "pattern": "^\\d{1,19}(\\.\\d{1,8})?$",
+                    "description": "Capacity to debit now against every hard limit and spend locally. Near a limit less is granted; when nothing fits, 402.",
+                    "example": "0.05"
+                  },
+                  "ttlMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "exclusiveMinimum": true,
+                    "description": "How long the lease lives without a report, in milliseconds: at least 1000 and at most the budget's holds.maxTtlMs. A report renews it once less than half remains. A lease still open at expiry counts its whole grant as used until the window resets.",
+                    "example": 60000
+                  }
+                },
+                "required": ["key", "leaseKey", "amount", "ttlMs"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The lease",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "lease": {
+                      "type": "object",
+                      "properties": {
+                        "leaseKey": {
+                          "type": "string"
+                        },
+                        "seq": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "The last report applied; 0 before the first"
+                        },
+                        "granted": {
+                          "type": "string",
+                          "description": "Debited for this lease so far: the grant plus every extension"
+                        },
+                        "captured": {
+                          "type": "string",
+                          "description": "Usage reported so far"
+                        },
+                        "expiresAt": {
+                          "type": "integer",
+                          "description": "When the lease expires without a report, in epoch milliseconds. At expiry its whole grant counts as used."
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["open", "closed", "expired"]
+                        }
+                      },
+                      "required": ["leaseKey", "seq", "granted", "captured", "expiresAt", "status"]
+                    },
+                    "terms": {
+                      "type": "object",
+                      "properties": {
+                        "holds": {
+                          "type": "object",
+                          "properties": {
+                            "defaultTtlMs": {
+                              "type": "integer"
+                            },
+                            "maxTtlMs": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": ["defaultTtlMs", "maxTtlMs"]
+                        },
+                        "closesAt": {
+                          "type": "integer",
+                          "nullable": true
+                        }
+                      },
+                      "required": ["holds", "closesAt"],
+                      "description": "The budget's hold TTL bounds and close time, so holds spent locally follow them"
+                    },
+                    "replayed": {
+                      "type": "boolean",
+                      "description": "True when this answer replays an earlier request instead of applying it again"
+                    },
+                    "balance": {
+                      "type": "object",
+                      "properties": {
+                        "remaining": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "The least remaining over hard limits; null when the budget has no hard limit"
+                        },
+                        "held": {
+                          "type": "string",
+                          "description": "The sum of open holds and the unreported part of open leases"
+                        },
+                        "limits": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "window": {
+                                "type": "string",
+                                "enum": ["hour", "day", "week", "month", "never"],
+                                "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                                "example": "month"
+                              },
+                              "enforce": {
+                                "type": "string",
+                                "enum": ["hard", "soft"],
+                                "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
+                                "example": "hard"
+                              },
+                              "amount": {
+                                "type": "string",
+                                "description": "The limit"
+                              },
+                              "consumed": {
+                                "type": "string",
+                                "description": "Used in the current period"
+                              },
+                              "held": {
+                                "type": "string",
+                                "description": "Held by open holds and leases"
+                              },
+                              "remaining": {
+                                "type": "string",
+                                "description": "amount - consumed - held; negative for a soft limit, or a hard limit a record passed"
+                              },
+                              "resetsAt": {
+                                "type": "integer",
+                                "nullable": true,
+                                "description": "When the limit's current period ends, in epoch milliseconds; null for never"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "window",
+                              "enforce",
+                              "amount",
+                              "consumed",
+                              "held",
+                              "remaining",
+                              "resetsAt"
+                            ]
+                          }
+                        },
+                        "asOf": {
+                          "type": "integer",
+                          "description": "When this balance was computed, in epoch milliseconds"
+                        }
+                      },
+                      "required": ["remaining", "held", "limits", "asOf"]
+                    }
+                  },
+                  "required": ["lease", "terms", "replayed", "balance"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrBadRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Although the HTTP standard specifies \"unauthorized\", semantically this response means \"unauthenticated\". That is, the client must authenticate itself to get the requested response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrUnauthorized"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "The request does not fit the budget. `details.blocked` names the limit that blocked it and the remedy that would let it through.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrBudgetExceeded"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrForbidden"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrNotFound"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "This response is sent when a request conflicts with the current state of the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrConflict"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrPreconditionFailed"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request payload is larger than the server is willing to process.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrPayloadTooLarge"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The user has sent too many requests in a given amount of time (\"rate limiting\")",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrTooManyRequests"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server has encountered a situation it does not know how to handle.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrInternalServerError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/budgets/report": {
+      "post": {
+        "operationId": "budgets.report",
+        "summary": "report a lease's usage, and extend or close it",
+        "description": "Report the cumulative usage spent from a lease. A report that is not final may ask for more capacity: what fits is granted, and a short extension is part of the answer, never an error, so the usage always counts. Reports renew the lease once less than half its ttlMs remains. A final report closes the lease and returns the unused grant. Reports are numbered from 1; resending the last one replays its answer, and any other number returns 409. After expiresAt only a final report is accepted.",
+        "tags": ["budgets"],
+        "x-unprice": {
+          "audience": "public",
+          "category": "runtime",
+          "docs": {
+            "expose": false
+          },
+          "sdk": {
+            "path": ["budgets", "report"]
+          }
+        },
+        "requestBody": {
+          "description": "The report",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9:/_.@-]{0,127}$",
+                        "description": "The budget's key, chosen by you and unique within the project. Up to 128 letters, digits, and `: / _ . @ -`, starting with a letter or digit.",
+                        "example": "customer:acme"
+                      },
+                      "leaseKey": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "description": "Up to 256 characters, one per lease, chosen by the client. Retrying a grant with the same key, amount, and ttlMs replays it; another amount or ttlMs returns 409. Lease keys and idempotency keys are separate.",
+                        "example": "lease_01J9Z3"
+                      },
+                      "seq": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "exclusiveMinimum": true,
+                        "description": "1 for the first report on a lease, then one more each time. Resending the last seq with the same body replays its answer; any other seq returns 409.",
+                        "example": 1
+                      },
+                      "captured": {
+                        "type": "string",
+                        "pattern": "^\\d{1,19}(\\.\\d{1,8})?$",
+                        "description": "Usage spent from the lease so far, cumulative: never below the last report and never above the grant. A lost report is covered by the next.",
+                        "example": "0.05"
+                      },
+                      "final": {
+                        "type": "boolean",
+                        "enum": [false]
+                      },
+                      "extend": {
+                        "type": "string",
+                        "pattern": "^\\d{1,19}(\\.\\d{1,8})?$",
+                        "description": "More capacity to add to the lease. Near a hard limit less is granted, and the capture still applies.",
+                        "example": "0.05"
+                      }
+                    },
+                    "required": ["key", "leaseKey", "seq", "captured", "final", "extend"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9:/_.@-]{0,127}$",
+                        "description": "The budget's key, chosen by you and unique within the project. Up to 128 letters, digits, and `: / _ . @ -`, starting with a letter or digit.",
+                        "example": "customer:acme"
+                      },
+                      "leaseKey": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "description": "Up to 256 characters, one per lease, chosen by the client. Retrying a grant with the same key, amount, and ttlMs replays it; another amount or ttlMs returns 409. Lease keys and idempotency keys are separate.",
+                        "example": "lease_01J9Z3"
+                      },
+                      "seq": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "exclusiveMinimum": true,
+                        "description": "1 for the first report on a lease, then one more each time. Resending the last seq with the same body replays its answer; any other seq returns 409.",
+                        "example": 1
+                      },
+                      "captured": {
+                        "type": "string",
+                        "pattern": "^\\d{1,19}(\\.\\d{1,8})?$",
+                        "description": "Usage spent from the lease so far, cumulative: never below the last report and never above the grant. A lost report is covered by the next.",
+                        "example": "0.05"
+                      },
+                      "final": {
+                        "type": "boolean",
+                        "enum": [true],
+                        "description": "Closes the lease: counts `captured` and returns the rest of the grant. After expiresAt only a final report is accepted, until the expired lease is counted."
+                      }
+                    },
+                    "required": ["key", "leaseKey", "seq", "captured", "final"],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The lease after the report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "lease": {
+                      "type": "object",
+                      "properties": {
+                        "leaseKey": {
+                          "type": "string"
+                        },
+                        "seq": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "The last report applied; 0 before the first"
+                        },
+                        "granted": {
+                          "type": "string",
+                          "description": "Debited for this lease so far: the grant plus every extension"
+                        },
+                        "captured": {
+                          "type": "string",
+                          "description": "Usage reported so far"
+                        },
+                        "expiresAt": {
+                          "type": "integer",
+                          "description": "When the lease expires without a report, in epoch milliseconds. At expiry its whole grant counts as used."
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["open", "closed", "expired"]
+                        }
+                      },
+                      "required": ["leaseKey", "seq", "granted", "captured", "expiresAt", "status"]
+                    },
+                    "terms": {
+                      "type": "object",
+                      "properties": {
+                        "holds": {
+                          "type": "object",
+                          "properties": {
+                            "defaultTtlMs": {
+                              "type": "integer"
+                            },
+                            "maxTtlMs": {
+                              "type": "integer"
+                            }
+                          },
+                          "required": ["defaultTtlMs", "maxTtlMs"]
+                        },
+                        "closesAt": {
+                          "type": "integer",
+                          "nullable": true
+                        }
+                      },
+                      "required": ["holds", "closesAt"],
+                      "description": "The budget's hold TTL bounds and close time, so holds spent locally follow them"
+                    },
+                    "extension": {
+                      "type": "object",
+                      "properties": {
+                        "requested": {
+                          "type": "string",
+                          "description": "A decimal amount in the budget's unit"
+                        },
+                        "granted": {
+                          "type": "string",
+                          "description": "A decimal amount in the budget's unit"
+                        },
+                        "denied": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": ["budget_exceeded"]
+                                },
+                                "blocked": {
+                                  "type": "object",
+                                  "properties": {
+                                    "limitId": {
+                                      "type": "string"
+                                    },
+                                    "window": {
+                                      "type": "string",
+                                      "enum": ["hour", "day", "week", "month", "never"],
+                                      "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                                      "example": "month"
+                                    },
+                                    "remaining": {
+                                      "type": "string",
+                                      "description": "A decimal amount in the budget's unit"
+                                    },
+                                    "held": {
+                                      "type": "string",
+                                      "description": "A decimal amount in the budget's unit"
+                                    },
+                                    "resetsAt": {
+                                      "type": "integer",
+                                      "nullable": true,
+                                      "description": "When the limit's current period ends, in epoch milliseconds; null for never"
+                                    },
+                                    "remedy": {
+                                      "type": "string",
+                                      "enum": ["release_holds", "wait_for_reset", "raise_limit"],
+                                      "description": "release_holds: releasing holds makes the request fit all failing limits. wait_for_reset: resetting the failing windows makes the request fit with holds unchanged. raise_limit: neither action alone is sufficient; one or more limits need a change."
+                                    }
+                                  },
+                                  "required": [
+                                    "limitId",
+                                    "window",
+                                    "remaining",
+                                    "held",
+                                    "resetsAt",
+                                    "remedy"
+                                  ],
+                                  "description": "A failing hard limit smaller than the request, or otherwise the one that resets last. Other limits can also block the request. The remedy considers all failing limits."
+                                },
+                                "balance": {
+                                  "type": "object",
+                                  "properties": {
+                                    "remaining": {
+                                      "type": "string",
+                                      "nullable": true,
+                                      "description": "The least remaining over hard limits; null when the budget has no hard limit"
+                                    },
+                                    "held": {
+                                      "type": "string",
+                                      "description": "The sum of open holds and the unreported part of open leases"
+                                    },
+                                    "limits": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "id": {
+                                            "type": "string"
+                                          },
+                                          "window": {
+                                            "type": "string",
+                                            "enum": ["hour", "day", "week", "month", "never"],
+                                            "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                                            "example": "month"
+                                          },
+                                          "enforce": {
+                                            "type": "string",
+                                            "enum": ["hard", "soft"],
+                                            "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
+                                            "example": "hard"
+                                          },
+                                          "amount": {
+                                            "type": "string",
+                                            "description": "The limit"
+                                          },
+                                          "consumed": {
+                                            "type": "string",
+                                            "description": "Used in the current period"
+                                          },
+                                          "held": {
+                                            "type": "string",
+                                            "description": "Held by open holds and leases"
+                                          },
+                                          "remaining": {
+                                            "type": "string",
+                                            "description": "amount - consumed - held; negative for a soft limit, or a hard limit a record passed"
+                                          },
+                                          "resetsAt": {
+                                            "type": "integer",
+                                            "nullable": true,
+                                            "description": "When the limit's current period ends, in epoch milliseconds; null for never"
+                                          }
+                                        },
+                                        "required": [
+                                          "id",
+                                          "window",
+                                          "enforce",
+                                          "amount",
+                                          "consumed",
+                                          "held",
+                                          "remaining",
+                                          "resetsAt"
+                                        ]
+                                      }
+                                    },
+                                    "asOf": {
+                                      "type": "integer",
+                                      "description": "When this balance was computed, in epoch milliseconds"
+                                    }
+                                  },
+                                  "required": ["remaining", "held", "limits", "asOf"]
+                                }
+                              },
+                              "required": ["kind", "blocked", "balance"]
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "enum": ["budget_closed"]
+                                },
+                                "closedAt": {
+                                  "type": "integer",
+                                  "description": "When the budget closed, in epoch milliseconds"
+                                }
+                              },
+                              "required": ["kind", "closedAt"]
+                            },
+                            {
+                              "nullable": true
+                            }
+                          ],
+                          "description": "Why less than requested was granted, shaped like the error details of a denied charge; null when all of it was"
+                        }
+                      },
+                      "required": ["requested", "granted", "denied"]
+                    },
+                    "released": {
+                      "type": "string",
+                      "description": "A final report's unused grant, returned; 0 otherwise"
+                    },
+                    "crossed": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Limit ids whose consumed amount first exceeded the limit's amount. A hard limit crosses only after recorded usage took its room. Reservations do not trigger crossings. Replays preserve the original result."
+                    },
+                    "replayed": {
+                      "type": "boolean",
+                      "description": "True when this answer replays an earlier request instead of applying it again"
+                    },
+                    "balance": {
+                      "type": "object",
+                      "properties": {
+                        "remaining": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "The least remaining over hard limits; null when the budget has no hard limit"
+                        },
+                        "held": {
+                          "type": "string",
+                          "description": "The sum of open holds and the unreported part of open leases"
+                        },
+                        "limits": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "window": {
+                                "type": "string",
+                                "enum": ["hour", "day", "week", "month", "never"],
+                                "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                                "example": "month"
+                              },
+                              "enforce": {
+                                "type": "string",
+                                "enum": ["hard", "soft"],
+                                "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
+                                "example": "hard"
+                              },
+                              "amount": {
+                                "type": "string",
+                                "description": "The limit"
+                              },
+                              "consumed": {
+                                "type": "string",
+                                "description": "Used in the current period"
+                              },
+                              "held": {
+                                "type": "string",
+                                "description": "Held by open holds and leases"
+                              },
+                              "remaining": {
+                                "type": "string",
+                                "description": "amount - consumed - held; negative for a soft limit, or a hard limit a record passed"
+                              },
+                              "resetsAt": {
+                                "type": "integer",
+                                "nullable": true,
+                                "description": "When the limit's current period ends, in epoch milliseconds; null for never"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "window",
+                              "enforce",
+                              "amount",
+                              "consumed",
+                              "held",
+                              "remaining",
+                              "resetsAt"
+                            ]
+                          }
+                        },
+                        "asOf": {
+                          "type": "integer",
+                          "description": "When this balance was computed, in epoch milliseconds"
+                        }
+                      },
+                      "required": ["remaining", "held", "limits", "asOf"]
+                    }
+                  },
+                  "required": [
+                    "lease",
+                    "terms",
+                    "extension",
+                    "released",
+                    "crossed",
+                    "replayed",
+                    "balance"
+                  ]
                 }
               }
             }

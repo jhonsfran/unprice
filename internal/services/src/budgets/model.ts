@@ -43,7 +43,8 @@ export type WindowPeriod = Readonly<{
  * - `lastAt` is the budget's clock: when it last wrote. `transition` clamps to it, so windows only
  *   roll forward and nothing is purged ahead of a later command's clock.
  * - `holdSeq` counts holds ever placed. `h_<n>` with n <= holdSeq was minted.
- * - `held` = sum of `amount` over open holds, including expired ones the alarm has not settled yet.
+ * - `held` = what open reservations count: each open hold's `amount` and each open lease's
+ *   `granted - captured`, including expired ones the alarm has not closed yet.
  * - `usage` has all five canonical windows plus anchored ones; `usage.never.consumed` is lifetime
  *   consumption. Every consumption adds to every counter.
  * - `operations` counts the accepted calls that changed the budget, per verb. It rides on the row
@@ -68,7 +69,16 @@ export const emptyLedger: Ledger = {
     month: { start: 0, consumed: ZERO },
     never: { start: 0, consumed: ZERO },
   },
-  operations: { upsert: 0, authorize: 0, settle: 0, release: 0, charge: 0, record: 0 },
+  operations: {
+    upsert: 0,
+    authorize: 0,
+    settle: 0,
+    release: 0,
+    charge: 0,
+    record: 0,
+    lease: 0,
+    report: 0,
+  },
 }
 
 /**
@@ -119,7 +129,64 @@ export type ChargeOperation = Readonly<{
   crossed: readonly string[]
 }>
 
-export type Operation = HoldOperation | ChargeOperation
+/**
+ * What one lease report asks for. `captured` is cumulative, so a lost report is subsumed by the
+ * next. A final report closes the lease, so it cannot extend it. A retry of the same seq must
+ * repeat it field by field.
+ */
+export type LeaseReportRequest =
+  | Readonly<{ final: false; captured: Amount; extend: Amount }>
+  | Readonly<{ final: true; captured: Amount }>
+
+/** Why an extension came back short. The capture in the same report still applied. */
+export type ExtensionDenial =
+  | Readonly<{ code: "LIMIT_EXCEEDED"; blocked: Blocked }>
+  | Readonly<{ code: "BUDGET_CLOSED"; closedAt: number }>
+
+/** The last report a lease applied and what it produced, so an exact retry replays it. */
+export type AppliedReport = Readonly<{
+  seq: number
+  request: LeaseReportRequest
+  extended: Amount
+  denied: ExtensionDenial | null
+  crossed: readonly string[]
+}>
+
+/**
+ * open counts `granted - captured` against every limit. closed consumed `captured` and returned
+ * the rest. expired consumed all of `granted`: a timer cannot prove the process stopped (B3, B10).
+ */
+export type LeaseState =
+  | Readonly<{ status: "open" }>
+  | Readonly<{ status: "closed"; closedAt: number }>
+  | Readonly<{ status: "expired"; closedAt: number }>
+
+/**
+ * Capacity debited up front for a process to spend in its own memory (B10 `local`). Its id is
+ * `l:<lease key>`; the SQLite store keys the row by the key's hash instead. `granted` and
+ * `captured` only grow, and `captured <= granted`. Its seq is `last?.seq ?? 0`.
+ */
+export type LeaseOperation = Readonly<{
+  kind: "lease"
+  id: string
+  /** Chosen by the SDK, one per lease. A separate namespace from idempotency keys. */
+  leaseKey: string
+  /** As requested at grant; a grant retry must repeat it and `ttlMs`. */
+  requested: Amount
+  /** The renewal period. */
+  ttlMs: number
+  createdAt: number
+  granted: Amount
+  captured: Amount
+  last: AppliedReport | null
+  expiresAt: number
+  state: LeaseState
+}>
+
+export type Operation = HoldOperation | ChargeOperation | LeaseOperation
+
+/** Rows that reserve capacity while open, and that the alarm closes into consumption at expiry. */
+export type ReservationOperation = HoldOperation | LeaseOperation
 
 /**
  * What `transition` reads. Only the addressed row and requested window history.
@@ -129,13 +196,14 @@ export type BudgetView = Readonly<{
   ledger: Ledger
   /**
    * The row this command addresses: by idempotency key for authorize, charge, and record; by hold
-   * id for settle and release. Null when it never existed or was purged.
+   * id for settle and release; by lease key for lease and report. Null when it never existed or
+   * was purged.
    */
   target: Operation | null
   /** For `get`: up to WINDOW_HISTORY_PERIODS stored periods per limited window id, newest first. */
   history: readonly WindowPeriod[]
-  /** For `sweep`: open holds whose `expiresAt` passed, earliest first, a bounded batch. */
-  expiredHolds: readonly HoldOperation[]
+  /** For `sweep`: open holds and leases whose `expiresAt` passed, earliest first, a bounded batch. */
+  expired: readonly ReservationOperation[]
 }>
 
 // Commands
@@ -164,6 +232,9 @@ export type BudgetCommand =
       /** Epoch ms the usage happened. Bounds acceptance only; usage counts when it arrives. */
       occurredAt: number
     }>
+  /** Debits `min(amount, room)` under every hard limit for a process to spend locally. */
+  | Readonly<{ type: "lease"; leaseKey: string; amount: Amount; ttlMs: number }>
+  | Readonly<{ type: "report"; leaseKey: string; seq: number; request: LeaseReportRequest }>
   | Readonly<{ type: "get" }>
   | Readonly<{ type: "sweep" }>
 
@@ -200,6 +271,18 @@ export type BudgetSnapshot = Readonly<
     operations: BudgetOperations
   } & BudgetConfig
 >
+
+export type LeaseView = Readonly<{
+  leaseKey: string
+  seq: number
+  granted: Amount
+  captured: Amount
+  expiresAt: number
+  status: LeaseState["status"]
+}>
+
+/** What a local handle needs to answer like the budget: hold TTL bounds and the close time. */
+export type LeaseTerms = Readonly<Pick<BudgetConfig, "holds" | "closesAt">>
 
 /** What would let the same request through. */
 export type BlockedRemedy = "release_holds" | "wait_for_reset" | "raise_limit"
@@ -251,6 +334,24 @@ export type BudgetOutcome =
       replayed: boolean
       balance: BudgetBalance
     }>
+  | Readonly<{
+      type: "lease"
+      lease: LeaseView
+      terms: LeaseTerms
+      replayed: boolean
+      balance: BudgetBalance
+    }>
+  | Readonly<{
+      type: "report"
+      lease: LeaseView
+      terms: LeaseTerms
+      extension: Readonly<{ requested: Amount; granted: Amount; denied: ExtensionDenial | null }>
+      /** A final report's unused grant, returned: granted - captured. Zero otherwise. */
+      released: Amount
+      crossed: readonly string[]
+      replayed: boolean
+      balance: BudgetBalance
+    }>
   | Readonly<{ type: "sweep" }>
 
 /** The outcome a command of type `T` answers with. */
@@ -292,6 +393,18 @@ export type BudgetRejection =
   | Readonly<{ code: "LOOSENING_FORBIDDEN"; change: ConfigChange }>
   | Readonly<{ code: "TOO_LATE"; occurredAt: number; oldestAccepted: number }>
   | Readonly<{ code: "INVALID_OCCURRED_AT"; occurredAt: number; latestAccepted: number }>
+  /** Never granted, or purged after retention. */
+  | Readonly<{ code: "LEASE_NOT_FOUND"; leaseKey: string }>
+  | Readonly<{ code: "LEASE_CLOSED"; leaseKey: string; status: "closed" | "expired" }>
+  /** `seq` is the last applied: only `seq + 1`, or an exact retry of `seq`, is accepted. */
+  | Readonly<{ code: "LEASE_SEQ_CONFLICT"; leaseKey: string; seq: number; requested: number }>
+  | Readonly<{
+      code: "LEASE_CAPTURE_OUT_OF_RANGE"
+      leaseKey: string
+      minimum: Amount
+      maximum: Amount
+      captured: Amount
+    }>
 
 export type BudgetErrorCode = BudgetRejection["code"]
 
@@ -343,6 +456,16 @@ function rejectionMessage(rejection: BudgetRejection): string {
       return `Usage at ${rejection.occurredAt} is older than the oldest accepted ${rejection.oldestAccepted}`
     case "INVALID_OCCURRED_AT":
       return `occurredAt ${rejection.occurredAt} is ahead of the latest accepted ${rejection.latestAccepted}`
+    case "LEASE_NOT_FOUND":
+      return `Lease ${rejection.leaseKey} does not exist`
+    case "LEASE_CLOSED":
+      return rejection.status === "expired"
+        ? `Lease ${rejection.leaseKey} expired; a final report is accepted only until the alarm counts its remainder`
+        : `Lease ${rejection.leaseKey} is already closed`
+    case "LEASE_SEQ_CONFLICT":
+      return `Lease ${rejection.leaseKey} applied report ${rejection.seq}; expected ${rejection.seq + 1} or an exact retry of ${rejection.seq}, got ${rejection.requested}`
+    case "LEASE_CAPTURE_OUT_OF_RANGE":
+      return `Lease ${rejection.leaseKey} accepts a cumulative capture from ${formatAmount(rejection.minimum)} to ${formatAmount(rejection.maximum)}, not ${formatAmount(rejection.captured)}`
   }
 }
 

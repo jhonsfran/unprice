@@ -243,6 +243,14 @@ patterns. Keep it cheap to load and useful.
 - 2026-10-18: Budgets use automatic placement (`getBudgetStub`: no jurisdiction, no hint); every
   other DO stays EU-pinned. evlog `keep` rules only add; to except a request, drop the global rule
   and decide in the middleware's `keep` callback (`keepFailedRequest` in `apps/api/src/observability.ts`).
+- 2026-10-18: In a non-TTY shell vitest-pool-workers swallows the benchmarks' `console.info`; run
+  `pnpm --filter api test:workers:bench --disableConsoleIntercept` to see `BUDGET_BENCHMARK` lines.
+  Measured there: an UPDATE that moves `due_at` adds no row written (lease report 3 with or
+  without renewal), so measure rather than count index entries.
+- 2026-10-18: After extending `budget.properties.test.ts` with a verb, flip one of its core rules
+  and confirm the property fails. Lease reports first reached their accepted path 1% of the time
+  and survived every mutation; planning them against live leases and adding a steady-clock
+  scenario made each mutation fail.
 - 2026-10-16: Budget amounts are `@unprice/money` `Amount` (bigint at `LEDGER_SCALE`) and the wire
   patterns live in `@unprice/db/validators`; never redeclare them in the budget core.
 - 2026-10-16: `Omit` over a generic `BudgetOutcome & { type: T }` does not narrow; strip `type` at

@@ -3,8 +3,10 @@ import {
   type BudgetRecord,
   type ChargeOperation,
   type HoldOperation,
+  type LeaseOperation,
   type Ledger,
   type Operation,
+  type ReservationOperation,
   WINDOW_HISTORY_PERIODS,
   type WindowId,
   alarmAt,
@@ -37,7 +39,10 @@ function decode<T>(text: string): T {
   ) as T
 }
 
-type Payload = Omit<HoldOperation, "kind" | "id"> | Omit<ChargeOperation, "kind" | "id">
+type Payload =
+  | Omit<HoldOperation, "kind" | "id">
+  | Omit<ChargeOperation, "kind" | "id">
+  | Omit<LeaseOperation, "kind" | "id">
 
 /** `kind` and `id` live in their own columns, so the payload leaves them out. */
 function encodeOperation({ kind: _kind, id: _id, ...payload }: Operation): string {
@@ -48,23 +53,33 @@ function decodeOperation(
   row: Pick<typeof schema.budgetOperations.$inferSelect, "id" | "kind" | "dataJson">
 ): Operation {
   const payload = decode<Payload>(row.dataJson)
-  if (row.kind === "hold" && "state" in payload) return { ...payload, kind: "hold", id: row.id }
-  if (row.kind !== "hold" && "crossed" in payload) {
+  if (row.kind === "lease" && "leaseKey" in payload) {
+    return { ...payload, kind: "lease", id: `l:${payload.leaseKey}` }
+  }
+  if (row.kind === "hold" && "amount" in payload && "state" in payload) {
+    return { ...payload, kind: "hold", id: row.id }
+  }
+  if ((row.kind === "charge" || row.kind === "record") && "crossed" in payload) {
     return { ...payload, kind: row.kind, id: `o:${payload.idempotencyKey}` }
   }
   throw new Error(`budget operation ${row.id} does not match its kind ${row.kind}`)
 }
 
 /**
- * Holds keep their minted `h_<n>`. Charge and record rows are keyed by their key's hash, so a
- * 256-character idempotency key never becomes a 256-character primary key.
+ * Holds keep their minted `h_<n>`. Charge, record, and lease rows are keyed by their key's hash, so
+ * a 256-character key never becomes a 256-character primary key.
  */
 function storedId(operation: Operation): string {
-  return operation.kind === "hold" ? operation.id : `o:${sha256HexSync(operation.idempotencyKey)}`
+  if (operation.kind === "hold") return operation.id
+  if (operation.kind === "lease") return leaseId(operation.leaseKey)
+  return `o:${sha256HexSync(operation.idempotencyKey)}`
 }
 
+const leaseId = (leaseKey: string) => `l:${sha256HexSync(leaseKey)}`
+
 function statusOf(operation: Operation): (typeof schema.budgetOperations.$inferInsert)["status"] {
-  return operation.kind === "hold" ? operation.state.status : "done"
+  if (operation.kind === "hold") return operation.state.status
+  return operation.kind === "lease" && operation.state.status === "open" ? "open" : "done"
 }
 
 export class BudgetSqliteStore implements BudgetStore {
@@ -132,7 +147,13 @@ function bind(
         sql`${operations.kind} = 'hold' AND ${operations.dataJson} ->> '$.idempotencyKey' = ${idempotencyKey}`
       ),
 
-    readExpiredHolds(now, limit) {
+    readLease(leaseKey) {
+      const operation = readOperationWhere(eq(operations.id, leaseId(leaseKey)))
+      if (!operation || operation.kind === "lease") return operation
+      throw new Error(`row for ${leaseKey} is not a lease`)
+    },
+
+    readExpired(now, limit) {
       return (
         db
           .select({ id: operations.id, kind: operations.kind, dataJson: operations.dataJson })
@@ -142,10 +163,10 @@ function bind(
           .orderBy(asc(operations.dueAt), asc(sql`length(${operations.id})`), asc(operations.id))
           .limit(limit)
           .all()
-          .map((row) => {
+          .map((row): ReservationOperation => {
             const operation = decodeOperation(row)
-            if (operation.kind !== "hold") throw new Error(`open row ${row.id} is not a hold`)
-            return operation
+            if (operation.kind === "hold" || operation.kind === "lease") return operation
+            throw new Error(`open row ${row.id} is not a hold or a lease`)
           })
       )
     },
@@ -231,7 +252,7 @@ function bind(
         const insert = db
           .insert(operations)
           .values({ id: storedId(operation), kind: operation.kind, ...row })
-        if (operation.kind === "hold") {
+        if (operation.kind === "hold" || operation.kind === "lease") {
           insert.onConflictDoUpdate({ target: operations.id, set: row }).run()
         } else {
           insert.run()
