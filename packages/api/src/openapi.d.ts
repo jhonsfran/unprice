@@ -4543,8 +4543,8 @@ export interface operations {
               requested: string
               /** @description A decimal amount in the budget's unit */
               granted: string
-              /** @description Why less than requested was granted, shaped like the error details of a denied charge; null when all of it was */
-              denied:
+              /** @description Why less than requested was granted, shaped like the error details of a denied charge; absent when all of it was */
+              denied?:
                 | {
                     /** @enum {string} */
                     kind: "budget_exceeded"
@@ -4609,7 +4609,6 @@ export interface operations {
                     /** @description When the budget closed, in epoch milliseconds */
                     closedAt: number
                   }
-                | unknown
             }
             /** @description A final report's unused grant, returned; 0 otherwise */
             released: string

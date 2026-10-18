@@ -682,7 +682,7 @@ describe("budgets API", () => {
         status: "closed",
       },
       terms: { ...terms, closesAt: 1_798_761_600_000 },
-      extension: { requested: "0", granted: "0", denied: null },
+      extension: { requested: "0", granted: "0" },
       released: "3",
       crossed: [],
       replayed: true,

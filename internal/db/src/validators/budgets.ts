@@ -632,10 +632,10 @@ export const reportBudgetResponseSchema = z.object({
     granted: budgetDecimalSchema,
     denied: z
       .discriminatedUnion("kind", [budgetExceededDetailsSchema, budgetClosedDetailsSchema])
-      .nullable()
+      .optional()
       .openapi({
         description:
-          "Why less than requested was granted, shaped like the error details of a denied charge; null when all of it was",
+          "Why less than requested was granted, shaped like the error details of a denied charge; absent when all of it was",
       }),
   }),
   released: budgetDecimalSchema.openapi({

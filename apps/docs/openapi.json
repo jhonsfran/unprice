@@ -6839,15 +6839,12 @@
                                 }
                               },
                               "required": ["kind", "closedAt"]
-                            },
-                            {
-                              "nullable": true
                             }
                           ],
-                          "description": "Why less than requested was granted, shaped like the error details of a denied charge; null when all of it was"
+                          "description": "Why less than requested was granted, shaped like the error details of a denied charge; absent when all of it was"
                         }
                       },
-                      "required": ["requested", "granted", "denied"]
+                      "required": ["requested", "granted"]
                     },
                     "released": {
                       "type": "string",

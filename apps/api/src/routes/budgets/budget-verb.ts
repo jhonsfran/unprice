@@ -88,16 +88,13 @@ export function extensionToWire(
   { requested, granted, denied }: OutcomeOf<"report">["extension"],
   balance: BudgetBalance
 ) {
-  return {
-    requested: formatAmount(requested),
-    granted: formatAmount(granted),
-    denied:
-      denied === null
-        ? null
-        : denied.code === "LIMIT_EXCEEDED"
-          ? exceededDetails(denied.blocked, balance)
-          : closedDetails(denied.closedAt),
-  }
+  const wire = { requested: formatAmount(requested), granted: formatAmount(granted) }
+  if (denied === null) return wire
+  const details =
+    denied.code === "LIMIT_EXCEEDED"
+      ? exceededDetails(denied.blocked, balance)
+      : closedDetails(denied.closedAt)
+  return { ...wire, denied: details }
 }
 
 function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): UnpriceApiError {
