@@ -835,6 +835,7 @@ function countersView(ledger: Ledger, model: ReferenceBudget, now: number) {
 }
 
 describe("budget core against a reference model", () => {
+  // A few hundred milliseconds alone, but the pre-commit hook runs every package's tests at once.
   it("agrees on every outcome, balance, counter, and window history", () => {
     fc.assert(
       fc.property(scenarioArb, ({ config, steps }) => {
@@ -951,7 +952,7 @@ describe("budget core against a reference model", () => {
       }),
       { numRuns: runs, seed }
     )
-  })
+  }, 120_000)
 
   it("keeps the record dedupe window longer than any replay that is still accepted", () => {
     expect(RECORD_DEDUPE_MS - RECORD_ACCEPT_WINDOW_MS - RECORD_FUTURE_SKEW_MS).toBe(

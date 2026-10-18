@@ -90,6 +90,36 @@ describe("alarm scheduling recovery", () => {
     })
   })
 
+  it("lowers a later alarm on wake when an eviction lost the earlier one", async () => {
+    const stub = await created("alarm:evicted-before-arming")
+    await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
+      const now = ahead()
+      const later = now + 30 * DAY
+      await state.storage.setAlarm(later)
+      // The hold commits, then the object is evicted before it moves the alarm to the expiry.
+      const evicted = processor(state, now, async () => {
+        throw new Error("evicted before setAlarm")
+      })
+      await evicted.initialize()
+      const hold = {
+        type: "authorize",
+        idempotencyKey: "hold",
+        amount: UNIT,
+        ttlMs: 60_000,
+      } as const
+      await expect(evicted.execute(hold)).rejects.toThrow("evicted before setAlarm")
+      expect(await state.storage.getAlarm()).toBe(later)
+
+      // The next instance wakes the alarm for the hold's expiry, not a month later.
+      await processor(state, now).initialize()
+      expect(await state.storage.getAlarm()).toBe(now + 60_000)
+      expect(state.storage.sql.exec("SELECT status, due_at FROM budget_operations").one()).toEqual({
+        status: "open",
+        due_at: now + 60_000,
+      })
+    })
+  })
+
   it("retries a failed alarm when an already committed charge replays", async () => {
     const stub = await created("alarm:replay-recovery")
     await runInDurableObject(stub, async (_instance: BudgetDO, state) => {

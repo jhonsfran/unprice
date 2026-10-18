@@ -206,6 +206,82 @@ describe("denials", () => {
   })
 })
 
+describe("several windows at once", () => {
+  it("keeps hour, week, and month limits on their own clocks and blocks on the one that resets last", () => {
+    const at = Date.parse
+    const store = budgetWith({
+      limits: [
+        { id: "hourly", amount: "5", window: "hour" },
+        { id: "weekly", amount: "20", window: "week" },
+        { id: "monthly", amount: "50", window: "month" },
+      ],
+    })
+    const spend = (key: string, units: number, iso: string) =>
+      store.run(charge(key, units), at(iso))
+    const left = (hourly: number, weekly: number, monthly: number) => [
+      ["hourly", $(hourly)],
+      ["weekly", $(weekly)],
+      ["monthly", $(monthly)],
+    ]
+
+    // Wednesday: the hour runs out first and comes back at the top of the next hour.
+    expect(remaining(ok(spend("c1", 4, "2026-10-14T10:00:00Z")))).toEqual(left(1, 16, 46))
+    expect(rejection(spend("c2", 2, "2026-10-14T10:30:00Z"))).toMatchObject({
+      code: "LIMIT_EXCEEDED",
+      blocked: {
+        limitId: "hourly",
+        remaining: $(1),
+        resetsAt: at("2026-10-14T11:00:00Z"),
+        remedy: "wait_for_reset",
+      },
+    })
+    ok(spend("c3", 5, "2026-10-14T11:00:00Z"))
+    ok(spend("c4", 5, "2026-10-14T12:00:00Z"))
+    expect(remaining(ok(spend("c5", 5, "2026-10-14T13:00:00Z")))).toEqual(left(0, 1, 31))
+    // The hour and the week are both short; the week resets last, so it is the one to wait for.
+    expect(rejection(spend("c6", 2, "2026-10-14T13:30:00Z"))).toMatchObject({
+      blocked: {
+        limitId: "weekly",
+        remaining: $(1),
+        resetsAt: at("2026-10-19T00:00:00Z"),
+        remedy: "wait_for_reset",
+      },
+    })
+
+    // Monday resets the week; the month keeps everything the week spent.
+    for (const [key, hour] of [
+      ["c7", "00"],
+      ["c8", "01"],
+      ["c9", "02"],
+    ] as const) {
+      ok(spend(key, 5, `2026-10-19T${hour}:00:00Z`))
+    }
+    expect(remaining(ok(spend("c10", 5, "2026-10-19T03:00:00Z")))).toEqual(left(0, 0, 11))
+
+    // The next Monday, the month runs out while the hour and the week have room.
+    ok(spend("c11", 5, "2026-10-26T00:00:00Z"))
+    expect(remaining(ok(spend("c12", 5, "2026-10-26T01:00:00Z")))).toEqual(left(0, 10, 1))
+    expect(rejection(spend("c13", 2, "2026-10-26T02:00:00Z"))).toMatchObject({
+      blocked: { limitId: "monthly", remaining: $(1), resetsAt: nov1, remedy: "wait_for_reset" },
+    })
+
+    // November 1 is a Sunday: the month starts over and the week it falls in keeps counting.
+    expect(remaining(ok(spend("c14", 3, "2026-11-01T00:00:00Z")))).toEqual(left(2, 7, 47))
+
+    const read = ok(store.run({ type: "get" }, nov1)).outcome
+    if (read.type !== "get") throw new Error(`expected get, got ${read.type}`)
+    const ended = (windowId: string) =>
+      read.history.filter((p) => p.windowId === windowId).map((p) => [p.start, p.consumed])
+    expect(ended("week")).toEqual([
+      [at("2026-10-19T00:00:00Z"), $(20)],
+      [at("2026-10-12T00:00:00Z"), $(19)],
+    ])
+    expect(ended("month")).toEqual([[at("2026-10-01T00:00:00Z"), $(49)]])
+    // Ten hours had usage; each rolled into history on the next accepted charge.
+    expect(ended("hour")).toHaveLength(10)
+  })
+})
+
 describe("idempotency", () => {
   it("replays an authorize with the same key and request, and conflicts otherwise", () => {
     const store = budgetWith(month100)

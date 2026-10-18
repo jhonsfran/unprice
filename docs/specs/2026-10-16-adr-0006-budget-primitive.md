@@ -374,7 +374,10 @@ close: final capture, then source.release(key = "rel:{budget}:{epoch}")
    A budget with neither sleeps until a command writes one, and window boundaries need no wake
    (B2). The sweep first moves the budget's clock to now and settles expired holds, then purges in
    bounded batches: a command clamps its clock to the budget's, so a purge never runs ahead of a
-   later command's clock and a replay cannot count twice.
+   later command's clock and a replay cannot count twice. Commands only move the alarm earlier,
+   after they commit. An object that starts up lowers a stored alarm to its earliest due row too,
+   because an eviction between a commit and its `setAlarm` would otherwise leave an expired hold
+   held until a later wake.
 10. A Durable Object gets its storage on its budget's first upsert. Any other verb on a key that
     was never upserted answers `BUDGET_NOT_FOUND` without writing. A closed budget's alarm wakes
     30 days after `closesAt` and deletes the storage and the alarm once no row is due, so no

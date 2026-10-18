@@ -32,16 +32,19 @@ export class BudgetProcessor {
 
   constructor(private readonly deps: BudgetProcessorDeps) {}
 
+  /**
+   * Lowers the stored alarm to the earliest due row or deletion, even when one is armed: an eviction
+   * between a commit and its `setAlarm` leaves the later alarm in place, and an expired hold would
+   * otherwise stay held until that later wake.
+   */
   async initialize(): Promise<void> {
     this.armedAt = await this.deps.scheduler.getAlarm()
-    if (this.armedAt === null) {
-      await this.lowerAlarm(
-        this.deps.store.atomically((tx) => {
-          const budget = tx.readBudget()
-          return earliest(tx.nextDueAt(), budget && deletableAt(budget.config))
-        })
-      )
-    }
+    await this.lowerAlarm(
+      this.deps.store.atomically((tx) => {
+        const budget = tx.readBudget()
+        return earliest(tx.nextDueAt(), budget && deletableAt(budget.config))
+      })
+    )
   }
 
   async execute(request: BudgetRequest): Promise<BudgetReply> {
