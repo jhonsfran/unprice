@@ -234,15 +234,46 @@ describe("budget handle", () => {
       const input = { amount: "0.05", idempotencyKey: `msg_lost_${verb}` }
 
       const uncertain = await budget[verb](input)
-      expect(uncertain).toMatchObject({ result: { allowed: false, degraded: true } })
+      expect(uncertain).toEqual({
+        result: {
+          allowed: false,
+          degraded: true,
+          blocked: {
+            reason: "unavailable",
+            remedy: "retry",
+            error: {
+              code: "FETCH_ERROR",
+              message: "Response lost after commit",
+              docs: "https://developer.mozilla.org/en-US/docs/Web/API/fetch",
+              requestId: "N/A",
+            },
+          },
+          balance: null,
+        },
+      })
 
       const recovered = await budget[verb](input)
-      expect(recovered).toMatchObject({
-        result: { allowed: true, degraded: false, replayed: true },
-      })
-      if (verb === "authorize") {
-        expect(recovered).toMatchObject({ result: { hold: { id: authorized.holdId } } })
+      const hold = {
+        id: authorized.holdId,
+        key: "customer:acme",
+        amount: authorized.amount,
+        expiresAt: authorized.expiresAt,
+        settle: expect.any(Function),
+        release: expect.any(Function),
       }
+      expect(recovered).toEqual({
+        result:
+          verb === "authorize"
+            ? { allowed: true, degraded: false, hold, balance, replayed: true }
+            : {
+                allowed: true,
+                degraded: false,
+                amount: "0.05",
+                crossed: [],
+                replayed: true,
+                balance,
+              },
+      })
       expect(committedKeys.size).toBe(1)
       expect(bodies).toEqual([
         { ...input, key: "customer:acme" },

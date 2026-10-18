@@ -91,6 +91,17 @@ async function call(path: string, body?: unknown) {
 const rejectWith = (rejection: ConstructorParameters<typeof UnPriceBudgetError>[0]) =>
   mocks.execute.mockResolvedValue(Err(new UnPriceBudgetError(rejection)))
 
+/** The whole versioned error body the handler emits, so an added or renamed field fails. */
+const errorBody = (code: string, message: string, details?: Record<string, unknown>) => ({
+  error: {
+    code,
+    docs: `https://docs.unprice.dev/api-reference/errors/code/${code}`,
+    message,
+    requestId: "req_test",
+    ...(details ? { details } : {}),
+  },
+})
+
 describe("budgets API", () => {
   it("serializes into the OpenAPI document with the 402 on gated verbs", () => {
     const document = createTestApp().getOpenAPIDocument({
@@ -118,12 +129,14 @@ describe("budgets API", () => {
     rejectWith({ code: "HOLD_AMOUNT_EXCEEDED", holdId: "h_1", maximum: usd(10), actual: usd(11) })
     const response = await call("/v1/budgets/settle", { key: "k", holdId: "h_1", amount: "11" })
     expect(response.status).toBe(409)
-    expect(await response.json()).toMatchObject({
-      error: {
-        code: "CONFLICT",
-        details: { kind: "hold_amount_exceeded", holdId: "h_1", maximum: "10", actual: "11" },
-      },
-    })
+    expect(await response.json()).toEqual(
+      errorBody("CONFLICT", "Hold h_1 permits 10, not 11", {
+        kind: "hold_amount_exceeded",
+        holdId: "h_1",
+        maximum: "10",
+        actual: "11",
+      })
+    )
   })
 
   it("returns the minimum cap when a configuration is below committed usage", async () => {
@@ -139,12 +152,14 @@ describe("budgets API", () => {
       limits: [{ id: "month", amount: "80", window: "month" }],
     })
     expect(response.status).toBe(409)
-    expect(await response.json()).toMatchObject({
-      error: {
-        code: "CONFLICT",
-        details: { kind: "limit_below_usage", limitId: "month", minimum: "90", requested: "80" },
-      },
-    })
+    expect(await response.json()).toEqual(
+      errorBody("CONFLICT", "Limit month must cover 90 consumed or held", {
+        kind: "limit_below_usage",
+        limitId: "month",
+        minimum: "90",
+        requested: "80",
+      })
+    )
   })
 
   it.each(["allow", { allowUpTo: "1" }])("refuses fail-open policy %j", async (onUnavailable) => {
@@ -162,12 +177,13 @@ describe("budgets API", () => {
     rejectWith({ code: "WINDOW_CAPACITY_EXCEEDED", maximum: 32, retained: 32 })
     const response = await call("/v1/budgets/upsert", { key: "k", unit: "USD", limits: [] })
     expect(response.status).toBe(409)
-    expect(await response.json()).toMatchObject({
-      error: {
-        code: "CONFLICT",
-        details: { kind: "window_capacity_exceeded", maximum: 32, retained: 32 },
-      },
-    })
+    expect(await response.json()).toEqual(
+      errorBody(
+        "CONFLICT",
+        "Budget retains 32 anchored schedules; at most 32 can remain active or in their current period",
+        { kind: "window_capacity_exceeded", maximum: 32, retained: 32 }
+      )
+    )
   })
 
   it("rejects a request without a valid key", async () => {
@@ -221,13 +237,12 @@ describe("budgets API", () => {
     })
 
     expect(response.status).toBe(403)
-    expect(await response.json()).toMatchObject({
-      error: {
-        code: "INSUFFICIENT_PERMISSIONS",
-        message:
-          "This caller cannot loosen the budget: the upsert raises hard limit month from 50 to 500. A runtime key can create or tighten a budget; raising or removing a hard limit, making it soft, or clearing or postponing closesAt needs a config key.",
-      },
-    })
+    expect(await response.json()).toEqual(
+      errorBody(
+        "INSUFFICIENT_PERMISSIONS",
+        "This caller cannot loosen the budget: the upsert raises hard limit month from 50 to 500. A runtime key can create or tighten a budget; raising or removing a hard limit, making it soft, or clearing or postponing closesAt needs a config key."
+      )
+    )
   })
 
   it.each([
@@ -391,13 +406,12 @@ describe("budgets API", () => {
     })
 
     expect(response.status).toBe(409)
-    expect(await response.json()).toMatchObject({
-      error: {
-        code: "CONFLICT",
-        message: "Budget closed at 2027-01-01T00:00:00.000Z",
-        details: { kind: "budget_closed", closedAt: 1_798_761_600_000 },
-      },
-    })
+    expect(await response.json()).toEqual(
+      errorBody("CONFLICT", "Budget closed at 2027-01-01T00:00:00.000Z", {
+        kind: "budget_closed",
+        closedAt: 1_798_761_600_000,
+      })
+    )
   })
 
   it("requires occurredAt on record and passes it to the budget", async () => {
