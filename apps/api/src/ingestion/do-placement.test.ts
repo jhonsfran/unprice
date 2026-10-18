@@ -59,21 +59,25 @@ describe("durable object placement", () => {
     )
   })
 
-  it("scopes the budget to the EU jurisdiction with the key as the name's tail", () => {
-    const harness = createNamespaceHarness()
-    const env = {
-      APP_ENV: "preview",
-      budget: harness.namespace,
-    } as unknown as Pick<Env, "APP_ENV" | "budget">
+  it.each(["preview", "production"])(
+    "places the budget automatically on %s, with the key as the name's tail",
+    (appEnv) => {
+      const harness = createNamespaceHarness()
+      const env = {
+        APP_ENV: appEnv,
+        budget: harness.namespace,
+      } as unknown as Pick<Env, "APP_ENV" | "budget">
 
-    getBudgetStub(env, { projectId: "proj_123", key: "customer:acme/run:1" })
+      getBudgetStub(env, { projectId: "proj_123", key: "customer:acme/run:1" })
 
-    expect(harness.jurisdiction).toHaveBeenCalledWith("eu")
-    expect(harness.getByName).toHaveBeenCalledWith(
-      "preview:proj_123:budget:customer:acme/run:1",
-      DO_LOCATION_HINT
-    )
-  })
+      // No jurisdiction and no hint: Cloudflare creates the object near its first request.
+      expect(harness.jurisdiction).not.toHaveBeenCalled()
+      expect(harness.getByName).toHaveBeenCalledWith(
+        `${appEnv}:proj_123:budget:customer:acme/run:1`
+      )
+      expect(harness.getByName.mock.calls[0]).toHaveLength(1)
+    }
+  )
 
   it.each([
     ["preview", true],
