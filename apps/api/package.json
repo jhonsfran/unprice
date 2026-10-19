@@ -33,6 +33,7 @@
     "@cloudflare/workers-types": "^5.20260730.1",
     "@types/node": "24.13.2",
     "@unprice/api": "workspace:^",
+    "@unprice/budgets": "workspace:^",
     "@unprice/tsconfig": "workspace:^",
     "dinero.js": "2.0.2",
     "drizzle-kit": "^0.30.5",

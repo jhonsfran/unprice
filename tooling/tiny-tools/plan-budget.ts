@@ -4,7 +4,7 @@ import {
   type BudgetBalance,
   type BudgetHold,
   Unprice,
-} from "@unprice/api"
+} from "@unprice/budgets"
 import { assert, colors, passed, step } from "./harness"
 
 // End-to-end walk through one budget: every verb, its replay, its denial, and the closing rules.

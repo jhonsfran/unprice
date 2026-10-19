@@ -1,17 +1,15 @@
-import createOpenApiClient, { type Client as OpenApiClient } from "openapi-fetch"
-import { version } from "../package.json"
-import {
-  type LocalBudgetHandle,
-  type LocalBudgetOptions,
-  type LocalLeases,
-  createLocalLeases,
-} from "./budget-local"
 import {
   type BudgetHandle,
   type BudgetSettleError,
+  type LocalBudgetHandle,
+  type LocalBudgetOptions,
+  type LocalLeases,
   type SpendSettlement,
   createBudgetHandle,
-} from "./budgets"
+  createLocalLeases,
+} from "@unprice/budgets"
+import createOpenApiClient, { type Client as OpenApiClient } from "openapi-fetch"
+import { version } from "../package.json"
 import type { ApiError, ErrorResponse } from "./errors"
 import {
   type GeneratedSdkResources,

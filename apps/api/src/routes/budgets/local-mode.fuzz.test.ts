@@ -1,5 +1,5 @@
 import { OpenAPIHono } from "@hono/zod-openapi"
-import { type BudgetHold, type LocalBudgetHandle, Unprice } from "@unprice/api"
+import { type BudgetHold, type LocalBudgetHandle, Unprice } from "@unprice/budgets"
 import {
   type BudgetRecord,
   type BudgetRejection,

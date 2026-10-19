@@ -49,6 +49,7 @@
     "vitest": "^4.1.10"
   },
   "dependencies": {
+    "@unprice/budgets": "workspace:^",
     "openapi-fetch": "0.17.0"
   }
 }

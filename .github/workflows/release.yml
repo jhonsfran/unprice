@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   release:
-    name: Release API package
+    name: Release SDK packages
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -42,7 +42,7 @@ jobs:
           version: pnpm bump-versions
           publish: pnpm release
           commitMode: github-api
-          title: "chore: release API package"
-          commit: "chore: release API package"
+          title: "chore: release SDK packages"
+          commit: "chore: release SDK packages"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

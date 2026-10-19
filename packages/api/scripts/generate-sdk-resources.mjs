@@ -4,10 +4,15 @@ import { dirname, resolve } from "node:path"
 
 const METHODS = ["get", "post", "put", "patch", "delete"]
 
-const [, , openApiPathArg, outputPathArg] = process.argv
+const [, , openApiPathArg, outputPathArg, ...flags] = process.argv
+// `--only <group>` keeps the operations under one top-level SDK path, e.g. `--only budgets` for
+// @unprice/budgets, which ships the budget operations without the rest of the API.
+const only = flags[0] === "--only" ? flags[1] : undefined
 
-if (!openApiPathArg || !outputPathArg) {
-  console.error("usage: node scripts/generate-sdk-resources.mjs <openapi.json> <output.ts>")
+if (!openApiPathArg || !outputPathArg || (flags.length > 0 && !only)) {
+  console.error(
+    "usage: node scripts/generate-sdk-resources.mjs <openapi.json> <output.ts> [--only <group>]"
+  )
   process.exit(1)
 }
 
@@ -100,7 +105,7 @@ function collectOperations(openApiDocument) {
 
       const sdkPath = getSdkPath(operationId, operation)
 
-      if (!sdkPath) {
+      if (!sdkPath || (only && sdkPath[0] !== only)) {
         continue
       }
 
