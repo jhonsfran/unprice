@@ -96,7 +96,7 @@ budget is deleted: `get` returns 404, and an upsert creates it again.
 ## Holds
 
 `holds` sets how long an authorization may stay open: `defaultTtlMs` for an authorize that sends no
-`ttlMs` (15 minutes by default), and `maxTtlMs`, the longest one may ask for (1 day by default).
+`ttlMs` (15 minutes by default), and `maxTtlMs`, the longest one may ask for (one day by default).
 See [what happens when a hold expires](/budgets/spend#holds-and-expiry).
 
 ## Changing a budget
@@ -133,7 +133,7 @@ const { result } = await unprice.budget("customer:acme").get();
 `result.budget.balance` has the least `remaining` over the hard limits (null without one), the
 amount `held` by open holds and leases, and each limit's `consumed`, `held`, `remaining`, and
 `resetsAt`. `result.history` holds up to 12 ended periods for each limited window.
-`result.budget.operations` counts the accepted calls that changed the budget, per verb; replays, rejections, and reads are not
-counted.
+`result.budget.operations` counts the accepted calls that changed the budget, per verb. It does not
+count replays, rejections, or reads.
 
 The full request and response schemas are in the [API reference](/api-reference/overview).

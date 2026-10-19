@@ -34,7 +34,7 @@ const unprice = new Unprice({ token: process.env.UNPRICE_TOKEN! });
 
 ## Operations
 
-`unprice.budgets` calls the API directly. Each method returns `{ result }` or `{ error }`; check
+`unprice.budgets` calls the API directly. Each method returns `{ result }` or `{ error }`. Check
 `error` before you use `result`.
 
 | Method | Endpoint |
@@ -55,20 +55,42 @@ The request and response schemas are in the [API reference](/api-reference/overv
 
 `unprice.budget(key)` returns a handle bound to one key. It never creates or changes the budget.
 
-| Method | Returns |
+| Member | Returns |
 | --- | --- |
-| `spend(input, fn)` | The value your function returns. Throws the [budget errors](/budgets/errors). |
-| `authorize({ amount, idempotencyKey, ttlMs? })` | `{ result: { allowed: true, hold } }` or `{ result: { allowed: false, blocked } }` |
-| `charge({ amount, idempotencyKey })` | `{ result: { allowed: true, ... } }` or `{ result: { allowed: false, blocked } }` |
-| `record({ amount, idempotencyKey, occurredAt })` | `{ result }` with `crossed` |
+| `key` | The budget key |
+| `spend(input, fn)` | The `value` your function returns. Throws the [budget errors](/budgets/errors). |
+| `authorize({ amount, idempotencyKey, ttlMs? })` | `{ result: { allowed: true, hold, balance, replayed } }` or `{ result: { allowed: false, blocked, balance } }` |
+| `charge({ amount, idempotencyKey })` | `{ result: { allowed: true, amount, crossed, replayed, balance } }` or `{ result: { allowed: false, blocked, balance } }` |
+| `record({ amount, idempotencyKey, occurredAt })` | `{ result: { amount, crossed, replayed, balance } }` |
 | `get()` | `{ result: { budget, history } }` |
 
-A hold from `authorize` has `id`, `key`, `amount`, `expiresAt`, `settle({ amount })`, and
-`release()`. See [spend against a budget](/budgets/spend).
+Each method except `spend` can also return `{ error }`. A hold from `authorize` has `id`, `key`,
+`amount`, `expiresAt`, `settle({ amount })`, and `release()`. See
+[spend against a budget](/budgets/spend).
 
-`unprice.budget(key, { mode: "local", lease })` returns a [local handle](/budgets/local-mode) with
-the same methods, plus `flush()` and `close()`. `unprice.close()` returns every open lease and
-resolves with the keys it could not return.
+### `spend` input
+
+<ParamField body="estimate" type="string | number" required>
+  The most the work may use, in the budget's unit. `spend` authorizes this amount before `fn` runs.
+</ParamField>
+
+<ParamField body="idempotencyKey" type="string">
+  A stable key for this operation, such as the request id. When you omit it, `spend` generates one
+  and puts it on its errors as `error.idempotencyKey`.
+</ParamField>
+
+<ParamField body="ttlMs" type="integer">
+  How long the hold stays open. Defaults to the budget's `holds.defaultTtlMs`.
+</ParamField>
+
+`fn` receives the hold and returns `{ value, actual }`. `spend` settles `actual`, which may not
+exceed `estimate`, and returns `value`.
+
+### Local handles
+
+`unprice.budget(key, { mode: "local", lease })` returns a [local handle](/budgets/local-mode). It
+has the same members, plus `mode: "local"`, `flush()`, and `close()`. `unprice.close()` returns
+every open lease. It resolves with a `{ key, error }` for each lease it could not return.
 
 Amounts accept numbers or decimal strings and come back as decimal strings. Numbers are rounded to
 8 decimal places.
@@ -78,7 +100,7 @@ Amounts accept numbers or decimal strings and come back as decimal strings. Numb
 | Class | Thrown when |
 | --- | --- |
 | `BudgetExceededError` | A limit denied the estimate |
-| `BudgetUnavailableError` | Unprice could not be reached after the client's retries |
+| `BudgetUnavailableError` | Unprice could not be reached, or answered 429 or 500, after the client's retries |
 | `BudgetRequestError` | The API rejected the authorization |
 | `BudgetRecoveryError` | Your function threw, or your idempotency key replayed |
 | `BudgetSettleError` | The work succeeded, but its settle failed |

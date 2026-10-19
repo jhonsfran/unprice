@@ -3,8 +3,8 @@ title: "Budgets quickstart"
 description: "Put a hard monthly cap on one customer's model calls."
 ---
 
-This guide caps one customer, `customer:acme`, at $50 a month, and wraps an AI SDK call so it runs
-only when the cap can cover it.
+In this quickstart, we cap one customer, `customer:acme`, at $50 a month. Then we wrap an AI SDK
+call in a route handler, so the call runs only when the cap can cover it.
 
 <Steps>
   <Step title="Create an API key">
@@ -17,24 +17,25 @@ only when the cap can cover it.
     <CodeGroup>
 
       ```bash npm
-      npm install @unprice/budgets
+      npm install @unprice/budgets ai @ai-sdk/openai
       ```
 
       ```bash pnpm
-      pnpm add @unprice/budgets
+      pnpm add @unprice/budgets ai @ai-sdk/openai
       ```
 
       ```bash yarn
-      yarn add @unprice/budgets
+      yarn add @unprice/budgets ai @ai-sdk/openai
       ```
 
       ```bash bun
-      bun add @unprice/budgets
+      bun add @unprice/budgets ai @ai-sdk/openai
       ```
     </CodeGroup>
 
-    `@unprice/budgets` is also included in `@unprice/api`. If you already use `@unprice/api`, skip
-    this step and import from it instead.
+    The examples call OpenAI, so they also need `OPENAI_API_KEY` in your environment. If you already
+    use `@unprice/api`, leave out `@unprice/budgets` and import from `@unprice/api` instead. It
+    includes the same client.
   </Step>
 
   <Step title="Define the budget">
@@ -55,7 +56,9 @@ only when the cap can cover it.
     if (error) throw new Error(`${error.code}: ${error.message}`);
     ```
 
-    A runtime key can create a budget and tighten it. Raising the cap later needs a config key; see
+    The call succeeds, and `result.budget.balance.remaining` is `"50"`.
+
+    A runtime key can create a budget and tighten it. Raising the cap later needs a config key. See
     [who can change a cap](/budgets/keys-and-limits#who-can-change-a-cap).
   </Step>
 
@@ -63,30 +66,35 @@ only when the cap can cover it.
     `spend` reserves the most the call can cost, runs it, and settles what it actually cost.
 
     ```ts
+    import { openai } from "@ai-sdk/openai";
     import { generateText } from "ai";
 
-    // Example USD prices per million tokens; use your provider's.
+    const model = openai("gpt-4.1");
+
+    // Example prices in USD per million tokens. Use your model's current prices.
     const PRICE = { input: 2, output: 8 };
-    const costOf = (inputTokens = 0, outputTokens = 0) =>
-      (inputTokens * PRICE.input + outputTokens * PRICE.output) / 1_000_000;
+    const costOf = (usage: { inputTokens?: number; outputTokens?: number }) =>
+      ((usage.inputTokens ?? 0) * PRICE.input + (usage.outputTokens ?? 0) * PRICE.output) / 1_000_000;
+
+    // At most one token per UTF-8 byte, plus room for the message format.
+    const maxInputTokens = (prompt: string) => new TextEncoder().encode(prompt).length + 64;
 
     const acme = unprice.budget("customer:acme");
     const maxOutputTokens = 512;
 
     async function answer(prompt: string) {
-      // Upper bound: the prompt's tokens plus the output limit.
-      const estimate = costOf(countTokens(prompt), maxOutputTokens);
+      const estimate = costOf({ inputTokens: maxInputTokens(prompt), outputTokens: maxOutputTokens });
 
       return acme.spend({ estimate }, async () => {
         const r = await generateText({ model, prompt, maxOutputTokens });
-        const { inputTokens, outputTokens } = r.usage;
-        return { value: r.text, actual: costOf(inputTokens, outputTokens) };
+        return { value: r.text, actual: costOf(r.usage) };
       });
     }
     ```
 
-    `countTokens` stands for your tokenizer, or a limit you enforce on the prompt. The estimate
-    must cover every billable unit, because `actual` may not exceed it.
+    The estimate must cover every billable unit, because `actual` may not exceed it.
+    `maxInputTokens` returns a high bound, so most calls settle below the estimate. If your provider
+    can count a prompt's tokens before the call, use that count instead.
   </Step>
 
   <Step title="Handle the denial">
@@ -96,19 +104,26 @@ only when the cap can cover it.
     ```ts
     import { BudgetExceededError } from "@unprice/budgets";
 
-    try {
-      const text = await answer(prompt);
-      return Response.json({ text });
-    } catch (error) {
-      if (error instanceof BudgetExceededError) {
-        return Response.json(
-          { error: "budget_exceeded", resetsAt: error.blocked.resetsAt },
-          { status: 402 }
-        );
+    export async function POST(request: Request) {
+      const { prompt } = await request.json();
+
+      try {
+        const text = await answer(prompt);
+        return Response.json({ text });
+      } catch (error) {
+        if (error instanceof BudgetExceededError) {
+          return Response.json(
+            { error: "budget_exceeded", resetsAt: error.blocked.resetsAt },
+            { status: 402 }
+          );
+        }
+        throw error;
       }
-      throw error;
     }
     ```
+
+    Send the route a prompt. It answers with `{ "text": ... }` while the cap has room, and with a
+    402 once it does not.
 
     `spend` throws other errors when Unprice cannot be reached or the work fails. Read
     [errors and recovery](/budgets/errors) before you go to production.
@@ -121,8 +136,8 @@ only when the cap can cover it.
     console.log(result?.budget.balance.remaining); // "49.99412"
     ```
 
-    `balance.limits` holds each limit's consumed, held, and remaining amounts, and `history` holds
-    the last ended periods.
+    `remaining` is now below `"50"` by what the call cost. `balance.limits` holds each limit's
+    `consumed`, `held`, and `remaining` amounts, and `history` holds the last ended periods.
   </Step>
 </Steps>
 

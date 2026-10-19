@@ -72,7 +72,8 @@ expire and count in full.
 </ParamField>
 
 <ParamField body="onError" type="(error: ApiError) => void">
-  Background report failures. Spending continues within the lease until its deadline.
+  Receives background report failures. Spending continues within the lease until its deadline. An
+  `ApiError` has `code`, `message`, `docs`, and `requestId`.
 </ParamField>
 
 ## One lease per key
@@ -98,4 +99,4 @@ counts in full, so that capacity stays used until its window resets.
 - Idempotency keys replay for the life of the lease, up to its most recent 100,000 keys.
 
 Other languages can run the same protocol over HTTP with `/v1/budgets/lease` and
-`/v1/budgets/report`; see the [API reference](/api-reference/overview).
+`/v1/budgets/report`. See the [API reference](/api-reference/overview).

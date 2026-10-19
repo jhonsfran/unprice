@@ -614,6 +614,37 @@ describe("budget.spend", () => {
     })
   })
 
+  it.each([
+    ["INTERNAL_SERVER_ERROR", 500],
+    ["TOO_MANY_REQUESTS", 429],
+  ] as const)("throws BudgetUnavailableError when the API answers %s", async (code, status) => {
+    const { budget } = createClient([
+      json(
+        {
+          error: {
+            code,
+            message: "Try again",
+            docs: `https://docs.unprice.dev/api-reference/errors/code/${code}`,
+            requestId: "req_3",
+          },
+        },
+        status
+      ),
+    ])
+    let executions = 0
+
+    const error = await budget
+      .spend({ estimate: "1", idempotencyKey: "msg_retry" }, async () => {
+        executions += 1
+        return { value: "unreachable", actual: "1" }
+      })
+      .catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(BudgetUnavailableError)
+    expect(error).toMatchObject({ error: { code }, idempotencyKey: "msg_retry" })
+    expect(executions).toBe(0)
+  })
+
   it("throws BudgetSettleError carrying the value and actual when the settle fails", async () => {
     const { budget, requests } = createClient([
       json(authorized),

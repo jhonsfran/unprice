@@ -113,11 +113,12 @@ that need several usage events or a serializable run identifier.
 
 ## Budgets
 
-Budgets ship in [`@unprice/budgets`](../budgets/README.md) and come with this client:
-`unprice.budgets.*`, `unprice.budget(key)` (remote, or `{ mode: "local" }` from a lease in
-memory) and `unprice.close()` work the same here, and the budget errors are the same classes. Install
-`@unprice/budgets` on its own to cap spend without the rest of the API; its README covers holds,
-`spend`, recovery, and local mode.
+Budgets ship in [`@unprice/budgets`](https://github.com/jhonsfran/unprice/tree/main/packages/budgets)
+and come with this client. `unprice.budgets.*`, `unprice.budget(key)` (remote, or
+`{ mode: "local" }` from a lease in memory), and `unprice.close()` work the same here, and the
+budget errors are the same classes. Install `@unprice/budgets` on its own to cap spend without the
+rest of the API. The [Budgets docs](https://docs.unprice.dev/budgets/overview) cover holds, `spend`,
+recovery, and local mode.
 
 ```ts
 await unprice.budgets.upsert({

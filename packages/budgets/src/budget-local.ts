@@ -9,6 +9,7 @@ import {
   type BudgetHold,
   type SpendSettlement,
   createSpend,
+  retryable,
   toDenial,
 } from "./budgets"
 import type { ApiError } from "./errors"
@@ -578,12 +579,6 @@ const toReportRequest = (
     ? { key, leaseKey, seq, captured, final: true }
     : { key, leaseKey, seq, captured, final: false, extend: fromUnits(report.extend) }
 }
-
-// The answer of a lost or refused request may still have committed; resending it is safe.
-const retryable = (error: ApiError) =>
-  error.code === "FETCH_ERROR" ||
-  error.code === "INTERNAL_SERVER_ERROR" ||
-  error.code === "TOO_MANY_REQUESTS"
 
 const failed = (error: ApiError): ApiResult<BudgetDenial> => {
   const denial = toDenial(error)

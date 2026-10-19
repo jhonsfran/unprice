@@ -22,7 +22,7 @@ const acme = unprice.budget("customer:acme");
 
 const text = await acme.spend(
   { estimate, idempotencyKey: request.id },
-  async (hold) => {
+  async () => {
     const r = await generateText({ model, prompt, maxOutputTokens });
     return { value: r.text, actual: costOf(r.usage) };
   }
@@ -32,8 +32,8 @@ const text = await acme.spend(
 - **`estimate`** must cover every billable unit, including input and the configured output limit.
   Your provider integration must keep the work within it: a budget cannot stop a provider by itself.
 - **`actual`** may not exceed the estimate. Return `actual: 0` when the work used nothing.
-- **`idempotencyKey`** should be stable for each operation, such as the request id. Without one,
-  `spend` generates a key and exposes it as `error.idempotencyKey` on its errors.
+- **`idempotencyKey`** is a stable key for each operation, such as the request id. Without one,
+  `spend` generates a key and puts it on its errors as `error.idempotencyKey`.
 - **`ttlMs`** is the deadline for the work. It defaults to the budget's `holds.defaultTtlMs`.
 
 `spend` throws when the budget denies the estimate, when Unprice cannot be reached, and when the
@@ -41,7 +41,7 @@ work or the settle fails. [Errors and recovery](/budgets/errors) covers each cas
 
 ## `authorize`, `settle`, and `release`
 
-Use the manual calls when the reservation and the settle happen in different places, for example
+Use the manual calls when the authorize and the settle happen in different places, for example
 across a queue.
 
 ```ts
@@ -70,7 +70,7 @@ same key with another amount or `ttlMs` returns 409. `hold.settle` and `hold.rel
 retry, because the hold id is their idempotency key.
 
 Call `release` only after confirming the work used nothing and has stopped. Releasing twice changes
-nothing; releasing a settled hold returns 409.
+nothing. Releasing a settled hold returns 409.
 
 ## Holds and expiry
 
@@ -114,7 +114,7 @@ await acme.record({
 ```
 
 - Pass the event's own id as the key and its own time as `occurredAt`, never the time of the call.
-- `occurredAt` must be at most one day old and at most five minutes ahead; older usage returns 409.
+- `occurredAt` must be at most one day old and at most five minutes ahead. Older usage returns 409.
 - For 25 hours, the same key and amount replay instead of counting twice, and the same key with
   another amount returns 409.
 
