@@ -142,13 +142,19 @@
     "preview": {
       "workers_dev": false,
       "observability": {
+        "enabled": true,
         "logs": {
-          "enabled": false,
+          "enabled": true,
+          "head_sampling_rate": 1,
           "invocation_logs": true,
-          "persist": false
+          "persist": false,
+          "destinations": ["axiom-preview-logs"]
         },
         "traces": {
-          "enabled": false
+          "enabled": true,
+          "head_sampling_rate": 0.05,
+          "persist": false,
+          "destinations": ["axiom-preview-traces"]
         }
       },
       "route": {

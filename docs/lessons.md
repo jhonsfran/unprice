@@ -68,6 +68,9 @@ patterns. Keep it cheap to load and useful.
 
 ## Cloudflare, API, And Ingestion
 
+- 2026-10-19: Preview native telemetry exports use the account-level `axiom-preview-logs` and
+  `axiom-preview-traces` destinations for `unprice-staging`. Create them before deploying the
+  Wrangler config; keep destination credentials in Cloudflare, never in the repository.
 - 2026-09-20: Default authenticated SDK requests to `cache: "no-store"`; Cloudflare Workers reject
   an explicitly supplied `cache: "default"` before the request reaches the API.
 - 2026-09-20: Treat a missing or disabled payment provider during paid plan publication as an
