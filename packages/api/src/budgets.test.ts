@@ -6,7 +6,7 @@ import {
   BudgetSettleError,
   BudgetUnavailableError,
 } from "./budgets"
-import { Unprice } from "./client"
+import { Unprice, type UnpriceOptions } from "./client"
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -94,11 +94,16 @@ const conflict = () =>
     409
   )
 
-type Reply = Response | Error
+type Reply = Response | Error | Promise<Response>
 
-const createClient = (replies: Reply[], retryAttempts = 0) => {
+const createClient = (
+  replies: Reply[],
+  retryAttempts = 0,
+  settlement: Pick<UnpriceOptions, "waitUntil" | "onSettleError"> = {}
+) => {
   const requests: Array<{ method: string; url: string; body: unknown }> = []
   const client = new Unprice({
+    ...settlement,
     token: "test-token",
     baseUrl: "https://example.com",
     disableTelemetry: true,
@@ -724,5 +729,127 @@ describe("budget.spend", () => {
       url: "https://example.com/v1/budgets/settle",
       body: { key: "customer:acme", holdId: "h_7", amount: "0.06" },
     })
+  })
+})
+
+describe("budget.spend with waitUntil", () => {
+  const deferred = () => {
+    let resolve: (response: Response) => void = () => undefined
+    const promise = new Promise<Response>((done) => {
+      resolve = done
+    })
+    return { promise, resolve }
+  }
+  const nextTask = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+  it("returns the value before the settle answers and hands the settle to waitUntil", async () => {
+    const settleReply = deferred()
+    const background: Array<Promise<unknown>> = []
+    const onSettleError = vi.fn()
+    const { budget, requests } = createClient([json(authorized), settleReply.promise], 0, {
+      waitUntil: (promise) => void background.push(promise),
+      onSettleError,
+    })
+
+    const value = await budget.spend({ estimate: "0.05" }, async () => ({
+      value: "the answer",
+      actual: "0.031",
+    }))
+
+    expect(value).toBe("the answer")
+    expect(background).toHaveLength(1)
+    await vi.waitFor(() => expect(requests).toHaveLength(2))
+    let done = false
+    void background[0]?.then(() => {
+      done = true
+    })
+    await nextTask()
+    expect(done).toBe(false)
+
+    settleReply.resolve(json(settled))
+    await expect(background[0]).resolves.toBeUndefined()
+    expect(onSettleError).not.toHaveBeenCalled()
+    expect(requests[1]).toEqual({
+      method: "POST",
+      url: "https://example.com/v1/budgets/settle",
+      body: { key: "customer:acme", holdId: "h_7", amount: "0.031" },
+    })
+  })
+
+  it("passes a failed background settle to onSettleError without rejecting", async () => {
+    const background: Array<Promise<unknown>> = []
+    const onSettleError = vi.fn()
+    const { budget } = createClient([json(authorized), conflict()], 0, {
+      waitUntil: (promise) => void background.push(promise),
+      onSettleError,
+    })
+
+    const value = await budget.spend(
+      { estimate: "0.05", idempotencyKey: "msg_background" },
+      async () => ({ value: "the answer", actual: "0.031" })
+    )
+
+    expect(value).toBe("the answer")
+    await expect(Promise.all(background)).resolves.toEqual([undefined])
+    expect(onSettleError).toHaveBeenCalledTimes(1)
+    const [error] = onSettleError.mock.calls[0] ?? []
+    expect(error).toBeInstanceOf(BudgetSettleError)
+    expect(error).toMatchObject({
+      value: "the answer",
+      actual: "0.031",
+      idempotencyKey: "msg_background",
+      hold: { id: "h_7", key: "customer:acme", amount: "0.05" },
+      error: { code: "CONFLICT", requestId: "req_2" },
+    })
+  })
+
+  it("resolves a failed background settle without onSettleError", async () => {
+    const background: Array<Promise<unknown>> = []
+    const { budget } = createClient([json(authorized), new TypeError("fetch failed")], 0, {
+      waitUntil: (promise) => void background.push(promise),
+    })
+
+    await budget.spend({ estimate: "0.05" }, async () => ({ value: "the answer", actual: "0.031" }))
+
+    await expect(Promise.all(background)).resolves.toEqual([undefined])
+  })
+
+  it("still throws denials and work failures from spend", async () => {
+    const waitUntil = vi.fn()
+    const { budget } = createClient([exceeded(), json(authorized)], 0, { waitUntil })
+    const cause = new Error("provider timed out")
+
+    const denied = await budget
+      .spend({ estimate: "1" }, async () => ({ value: "never", actual: "0" }))
+      .catch((caught: unknown) => caught)
+    const failed = await budget
+      .spend({ estimate: "0.05", idempotencyKey: "msg_failed" }, async () => {
+        throw cause
+      })
+      .catch((caught: unknown) => caught)
+
+    expect(denied).toBeInstanceOf(BudgetExceededError)
+    expect(failed).toBeInstanceOf(BudgetRecoveryError)
+    expect(failed).toMatchObject({ reason: "work_failed", cause, hold: { id: "h_7" } })
+    expect(waitUntil).not.toHaveBeenCalled()
+  })
+
+  it("awaits the settle without waitUntil", async () => {
+    const settleReply = deferred()
+    const { budget, requests } = createClient([json(authorized), settleReply.promise])
+    let done = false
+
+    const spent = budget
+      .spend({ estimate: "0.05" }, async () => ({ value: "the answer", actual: "0.031" }))
+      .then((value) => {
+        done = true
+        return value
+      })
+    await vi.waitFor(() => expect(requests).toHaveLength(2))
+    await nextTask()
+    expect(done).toBe(false)
+
+    settleReply.resolve(json(settled))
+    await expect(spent).resolves.toBe("the answer")
   })
 })
