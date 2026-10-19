@@ -275,7 +275,7 @@ export interface paths {
     put?: never
     /**
      * debit capacity for a long-lived process to spend locally
-     * @description Debit capacity against every hard limit before it is spent, for a long-lived process to authorize, settle, and charge in its own memory. Near a limit less than asked for is granted; when nothing fits, 402. Report usage to /v1/budgets/report before expiresAt, or the whole grant counts as used. A retry with the same lease key, amount, and ttlMs returns the same lease. A budget past its closesAt returns 409.
+     * @description Debit capacity against every hard limit before it is spent, for a long-lived process to authorize, settle, and charge in its own memory. Near a limit less than asked for is granted; when nothing fits, 402. Report usage to /v1/budgets/report before expiresAt, or the whole grant counts as used. A retry with the same lease key, amount, and ttlMs returns the same lease, or for 10 minutes the same 402. A budget past its closesAt returns 409.
      */
     post: operations["budgets.lease"]
     delete?: never
@@ -4264,7 +4264,7 @@ export interface operations {
            */
           key: string
           /**
-           * @description Up to 256 characters, one per lease, chosen by the client. Retrying a grant with the same key, amount, and ttlMs replays it; another amount or ttlMs returns 409. Lease keys and idempotency keys are separate.
+           * @description Up to 256 characters, one per lease, chosen by the client. Retrying a grant with the same key, amount, and ttlMs replays it, and replays a 402 for 10 minutes; another amount or ttlMs returns 409. Lease keys and idempotency keys are separate.
            * @example lease_01J9Z3
            */
           leaseKey: string
@@ -4458,7 +4458,7 @@ export interface operations {
                */
               key: string
               /**
-               * @description Up to 256 characters, one per lease, chosen by the client. Retrying a grant with the same key, amount, and ttlMs replays it; another amount or ttlMs returns 409. Lease keys and idempotency keys are separate.
+               * @description Up to 256 characters, one per lease, chosen by the client. Retrying a grant with the same key, amount, and ttlMs replays it, and replays a 402 for 10 minutes; another amount or ttlMs returns 409. Lease keys and idempotency keys are separate.
                * @example lease_01J9Z3
                */
               leaseKey: string
@@ -4487,7 +4487,7 @@ export interface operations {
                */
               key: string
               /**
-               * @description Up to 256 characters, one per lease, chosen by the client. Retrying a grant with the same key, amount, and ttlMs replays it; another amount or ttlMs returns 409. Lease keys and idempotency keys are separate.
+               * @description Up to 256 characters, one per lease, chosen by the client. Retrying a grant with the same key, amount, and ttlMs replays it, and replays a 402 for 10 minutes; another amount or ttlMs returns 409. Lease keys and idempotency keys are separate.
                * @example lease_01J9Z3
                */
               leaseKey: string

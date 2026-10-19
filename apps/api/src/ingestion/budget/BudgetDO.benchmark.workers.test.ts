@@ -362,33 +362,61 @@ describe("BudgetDO measured work", () => {
     }
   }, 120_000)
 
-  it("measures replay and denied admission with 1000 receipts", async () => {
+  it("measures replay, denied admission, and a refused lease with 1000 receipts", async () => {
     const stub = await prepare("bench:replay-denial", 1, 1000, "1000")
     const before = await inspect(stub)
-    for (const type of ["replay", "denial"] as const) {
+    const refusal = (i: number): BudgetRequest => ({
+      type: "lease",
+      leaseKey: `refused_${i}`,
+      amount: UNIT,
+      ttlMs: 60_000,
+    })
+    const cases = {
+      replay: {
+        request: (): BudgetRequest => ({
+          type: "record",
+          idempotencyKey: "seed_0",
+          amount: UNIT,
+          occurredAt: Date.now(),
+        }),
+        receipts: 1000,
+      },
+      denial: {
+        request: (i: number): BudgetRequest => ({
+          type: "charge",
+          idempotencyKey: `deny_${i}`,
+          amount: UNIT,
+        }),
+        receipts: 1000,
+      },
+      "lease:refusal": { request: refusal, receipts: 1000 + SAMPLES },
+      "lease:refusalReplay": { request: refusal, receipts: 1000 + SAMPLES },
+    }
+    for (const [type, { request, receipts }] of Object.entries(cases)) {
       const samples: SqlSample[] = []
       const rpcMs: number[] = []
       for (let i = 0; i < SAMPLES; i++) {
-        const measured = await sample(
-          stub,
-          type === "replay"
-            ? { type: "record", idempotencyKey: "seed_0", amount: UNIT, occurredAt: Date.now() }
-            : { type: "charge", idempotencyKey: `deny_${i}`, amount: UNIT }
-        )
+        const measured = await sample(stub, request(i))
         if (type === "replay") {
           const outcome = accepted(measured.reply)
           expect(isOutcomeOf(outcome, "record") && outcome.replayed).toBe(true)
           expect(isOutcomeOf(outcome, "record") && outcome.balance.remaining).toBe(BigInt(0))
-        } else {
+        } else if (type === "denial") {
           expect(measured.reply).toMatchObject({
             ok: false,
             rejection: { code: "LIMIT_EXCEEDED", blocked: { remaining: BigInt(0) } },
+          })
+        } else {
+          expect(accepted(measured.reply)).toMatchObject({
+            type: "refused",
+            blocked: { remaining: BigInt(0) },
+            replayed: type === "lease:refusalReplay",
           })
         }
         samples.push(measured.sql)
         rpcMs.push(measured.rpcMs)
       }
-      expect((await inspect(stub)).receipts).toBe(1000)
+      expect((await inspect(stub)).receipts).toBe(receipts)
       report(`${type}:history=1000`, samples, rpcMs, { before })
     }
   })

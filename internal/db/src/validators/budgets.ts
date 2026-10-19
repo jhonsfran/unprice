@@ -27,6 +27,13 @@ export const MAX_HOLD_TTL_MS = 24 * 60 * 60 * 1000
  * released. A budget accepts `record` this long past its `closesAt`.
  */
 export const OPERATION_RETENTION_MS = 24 * 60 * 60 * 1000
+/**
+ * A refused lease answers this long, so a late copy of the request (an HTTP retry sent while the
+ * first attempt was still in flight) replays the 402 instead of taking capacity no process holds.
+ * Far longer than a copy stays in flight, and far shorter than OPERATION_RETENTION_MS, because a
+ * process facing a full budget is refused again every flush interval.
+ */
+export const LEASE_REFUSAL_RETENTION_MS = 10 * 60 * 1000
 /** `record` accepts usage that occurred at most this long ago (`TOO_LATE` beyond it). */
 export const RECORD_ACCEPT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 /** `record` rejects `occurredAt` further than this ahead of the budget's clock. */
@@ -523,11 +530,14 @@ export const budgetClosedDetailsSchema = z.object({
   }),
 })
 
-const budgetLeaseKeySchema = z.string().min(1).max(256).openapi({
-  description:
-    "Up to 256 characters, one per lease, chosen by the client. Retrying a grant with the same key, amount, and ttlMs replays it; another amount or ttlMs returns 409. Lease keys and idempotency keys are separate.",
-  example: "lease_01J9Z3",
-})
+const budgetLeaseKeySchema = z
+  .string()
+  .min(1)
+  .max(256)
+  .openapi({
+    description: `Up to 256 characters, one per lease, chosen by the client. Retrying a grant with the same key, amount, and ttlMs replays it, and replays a 402 for ${describeDuration(LEASE_REFUSAL_RETENTION_MS)}; another amount or ttlMs returns 409. Lease keys and idempotency keys are separate.`,
+    example: "lease_01J9Z3",
+  })
 
 export const leaseBudgetInputSchema = z
   .object({

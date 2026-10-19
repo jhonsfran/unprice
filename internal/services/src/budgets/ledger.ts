@@ -1,7 +1,12 @@
 /** Counter arithmetic (ADR-0006 B1, B2): rolling windows forward and adding consumption. No policy. */
 
 import type { Amount } from "@unprice/money"
-import { type BudgetLimit, OPERATION_RETENTION_MS, RECORD_DEDUPE_MS } from "./config"
+import {
+  type BudgetLimit,
+  LEASE_REFUSAL_RETENTION_MS,
+  OPERATION_RETENTION_MS,
+  RECORD_DEDUPE_MS,
+} from "./config"
 import type {
   Operation,
   ReservationOperation,
@@ -88,14 +93,17 @@ export function exposureOf(row: ReservationOperation): Amount {
 
 /**
  * When a row's retention ends and the alarm may purge it; null for an open hold or lease, which
- * stays until it is closed. A record is kept for RECORD_DEDUPE_MS so a retry never counts twice;
- * every other row is purged OPERATION_RETENTION_MS after it closed.
+ * stays until it is closed. A record is kept for RECORD_DEDUPE_MS so a retry never counts twice, a
+ * refused lease for LEASE_REFUSAL_RETENTION_MS, and every other row is purged
+ * OPERATION_RETENTION_MS after it closed.
  */
 export function dueAt(operation: Operation): number | null {
   if (operation.kind === "hold" || operation.kind === "lease") {
-    return operation.state.status === "open"
-      ? null
-      : operation.state.closedAt + OPERATION_RETENTION_MS
+    const { state } = operation
+    if (state.status === "open") return null
+    const retention =
+      state.status === "refused" ? LEASE_REFUSAL_RETENTION_MS : OPERATION_RETENTION_MS
+    return state.closedAt + retention
   }
   const retention = operation.kind === "record" ? RECORD_DEDUPE_MS : OPERATION_RETENTION_MS
   return operation.createdAt + retention

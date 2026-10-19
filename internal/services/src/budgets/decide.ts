@@ -362,7 +362,9 @@ function invalidTtl(ttlMs: number, maxTtlMs: number) {
 
 /**
  * Debits first, against every hard limit, like an authorize, and grants what fits: near a limit
- * less than asked for, and nothing fitting is LIMIT_EXCEEDED. The same key, amount, and TTL replay.
+ * less than asked for. Nothing fitting is written as a refused lease: a lease key's first answer is
+ * final, so a late copy of a refused request cannot take capacity no process holds. The same key,
+ * amount, and TTL replay the grant or the refusal.
  */
 function decideLease(
   command: Extract<BudgetCommand, { type: "lease" }>,
@@ -386,7 +388,6 @@ function decideLease(
   const room = roomOf(balance)
   const granted = room === null || room >= amount ? amount : room
   const blocked = granted === ZERO ? blockingLimit(balance, amount) : null
-  if (blocked) return reject({ code: "LIMIT_EXCEEDED", blocked, balance })
   const lease: LeaseOperation = {
     kind: "lease",
     id: `l:${leaseKey}`,
@@ -398,7 +399,7 @@ function decideLease(
     captured: ZERO,
     last: null,
     expiresAt: now + ttlMs,
-    state: { status: "open" },
+    state: blocked ? { status: "refused", closedAt: now, blocked } : { status: "open" },
   }
   return Ok({ rows: [lease], row: lease, held: granted, consumed: ZERO })
 }
@@ -421,8 +422,11 @@ function decideReport(
   now: number
 ): Result<Change, UnPriceBudgetError> {
   const { leaseKey, seq, request } = command
-  if (!target) return reject({ code: "LEASE_NOT_FOUND", leaseKey })
-  const lease = leaseOf(target, leaseKey)
+  const lease = target && leaseOf(target, leaseKey)
+  // A refused lease was never granted, so it has nothing to report on.
+  if (!lease || lease.state.status === "refused") {
+    return reject({ code: "LEASE_NOT_FOUND", leaseKey })
+  }
   const { last, state: leaseState } = lease
   if (last && last.seq === seq && sameReport(last.request, request)) return Ok(unchanged(lease))
   if (leaseState.status !== "open") {

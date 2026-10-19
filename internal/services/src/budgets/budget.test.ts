@@ -549,7 +549,7 @@ describe("expiry and final settlement", () => {
 describe("leases", () => {
   const terms = { holds: { defaultTtlMs: 15 * minute, maxTtlMs: day }, closesAt: null }
 
-  it("grants what fits under every hard limit, refuses when nothing fits, and replays its key", () => {
+  it("grants what fits under every hard limit and replays its key", () => {
     const store = budgetWith(month100)
     ok(store.run(charge("c1", 70), t0))
 
@@ -571,17 +571,6 @@ describe("leases", () => {
     expect(granted.wakeAt).toBe(t0 + minute)
 
     const writes = store.writes
-    expect(rejection(store.run(lease("l2", 1), t0))).toMatchObject({
-      code: "LIMIT_EXCEEDED",
-      blocked: {
-        limitId: "month",
-        window: "month",
-        remaining: $(0),
-        held: $(30),
-        resetsAt: nov1,
-        remedy: "release_holds",
-      },
-    })
     expect(ok(store.run(lease("l1", 50), t0 + minute / 2)).outcome).toMatchObject({
       lease: { granted: $(30), expiresAt: t0 + minute },
       replayed: true,
@@ -590,6 +579,58 @@ describe("leases", () => {
     expect(rejection(store.run(lease("l1", 40), t0))).toEqual(conflict)
     expect(rejection(store.run(lease("l1", 50, hour), t0))).toEqual(conflict)
     expect(store.writes).toBe(writes)
+  })
+
+  it("writes a refusal when nothing fits, which its key replays for 10 minutes", () => {
+    const store = budgetWith(month100)
+    ok(store.run(authorize("k1", 100), t0))
+    const blocked = {
+      limitId: "month",
+      window: "month",
+      remaining: $(0),
+      held: $(100),
+      resetsAt: nov1,
+      remedy: "release_holds",
+    }
+
+    const refused = ok(store.run(lease("l1", 1), t0))
+    expect(refused.outcome).toEqual({
+      type: "refused",
+      blocked,
+      replayed: false,
+      balance: expect.objectContaining({ remaining: $(0), held: $(100) }),
+    })
+    expect(refused.wakeAt).toBe(t0 + 10 * minute)
+    expect(store.rows.get("l:l1")).toMatchObject({
+      granted: $(0),
+      state: { status: "refused", closedAt: t0, blocked },
+    })
+
+    // A late copy of the request finds the room a release returned and still gets the refusal.
+    ok(store.run(release("h_1"), t0))
+    const writes = store.writes
+    expect(ok(store.run(lease("l1", 1), t0 + 10 * minute - 1)).outcome).toMatchObject({
+      type: "refused",
+      blocked,
+      replayed: true,
+      balance: { remaining: $(100), held: $(0) },
+    })
+    expect(rejection(store.run(lease("l1", 2), t0))).toEqual({
+      code: "IDEMPOTENCY_CONFLICT",
+      idempotencyKey: "l1",
+    })
+    expect(rejection(store.run(finalReport("l1", 1, 0), t0))).toEqual({
+      code: "LEASE_NOT_FOUND",
+      leaseKey: "l1",
+    })
+    expect(store.writes).toBe(writes)
+    expect([store.ledger.held, store.ledger.usage.month.consumed]).toEqual([$(0), $(0)])
+    expect(store.ledger.operations).toMatchObject({ authorize: 1, release: 1, lease: 0 })
+
+    const regranted = ok(store.run(lease("l1", 1), t0 + 10 * minute))
+    expect(regranted.outcome).toMatchObject({ type: "lease", lease: { granted: $(1) } })
+    expect(regranted.purged).toEqual([expect.objectContaining({ id: "l:l1" })])
+    expect(store.ledger.operations.lease).toBe(1)
   })
 
   it("refuses a lease on a closed budget and a TTL outside the hold bounds", () => {
@@ -1519,6 +1560,44 @@ describe("checkTransition for leases", () => {
         periods: [],
       })
     ).toEqual(["lease l:l1 expired without capturing its grant"])
+  })
+
+  it("catches a refused lease that was granted something", () => {
+    const refused: LeaseOperation = {
+      kind: "lease",
+      id: "l:l1",
+      leaseKey: "l1",
+      requested: $(40),
+      ttlMs: minute,
+      createdAt: t0,
+      granted: $(10),
+      captured: $(0),
+      last: null,
+      expiresAt: t0 + minute,
+      state: {
+        status: "refused",
+        closedAt: t0,
+        blocked: {
+          limitId: "month",
+          window: "month",
+          remaining: $(0),
+          held: $(0),
+          resetsAt: nov1,
+          remedy: "raise_limit",
+        },
+      },
+    }
+    const before = { ...emptyLedger, lastAt: t0 }
+    expect(
+      checkTransition({
+        before,
+        after: before,
+        limits: [],
+        resultingLimits: [],
+        steps: [[undefined, refused]],
+        periods: [],
+      })
+    ).toEqual(["lease l:l1 was created refused"])
   })
 })
 

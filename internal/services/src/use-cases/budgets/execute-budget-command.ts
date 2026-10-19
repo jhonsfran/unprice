@@ -1,5 +1,5 @@
-import { Ok, type Result } from "@unprice/error"
-import { type OutcomeOf, type UnPriceBudgetError, isOutcomeOf } from "../../budgets"
+import { Err, Ok, type Result } from "@unprice/error"
+import { type OutcomeOf, UnPriceBudgetError, isOutcomeOf } from "../../budgets"
 import type { BudgetClient, BudgetRequest } from "./budget-client"
 
 /**
@@ -33,6 +33,12 @@ export async function executeBudgetCommand<R extends BudgetVerbRequest>(
     request.type === "upsert" ? { ...request, key, projectId } : request
   const result = await deps.budgets.execute({ projectId, key }, command)
   if (result.err) return result
+  // A refused lease is written so a late copy of the request stays refused; the caller gets it as
+  // LIMIT_EXCEEDED, like any denial.
+  if (result.val.type === "refused") {
+    const { blocked, balance } = result.val
+    return Err(new UnPriceBudgetError({ code: "LIMIT_EXCEEDED", blocked, balance }))
+  }
   // RPC erases the verb's type; the budget always answers with the outcome of the verb it ran.
   if (!isOutcomeOf(result.val, input.request.type)) {
     throw new Error(`budget ${input.request.type} returned a ${result.val.type} outcome`)

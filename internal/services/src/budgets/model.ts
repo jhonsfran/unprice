@@ -155,11 +155,14 @@ export type AppliedReport = Readonly<{
 /**
  * open counts `granted - captured` against every limit. closed consumed `captured` and returned
  * the rest. expired consumed all of `granted`: a timer cannot prove the process stopped (B3, B10).
+ * refused granted nothing because nothing fit; it keeps what blocked it, so a later copy of the
+ * request replays the refusal instead of taking capacity no process holds.
  */
 export type LeaseState =
   | Readonly<{ status: "open" }>
   | Readonly<{ status: "closed"; closedAt: number }>
   | Readonly<{ status: "expired"; closedAt: number }>
+  | Readonly<{ status: "refused"; closedAt: number; blocked: Blocked }>
 
 /**
  * Capacity debited up front for a process to spend in its own memory (B10 `local`). Its id is
@@ -272,13 +275,14 @@ export type BudgetSnapshot = Readonly<
   } & BudgetConfig
 >
 
+/** A granted lease; a refused one answers as `refused` instead. */
 export type LeaseView = Readonly<{
   leaseKey: string
   seq: number
   granted: Amount
   captured: Amount
   expiresAt: number
-  status: LeaseState["status"]
+  status: Exclude<LeaseState["status"], "refused">
 }>
 
 /** What a local handle needs to answer like the budget: hold TTL bounds and the close time. */
@@ -341,6 +345,11 @@ export type BudgetOutcome =
       replayed: boolean
       balance: BudgetBalance
     }>
+  /**
+   * A lease nothing fit. It is written, so the lease key keeps this answer for
+   * LEASE_REFUSAL_RETENTION_MS; the caller gets it as the LIMIT_EXCEEDED rejection.
+   */
+  | Readonly<{ type: "refused"; blocked: Blocked; replayed: boolean; balance: BudgetBalance }>
   | Readonly<{
       type: "report"
       lease: LeaseView
@@ -357,7 +366,7 @@ export type BudgetOutcome =
 /** The outcome a command of type `T` answers with. */
 export type OutcomeOf<T extends BudgetOutcome["type"]> = BudgetOutcome & Readonly<{ type: T }>
 
-/** Every command answers with the outcome of its own type. */
+/** Every command answers with the outcome of its own type, and a lease nothing fit with `refused`. */
 export function isOutcomeOf<T extends BudgetOutcome["type"]>(
   outcome: BudgetOutcome,
   type: T

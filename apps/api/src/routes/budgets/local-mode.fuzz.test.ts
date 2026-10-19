@@ -167,7 +167,9 @@ class MemoryBudgetStore implements BudgetStore {
 type Delivery = { actor: number | null; copy: boolean }
 
 /** The budget's Durable Object: the real processor, with RPC copies and alarms on the fake clock. */
-function createBudgetObject(onReply: (reply: BudgetReply, delivery: Delivery) => void) {
+function createBudgetObject(
+  onReply: (reply: BudgetReply, delivery: Delivery, request: BudgetRequest) => void
+) {
   const store = new MemoryBudgetStore()
   const failures: string[] = []
   let alarm: { at: number; timer: ReturnType<typeof setTimeout> } | null = null
@@ -199,7 +201,7 @@ function createBudgetObject(onReply: (reply: BudgetReply, delivery: Delivery) =>
   const execute = async (request: BudgetRequest, delivery: Delivery): Promise<BudgetReply> => {
     try {
       const reply = structuredClone(await processor.execute(structuredClone(request)))
-      onReply(reply, delivery)
+      onReply(reply, delivery, request)
       return reply
     } catch (error) {
       failures.push(`${request.type} threw: ${messageOf(error)}`)
@@ -307,8 +309,12 @@ async function runScenario(scenario: Scenario) {
   let confirmed = ZERO
   /** Holds the clients report closed at their full amount: expired, or open when a lease ended. */
   let full = ZERO
+  /** Which client asked for each lease key, and the keys whose lease reached that client. */
+  const owners = new Map<string, number>()
+  const heard = new Set<string>()
 
-  const object = createBudgetObject((reply, { actor, copy }) => {
+  const object = createBudgetObject((reply, { actor, copy }, request) => {
+    if (request.type === "lease" && actor !== null) owners.set(request.leaseKey, actor)
     if (reply.ok) return
     const { rejection } = reply
     if (rejection.code === "LEASE_CLOSED" && actor !== null) {
@@ -338,12 +344,21 @@ async function runScenario(scenario: Scenario) {
     return response
   }
 
+  /** An answer that reaches its client: a lease in it is one the client holds. */
+  const hear = async (response: Response) => {
+    if (response.ok) {
+      const body = (await response.clone().json()) as { lease?: { leaseKey: string } }
+      if (body.lease) heard.add(body.lease.leaseKey)
+    }
+    return response
+  }
+
   const send = async (actor: Client, request: Request): Promise<Response> => {
     // A crashed process never hears back.
     if (actor.crashed) return new Promise<Response>(() => {})
     const delivery = { actor: actor.id, copy: false }
     const fault = faults.shift()
-    if (fault === undefined) return deliver(request, delivery)
+    if (fault === undefined) return hear(await deliver(request, delivery))
     if (fault === "lose") throw new TypeError("fetch failed")
     if (fault === "drop") {
       await deliver(request, delivery)
@@ -352,7 +367,7 @@ async function runScenario(scenario: Scenario) {
     if (fault === "twice") {
       const copy = copyOf(request)
       await deliver(request, delivery)
-      return deliver(copy, delivery)
+      return hear(await deliver(copy, delivery))
     }
     if ("delay" in fault) {
       return new Promise<Response>((answer) => {
@@ -360,7 +375,7 @@ async function runScenario(scenario: Scenario) {
       })
     }
     parked.push({ request: copyOf(request), actor, at: step + fault.echo, answer: null })
-    return deliver(request, delivery)
+    return hear(await deliver(request, delivery))
   }
 
   const releaseParked = async (all: boolean) => {
@@ -368,7 +383,7 @@ async function runScenario(scenario: Scenario) {
     for (const item of due) {
       parked.splice(parked.indexOf(item), 1)
       const response = await deliver(item.request, { actor: item.actor.id, copy: !item.answer })
-      if (item.answer && !item.actor.crashed) item.answer(response)
+      if (item.answer && !item.actor.crashed) item.answer(await hear(response))
     }
     await quiesce()
   }
@@ -604,6 +619,15 @@ async function runScenario(scenario: Scenario) {
   expect(
     store.leases().flatMap((lease) => (lease.state.status === "open" ? [lease.leaseKey] : []))
   ).toEqual([])
+  // Every lease the server granted reached the client that asked for it, unless that client
+  // crashed first. A lease no client holds, such as one a stray copy of a refused request took,
+  // would count its whole grant at expiry for nothing.
+  const orphans = store.leases().filter((lease) => {
+    if (lease.state.status === "refused" || heard.has(lease.leaseKey)) return false
+    const owner = owners.get(lease.leaseKey)
+    return owner === undefined || !actors[owner]?.crashed
+  })
+  expect(orphans.map((lease) => lease.leaseKey)).toEqual([])
   expect(store.ledger.held).toBe(ZERO)
   expect(consumed).toBeGreaterThanOrEqual(spent)
   expect(consumed).toBeLessThanOrEqual(spent + unreported)
@@ -615,12 +639,14 @@ const expectedRefusal = (rejection: BudgetRejection) =>
   rejection.code === "LIMIT_EXCEEDED" ||
   (rejection.code === "LEASE_CLOSED" && rejection.status === "expired")
 
+// Stray copies weigh most: a copy of a refused grant can take capacity only if room returns
+// before it lands, so the scenario needs a refusal, its copy, and a close or idle return in between.
 const faultArb: fc.Arbitrary<Fault> = fc.oneof(
   fc.constant("lose"),
   fc.constant("drop"),
   fc.constant("twice"),
   fc.record({ delay: fc.integer({ min: 1, max: 3 }) }),
-  fc.record({ echo: fc.integer({ min: 1, max: 3 }) })
+  { weight: 3, arbitrary: fc.record({ echo: fc.integer({ min: 1, max: 6 }) }) }
 )
 
 const actorArb = fc.nat(2)
@@ -657,7 +683,7 @@ const commandArb: fc.Arbitrary<Command> = fc.oneof(
     }),
   },
   { weight: 1, arbitrary: fc.record({ kind: fc.constant("flush"), actor: actorArb }) },
-  { weight: 1, arbitrary: fc.record({ kind: fc.constant("close"), actor: actorArb }) },
+  { weight: 2, arbitrary: fc.record({ kind: fc.constant("close"), actor: actorArb }) },
   { weight: 1, arbitrary: fc.record({ kind: fc.constant("crash"), actor: actorArb }) },
   {
     weight: 5,
@@ -680,8 +706,8 @@ const leaseArb: fc.Arbitrary<LeaseOptions> = fc
     ttlAfterThreeTicks: fc.integer({ min: 1, max: 20_000 }),
     idleMs: fc.option(fc.integer({ min: 500, max: 20_000 }), { nil: Number.POSITIVE_INFINITY }),
   })
-  // The SDK renews before the last third of the TTL, at its flush ticks: a TTL of three ticks or
-  // less lapses between them.
+  // The SDK renews before the last third of the TTL, at its flush ticks, so it refuses a TTL of
+  // three ticks or less, which would lapse between them (budget-local.test.ts covers that).
   .map(({ ttlAfterThreeTicks, ...lease }) => ({
     ...lease,
     ttlMs: 3 * lease.flushIntervalMs + ttlAfterThreeTicks,
@@ -698,8 +724,8 @@ const scenarioArb: fc.Arbitrary<Scenario> = fc.record({
     fc.record({
       command: commandArb,
       faults: fc.oneof(
-        { weight: 3, arbitrary: fc.constant<Fault[]>([]) },
-        { weight: 2, arbitrary: fc.array(faultArb, { minLength: 1, maxLength: 3 }) }
+        { weight: 1, arbitrary: fc.constant<Fault[]>([]) },
+        { weight: 1, arbitrary: fc.array(faultArb, { minLength: 1, maxLength: 3 }) }
       ),
     }),
     { minLength: 1, maxLength: 60, size: "medium" }

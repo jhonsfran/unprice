@@ -227,16 +227,18 @@ export function transition(params: {
 }
 
 /**
- * Counts a caller's command that changed the budget. A replay, an upsert that changed nothing, and
- * the alarm's sweep (which closes expired reservations) are not counted.
+ * Counts a caller's command that changed the budget. A replay, an upsert that changed nothing, a
+ * refused lease (written only so its key stays refused), and the alarm's sweep (which closes
+ * expired reservations) are not counted.
  */
 function countCall(
   operations: BudgetOperations,
   command: BudgetCommand,
-  change: Pick<Change, "rows" | "configured">
+  change: Pick<Change, "rows" | "configured" | "row">
 ): BudgetOperations {
   if (command.type === "get" || command.type === "sweep") return operations
   if (change.rows.length === 0 && change.configured === undefined) return operations
+  if (change.row?.kind === "lease" && change.row.state.status === "refused") return operations
   return { ...operations, [command.type]: operations[command.type] + 1 }
 }
 
@@ -312,6 +314,9 @@ function outcomeOf(
     }
     case "lease": {
       if (row?.kind !== "lease") throw new Error("lease produced no lease row")
+      if (row.state.status === "refused") {
+        return { type: "refused", blocked: row.state.blocked, replayed, balance }
+      }
       return { type: "lease", lease: leaseView(row), terms: termsOf(budget), replayed, balance }
     }
     case "report": {
@@ -335,6 +340,7 @@ function outcomeOf(
 
 function leaseView(lease: LeaseOperation): LeaseView {
   const { leaseKey, granted, captured, expiresAt, last, state } = lease
+  if (state.status === "refused") throw new Error(`lease ${leaseKey} was refused`)
   return { leaseKey, seq: last?.seq ?? 0, granted, captured, expiresAt, status: state.status }
 }
 

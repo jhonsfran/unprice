@@ -707,6 +707,56 @@ describe("BudgetDO alarm", () => {
     })
   })
 
+  it("keeps a refused lease for 10 minutes, so its key replays the refusal, then purges it", async () => {
+    const key = "customer:lease-refused"
+    const stub = stubFor(key)
+    const t0 = midMonthAhead()
+    let now = t0
+    const lease: BudgetRequest = {
+      type: "lease",
+      leaseKey: "proc-1",
+      amount: units(5),
+      ttlMs: MINUTE,
+    }
+    await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
+      await migrate(drizzle(state.storage), migrations)
+      const processor = realStorageProcessor(state, () => now)
+      await processor.execute(upsert(key, fiftyPerMonth))
+      outcome(
+        await processor.execute({ type: "authorize", idempotencyKey: "k1", amount: units(50) }),
+        "authorize"
+      )
+
+      const refused = outcome(await processor.execute(lease), "refused")
+      expect([refused.blocked.limitId, refused.blocked.remaining, refused.replayed]).toEqual([
+        "month",
+        BigInt(0),
+        false,
+      ])
+      expect(
+        state.storage.sql
+          .exec("SELECT id, status, due_at FROM budget_operations WHERE kind = 'lease'")
+          .toArray()
+      ).toEqual([{ id: `l:${sha256HexSync("proc-1")}`, status: "done", due_at: t0 + 10 * MINUTE }])
+
+      outcome(await processor.execute({ type: "release", holdId: "h_1" }), "release")
+      now = t0 + 10 * MINUTE - 1
+      const replayed = outcome(await processor.execute(lease), "refused")
+      expect([replayed.replayed, replayed.balance.remaining]).toEqual([true, units(50)])
+
+      now = t0 + 10 * MINUTE
+      await processor.alarm()
+      expect(
+        state.storage.sql
+          .exec("SELECT count(*) AS n FROM budget_operations WHERE kind = 'lease'")
+          .one()
+      ).toEqual({ n: 0 })
+      expect(outcome(await processor.execute(lease), "lease").lease.granted).toBe(units(5))
+      const read = outcome(await processor.execute({ type: "get" }), "get")
+      expect(read.budget.operations).toMatchObject({ authorize: 1, release: 1, lease: 1 })
+    })
+  })
+
   it("settles expired holds in batches, and the next day has the capacity back", async () => {
     const key = "customer:many-uncertain"
     const stub = stubFor(key)

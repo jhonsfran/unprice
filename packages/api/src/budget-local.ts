@@ -48,9 +48,15 @@ export type LocalLeaseOptions = {
   amount: AmountInput
   /** Refill in the background below this. Defaults to a quarter of `amount`. */
   lowWater?: AmountInput
-  /** The lease's TTL, renewed while the process reports. Defaults to 60 s. */
+  /**
+   * The lease's TTL, renewed while the process reports. Must exceed three flush intervals.
+   * Defaults to 60 s.
+   */
   ttlMs?: number
-  /** How often consumption is reported while it changes. Defaults to 1 s. */
+  /**
+   * How often consumption is reported while it changes, and how long a key whose grant was refused
+   * answers with that denial before it asks again. Defaults to 1 s.
+   */
   flushIntervalMs?: number
   /**
    * Returns the lease after this long without a local authorize, charge, settle, or release, once
@@ -203,10 +209,24 @@ const createShell = ({
   let timer: ReturnType<typeof setInterval> | null = null
   let calls = 0
   let activeAt = now()
+  // The server writes a row for each refused grant, so for one flush interval after a 402 the
+  // key's calls get that denial from memory instead of a refused grant each.
+  let refused: ApiError | null = null
 
   // Only between calls, so no call goes on to open a lease from a shell the registry dropped.
   const forgetIfDone = () => {
-    if (calls === 0 && epoch.phase === "idle" && epoch.replay === null) forget()
+    if (calls === 0 && epoch.phase === "idle" && epoch.replay === null && refused === null) {
+      forget()
+    }
+  }
+
+  const refuse = (error: ApiError) => {
+    refused = error
+    const lapse = setTimeout(() => {
+      refused = null
+      forgetIfDone()
+    }, flushIntervalMs)
+    if (typeof lapse === "object") lapse.unref()
   }
 
   const tracked =
@@ -239,6 +259,7 @@ const createShell = ({
   const grant = (need: Units): Promise<ApiResult<Lease>> => {
     if (epoch.phase === "granting") return epoch.granted
     if (epoch.phase === "open") return Promise.resolve({ result: epoch.lease })
+    if (refused) return Promise.resolve({ error: refused })
     const request = epoch.replay ?? {
       key,
       leaseKey: globalThis.crypto.randomUUID(),
@@ -249,6 +270,7 @@ const createShell = ({
     const granted = transport.lease(request).then((response): ApiResult<Lease> => {
       if (response.error) {
         epoch = { phase: "idle", replay: retryable(response.error) ? request : null }
+        if (response.error.code === "BUDGET_EXCEEDED") refuse(response.error)
         return { error: response.error }
       }
       const { result } = response
@@ -489,14 +511,23 @@ function leaseSettings(options: LocalLeaseOptions): LeaseSettings {
   if (amount === ZERO) throw new RangeError("lease.amount must be positive")
   const idleMs = options.idleMs ?? DEFAULT_IDLE_MS
   if (!(idleMs > 0)) throw new RangeError(`lease.idleMs must be positive, received ${idleMs}`)
+  const ttlMs = options.ttlMs ?? DEFAULT_LEASE_TTL_MS
+  const flushIntervalMs = options.flushIntervalMs ?? DEFAULT_FLUSH_INTERVAL_MS
+  // Renewal is checked on flush ticks once less than a third of the TTL is left; with a third no
+  // longer than a tick, the lease can expire between two ticks on a perfect network.
+  if (!(ttlMs > 3 * flushIntervalMs)) {
+    throw new RangeError(
+      `lease.ttlMs must exceed 3 × lease.flushIntervalMs, received ttlMs ${ttlMs} and flushIntervalMs ${flushIntervalMs}`
+    )
+  }
   return {
     amount,
     lowWater:
       options.lowWater === undefined
         ? amount / BigInt(4)
         : optionUnits(options.lowWater, "lease.lowWater"),
-    ttlMs: options.ttlMs ?? DEFAULT_LEASE_TTL_MS,
-    flushIntervalMs: options.flushIntervalMs ?? DEFAULT_FLUSH_INTERVAL_MS,
+    ttlMs,
+    flushIntervalMs,
     idleMs,
   }
 }

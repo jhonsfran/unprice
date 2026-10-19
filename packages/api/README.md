@@ -245,10 +245,13 @@ process.on("SIGTERM", () => void unprice.close())
 ```
 
 The handle reports consumption every `flushIntervalMs` (1 second) and tops the lease back up to
-`amount` in the background once it falls below `lowWater` (a quarter of `amount`). Only a request
-the lease cannot cover waits for a refill, and when the budget has no room left it gets the usual
-limit denial. If Unprice cannot be reached, spending continues within the lease until its
-deadline; then `authorize` and `charge` deny as `degraded`.
+`amount` in the background once it falls below `lowWater` (a quarter of `amount`). It renews the
+lease once less than a third of `ttlMs` (60 seconds) is left, so `ttlMs` must exceed three flush
+intervals; a shorter one throws a `RangeError`. Only a request the lease cannot cover waits for a
+refill, and when the budget has no room left it gets the usual limit denial. When a new lease is
+refused, the key's calls get that denial for `flushIntervalMs` before the handle asks again. If
+Unprice cannot be reached, spending continues within the lease until its deadline; then
+`authorize` and `charge` deny as `degraded`.
 
 A client holds at most one lease per key. Every `unprice.budget(key, { mode: "local", ... })` call
 on it spends from that lease, so taking a handle per request is fine. Taking one with other lease

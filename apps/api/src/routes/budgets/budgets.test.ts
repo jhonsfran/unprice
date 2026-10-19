@@ -875,6 +875,38 @@ describe("budgets API", () => {
     }
   )
 
+  it("answers a refused lease, first or replayed, with the 402 of a denial", async () => {
+    const blocked = {
+      limitId: "month",
+      window: "month" as const,
+      remaining: BigInt(0),
+      held: usd(50),
+      resetsAt: 1_798_761_600_000,
+      remedy: "release_holds" as const,
+    }
+    const body = { key: "k", leaseKey: "lease_1", amount: "1", ttlMs: 60_000 }
+
+    for (const replayed of [false, true]) {
+      mocks.execute.mockResolvedValue(
+        Ok({ type: "refused", blocked, replayed, balance: balance(BigInt(0), usd(50)) })
+      )
+      const response = await call("/v1/budgets/lease", body)
+
+      expect(response.status).toBe(402)
+      expect(response.headers.get("Unprice-Budget-Remaining")).toBe("0")
+      expect(await response.json()).toEqual(
+        errorBody("BUDGET_EXCEEDED", "Limit month has 0 remaining", {
+          kind: "budget_exceeded",
+          blocked: { ...blocked, remaining: "0", held: "50" },
+          balance: wireBalance("0", "50", "0"),
+        })
+      )
+    }
+    expect(mocks.log).toHaveBeenLastCalledWith({
+      budget: { command: "lease", outcome: "LIMIT_EXCEEDED", do_ms: expect.any(Number) },
+    })
+  })
+
   it("reads a budget by the key in the query string", async () => {
     rejectWith({ code: "BUDGET_NOT_FOUND" })
 

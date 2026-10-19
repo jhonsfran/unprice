@@ -142,9 +142,10 @@ function counterViolations(
 const seqOf = (lease: LeaseOperation) => lease.last?.seq ?? 0
 
 /**
- * The lease lifecycle: created open with nothing captured; each report is the next seq and only
- * grows `granted` and `captured`, with `captured <= granted`; closing keeps `granted`; expiry keeps
- * the seq and captures all of `granted`; a closed or expired lease never changes.
+ * The lease lifecycle: created open with nothing captured, or refused with nothing granted; each
+ * report is the next seq and only grows `granted` and `captured`, with `captured <= granted`;
+ * closing keeps `granted`; expiry keeps the seq and captures all of `granted`; a closed, expired,
+ * or refused lease never changes.
  */
 function leaseStepViolations(prior: Operation | undefined, row: LeaseOperation): string[] {
   const at = `lease ${row.id}`
@@ -153,8 +154,11 @@ function leaseStepViolations(prior: Operation | undefined, row: LeaseOperation):
     return [`${at} captured ${captured} of ${granted}`]
   }
   if (!prior) {
-    const created = row.state.status === "open" && captured === ZERO && row.last === null
-    return created && granted <= row.requested ? [] : [`${at} was created ${row.state.status}`]
+    const status = row.state.status
+    const maxGranted = status === "open" ? row.requested : status === "refused" ? ZERO : null
+    const created =
+      maxGranted !== null && granted <= maxGranted && captured === ZERO && row.last === null
+    return created ? [] : [`${at} was created ${status}`]
   }
   if (
     prior.kind !== "lease" ||

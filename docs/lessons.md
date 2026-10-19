@@ -277,6 +277,13 @@ patterns. Keep it cheap to load and useful.
   through the real budget routes and processor on fake timers; rebuild `@unprice/api` before it.
   Keep `setImmediate` real and step with `vi.advanceTimersToNextTimer()`: the async advance waits a
   real 1 ms per timer. Never put `vi.fn()` on a per-request path there: it keeps every Hono context.
+- 2026-10-18: A refusal that writes nothing is not idempotent: a late copy of the request (an HTTP
+  retry still in flight) is decided again and can succeed once room returns. Budget leases write
+  their refusal (`status: "refused"`, 10-minute retention), and the SDK waits a flush interval
+  before asking again, so a blocked key writes one row per interval rather than per call.
+- 2026-10-18: The local-mode fuzz test asserts that every lease on the server reached its client.
+  Reverting the refusal row failed it after about 390 runs at the old fault weights; stray copies
+  weighted 3, faults on half the steps, and close weighted 2 cut that to about 40 (at most 110).
 - 2026-10-18: `pnpm add` can re-resolve unrelated peer variants in `pnpm-lock.yaml`; add only the
   importer entries and confirm with `corepack pnpm install --frozen-lockfile`.
 - 2026-10-16: Budget amounts are `@unprice/money` `Amount` (bigint at `LEDGER_SCALE`) and the wire
