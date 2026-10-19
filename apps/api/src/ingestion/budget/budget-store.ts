@@ -268,8 +268,6 @@ function bind(
         .orderBy(asc(operations.dueAt))
         .limit(limit)
       db.delete(operations).where(inArray(operations.id, expired)).run()
-      // Counted with changes(): RETURNING would read every deleted row once more.
-      return db.get<{ deleted: number }>(sql`SELECT changes() AS deleted`).deleted
     },
 
     nextDueAt() {

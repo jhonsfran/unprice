@@ -29,12 +29,8 @@ jobs:
       - name: Audit dependencies
         run: pnpm audit:high
 
-      - name: Build API client
-        run: pnpm build --filter='./packages/api'
-        env:
-          UNPRICE_API_KEY: ""
-          NODE_ENV: test
-
+      # Turbo builds the SDK packages first: typecheck and test depend on ^build, because
+      # @unprice/budgets and @unprice/api resolve to their dist.
       - name: Type-check
         run: pnpm typecheck
         env:
@@ -131,7 +127,8 @@ jobs:
           ts: "true"
           python: "false"
 
-      - name: Build API client
+      # Run outside turbo, so the SDKs @unprice/services imports are built here.
+      - name: Build SDK packages
         run: pnpm build --filter='./packages/api'
         env:
           UNPRICE_API_KEY: ""

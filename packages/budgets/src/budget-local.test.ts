@@ -478,6 +478,16 @@ describe("local budget handle", () => {
     expect(new Set(leaseKeys).size).toBe(2)
   })
 
+  it("closes a refused key without asking the server again", async () => {
+    const server = createServer("0")
+    const local = createHandle(server, { amount: "1" })
+
+    await local.authorize({ amount: "0.1", idempotencyKey: "a" })
+
+    expect(await local.close()).toEqual({ result: null })
+    expect(server.requests).toHaveLength(1)
+  })
+
   it("keeps a refusal whose answer was lost, even once room returns", async () => {
     const server = createServer("0")
     const local = createHandle(server, { amount: "1" })

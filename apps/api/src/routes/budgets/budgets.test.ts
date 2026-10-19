@@ -327,7 +327,7 @@ describe("budgets API", () => {
     })
   })
 
-  it("reports the budget operation and duration without placement diagnostics", async () => {
+  it("reports the budget call on Server-Timing and the request's wide event", async () => {
     mocks.execute.mockResolvedValue(
       Ok({
         type: "authorize",
@@ -342,40 +342,23 @@ describe("budgets API", () => {
     app.use(timing())
     app.use("*", withLogger)
     registerAuthorizeBudgetV1(app)
-    const serverTiming = async (APP_ENV: string) => {
-      const request = new Request("https://example.com/v1/budgets/authorize", {
+
+    const response = await app.fetch(
+      new Request("https://example.com/v1/budgets/authorize", {
         method: "POST",
         headers: { authorization: "Bearer key", "content-type": "application/json" },
         body: JSON.stringify({ key: "customer:acme", amount: "10", idempotencyKey: "a1" }),
-      })
-      const response = await app.fetch(
-        Object.assign(request, { cf: { colo: "EWR" } }),
-        { APP_ENV },
-        { passThroughOnException: vi.fn(), waitUntil: vi.fn() } as unknown as ExecutionContext
-      )
-      expect(response.status).toBe(200)
-      return response.headers.get("Server-Timing")
-    }
+      }),
+      {},
+      { passThroughOnException: vi.fn(), waitUntil: vi.fn() } as unknown as ExecutionContext
+    )
 
-    expect(await serverTiming("preview")).toMatch(
+    expect(response.status).toBe(200)
+    expect(response.headers.get("Server-Timing")).toMatch(
       /^budget;dur=\d+\.\d,total;dur=\d+\.\d;desc="Total Response Time"$/
     )
     expect(mocks.log).toHaveBeenLastCalledWith({
-      budget: {
-        command: "authorize",
-        outcome: "ok",
-        do_ms: expect.any(Number),
-      },
-    })
-    expect(await serverTiming("production")).toMatch(
-      /^budget;dur=\d+\.\d,total;dur=\d+\.\d;desc="Total Response Time"$/
-    )
-    expect(mocks.log).toHaveBeenLastCalledWith({
-      budget: {
-        command: "authorize",
-        outcome: "ok",
-        do_ms: expect.any(Number),
-      },
+      budget: { command: "authorize", outcome: "ok", do_ms: expect.any(Number) },
     })
   })
 
@@ -855,38 +838,6 @@ describe("budgets API", () => {
       expect(await response.json()).toEqual(body)
     }
   )
-
-  it("answers a refused lease, first or replayed, with the 402 of a denial", async () => {
-    const blocked = {
-      limitId: "month",
-      window: "month" as const,
-      remaining: BigInt(0),
-      held: usd(50),
-      resetsAt: 1_798_761_600_000,
-      remedy: "release_holds" as const,
-    }
-    const body = { key: "k", leaseKey: "lease_1", amount: "1", ttlMs: 60_000 }
-
-    for (const replayed of [false, true]) {
-      mocks.execute.mockResolvedValue(
-        Ok({ type: "refused", blocked, replayed, balance: balance(BigInt(0), usd(50)) })
-      )
-      const response = await call("/v1/budgets/lease", body)
-
-      expect(response.status).toBe(402)
-      expect(response.headers.get("Unprice-Budget-Remaining")).toBe("0")
-      expect(await response.json()).toEqual(
-        errorBody("BUDGET_EXCEEDED", "Limit month has 0 remaining", {
-          kind: "budget_exceeded",
-          blocked: { ...blocked, remaining: "0", held: "50" },
-          balance: wireBalance("0", "50", "0"),
-        })
-      )
-    }
-    expect(mocks.log).toHaveBeenLastCalledWith({
-      budget: { command: "lease", outcome: "LIMIT_EXCEEDED", do_ms: expect.any(Number) },
-    })
-  })
 
   it("reads a budget by the key in the query string", async () => {
     rejectWith({ code: "BUDGET_NOT_FOUND" })

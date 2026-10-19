@@ -45,10 +45,6 @@ check "decode returns the exact value" "$(run decode "$ciphertext" "$passphrase"
 check "decode masks the value" "$(grep -c "::add-mask::$value" "$work/stdout")" "1"
 check "decode prints the value only in its mask" "$(grep -v '::add-mask::' "$work/stdout" "$work/stderr" | grep -cF "$value" || true)" "0"
 
-# The cloudposse encoder, verbatim, so a ciphertext it stored still decodes.
-legacy="$(GNUPGHOME="$(mktemp -d)" gpg --symmetric --batch --passphrase "$passphrase" --output - <(echo "$value") | base64 -w0)"
-check "decodes the cloudposse format" "$(run decode "$legacy" "$passphrase")" "$value"
-
 if run decode "$ciphertext" "wrong passphrase" >/dev/null; then wrong="decoded"; else wrong="failed"; fi
 check "a wrong passphrase fails" "$wrong" "failed"
 check "a failed decode never prints the value" "$(cat "$work/stdout" "$work/stderr" | grep -cF "$value" || true)" "0"

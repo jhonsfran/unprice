@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
+import { version } from "../package.json"
 import {
   BudgetExceededError,
   BudgetRecoveryError,
@@ -128,6 +129,48 @@ const createClient = (
 
   return { budget: client.budget("customer:acme"), requests }
 }
+
+describe("Unprice from @unprice/budgets", () => {
+  it("names this package in its source and telemetry headers", async () => {
+    const requests: Request[] = []
+    const client = new Unprice({
+      token: "test-token",
+      baseUrl: "https://example.com",
+      retry: { attempts: 0 },
+      fetch: async (request) => {
+        requests.push(request.clone())
+        return json(authorized)
+      },
+    })
+
+    await client.budget("customer:acme").authorize({ amount: "0.05", idempotencyKey: "msg_1" })
+
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.headers.get("authorization")).toBe("Bearer test-token")
+    expect(requests[0]?.headers.get("unprice-request-source")).toBe(`budgets@${version}`)
+    expect(requests[0]?.headers.get("unprice-telemetry-sdk")).toBe(`@unprice/budgets@${version}`)
+  })
+
+  it("retries a server error, then maps an unreadable failure to FETCH_ERROR", async () => {
+    const { budget, requests } = createClient(
+      [new Response("boom", { status: 503 }), new Response("boom", { status: 503 })],
+      1
+    )
+
+    const { error } = await budget.get()
+
+    expect(requests).toHaveLength(2)
+    expect(error).toMatchObject({
+      code: "FETCH_ERROR",
+      message: "Unexpected API response: 503",
+      requestId: "N/A",
+    })
+  })
+
+  it("refuses an empty token", () => {
+    expect(() => new Unprice({ token: "" })).toThrow("unprice root key must be set")
+  })
+})
 
 describe("budget handle", () => {
   it("authorizes, then settles the hold by its id", async () => {

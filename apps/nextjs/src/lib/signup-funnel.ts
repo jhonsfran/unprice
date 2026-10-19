@@ -11,18 +11,32 @@ export const signupIntentSchema = z.enum(["paid-action", "budgets"])
 export type SignupIntent = z.infer<typeof signupIntentSchema>
 
 /**
- * Where a signup with this intent continues after auth. A Budgets visitor needs a project and a
- * runtime key, not the paid-action proof, so `/new` carries the intent through workspace creation
- * into the Budgets setup.
+ * Where a workspace sends a signup with this intent, or null for the workspace's own home. A
+ * Budgets visitor needs a project and a runtime key, not the paid-action proof.
  */
-export const SIGNUP_INTENT_NEXT: Record<SignupIntent, string | undefined> = {
-  "paid-action": undefined,
-  budgets: "/new?intent=budgets",
+const INTENT_LANDING: Record<SignupIntent, ((workspaceSlug: string) => string) | null> = {
+  "paid-action": null,
+  budgets: (workspaceSlug) => `/${workspaceSlug}/onboarding/budgets`,
 }
 
-/** The Budgets setup inside a workspace: a project, a runtime key, then the two calls. */
-export function budgetsSetupPath(workspaceSlug: string): string {
-  return `/${workspaceSlug}/onboarding?intent=budgets`
+/** Workspace creation, carrying the intent so `/new` can route onward once it exists. */
+export function newWorkspacePath(intent?: SignupIntent): string {
+  return intent ? `/new?${new URLSearchParams({ intent })}` : "/new"
+}
+
+/** Where auth continues for this intent: through `/new` when the intent has its own landing. */
+export function nextAfterAuth(intent: SignupIntent): string | undefined {
+  return INTENT_LANDING[intent] ? newWorkspacePath(intent) : undefined
+}
+
+/** The intent's own landing inside a workspace, or null when it has none. */
+export function intentLanding(workspaceSlug: string, intent?: SignupIntent): string | null {
+  return (intent && INTENT_LANDING[intent]?.(workspaceSlug)) || null
+}
+
+/** Where a workspace lands a signup with this intent: its own landing, else the workspace. */
+export function workspaceLanding(workspaceSlug: string, intent?: SignupIntent): string {
+  return intentLanding(workspaceSlug, intent) ?? `/${workspaceSlug}`
 }
 
 export function getSingleSearchParam(value: string | string[] | undefined): string | undefined {

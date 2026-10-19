@@ -95,9 +95,9 @@ type KeyedRecord = {
  */
 type Segment = { id: string; window: Window; anchor?: number; from: number; until: number | null }
 
-type Expected =
-  | { error: string; limitId?: string; remedy?: string }
-  | { outcome: Record<string, unknown>; checkBalance: boolean }
+/** A refused lease is the one rejection that is kept; `wrote` says whether this call wrote it. */
+type Rejected = { error: string; limitId?: string; remedy?: string; wrote?: boolean }
+type Expected = Rejected | { outcome: Record<string, unknown>; checkBalance: boolean }
 
 /** Calendar math written independently of `windows.ts`: Date.UTC with field overflow. */
 function windowRange(window: Window, t: number): Range {
@@ -426,9 +426,8 @@ class ReferenceBudget {
       if (prior.requested !== amount || prior.ttlMs !== ttlMs) {
         return { error: "IDEMPOTENCY_CONFLICT" }
       }
-      const outcome = prior.blocked
-        ? { type: "refused", blocked: prior.blocked, replayed: true }
-        : { lease: this.leaseView(leaseKey, prior), replayed: true }
+      if (prior.blocked) return { error: "LIMIT_EXCEEDED", ...prior.blocked, wrote: false }
+      const outcome = { lease: this.leaseView(leaseKey, prior), replayed: true }
       return { outcome, wrote: false, checkBalance: true }
     }
     if (ttlMs < 1_000 || ttlMs > config.maxTtlMs) return { error: "INVALID_TTL" }
@@ -450,10 +449,7 @@ class ReferenceBudget {
     // Newest last, so a planned report can name a lease by its distance from the newest.
     this.leases.delete(leaseKey)
     this.leases.set(leaseKey, lease)
-    if (blocked) {
-      const outcome = { type: "refused", blocked, replayed: false }
-      return { outcome, wrote: true, counted: false, checkBalance: true }
-    }
+    if (blocked) return { error: "LIMIT_EXCEEDED", ...blocked, wrote: true }
     const outcome = { lease: this.leaseView(leaseKey, lease), replayed: false }
     return { outcome, wrote: true, checkBalance: true }
   }
@@ -523,7 +519,8 @@ class ReferenceBudget {
   apply(command: BudgetCommand, clock: number): Expected {
     const now = Math.max(clock, this.lastWriteAt)
     const decided = this.decide(command, now)
-    if ("error" in decided) return decided
+    // A rejection writes nothing, except a refused lease, which is kept like an accepted command.
+    if ("error" in decided && decided.wrote === undefined) return decided
     // An accepted command also persists the roll of every reported period that ended, and a sweep
     // always moves the clock.
     const rolled = this.rolledPeriods(now).length
@@ -535,25 +532,16 @@ class ReferenceBudget {
     if (decided.wrote || rolled > this.rolledCount || sweep || retired) {
       this.lastWriteAt = now
     }
-    if (decided.wrote && decided.counted !== false) {
-      this.calls[command.type] = (this.calls[command.type] ?? 0) + 1
-    }
     this.rolledCount = rolled
+    if ("error" in decided) return decided
+    if (decided.wrote) this.calls[command.type] = (this.calls[command.type] ?? 0) + 1
     return { outcome: decided.outcome, checkBalance: decided.checkBalance }
   }
 
   private decide(
     command: BudgetCommand,
     now: number
-  ):
-    | { error: string; limitId?: string; remedy?: string }
-    | {
-        outcome: Record<string, unknown>
-        wrote: boolean
-        /** False for a write that is not a call that changed the budget: a refused lease. */
-        counted?: boolean
-        checkBalance: boolean
-      } {
+  ): Rejected | { outcome: Record<string, unknown>; wrote: boolean; checkBalance: boolean } {
     if (command.type === "upsert") {
       const next: ModelConfig = {
         limits: command.config.limits.map((l) => ({ ...l })),
@@ -1060,9 +1048,6 @@ function outcomeFields(outcome: BudgetOutcome, expected: Record<string, unknown>
   let source: object = outcome
   if (outcome.type === "upsert" || outcome.type === "get") {
     source = { version: outcome.budget.version, closed: outcome.budget.closed }
-  } else if (outcome.type === "refused") {
-    const { limitId, remedy } = outcome.blocked
-    source = { ...outcome, blocked: { limitId, remedy } }
   } else if (outcome.type === "report") {
     const { denied } = outcome.extension
     const projected =
@@ -1154,7 +1139,8 @@ describe("budget core against a reference model", () => {
           const result = store.run(command, clock)
 
           if ("error" in expected) {
-            const rejection = result.err?.rejection
+            const kept = result.err || result.val.ok ? undefined : result.val.rejection
+            const rejection = result.err?.rejection ?? kept
             const blocked = rejection?.code === "LIMIT_EXCEEDED" ? rejection.blocked : undefined
             expect({
               code: rejection?.code,
@@ -1165,10 +1151,14 @@ describe("budget core against a reference model", () => {
               limitId: expected.limitId,
               remedy: expected.remedy,
             })
-            expect(store.writes).toBe(writesBefore)
+            // A kept refusal may also write the roll of an ended period; any other rejection writes
+            // nothing.
+            if (expected.wrote === undefined) expect(store.writes).toBe(writesBefore)
+            else expect(kept).toBeDefined()
             continue
           }
           if (result.err) throw result.err
+          if (!result.val.ok) throw new Error(`unexpected ${result.val.rejection.code}`)
 
           const { outcome, ledger } = result.val
           if (command.type === "record" && outcome.type === "record" && !outcome.replayed) {

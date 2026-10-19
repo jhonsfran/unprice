@@ -1,7 +1,7 @@
 name: Secret Outputs
 description: >-
   Encrypts a value so it can travel between jobs as a job output, and decrypts it in the job that
-  uses it. Reads ciphertext written by cloudposse/github-action-secret-outputs.
+  uses it.
 
 inputs:
   op:

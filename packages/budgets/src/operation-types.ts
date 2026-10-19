@@ -1,6 +1,6 @@
 import type { operations } from "./openapi"
 
-type EmptyObject = Record<never, never>
+export type EmptyObject = Record<never, never>
 type SuccessStatus = 200 | 201 | 202 | 204
 
 type JsonContent<TResponse> = TResponse extends {
@@ -31,7 +31,7 @@ type SuccessResponse<TOperation> = TOperation extends {
     }[keyof TResponses]
   : never
 
-type OperationParameters<TId extends OperationId> = operations[TId] extends {
+type OperationParameters<TOperation> = TOperation extends {
   parameters: infer TParameters
 }
   ? TParameters
@@ -43,13 +43,13 @@ type NonNever<TValue> = [TValue] extends [never] ? EmptyObject : TValue
 // emits `query?` when every query param is optional), so match them optionally and
 // strip the `undefined` the optional match introduces — otherwise optional query
 // params (e.g. runs.get's `project_id`) silently vanish from the operation input.
-type OperationPathParams<TId extends OperationId> = OperationParameters<TId> extends {
+type OperationPathParams<TOperation> = OperationParameters<TOperation> extends {
   path?: infer TPath
 }
   ? NonNever<NonNullable<TPath>>
   : EmptyObject
 
-type OperationQueryParams<TId extends OperationId> = OperationParameters<TId> extends {
+type OperationQueryParams<TOperation> = OperationParameters<TOperation> extends {
   query?: infer TQuery
 }
   ? NonNever<NonNullable<TQuery>>
@@ -59,15 +59,24 @@ type MergeInput<TValue> = {
   [TKey in keyof TValue]: TValue[TKey]
 }
 
-export type OperationId = keyof operations & string
-
-export type OperationInput<TId extends OperationId> = MergeInput<
-  OperationPathParams<TId> & OperationQueryParams<TId> & JsonRequestBody<operations[TId]>
+/**
+ * One operation's input: its path and query parameters and its JSON body, as one object. Generic
+ * over the operation so `@unprice/api` derives its inputs from its own OpenAPI types.
+ */
+export type OperationInputOf<TOperation> = MergeInput<
+  OperationPathParams<TOperation> & OperationQueryParams<TOperation> & JsonRequestBody<TOperation>
 >
 
-export type OperationResponse<TId extends OperationId> = NonNever<SuccessResponse<operations[TId]>>
+/** One operation's JSON success body. */
+export type OperationResponseOf<TOperation> = NonNever<SuccessResponse<TOperation>>
 
-type AssertAssignable<TValue extends TExpected, TExpected> = TValue
+export type AssertAssignable<TValue extends TExpected, TExpected> = TValue
+
+export type OperationId = keyof operations & string
+
+export type OperationInput<TId extends OperationId> = OperationInputOf<operations[TId]>
+
+export type OperationResponse<TId extends OperationId> = OperationResponseOf<operations[TId]>
 
 type _BudgetsAuthorizeInputCheck = AssertAssignable<
   OperationInput<"budgets.authorize">,

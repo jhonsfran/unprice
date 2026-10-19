@@ -275,7 +275,7 @@ export type BudgetSnapshot = Readonly<
   } & BudgetConfig
 >
 
-/** A granted lease; a refused one answers as `refused` instead. */
+/** A granted lease; a refused one answers with the LIMIT_EXCEEDED rejection instead. */
 export type LeaseView = Readonly<{
   leaseKey: string
   seq: number
@@ -345,11 +345,6 @@ export type BudgetOutcome =
       replayed: boolean
       balance: BudgetBalance
     }>
-  /**
-   * A lease nothing fit. It is written, so the lease key keeps this answer for
-   * LEASE_REFUSAL_RETENTION_MS; the caller gets it as the LIMIT_EXCEEDED rejection.
-   */
-  | Readonly<{ type: "refused"; blocked: Blocked; replayed: boolean; balance: BudgetBalance }>
   | Readonly<{
       type: "report"
       lease: LeaseView
@@ -366,7 +361,7 @@ export type BudgetOutcome =
 /** The outcome a command of type `T` answers with. */
 export type OutcomeOf<T extends BudgetOutcome["type"]> = BudgetOutcome & Readonly<{ type: T }>
 
-/** Every command answers with the outcome of its own type, and a lease nothing fit with `refused`. */
+/** Every command answers with the outcome of its own type. */
 export function isOutcomeOf<T extends BudgetOutcome["type"]>(
   outcome: BudgetOutcome,
   type: T
@@ -416,6 +411,13 @@ export type BudgetRejection =
     }>
 
 export type BudgetErrorCode = BudgetRejection["code"]
+
+/**
+ * What a command answers. Error classes do not survive Workers RPC, so a rejection is plain data.
+ */
+export type BudgetReply =
+  | Readonly<{ ok: true; outcome: BudgetOutcome }>
+  | Readonly<{ ok: false; rejection: BudgetRejection }>
 
 /** An expected budget failure. `rejection` is plain data and is what crosses an RPC boundary. */
 export class UnPriceBudgetError extends BaseError<{ code: BudgetErrorCode }> {

@@ -103,17 +103,31 @@ function budgetWith(input: BudgetConfigInput, at = t0) {
   return store
 }
 
-function ok(result: ReturnType<MemoryBudgetStore["run"]>): BudgetTransition {
+type Accepted = Extract<BudgetTransition, { ok: true }>
+
+function ok(result: ReturnType<MemoryBudgetStore["run"]>): Accepted {
   if (result.err) throw result.err
+  if (!result.val.ok) throw new Error(`expected an outcome, got ${result.val.rejection.code}`)
   return result.val
 }
 
 function rejection(result: ReturnType<MemoryBudgetStore["run"]>) {
-  if (!result.err) throw new Error(`expected a rejection, got ${result.val.outcome.type}`)
+  if (!result.err) {
+    throw new Error(
+      `expected a rejection, got ${result.val.ok ? result.val.outcome.type : "a refusal"}`
+    )
+  }
   return result.err.rejection
 }
 
-function remaining(transition: BudgetTransition) {
+/** A rejection the store wrote: a refused lease, kept so its key replays the refusal. */
+function refusal(result: ReturnType<MemoryBudgetStore["run"]>) {
+  if (result.err) throw result.err
+  if (result.val.ok) throw new Error(`expected a refusal, got ${result.val.outcome.type}`)
+  return result.val
+}
+
+function remaining(transition: Accepted) {
   const { outcome } = transition
   const balance =
     "balance" in outcome ? outcome.balance : "budget" in outcome ? outcome.budget.balance : null
@@ -593,14 +607,13 @@ describe("leases", () => {
       remedy: "release_holds",
     }
 
-    const refused = ok(store.run(lease("l1", 1), t0))
-    expect(refused.outcome).toEqual({
-      type: "refused",
+    const refused = refusal(store.run(lease("l1", 1), t0))
+    expect(refused.rejection).toEqual({
+      code: "LIMIT_EXCEEDED",
       blocked,
-      replayed: false,
       balance: expect.objectContaining({ remaining: $(0), held: $(100) }),
     })
-    expect(refused.wakeAt).toBe(t0 + 10 * minute)
+    expect([refused.write, refused.wakeAt]).toEqual([true, t0 + 10 * minute])
     expect(store.rows.get("l:l1")).toMatchObject({
       granted: $(0),
       state: { status: "refused", closedAt: t0, blocked },
@@ -609,12 +622,11 @@ describe("leases", () => {
     // A late copy of the request finds the room a release returned and still gets the refusal.
     ok(store.run(release("h_1"), t0))
     const writes = store.writes
-    expect(ok(store.run(lease("l1", 1), t0 + 10 * minute - 1)).outcome).toMatchObject({
-      type: "refused",
-      blocked,
-      replayed: true,
-      balance: { remaining: $(100), held: $(0) },
-    })
+    const replayed = refusal(store.run(lease("l1", 1), t0 + 10 * minute - 1))
+    expect([replayed.write, replayed.rejection]).toMatchObject([
+      false,
+      { code: "LIMIT_EXCEEDED", blocked, balance: { remaining: $(100), held: $(0) } },
+    ])
     expect(rejection(store.run(lease("l1", 2), t0))).toEqual({
       code: "IDEMPOTENCY_CONFLICT",
       idempotencyKey: "l1",

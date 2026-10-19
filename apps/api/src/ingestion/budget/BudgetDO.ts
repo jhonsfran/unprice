@@ -57,7 +57,7 @@ export class BudgetDO extends DurableObject {
   override async alarm(): Promise<void> {
     if (!this.ready) return
     await this.ready
-    await this.processor.alarm()
+    return this.processor.alarm()
   }
 
   private prepare(): Promise<void> {

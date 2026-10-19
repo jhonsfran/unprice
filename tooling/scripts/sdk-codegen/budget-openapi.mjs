@@ -1,16 +1,17 @@
-import { readFileSync, writeFileSync } from "node:fs"
+import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 
-// Writes the part of the API's OpenAPI document that @unprice/budgets types against: the public
-// operations whose SDK path starts with `budgets`, every component they reference, and every
-// error schema. Keeping all error schemas makes `ApiError` the same union as in @unprice/api, so
-// @unprice/api can hand its own budget transport to this package's handles.
+// Prints the part of the API's OpenAPI document that @unprice/budgets types against: the public
+// operations whose SDK path starts with `budgets`, and every component they reference. It also
+// keeps every schema any operation answers with on an error status, so `ApiError` is the same
+// union as in @unprice/api, which re-exports it and hands its own transport to this package's
+// handles. Pipe the output into openapi-typescript and generate-sdk-resources.mjs (`-`).
 
 const METHODS = ["get", "post", "put", "patch", "delete"]
-const [, , inputArg, outputArg] = process.argv
+const [, , inputArg] = process.argv
 
-if (!inputArg || !outputArg) {
-  console.error("usage: node scripts/budget-openapi.mjs <openapi.json> <output.json>")
+if (!inputArg) {
+  console.error("usage: node tooling/scripts/sdk-codegen/budget-openapi.mjs <openapi.json>")
   process.exit(1)
 }
 
@@ -22,6 +23,8 @@ const isBudgetOperation = (operation) => {
   return contract?.audience === "public" && contract.sdk?.path?.[0] === "budgets"
 }
 
+const operationsOf = (item) => METHODS.flatMap((method) => (item[method] ? [item[method]] : []))
+
 const paths = {}
 for (const [path, item] of Object.entries(document.paths ?? {})) {
   const kept = Object.fromEntries(
@@ -32,7 +35,7 @@ for (const [path, item] of Object.entries(document.paths ?? {})) {
   if (METHODS.some((method) => kept[method])) paths[path] = kept
 }
 
-// Walk every `$ref` reachable from the kept paths and the error schemas.
+// Walk every `$ref` reachable from the kept paths and from every operation's error responses.
 const keep = new Map()
 const visit = (value) => {
   if (Array.isArray(value)) {
@@ -53,8 +56,12 @@ const visit = (value) => {
   for (const child of Object.values(value)) visit(child)
 }
 visit(paths)
-for (const [name, schema] of Object.entries(components.schemas ?? {})) {
-  if (schema?.properties?.error) visit({ $ref: `#/components/schemas/${name}` })
+for (const item of Object.values(document.paths ?? {})) {
+  for (const operation of operationsOf(item)) {
+    for (const [status, response] of Object.entries(operation.responses ?? {})) {
+      if (/^[45]/.test(status)) visit(response)
+    }
+  }
 }
 
 const kept = {}
@@ -63,9 +70,8 @@ for (const [kind, names] of keep) {
 }
 if (components.securitySchemes) kept.securitySchemes = components.securitySchemes
 
-const subset = { ...document, paths, components: kept }
-writeFileSync(resolve(process.cwd(), outputArg), `${JSON.stringify(subset, null, 2)}\n`)
-const operations = Object.values(paths).flatMap((item) => METHODS.filter((method) => item[method]))
-console.info(
+process.stdout.write(`${JSON.stringify({ ...document, paths, components: kept }, null, 2)}\n`)
+const operations = Object.values(paths).flatMap(operationsOf)
+console.error(
   `kept ${operations.length} budget operations and ${[...keep.values()].reduce((n, s) => n + s.size, 0)} components`
 )

@@ -32,8 +32,8 @@
     "clean": "rm -rf .turbo node_modules dist",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "generate:types": "node ./scripts/budget-openapi.mjs ../../apps/docs/openapi.json ./openapi.budgets.json && openapi-typescript ./openapi.budgets.json -o ./src/openapi.d.ts --default-non-nullable false && rm ./openapi.budgets.json",
-    "generate:resources": "node ../api/scripts/generate-sdk-resources.mjs ../../apps/docs/openapi.json ./src/generated/sdk-resources.ts --only budgets",
+    "generate:types": "node ../../tooling/scripts/sdk-codegen/budget-openapi.mjs ../../apps/docs/openapi.json | openapi-typescript -o ./src/openapi.d.ts --default-non-nullable false && pnpm biome format ./src/openapi.d.ts --write",
+    "generate:resources": "node ../../tooling/scripts/sdk-codegen/budget-openapi.mjs ../../apps/docs/openapi.json | node ../../tooling/scripts/sdk-codegen/generate-sdk-resources.mjs - ./src/generated/sdk-resources.ts",
     "generate": "pnpm generate:types && pnpm generate:resources",
     "build": "rm -rf dist && tsup",
     "dev": "tsup --watch"

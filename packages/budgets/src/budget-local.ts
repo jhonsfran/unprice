@@ -117,6 +117,11 @@ type Epoch =
   | { phase: "idle"; replay: LeaseRequest | null }
   | { phase: "granting"; granted: Promise<ApiResult<Lease>> }
   | { phase: "open"; lease: Lease }
+  /**
+   * The server keeps a row for each refused grant, so for one flush interval after a 402 the key's
+   * calls get that denial from memory instead of a refused grant each.
+   */
+  | { phase: "refused"; error: ApiError }
 
 type Spent<T> = Readonly<{ lease: Lease; value: T }> | ApiResult<BudgetDenial>
 
@@ -209,24 +214,21 @@ const createShell = ({
   let timer: ReturnType<typeof setInterval> | null = null
   let calls = 0
   let activeAt = now()
-  // The server writes a row for each refused grant, so for one flush interval after a 402 the
-  // key's calls get that denial from memory instead of a refused grant each.
-  let refused: ApiError | null = null
 
   // Only between calls, so no call goes on to open a lease from a shell the registry dropped.
   const forgetIfDone = () => {
-    if (calls === 0 && epoch.phase === "idle" && epoch.replay === null && refused === null) {
-      forget()
-    }
+    if (calls === 0 && epoch.phase === "idle" && epoch.replay === null) forget()
   }
 
-  const refuse = (error: ApiError) => {
-    refused = error
+  const refuse = (error: ApiError): Epoch => {
+    const refused: Epoch = { phase: "refused", error }
     const lapse = setTimeout(() => {
-      refused = null
+      if (epoch !== refused) return
+      epoch = { phase: "idle", replay: null }
       forgetIfDone()
     }, flushIntervalMs)
     if (typeof lapse === "object") lapse.unref()
+    return refused
   }
 
   const tracked =
@@ -259,7 +261,7 @@ const createShell = ({
   const grant = (need: Units): Promise<ApiResult<Lease>> => {
     if (epoch.phase === "granting") return epoch.granted
     if (epoch.phase === "open") return Promise.resolve({ result: epoch.lease })
-    if (refused) return Promise.resolve({ error: refused })
+    if (epoch.phase === "refused") return Promise.resolve({ error: epoch.error })
     const request = epoch.replay ?? {
       key,
       leaseKey: globalThis.crypto.randomUUID(),
@@ -269,8 +271,10 @@ const createShell = ({
     const sentAt = now()
     const granted = transport.lease(request).then((response): ApiResult<Lease> => {
       if (response.error) {
-        epoch = { phase: "idle", replay: retryable(response.error) ? request : null }
-        if (response.error.code === "BUDGET_EXCEEDED") refuse(response.error)
+        epoch =
+          response.error.code === "BUDGET_EXCEEDED"
+            ? refuse(response.error)
+            : { phase: "idle", replay: retryable(response.error) ? request : null }
         return { error: response.error }
       }
       const { result } = response
@@ -480,6 +484,7 @@ const createShell = ({
         await epoch.granted
         continue
       }
+      if (epoch.phase === "refused") return { result: null }
       if (epoch.phase === "idle") {
         if (!epoch.replay) return { result: null }
         // The lost grant may have committed: replay it so its capacity can be returned.

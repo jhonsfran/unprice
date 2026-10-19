@@ -1,6 +1,6 @@
 import { DOCS_DOMAIN } from "@unprice/config"
-import { cn, focusRing } from "@unprice/ui/utils"
-import { ArrowRight } from "lucide-react"
+import { siteConfig } from "~/constants/layout"
+import { type FaqItem, FaqList } from "./faq"
 import { SectionShell } from "./station"
 import { StationHeader } from "./station-header"
 
@@ -9,13 +9,7 @@ import { StationHeader } from "./station-header"
 // only by what every gateway cap does, the offer as the home page states it.
 // Answers stay plain strings so the same array feeds the FAQPage JSON-LD.
 
-const REPO_URL = "https://github.com/jhonsfran1165/unprice"
-
-type FaqItem = {
-  question: string
-  answer: string
-  link?: { href: string; label: string; external?: boolean }
-}
+const REPO_URL = siteConfig.links.github
 
 const faqs: FaqItem[] = [
   {
@@ -61,30 +55,9 @@ const faqs: FaqItem[] = [
   },
 ]
 
-const faqJsonLd = {
-  "@context": "https://schema.org",
-  "@type": "FAQPage",
-  mainEntity: faqs.map((item) => ({
-    "@type": "Question",
-    name: item.question,
-    acceptedAnswer: {
-      "@type": "Answer",
-      text: item.answer,
-    },
-  })),
-}
-
 export function BudgetsFaq() {
   return (
     <SectionShell labelledBy="budgets-faq-title">
-      {/* JSON.stringify does not HTML-escape; escape `<` so no answer can
-          close the script element. */}
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{
-          __html: JSON.stringify(faqJsonLd).replace(/</g, "\\u003c"),
-        }}
-      />
       <div className="flex flex-col items-start">
         <StationHeader index="05" label="The questions" fact="short answers" />
         <h2
@@ -95,35 +68,7 @@ export function BudgetsFaq() {
         </h2>
       </div>
 
-      <dl className="mt-12 grid gap-x-8 border-background-border border-t md:grid-cols-2">
-        {faqs.map((item) => (
-          <div key={item.question} className="border-background-border border-b py-6">
-            <dt className="font-medium text-background-textContrast text-sm">{item.question}</dt>
-            <dd className="mt-2 text-background-text text-sm leading-6">
-              {item.answer}
-              {item.link ? (
-                <>
-                  {" "}
-                  <a
-                    href={item.link.href}
-                    {...(item.link.external ? { target: "_blank", rel: "noreferrer" } : {})}
-                    className={cn(
-                      "group inline-flex items-baseline gap-1 rounded-sm font-medium text-background-textContrast underline decoration-background-borderHover underline-offset-4 hover:decoration-background-textContrast",
-                      focusRing
-                    )}
-                  >
-                    {item.link.label}
-                    <ArrowRight
-                      aria-hidden
-                      className="size-3 self-center transition-transform duration-quick ease-out-quad group-hover:translate-x-0.5"
-                    />
-                  </a>
-                </>
-              ) : null}
-            </dd>
-          </div>
-        ))}
-      </dl>
+      <FaqList items={faqs} />
     </SectionShell>
   )
 }

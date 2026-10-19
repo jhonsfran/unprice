@@ -54,9 +54,7 @@ export function keepFailedRequest(ctx: TailSamplingContext): void {
   ctx.shouldKeep = true
 }
 
-export const apiEvlog = evlog({
-  keep: keepFailedRequest,
-})
+export const apiEvlog = evlog({ keep: keepFailedRequest })
 
 // ============================================
 // Helpers for route handlers and DOs

@@ -6,7 +6,12 @@ import { redirect } from "next/navigation"
 import { Suspense } from "react"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import LayoutLoader from "~/components/layout/layout-loader"
-import { type SignupIntent, budgetsSetupPath, getSignupIntent } from "~/lib/signup-funnel"
+import {
+  type SignupIntent,
+  getSignupIntent,
+  intentLanding,
+  workspaceLanding,
+} from "~/lib/signup-funnel"
 import { api } from "~/trpc/server"
 import NewWorkspaceForm from "../_components/new-workspace-form"
 import Redirect from "./_components/redirect"
@@ -21,12 +26,18 @@ export default async function NewPage(props: {
   const sessionId = cookieStore.get(COOKIES_APP.SESSION)?.value
   const signupIntent = getSignupIntent(intent)
 
-  // A Budgets visitor who already has a workspace needs a key, not another workspace.
-  if (signupIntent === "budgets" && !workspace_id) {
+  // A visitor whose intent has its own landing and who already runs a workspace goes there, not
+  // to another workspace. Only a workspace they own or administer: an invited member cannot set up
+  // someone else's.
+  if (signupIntent && !workspace_id) {
     const session = await getSession()
-    const workspaceSlug = session?.user?.workspaces[0]?.slug
-    if (workspaceSlug) {
-      redirect(budgetsSetupPath(workspaceSlug))
+    const workspaces = session?.user?.workspaces ?? []
+    const owned =
+      workspaces.find((workspace) => workspace.isPersonal) ??
+      workspaces.find((workspace) => workspace.role === "OWNER" || workspace.role === "ADMIN")
+    const landing = owned ? intentLanding(owned.slug, signupIntent) : null
+    if (landing) {
+      redirect(landing)
     }
   }
 
@@ -103,5 +114,5 @@ async function Content({
   })
 
   const slug = newWorkspace.workspace.slug
-  return <Redirect url={intent === "budgets" ? budgetsSetupPath(slug) : slug} />
+  return <Redirect url={workspaceLanding(slug, intent)} />
 }

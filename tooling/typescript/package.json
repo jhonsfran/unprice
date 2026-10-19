@@ -3,6 +3,6 @@
   "license": "AGPL-3.0-only",
   "private": true,
   "version": "0.1.0",
-  "files": ["base.json"],
+  "files": ["base.json", "sdk.json"],
   "dependencies": {}
 }

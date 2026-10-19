@@ -10,9 +10,9 @@ import { type ComponentProps, type MouseEvent, useEffect, useState, useTransitio
 import { getOrCreateConversionId, persistConversionId } from "~/lib/conversion-session"
 import {
   ACQUISITION_SIGNUP_URL,
-  SIGNUP_INTENT_NEXT,
   type SignupIntent,
   buildAuthHref,
+  nextAfterAuth,
 } from "~/lib/signup-funnel"
 
 type AcquisitionSource =
@@ -31,7 +31,7 @@ type AcquisitionLinkProps = Omit<ComponentProps<typeof Link>, "href"> & {
 
 function getAcquisitionHref(sessionId: string, intent: SignupIntent): string {
   return new URL(
-    buildAuthHref(AUTH_ROUTES.SIGNUP, { sessionId, intent, next: SIGNUP_INTENT_NEXT[intent] }),
+    buildAuthHref(AUTH_ROUTES.SIGNUP, { sessionId, intent, next: nextAfterAuth(intent) }),
     APP_DOMAIN
   ).toString()
 }

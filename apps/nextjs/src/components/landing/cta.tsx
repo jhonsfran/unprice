@@ -3,6 +3,7 @@ import { cn, focusRing } from "@unprice/ui/utils"
 import { Link } from "next-view-transitions"
 import Balancer from "react-wrap-balancer"
 import { AcquisitionLink } from "./acquisition-link"
+import { DecisionBracket } from "./decision-bracket"
 import { Reveal } from "./reveal"
 import { SectionShell } from "./station"
 import { StationHeader } from "./station-header"
@@ -25,14 +26,6 @@ import { StationHeader } from "./station-header"
 //
 // The one mailto is the only other way out of this section, and it is inside
 // the founder's own sentence — a person to answer, not a competing CTA.
-
-// The logo's containment motif marks the decision moment.
-const BRACKET_CORNERS = [
-  "top-0 left-0 border-t-2 border-l-2",
-  "top-0 right-0 border-t-2 border-r-2",
-  "bottom-0 left-0 border-b-2 border-l-2",
-  "right-0 bottom-0 border-r-2 border-b-2",
-]
 
 const inlineLink = cn(
   "rounded-sm font-medium text-background-textContrast underline decoration-background-borderHover underline-offset-4 transition-colors duration-quick ease-out-quad hover:decoration-background-textContrast",
@@ -68,21 +61,14 @@ export default function Cta() {
           </Balancer>
         </p>
 
-        <div className="relative mt-12 px-6 py-5">
-          {BRACKET_CORNERS.map((corner) => (
-            <span
-              key={corner}
-              aria-hidden
-              className={cn("absolute size-3 border-background-textContrast", corner)}
-            />
-          ))}
+        <DecisionBracket className="mt-12">
           <AcquisitionLink
             source="closing_cta"
             className={buttonVariants({ variant: "primary", className: "gap-1.5" })}
           >
             Start with one agent action
           </AcquisitionLink>
-        </div>
+        </DecisionBracket>
 
         {/* The afternoon, itemized honestly. */}
         <p className="mt-5 font-mono text-[11px] text-background-text leading-5">

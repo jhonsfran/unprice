@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # Encrypts a job output with a shared passphrase (op=encode) or decrypts it (op=decode).
-# The ciphertext format matches cloudposse/github-action-secret-outputs: gpg symmetric, base64
-# without wrapping. Unlike it, the passphrase reaches gpg through a pipe instead of its argv,
-# outputs use a random delimiter so a value cannot inject another output, and gpg runs in a
-# throwaway home with no passphrase cache.
+# The ciphertext is gpg symmetric, base64 without wrapping. The passphrase reaches gpg through a
+# pipe instead of its argv, outputs use a random delimiter so a value cannot inject another
+# output, and gpg runs in a throwaway home with no passphrase cache.
 set -euo pipefail
 umask 077
 
@@ -59,8 +58,6 @@ case "$op" in
     write_output "$ciphertext"
     ;;
   decode)
-    # Command substitution drops trailing newlines, as the cloudposse decoder did, so values it
-    # encoded with a trailing newline decode to the same string.
     plaintext="$(printf '%s' "$value" | base64 --decode | run_gpg --decrypt --output -)" ||
       fail "could not decrypt in"
     [[ -n "$plaintext" ]] || fail "decrypted value is empty"

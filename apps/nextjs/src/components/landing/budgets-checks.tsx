@@ -1,5 +1,6 @@
 import { cn, focusRing } from "@unprice/ui/utils"
 import { ArrowRight } from "lucide-react"
+import { siteConfig } from "~/constants/layout"
 import { ProofLink } from "./proof-link"
 import { LedgerRow, SectionShell } from "./station"
 import { StationHeader } from "./station-header"
@@ -10,7 +11,7 @@ import { StationHeader } from "./station-header"
 // all, and a remote check makes one. Both hold the same cap, because a lease
 // is debited from the budget before the process spends it.
 
-const REPO_URL = "https://github.com/jhonsfran1165/unprice"
+const REPO_URL = siteConfig.links.github
 const BENCHMARK_URL = `${REPO_URL}/blob/main/tooling/k6/budget-local.ts`
 
 type Mode = {

@@ -703,22 +703,26 @@ describe("BudgetDO alarm", () => {
         "authorize"
       )
 
-      const refused = outcome(await processor.execute(lease), "refused")
-      expect([refused.blocked.limitId, refused.blocked.remaining, refused.replayed]).toEqual([
-        "month",
-        BigInt(0),
-        false,
-      ])
+      expect(rejection(await processor.execute(lease))).toMatchObject({
+        code: "LIMIT_EXCEEDED",
+        blocked: { limitId: "month", remaining: BigInt(0) },
+      })
       expect(
         state.storage.sql
           .exec("SELECT id, status, due_at FROM budget_operations WHERE kind = 'lease'")
           .toArray()
       ).toEqual([{ id: `l:${sha256HexSync("proc-1")}`, status: "done", due_at: t0 + 10 * MINUTE }])
+      // The refusal is a rejection, and it still lowers the alarm to its own purge.
+      await expect(state.storage.getAlarm()).resolves.toBe(t0 + 10 * MINUTE)
 
       outcome(await processor.execute({ type: "release", holdId: "h_1" }), "release")
       now = t0 + 10 * MINUTE - 1
-      const replayed = outcome(await processor.execute(lease), "refused")
-      expect([replayed.replayed, replayed.balance.remaining]).toEqual([true, units(50)])
+      // The release returned room, so only the kept refusal can still deny the same key.
+      expect(rejection(await processor.execute(lease))).toMatchObject({
+        code: "LIMIT_EXCEEDED",
+        blocked: { limitId: "month" },
+        balance: { remaining: units(50) },
+      })
 
       now = t0 + 10 * MINUTE
       await processor.alarm()
@@ -756,18 +760,14 @@ describe("BudgetDO alarm", () => {
         )
       }
       now += HOUR
-      expect(await processor.alarm()).toEqual({
-        expired: EXPIRED_PER_SWEEP,
-        purged: 0,
-        capped: true,
-      })
+      await processor.alarm()
       // A full batch leaves expired holds behind, so the alarm comes straight back for them.
       await expect(state.storage.getAlarm()).resolves.toBe(now + ALARM_CONTINUE_MS)
       expect(outcome(await processor.execute({ type: "get" }), "get").budget.balance.held).toBe(
         units(44)
       )
       now += ALARM_CONTINUE_MS
-      expect(await processor.alarm()).toEqual({ expired: 44, purged: 0, capped: false })
+      await processor.alarm()
     })
     await evictDurableObject(stub)
     await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
@@ -812,7 +812,7 @@ describe("BudgetDO alarm", () => {
       outcome(await processor.execute(late), "record")
       await expect(state.storage.getAlarm()).resolves.toBe(now + 25 * HOUR)
       now += 25 * HOUR
-      expect(await processor.alarm()).toEqual({ expired: 0, purged: 1, capped: false })
+      await processor.alarm()
       expect(state.storage.sql.exec("SELECT count(*) AS n FROM budget_operations").one()).toEqual({
         n: 0,
       })
@@ -991,7 +991,7 @@ describe("BudgetDO alarm", () => {
         },
       })
 
-      expect(await processor.alarm()).toEqual({ expired: 0, purged: 0, capped: false })
+      await processor.alarm()
 
       expect(errors).toEqual(["budget alarm failed: storage unavailable"])
       await expect(state.storage.getAlarm()).resolves.toBe(t0 + 30_000)

@@ -248,8 +248,8 @@ patterns. Keep it cheap to load and useful.
   and decide in the middleware's `keep` callback (`keepFailedRequest` in `apps/api/src/observability.ts`).
 - 2026-10-19: CI passes secrets between jobs with `.github/actions/secret-outputs` (gpg symmetric, base64),
   which replaced the cloudposse Docker action after public.ecr.aws rate limits failed preview deploys
-  repeatedly. Run `.github/actions/secret-outputs/secret-outputs.test.sh` (Docker) after touching it;
-  it still reads the old format, which `DATABASE_URL_ENCRYPTED` is stored in.
+  repeatedly. Run `.github/actions/secret-outputs/secret-outputs.test.sh` (Docker) after touching it.
+  No ciphertext outlives a run: preview encodes `DATABASE_URL_ENCRYPTED` and decodes it in later jobs.
 - 2026-10-19: Never time Durable Object work from the object's `Date.now()`: it is stale until the
   object's next I/O. A Worker-to-object `queueMs` read 0 on about 27,000 preview requests and was
   removed; use caller-side RPC timing instead.
@@ -282,6 +282,9 @@ patterns. Keep it cheap to load and useful.
   retry still in flight) is decided again and can succeed once room returns. Budget leases write
   their refusal (`status: "refused"`, 10-minute retention), and the SDK waits a flush interval
   before asking again, so a blocked key writes one row per interval rather than per call.
+- 2026-10-19: `BudgetTransition` is the rows to write plus a `BudgetReply`. A refused lease is the
+  one rejection that writes: `ok: false` with LIMIT_EXCEEDED, committed and armed like any write.
+  Every other rejection is the `Err` of `transition` and writes nothing; core tests narrow with `ok()`.
 - 2026-10-18: The local-mode fuzz test asserts that every lease on the server reached its client.
   Reverting the refusal row failed it after about 390 runs at the old fault weights; stray copies
   weighted 3, faults on half the steps, and close weighted 2 cut that to about 40 (at most 110).
@@ -394,9 +397,11 @@ patterns. Keep it cheap to load and useful.
 
 ## Next.js And Dashboard
 
-- 2026-10-19: A signup intent routes past auth only through `next`: `SIGNUP_INTENT_NEXT` in
-  `lib/signup-funnel.ts` maps it to a path, and `/new` must forward `intent` into the workspace
-  signUp `successUrl` (the provider appends `workspace_id`) or the intent dies at workspace creation.
+- 2026-10-19: A signup intent routes past auth only through `next`: `INTENT_LANDING` in
+  `lib/signup-funnel.ts` is the one table of intents, and `/new` must forward `intent` into the
+  workspace signUp `successUrl` (the provider appends `workspace_id`) or it dies at workspace creation.
+- 2026-10-19: The `@sidebar/[...all]` slot decides per route whether to hide the sidebar; a nested
+  route under a hidden section (`/{ws}/onboarding/budgets`) needs that check widened.
 
 - 2026-08-01: Auth middleware that enriches sessions from Postgres must declare
   `config.runtime = "nodejs"`; leaving it on Edge can surface the database failure as a misleading
@@ -700,6 +705,13 @@ patterns. Keep it cheap to load and useful.
 Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardrails.md).
 
 ## API SDK And Public Contracts
+
+- 2026-10-19: Both SDKs share one transport, `packages/budgets/src/transport.ts` (retries, error
+  mapping, headers, telemetry); fix it there, never in `packages/api`.
+- 2026-10-19: SDK codegen lives in `tooling/scripts/sdk-codegen/`; `@unprice/budgets` types a subset
+  piped from `budget-openapi.mjs`. `pnpm --filter @unprice/api generate` regenerates both SDKs.
+- 2026-10-19: The SDKs resolve to `dist`, so turbo's `typecheck`/`test` depend on `^build`; a job
+  running them outside turbo must build `./packages/api` (and with it `@unprice/budgets`) first.
 
 - 2026-09-01: Public API adapters must map expected service errors through
   `resolveDomainErrorKind`; never use a catch-all `BaseError -> BAD_REQUEST` rule, which turns

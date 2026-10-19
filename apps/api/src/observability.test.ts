@@ -221,4 +221,11 @@ describe("keepFailedRequest", () => {
     expect(keeps(keep, 200, "/v1/budgets/authorize")).toBe(false)
     expect(keeps(keep, undefined, "/v1/budgets/authorize")).toBe(false)
   })
+
+  it("is the request middleware's tail sampler", async () => {
+    const { keepFailedRequest } = await loadObservability()
+    const { evlog } = await import("evlog/hono")
+
+    expect(evlog).toHaveBeenCalledWith({ keep: keepFailedRequest })
+  })
 })

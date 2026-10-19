@@ -1,5 +1,6 @@
 import { cn, focusRing } from "@unprice/ui/utils"
 import { ArrowRight, Play } from "lucide-react"
+import { siteConfig } from "~/constants/layout"
 import { DEMO_VIDEO } from "./demo-video"
 import { ProofLink } from "./proof-link"
 import { LedgerRow, SectionShell } from "./station"
@@ -16,7 +17,7 @@ import { StationHeader } from "./station-header"
 // receipts that are true and clickable *today* lead, and the video slots in
 // above them when it lands. Configuration lives in demo-video.ts.
 
-const REPO_URL = "https://github.com/jhonsfran1165/unprice"
+const REPO_URL = siteConfig.links.github
 const DO_TEST_PATH = "apps/api/src/ingestion/entitlements/EntitlementWindowDO.workers.test.ts"
 
 // Proof that does not depend on us publishing anything. Every row is a real

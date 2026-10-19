@@ -1,6 +1,5 @@
 import { BUDGETS_TWO_CALLS } from "./budgets-snippets"
-import { CodeEditor } from "./code-editor"
-import CopyToClipboard from "./copy-to-clipboard"
+import { CodePanel } from "./code-panel"
 import { Reveal } from "./reveal"
 import { LedgerRow, SectionShell } from "./station"
 import { StationHeader } from "./station-header"
@@ -33,17 +32,7 @@ export function BudgetsIntegration() {
       </div>
 
       <figure className="mt-12 max-w-3xl">
-        <div className="rounded-lg border border-background-border bg-surface-panel shadow-ambient">
-          <div className="flex items-center justify-between gap-4 border-background-border border-b px-4 py-2 sm:px-5">
-            <span className="font-mono text-background-text text-xs uppercase tracking-widest">
-              agent.ts
-            </span>
-            <CopyToClipboard code={BUDGETS_TWO_CALLS} variant="ghost" className="size-7" />
-          </div>
-          <div className="overflow-x-auto px-4 py-4 sm:px-5">
-            <CodeEditor codeBlock={BUDGETS_TWO_CALLS} language="typescript" />
-          </div>
-        </div>
+        <CodePanel filename="agent.ts" code={BUDGETS_TWO_CALLS} className="shadow-ambient" />
 
         <div className="mt-6 border-background-border border-t pt-4">
           <p className="text-background-text text-sm leading-6">

@@ -1,36 +1,22 @@
 import {
   type BudgetCommand,
-  type BudgetOutcome,
-  type BudgetRejection,
-  EXPIRED_PER_SWEEP,
+  type BudgetReply,
   deletableAt,
   loadView,
   transition,
 } from "@unprice/services/budgets"
-import type { BudgetReply, BudgetRequest } from "@unprice/services/use-cases"
+import type { BudgetRequest } from "@unprice/services/use-cases"
 import type { BudgetProcessorDeps, BudgetStoreTx } from "./ports"
 
 export const ALARM_PURGE_LIMIT = 2048
 export const ALARM_CONTINUE_MS = 1_000
 export const ALARM_RETRY_MS = 30_000
 
-type Committed =
-  | { ok: true; outcome: BudgetOutcome; wakeAt: number | null; now: number; written: number }
-  | { ok: false; rejection: BudgetRejection }
-
-/** What one alarm run did, for its log line. */
-export type BudgetAlarmRun = Readonly<{
-  /** Expired holds and leases the sweep closed. */
-  expired: number
-  /** Closed rows past their retention the purge deleted. */
-  purged: number
-  /** The sweep or the purge filled its batch, so the alarm comes straight back for the rest. */
-  capped: boolean
-}>
+/** A command's reply, and the alarm its written rows need: a refused lease is written too. */
+type Committed = { reply: BudgetReply; wakeAt: number | null; now: number }
 
 /** What the alarm does after a sweep: wake again (or never), or delete the closed budget. */
-type Swept = Pick<BudgetAlarmRun, "expired" | "purged"> &
-  ({ destroy: true } | { destroy: false; next: number | null })
+type Swept = { destroy: true } | { destroy: false; next: number | null }
 
 /**
  * Business orchestration for one budget. Every command is one synchronous SQLite transaction
@@ -61,13 +47,12 @@ export class BudgetProcessor {
 
   async execute(request: BudgetRequest): Promise<BudgetReply> {
     const clockMs = this.deps.clock.now()
-    const committed = this.deps.store.atomically((tx) => commit(tx, request, clockMs))
-    if (!committed.ok) return committed
-    await this.lowerAlarm(committed.wakeAt)
-    return { ok: true, outcome: committed.outcome }
+    const { reply, wakeAt } = this.deps.store.atomically((tx) => commit(tx, request, clockMs))
+    await this.lowerAlarm(wakeAt)
+    return reply
   }
 
-  async alarm(): Promise<BudgetAlarmRun> {
+  async alarm(): Promise<void> {
     this.armedAt = null
     this.pendingAt = null
     const now = this.deps.clock.now()
@@ -76,27 +61,20 @@ export class BudgetProcessor {
       swept = this.deps.store.atomically((tx) => sweep(tx, now))
     } catch (error) {
       this.deps.logger.error("budget alarm failed", { error: errorMessage(error) })
-      swept = { expired: 0, purged: 0, destroy: false, next: now + ALARM_RETRY_MS }
-    }
-    const { expired, purged } = swept
-    const run = {
-      expired,
-      purged,
-      capped: expired >= EXPIRED_PER_SWEEP || purged >= ALARM_PURGE_LIMIT,
+      swept = { destroy: false, next: now + ALARM_RETRY_MS }
     }
     if (swept.destroy) {
       await this.deps.runtime.destroy()
-      return run
+      return
     }
     const { next } = swept
-    if (next === null) return run
+    if (next === null) return
     try {
       await this.lowerAlarm(next)
     } catch (error) {
       this.deps.logger.error("budget alarm could not re-arm", { error: errorMessage(error) })
       throw error
     }
-    return run
   }
 
   private async lowerAlarm(at: number | null): Promise<void> {
@@ -118,17 +96,17 @@ export class BudgetProcessor {
 function commit(tx: BudgetStoreTx, command: BudgetCommand, clockMs: number): Committed {
   const view = loadView(tx, command, clockMs)
   const result = transition({ view, command, clockMs })
-  if (result.err) return { ok: false, rejection: result.err.rejection }
-
-  const { write, outcome, now, wakeAt, operations } = result.val
-  if (write) tx.commit(result.val)
-  return {
-    ok: true,
-    outcome,
-    wakeAt: write ? wakeAt : null,
-    now,
-    written: write ? operations.length : 0,
+  // Nothing was written. Only the sweep reads `now`, and a sweep is never rejected.
+  if (result.err) {
+    return { reply: { ok: false, rejection: result.err.rejection }, wakeAt: null, now: clockMs }
   }
+
+  const { write, now, wakeAt } = result.val
+  if (write) tx.commit(result.val)
+  const reply: BudgetReply = result.val.ok
+    ? { ok: true, outcome: result.val.outcome }
+    : { ok: false, rejection: result.val.rejection }
+  return { reply, wakeAt: write ? wakeAt : null, now }
 }
 
 /**
@@ -137,25 +115,19 @@ function commit(tx: BudgetStoreTx, command: BudgetCommand, clockMs: number): Com
  */
 function sweep(tx: BudgetStoreTx, clockMs: number): Swept {
   const budget = tx.readBudget()
-  if (budget === null) return { expired: 0, purged: 0, destroy: false, next: null }
+  if (budget === null) return { destroy: false, next: null }
   const swept = commit(tx, { type: "sweep" }, clockMs)
-  if (!swept.ok) throw new Error(`budget sweep rejected: ${swept.rejection.code}`)
-  // A sweep writes exactly the expired reservations it closed.
-  const expired = swept.written
+  if (!swept.reply.ok) throw new Error(`budget sweep rejected: ${swept.reply.rejection.code}`)
   // The sweep moved the budget's clock to `now`, so purging at it never runs ahead of a command.
-  const purged = tx.purgeOperations(swept.now, ALARM_PURGE_LIMIT)
+  tx.purgeOperations(swept.now, ALARM_PURGE_LIMIT)
   const due = tx.nextDueAt()
   const deletable = deletableAt(budget.config)
-  if (due === null && deletable !== null && swept.now >= deletable) {
-    return { expired, purged, destroy: true }
-  }
+  if (due === null && deletable !== null && swept.now >= deletable) return { destroy: true }
   // Work a capped batch left behind is already due, so the floor is also the continuation delay,
   // and it keeps a row the sweep cannot clear from spinning the alarm. A deletion already due
   // waits for the rows instead.
   const rows = due === null ? null : Math.max(due, swept.now + ALARM_CONTINUE_MS)
   return {
-    expired,
-    purged,
     destroy: false,
     next: earliest(rows, deletable !== null && deletable > swept.now ? deletable : null),
   }

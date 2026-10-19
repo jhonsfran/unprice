@@ -1,21 +1,14 @@
 import { buttonVariants } from "@unprice/ui/button"
-import { cn } from "@unprice/ui/utils"
 import Balancer from "react-wrap-balancer"
 import { AcquisitionLink } from "./acquisition-link"
-import { InstallCommand } from "./budgets-hero"
+import { InstallCommand } from "./code-panel"
+import { DecisionBracket } from "./decision-bracket"
 import { SectionShell } from "./station"
 import { StationHeader } from "./station-header"
 
 // The close: one decision inside the logo's bracket and the install line under
 // it, nothing else. The terms are the home page's offer, stated once in the
 // station fact.
-
-const BRACKET_CORNERS = [
-  "top-0 left-0 border-t-2 border-l-2",
-  "top-0 right-0 border-t-2 border-r-2",
-  "bottom-0 left-0 border-b-2 border-l-2",
-  "right-0 bottom-0 border-r-2 border-b-2",
-]
 
 export function BudgetsCta() {
   return (
@@ -37,14 +30,7 @@ export function BudgetsCta() {
         </Balancer>
       </p>
 
-      <div className="relative mt-12 px-6 py-5">
-        {BRACKET_CORNERS.map((corner) => (
-          <span
-            key={corner}
-            aria-hidden
-            className={cn("absolute size-3 border-background-textContrast", corner)}
-          />
-        ))}
+      <DecisionBracket className="mt-12">
         <AcquisitionLink
           source="budgets_cta"
           intent="budgets"
@@ -52,7 +38,7 @@ export function BudgetsCta() {
         >
           Get an API key
         </AcquisitionLink>
-      </div>
+      </DecisionBracket>
 
       <InstallCommand className="mt-6" />
     </SectionShell>

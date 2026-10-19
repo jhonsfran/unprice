@@ -35,3 +35,12 @@ export type {
   LocalLeases,
 } from "./budget-local"
 export type { components, operations, paths } from "./openapi"
+// For @unprice/api, which builds its client on this package's transport; not covered by semver.
+export { createTransport } from "./transport"
+export type { SdkIdentity, Transport } from "./transport"
+export type {
+  AssertAssignable,
+  EmptyObject,
+  OperationInputOf,
+  OperationResponseOf,
+} from "./operation-types"

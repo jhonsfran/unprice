@@ -404,16 +404,11 @@ describe("BudgetDO measured work", () => {
           const outcome = accepted(measured.reply)
           expect(isOutcomeOf(outcome, "record") && outcome.replayed).toBe(true)
           expect(isOutcomeOf(outcome, "record") && outcome.balance.remaining).toBe(BigInt(0))
-        } else if (type === "denial") {
+        } else {
+          // A denied charge writes nothing; a refused lease is kept, so its replay is read back.
           expect(measured.reply).toMatchObject({
             ok: false,
             rejection: { code: "LIMIT_EXCEEDED", blocked: { remaining: BigInt(0) } },
-          })
-        } else {
-          expect(accepted(measured.reply)).toMatchObject({
-            type: "refused",
-            blocked: { remaining: BigInt(0) },
-            replayed: type === "lease:refusalReplay",
           })
         }
         samples.push(measured.sql)

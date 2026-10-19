@@ -1,8 +1,8 @@
-import type { UnpriceOptions } from "./client"
 import type { ApiError, ErrorResponse } from "./errors"
 import type { GeneratedSdkResources } from "./generated/sdk-resources"
 import type { OperationResponse } from "./operation-types"
 import type { ApiResult } from "./result"
+import type { UnpriceOptions } from "./transport"
 
 type BudgetResources = GeneratedSdkResources["budgets"]
 

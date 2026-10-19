@@ -1,6 +1,7 @@
 import { buttonVariants } from "@unprice/ui/button"
 import { GitHub } from "@unprice/ui/icons"
 import { Link } from "next-view-transitions"
+import { siteConfig } from "~/constants/layout"
 import { LedgerRow, SectionShell } from "./station"
 import { StationHeader } from "./station-header"
 
@@ -52,7 +53,7 @@ export default function ManifestoOwnership() {
           </p>
           <div className="mt-8">
             <Link
-              href="https://github.com/jhonsfran1165/unprice"
+              href={siteConfig.links.github}
               target="_blank"
               className={buttonVariants({ variant: "outline", className: "gap-2" })}
             >

@@ -15,7 +15,7 @@ import {
 import { Input } from "@unprice/ui/input"
 import { SubmitButton } from "~/components/submit-button"
 import { toBrowserAbsoluteUrl } from "~/lib/browser-url"
-import { SIGNUP_INTENT_NEXT, type SignupIntent } from "~/lib/signup-funnel"
+import { type SignupIntent, newWorkspacePath } from "~/lib/signup-funnel"
 import { useZodForm } from "~/lib/zod-form"
 import { useTRPC } from "~/trpc/client"
 
@@ -53,7 +53,7 @@ export default function NewWorkspaceForm({
   const onSubmitForm = async (data: WorkspaceSignup) => {
     await signUpWorkspace.mutateAsync({
       ...data,
-      successUrl: toBrowserAbsoluteUrl((intent && SIGNUP_INTENT_NEXT[intent]) || "/new"),
+      successUrl: toBrowserAbsoluteUrl(newWorkspacePath(intent)),
       cancelUrl: toBrowserAbsoluteUrl("/"),
     })
   }

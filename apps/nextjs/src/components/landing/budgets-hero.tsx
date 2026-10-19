@@ -1,33 +1,14 @@
 import { buttonVariants } from "@unprice/ui/button"
-import { cn } from "@unprice/ui/utils"
 import Balancer from "react-wrap-balancer"
 import { AcquisitionLink } from "./acquisition-link"
-import { BUDGETS_INSTALL } from "./budgets-snippets"
 import { BudgetsVideo } from "./budgets-video"
-import CopyToClipboard from "./copy-to-clipboard"
+import { InstallCommand } from "./code-panel"
 
 // The Budgets page opens on the launch video's own words, so a reader who
 // arrives from it lands on the promise they just heard (message match,
 // marketing-framework.md). The video itself sits beside the headline, so a
 // reader who skipped it can watch it without scrolling. One way in: the key,
 // with the install line under it.
-
-export function InstallCommand({ className }: { className?: string }) {
-  return (
-    <div
-      className={cn(
-        "flex items-center gap-2 rounded-md border border-background-border bg-surface-panel py-1 pr-1 pl-3",
-        className
-      )}
-    >
-      <span aria-hidden className="select-none font-mono text-background-text text-xs">
-        $
-      </span>
-      <code className="font-mono text-background-textContrast text-xs">{BUDGETS_INSTALL}</code>
-      <CopyToClipboard code={BUDGETS_INSTALL} variant="ghost" className="size-7" />
-    </div>
-  )
-}
 
 export function BudgetsHero() {
   return (
