@@ -264,6 +264,46 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/v1/budgets/lease": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * debit capacity for a long-lived process to spend locally
+     * @description Debit capacity against every hard limit before it is spent, for a long-lived process to authorize, settle, and charge in its own memory. Near a limit less than asked for is granted; when nothing fits, 402. Report usage to /v1/budgets/report before expiresAt, or the whole grant counts as used. A retry with the same lease key, amount, and ttlMs returns the same lease. A budget past its closesAt returns 409.
+     */
+    post: operations["budgets.lease"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/v1/budgets/report": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * report a lease's usage, and extend or close it
+     * @description Report the cumulative usage spent from a lease. A report that is not final may ask for more capacity: what fits is granted, and a short extension is part of the answer, never an error, so the usage always counts. Reports renew the lease once less than half its ttlMs remains. A final report closes the lease and returns the unused grant. Reports are numbered from 1; resending the last one replays its answer, and any other number returns 409. After expiresAt only a final report is accepted.
+     */
+    post: operations["budgets.report"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/v1/customers/sign-up": {
     parameters: {
       query?: never
@@ -790,7 +830,7 @@ export interface components {
               balance: {
                 /** @description The least remaining over hard limits; null when the budget has no hard limit */
                 remaining: string | null
-                /** @description The sum of open holds */
+                /** @description The sum of open holds and the unreported part of open leases */
                 held: string
                 limits: {
                   id: string
@@ -810,7 +850,7 @@ export interface components {
                   amount: string
                   /** @description Used in the current period */
                   consumed: string
-                  /** @description Held by open holds */
+                  /** @description Held by open holds and leases */
                   held: string
                   /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                   remaining: string
@@ -922,7 +962,7 @@ export interface components {
               balance: {
                 /** @description The least remaining over hard limits; null when the budget has no hard limit */
                 remaining: string | null
-                /** @description The sum of open holds */
+                /** @description The sum of open holds and the unreported part of open leases */
                 held: string
                 limits: {
                   id: string
@@ -942,7 +982,7 @@ export interface components {
                   amount: string
                   /** @description Used in the current period */
                   consumed: string
-                  /** @description Held by open holds */
+                  /** @description Held by open holds and leases */
                   held: string
                   /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                   remaining: string
@@ -1054,7 +1094,7 @@ export interface components {
               balance: {
                 /** @description The least remaining over hard limits; null when the budget has no hard limit */
                 remaining: string | null
-                /** @description The sum of open holds */
+                /** @description The sum of open holds and the unreported part of open leases */
                 held: string
                 limits: {
                   id: string
@@ -1074,7 +1114,7 @@ export interface components {
                   amount: string
                   /** @description Used in the current period */
                   consumed: string
-                  /** @description Held by open holds */
+                  /** @description Held by open holds and leases */
                   held: string
                   /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                   remaining: string
@@ -1186,7 +1226,7 @@ export interface components {
               balance: {
                 /** @description The least remaining over hard limits; null when the budget has no hard limit */
                 remaining: string | null
-                /** @description The sum of open holds */
+                /** @description The sum of open holds and the unreported part of open leases */
                 held: string
                 limits: {
                   id: string
@@ -1206,7 +1246,7 @@ export interface components {
                   amount: string
                   /** @description Used in the current period */
                   consumed: string
-                  /** @description Held by open holds */
+                  /** @description Held by open holds and leases */
                   held: string
                   /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                   remaining: string
@@ -1318,7 +1358,7 @@ export interface components {
               balance: {
                 /** @description The least remaining over hard limits; null when the budget has no hard limit */
                 remaining: string | null
-                /** @description The sum of open holds */
+                /** @description The sum of open holds and the unreported part of open leases */
                 held: string
                 limits: {
                   id: string
@@ -1338,7 +1378,7 @@ export interface components {
                   amount: string
                   /** @description Used in the current period */
                   consumed: string
-                  /** @description Held by open holds */
+                  /** @description Held by open holds and leases */
                   held: string
                   /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                   remaining: string
@@ -1450,7 +1490,7 @@ export interface components {
               balance: {
                 /** @description The least remaining over hard limits; null when the budget has no hard limit */
                 remaining: string | null
-                /** @description The sum of open holds */
+                /** @description The sum of open holds and the unreported part of open leases */
                 held: string
                 limits: {
                   id: string
@@ -1470,7 +1510,7 @@ export interface components {
                   amount: string
                   /** @description Used in the current period */
                   consumed: string
-                  /** @description Held by open holds */
+                  /** @description Held by open holds and leases */
                   held: string
                   /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                   remaining: string
@@ -1582,7 +1622,7 @@ export interface components {
               balance: {
                 /** @description The least remaining over hard limits; null when the budget has no hard limit */
                 remaining: string | null
-                /** @description The sum of open holds */
+                /** @description The sum of open holds and the unreported part of open leases */
                 held: string
                 limits: {
                   id: string
@@ -1602,7 +1642,7 @@ export interface components {
                   amount: string
                   /** @description Used in the current period */
                   consumed: string
-                  /** @description Held by open holds */
+                  /** @description Held by open holds and leases */
                   held: string
                   /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                   remaining: string
@@ -1714,7 +1754,7 @@ export interface components {
               balance: {
                 /** @description The least remaining over hard limits; null when the budget has no hard limit */
                 remaining: string | null
-                /** @description The sum of open holds */
+                /** @description The sum of open holds and the unreported part of open leases */
                 held: string
                 limits: {
                   id: string
@@ -1734,7 +1774,7 @@ export interface components {
                   amount: string
                   /** @description Used in the current period */
                   consumed: string
-                  /** @description Held by open holds */
+                  /** @description Held by open holds and leases */
                   held: string
                   /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                   remaining: string
@@ -1846,7 +1886,7 @@ export interface components {
               balance: {
                 /** @description The least remaining over hard limits; null when the budget has no hard limit */
                 remaining: string | null
-                /** @description The sum of open holds */
+                /** @description The sum of open holds and the unreported part of open leases */
                 held: string
                 limits: {
                   id: string
@@ -1866,7 +1906,7 @@ export interface components {
                   amount: string
                   /** @description Used in the current period */
                   consumed: string
-                  /** @description Held by open holds */
+                  /** @description Held by open holds and leases */
                   held: string
                   /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                   remaining: string
@@ -1978,7 +2018,7 @@ export interface components {
               balance: {
                 /** @description The least remaining over hard limits; null when the budget has no hard limit */
                 remaining: string | null
-                /** @description The sum of open holds */
+                /** @description The sum of open holds and the unreported part of open leases */
                 held: string
                 limits: {
                   id: string
@@ -1998,7 +2038,7 @@ export interface components {
                   amount: string
                   /** @description Used in the current period */
                   consumed: string
-                  /** @description Held by open holds */
+                  /** @description Held by open holds and leases */
                   held: string
                   /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                   remaining: string
@@ -3027,7 +3067,7 @@ export interface operations {
               balance: {
                 /** @description The least remaining over hard limits; null when the budget has no hard limit */
                 remaining: string | null
-                /** @description The sum of open holds */
+                /** @description The sum of open holds and the unreported part of open leases */
                 held: string
                 limits: {
                   id: string
@@ -3047,7 +3087,7 @@ export interface operations {
                   amount: string
                   /** @description Used in the current period */
                   consumed: string
-                  /** @description Held by open holds */
+                  /** @description Held by open holds and leases */
                   held: string
                   /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                   remaining: string
@@ -3057,7 +3097,7 @@ export interface operations {
                 /** @description When this balance was computed, in epoch milliseconds */
                 asOf: number
               }
-              /** @description Accepted calls that changed the budget, per verb, since it was created. Replays, rejections, reads, upserts that changed nothing, and holds the alarm settled at expiry are not counted. */
+              /** @description Accepted calls that changed the budget, per verb, since it was created. Replays, rejections, reads, upserts that changed nothing, and holds and leases the alarm closed at expiry are not counted. */
               operations: {
                 upsert: number
                 authorize: number
@@ -3065,6 +3105,8 @@ export interface operations {
                 release: number
                 charge: number
                 record: number
+                lease: number
+                report: number
               }
             }
           }
@@ -3211,7 +3253,7 @@ export interface operations {
             balance: {
               /** @description The least remaining over hard limits; null when the budget has no hard limit */
               remaining: string | null
-              /** @description The sum of open holds */
+              /** @description The sum of open holds and the unreported part of open leases */
               held: string
               limits: {
                 id: string
@@ -3231,7 +3273,7 @@ export interface operations {
                 amount: string
                 /** @description Used in the current period */
                 consumed: string
-                /** @description Held by open holds */
+                /** @description Held by open holds and leases */
                 held: string
                 /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                 remaining: string
@@ -3391,7 +3433,7 @@ export interface operations {
             balance: {
               /** @description The least remaining over hard limits; null when the budget has no hard limit */
               remaining: string | null
-              /** @description The sum of open holds */
+              /** @description The sum of open holds and the unreported part of open leases */
               held: string
               limits: {
                 id: string
@@ -3411,7 +3453,7 @@ export interface operations {
                 amount: string
                 /** @description Used in the current period */
                 consumed: string
-                /** @description Held by open holds */
+                /** @description Held by open holds and leases */
                 held: string
                 /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                 remaining: string
@@ -3551,7 +3593,7 @@ export interface operations {
             balance: {
               /** @description The least remaining over hard limits; null when the budget has no hard limit */
               remaining: string | null
-              /** @description The sum of open holds */
+              /** @description The sum of open holds and the unreported part of open leases */
               held: string
               limits: {
                 id: string
@@ -3571,7 +3613,7 @@ export interface operations {
                 amount: string
                 /** @description Used in the current period */
                 consumed: string
-                /** @description Held by open holds */
+                /** @description Held by open holds and leases */
                 held: string
                 /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                 remaining: string
@@ -3715,7 +3757,7 @@ export interface operations {
             balance: {
               /** @description The least remaining over hard limits; null when the budget has no hard limit */
               remaining: string | null
-              /** @description The sum of open holds */
+              /** @description The sum of open holds and the unreported part of open leases */
               held: string
               limits: {
                 id: string
@@ -3735,7 +3777,7 @@ export interface operations {
                 amount: string
                 /** @description Used in the current period */
                 consumed: string
-                /** @description Held by open holds */
+                /** @description Held by open holds and leases */
                 held: string
                 /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                 remaining: string
@@ -3891,7 +3933,7 @@ export interface operations {
             balance: {
               /** @description The least remaining over hard limits; null when the budget has no hard limit */
               remaining: string | null
-              /** @description The sum of open holds */
+              /** @description The sum of open holds and the unreported part of open leases */
               held: string
               limits: {
                 id: string
@@ -3911,7 +3953,7 @@ export interface operations {
                 amount: string
                 /** @description Used in the current period */
                 consumed: string
-                /** @description Held by open holds */
+                /** @description Held by open holds and leases */
                 held: string
                 /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                 remaining: string
@@ -4066,7 +4108,7 @@ export interface operations {
               balance: {
                 /** @description The least remaining over hard limits; null when the budget has no hard limit */
                 remaining: string | null
-                /** @description The sum of open holds */
+                /** @description The sum of open holds and the unreported part of open leases */
                 held: string
                 limits: {
                   id: string
@@ -4086,7 +4128,7 @@ export interface operations {
                   amount: string
                   /** @description Used in the current period */
                   consumed: string
-                  /** @description Held by open holds */
+                  /** @description Held by open holds and leases */
                   held: string
                   /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
                   remaining: string
@@ -4096,7 +4138,7 @@ export interface operations {
                 /** @description When this balance was computed, in epoch milliseconds */
                 asOf: number
               }
-              /** @description Accepted calls that changed the budget, per verb, since it was created. Replays, rejections, reads, upserts that changed nothing, and holds the alarm settled at expiry are not counted. */
+              /** @description Accepted calls that changed the budget, per verb, since it was created. Replays, rejections, reads, upserts that changed nothing, and holds and leases the alarm closed at expiry are not counted. */
               operations: {
                 upsert: number
                 authorize: number
@@ -4104,6 +4146,8 @@ export interface operations {
                 release: number
                 charge: number
                 record: number
+                lease: number
+                report: number
               }
             }
             /** @description The last 12 ended periods with usage of each limited window, newest first. Older periods are not kept. */
@@ -4117,6 +4161,494 @@ export interface operations {
               /** @description Used in the period */
               consumed: string
             }[]
+          }
+        }
+      }
+      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrBadRequest"]
+        }
+      }
+      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+      401: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrUnauthorized"]
+        }
+      }
+      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+      403: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrForbidden"]
+        }
+      }
+      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrNotFound"]
+        }
+      }
+      /** @description This response is sent when a request conflicts with the current state of the server. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrConflict"]
+        }
+      }
+      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+      412: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
+        }
+      }
+      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+      429: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrTooManyRequests"]
+        }
+      }
+      /** @description The server has encountered a situation it does not know how to handle. */
+      500: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrInternalServerError"]
+        }
+      }
+    }
+  }
+  "budgets.lease": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The lease request */
+    requestBody: {
+      content: {
+        "application/json": {
+          /**
+           * @description The budget's key, chosen by you and unique within the project. Up to 128 letters, digits, and `: / _ . @ -`, starting with a letter or digit.
+           * @example customer:acme
+           */
+          key: string
+          /**
+           * @description Up to 256 characters, one per lease, chosen by the client. Retrying a grant with the same key, amount, and ttlMs replays it; another amount or ttlMs returns 409. Lease keys and idempotency keys are separate.
+           * @example lease_01J9Z3
+           */
+          leaseKey: string
+          /**
+           * @description Capacity to debit now against every hard limit and spend locally. Near a limit less is granted; when nothing fits, 402.
+           * @example 0.05
+           */
+          amount: string
+          /**
+           * @description How long the lease lives without a report, in milliseconds: at least 1000 and at most the budget's holds.maxTtlMs. A report renews it once less than half remains. A lease still open at expiry counts its whole grant as used until the window resets.
+           * @example 60000
+           */
+          ttlMs: number
+        }
+      }
+    }
+    responses: {
+      /** @description The lease */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": {
+            lease: {
+              leaseKey: string
+              /** @description The last report applied; 0 before the first */
+              seq: number
+              /** @description Debited for this lease so far: the grant plus every extension */
+              granted: string
+              /** @description Usage reported so far */
+              captured: string
+              /** @description When the lease expires without a report, in epoch milliseconds. At expiry its whole grant counts as used. */
+              expiresAt: number
+              /** @enum {string} */
+              status: "open" | "closed" | "expired"
+            }
+            /** @description The budget's hold TTL bounds and close time, so holds spent locally follow them */
+            terms: {
+              holds: {
+                defaultTtlMs: number
+                maxTtlMs: number
+              }
+              closesAt: number | null
+            }
+            /** @description True when this answer replays an earlier request instead of applying it again */
+            replayed: boolean
+            balance: {
+              /** @description The least remaining over hard limits; null when the budget has no hard limit */
+              remaining: string | null
+              /** @description The sum of open holds and the unreported part of open leases */
+              held: string
+              limits: {
+                id: string
+                /**
+                 * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                 * @example month
+                 * @enum {string}
+                 */
+                window: "hour" | "day" | "week" | "month" | "never"
+                /**
+                 * @description hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.
+                 * @example hard
+                 * @enum {string}
+                 */
+                enforce: "hard" | "soft"
+                /** @description The limit */
+                amount: string
+                /** @description Used in the current period */
+                consumed: string
+                /** @description Held by open holds and leases */
+                held: string
+                /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
+                remaining: string
+                /** @description When the limit's current period ends, in epoch milliseconds; null for never */
+                resetsAt: number | null
+              }[]
+              /** @description When this balance was computed, in epoch milliseconds */
+              asOf: number
+            }
+          }
+        }
+      }
+      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrBadRequest"]
+        }
+      }
+      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+      401: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrUnauthorized"]
+        }
+      }
+      /** @description The request does not fit the budget. `details.blocked` names the limit that blocked it and the remedy that would let it through. */
+      402: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrBudgetExceeded"]
+        }
+      }
+      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+      403: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrForbidden"]
+        }
+      }
+      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrNotFound"]
+        }
+      }
+      /** @description This response is sent when a request conflicts with the current state of the server. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrConflict"]
+        }
+      }
+      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+      412: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
+        }
+      }
+      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+      429: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrTooManyRequests"]
+        }
+      }
+      /** @description The server has encountered a situation it does not know how to handle. */
+      500: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrInternalServerError"]
+        }
+      }
+    }
+  }
+  "budgets.report": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description The report */
+    requestBody: {
+      content: {
+        "application/json":
+          | {
+              /**
+               * @description The budget's key, chosen by you and unique within the project. Up to 128 letters, digits, and `: / _ . @ -`, starting with a letter or digit.
+               * @example customer:acme
+               */
+              key: string
+              /**
+               * @description Up to 256 characters, one per lease, chosen by the client. Retrying a grant with the same key, amount, and ttlMs replays it; another amount or ttlMs returns 409. Lease keys and idempotency keys are separate.
+               * @example lease_01J9Z3
+               */
+              leaseKey: string
+              /**
+               * @description 1 for the first report on a lease, then one more each time. Resending the last seq with the same body replays its answer; any other seq returns 409.
+               * @example 1
+               */
+              seq: number
+              /**
+               * @description Usage spent from the lease so far, cumulative: never below the last report and never above the grant. A lost report is covered by the next.
+               * @example 0.05
+               */
+              captured: string
+              /** @enum {boolean} */
+              final: false
+              /**
+               * @description More capacity to add to the lease. Near a hard limit less is granted, and the capture still applies.
+               * @example 0.05
+               */
+              extend: string
+            }
+          | {
+              /**
+               * @description The budget's key, chosen by you and unique within the project. Up to 128 letters, digits, and `: / _ . @ -`, starting with a letter or digit.
+               * @example customer:acme
+               */
+              key: string
+              /**
+               * @description Up to 256 characters, one per lease, chosen by the client. Retrying a grant with the same key, amount, and ttlMs replays it; another amount or ttlMs returns 409. Lease keys and idempotency keys are separate.
+               * @example lease_01J9Z3
+               */
+              leaseKey: string
+              /**
+               * @description 1 for the first report on a lease, then one more each time. Resending the last seq with the same body replays its answer; any other seq returns 409.
+               * @example 1
+               */
+              seq: number
+              /**
+               * @description Usage spent from the lease so far, cumulative: never below the last report and never above the grant. A lost report is covered by the next.
+               * @example 0.05
+               */
+              captured: string
+              /**
+               * @description Closes the lease: counts `captured` and returns the rest of the grant. After expiresAt only a final report is accepted, until the expired lease is counted.
+               * @enum {boolean}
+               */
+              final: true
+            }
+      }
+    }
+    responses: {
+      /** @description The lease after the report */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": {
+            lease: {
+              leaseKey: string
+              /** @description The last report applied; 0 before the first */
+              seq: number
+              /** @description Debited for this lease so far: the grant plus every extension */
+              granted: string
+              /** @description Usage reported so far */
+              captured: string
+              /** @description When the lease expires without a report, in epoch milliseconds. At expiry its whole grant counts as used. */
+              expiresAt: number
+              /** @enum {string} */
+              status: "open" | "closed" | "expired"
+            }
+            /** @description The budget's hold TTL bounds and close time, so holds spent locally follow them */
+            terms: {
+              holds: {
+                defaultTtlMs: number
+                maxTtlMs: number
+              }
+              closesAt: number | null
+            }
+            extension: {
+              /** @description A decimal amount in the budget's unit */
+              requested: string
+              /** @description A decimal amount in the budget's unit */
+              granted: string
+              /** @description Why less than requested was granted, shaped like the error details of a denied charge; absent when all of it was */
+              denied?:
+                | {
+                    /** @enum {string} */
+                    kind: "budget_exceeded"
+                    /** @description A failing hard limit smaller than the request, or otherwise the one that resets last. Other limits can also block the request. The remedy considers all failing limits. */
+                    blocked: {
+                      limitId: string
+                      /**
+                       * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                       * @example month
+                       * @enum {string}
+                       */
+                      window: "hour" | "day" | "week" | "month" | "never"
+                      /** @description A decimal amount in the budget's unit */
+                      remaining: string
+                      /** @description A decimal amount in the budget's unit */
+                      held: string
+                      /** @description When the limit's current period ends, in epoch milliseconds; null for never */
+                      resetsAt: number | null
+                      /**
+                       * @description release_holds: releasing holds makes the request fit all failing limits. wait_for_reset: resetting the failing windows makes the request fit with holds unchanged. raise_limit: neither action alone is sufficient; one or more limits need a change.
+                       * @enum {string}
+                       */
+                      remedy: "release_holds" | "wait_for_reset" | "raise_limit"
+                    }
+                    balance: {
+                      /** @description The least remaining over hard limits; null when the budget has no hard limit */
+                      remaining: string | null
+                      /** @description The sum of open holds and the unreported part of open leases */
+                      held: string
+                      limits: {
+                        id: string
+                        /**
+                         * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                         * @example month
+                         * @enum {string}
+                         */
+                        window: "hour" | "day" | "week" | "month" | "never"
+                        /**
+                         * @description hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.
+                         * @example hard
+                         * @enum {string}
+                         */
+                        enforce: "hard" | "soft"
+                        /** @description The limit */
+                        amount: string
+                        /** @description Used in the current period */
+                        consumed: string
+                        /** @description Held by open holds and leases */
+                        held: string
+                        /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
+                        remaining: string
+                        /** @description When the limit's current period ends, in epoch milliseconds; null for never */
+                        resetsAt: number | null
+                      }[]
+                      /** @description When this balance was computed, in epoch milliseconds */
+                      asOf: number
+                    }
+                  }
+                | {
+                    /** @enum {string} */
+                    kind: "budget_closed"
+                    /** @description When the budget closed, in epoch milliseconds */
+                    closedAt: number
+                  }
+            }
+            /** @description A final report's unused grant, returned; 0 otherwise */
+            released: string
+            /** @description Limit ids whose consumed amount first exceeded the limit's amount. A hard limit crosses only after recorded usage took its room. Reservations do not trigger crossings. Replays preserve the original result. */
+            crossed: string[]
+            /** @description True when this answer replays an earlier request instead of applying it again */
+            replayed: boolean
+            balance: {
+              /** @description The least remaining over hard limits; null when the budget has no hard limit */
+              remaining: string | null
+              /** @description The sum of open holds and the unreported part of open leases */
+              held: string
+              limits: {
+                id: string
+                /**
+                 * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+                 * @example month
+                 * @enum {string}
+                 */
+                window: "hour" | "day" | "week" | "month" | "never"
+                /**
+                 * @description hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.
+                 * @example hard
+                 * @enum {string}
+                 */
+                enforce: "hard" | "soft"
+                /** @description The limit */
+                amount: string
+                /** @description Used in the current period */
+                consumed: string
+                /** @description Held by open holds and leases */
+                held: string
+                /** @description amount - consumed - held; negative for a soft limit, or a hard limit a record passed */
+                remaining: string
+                /** @description When the limit's current period ends, in epoch milliseconds; null for never */
+                resetsAt: number | null
+              }[]
+              /** @description When this balance was computed, in epoch milliseconds */
+              asOf: number
+            }
           }
         }
       }

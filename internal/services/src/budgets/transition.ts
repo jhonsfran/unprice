@@ -25,13 +25,17 @@ import type {
   BudgetCommand,
   BudgetOutcome,
   BudgetView,
-  HoldOperation,
+  LeaseOperation,
+  LeaseView,
   Ledger,
   Operation,
+  ReservationOperation,
   UnPriceBudgetError,
   WindowPeriod,
 } from "./model"
 import { type WindowId, windowIdOf } from "./windows"
+
+const ZERO = BigInt(0)
 
 /** The reads a store answers inside its transaction. Rows come back as domain types. */
 export type BudgetReader = {
@@ -39,18 +43,23 @@ export type BudgetReader = {
   readLedger(): Ledger
   readOperation(id: string): Operation | null
   readOperationByKey(idempotencyKey: string): Operation | null
+  /** The lease with this key, or null when it never existed or was purged. */
+  readLease(leaseKey: string): LeaseOperation | null
   /** Up to `limit` stored periods of each window id, newest first. */
   readHistory(windowIds: readonly WindowId[], limit: number): WindowPeriod[]
-  /** Up to `limit` open holds with `expiresAt <= now`, by `expiresAt`, then hold number. */
-  readExpiredHolds(now: number, limit: number): HoldOperation[]
+  /**
+   * Up to `limit` open holds and leases with `expiresAt <= now`, by `expiresAt`, then holds before
+   * leases, holds by number.
+   */
+  readExpired(now: number, limit: number): ReservationOperation[]
 }
 
-/** The most expired holds one sweep settles; the alarm comes back at once for the rest. */
-export const EXPIRED_HOLDS_PER_SWEEP = 256
+/** The most expired reservations one sweep closes; the alarm comes back at once for the rest. */
+export const EXPIRED_PER_SWEEP = 256
 
 /**
- * Loads the addressed operation, the history a `get` returns, and the expired holds a `sweep`
- * settles at the clock `transition` will clamp to.
+ * Loads the addressed operation, the history a `get` returns, and the expired reservations a
+ * `sweep` closes at the clock `transition` will clamp to.
  */
 export function loadView(
   reader: BudgetReader,
@@ -68,10 +77,7 @@ export function loadView(
       command.type === "get" && budget
         ? reader.readHistory(limitedWindows(budget), WINDOW_HISTORY_PERIODS)
         : [],
-    expiredHolds:
-      command.type === "sweep" && budget
-        ? reader.readExpiredHolds(now, EXPIRED_HOLDS_PER_SWEEP)
-        : [],
+    expired: command.type === "sweep" && budget ? reader.readExpired(now, EXPIRED_PER_SWEEP) : [],
   }
 }
 
@@ -89,6 +95,9 @@ function targetOf(reader: BudgetReader, command: BudgetCommand): Operation | nul
     case "settle":
     case "release":
       return reader.readOperation(command.holdId)
+    case "lease":
+    case "report":
+      return reader.readLease(command.leaseKey)
     default:
       return null
   }
@@ -141,7 +150,7 @@ export function transition(params: {
 
   const decided = decide(
     command,
-    { budget: view.budget, ledger: rolledLedger, target: live, expiredHolds: view.expiredHolds },
+    { budget: view.budget, ledger: rolledLedger, target: live, expired: view.expired },
     now
   )
   if (decided.err) return Err(decided.err)
@@ -163,8 +172,9 @@ export function transition(params: {
   }
   const operations = change.rows
   const { periods } = rolled
-  // A row changes from the addressed one, or from an expired hold a sweep settles; else it is new.
-  const priors = new Map<string, Operation>(view.expiredHolds.map((hold) => [hold.id, hold]))
+  // A row changes from the addressed one, or from an expired reservation a sweep closes; else it
+  // is new.
+  const priors = new Map<string, Operation>(view.expired.map((row) => [row.id, row]))
   if (live) priors.set(live.id, live)
 
   const violations = checkTransition({
@@ -218,7 +228,7 @@ export function transition(params: {
 
 /**
  * Counts a caller's command that changed the budget. A replay, an upsert that changed nothing, and
- * the alarm's sweep (which settles expired holds) are not counted.
+ * the alarm's sweep (which closes expired reservations) are not counted.
  */
 function countCall(
   operations: BudgetOperations,
@@ -230,7 +240,7 @@ function countCall(
   return { ...operations, [command.type]: operations[command.type] + 1 }
 }
 
-/** Past its retention. An open hold has none until it is closed. */
+/** Past its retention. An open hold or lease has none until it is closed. */
 function isPastRetention(row: Operation, now: number): boolean {
   const due = dueAt(row)
   return due !== null && due <= now
@@ -300,7 +310,36 @@ function outcomeOf(
         balance,
       }
     }
+    case "lease": {
+      if (row?.kind !== "lease") throw new Error("lease produced no lease row")
+      return { type: "lease", lease: leaseView(row), terms: termsOf(budget), replayed, balance }
+    }
+    case "report": {
+      if (row?.kind !== "lease" || !row.last) {
+        throw new Error(`report on ${command.leaseKey} produced no reported lease`)
+      }
+      const { request, extended, denied, crossed } = row.last
+      return {
+        type: "report",
+        lease: leaseView(row),
+        terms: termsOf(budget),
+        extension: { requested: request.final ? ZERO : request.extend, granted: extended, denied },
+        released: request.final ? row.granted - row.captured : ZERO,
+        crossed,
+        replayed,
+        balance,
+      }
+    }
   }
+}
+
+function leaseView(lease: LeaseOperation): LeaseView {
+  const { leaseKey, granted, captured, expiresAt, last, state } = lease
+  return { leaseKey, seq: last?.seq ?? 0, granted, captured, expiresAt, status: state.status }
+}
+
+function termsOf(budget: BudgetRecord) {
+  return { holds: budget.config.holds, closesAt: budget.config.closesAt }
 }
 
 function snapshotOf(budget: BudgetRecord, ledger: Ledger, balance: BudgetBalance, now: number) {

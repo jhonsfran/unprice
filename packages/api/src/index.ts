@@ -24,6 +24,12 @@ export type {
   SpendBudgetInput,
 } from "./budgets"
 export type {
+  LeaseReportResponse,
+  LocalBudgetHandle,
+  LocalBudgetOptions,
+  LocalLeaseOptions,
+} from "./budget-local"
+export type {
   Reservation,
   Reservations,
   ReservationSettlement,

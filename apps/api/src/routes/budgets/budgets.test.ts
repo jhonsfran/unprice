@@ -11,8 +11,10 @@ import { placementTiming } from "~/middleware/placement-timing"
 import { registerAuthorizeBudgetV1 } from "./authorizeBudgetV1"
 import { registerChargeBudgetV1 } from "./chargeBudgetV1"
 import { registerGetBudgetV1 } from "./getBudgetV1"
+import { registerLeaseBudgetV1 } from "./leaseBudgetV1"
 import { registerRecordBudgetV1 } from "./recordBudgetV1"
 import { registerReleaseBudgetV1 } from "./releaseBudgetV1"
+import { registerReportBudgetV1 } from "./reportBudgetV1"
 import { registerSettleBudgetV1 } from "./settleBudgetV1"
 import { registerUpsertBudgetV1 } from "./upsertBudgetV1"
 
@@ -79,6 +81,8 @@ function createTestApp() {
     registerChargeBudgetV1,
     registerRecordBudgetV1,
     registerGetBudgetV1,
+    registerLeaseBudgetV1,
+    registerReportBudgetV1,
   ]) {
     register(app)
   }
@@ -126,12 +130,16 @@ describe("budgets API", () => {
       "/v1/budgets/charge",
       "/v1/budgets/record",
       "/v1/budgets/get",
+      "/v1/budgets/lease",
+      "/v1/budgets/report",
     ])
     const statuses = (path: string) =>
       Object.keys(document.paths[path]?.post?.responses ?? {}).filter((status) => status === "402")
     expect(
-      ["authorize", "charge", "record"].map((verb) => statuses(`/v1/budgets/${verb}`))
-    ).toEqual([["402"], ["402"], []])
+      ["authorize", "charge", "record", "lease", "report"].map((verb) =>
+        statuses(`/v1/budgets/${verb}`)
+      )
+    ).toEqual([["402"], ["402"], [], ["402"], []])
   })
 
   it("returns settlement maximum and actual on an over-reservation conflict", async () => {
@@ -549,6 +557,273 @@ describe("budgets API", () => {
       ],
     })
   })
+
+  const lease = {
+    leaseKey: "lease_1",
+    seq: 0,
+    granted: usd(5),
+    captured: BigInt(0),
+    expiresAt: 1_796_083_260_000,
+    status: "open" as const,
+  }
+  const terms = { holds: { defaultTtlMs: 900_000, maxTtlMs: 86_400_000 }, closesAt: null }
+  const wireBalance = (remaining: string, held: string, consumed: string) => ({
+    remaining,
+    held,
+    limits: [
+      {
+        id: "month",
+        window: "month",
+        enforce: "hard",
+        amount: "50",
+        consumed,
+        held,
+        remaining,
+        resetsAt: 1_798_761_600_000,
+      },
+    ],
+    asOf: 1_796_083_200_000,
+  })
+
+  it("grants a lease and answers in decimal strings with the remaining header", async () => {
+    mocks.execute.mockResolvedValue(
+      Ok({ type: "lease", lease, terms, replayed: false, balance: balance(usd(45), usd(5)) })
+    )
+
+    const response = await call("/v1/budgets/lease", {
+      key: "customer:acme",
+      leaseKey: "lease_1",
+      amount: "5",
+      ttlMs: 60_000,
+    })
+
+    expect(mocks.execute).toHaveBeenCalledWith(
+      { projectId: "proj_123", key: "customer:acme" },
+      { type: "lease", leaseKey: "lease_1", amount: usd(5), ttlMs: 60_000 }
+    )
+    expect(response.status).toBe(200)
+    expect(response.headers.get("Unprice-Budget-Remaining")).toBe("45")
+    expect(await response.json()).toEqual({
+      lease: {
+        leaseKey: "lease_1",
+        seq: 0,
+        granted: "5",
+        captured: "0",
+        expiresAt: 1_796_083_260_000,
+        status: "open",
+      },
+      terms,
+      replayed: false,
+      balance: wireBalance("45", "5", "0"),
+    })
+  })
+
+  it("answers a short extension with the details of a denied charge, and the capture applied", async () => {
+    const blocked = {
+      limitId: "month",
+      window: "month" as const,
+      remaining: usd(0),
+      held: usd(2),
+      resetsAt: 1_798_761_600_000,
+      remedy: "release_holds" as const,
+    }
+    mocks.execute.mockResolvedValue(
+      Ok({
+        type: "report",
+        lease: { ...lease, seq: 2, granted: usd(7), captured: usd(3) },
+        terms,
+        extension: {
+          requested: usd(5),
+          granted: usd(2),
+          denied: { code: "LIMIT_EXCEEDED", blocked },
+        },
+        released: BigInt(0),
+        crossed: [],
+        replayed: false,
+        balance: balance(usd(0), usd(4)),
+      })
+    )
+
+    const response = await call("/v1/budgets/report", {
+      key: "customer:acme",
+      leaseKey: "lease_1",
+      seq: 2,
+      captured: "3",
+      final: false,
+      extend: "5",
+    })
+
+    expect(mocks.execute).toHaveBeenCalledWith(
+      { projectId: "proj_123", key: "customer:acme" },
+      {
+        type: "report",
+        leaseKey: "lease_1",
+        seq: 2,
+        request: { captured: usd(3), final: false, extend: usd(5) },
+      }
+    )
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      lease: {
+        leaseKey: "lease_1",
+        seq: 2,
+        granted: "7",
+        captured: "3",
+        expiresAt: 1_796_083_260_000,
+        status: "open",
+      },
+      terms,
+      extension: {
+        requested: "5",
+        granted: "2",
+        denied: {
+          kind: "budget_exceeded",
+          blocked: {
+            limitId: "month",
+            window: "month",
+            remaining: "0",
+            held: "2",
+            resetsAt: 1_798_761_600_000,
+            remedy: "release_holds",
+          },
+          balance: wireBalance("0", "4", "46"),
+        },
+      },
+      released: "0",
+      crossed: [],
+      replayed: false,
+      balance: wireBalance("0", "4", "46"),
+    })
+  })
+
+  it("closes a lease with a final report and refuses a final report that extends", async () => {
+    mocks.execute.mockResolvedValue(
+      Ok({
+        type: "report",
+        lease: { ...lease, seq: 1, captured: usd(2), status: "closed" },
+        terms: { ...terms, closesAt: 1_798_761_600_000 },
+        extension: {
+          requested: BigInt(0),
+          granted: BigInt(0),
+          denied: null,
+        },
+        released: usd(3),
+        crossed: [],
+        replayed: true,
+        balance: balance(usd(48)),
+      })
+    )
+    const body = { key: "customer:acme", leaseKey: "lease_1", seq: 1, captured: "2", final: true }
+
+    const response = await call("/v1/budgets/report", body)
+
+    expect(mocks.execute.mock.calls[0]?.[1]).toEqual({
+      type: "report",
+      leaseKey: "lease_1",
+      seq: 1,
+      request: { captured: usd(2), final: true },
+    })
+    expect(await response.json()).toEqual({
+      lease: {
+        leaseKey: "lease_1",
+        seq: 1,
+        granted: "5",
+        captured: "2",
+        expiresAt: 1_796_083_260_000,
+        status: "closed",
+      },
+      terms: { ...terms, closesAt: 1_798_761_600_000 },
+      extension: { requested: "0", granted: "0" },
+      released: "3",
+      crossed: [],
+      replayed: true,
+      balance: wireBalance("48", "0", "2"),
+    })
+    const extending = await call("/v1/budgets/report", { ...body, extend: "1" })
+    expect(extending.status).toBe(400)
+    expect(mocks.execute).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    [
+      "/v1/budgets/lease",
+      {
+        code: "LIMIT_EXCEEDED",
+        blocked: {
+          limitId: "month",
+          window: "month",
+          remaining: BigInt(0),
+          held: usd(50),
+          resetsAt: 1_798_761_600_000,
+          remedy: "release_holds",
+        },
+        balance: balance(BigInt(0), usd(50)),
+      },
+      402,
+      errorBody("BUDGET_EXCEEDED", "Limit month has 0 remaining", {
+        kind: "budget_exceeded",
+        blocked: {
+          limitId: "month",
+          window: "month",
+          remaining: "0",
+          held: "50",
+          resetsAt: 1_798_761_600_000,
+          remedy: "release_holds",
+        },
+        balance: wireBalance("0", "50", "0"),
+      }),
+    ],
+    [
+      "/v1/budgets/report",
+      { code: "LEASE_NOT_FOUND", leaseKey: "lease_1" },
+      404,
+      errorBody("NOT_FOUND", "Lease lease_1 does not exist"),
+    ],
+    [
+      "/v1/budgets/report",
+      { code: "LEASE_CLOSED", leaseKey: "lease_1", status: "expired" },
+      409,
+      errorBody(
+        "CONFLICT",
+        "Lease lease_1 expired; a final report is accepted only until the alarm counts its remainder"
+      ),
+    ],
+    [
+      "/v1/budgets/report",
+      { code: "LEASE_SEQ_CONFLICT", leaseKey: "lease_1", seq: 3, requested: 5 },
+      409,
+      errorBody(
+        "CONFLICT",
+        "Lease lease_1 applied report 3; expected 4 or an exact retry of 3, got 5"
+      ),
+    ],
+    [
+      "/v1/budgets/report",
+      {
+        code: "LEASE_CAPTURE_OUT_OF_RANGE",
+        leaseKey: "lease_1",
+        minimum: usd(2),
+        maximum: usd(5),
+        captured: usd(6),
+      },
+      409,
+      errorBody("CONFLICT", "Lease lease_1 accepts a cumulative capture from 2 to 5, not 6"),
+    ],
+  ] as const)(
+    "maps a lease rejection on %s to its status and body",
+    async (path, rejection, status, body) => {
+      rejectWith(rejection as ConstructorParameters<typeof UnPriceBudgetError>[0])
+      const bodies: Record<string, unknown> = {
+        "/v1/budgets/lease": { key: "k", leaseKey: "lease_1", amount: "1", ttlMs: 60_000 },
+        "/v1/budgets/report": { key: "k", leaseKey: "lease_1", seq: 5, captured: "6", final: true },
+      }
+
+      const response = await call(path, bodies[path])
+
+      expect(response.status).toBe(status)
+      expect(await response.json()).toEqual(body)
+    }
+  )
 
   it("reads a budget by the key in the query string", async () => {
     rejectWith({ code: "BUDGET_NOT_FOUND" })

@@ -17,8 +17,10 @@ export const sdkOperationIds = [
   "budgets.authorize",
   "budgets.charge",
   "budgets.get",
+  "budgets.lease",
   "budgets.record",
   "budgets.release",
+  "budgets.report",
   "budgets.settle",
   "budgets.upsert",
   "customers.changePlan",
@@ -101,12 +103,18 @@ export type GeneratedSdkResources = {
     get: (
       req: OperationInput<"budgets.get">
     ) => Promise<ApiResult<OperationResponse<"budgets.get">>>
+    lease: (
+      req: OperationInput<"budgets.lease">
+    ) => Promise<ApiResult<OperationResponse<"budgets.lease">>>
     record: (
       req: OperationInput<"budgets.record">
     ) => Promise<ApiResult<OperationResponse<"budgets.record">>>
     release: (
       req: OperationInput<"budgets.release">
     ) => Promise<ApiResult<OperationResponse<"budgets.release">>>
+    report: (
+      req: OperationInput<"budgets.report">
+    ) => Promise<ApiResult<OperationResponse<"budgets.report">>>
     settle: (
       req: OperationInput<"budgets.settle">
     ) => Promise<ApiResult<OperationResponse<"budgets.settle">>>
@@ -225,8 +233,10 @@ export function createGeneratedSdkResources(
       authorize: (body) => toResult(openapi.POST("/v1/budgets/authorize", { body })),
       charge: (body) => toResult(openapi.POST("/v1/budgets/charge", { body })),
       get: (query) => toResult(openapi.GET("/v1/budgets/get", { params: { query } })),
+      lease: (body) => toResult(openapi.POST("/v1/budgets/lease", { body })),
       record: (body) => toResult(openapi.POST("/v1/budgets/record", { body })),
       release: (body) => toResult(openapi.POST("/v1/budgets/release", { body })),
+      report: (body) => toResult(openapi.POST("/v1/budgets/report", { body })),
       settle: (body) => toResult(openapi.POST("/v1/budgets/settle", { body })),
       upsert: (body) => toResult(openapi.POST("/v1/budgets/upsert", { body })),
     },

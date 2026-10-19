@@ -1,9 +1,11 @@
 import type { ApiKeyExtended } from "@unprice/db/validators"
 import { formatAmount } from "@unprice/money"
 import {
+  type Blocked,
   type BudgetBalance,
   type BudgetOutcome,
   type BudgetSnapshot,
+  type OutcomeOf,
   type UnPriceBudgetError,
   formatBudgetConfig,
 } from "@unprice/services/budgets"
@@ -79,6 +81,28 @@ export function budgetToWire(budget: BudgetSnapshot) {
   return { key, unit, version, ...config, closed, balance: toWire(balance), operations }
 }
 
+const exceededDetails = (blocked: Blocked, balance: BudgetBalance) => ({
+  kind: "budget_exceeded" as const,
+  blocked: toWire(blocked),
+  balance: toWire(balance),
+})
+
+const closedDetails = (closedAt: number) => ({ kind: "budget_closed" as const, closedAt })
+
+/** A report's extension; a short one carries the details a denied charge would have. */
+export function extensionToWire(
+  { requested, granted, denied }: OutcomeOf<"report">["extension"],
+  balance: BudgetBalance
+) {
+  const wire = { requested: formatAmount(requested), granted: formatAmount(granted) }
+  if (denied === null) return wire
+  const details =
+    denied.code === "LIMIT_EXCEEDED"
+      ? exceededDetails(denied.blocked, balance)
+      : closedDetails(denied.closedAt)
+  return { ...wire, denied: details }
+}
+
 function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): UnpriceApiError {
   const { rejection } = error
   const message = error.message
@@ -88,17 +112,13 @@ function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): Unprice
       return new UnpriceApiError({
         code: "BUDGET_EXCEEDED",
         message,
-        details: {
-          kind: "budget_exceeded",
-          blocked: toWire(rejection.blocked),
-          balance: toWire(rejection.balance),
-        },
+        details: exceededDetails(rejection.blocked, rejection.balance),
       })
     case "BUDGET_CLOSED":
       return new UnpriceApiError({
         code: "CONFLICT",
         message,
-        details: { kind: "budget_closed", closedAt: rejection.closedAt },
+        details: closedDetails(rejection.closedAt),
       })
     case "HOLD_AMOUNT_EXCEEDED":
       return new UnpriceApiError({
@@ -143,9 +163,13 @@ function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): Unprice
     case "UNIT_IMMUTABLE":
     case "LIMIT_WINDOW_IMMUTABLE":
     case "TOO_LATE":
+    case "LEASE_CLOSED":
+    case "LEASE_SEQ_CONFLICT":
+    case "LEASE_CAPTURE_OUT_OF_RANGE":
       return new UnpriceApiError({ code: "CONFLICT", message })
     case "BUDGET_NOT_FOUND":
     case "HOLD_NOT_FOUND":
+    case "LEASE_NOT_FOUND":
       return new UnpriceApiError({ code: "NOT_FOUND", message })
     case "INVALID_TTL":
     case "INVALID_OCCURRED_AT":

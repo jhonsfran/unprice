@@ -247,6 +247,20 @@ patterns. Keep it cheap to load and useful.
   (`middleware/placement-timing.ts`). BudgetDO returns `placement` beside its RPC reply and learns its colo
   from a never-awaited `cdn-cgi/trace` fetch in preview only (`local` elsewhere, so tests stay off the network). Local workerd evicts an idle DO after about 10 s, so manual
   curls see `cold` again.
+- 2026-10-18: In a non-TTY shell vitest-pool-workers swallows the benchmarks' `console.info`; run
+  `pnpm --filter api test:workers:bench --disableConsoleIntercept` to see `BUDGET_BENCHMARK` lines.
+  Measured there: an UPDATE that moves `due_at` adds no row written (lease report 3 with or
+  without renewal), so measure rather than count index entries.
+- 2026-10-18: After extending `budget.properties.test.ts` with a verb, flip one of its core rules
+  and confirm the property fails. Lease reports first reached their accepted path 1% of the time
+  and survived every mutation; planning them against live leases and adding a steady-clock
+  scenario made each mutation fail.
+- 2026-10-18: A nullable discriminated union in a response schema renders in OpenAPI 3.0 as a
+  `oneOf` with a bare `{ nullable: true }` member, and openapi-typescript then types the field as
+  `unknown`. Make such a field optional (absent instead of null) and check `openapi.d.ts`.
+- 2026-10-18: tsx cannot import `packages/api/src` (its CommonJS `export *`); tooling scripts import
+  the built `@unprice/api`, so run `pnpm --filter @unprice/api build` first. Run tooling probes
+  with explicit env vars rather than `--env-file`, which loads the operator's credentials.
 - 2026-10-16: Budget amounts are `@unprice/money` `Amount` (bigint at `LEDGER_SCALE`) and the wire
   patterns live in `@unprice/db/validators`; never redeclare them in the budget core.
 - 2026-10-16: `Omit` over a generic `BudgetOutcome & { type: T }` does not narrow; strip `type` at

@@ -8,8 +8,10 @@ import { route as billingReservationsFlushForInvoicingRoute } from "~/routes/bil
 import { route as budgetsAuthorizeRoute } from "~/routes/budgets/authorizeBudgetV1"
 import { route as budgetsChargeRoute } from "~/routes/budgets/chargeBudgetV1"
 import { route as budgetsGetRoute } from "~/routes/budgets/getBudgetV1"
+import { route as budgetsLeaseRoute } from "~/routes/budgets/leaseBudgetV1"
 import { route as budgetsRecordRoute } from "~/routes/budgets/recordBudgetV1"
 import { route as budgetsReleaseRoute } from "~/routes/budgets/releaseBudgetV1"
+import { route as budgetsReportRoute } from "~/routes/budgets/reportBudgetV1"
 import { route as budgetsSettleRoute } from "~/routes/budgets/settleBudgetV1"
 import { route as budgetsUpsertRoute } from "~/routes/budgets/upsertBudgetV1"
 import { route as customersChangePlanRoute } from "~/routes/customers/changePlanV1"
@@ -76,6 +78,8 @@ const routes = [
   budgetsChargeRoute,
   budgetsRecordRoute,
   budgetsGetRoute,
+  budgetsLeaseRoute,
+  budgetsReportRoute,
   customersSignUpRoute,
   customersChangePlanRoute,
   featuresListRoute,
@@ -121,6 +125,8 @@ const expectedRoutes = new Map<string, string>([
   ["budgets.charge", "POST /v1/budgets/charge"],
   ["budgets.record", "POST /v1/budgets/record"],
   ["budgets.get", "GET /v1/budgets/get"],
+  ["budgets.lease", "POST /v1/budgets/lease"],
+  ["budgets.report", "POST /v1/budgets/report"],
   ["customers.signUp", "POST /v1/customers/sign-up"],
   ["customers.changePlan", "POST /v1/customers/change-plan"],
   ["features.list", "GET /v1/features/list"],
@@ -183,6 +189,8 @@ const expectedSdkPublicOperations = [
   "budgets.charge",
   "budgets.record",
   "budgets.get",
+  "budgets.lease",
+  "budgets.report",
   "customers.signUp",
   "customers.changePlan",
   "features.list",

@@ -18,16 +18,22 @@ import {
   isClosed,
   loosening,
 } from "./config"
+import { consume, exposureOf } from "./ledger"
 import {
   type Blocked,
   type BlockedRemedy,
   type BudgetBalance,
   type BudgetCommand,
   type BudgetView,
+  type ChargeOperation,
+  type ExtensionDenial,
   type HoldOperation,
+  type LeaseOperation,
+  type LeaseReportRequest,
   type Ledger,
   type LimitBalance,
   type Operation,
+  type ReservationOperation,
   type UnPriceBudgetError,
   reject,
 } from "./model"
@@ -95,6 +101,12 @@ function blockingLimit(balance: BudgetBalance, amount: Amount): Blocked | null {
   }
 }
 
+/** What fits under every hard limit at this balance, never negative; null with no hard limit. */
+function roomOf(balance: BudgetBalance): Amount | null {
+  if (balance.remaining === null) return null
+  return balance.remaining > ZERO ? balance.remaining : ZERO
+}
+
 function resetsLater(a: number | null, b: number | null): boolean {
   if (b === null) return false
   return a === null || a > b
@@ -136,16 +148,14 @@ const unchanged = (row: Operation | null): Change => ({ rows: [], row, held: ZER
  */
 export function decide(
   command: BudgetCommand,
-  view: Pick<BudgetView, "budget" | "ledger" | "target" | "expiredHolds">,
+  view: Pick<BudgetView, "budget" | "ledger" | "target" | "expired">,
   now: number
 ): Result<Change, UnPriceBudgetError> {
   if (command.type === "upsert") return decideUpsert(command, view.budget, view.ledger, now)
   const budget = view.budget
   if (command.type === "sweep") {
     return Ok(
-      budget
-        ? decideSweep({ budget, ledger: view.ledger }, view.expiredHolds, now)
-        : unchanged(null)
+      budget ? decideSweep({ budget, ledger: view.ledger }, view.expired, now) : unchanged(null)
     )
   }
   if (!budget) return reject({ code: "BUDGET_NOT_FOUND" })
@@ -162,6 +172,10 @@ export function decide(
       return decideSettle(command, state, view.target, now)
     case "release":
       return decideRelease(command, state.ledger, view.target, now)
+    case "lease":
+      return decideLease(command, state, view.target, now)
+    case "report":
+      return decideReport(command, state, view.target, now)
   }
 }
 
@@ -235,22 +249,28 @@ function decideUpsert(
 }
 
 /**
- * Settles every expired hold at its full amount: a timer cannot prove the work stopped, so the
- * hold counts everything it permitted. Held capacity becomes consumption in the current window and
- * returns when that window rolls. A late settle of the same amount replays; another is refused.
+ * Closes every expired reservation into consumption of all it still holds: a timer cannot prove
+ * the work or the process stopped, so a hold counts everything it permitted and a lease everything
+ * it was granted. Held capacity becomes consumption in the current window and returns when that
+ * window rolls. A late settle of a hold's full amount replays; another is refused.
  */
-function decideSweep(state: Funded, holds: readonly HoldOperation[], now: number): Change {
+function decideSweep(state: Funded, expired: readonly ReservationOperation[], now: number): Change {
   const balance = balanceOf(state, now)
   let consumed = ZERO
-  const rows = holds.map((hold): HoldOperation => {
-    if (hold.state.status !== "open" || hold.expiresAt > now) {
-      throw new Error(`hold ${hold.id} is not an open hold past its expiry`)
+  const rows = expired.map((row): ReservationOperation => {
+    if (row.state.status !== "open" || row.expiresAt > now) {
+      throw new Error(`${row.kind} ${row.id} is not open past its expiry`)
     }
-    const crossed = crossings(balance, hold.amount, consumed)
-    consumed += hold.amount
+    const exposure = exposureOf(row)
+    const prior = consumed
+    consumed += exposure
+    if (row.kind === "lease") {
+      return { ...row, captured: row.granted, state: { status: "expired", closedAt: now } }
+    }
+    const crossed = crossings(balance, exposure, prior)
     return {
-      ...hold,
-      state: { status: "settled", closedAt: now, actual: hold.amount, crossed, byExpiry: true },
+      ...row,
+      state: { status: "settled", closedAt: now, actual: row.amount, crossed, byExpiry: true },
     }
   })
   return { rows, row: null, held: -consumed, consumed }
@@ -258,7 +278,7 @@ function decideSweep(state: Funded, holds: readonly HoldOperation[], now: number
 
 /** A keyed command repeats its row when the verb, the amount, and (for a hold) the TTL match. */
 function sameRequest(
-  row: Operation,
+  row: HoldOperation | ChargeOperation,
   command: Extract<BudgetCommand, { type: "authorize" | "charge" | "record" }>
 ): boolean {
   if (row.amount !== command.amount) return false
@@ -274,7 +294,7 @@ function decideKeyed(
 ): Result<Change, UnPriceBudgetError> {
   const { amount, idempotencyKey } = command
   if (target) {
-    if (target.idempotencyKey !== idempotencyKey) {
+    if (target.kind === "lease" || target.idempotencyKey !== idempotencyKey) {
       throw new Error(`target ${target.id} is not the row for key ${idempotencyKey}`)
     }
     if (sameRequest(target, command)) return Ok(unchanged(target))
@@ -285,14 +305,8 @@ function decideKeyed(
   if (command.type === "authorize") {
     const { holds } = state.budget.config
     ttlMs = command.ttlMs ?? holds.defaultTtlMs
-    if (!Number.isSafeInteger(ttlMs) || ttlMs < MIN_HOLD_TTL_MS || ttlMs > holds.maxTtlMs) {
-      return reject({
-        code: "INVALID_TTL",
-        ttlMs,
-        minTtlMs: MIN_HOLD_TTL_MS,
-        maxTtlMs: holds.maxTtlMs,
-      })
-    }
+    const invalid = invalidTtl(ttlMs, holds.maxTtlMs)
+    if (invalid) return invalid
   }
 
   if (command.type === "record") {
@@ -338,6 +352,151 @@ function decideKeyed(
     crossed: crossings(balance, amount),
   }
   return Ok({ rows: [row], row, held: ZERO, consumed: amount })
+}
+
+/** A hold's or a lease's TTL: from MIN_HOLD_TTL_MS up to the budget's `holds.maxTtlMs`. */
+function invalidTtl(ttlMs: number, maxTtlMs: number) {
+  if (Number.isSafeInteger(ttlMs) && ttlMs >= MIN_HOLD_TTL_MS && ttlMs <= maxTtlMs) return null
+  return reject({ code: "INVALID_TTL", ttlMs, minTtlMs: MIN_HOLD_TTL_MS, maxTtlMs })
+}
+
+/**
+ * Debits first, against every hard limit, like an authorize, and grants what fits: near a limit
+ * less than asked for, and nothing fitting is LIMIT_EXCEEDED. The same key, amount, and TTL replay.
+ */
+function decideLease(
+  command: Extract<BudgetCommand, { type: "lease" }>,
+  state: Funded,
+  target: Operation | null,
+  now: number
+): Result<Change, UnPriceBudgetError> {
+  const { leaseKey, amount, ttlMs } = command
+  if (target) {
+    const lease = leaseOf(target, leaseKey)
+    if (lease.requested === amount && lease.ttlMs === ttlMs) return Ok(unchanged(lease))
+    return reject({ code: "IDEMPOTENCY_CONFLICT", idempotencyKey: leaseKey })
+  }
+  const { config } = state.budget
+  const invalid = invalidTtl(ttlMs, config.holds.maxTtlMs)
+  if (invalid) return invalid
+  if (config.closesAt !== null && isClosed(config, now)) {
+    return reject({ code: "BUDGET_CLOSED", closedAt: config.closesAt })
+  }
+  const balance = balanceOf(state, now)
+  const room = roomOf(balance)
+  const granted = room === null || room >= amount ? amount : room
+  const blocked = granted === ZERO ? blockingLimit(balance, amount) : null
+  if (blocked) return reject({ code: "LIMIT_EXCEEDED", blocked, balance })
+  const lease: LeaseOperation = {
+    kind: "lease",
+    id: `l:${leaseKey}`,
+    leaseKey,
+    requested: amount,
+    ttlMs,
+    createdAt: now,
+    granted,
+    captured: ZERO,
+    last: null,
+    expiresAt: now + ttlMs,
+    state: { status: "open" },
+  }
+  return Ok({ rows: [lease], row: lease, held: granted, consumed: ZERO })
+}
+
+function sameReport(a: LeaseReportRequest, b: LeaseReportRequest): boolean {
+  if (a.captured !== b.captured) return false
+  return a.final || b.final ? a.final === b.final : a.extend === b.extend
+}
+
+/**
+ * One report, one transaction. It moves the capture delta from held to consumed, then either
+ * extends by what fits (a short extension is an outcome, so the capture always lands) and renews
+ * once less than half the TTL remains, or, when final, returns the unused grant. Past `expiresAt`
+ * only a final report is accepted, like a late settle (B3).
+ */
+function decideReport(
+  command: Extract<BudgetCommand, { type: "report" }>,
+  state: Funded,
+  target: Operation | null,
+  now: number
+): Result<Change, UnPriceBudgetError> {
+  const { leaseKey, seq, request } = command
+  if (!target) return reject({ code: "LEASE_NOT_FOUND", leaseKey })
+  const lease = leaseOf(target, leaseKey)
+  const { last, state: leaseState } = lease
+  if (last && last.seq === seq && sameReport(last.request, request)) return Ok(unchanged(lease))
+  if (leaseState.status !== "open") {
+    return reject({ code: "LEASE_CLOSED", leaseKey, status: leaseState.status })
+  }
+  const applied = last?.seq ?? 0
+  if (seq !== applied + 1) {
+    return reject({ code: "LEASE_SEQ_CONFLICT", leaseKey, seq: applied, requested: seq })
+  }
+  const { captured } = request
+  if (captured < lease.captured || captured > lease.granted) {
+    return reject({
+      code: "LEASE_CAPTURE_OUT_OF_RANGE",
+      leaseKey,
+      minimum: lease.captured,
+      maximum: lease.granted,
+      captured,
+    })
+  }
+  if (!request.final && now >= lease.expiresAt) {
+    return reject({ code: "LEASE_CLOSED", leaseKey, status: "expired" })
+  }
+
+  const balance = balanceOf(state, now)
+  const delta = captured - lease.captured
+  const crossed = crossings(balance, delta)
+  if (request.final) {
+    const row: LeaseOperation = {
+      ...lease,
+      captured,
+      last: { seq, request, extended: ZERO, denied: null, crossed },
+      state: { status: "closed", closedAt: now },
+    }
+    return Ok({ rows: [row], row, held: lease.captured - lease.granted, consumed: delta })
+  }
+
+  // The extension is judged after the capture it travels with.
+  const { ledger } = state
+  const afterCapture = balanceOf(
+    {
+      ...state,
+      ledger: { ...ledger, held: ledger.held - delta, usage: consume(ledger.usage, delta) },
+    },
+    now
+  )
+  const { config } = state.budget
+  const closedAt = config.closesAt !== null && isClosed(config, now) ? config.closesAt : null
+  const room = closedAt === null ? roomOf(afterCapture) : ZERO
+  const extended = room === null || room >= request.extend ? request.extend : room
+  let denied: ExtensionDenial | null = null
+  if (extended < request.extend && closedAt !== null) {
+    denied = { code: "BUDGET_CLOSED", closedAt }
+  } else if (extended < request.extend) {
+    const blocked = blockingLimit(afterCapture, request.extend)
+    if (!blocked) throw new Error(`lease ${leaseKey} extended short with no blocking limit`)
+    denied = { code: "LIMIT_EXCEEDED", blocked }
+  }
+  const renew = 2 * (lease.expiresAt - now) < lease.ttlMs
+  const row: LeaseOperation = {
+    ...lease,
+    granted: lease.granted + extended,
+    captured,
+    last: { seq, request, extended, denied, crossed },
+    expiresAt: renew ? now + lease.ttlMs : lease.expiresAt,
+  }
+  return Ok({ rows: [row], row, held: extended - delta, consumed: delta })
+}
+
+/** The lease a lease or report addresses; the store found it by the command's lease key. */
+function leaseOf(target: Operation, leaseKey: string): LeaseOperation {
+  if (target.kind !== "lease" || target.leaseKey !== leaseKey) {
+    throw new Error(`target ${target.id} is not the lease ${leaseKey}`)
+  }
+  return target
 }
 
 function decideSettle(

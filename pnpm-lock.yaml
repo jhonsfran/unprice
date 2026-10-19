@@ -1171,6 +1171,9 @@ importers:
       '@types/node':
         specifier: 24.13.2
         version: 24.13.2
+      fast-check:
+        specifier: ^4.5.3
+        version: 4.5.3
       openapi-typescript:
         specifier: 7.0.0-next.7
         version: 7.0.0-next.7(typescript@5.9.3)

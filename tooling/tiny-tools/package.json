@@ -16,6 +16,7 @@
     "e2e:budget": "node --env-file-if-exists=.env --import=tsx plan-budget.ts",
     "e2e:budget:local": "UNPRICE_API_URL=http://localhost:8787 node --env-file-if-exists=.env --import=tsx plan-budget.ts",
     "clean": "git clean -xdf .next .turbo node_modules",
+    "typecheck": "tsc --noEmit",
     "with-env": "infisical run --env=preview --path=/app --"
   },
   "keywords": [],

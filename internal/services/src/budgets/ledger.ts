@@ -2,7 +2,13 @@
 
 import type { Amount } from "@unprice/money"
 import { type BudgetLimit, OPERATION_RETENTION_MS, RECORD_DEDUPE_MS } from "./config"
-import type { Operation, WindowCounters, WindowPeriod, WindowUsage } from "./model"
+import type {
+  Operation,
+  ReservationOperation,
+  WindowCounters,
+  WindowPeriod,
+  WindowUsage,
+} from "./model"
 import { type WindowId, windowBounds, windowIdOf, windowSpecOf } from "./windows"
 
 const ZERO = BigInt(0)
@@ -74,27 +80,35 @@ export function consume(usage: WindowCounters, amount: Amount): WindowCounters {
   )
 }
 
-/**
- * When a row's retention ends and the alarm may purge it; null for an open hold, which stays until
- * it is closed. A record is kept for RECORD_DEDUPE_MS so a retry never counts twice; every other
- * row is purged OPERATION_RETENTION_MS after it closed.
- */
-export function dueAt(operation: Operation): number | null {
-  if (operation.kind !== "hold") {
-    const retention = operation.kind === "record" ? RECORD_DEDUPE_MS : OPERATION_RETENTION_MS
-    return operation.createdAt + retention
-  }
-  return operation.state.status === "open"
-    ? null
-    : operation.state.closedAt + OPERATION_RETENTION_MS
+/** What an open reservation counts against every limit; zero once it closed. */
+export function exposureOf(row: ReservationOperation): Amount {
+  if (row.state.status !== "open") return ZERO
+  return row.kind === "hold" ? row.amount : row.granted - row.captured
 }
 
 /**
- * When the alarm must next visit a row: an open hold at its `expiresAt`, to settle it; any other
- * row when its retention ends, to purge it. A store mirrors this in an indexed `due_at` column.
+ * When a row's retention ends and the alarm may purge it; null for an open hold or lease, which
+ * stays until it is closed. A record is kept for RECORD_DEDUPE_MS so a retry never counts twice;
+ * every other row is purged OPERATION_RETENTION_MS after it closed.
+ */
+export function dueAt(operation: Operation): number | null {
+  if (operation.kind === "hold" || operation.kind === "lease") {
+    return operation.state.status === "open"
+      ? null
+      : operation.state.closedAt + OPERATION_RETENTION_MS
+  }
+  const retention = operation.kind === "record" ? RECORD_DEDUPE_MS : OPERATION_RETENTION_MS
+  return operation.createdAt + retention
+}
+
+/**
+ * When the alarm must next visit a row: an open hold or lease at its `expiresAt`, to close it; any
+ * other row when its retention ends, to purge it. A store mirrors this in an indexed `due_at`
+ * column.
  */
 export function alarmAt(operation: Operation): number {
-  if (operation.kind === "hold" && operation.state.status === "open") return operation.expiresAt
+  const reservation = operation.kind === "hold" || operation.kind === "lease"
+  if (reservation && operation.state.status === "open") return operation.expiresAt
   const due = dueAt(operation)
   if (due === null) throw new Error(`closed row ${operation.id} has no retention end`)
   return due
