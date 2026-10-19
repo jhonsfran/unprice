@@ -253,6 +253,10 @@ patterns. Keep it cheap to load and useful.
   outside production) beside every RPC reply and learns its colo
   from a never-awaited `cdn-cgi/trace` fetch in preview only (`local` elsewhere, so tests stay off the network). Local workerd evicts an idle DO after about 10 s, so manual
   curls see `cold` again.
+- 2026-10-19: CI passes secrets between jobs with `.github/actions/secret-outputs` (gpg symmetric, base64),
+  which replaced the cloudposse Docker action after public.ecr.aws rate limits failed preview deploys
+  repeatedly. Run `.github/actions/secret-outputs/secret-outputs.test.sh` (Docker) after touching it;
+  it still reads the old format, which `DATABASE_URL_ENCRYPTED` is stored in.
 - 2026-10-19: Never time Durable Object work from the object's `Date.now()`: it is stale until the
   object's next I/O. A Worker-to-object `queueMs` read 0 on about 27,000 preview requests and was
   removed. Batched releases show instead as consecutive `budget_served` values that end together.

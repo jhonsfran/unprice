@@ -1,0 +1,33 @@
+name: Secret Outputs
+description: >-
+  Encrypts a value so it can travel between jobs as a job output, and decrypts it in the job that
+  uses it. Reads ciphertext written by cloudposse/github-action-secret-outputs.
+
+inputs:
+  op:
+    description: encode or decode
+    required: true
+  in:
+    description: The value to encrypt, or the base64 ciphertext to decrypt
+    required: true
+  secret:
+    description: The passphrase the encoding and decoding jobs share
+    required: true
+
+outputs:
+  out:
+    description: The base64 ciphertext, or the decrypted value (masked in logs)
+    value: ${{ steps.run.outputs.out }}
+
+runs:
+  using: "composite"
+
+  steps:
+    # Inputs reach the script only through the environment, never through the command line.
+    - id: run
+      shell: bash
+      env:
+        SECRET_OUTPUTS_OP: ${{ inputs.op }}
+        SECRET_OUTPUTS_IN: ${{ inputs.in }}
+        SECRET_OUTPUTS_PASSPHRASE: ${{ inputs.secret }}
+      run: '"$GITHUB_ACTION_PATH/secret-outputs.sh"'
