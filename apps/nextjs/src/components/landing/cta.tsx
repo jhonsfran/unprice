@@ -52,8 +52,7 @@ export default function Cta() {
         {/* One prerequisite, one exit to the long argument. */}
         <p className="mt-5 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
           <Balancer>
-            Bring the agent run or paid workflow that burns margin when a customer triggers it. That
-            is the only prerequisite. Read the argument in{" "}
+            Bring one agent run that costs you money. The reasoning is in{" "}
             <Link href="/manifesto" className={inlineLink}>
               the manifesto
             </Link>
@@ -88,21 +87,20 @@ export default function Cta() {
             </span>
           </div>
           <p className="mt-3 text-background-text text-sm leading-6">
-            Test the reservation with Unprice&apos;s built-in Sandbox before it touches production.
-            If the result does not match your model, remove it. No provider traffic, payment
-            processor, or contract changed.
+            Try it in Unprice&apos;s built-in Sandbox first. If it doesn&apos;t fit, remove it.
+            Nothing else changes.
           </p>
           {/* Honest scarcity: a real constraint on my own time, stated as a
               number. No countdown, no fake stock (marketing-framework.md). */}
           <p className="mt-4 text-background-text text-sm leading-6">
-            I am taking ten design partners and I onboard each one myself.{" "}
+            I&apos;m onboarding ten design partners myself.{" "}
             <a
               href="mailto:seb@unprice.dev?subject=What%20runs%20when%20customers%20overspend%3F"
               className={inlineLink}
             >
-              Email me your action
+              Email me the action
             </a>{" "}
-            and I&apos;ll reply with the first step, even if no slot is left.
+            you want to budget, and I&apos;ll reply with the first step.
           </p>
           <p className="mt-4 font-medium text-background-textContrast text-sm leading-6">
             Seb, founder of Unprice · <span className="font-mono text-xs">seb@unprice.dev</span>

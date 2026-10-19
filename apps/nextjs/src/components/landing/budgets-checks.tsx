@@ -26,18 +26,18 @@ type Mode = {
 const modes: Mode[] = [
   {
     title: "Local mode",
-    caption: "long-lived processes",
+    caption: "long-running processes",
     count: "0",
     unit: "network calls per check",
     rows: [
       { label: "answered from", fact: "a lease in memory" },
       { label: "use it in", fact: "servers · workers · agent runners" },
-      { label: "reports", fact: "once a second" },
+      { label: "reports usage", fact: "once a second" },
     ],
     call: 'budget(key, { mode: "local", lease: { amount: "5" } })',
   },
   {
-    title: "Remote",
+    title: "Remote mode",
     caption: "the default",
     count: "1",
     unit: "network round trip per check",
@@ -62,8 +62,8 @@ export function BudgetsChecks() {
           Zero-millisecond checks. Or one hop away.
         </h2>
         <p className="mt-5 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-          A long-lived process spends from a lease held in its own memory, so a check never leaves
-          the process. Remote checks add one network round trip. Both hold the same hard cap.
+          Local mode spends from a lease, a slice of the budget held in memory, so a check makes no
+          network call. Remote mode makes one round trip. Both enforce the same cap.
         </p>
       </div>
 
@@ -101,8 +101,7 @@ export function BudgetsChecks() {
 
       <div className="mt-8 flex max-w-3xl flex-wrap items-baseline gap-x-4 gap-y-2">
         <p className="text-background-text text-sm leading-6">
-          A lease is debited from the budget before the process spends it, so local spending never
-          exceeds what the budget granted.
+          The lease comes out of the budget first, so local mode can&apos;t overspend.
         </p>
         <ProofLink
           source="budgets_benchmark"

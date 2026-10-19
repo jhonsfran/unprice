@@ -11,7 +11,7 @@ import { StationHeader } from "./station-header"
 
 const night = [
   { time: "23:04", event: "run:r_42 started", fact: "research agent" },
-  { time: "23:04 →", event: "model calls", fact: "never paused" },
+  { time: "23:04 →", event: "model calls", fact: "never stopped" },
   { time: "07:58", event: "usage alert", fact: "over the $500 budget" },
 ]
 
@@ -33,14 +33,13 @@ export function BudgetsProblem() {
             Billing is too late.
           </h2>
           <p className="mt-5 max-w-xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-            <span className="text-background-textContrast">An alert is not a cap.</span> Usage
-            alerts and invoices report spend after it happened. When an agent loops overnight, the
-            alert lands on time, and the money is already gone.
+            <span className="text-background-textContrast">An alert is not a cap.</span> By the time
+            it arrives, the money is spent.
           </p>
         </div>
 
         <figure
-          aria-label="A trace of one overnight agent run. The run starts at 23:04 and its model calls never pause. At 07:58 the usage alert reports spend over the $500 budget, by which point $1,204 is spent. No check ran before any call, and the run had no cap."
+          aria-label="A trace of one overnight agent run. The run starts at 23:04 and its model calls never stop. At 07:58 the usage alert reports spend over the $500 budget, by which point $1,204 is spent. No check ran before any call, and the run had no cap."
           className="h-fit rounded-lg border border-background-border bg-surface-panel p-4 shadow-ambient sm:p-5"
         >
           <figcaption className="mb-4 flex items-baseline justify-between gap-4 border-background-border border-b pb-3">
@@ -71,7 +70,7 @@ export function BudgetsProblem() {
 
           <div className="mt-3 border-background-border border-t pt-2">
             <LedgerRow
-              label="spent when the alert landed"
+              label="spent when the alert arrived"
               fact="$1,204.00"
               factClassName="font-medium text-background-textContrast"
             />

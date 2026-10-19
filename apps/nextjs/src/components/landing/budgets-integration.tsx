@@ -26,8 +26,8 @@ export function BudgetsIntegration() {
           <code className="rounded-sm bg-background-bg px-1 py-px font-mono text-[13px] text-background-textContrast">
             spend
           </code>{" "}
-          reserves the most the call can cost, runs it, and settles what it actually cost. When the
-          cap cannot cover it, the call never runs.
+          holds the estimate, runs your function, and counts only what it actually cost. If the cap
+          can&apos;t cover the estimate, your function never runs.
         </p>
       </div>
 
@@ -36,7 +36,7 @@ export function BudgetsIntegration() {
 
         <div className="mt-6 border-background-border border-t pt-4">
           <p className="text-background-text text-sm leading-6">
-            Your billing stack stays exactly where it is.
+            Nothing in your billing stack changes.
           </p>
           <Reveal stagger className="mt-3 flex flex-col">
             {untouched.map((system) => (

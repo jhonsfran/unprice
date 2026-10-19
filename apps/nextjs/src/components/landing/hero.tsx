@@ -36,9 +36,8 @@ export default function Hero() {
               it as Unprice sitting in the flow, which is the one misread that
               costs the most. */}
           <p className="mt-6 max-w-xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-            Reserve against the customer&apos;s budget, run the work, then settle what it actually
-            cost and release the rest. A denied run makes zero provider calls and still leaves a
-            receipt that says why.
+            Unprice checks your customer&apos;s budget before each agent run. If the budget
+            can&apos;t cover it, the run never starts.
           </p>
           <div className="mt-10 flex flex-wrap items-center gap-3">
             <AcquisitionLink
@@ -55,7 +54,7 @@ export default function Hero() {
               href="#demo"
               className={cn(buttonVariants({ variant: "outline" }))}
             >
-              {hasDemoVideo ? "Watch it deny a request" : "See the receipts"}
+              {hasDemoVideo ? "Watch it deny a request" : "Check the proof"}
             </ProofLink>
           </div>
           <p className="mt-3.5 font-mono text-[11px] text-background-text">
@@ -66,9 +65,9 @@ export default function Hero() {
               believe the promise — then the rest as one metadata line. */}
           <div className="mt-12 w-full max-w-xl border-background-border border-t pt-6">
             <p className="font-medium text-background-textContrast text-base leading-7">
-              Settles to your own Stripe.{" "}
+              Payments go to your own Stripe account.{" "}
               <span className="font-normal text-background-text">
-                The money never touches Unprice.
+                Unprice never holds the money.
               </span>
             </p>
             {/* "nothing to deploy" is here because its absence cost a signup:

@@ -25,9 +25,7 @@ export function BudgetsCta() {
         <Balancer>Put a hard cap in front of your agent today.</Balancer>
       </h2>
       <p className="mt-5 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-        <Balancer>
-          Create a key, install the package, and wrap one call. Nothing in your billing changes.
-        </Balancer>
+        <Balancer>Get an API key, install the package, and wrap one call.</Balancer>
       </p>
 
       <DecisionBracket className="mt-12">

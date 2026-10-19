@@ -23,13 +23,11 @@ export function MoneyPathSection() {
           id="money-path-title"
           className="mt-6 max-w-2xl font-primary text-background-textContrast text-display-3"
         >
-          The authorization becomes the receipt.
+          One check, from request to invoice.
         </h2>
         <p className="mt-5 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-          An allow reserves against the customer&apos;s budget before the agent runs. After the work
-          completes, Unprice settles actual usage, captures the ledger movement, and writes the
-          invoice line. A deny makes zero provider calls: no work, no ledger entry, no invoice line,
-          no charge.
+          If the check allows a request, Unprice holds the cost, the agent runs, and the actual
+          usage goes on the invoice. If it denies the request, nothing runs and nothing is charged.
         </p>
       </div>
 

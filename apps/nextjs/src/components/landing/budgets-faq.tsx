@@ -14,19 +14,18 @@ const REPO_URL = siteConfig.links.github
 const faqs: FaqItem[] = [
   {
     question: "Do I need Unprice billing?",
-    answer:
-      "No. A budget needs no plans, subscriptions, customers, or payment provider in Unprice. Keep the billing you have. Unprice billing is there when you want to sell plans, credits, and invoices.",
+    answer: "No. Budgets work with the billing you already have.",
     link: { href: `${DOCS_DOMAIN}budgets/overview`, label: "Read the overview", external: true },
   },
   {
     question: "Doesn't my AI gateway already have a cap?",
     answer:
-      "A gateway cap sits on the key it is configured for, usually your provider key, so one runaway agent can trip it for every customer. Some gateways also budget per customer. A budget caps any key you choose, in front of any paid call, model or tool, and reserves the maximum before the call runs.",
+      "A gateway cap usually covers your whole provider key, so one runaway agent blocks every customer. A budget caps any key you choose, before the call runs.",
   },
   {
     question: "Can parallel calls overshoot the cap?",
     answer:
-      "No. Each authorization reserves its maximum against every hard limit in one serialized step. In the test suite, 100 parallel $0.75 authorizations against a $50 cap admit 66 and refuse 34.",
+      "No. In the test suite, 100 parallel $0.75 calls against a $50 cap admit 66 and refuse 34.",
     link: {
       href: `${REPO_URL}/blob/main/apps/api/src/ingestion/budget/BudgetDO.workers.test.ts`,
       label: "Read the test",
@@ -35,18 +34,17 @@ const faqs: FaqItem[] = [
   },
   {
     question: "Can my agent raise its own cap?",
-    answer:
-      "No. A runtime key can create a budget and tighten it. Raising or removing a cap needs a config key, which you keep out of the environment that spends.",
+    answer: "No. Raising a cap needs a config key. Keep that key away from the agent.",
   },
   {
     question: "What happens if Unprice is unreachable?",
     answer:
-      "A remote check denies new work and tells your code to retry. In local mode, the process keeps spending within its lease until the lease's deadline, then denies.",
+      "Remote checks deny new work. In local mode, the process keeps spending its lease until the lease expires.",
   },
   {
     question: "Is it open source?",
     answer:
-      "Yes. The SDK, @unprice/budgets, is MIT. The budget runtime is AGPL-3.0, in the same repository, and you can deploy it to your own Cloudflare account. On the hosted cloud, each budget is created near its first request, so its state may live outside the EU.",
+      "Yes. The SDK is MIT and the runtime is AGPL-3.0, and you can run it in your own Cloudflare account. On the hosted cloud, budget state may live outside the EU.",
     link: { href: REPO_URL, label: "Read the source", external: true },
   },
   {
@@ -64,7 +62,7 @@ export function BudgetsFaq() {
           id="budgets-faq-title"
           className="mt-6 max-w-2xl font-primary text-background-textContrast text-display-3"
         >
-          Asked before the first cap.
+          Questions before your first cap.
         </h2>
       </div>
 

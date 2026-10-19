@@ -116,9 +116,11 @@ export function BudgetsPerKey() {
           Your gateway caps your provider bill. Budgets cap every key you pick.
         </h2>
         <p className="mt-5 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-          When every customer shares one provider key, one runaway agent trips the cap for all of
-          them. A budget sits on the key the cap is about: a customer, a run, an agent, or an API
-          key you issued.
+          One shared cap lets one runaway agent block every customer. A budget per key, such as{" "}
+          <code className="rounded-sm bg-background-bg px-1 py-px font-mono text-[13px] text-background-textContrast">
+            customer:acme
+          </code>
+          , stops only the runaway.
         </p>
       </div>
 
@@ -127,14 +129,14 @@ export function BudgetsPerKey() {
           title="One cap"
           caption="on the provider key"
           rows={sharedCap}
-          outcome={{ label: "the cap trips", fact: "every customer refused" }}
+          outcome={{ label: "cap reached", fact: "every customer refused" }}
           outcomeTone="danger"
         />
         <CapPanel
           title="A budget per key"
           caption="hard caps · per customer"
           rows={perKey}
-          outcome={{ label: "the runaway", fact: "stopped at its own cap" }}
+          outcome={{ label: "the runaway agent", fact: "stopped at its own cap" }}
           outcomeTone="decision"
           lifted
         />

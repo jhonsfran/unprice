@@ -8,23 +8,23 @@ import { StationHeader } from "./station-header"
 const pillars = [
   {
     title: "Spend safety",
-    body: "Put a real-time budget around the expensive action. Over-budget customer or workload spend is rejected in the request path, before the work runs.",
+    body: "Unprice rejects over-budget spend before the work runs.",
     practice: "stop cost before it exists",
   },
   {
     title: "Runtime decisions",
-    body: "Pricing is not a page or an end-of-cycle job. Entitlement, budget, and credit checks happen while the request is in flight.",
-    practice: "decide in the request path",
+    body: "Unprice checks entitlements, budgets, and credits during the request.",
+    practice: "decide during the request",
   },
   {
-    title: "Explainable money flow",
-    body: "Usage, entitlements, budgets, credits, and invoices share one evidence trail. Every charge traces back to rated events and ledger captures.",
+    title: "Explainable charges",
+    body: "Every charge traces back to the usage and ledger entries behind it.",
     practice: "every charge carries evidence",
   },
   {
     title: "Open and inspectable",
-    body: "Money logic should not be a black box. Read the open-source runtime yourself, or have your agent inspect it.",
-    practice: "trust follows inspection",
+    body: "Read the code that moves your money, or have your coding agent review it.",
+    practice: "read it before you trust it",
   },
 ]
 
@@ -37,12 +37,11 @@ export default function ManifestoPriceOps() {
           id="priceops-title"
           className="mt-6 max-w-2xl font-primary text-background-textContrast text-display-3"
         >
-          Operate pricing like infrastructure.
+          Run pricing like infrastructure.
         </h2>
         <p className="mt-5 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-          PriceOps means keeping pricing rules in versioned infrastructure. Plans, versions,
-          entitlements, meters, budgets, credits, and invoice evidence stay separate but connected.
-          You can change packaging without rewriting the product.
+          PriceOps means treating pricing as versioned infrastructure. You can change a plan without
+          changing product code.
         </p>
       </div>
 

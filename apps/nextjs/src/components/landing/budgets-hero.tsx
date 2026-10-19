@@ -30,8 +30,8 @@ export function BudgetsHero() {
             </Balancer>
           </h1>
           <p className="mt-6 max-w-xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-            Put a budget in front of your agent. Every paid call checks it first, and a call the cap
-            cannot cover never reaches the provider. Your billing stays where it is.
+            Every paid call checks the budget first. A call that would go over the cap never reaches
+            the provider. Your billing stays the same.
           </p>
           <AcquisitionLink
             source="budgets_hero"

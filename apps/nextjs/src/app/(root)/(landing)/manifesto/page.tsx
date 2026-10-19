@@ -10,12 +10,12 @@ const ManifestoOwnership = dynamic(() => import("~/components/landing/manifesto-
 const ManifestoBelief = dynamic(() => import("~/components/landing/manifesto-belief"))
 
 const description =
-  "Pricing is a runtime decision. Why the customer money path belongs in the request path, in the open — and why it should be yours."
+  "Pricing is a runtime decision. Why the check on customer spend belongs in the request, in open-source code you own."
 
 // The manifesto ships its own social card: the generic landing card sells the
 // product frame; this page's card must carry the manifesto's own line.
 const ogImage = `/og?title=${encodeURIComponent("The Unprice manifesto")}&description=${encodeURIComponent(
-  "Pricing is a runtime decision. The customer money path belongs in the request path, in the open — and it should be yours."
+  "Pricing is a runtime decision. The check on customer spend belongs in the request, in open-source code you own."
 )}`
 
 export const metadata: Metadata = {
