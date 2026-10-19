@@ -2,6 +2,7 @@ import { env } from "../env"
 import { AnalyticsService } from "./analytics/service"
 import { ApiKeysService } from "./apikey/service"
 import { BillingService } from "./billing/service"
+import { BudgetCatalogService } from "./budget-catalog/service"
 import { BudgetRunService } from "./budget-runs/service"
 import { CustomerService } from "./customers/service"
 import type { ServiceDeps } from "./deps"
@@ -30,6 +31,7 @@ import { WorkspaceService } from "./workspaces/service"
  */
 export interface ServiceContext {
   budgetRuns: BudgetRunService
+  budgetCatalog: BudgetCatalogService
   analytics: AnalyticsService
   apikeys: ApiKeysService
   customers: CustomerService
@@ -65,6 +67,11 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     logger: deps.logger,
     cache: deps.cache,
     waitUntil: deps.waitUntil,
+  })
+
+  const budgetCatalog = new BudgetCatalogService({
+    db: deps.db,
+    logger: deps.logger,
   })
 
   const ledger = new LedgerGateway({
@@ -218,6 +225,7 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
 
   return {
     budgetRuns,
+    budgetCatalog,
     analytics,
     apikeys,
     customers,

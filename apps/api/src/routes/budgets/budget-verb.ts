@@ -1,4 +1,5 @@
 import type { ApiKeyExtended } from "@unprice/db/validators"
+import type { Result } from "@unprice/error"
 import { formatAmount } from "@unprice/money"
 import {
   type Blocked,
@@ -11,6 +12,7 @@ import {
 } from "@unprice/services/budgets"
 import {
   type BudgetVerbRequest,
+  type ExecuteBudgetCommandDeps,
   type ExecuteBudgetCommandInput,
   executeBudgetCommand,
 } from "@unprice/services/use-cases"
@@ -23,6 +25,12 @@ import { CloudflareBudgetClient } from "~/ingestion/budget/client"
 
 export const BUDGET_REMAINING_HEADER = "Unprice-Budget-Remaining"
 
+/** The use case that runs a verb; `executeBudgetCommand` unless the verb has its own. */
+export type BudgetVerbExecutor<R extends BudgetVerbRequest> = (
+  deps: ExecuteBudgetCommandDeps,
+  input: ExecuteBudgetCommandInput<R>
+) => Promise<Result<OutcomeOf<R["type"]>, UnPriceBudgetError>>
+
 /**
  * Runs one verb against the budget at `key` and sets the remaining header. Authenticates a runtime
  * key unless the route already authenticated `apiKey` itself. Returns the verb's outcome, or
@@ -32,10 +40,11 @@ export async function runBudgetVerb<R extends BudgetVerbRequest>(
   c: Context<HonoEnv>,
   key: string,
   request: R,
-  apiKey?: Pick<ApiKeyExtended, "projectId">
+  apiKey?: Pick<ApiKeyExtended, "projectId">,
+  execute: BudgetVerbExecutor<R> = executeBudgetCommand
 ) {
   const { projectId } = apiKey ?? (await keyAuth(c))
-  const result = await callBudget(c, { projectId, key, request })
+  const result = await callBudget(c, { projectId, key, request }, execute)
   if (result.err) throw budgetApiError(c, result.err)
   setRemaining(c, result.val)
   return result.val
@@ -48,13 +57,14 @@ export async function runBudgetVerb<R extends BudgetVerbRequest>(
  */
 async function callBudget<R extends BudgetVerbRequest>(
   c: Context<HonoEnv>,
-  input: ExecuteBudgetCommandInput<R>
+  input: ExecuteBudgetCommandInput<R>,
+  execute: BudgetVerbExecutor<R>
 ) {
   const budgets = new CloudflareBudgetClient(c.env)
   const startedAt = performance.now()
   let outcome = "error"
   try {
-    const result = await executeBudgetCommand({ budgets }, input)
+    const result = await execute({ budgets }, input)
     outcome = result.err ? result.err.rejection.code : "ok"
     return result
   } finally {
