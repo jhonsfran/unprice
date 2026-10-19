@@ -27,7 +27,7 @@ export function placementTiming(): MiddlewareHandler<HonoEnv> {
 /**
  * The `budget` entry is the Worker's round trip to the budget's object. Outside production its desc
  * says where the object ran and whether the request woke it (`do=EWR warm`; the benchmark harness
- * parses it), and `budgetQueue` follows with the time from dispatch to the object starting it.
+ * parses it).
  */
 export function budgetTiming(
   c: Context<HonoEnv>,
@@ -39,5 +39,4 @@ export function budgetTiming(
     ? `do=${placed.colo} ${placed.cold ? "cold" : "warm"}`
     : undefined
   setMetric(c, "budget", durationMs, description)
-  if (placed?.queueMs !== undefined) setMetric(c, "budgetQueue", placed.queueMs)
 }

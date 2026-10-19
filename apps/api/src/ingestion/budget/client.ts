@@ -16,7 +16,7 @@ export class CloudflareBudgetClient implements BudgetClient {
     address: BudgetAddress,
     request: BudgetRequest
   ): Promise<Result<BudgetOutcome, UnPriceBudgetError>> {
-    const reply = await getBudgetStub(this.env, address).execute(request, { sentAt: Date.now() })
+    const reply = await getBudgetStub(this.env, address).execute(request)
     this.telemetry = reply.telemetry
     return reply.ok ? Ok(reply.outcome) : Err(new UnPriceBudgetError(reply.rejection))
   }

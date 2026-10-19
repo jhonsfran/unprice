@@ -513,21 +513,20 @@ describe("BudgetDO verbs", () => {
     expect(next.holdId).toBe("h_2")
   })
 
-  it("reports how long each request waited, whether it woke the object, and how many it served", async () => {
+  it("reports whether each request woke the object and how many it served", async () => {
     const key = "customer:telemetry"
     const stub = stubFor(key)
-    const sentAt = Date.now() - 5_000
 
-    const first = (await stub.execute({ type: "get" }, { sentAt })).telemetry
-    const second = (await stub.execute(upsert(key, fiftyPerMonth), { sentAt })).telemetry
-    expect(first).toEqual({ queueMs: expect.any(Number), cold: true, served: 1, colo: "local" })
-    expect(second).toEqual({ queueMs: expect.any(Number), cold: false, served: 2, colo: "local" })
-    expect(first.queueMs).toBeGreaterThanOrEqual(5_000)
-    expect(second.queueMs).toBeGreaterThanOrEqual(5_000)
-
-    // A dispatch time ahead of the object's clock reads as no wait rather than a negative one.
-    const ahead = await stub.execute({ type: "get" }, { sentAt: Date.now() + 60_000 })
-    expect(ahead.telemetry).toEqual({ queueMs: 0, cold: false, served: 3, colo: "local" })
+    expect((await stub.execute({ type: "get" })).telemetry).toEqual({
+      cold: true,
+      served: 1,
+      colo: "local",
+    })
+    expect((await stub.execute(upsert(key, fiftyPerMonth))).telemetry).toEqual({
+      cold: false,
+      served: 2,
+      colo: "local",
+    })
 
     await evictDurableObject(stub)
     const revived = getBudgetStub(env, { projectId: "proj_1", key })

@@ -66,7 +66,6 @@ async function callBudget<R extends BudgetVerbRequest>(
         command: input.request.type,
         outcome,
         do_ms: doMs,
-        queue_ms: telemetry?.queueMs,
         cold: telemetry?.cold,
         served: telemetry?.served,
         colo: telemetry?.colo,

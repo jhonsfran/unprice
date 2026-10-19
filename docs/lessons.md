@@ -246,10 +246,13 @@ patterns. Keep it cheap to load and useful.
   That callback's `ctx.context` holds every field set through `c.get("logger").set`, so a rule can
   read route fields (`keepSlowBudgetCall` reads `budget.do_ms`).
 - 2026-10-18: Outside production, Server-Timing adds `edge`, `isolate`, and `budget;desc="do=<colo> cold|warm"`
-  (`middleware/placement-timing.ts`), plus `budgetQueue`. BudgetDO returns `telemetry` (`queueMs`, `cold`,
-  `served`, and `colo` outside production) beside every RPC reply and learns its colo
+  (`middleware/placement-timing.ts`). BudgetDO returns `telemetry` (`cold`, `served`, and `colo`
+  outside production) beside every RPC reply and learns its colo
   from a never-awaited `cdn-cgi/trace` fetch in preview only (`local` elsewhere, so tests stay off the network). Local workerd evicts an idle DO after about 10 s, so manual
   curls see `cold` again.
+- 2026-10-19: Never time Durable Object work from the object's `Date.now()`: it is stale until the
+  object's next I/O. A Worker-to-object `queueMs` read 0 on about 27,000 preview requests and was
+  removed. Batched releases show instead as consecutive `budget_served` values that end together.
 - 2026-10-18: In DO SQLite, `DELETE ... RETURNING` costs one extra row read per deleted row (measured on
   the alarm purge: +2,048 rows read at its cap). Count deletions with `SELECT changes()` in the same
   transaction instead: one statement, no rows read.

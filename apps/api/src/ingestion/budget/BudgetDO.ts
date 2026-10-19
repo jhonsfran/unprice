@@ -11,20 +11,12 @@ import * as schema from "./db/schema"
 import migrations from "./drizzle/migrations"
 import { BudgetProcessor } from "./processor"
 
-/** When the Worker sent the request; travels beside it so the shared BudgetRequest stays as it is. */
-export type BudgetDispatch = Readonly<{ sentAt: number }>
-
 /**
- * How this instance served one request, returned beside every reply. The object's clock stands
- * still during synchronous SQLite work, so it can say when a request started, not how long it ran.
+ * How this instance served one request, returned beside every reply. The object's clock is stale
+ * until its next I/O, so it cannot time a request; consecutive `served` values whose answers reach
+ * the Worker together show responses held back as one batch.
  */
 export type BudgetTelemetry = Readonly<{
-  /**
-   * From the Worker's `sentAt` to this object starting the request: one-way transit plus any wait
-   * behind the object's other work. Two machines' clocks that advance only on I/O, so it is coarse
-   * and clamped at zero.
-   */
-  queueMs?: number
   /** This request woke the instance. */
   cold: boolean
   /** Requests this instance has started, this one included. */
@@ -77,17 +69,12 @@ export class BudgetDO extends DurableObject {
     if (reportsPlacement(env.APP_ENV)) this.traceColo(env.APP_ENV)
   }
 
-  async execute(
-    request: BudgetRequest,
-    dispatch?: BudgetDispatch
-  ): Promise<BudgetReply & { telemetry: BudgetTelemetry }> {
-    // Before any await, while the clock still reads the moment this request started.
-    const queueMs = dispatch && Math.max(0, Date.now() - dispatch.sentAt)
+  async execute(request: BudgetRequest): Promise<BudgetReply & { telemetry: BudgetTelemetry }> {
     const cold = !this.woken
     this.woken = true
     const served = ++this.served
     const reply = await this.run(request)
-    return { ...reply, telemetry: { queueMs, cold, served, colo: this.colo ?? undefined } }
+    return { ...reply, telemetry: { cold, served, colo: this.colo ?? undefined } }
   }
 
   override async alarm(): Promise<void> {

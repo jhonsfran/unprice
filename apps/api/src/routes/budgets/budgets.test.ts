@@ -364,28 +364,23 @@ describe("budgets API", () => {
       return response.headers.get("Server-Timing")
     }
 
-    expect(
-      await serverTiming("preview", { queueMs: 12, cold: true, served: 1, colo: "LHR" })
-    ).toMatch(
-      /^edge;desc="EWR",isolate;desc="cold",budget;dur=\d+\.\d;desc="do=LHR cold",budgetQueue;dur=12\.0,total;dur=\d+\.\d;desc="Total Response Time"$/
+    expect(await serverTiming("preview", { cold: true, served: 1, colo: "LHR" })).toMatch(
+      /^edge;desc="EWR",isolate;desc="cold",budget;dur=\d+\.\d;desc="do=LHR cold",total;dur=\d+\.\d;desc="Total Response Time"$/
     )
     expect(mocks.log).toHaveBeenLastCalledWith({
       budget: {
         command: "authorize",
         outcome: "ok",
         do_ms: expect.any(Number),
-        queue_ms: 12,
         cold: true,
         served: 1,
         colo: "LHR",
       },
     })
-    expect(
-      await serverTiming("preview", { queueMs: 0, cold: false, served: 7, colo: "unknown" })
-    ).toMatch(
-      /^edge;desc="EWR",isolate;desc="warm",budget;dur=\d+\.\d;desc="do=unknown warm",budgetQueue;dur=0\.0,total;/
+    expect(await serverTiming("preview", { cold: false, served: 7, colo: "unknown" })).toMatch(
+      /^edge;desc="EWR",isolate;desc="warm",budget;dur=\d+\.\d;desc="do=unknown warm",total;/
     )
-    expect(await serverTiming("production", { queueMs: 9, cold: false, served: 2 })).toMatch(
+    expect(await serverTiming("production", { cold: false, served: 2 })).toMatch(
       /^budget;dur=\d+\.\d,total;dur=\d+\.\d;desc="Total Response Time"$/
     )
     expect(mocks.log).toHaveBeenLastCalledWith({
@@ -393,7 +388,6 @@ describe("budgets API", () => {
         command: "authorize",
         outcome: "ok",
         do_ms: expect.any(Number),
-        queue_ms: 9,
         cold: false,
         served: 2,
       },
@@ -401,7 +395,7 @@ describe("budgets API", () => {
   })
 
   it("names the rejection, or an error, as the budget call's outcome", async () => {
-    mocks.telemetry = { queueMs: 3, cold: false, served: 4 }
+    mocks.telemetry = { cold: false, served: 4 }
     rejectWith({ code: "BUDGET_NOT_FOUND" })
     expect((await call("/v1/budgets/get?key=customer:missing")).status).toBe(404)
     expect(mocks.log).toHaveBeenLastCalledWith({
@@ -409,7 +403,6 @@ describe("budgets API", () => {
         command: "get",
         outcome: "BUDGET_NOT_FOUND",
         do_ms: expect.any(Number),
-        queue_ms: 3,
         cold: false,
         served: 4,
       },
