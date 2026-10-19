@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "cloudflare-doctor": {
+      "source": "adewale/cfdoctor",
+      "sourceType": "github",
+      "skillPath": "skills/cloudflare-doctor/SKILL.md",
+      "computedHash": "ccaeb9916e82bab0eca0f49a806064b9cb7ade64b16b38fab8b9cf9ed458afe0"
+    }
+  }
+}

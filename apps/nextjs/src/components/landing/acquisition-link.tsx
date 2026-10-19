@@ -8,7 +8,12 @@ import { ArrowRight } from "lucide-react"
 import { Link } from "next-view-transitions"
 import { type ComponentProps, type MouseEvent, useEffect, useState, useTransition } from "react"
 import { getOrCreateConversionId, persistConversionId } from "~/lib/conversion-session"
-import { ACQUISITION_SIGNUP_URL, buildAuthHref } from "~/lib/signup-funnel"
+import {
+  ACQUISITION_SIGNUP_URL,
+  SIGNUP_INTENT_NEXT,
+  type SignupIntent,
+  buildAuthHref,
+} from "~/lib/signup-funnel"
 
 type AcquisitionSource =
   | "header"
@@ -20,11 +25,13 @@ type AcquisitionSource =
 
 type AcquisitionLinkProps = Omit<ComponentProps<typeof Link>, "href"> & {
   source: AcquisitionSource
+  /** What the visitor came to start. It sets the signup copy and where they land after auth. */
+  intent?: SignupIntent
 }
 
-function getAcquisitionHref(sessionId: string): string {
+function getAcquisitionHref(sessionId: string, intent: SignupIntent): string {
   return new URL(
-    buildAuthHref(AUTH_ROUTES.SIGNUP, { sessionId, intent: "paid-action" }),
+    buildAuthHref(AUTH_ROUTES.SIGNUP, { sessionId, intent, next: SIGNUP_INTENT_NEXT[intent] }),
     APP_DOMAIN
   ).toString()
 }
@@ -44,7 +51,13 @@ function isPrimaryUnmodifiedClick(event: MouseEvent<HTMLAnchorElement>): boolean
   )
 }
 
-export function AcquisitionLink({ children, onClick, source, ...props }: AcquisitionLinkProps) {
+export function AcquisitionLink({
+  children,
+  onClick,
+  source,
+  intent = "paid-action",
+  ...props
+}: AcquisitionLinkProps) {
   const [href, setHref] = useState(ACQUISITION_SIGNUP_URL)
   const [isPending, startTransition] = useTransition()
 
@@ -74,7 +87,7 @@ export function AcquisitionLink({ children, onClick, source, ...props }: Acquisi
         track("funnel_acquisition_cta_selected", { source })
 
         startTransition(() => {
-          setHref(getAcquisitionHref(sessionId))
+          setHref(getAcquisitionHref(sessionId, intent))
         })
       }}
     >

@@ -18,7 +18,6 @@ type ProofSource =
   | "demo_source"
   | "demo_benchmark"
   | "integration_sdk"
-  | "budgets_test"
   | "budgets_benchmark"
 
 export function ProofLink({

@@ -1,30 +1,16 @@
-import { DOCS_DOMAIN } from "@unprice/config"
 import { buttonVariants } from "@unprice/ui/button"
-import { cn, focusRing } from "@unprice/ui/utils"
-import { ArrowRight } from "lucide-react"
+import { cn } from "@unprice/ui/utils"
 import Balancer from "react-wrap-balancer"
 import { AcquisitionLink } from "./acquisition-link"
+import { BUDGETS_INSTALL } from "./budgets-snippets"
+import { BudgetsVideo } from "./budgets-video"
 import CopyToClipboard from "./copy-to-clipboard"
-import { ProofLink } from "./proof-link"
-import { Reveal } from "./reveal"
-import { Leader, LedgerRow, StationDot } from "./station"
 
 // The Budgets page opens on the launch video's own words, so a reader who
 // arrives from it lands on the promise they just heard (message match,
-// marketing-framework.md). The receipt beside the headline is not a drawing:
-// it is the BudgetDO concurrency test, rendered as its hundred agents. Solid
-// cells ran, ghost cells never did (the page-wide grammar), and the one amber
-// fact is the decision: nothing went over the cap.
-
-export const BUDGETS_INSTALL = "npm i @unprice/budgets"
-
-const REPO_URL = "https://github.com/jhonsfran1165/unprice"
-const RACE_TEST_URL = `${REPO_URL}/blob/main/apps/api/src/ingestion/budget/BudgetDO.workers.test.ts`
-
-// From "never lets 100 parallel authorizes exceed a $50 cap": 100 × $0.75
-// against $50.00, of which 66 fit ($49.50 held) and 34 are refused.
-const AGENTS = 100
-const ALLOWED = 66
+// marketing-framework.md). The video itself sits beside the headline, so a
+// reader who skipped it can watch it without scrolling. One way in: the key,
+// with the install line under it.
 
 export function InstallCommand({ className }: { className?: string }) {
   return (
@@ -66,95 +52,17 @@ export function BudgetsHero() {
             Put a budget in front of your agent. Every paid call checks it first, and a call the cap
             cannot cover never reaches the provider. Your billing stays where it is.
           </p>
-          <div className="mt-10 flex flex-wrap items-center gap-3">
-            <AcquisitionLink
-              source="budgets_hero"
-              className={buttonVariants({ variant: "primary", className: "gap-1.5" })}
-            >
-              Get an API key
-            </AcquisitionLink>
-            <a
-              href={`${DOCS_DOMAIN}budgets/quickstart`}
-              className={buttonVariants({ variant: "outline" })}
-            >
-              Read the quickstart
-            </a>
-          </div>
+          <AcquisitionLink
+            source="budgets_hero"
+            intent="budgets"
+            className={buttonVariants({ variant: "primary", className: "mt-10 gap-1.5" })}
+          >
+            Get an API key
+          </AcquisitionLink>
           <InstallCommand className="mt-6" />
         </div>
 
-        <figure
-          aria-label="From the test suite: 100 agents authorize $0.75 each in parallel against one $50 cap. 66 are allowed and hold $49.50. 34 are refused with BUDGET_EXCEEDED. Nothing goes over the cap."
-          className="rounded-lg border border-background-border bg-surface-panel p-4 shadow-ambient sm:p-5"
-        >
-          <figcaption className="mb-4 flex items-baseline justify-between gap-4 border-background-border border-b pb-3">
-            <span className="font-mono text-background-text text-xs uppercase tracking-widest">
-              100 agents · one cap
-            </span>
-            <span className="hidden whitespace-nowrap font-mono text-[10px] text-background-text sm:inline">
-              budget · customer:acme
-            </span>
-          </figcaption>
-
-          <div aria-hidden className="grid grid-cols-[repeat(20,minmax(0,1fr))] gap-1 sm:gap-1.5">
-            {Array.from({ length: AGENTS }, (_, i) => (
-              <span
-                // biome-ignore lint/suspicious/noArrayIndexKey: a fixed grid of identical cells
-                key={i}
-                className={cn(
-                  "aspect-square rounded-[2px]",
-                  i < ALLOWED
-                    ? "bg-background-text"
-                    : "border border-background-borderHover border-dashed"
-                )}
-              />
-            ))}
-          </div>
-
-          <Reveal stagger className="mt-5 flex flex-col border-background-border border-t pt-3">
-            <LedgerRow label="authorize · $0.75 each" variant="ghost" fact="100 in parallel" />
-            <div className="flex items-baseline gap-2 py-[5px]">
-              <StationDot variant="terminal" className="self-center" />
-              <span className="font-medium text-background-textContrast text-sm">allowed</span>
-              <Leader />
-              <span className="font-mono text-[11px] text-background-text">66 · $49.50 held</span>
-            </div>
-            <div className="flex items-baseline gap-2 py-[5px]">
-              <StationDot variant="ghost" className="self-center" />
-              <span className="text-background-text text-sm">
-                refused<span className="hidden sm:inline"> · never ran</span>
-              </span>
-              <Leader />
-              <span className="font-medium font-mono text-[11px] text-danger-text">
-                34 · 402 BUDGET_EXCEEDED
-              </span>
-            </div>
-            <div className="mt-2 border-background-border border-t pt-2">
-              <LedgerRow
-                label="over the $50.00 cap"
-                fact="$0.00"
-                factClassName="font-medium text-primary-text text-xs"
-              />
-            </div>
-          </Reveal>
-
-          <ProofLink
-            source="budgets_test"
-            href={RACE_TEST_URL}
-            target="_blank"
-            rel="noreferrer"
-            className={cn(
-              "group mt-4 inline-flex items-baseline gap-1.5 rounded-sm font-mono text-[11px] text-background-text hover:text-background-textContrast",
-              focusRing
-            )}
-          >
-            BudgetDO.workers.test.ts · read the test
-            <ArrowRight
-              aria-hidden
-              className="size-3 self-center transition-transform duration-quick ease-out-quad group-hover:translate-x-0.5"
-            />
-          </ProofLink>
-        </figure>
+        <BudgetsVideo />
       </div>
     </section>
   )

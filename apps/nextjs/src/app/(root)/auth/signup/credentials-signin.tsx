@@ -11,7 +11,7 @@ import { useRouter } from "next/navigation"
 import { useState } from "react"
 import { z } from "zod"
 import { signUpWithCredentials } from "~/actions/signupCredentials"
-import { type SignupIntent, buildAuthHref } from "~/lib/signup-funnel"
+import { type SignupIntent, buildAuthHref, signupIntentSchema } from "~/lib/signup-funnel"
 import { useZodForm } from "~/lib/zod-form"
 
 export const SignupSchema = z
@@ -22,7 +22,7 @@ export const SignupSchema = z
     name: z.string().min(3),
     sessionId: z.string().optional(),
     next: z.string().optional(),
-    intent: z.enum(["paid-action"]).optional(),
+    intent: signupIntentSchema.optional(),
   })
   .refine((data) => data.password === data.confirmPassword, {
     path: ["confirmPassword"],

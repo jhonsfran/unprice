@@ -5,7 +5,9 @@ import { APP_DOMAIN, AUTH_ROUTES, BASE_URL } from "@unprice/config"
 import {
   ACQUISITION_SIGNUP_URL,
   PRIVACY_URL,
+  SIGNUP_INTENT_NEXT,
   TERMS_URL,
+  budgetsSetupPath,
   buildAuthHref,
   createFunnelPageEventClaimer,
   getSafeNextPath,
@@ -80,6 +82,19 @@ describe("signup funnel URLs", () => {
     expect(getSignupIntent("paid-action")).toBe("paid-action")
     expect(getSignupIntent("other")).toBeUndefined()
     expect(getSignupIntent(["paid-action", "other"])).toBeUndefined()
+  })
+
+  it("carries the budgets intent to the Budgets setup", () => {
+    const next = SIGNUP_INTENT_NEXT.budgets
+    const href = buildAuthHref(AUTH_ROUTES.SIGNUP, { intent: "budgets", next })
+    const url = new URL(href, "https://app.example")
+
+    expect(getSignupIntent("budgets")).toBe("budgets")
+    expect(url.searchParams.get("intent")).toBe("budgets")
+    expect(url.searchParams.get("next")).toBe("/new?intent=budgets")
+    expect(getSafeNextPath(next)).toBe("/new?intent=budgets")
+    expect(SIGNUP_INTENT_NEXT["paid-action"]).toBeUndefined()
+    expect(budgetsSetupPath("acme")).toBe("/acme/onboarding?intent=budgets")
   })
 
   it("omits empty optional params", () => {

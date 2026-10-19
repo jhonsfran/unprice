@@ -9,8 +9,8 @@ import { BudgetsProblem } from "~/components/landing/budgets-problem"
 
 // Unprice Budgets has its own page because launch traffic arrives with the
 // video's promise (hard caps, per key, nothing to migrate), and the home page
-// sells the whole billing path. Same arc as the home page: promise, incident,
-// objection, integration, proof, questions, offer.
+// sells the whole billing path. Same arc as the home page: promise (beside the
+// video that made it), incident, objection, integration, proof, questions, offer.
 
 const title = "Unprice Budgets"
 const description =

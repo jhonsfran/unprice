@@ -1,15 +1,14 @@
-import { DOCS_DOMAIN } from "@unprice/config"
 import { buttonVariants } from "@unprice/ui/button"
-import { cn, focusRing } from "@unprice/ui/utils"
+import { cn } from "@unprice/ui/utils"
 import Balancer from "react-wrap-balancer"
 import { AcquisitionLink } from "./acquisition-link"
 import { InstallCommand } from "./budgets-hero"
 import { SectionShell } from "./station"
 import { StationHeader } from "./station-header"
 
-// The close: one decision inside the logo's bracket, the install line, and
-// the quickstart as the only other way out. The terms are the home page's
-// offer, stated once in the station fact.
+// The close: one decision inside the logo's bracket and the install line under
+// it, nothing else. The terms are the home page's offer, stated once in the
+// station fact.
 
 const BRACKET_CORNERS = [
   "top-0 left-0 border-t-2 border-l-2",
@@ -48,6 +47,7 @@ export function BudgetsCta() {
         ))}
         <AcquisitionLink
           source="budgets_cta"
+          intent="budgets"
           className={buttonVariants({ variant: "primary", className: "gap-1.5" })}
         >
           Get an API key
@@ -55,15 +55,6 @@ export function BudgetsCta() {
       </div>
 
       <InstallCommand className="mt-6" />
-      <a
-        href={`${DOCS_DOMAIN}budgets/quickstart`}
-        className={cn(
-          "mt-5 rounded-sm font-medium text-background-textContrast text-sm underline decoration-background-borderHover underline-offset-4 transition-colors duration-quick ease-out-quad hover:decoration-background-textContrast",
-          focusRing
-        )}
-      >
-        Read the quickstart
-      </a>
     </SectionShell>
   )
 }

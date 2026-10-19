@@ -8,6 +8,7 @@ import { cn } from "@unprice/ui/utils"
 import { env } from "~/env"
 import {
   PRIVACY_URL,
+  type SignupIntent,
   TERMS_URL,
   buildAuthHref,
   getSafeNextPath,
@@ -23,6 +24,21 @@ import { SignUpCredentials } from "./credentials-signin"
 // This page reads the request's session and query string to select the authentication flow.
 export const dynamic = "force-dynamic"
 
+// The card names the first step the visitor came for, so the signup restates the page's promise.
+const INTENT_COPY: Record<SignupIntent, { title: string; description: string; footnote: string }> =
+  {
+    "paid-action": {
+      title: "Start with one agent action",
+      description: "Create a Sandbox money path — no card required.",
+      footnote: "One agent action · Sandbox · no card",
+    },
+    budgets: {
+      title: "Get an API key",
+      description: "Create an account, then a project and a runtime key. No card required.",
+      footnote: "Budgets · two calls · no card",
+    },
+  }
+
 export default async function AuthenticationPage(props: {
   searchParams: Promise<{
     sessionId?: string | string[]
@@ -35,6 +51,7 @@ export default async function AuthenticationPage(props: {
   const signupIntent = getSignupIntent(intent)
   const safeNext = getSafeNextPath(getSingleSearchParam(next))
   const session = await getSession()
+  const copy = signupIntent ? INTENT_COPY[signupIntent] : null
 
   if (session?.user?.id) {
     redirect(safeNext ?? APP_DOMAIN)
@@ -48,13 +65,9 @@ export default async function AuthenticationPage(props: {
       </Suspense>
       <Card>
         <CardHeader className="text-center">
-          <CardTitle className="text-xl">
-            {signupIntent === "paid-action" ? "Start with one agent action" : "Create an account"}
-          </CardTitle>
+          <CardTitle className="text-xl">{copy?.title ?? "Create an account"}</CardTitle>
           <CardDescription>
-            {signupIntent === "paid-action"
-              ? "Create a Sandbox money path — no card required."
-              : "Sign up with your GitHub or Google account"}
+            {copy?.description ?? "Sign up with your GitHub or Google account"}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-8">
@@ -90,11 +103,7 @@ export default async function AuthenticationPage(props: {
               </div>
             </>
           )}
-          {signupIntent === "paid-action" && (
-            <p className="text-center text-muted-foreground text-xs">
-              One agent action · Sandbox · no card
-            </p>
-          )}
+          {copy && <p className="text-center text-muted-foreground text-xs">{copy.footnote}</p>}
         </CardContent>
       </Card>
       <div className="text-balance text-center text-muted-foreground text-xs [&_a]:underline [&_a]:underline-offset-4 [&_a]:hover:text-primary ">

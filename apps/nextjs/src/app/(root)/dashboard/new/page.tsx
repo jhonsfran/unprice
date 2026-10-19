@@ -1,9 +1,12 @@
+import { getSession } from "@unprice/auth/server-rsc"
 import { COOKIES_APP } from "@unprice/config"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
 import { cookies } from "next/headers"
+import { redirect } from "next/navigation"
 import { Suspense } from "react"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import LayoutLoader from "~/components/layout/layout-loader"
+import { type SignupIntent, budgetsSetupPath, getSignupIntent } from "~/lib/signup-funnel"
 import { api } from "~/trpc/server"
 import NewWorkspaceForm from "../_components/new-workspace-form"
 import Redirect from "./_components/redirect"
@@ -11,15 +14,26 @@ import Redirect from "./_components/redirect"
 export default async function NewPage(props: {
   searchParams: Promise<{
     workspace_id?: string
+    intent?: string | string[]
   }>
 }) {
-  const [{ workspace_id }, cookieStore] = await Promise.all([props.searchParams, cookies()])
+  const [{ workspace_id, intent }, cookieStore] = await Promise.all([props.searchParams, cookies()])
   const sessionId = cookieStore.get(COOKIES_APP.SESSION)?.value
+  const signupIntent = getSignupIntent(intent)
+
+  // A Budgets visitor who already has a workspace needs a key, not another workspace.
+  if (signupIntent === "budgets" && !workspace_id) {
+    const session = await getSession()
+    const workspaceSlug = session?.user?.workspaces[0]?.slug
+    if (workspaceSlug) {
+      redirect(budgetsSetupPath(workspaceSlug))
+    }
+  }
 
   if (!sessionId) {
     return (
       <Suspense fallback={<LayoutLoader />}>
-        <Content workspaceId={workspace_id} />
+        <Content workspaceId={workspace_id} intent={signupIntent} />
       </Suspense>
     )
   }
@@ -37,6 +51,7 @@ export default async function NewPage(props: {
         workspaceId={workspace_id}
         planVersionId={session?.payload.plan_version_id}
         sessionId={session ? sessionId : undefined}
+        intent={signupIntent}
       />
     </Suspense>
   )
@@ -46,10 +61,12 @@ async function Content({
   workspaceId,
   planVersionId,
   sessionId,
+  intent,
 }: {
   workspaceId?: string
   planVersionId?: string
   sessionId?: string
+  intent?: SignupIntent
 }) {
   if (!workspaceId || workspaceId === "") {
     return (
@@ -64,6 +81,7 @@ async function Content({
             </CardHeader>
             <CardContent className="py-4">
               <NewWorkspaceForm
+                intent={intent}
                 defaultValues={{
                   name: "",
                   planVersionId,
@@ -84,5 +102,6 @@ async function Content({
     workspaceId,
   })
 
-  return <Redirect url={newWorkspace.workspace.slug} />
+  const slug = newWorkspace.workspace.slug
+  return <Redirect url={intent === "budgets" ? budgetsSetupPath(slug) : slug} />
 }

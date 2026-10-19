@@ -1,3 +1,4 @@
+import { BUDGETS_TWO_CALLS } from "./budgets-snippets"
 import { CodeEditor } from "./code-editor"
 import CopyToClipboard from "./copy-to-clipboard"
 import { Reveal } from "./reveal"
@@ -8,24 +9,6 @@ import { StationHeader } from "./station-header"
 // then wrap the call the agent already makes. Under the editor the billing
 // stack renders as ghosts, because "nothing to migrate" is a claim about what
 // does not change, and absence is the page's proof grammar.
-
-const TWO_CALLS = `import { Unprice } from "@unprice/budgets"
-
-const unprice = new Unprice({ token: process.env.UNPRICE_TOKEN! })
-
-// 1. Set the cap once.
-await unprice.budgets.upsert({
-  key: "customer:acme",
-  unit: "USD",
-  limits: [{ amount: "50", window: "month" }],
-})
-
-// 2. Wrap the call your agent already makes.
-const text = await unprice.budget("customer:acme").spend({ estimate }, async () => {
-  const r = await generateText({ model, prompt, maxOutputTokens })
-  return { value: r.text, actual: costOf(r.usage) }
-})
-`
 
 const untouched = ["plans", "subscriptions", "invoices", "payment provider"]
 
@@ -55,10 +38,10 @@ export function BudgetsIntegration() {
             <span className="font-mono text-background-text text-xs uppercase tracking-widest">
               agent.ts
             </span>
-            <CopyToClipboard code={TWO_CALLS} variant="ghost" className="size-7" />
+            <CopyToClipboard code={BUDGETS_TWO_CALLS} variant="ghost" className="size-7" />
           </div>
           <div className="overflow-x-auto px-4 py-4 sm:px-5">
-            <CodeEditor codeBlock={TWO_CALLS} language="typescript" />
+            <CodeEditor codeBlock={BUDGETS_TWO_CALLS} language="typescript" />
           </div>
         </div>
 

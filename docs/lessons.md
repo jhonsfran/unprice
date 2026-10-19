@@ -394,6 +394,10 @@ patterns. Keep it cheap to load and useful.
 
 ## Next.js And Dashboard
 
+- 2026-10-19: A signup intent routes past auth only through `next`: `SIGNUP_INTENT_NEXT` in
+  `lib/signup-funnel.ts` maps it to a path, and `/new` must forward `intent` into the workspace
+  signUp `successUrl` (the provider appends `workspace_id`) or the intent dies at workspace creation.
+
 - 2026-08-01: Auth middleware that enriches sessions from Postgres must declare
   `config.runtime = "nodejs"`; leaving it on Edge can surface the database failure as a misleading
   Auth.js `JWTSessionError`.

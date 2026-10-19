@@ -7,8 +7,23 @@ export const PRIVACY_URL = new URL("/privacy", BASE_URL).toString()
 
 type AuthRoute = (typeof AUTH_ROUTES)["SIGNIN" | "SIGNUP"]
 const SAFE_NEXT_BASE_URL = new URL("https://safe-next.invalid")
-export const signupIntentSchema = z.enum(["paid-action"])
+export const signupIntentSchema = z.enum(["paid-action", "budgets"])
 export type SignupIntent = z.infer<typeof signupIntentSchema>
+
+/**
+ * Where a signup with this intent continues after auth. A Budgets visitor needs a project and a
+ * runtime key, not the paid-action proof, so `/new` carries the intent through workspace creation
+ * into the Budgets setup.
+ */
+export const SIGNUP_INTENT_NEXT: Record<SignupIntent, string | undefined> = {
+  "paid-action": undefined,
+  budgets: "/new?intent=budgets",
+}
+
+/** The Budgets setup inside a workspace: a project, a runtime key, then the two calls. */
+export function budgetsSetupPath(workspaceSlug: string): string {
+  return `/${workspaceSlug}/onboarding?intent=budgets`
+}
 
 export function getSingleSearchParam(value: string | string[] | undefined): string | undefined {
   return typeof value === "string" ? value : undefined
