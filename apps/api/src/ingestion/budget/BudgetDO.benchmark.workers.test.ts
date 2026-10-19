@@ -1,6 +1,10 @@
 import { reset, runInDurableObject } from "cloudflare:test"
 import { env } from "cloudflare:workers"
-import { type BudgetConfigInput, upsertBudgetInputSchema } from "@unprice/db/validators"
+import {
+  type BudgetConfigInput,
+  RECORD_DEDUPE_MS,
+  upsertBudgetInputSchema,
+} from "@unprice/db/validators"
 import { isOutcomeOf } from "@unprice/services/budgets"
 import type { BudgetReply, BudgetRequest } from "@unprice/services/use-cases"
 import { drizzle } from "drizzle-orm/durable-sqlite"
@@ -12,7 +16,6 @@ import * as schema from "./db/schema"
 import { BudgetProcessor } from "./processor"
 
 const UNIT = BigInt(100_000_000)
-const DAY = 24 * 60 * 60 * 1000
 const SAMPLES = 21
 type NativeCursor = SqlStorageCursor<Record<string, SqlStorageValue>>
 type SqlSample = { statements: number; rowsRead: number; rowsWritten: number }
@@ -577,7 +580,7 @@ describe("BudgetDO measured work", () => {
               })
             )
           }
-          clock.now = start + 8 * DAY - 2999
+          clock.now = start + RECORD_DEDUPE_MS - 2999
           for (let i = 0; i < 64; i++) {
             accepted(
               await clock.processor.execute({
@@ -588,7 +591,7 @@ describe("BudgetDO measured work", () => {
               })
             )
           }
-          clock.now = start + 8 * DAY + 2
+          clock.now = start + RECORD_DEDUPE_MS + 2
           sqlSample(state.storage.sql)
         })
         const before = await inspect(stub)

@@ -201,7 +201,7 @@ class ReferenceBudget {
 
   /**
    * A closed row answers until its retention ends at the command's clock: a hold or a charge for a
-   * day after it closed, a record for 8 days, a refused lease for 10 minutes. Only the alarm
+   * day after it closed, a record for 25 hours, a refused lease for 10 minutes. Only the alarm
    * deletes rows.
    */
   private holdLive(hold: ModelHold, now: number) {
@@ -218,7 +218,7 @@ class ReferenceBudget {
       const hold = this.holds.get(rec.holdNo)
       return hold !== undefined && this.holdLive(hold, now)
     }
-    return now < rec.createdAt + (rec.verb === "record" ? 8 * day : day)
+    return now < rec.createdAt + (rec.verb === "record" ? 25 * hour : day)
   }
 
   /**
@@ -706,7 +706,7 @@ class ReferenceBudget {
     if (occurredAt !== undefined && occurredAt > now + 5 * minute) {
       return { error: "INVALID_OCCURRED_AT" }
     }
-    if (occurredAt !== undefined && occurredAt < now - 7 * day) return { error: "TOO_LATE" }
+    if (occurredAt !== undefined && occurredAt < now - day) return { error: "TOO_LATE" }
     const grace = command.type === "record" ? day : 0
     if (config.closesAt !== null && now >= config.closesAt + grace) {
       return { error: "BUDGET_CLOSED" }
@@ -870,10 +870,10 @@ function commandArb(scale: bigint): fc.Arbitrary<Planned> {
     0,
     -minute,
     -hour,
+    -12 * hour,
+    -day,
+    -day - 1,
     -2 * day,
-    -7 * day,
-    -7 * day - 1,
-    -8 * day,
     5 * minute,
     5 * minute + 1,
     hour
@@ -1016,7 +1016,7 @@ function resolve(
 const advanceArb = fc.oneof(
   { weight: 4, arbitrary: fc.constantFrom(0, second, minute, 10 * minute) },
   { weight: 2, arbitrary: fc.constantFrom(hour, 6 * hour, day) },
-  { weight: 1, arbitrary: fc.constantFrom(3 * day, 8 * day, 32 * day) },
+  { weight: 1, arbitrary: fc.constantFrom(25 * hour, 3 * day, 32 * day) },
   { weight: 1, arbitrary: fc.constantFrom(-minute, -2 * hour, -3 * day) },
   { weight: 1, arbitrary: fc.constantFrom<"hour-edge" | "day-edge">("hour-edge", "day-edge") }
 )
@@ -1240,7 +1240,7 @@ describe("budget core against a reference model", () => {
 
   it("keeps the record dedupe window longer than any replay that is still accepted", () => {
     expect(RECORD_DEDUPE_MS - RECORD_ACCEPT_WINDOW_MS - RECORD_FUTURE_SKEW_MS).toBe(
-      day - 5 * minute
+      hour - 5 * minute
     )
   })
 

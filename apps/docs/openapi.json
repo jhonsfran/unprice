@@ -5599,7 +5599,7 @@
       "post": {
         "operationId": "budgets.record",
         "summary": "record usage that already happened",
-        "description": "Consume an amount for work that already ran. It always counts, even past a hard limit, because the work cannot be undone: `crossed` names any limit it passed, and hard limits then deny authorize and charge. Usage must have occurred within the last 7 days (409 beyond it). For 8 days, a retry with the same idempotency key and amount replays instead of counting twice, and the same key with another amount returns 409.",
+        "description": "Consume an amount for work that already ran. It always counts, even past a hard limit, because the work cannot be undone: `crossed` names any limit it passed, and hard limits then deny authorize and charge. Usage must be at most 1 day old (409 beyond it). For 25 hours, a retry with the same idempotency key and amount replays instead of counting twice, and the same key with another amount returns 409.",
         "tags": ["budgets"],
         "x-unprice": {
           "audience": "public",
@@ -5635,13 +5635,13 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 256,
-                    "description": "Up to 256 characters, usually the event id. For 8 days, the same key with the same amount replays instead of counting again, and with another amount returns 409.",
+                    "description": "Up to 256 characters, usually the event id. For 25 hours, the same key with the same amount replays instead of counting again, and with another amount returns 409.",
                     "example": "evt_01J9Z3"
                   },
                   "occurredAt": {
                     "type": "integer",
                     "minimum": 0,
-                    "description": "When the usage happened, in epoch milliseconds: the event's own time, not the time of the call. Must be within the last 7 days and at most 5 minutes ahead. It bounds acceptance only; usage counts in the window it arrives in.",
+                    "description": "When the usage happened, in epoch milliseconds: the event's own time, not the time of the call. Must be at most 1 day old and at most 5 minutes ahead. It bounds acceptance only; usage counts in the window it arrives in.",
                     "example": 1792000000000
                   }
                 },

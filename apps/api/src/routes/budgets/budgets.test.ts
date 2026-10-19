@@ -6,8 +6,6 @@ import { timing } from "hono/timing"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { UnpriceApiError, handleError, handleZodError } from "~/errors"
 import type { HonoEnv } from "~/hono/env"
-import type { BudgetTelemetry } from "~/ingestion/budget/BudgetDO"
-import { placementTiming } from "~/middleware/placement-timing"
 import { registerAuthorizeBudgetV1 } from "./authorizeBudgetV1"
 import { registerChargeBudgetV1 } from "./chargeBudgetV1"
 import { registerGetBudgetV1 } from "./getBudgetV1"
@@ -21,7 +19,6 @@ import { registerUpsertBudgetV1 } from "./upsertBudgetV1"
 const mocks = vi.hoisted(() => ({
   keyAuth: vi.fn(),
   execute: vi.fn(),
-  telemetry: undefined as BudgetTelemetry | undefined,
   log: vi.fn(),
 }))
 
@@ -33,7 +30,6 @@ vi.mock("~/auth/key", async (importOriginal) => ({
 vi.mock("~/ingestion/budget/client", () => ({
   CloudflareBudgetClient: class {
     execute = mocks.execute
-    telemetry = mocks.telemetry
   },
 }))
 
@@ -64,7 +60,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.clearAllMocks()
-  mocks.telemetry = undefined
 })
 
 /** The request logger, whose `set` fields become the request's wide event. */
@@ -332,7 +327,7 @@ describe("budgets API", () => {
     })
   })
 
-  it("reports the budget call on the wide event everywhere and its placement and queue outside production", async () => {
+  it("reports the budget operation and duration without placement diagnostics", async () => {
     mocks.execute.mockResolvedValue(
       Ok({
         type: "authorize",
@@ -345,11 +340,9 @@ describe("budgets API", () => {
     )
     const app = new OpenAPIHono<HonoEnv>({ defaultHook: handleZodError })
     app.use(timing())
-    app.use(placementTiming())
     app.use("*", withLogger)
     registerAuthorizeBudgetV1(app)
-    const serverTiming = async (APP_ENV: string, telemetry: BudgetTelemetry) => {
-      mocks.telemetry = telemetry
+    const serverTiming = async (APP_ENV: string) => {
       const request = new Request("https://example.com/v1/budgets/authorize", {
         method: "POST",
         headers: { authorization: "Bearer key", "content-type": "application/json" },
@@ -364,23 +357,7 @@ describe("budgets API", () => {
       return response.headers.get("Server-Timing")
     }
 
-    expect(await serverTiming("preview", { cold: true, served: 1, colo: "LHR" })).toMatch(
-      /^edge;desc="EWR",isolate;desc="cold",budget;dur=\d+\.\d;desc="do=LHR cold",total;dur=\d+\.\d;desc="Total Response Time"$/
-    )
-    expect(mocks.log).toHaveBeenLastCalledWith({
-      budget: {
-        command: "authorize",
-        outcome: "ok",
-        do_ms: expect.any(Number),
-        cold: true,
-        served: 1,
-        colo: "LHR",
-      },
-    })
-    expect(await serverTiming("preview", { cold: false, served: 7, colo: "unknown" })).toMatch(
-      /^edge;desc="EWR",isolate;desc="warm",budget;dur=\d+\.\d;desc="do=unknown warm",total;/
-    )
-    expect(await serverTiming("production", { cold: false, served: 2 })).toMatch(
+    expect(await serverTiming("preview")).toMatch(
       /^budget;dur=\d+\.\d,total;dur=\d+\.\d;desc="Total Response Time"$/
     )
     expect(mocks.log).toHaveBeenLastCalledWith({
@@ -388,14 +365,21 @@ describe("budgets API", () => {
         command: "authorize",
         outcome: "ok",
         do_ms: expect.any(Number),
-        cold: false,
-        served: 2,
+      },
+    })
+    expect(await serverTiming("production")).toMatch(
+      /^budget;dur=\d+\.\d,total;dur=\d+\.\d;desc="Total Response Time"$/
+    )
+    expect(mocks.log).toHaveBeenLastCalledWith({
+      budget: {
+        command: "authorize",
+        outcome: "ok",
+        do_ms: expect.any(Number),
       },
     })
   })
 
   it("names the rejection, or an error, as the budget call's outcome", async () => {
-    mocks.telemetry = { cold: false, served: 4 }
     rejectWith({ code: "BUDGET_NOT_FOUND" })
     expect((await call("/v1/budgets/get?key=customer:missing")).status).toBe(404)
     expect(mocks.log).toHaveBeenLastCalledWith({
@@ -403,12 +387,9 @@ describe("budgets API", () => {
         command: "get",
         outcome: "BUDGET_NOT_FOUND",
         do_ms: expect.any(Number),
-        cold: false,
-        served: 4,
       },
     })
 
-    mocks.telemetry = undefined
     mocks.execute.mockRejectedValue(new Error("Durable Object reset"))
     expect((await call("/v1/budgets/get?key=customer:missing")).status).toBe(500)
     expect(mocks.log).toHaveBeenLastCalledWith({

@@ -70,7 +70,6 @@ import { consumeIngestionBatch, consumeIngestionDlqBatch } from "~/ingestion/ser
 import { internalKeyAuth } from "~/middleware/internal-key"
 import { knownRoute } from "~/middleware/known-route"
 import { obs } from "~/middleware/obs"
-import { placementTiming } from "~/middleware/placement-timing"
 import { apiDrain, apiEvlog } from "~/observability"
 import { registerGetInvoiceV1 } from "./routes/invoices/getInvoiceV1"
 import { registerGetWalletV1 } from "./routes/wallet/getWalletV1"
@@ -78,7 +77,6 @@ import { registerGetWalletV1 } from "./routes/wallet/getWalletV1"
 const app = newApp()
 
 app.use(timing())
-app.use(placementTiming())
 app.use(
   "*",
   knownRoute(() => app.routes)

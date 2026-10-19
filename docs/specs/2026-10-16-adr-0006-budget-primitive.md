@@ -252,15 +252,19 @@ settle(actual 55)   held 80 -> 0          consumed 0 -> 55   available 20 -> 45
   its hold id until it expires, because open holds do not enter retention.
 - Holds and settles carry the authorization timestamp. Prices are resolved at that timestamp
   (ADR-0005), so a price change between authorize and settle never changes what one call costs.
-- `record` accepts usage whose `occurredAt` is within the last 7 days and at most 5 minutes
+- `record` accepts usage whose `occurredAt` is within the last 24 hours and at most 5 minutes
   ahead. Older usage returns 409 `TOO_LATE`; a future time returns 400 `INVALID_OCCURRED_AT`.
   `occurredAt` only bounds acceptance: the amount counts against the window it arrives in, like a
   late settle.
-- A record's row is kept 8 days, longer than the 7-day accept window plus the skew. For those 8
-  days the same key and amount replay with the original response, and another amount, or another
-  verb, under the same key is a 409 conflict. After them, a replay is already too late.
+- 24 hours (7 days until 2026-10-18) is how long every other retry stays safe, and it bounds a
+  busy budget's storage. Every accepted record is one row of 330-559 B, measured. Over 25
+  hours, a 10 GB object holds about 200-340 records/s, near the object's own write throughput;
+  over 8 days it held 26-44/s.
+- A record's row is kept 25 hours, longer than the 24-hour accept window plus the skew. For those
+  25 hours the same key and amount replay with the original response, and another amount, or
+  another verb, under the same key is a 409 conflict. After them, a replay is already too late.
   `occurredAt` is not part of what a retry must repeat: a retry is the same event even if the
-  caller stamps it again. It must still be the event's own time, because the 7-day `TOO_LATE`
+  caller stamps it again. It must still be the event's own time, because the 24-hour `TOO_LATE`
   bound is what stops a retry once its row is gone; the SDK requires it and never defaults it to
   the time of the call.
 
@@ -617,8 +621,8 @@ await hold.settle({ usage: { feature: "model_call",
 { key: "customer:acme", unit: "USD", funding: { grant: { amount: 5, expiresAt: trialEnd } } }
 
 // Event ingestion always counts the debit; `crossed` names any limit it passed.
-// occurredAt is the event's own time and bounds acceptance (7 days); the same key and amount
-// count once within 8 days.
+// occurredAt is the event's own time and bounds acceptance (24 hours); the same key and amount
+// count once within 25 hours.
 await unprice.budget("customer:acme").record({ usage: { feature: "image", properties: {} },
   idempotencyKey: eventId, occurredAt: event.timestamp })
 ```

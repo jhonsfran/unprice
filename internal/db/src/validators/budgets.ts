@@ -34,8 +34,11 @@ export const OPERATION_RETENTION_MS = 24 * 60 * 60 * 1000
  * process facing a full budget is refused again every flush interval.
  */
 export const LEASE_REFUSAL_RETENTION_MS = 10 * 60 * 1000
-/** `record` accepts usage that occurred at most this long ago (`TOO_LATE` beyond it). */
-export const RECORD_ACCEPT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
+/**
+ * `record` accepts usage that occurred at most this long ago (`TOO_LATE` beyond it): as long as
+ * every other retry stays safe, and short enough that a hot budget's receipts fit its object.
+ */
+export const RECORD_ACCEPT_WINDOW_MS = 24 * 60 * 60 * 1000
 /** `record` rejects `occurredAt` further than this ahead of the budget's clock. */
 export const RECORD_FUTURE_SKEW_MS = 5 * 60 * 1000
 /**
@@ -43,7 +46,7 @@ export const RECORD_FUTURE_SKEW_MS = 5 * 60 * 1000
  * under the same key is a conflict. It must exceed the accept window plus the skew, so a replay
  * the row no longer catches is already `TOO_LATE`.
  */
-export const RECORD_DEDUPE_MS = 8 * 24 * 60 * 60 * 1000
+export const RECORD_DEDUPE_MS = 25 * 60 * 60 * 1000
 /** `get` returns this many ended periods per limited window, newest first; no more are kept. */
 export const WINDOW_HISTORY_PERIODS = 12
 /**
@@ -335,7 +338,7 @@ export const recordBudgetInputSchema = chargeBudgetInputSchema
       .int()
       .nonnegative()
       .openapi({
-        description: `When the usage happened, in epoch milliseconds: the event's own time, not the time of the call. Must be within the last ${describeDuration(RECORD_ACCEPT_WINDOW_MS)} and at most ${describeDuration(RECORD_FUTURE_SKEW_MS)} ahead. It bounds acceptance only; usage counts in the window it arrives in.`,
+        description: `When the usage happened, in epoch milliseconds: the event's own time, not the time of the call. Must be at most ${describeDuration(RECORD_ACCEPT_WINDOW_MS)} old and at most ${describeDuration(RECORD_FUTURE_SKEW_MS)} ahead. It bounds acceptance only; usage counts in the window it arrives in.`,
         example: 1_792_000_000_000,
       }),
   })

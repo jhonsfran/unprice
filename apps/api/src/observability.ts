@@ -54,25 +54,8 @@ export function keepFailedRequest(ctx: TailSamplingContext): void {
   ctx.shouldKeep = true
 }
 
-const SLOW_BUDGET_CALL_MS = 300
-
-/**
- * Keeps a request whose budget Durable Object round trip (`budget.do_ms`, set by `runBudgetVerb`)
- * took SLOW_BUDGET_CALL_MS or more, so an object stall is explained while the request stays under
- * the 700 ms rule.
- */
-export function keepSlowBudgetCall(ctx: TailSamplingContext): void {
-  const budget = ctx.context.budget
-  if (isRecord(budget) && typeof budget.do_ms === "number" && budget.do_ms >= SLOW_BUDGET_CALL_MS) {
-    ctx.shouldKeep = true
-  }
-}
-
 export const apiEvlog = evlog({
-  keep: (ctx) => {
-    keepFailedRequest(ctx)
-    keepSlowBudgetCall(ctx)
-  },
+  keep: keepFailedRequest,
 })
 
 // ============================================
@@ -94,8 +77,7 @@ export const apiMetricsLogger: Logger = createMetricsLogger(apiDrain)
 
 /**
  * DO diagnostics that must never be sampled away: errors, business denials,
- * batches containing denials, operator-recovery states, and budget alarms that
- * filled their batch and come straight back. Everything else
+ * batches containing denials, and operator-recovery states. Everything else
  * is throughput telemetry and is safe to sample (multiply counts by
  * 1/sample_rate in Axiom).
  */
@@ -109,7 +91,6 @@ export function shouldAlwaysKeepDoLogEvent(fields: Record<string, unknown> | und
   if (typeof fields.denied_reason === "string" && fields.denied_reason.length > 0) return true
   if (typeof fields.denied_count === "number" && fields.denied_count > 0) return true
   if (fields.recovery_required === true) return true
-  if (isRecord(fields.budget) && fields.budget.capped === true) return true
   return false
 }
 

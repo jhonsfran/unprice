@@ -85,7 +85,7 @@ export type ChargeBudgetInput = {
 
 /**
  * Usage that already happened. It always counts, even past a hard limit, and `crossed` names any
- * limit it passed; authorize before work that needs guaranteed capacity. Within 8 days, the same
+ * limit it passed; authorize before work that needs guaranteed capacity. Within 25 hours, the same
  * event key and amount replay; another amount is 409.
  */
 export type RecordBudgetInput = {
@@ -93,8 +93,8 @@ export type RecordBudgetInput = {
   idempotencyKey: string
   /**
    * When the usage happened, in epoch ms: the event's own time, never the time of the call. Usage
-   * older than 7 days is refused (409), which is what stops a retry from counting twice once its
-   * key's 8-day dedupe has ended, so a retry must send the same time.
+   * older than 24 hours is refused (409), which is what stops a retry from counting twice once its
+   * key's 25-hour dedupe has ended, so a retry must send the same time.
    */
   occurredAt: number
 }

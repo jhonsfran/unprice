@@ -19,7 +19,7 @@ export const route = createRoute(
       path: "/v1/budgets/record",
       operationId: "budgets.record",
       summary: "record usage that already happened",
-      description: `Consume an amount for work that already ran. It always counts, even past a hard limit, because the work cannot be undone: \`crossed\` names any limit it passed, and hard limits then deny authorize and charge. Usage must have occurred within the last ${describeDuration(RECORD_ACCEPT_WINDOW_MS)} (409 beyond it). For ${describeDuration(RECORD_DEDUPE_MS)}, a retry with the same idempotency key and amount replays instead of counting twice, and the same key with another amount returns 409.`,
+      description: `Consume an amount for work that already ran. It always counts, even past a hard limit, because the work cannot be undone: \`crossed\` names any limit it passed, and hard limits then deny authorize and charge. Usage must be at most ${describeDuration(RECORD_ACCEPT_WINDOW_MS)} old (409 beyond it). For ${describeDuration(RECORD_DEDUPE_MS)}, a retry with the same idempotency key and amount replays instead of counting twice, and the same key with another amount returns 409.`,
       method: "post",
       tags: ["budgets"],
       request: {

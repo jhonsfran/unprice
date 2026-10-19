@@ -513,30 +513,6 @@ describe("BudgetDO verbs", () => {
     expect(next.holdId).toBe("h_2")
   })
 
-  it("reports whether each request woke the object and how many it served", async () => {
-    const key = "customer:telemetry"
-    const stub = stubFor(key)
-
-    expect((await stub.execute({ type: "get" })).telemetry).toEqual({
-      cold: true,
-      served: 1,
-      colo: "local",
-    })
-    expect((await stub.execute(upsert(key, fiftyPerMonth))).telemetry).toEqual({
-      cold: false,
-      served: 2,
-      colo: "local",
-    })
-
-    await evictDurableObject(stub)
-    const revived = getBudgetStub(env, { projectId: "proj_1", key })
-    expect((await revived.execute({ type: "get" })).telemetry).toEqual({
-      cold: true,
-      served: 1,
-      colo: "local",
-    })
-  })
-
   it("rolls back the ledger when a later write in the same command fails", async () => {
     const key = "customer:rollback"
     const stub = stubFor(key)
@@ -825,7 +801,7 @@ describe("BudgetDO alarm", () => {
       await processor.execute(upsert(key, { ...fiftyPerMonth, closesAt }))
       await expect(state.storage.getAlarm()).resolves.toBe(deletable)
 
-      // A record still accepted after the close keeps its row for 8 days, well inside the 30.
+      // A record still accepted after the close keeps its row for 25 hours, well inside the 30 days.
       now = closesAt + MINUTE
       const late = {
         type: "record",
@@ -834,8 +810,8 @@ describe("BudgetDO alarm", () => {
         amount: units(1),
       } as const
       outcome(await processor.execute(late), "record")
-      await expect(state.storage.getAlarm()).resolves.toBe(now + 8 * DAY)
-      now += 8 * DAY
+      await expect(state.storage.getAlarm()).resolves.toBe(now + 25 * HOUR)
+      now += 25 * HOUR
       expect(await processor.alarm()).toEqual({ expired: 0, purged: 1, capped: false })
       expect(state.storage.sql.exec("SELECT count(*) AS n FROM budget_operations").one()).toEqual({
         n: 0,
@@ -927,7 +903,7 @@ describe("BudgetDO alarm", () => {
     })
   })
 
-  it("keeps a record's row through alarms for 8 days, conflicts included", async () => {
+  it("keeps a record's row through alarms for 25 hours, conflicts included", async () => {
     const key = "customer:record-replay"
     const stub = stubFor(key)
     const t0 = midMonthAhead()
@@ -948,7 +924,8 @@ describe("BudgetDO alarm", () => {
       expect(outcome(await processor.execute(request), "record").replayed).toBe(false)
       const rows = () => state.storage.sql.exec("SELECT count(*) AS n FROM budget_operations").one()
 
-      now = t0 + 25 * HOUR
+      // Past the accept window, the row still answers the replay.
+      now = t0 + DAY + 30 * MINUTE
       await processor.alarm()
       expect(rows()).toEqual({ n: 1 })
       const replay = outcome(await processor.execute({ ...request, occurredAt: t0 + 1 }), "record")
@@ -962,7 +939,7 @@ describe("BudgetDO alarm", () => {
         idempotencyKey: "evt_1",
       })
 
-      now = t0 + 8 * 24 * HOUR
+      now = t0 + 25 * HOUR
       await processor.alarm()
       expect(rows()).toEqual({ n: 0 })
       expect(rejection(await processor.execute(request)).code).toBe("TOO_LATE")

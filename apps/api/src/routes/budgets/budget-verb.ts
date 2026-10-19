@@ -15,11 +15,11 @@ import {
   executeBudgetCommand,
 } from "@unprice/services/use-cases"
 import type { Context } from "hono"
+import { setMetric } from "hono/timing"
 import { keyAuth } from "~/auth/key"
 import { UnpriceApiError } from "~/errors"
 import type { HonoEnv } from "~/hono/env"
 import { CloudflareBudgetClient } from "~/ingestion/budget/client"
-import { budgetTiming } from "~/middleware/placement-timing"
 
 export const BUDGET_REMAINING_HEADER = "Unprice-Budget-Remaining"
 
@@ -44,7 +44,7 @@ export async function runBudgetVerb<R extends BudgetVerbRequest>(
 /**
  * Runs the verb on the budget's Durable Object and reports the call on the request's wide event
  * (`budget_*` in Axiom) and on Server-Timing. Timed by hand, apart from key auth and the rest of
- * the Worker: what the object says about the call is known only once it answers.
+ * the Worker.
  */
 async function callBudget<R extends BudgetVerbRequest>(
   c: Context<HonoEnv>,
@@ -59,16 +59,12 @@ async function callBudget<R extends BudgetVerbRequest>(
     return result
   } finally {
     const doMs = performance.now() - startedAt
-    const telemetry = budgets.telemetry
-    budgetTiming(c, doMs, telemetry)
+    setMetric(c, "budget", doMs)
     c.get("logger").set({
       budget: {
         command: input.request.type,
         outcome,
         do_ms: doMs,
-        cold: telemetry?.cold,
-        served: telemetry?.served,
-        colo: telemetry?.colo,
       },
     })
   }

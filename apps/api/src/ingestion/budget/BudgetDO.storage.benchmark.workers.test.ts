@@ -1,6 +1,6 @@
 import { reset, runInDurableObject } from "cloudflare:test"
 import { env } from "cloudflare:workers"
-import { upsertBudgetInputSchema } from "@unprice/db/validators"
+import { RECORD_DEDUPE_MS, upsertBudgetInputSchema } from "@unprice/db/validators"
 import { isOutcomeOf } from "@unprice/services/budgets"
 import type { BudgetReply, BudgetRequest } from "@unprice/services/use-cases"
 import { drizzle } from "drizzle-orm/durable-sqlite"
@@ -240,7 +240,7 @@ describe("BudgetDO storage work", () => {
             )
         }
         // Opened just before cleanup, so the holds are still open while the receipts are purged.
-        clock.now = start + 8 * DAY - 1000
+        clock.now = start + RECORD_DEDUPE_MS - 1000
         for (let i = 0; i < 512; i++)
           accepted(
             await clock.processor.execute({
@@ -261,7 +261,7 @@ describe("BudgetDO storage work", () => {
         const result = await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
           const clock = clocks.get(state.storage.sql)
           if (!clock) throw new Error("missing clock")
-          clock.now = start + 8 * DAY + second * 1000
+          clock.now = start + RECORD_DEDUPE_MS + second * 1000
           const countBefore = inspect(state.storage.sql).receipts
           await clock.processor.alarm()
           const sql = measure(state.storage.sql)

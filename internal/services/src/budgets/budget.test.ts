@@ -1130,10 +1130,10 @@ describe("closesAt", () => {
       replayed: false,
     })
     expect(ok(store.run(release("h_2"), closesAt)).outcome).toMatchObject({ released: $(10) })
-    expect(ok(store.run(record("r1", 5), closesAt + day - 1)).outcome).toMatchObject({
+    expect(ok(store.run(record("r1", 5, closesAt), closesAt + day - 1)).outcome).toMatchObject({
       replayed: false,
     })
-    expect(rejection(store.run(record("r2", 5), closesAt + day))).toEqual(closed)
+    expect(rejection(store.run(record("r2", 5, closesAt), closesAt + day))).toEqual(closed)
 
     expect(ok(store.run({ type: "get" }, closesAt + day)).outcome).toMatchObject({
       budget: { closesAt, closed: true, balance: { held: $(0), limits: [{ consumed: $(30) }] } },
@@ -1260,12 +1260,12 @@ describe("window history", () => {
 })
 
 describe("record dedupe", () => {
-  it("accepts usage from the last 7 days up to 5 minutes ahead", () => {
+  it("accepts usage from the last day up to 5 minutes ahead", () => {
     const store = budgetWith(month100)
-    expect(rejection(store.run(record("r1", 1, t0 - 7 * day - 1), t0))).toEqual({
+    expect(rejection(store.run(record("r1", 1, t0 - day - 1), t0))).toEqual({
       code: "TOO_LATE",
-      occurredAt: t0 - 7 * day - 1,
-      oldestAccepted: t0 - 7 * day,
+      occurredAt: t0 - day - 1,
+      oldestAccepted: t0 - day,
     })
     expect(rejection(store.run(record("r1", 1, t0 + 5 * minute + 1), t0))).toEqual({
       code: "INVALID_OCCURRED_AT",
@@ -1274,7 +1274,7 @@ describe("record dedupe", () => {
     })
     expect(store.writes).toBe(1)
 
-    expect(ok(store.run(record("r1", 1, t0 - 7 * day), t0)).outcome).toMatchObject({
+    expect(ok(store.run(record("r1", 1, t0 - day), t0)).outcome).toMatchObject({
       replayed: false,
     })
     const ahead = ok(store.run(record("r2", 2, t0 + 5 * minute), t0))
@@ -1290,33 +1290,35 @@ describe("record dedupe", () => {
     expect(rejection(store.run(record("r1", 31), t0 + minute)).code).toBe("IDEMPOTENCY_CONFLICT")
   })
 
-  it("keeps a record's row for 8 days, then refuses the replay as too late", () => {
+  it("keeps a record's row for 25 hours, then refuses the replay as too late", () => {
     const store = budgetWith({ limits: [{ id: "life", amount: "100", window: "never" }] })
     ok(store.run(record("r1", 30), t0))
     ok(store.run(record("r2", 70), t0))
 
-    store.alarm(t0 + day)
+    // Past the accept window the row still answers: the replay never counts twice.
+    const late = t0 + day + 30 * minute
+    store.alarm(late)
     expect([...store.rows.keys()]).toEqual(["o:r1", "o:r2"])
-    expect(ok(store.run(record("r2", 70), t0 + 6 * day)).outcome).toMatchObject({
+    expect(ok(store.run(record("r2", 70), late)).outcome).toMatchObject({
       type: "record",
       amount: $(70),
       crossed: [],
       replayed: true,
       balance: { remaining: $(0) },
     })
-    expect(rejection(store.run(record("r1", 31), t0 + 6 * day)).code).toBe("IDEMPOTENCY_CONFLICT")
-    expect(rejection(store.run(charge("r1", 30), t0 + 6 * day)).code).toBe("IDEMPOTENCY_CONFLICT")
+    expect(rejection(store.run(record("r1", 31), late)).code).toBe("IDEMPOTENCY_CONFLICT")
+    expect(rejection(store.run(charge("r1", 30), late)).code).toBe("IDEMPOTENCY_CONFLICT")
 
-    store.alarm(t0 + 8 * day)
+    store.alarm(t0 + 25 * hour)
     expect(store.rows.size).toBe(0)
-    expect(rejection(store.run(record("r1", 30), t0 + 8 * day)).code).toBe("TOO_LATE")
+    expect(rejection(store.run(record("r1", 30), t0 + 25 * hour)).code).toBe("TOO_LATE")
   })
 
   it("stops answering from a row when its retention ends, even before the alarm purges it", () => {
     const store = budgetWith(month100)
     ok(store.run(record("r1", 30), t0))
 
-    const reused = ok(store.run(record("r1", 5, t0 + 8 * day), t0 + 8 * day))
+    const reused = ok(store.run(record("r1", 5, t0 + 25 * hour), t0 + 25 * hour))
     expect(reused.outcome).toMatchObject({ amount: $(5), replayed: false })
     expect([store.rows.size, store.rows.get("o:r1")]).toMatchObject([1, { amount: $(5) }])
   })

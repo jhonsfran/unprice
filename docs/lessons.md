@@ -68,12 +68,9 @@ patterns. Keep it cheap to load and useful.
 
 ## Cloudflare, API, And Ingestion
 
-- 2026-10-19: Keep native preview logs and traces in `unprice-preview-traces`; `unprice-staging`
-  reaches its field limit and rejects OTLP data. The `axiom-preview-*` destinations own the ingest
-  token and dataset headers; keep credentials out of Wrangler configuration.
-- 2026-10-19: Set `Content-Encoding: gzip` on native Axiom export destinations. Cloudflare's
-  preflight sends uncompressed samples, so create these destinations with `skipPreflightCheck: true`
-  and verify an actual marked preview request in Axiom before calling delivery complete.
+- 2026-10-19: Preview native logs/traces and BudgetDO placement diagnostics were temporary and are
+  disabled. Keep sampled request events with the budget operation, outcome, and RPC duration;
+  failed alarms remain error logs.
 - 2026-09-20: Default authenticated SDK requests to `cache: "no-store"`; Cloudflare Workers reject
   an explicitly supplied `cache: "default"` before the request reaches the API.
 - 2026-09-20: Treat a missing or disabled payment provider during paid plan publication as an
@@ -249,20 +246,13 @@ patterns. Keep it cheap to load and useful.
 - 2026-10-18: Budgets use automatic placement (`getBudgetStub`: no jurisdiction, no hint); every
   other DO stays EU-pinned. evlog `keep` rules only add; to except a request, drop the global rule
   and decide in the middleware's `keep` callback (`keepFailedRequest` in `apps/api/src/observability.ts`).
-  That callback's `ctx.context` holds every field set through `c.get("logger").set`, so a rule can
-  read route fields (`keepSlowBudgetCall` reads `budget.do_ms`).
-- 2026-10-18: Outside production, Server-Timing adds `edge`, `isolate`, and `budget;desc="do=<colo> cold|warm"`
-  (`middleware/placement-timing.ts`). BudgetDO returns `telemetry` (`cold`, `served`, and `colo`
-  outside production) beside every RPC reply and learns its colo
-  from a never-awaited `cdn-cgi/trace` fetch in preview only (`local` elsewhere, so tests stay off the network). Local workerd evicts an idle DO after about 10 s, so manual
-  curls see `cold` again.
 - 2026-10-19: CI passes secrets between jobs with `.github/actions/secret-outputs` (gpg symmetric, base64),
   which replaced the cloudposse Docker action after public.ecr.aws rate limits failed preview deploys
   repeatedly. Run `.github/actions/secret-outputs/secret-outputs.test.sh` (Docker) after touching it;
   it still reads the old format, which `DATABASE_URL_ENCRYPTED` is stored in.
 - 2026-10-19: Never time Durable Object work from the object's `Date.now()`: it is stale until the
   object's next I/O. A Worker-to-object `queueMs` read 0 on about 27,000 preview requests and was
-  removed. Batched releases show instead as consecutive `budget_served` values that end together.
+  removed; use caller-side RPC timing instead.
 - 2026-10-18: In DO SQLite, `DELETE ... RETURNING` costs one extra row read per deleted row (measured on
   the alarm purge: +2,048 rows read at its cap). Count deletions with `SELECT changes()` in the same
   transaction instead: one statement, no rows read.
@@ -270,6 +260,10 @@ patterns. Keep it cheap to load and useful.
   `pnpm --filter api test:workers:bench --disableConsoleIntercept` to see `BUDGET_BENCHMARK` lines.
   Measured there: an UPDATE that moves `due_at` adds no row written (lease report 3 with or
   without renewal), so measure rather than count index entries.
+- 2026-10-18: A stored `record` receipt costs 330 B (36-character key) to 559 B (256-character key) of
+  BudgetDO SQLite (`bytesPerReceipt` in `BudgetDO.storage.benchmark`). Each 10 GB object holds
+  `RECORD_DEDUPE_MS` × rate of them. At 8 days that was 26-44 records/s; at 25 hours it is ~200-340/s.
+  A 150 s k6 run on a fresh budget shows neither the ceiling nor an alarm purge.
 - 2026-10-18: After extending `budget.properties.test.ts` with a verb, flip one of its core rules
   and confirm the property fails. Lease reports first reached their accepted path 1% of the time
   and survived every mutation; planning them against live leases and adding a steady-clock
@@ -1034,7 +1028,7 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   API: the same load is clean with `K6_NO_CONNECTION_REUSE=true` and with Node's `fetch`. Check
   for it before chasing a server bug.
 - 2026-10-16: A dedupe that relies on a client-sent timestamp (`record`'s `occurredAt` bounding
-  replays past the 8-day receipt) breaks the moment the SDK defaults that timestamp to the time of
+  replays past the 25-hour receipt) breaks the moment the SDK defaults that timestamp to the time of
   the call: a retry gets a fresh time and passes the bound. Require it in the SDK, and keep clock
   values out of the request hash so a re-stamped retry replays instead of conflicting.
 - 2026-10-16: Don't store a flag the config already implies. The budget's anchored counters used
