@@ -1,0 +1,19 @@
+---
+title: INSUFFICIENT_PERMISSIONS
+---
+
+## Cause
+
+The API key's type cannot perform this request. A key is either a runtime key or a config key. A
+runtime key cannot loosen a budget: raise or remove a hard limit, make it soft, or clear or postpone
+its `closesAt`. A config key cannot spend, check access, or report usage.
+
+## Action
+
+Use the key type the operation needs. Keep the config key out of the environment that spends, so
+code that spends under a cap cannot lift it. See
+[who can change a cap](/budgets/keys-and-limits#who-can-change-a-cap).
+
+## Support evidence
+
+Include the error response and `requestId` if you contact [support](mailto:seb@unprice.dev).

@@ -1,0 +1,138 @@
+---
+title: "Budgets quickstart"
+description: "Put a hard monthly cap on one customer's model calls."
+---
+
+This guide caps one customer, `customer:acme`, at $50 a month, and wraps an AI SDK call so it runs
+only when the cap can cover it.
+
+<Steps>
+  <Step title="Create an API key">
+    Create a **runtime** key in your project's API key settings in the
+    [Unprice dashboard](https://app.unprice.dev). Store it as `UNPRICE_TOKEN` in your server's
+    environment. Do not send it to a browser or commit it to a repository.
+  </Step>
+
+  <Step title="Install the package">
+    <CodeGroup>
+
+      ```bash npm
+      npm install @unprice/budgets
+      ```
+
+      ```bash pnpm
+      pnpm add @unprice/budgets
+      ```
+
+      ```bash yarn
+      yarn add @unprice/budgets
+      ```
+
+      ```bash bun
+      bun add @unprice/budgets
+      ```
+    </CodeGroup>
+
+    `@unprice/budgets` is also included in `@unprice/api`. If you already use `@unprice/api`, skip
+    this step and import from it instead.
+  </Step>
+
+  <Step title="Define the budget">
+    Run this once, for example when the customer signs up or from a deploy script. Sending the same
+    definition again changes nothing.
+
+    ```ts
+    import { Unprice } from "@unprice/budgets";
+
+    const unprice = new Unprice({ token: process.env.UNPRICE_TOKEN! });
+
+    const { error } = await unprice.budgets.upsert({
+      key: "customer:acme",
+      unit: "USD",
+      limits: [{ amount: "50", window: "month" }]
+    });
+
+    if (error) throw new Error(`${error.code}: ${error.message}`);
+    ```
+
+    A runtime key can create a budget and tighten it. Raising the cap later needs a config key; see
+    [who can change a cap](/budgets/keys-and-limits#who-can-change-a-cap).
+  </Step>
+
+  <Step title="Wrap the model call">
+    `spend` reserves the most the call can cost, runs it, and settles what it actually cost.
+
+    ```ts
+    import { generateText } from "ai";
+
+    // Example USD prices per million tokens; use your provider's.
+    const PRICE = { input: 2, output: 8 };
+    const costOf = (inputTokens = 0, outputTokens = 0) =>
+      (inputTokens * PRICE.input + outputTokens * PRICE.output) / 1_000_000;
+
+    const acme = unprice.budget("customer:acme");
+    const maxOutputTokens = 512;
+
+    async function answer(prompt: string) {
+      // Upper bound: the prompt's tokens plus the output limit.
+      const estimate = costOf(countTokens(prompt), maxOutputTokens);
+
+      return acme.spend({ estimate }, async () => {
+        const r = await generateText({ model, prompt, maxOutputTokens });
+        const { inputTokens, outputTokens } = r.usage;
+        return { value: r.text, actual: costOf(inputTokens, outputTokens) };
+      });
+    }
+    ```
+
+    `countTokens` stands for your tokenizer, or a limit you enforce on the prompt. The estimate
+    must cover every billable unit, because `actual` may not exceed it.
+  </Step>
+
+  <Step title="Handle the denial">
+    When the cap cannot cover the estimate, `spend` throws `BudgetExceededError` and the model is
+    never called. `error.blocked` names the limit, when it resets, and the remedy.
+
+    ```ts
+    import { BudgetExceededError } from "@unprice/budgets";
+
+    try {
+      const text = await answer(prompt);
+      return Response.json({ text });
+    } catch (error) {
+      if (error instanceof BudgetExceededError) {
+        return Response.json(
+          { error: "budget_exceeded", resetsAt: error.blocked.resetsAt },
+          { status: 402 }
+        );
+      }
+      throw error;
+    }
+    ```
+
+    `spend` throws other errors when Unprice cannot be reached or the work fails. Read
+    [errors and recovery](/budgets/errors) before you go to production.
+  </Step>
+
+  <Step title="Check the balance">
+    ```ts
+    const { result } = await unprice.budget("customer:acme").get();
+
+    console.log(result?.budget.balance.remaining); // "49.99412"
+    ```
+
+    `balance.limits` holds each limit's consumed, held, and remaining amounts, and `history` holds
+    the last ended periods.
+  </Step>
+</Steps>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Keys and limits" icon="sliders" href="/budgets/keys-and-limits">
+    Cap runs and agents, combine windows, and close a budget.
+  </Card>
+  <Card title="Serverless functions" icon="cloud" href="/budgets/spend#settle-in-the-background">
+    Settle after the response with `waitUntil`.
+  </Card>
+</CardGroup>

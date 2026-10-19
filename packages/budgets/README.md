@@ -135,8 +135,8 @@ always counts, even past a hard limit, and its `crossed` names each limit it pas
 hard limit then denies `authorize` and `charge`. Authorize before work that needs guaranteed capacity.
 The API also rejects a lower hard cap when consumption plus open holds would exceed it.
 Pass the event's id as the record key and its own time as `occurredAt`, never the call time.
-For 8 days the same key and amount count once and another amount returns 409. Usage older than
-7 days returns 409, so a retry that resends the event's time cannot count twice.
+For 25 hours the same key and amount count once and another amount returns 409. Usage older than
+1 day returns 409, so a retry that resends the event's time cannot count twice.
 Amounts accept numbers or decimal strings and come back as decimal strings.
 
 ### Local mode

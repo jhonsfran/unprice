@@ -72,6 +72,29 @@
         ]
       },
       {
+        "tab": "Budgets",
+        "groups": [
+          {
+            "group": "Get started",
+            "icon": "gauge",
+            "pages": ["budgets/overview", "budgets/quickstart"]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "budgets/keys-and-limits",
+              "budgets/spend",
+              "budgets/local-mode",
+              "budgets/errors"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": ["budgets/sdk"]
+          }
+        ]
+      },
+      {
         "tab": "API Reference",
         "groups": [
           {
@@ -87,7 +110,9 @@
                 "pages": [
                   "api-reference/errors/code/BAD_REQUEST",
                   "api-reference/errors/code/UNAUTHORIZED",
+                  "api-reference/errors/code/BUDGET_EXCEEDED",
                   "api-reference/errors/code/FORBIDDEN",
+                  "api-reference/errors/code/INSUFFICIENT_PERMISSIONS",
                   "api-reference/errors/code/NOT_FOUND",
                   "api-reference/errors/code/CONFLICT",
                   "api-reference/errors/code/PRECONDITION_FAILED",

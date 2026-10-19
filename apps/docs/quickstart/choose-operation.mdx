@@ -24,6 +24,7 @@ the specific product feature you are checking or consuming, such as `ai-messages
 | Report usage without blocking the request | `usage.record` | No | Yes, asynchronously | Background metering, invoice evidence, eventual analytics |
 | Hold a maximum for one variable-cost call | `reservations.reserve` then `reservation.settle` | Yes | Yes | LLM calls priced on tokens you cannot predict |
 | Authorize spend across multi-step work | `runs.start` / `runs.consume` / `runs.settle` / `runs.end` | Yes | Yes | Workflows, jobs, tools, agents, custom workloads |
+| Cap spend on any key, with no plan or customer in Unprice | `budget(key).spend` | Yes | Yes | A hard cap per customer, run, or agent while your billing stays elsewhere; see [Unprice Budgets](/budgets/overview) |
 
 ## `access.check`: ask without changing state
 

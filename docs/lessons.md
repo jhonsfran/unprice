@@ -271,11 +271,11 @@ patterns. Keep it cheap to load and useful.
 - 2026-10-18: A nullable discriminated union in a response schema renders in OpenAPI 3.0 as a
   `oneOf` with a bare `{ nullable: true }` member, and openapi-typescript then types the field as
   `unknown`. Make such a field optional (absent instead of null) and check `openapi.d.ts`.
-- 2026-10-18: tsx cannot import `packages/api/src` (its CommonJS `export *`); tooling scripts import
-  the built `@unprice/api`, so run `pnpm --filter @unprice/api build` first. Run tooling probes
+- 2026-10-18: tsx cannot import `packages/api/src` (its CommonJS `export *`); budget tooling scripts
+  import the built `@unprice/budgets`, so run `pnpm --filter @unprice/budgets build` first. Run tooling probes
   with explicit env vars rather than `--env-file`, which loads the operator's credentials.
 - 2026-10-18: `apps/api/src/routes/budgets/local-mode.fuzz.test.ts` runs the built SDK's local mode
-  through the real budget routes and processor on fake timers; rebuild `@unprice/api` before it.
+  through the real budget routes and processor on fake timers; rebuild `@unprice/budgets` before it.
   Keep `setImmediate` real and step with `vi.advanceTimersToNextTimer()`: the async advance waits a
   real 1 ms per timer. Never put `vi.fn()` on a per-request path there: it keeps every Hono context.
 - 2026-10-18: A refusal that writes nothing is not idempotent: a late copy of the request (an HTTP
@@ -822,6 +822,10 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   The superlink component disables the auto fetch of next.js, allowing to reduce unnecesary load.
 
 ## Tests, Tooling, And Docs
+
+- 2026-10-19: Every API error's `docs` field links to
+  `docs.unprice.dev/api-reference/errors/code/<CODE>`; give each code the API returns a page there
+  and list it in `docs.json` (`BUDGET_EXCEEDED` and `INSUFFICIENT_PERMISSIONS` were missing).
 
 - 2026-10-16: Keep `getAnchor` month-length calculations entirely in UTC; local `endOfMonth`
   combined with `getUTCDate` returns day 1 in Bogotá. Verify billing changes under both
