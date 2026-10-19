@@ -129,12 +129,8 @@ async function settleReturnsTheRest(): Promise<void> {
   assert(firstHold, "authorize must run first")
   const settled = ok(await firstHold.settle({ amount: "2.5" }), "settle")
 
-  equal(
-    [settled.actual, settled.covered, settled.released, settled.overrun],
-    ["2.5", "2.5", "0.5", "0"],
-    "actual, covered, released, overrun"
-  )
-  equal([settled.late, settled.expired, settled.replayed], [false, false, false], "flags")
+  equal([settled.actual, settled.released], ["2.5", "0.5"], "actual and released")
+  equal([settled.expired, settled.replayed, settled.crossed], [false, false, []], "flags")
   expectMonth(settled.balance, "2.5", "0", "7.5")
 
   const replay = ok(await firstHold.settle({ amount: "2.5" }), "settle replay")
@@ -145,7 +141,10 @@ async function settleReturnsTheRest(): Promise<void> {
 }
 
 async function releaseReturnsTheHold(): Promise<void> {
-  const authorized = ok(await budget.authorize({ amount: 1 }), "authorize")
+  const authorized = ok(
+    await budget.authorize({ amount: 1, idempotencyKey: "auth-release" }),
+    "authorize"
+  )
   assert(authorized.allowed, "authorize 1 should be allowed")
 
   const released = ok(await authorized.hold.release(), "release")
@@ -175,8 +174,11 @@ async function chargeIsIdempotent(): Promise<void> {
 }
 
 async function decimalsStayExact(): Promise<void> {
-  ok(await budget.charge({ amount: 0.1 }), "charge 0.1")
-  const charged = ok(await budget.charge({ amount: 0.2 }), "charge 0.2")
+  ok(await budget.charge({ amount: 0.1, idempotencyKey: "charge-0.1" }), "charge 0.1")
+  const charged = ok(
+    await budget.charge({ amount: 0.2, idempotencyKey: "charge-0.2" }),
+    "charge 0.2"
+  )
   assert(charged.allowed, "charge should be allowed")
 
   expectMonth(charged.balance, "4.05", "0", "5.95")
@@ -194,7 +196,7 @@ async function spendSettlesTheActual(): Promise<void> {
 }
 
 async function softLimitOnlyReports(): Promise<void> {
-  const charged = ok(await budget.charge({ amount: 1 }), "charge")
+  const charged = ok(await budget.charge({ amount: 1, idempotencyKey: "charge-soft" }), "charge")
   assert(charged.allowed, "a soft limit should never deny")
 
   equal(charged.crossed, ["warn"], "crossed")
@@ -203,11 +205,14 @@ async function softLimitOnlyReports(): Promise<void> {
 }
 
 async function hardLimitDenies(): Promise<void> {
-  const tooLarge = ok(await budget.authorize({ amount: 100 }), "authorize 100")
+  const tooLarge = ok(
+    await budget.authorize({ amount: 100, idempotencyKey: "auth-100" }),
+    "authorize 100"
+  )
   assert(!tooLarge.allowed && !tooLarge.degraded, "authorize 100 should be denied by the limit")
   equal([tooLarge.blocked.limitId, tooLarge.blocked.remedy], ["month", "raise_limit"], "blocked by")
 
-  const doesNotFit = ok(await budget.charge({ amount: 5 }), "charge 5")
+  const doesNotFit = ok(await budget.charge({ amount: 5, idempotencyKey: "charge-5" }), "charge 5")
   assert(!doesNotFit.allowed && !doesNotFit.degraded, "charge 5 should be denied by the limit")
   equal(
     [doesNotFit.blocked.remedy, doesNotFit.blocked.remaining],
@@ -216,11 +221,14 @@ async function hardLimitDenies(): Promise<void> {
   )
   assert(doesNotFit.blocked.resetsAt !== null, "a monthly limit should reset")
 
-  const authorized = ok(await budget.authorize({ amount: 3 }), "authorize 3")
+  const authorized = ok(
+    await budget.authorize({ amount: 3, idempotencyKey: "auth-open" }),
+    "authorize 3"
+  )
   assert(authorized.allowed, "authorize 3 should fit")
   openHold = authorized.hold
 
-  const behindHold = ok(await budget.charge({ amount: 2 }), "charge 2")
+  const behindHold = ok(await budget.charge({ amount: 2, idempotencyKey: "charge-2" }), "charge 2")
   assert(!behindHold.allowed && !behindHold.degraded, "charge 2 should be denied behind the hold")
   equal(behindHold.blocked.remedy, "release_holds", "remedy")
   expectMonth(behindHold.balance, "6", "3", "1")
@@ -293,6 +301,10 @@ async function closedBudgetStopsNewSpend(): Promise<void> {
     "authorize after close"
   )
   equal(denied.code === "CONFLICT" && denied.details?.kind, "budget_closed", "closed details")
+
+  // Usage above the hold is a provider failure to reconcile: 409, and the hold stays open.
+  const above = failsWith(await openHold.settle({ amount: 4 }), "CONFLICT", "settle above the hold")
+  equal(above.code === "CONFLICT" && above.details?.kind, "hold_amount_exceeded", "above details")
 
   const settled = ok(await openHold.settle({ amount: 2 }), "settle after close")
   expectMonth(settled.balance, "28", "0", "-18")
