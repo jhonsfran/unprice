@@ -1,6 +1,7 @@
 import { AMOUNT_PATTERN, type Amount, formatAmount, parseAmount } from "@unprice/money"
 import { z } from "zod"
 import { extendZodWithOpenApi } from "zod-openapi"
+import { searchParamsSchemaDataTable } from "./utils"
 
 extendZodWithOpenApi(z)
 
@@ -689,3 +690,53 @@ export const budgetWindowCapacityExceededDetailsSchema = z.object({
   maximum: z.number().int().nonnegative(),
   retained: z.number().int().nonnegative(),
 })
+
+// The dashboard catalog: one Postgres row per budget, written after each upsert. It holds
+// configuration facts only; a balance would be stale within milliseconds of a hot budget's writes.
+
+/** hard when any limit is hard, soft when every limit is soft, none without limits. */
+export const budgetCapSchema = z.enum(["hard", "soft", "none"])
+
+/** Derived from closesAt at read time: open without one, closing before it, closed from it. */
+export const budgetCatalogStatusSchema = z.enum(["open", "closing", "closed"])
+
+export const budgetCatalogLimitSchema = z.object({
+  id: z.string(),
+  window: budgetWindowSchema,
+  enforce: budgetEnforceSchema,
+  amount: budgetDecimalSchema,
+})
+
+export const budgetCatalogFactsSchema = z.object({
+  key: z.string(),
+  unit: z.string(),
+  version: z.number().int(),
+  cap: budgetCapSchema,
+  limits: z.array(budgetCatalogLimitSchema),
+  closesAt: budgetEpochMsSchema.nullable(),
+})
+
+export const budgetCatalogRowSchema = budgetCatalogFactsSchema.extend({
+  id: z.string(),
+  status: budgetCatalogStatusSchema,
+  createdAt: budgetEpochMsSchema,
+  updatedAt: budgetEpochMsSchema,
+})
+
+/** The data-table search, where `search` is a key prefix. */
+export const listBudgetsInputSchema = searchParamsSchemaDataTable.extend({
+  filters: z
+    .object({
+      status: z.array(budgetCatalogStatusSchema).optional(),
+      unit: z.array(z.string()).optional(),
+      cap: z.array(budgetCapSchema).optional(),
+    })
+    .default({}),
+})
+
+export type BudgetCap = z.infer<typeof budgetCapSchema>
+export type BudgetCatalogStatus = z.infer<typeof budgetCatalogStatusSchema>
+export type BudgetCatalogLimit = z.infer<typeof budgetCatalogLimitSchema>
+export type BudgetCatalogFacts = z.infer<typeof budgetCatalogFactsSchema>
+export type BudgetCatalogRow = z.infer<typeof budgetCatalogRowSchema>
+export type ListBudgetsInput = z.infer<typeof listBudgetsInputSchema>
