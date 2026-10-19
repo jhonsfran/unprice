@@ -60,14 +60,14 @@ const supportingCalls = [
   },
   {
     call: "access.check",
-    fact: "shadow only · read-only and reserves nothing",
+    fact: "read-only · checks access, reserves nothing",
   },
 ]
 
 const stages = [
   {
     title: "Reserve",
-    body: "Authorize the maximum cost against the customer's budget before the provider call.",
+    body: "Hold the maximum cost before the provider call.",
     facts: [
       { label: "customer", fact: "funds the work" },
       { label: "held", fact: "$0.10 maximum" },
@@ -76,7 +76,7 @@ const stages = [
   },
   {
     title: "Run",
-    body: "Start the agent only after Unprice confirms the reservation.",
+    body: "Start the agent once the hold succeeds.",
     facts: [
       { label: "provider", fact: "your model account" },
       { label: "limit", fact: "2,000 output tokens" },
@@ -85,7 +85,7 @@ const stages = [
   },
   {
     title: "Settle",
-    body: "Report actual token usage. Unprice captures what the run cost, releases the rest, and closes the reservation.",
+    body: "Report the actual usage. Unprice releases the rest.",
     facts: [
       { label: "captured", fact: "actual usage" },
       { label: "released", fact: "unused hold" },
@@ -106,12 +106,12 @@ export function LaunchPathSection() {
           Reserve the customer&apos;s budget before the model spends yours.
         </h2>
         <p className="mt-5 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-          Reserve a ceiling against the customer&apos;s budget before{" "}
+          Reserve before{" "}
           <code className="rounded-sm bg-background-bg px-1 py-px font-mono text-[13px] text-background-textContrast">
             generateText
           </code>{" "}
-          runs. If the reservation is denied, the provider is never called. After the run, settle
-          actual token usage and release the rest.
+          runs, then settle the actual usage. If Unprice denies the reservation, your code never
+          calls the provider.
         </p>
       </div>
 
@@ -128,10 +128,7 @@ export function LaunchPathSection() {
           </div>
         </div>
         <div className="mt-6 border-background-border border-t pt-4">
-          <p className="text-background-text text-sm leading-6">
-            Use the smallest operation that matches the work. A reservation fits variable-cost agent
-            calls. These two paths cover simpler cases.
-          </p>
+          <p className="text-background-text text-sm leading-6">Two calls cover simpler cases.</p>
           <div className="mt-3 flex flex-col">
             {supportingCalls.map((row) => (
               <LedgerRow
@@ -145,9 +142,7 @@ export function LaunchPathSection() {
         </div>
 
         <figcaption className="mt-6 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 border-background-border border-t pt-3 text-background-text text-xs leading-6">
-          <span className="max-w-xl">
-            This is the same authorization pattern used by the working open-source AI chatbot.
-          </span>
+          <span className="max-w-xl">An open-source AI chatbot uses this pattern.</span>
           <ProofLink
             source="integration_sdk"
             href="https://github.com/jhonsfran/chatbot/blob/main/lib/unprice/runtime.ts"

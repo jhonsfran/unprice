@@ -1,7 +1,8 @@
 import { OpenAPIHono } from "@hono/zod-openapi"
 import { Err, Ok } from "@unprice/error"
 import { type BudgetBalance, UnPriceBudgetError } from "@unprice/services/budgets"
-import type { ExecutionContext } from "hono"
+import type { ExecutionContext, MiddlewareHandler } from "hono"
+import { timing } from "hono/timing"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { UnpriceApiError, handleError, handleZodError } from "~/errors"
 import type { HonoEnv } from "~/hono/env"
@@ -15,7 +16,11 @@ import { registerReportBudgetV1 } from "./reportBudgetV1"
 import { registerSettleBudgetV1 } from "./settleBudgetV1"
 import { registerUpsertBudgetV1 } from "./upsertBudgetV1"
 
-const mocks = vi.hoisted(() => ({ keyAuth: vi.fn(), execute: vi.fn() }))
+const mocks = vi.hoisted(() => ({
+  keyAuth: vi.fn(),
+  execute: vi.fn(),
+  log: vi.fn(),
+}))
 
 vi.mock("~/auth/key", async (importOriginal) => ({
   ...(await importOriginal<typeof import("~/auth/key")>()),
@@ -57,6 +62,12 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
+/** The request logger, whose `set` fields become the request's wide event. */
+const withLogger: MiddlewareHandler<HonoEnv> = async (c, next) => {
+  c.set("logger", { set: mocks.log } as unknown as HonoEnv["Variables"]["logger"])
+  await next()
+}
+
 function createTestApp() {
   const app = new OpenAPIHono<HonoEnv>({ defaultHook: handleZodError })
   app.onError(handleError)
@@ -64,6 +75,7 @@ function createTestApp() {
     c.set("requestId", "req_test")
     await next()
   })
+  app.use("*", withLogger)
   for (const register of [
     registerUpsertBudgetV1,
     registerAuthorizeBudgetV1,
@@ -312,6 +324,59 @@ describe("budgets API", () => {
         ],
         asOf: 1_796_083_200_000,
       },
+    })
+  })
+
+  it("reports the budget call on Server-Timing and the request's wide event", async () => {
+    mocks.execute.mockResolvedValue(
+      Ok({
+        type: "authorize",
+        holdId: "h_1",
+        amount: usd(10),
+        expiresAt: 1_796_084_100_000,
+        replayed: false,
+        balance: balance(usd(40), usd(10)),
+      })
+    )
+    const app = new OpenAPIHono<HonoEnv>({ defaultHook: handleZodError })
+    app.use(timing())
+    app.use("*", withLogger)
+    registerAuthorizeBudgetV1(app)
+
+    const response = await app.fetch(
+      new Request("https://example.com/v1/budgets/authorize", {
+        method: "POST",
+        headers: { authorization: "Bearer key", "content-type": "application/json" },
+        body: JSON.stringify({ key: "customer:acme", amount: "10", idempotencyKey: "a1" }),
+      }),
+      {},
+      { passThroughOnException: vi.fn(), waitUntil: vi.fn() } as unknown as ExecutionContext
+    )
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get("Server-Timing")).toMatch(
+      /^budget;dur=\d+\.\d,total;dur=\d+\.\d;desc="Total Response Time"$/
+    )
+    expect(mocks.log).toHaveBeenLastCalledWith({
+      budget: { command: "authorize", outcome: "ok", do_ms: expect.any(Number) },
+    })
+  })
+
+  it("names the rejection, or an error, as the budget call's outcome", async () => {
+    rejectWith({ code: "BUDGET_NOT_FOUND" })
+    expect((await call("/v1/budgets/get?key=customer:missing")).status).toBe(404)
+    expect(mocks.log).toHaveBeenLastCalledWith({
+      budget: {
+        command: "get",
+        outcome: "BUDGET_NOT_FOUND",
+        do_ms: expect.any(Number),
+      },
+    })
+
+    mocks.execute.mockRejectedValue(new Error("Durable Object reset"))
+    expect((await call("/v1/budgets/get?key=customer:missing")).status).toBe(500)
+    expect(mocks.log).toHaveBeenLastCalledWith({
+      budget: { command: "get", outcome: "error", do_ms: expect.any(Number) },
     })
   })
 

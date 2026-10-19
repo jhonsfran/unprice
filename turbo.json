@@ -122,13 +122,15 @@
       ]
     },
     "test": {
+      "dependsOn": ["^build"],
       "cache": false
     },
     "test:workers": {
+      "dependsOn": ["^build"],
       "cache": false
     },
     "typecheck": {
-      "dependsOn": ["^typecheck"],
+      "dependsOn": ["^typecheck", "^build"],
       "cache": false
     },
     "clean:workspaces": {

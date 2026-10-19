@@ -501,8 +501,8 @@ export function MoneyPath({
         </a>
       ) : (
         <p className="mt-5 border-background-border border-t pt-3 text-background-text text-xs leading-6">
-          Every step is in the public SDK. Reserve for variable-cost agent work, or authorize known
-          usage in one call. Use TypeScript, REST, or curl.
+          Reserve when the cost varies, like an agent run. Use one call when you know the cost up
+          front.
         </p>
       )}
     </figure>

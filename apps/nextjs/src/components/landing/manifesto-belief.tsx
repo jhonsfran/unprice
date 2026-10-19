@@ -23,7 +23,7 @@ export default function ManifestoBelief() {
           id="belief-title"
           className="max-w-3xl font-primary text-background-textContrast text-display-2"
         >
-          <Balancer>The team that owns the request path should own pricing.</Balancer>
+          <Balancer>The team that builds the product should own its pricing.</Balancer>
         </h2>
 
         <ul className="mt-8 flex flex-col gap-2">
@@ -33,13 +33,6 @@ export default function ManifestoBelief() {
             </li>
           ))}
         </ul>
-
-        <p className="mt-8 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-          <Balancer>
-            For AI products, every charge starts with a runtime decision. Unprice keeps that
-            decision in open code you can run and inspect.
-          </Balancer>
-        </p>
 
         <div className="relative mt-10 px-6 py-5">
           <span

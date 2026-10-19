@@ -1,0 +1,85 @@
+---
+title: "Unprice Budgets"
+description: "Hard spending caps for AI agents, on any key you choose, checked before the work runs."
+---
+
+Unprice Budgets puts a hard cap in front of an AI agent. A budget sits on a key you choose: a
+customer, a run, an agent, or an API key. Each paid call asks the budget first, and a call the cap
+cannot cover never reaches the provider.
+
+Budgets need no plans, subscriptions, or payment provider. Your billing stays where it is.
+
+## Why a budget
+
+- **Billing is too late.** A usage alert or an invoice reports spend after it happened. A budget
+  decides before the call.
+- **A provider cap is not a customer cap.** A gateway or provider limit caps the bill of the key it
+  sits on. When every customer shares that key, one runaway agent trips the cap for all of them. A
+  budget caps each key you pick.
+- **The cap is hard.** Each authorization reserves its maximum against every hard limit in one
+  serialized step, so parallel calls cannot overshoot the cap together.
+
+## Two calls
+
+Define the budget once, then wrap the paid call.
+
+```ts
+import { Unprice } from "@unprice/budgets";
+
+const unprice = new Unprice({ token: process.env.UNPRICE_TOKEN! });
+
+// 1. A $50 monthly cap for one customer.
+await unprice.budgets.upsert({
+  key: "customer:acme",
+  unit: "USD",
+  limits: [{ amount: "50", window: "month" }]
+});
+
+// 2. Reserve the most this call can cost, run it, then settle what it cost.
+const text = await unprice.budget("customer:acme").spend({ estimate }, async () => {
+  const r = await generateText({ model, prompt, maxOutputTokens });
+  return { value: r.text, actual: costOf(r.usage) };
+});
+```
+
+`spend` reserves `estimate`, runs your function, and settles `actual`. When the cap cannot cover
+the estimate, it throws `BudgetExceededError` and your function never runs.
+
+## Local or remote checks
+
+| Mode | Where the check runs | Use it in |
+| --- | --- | --- |
+| Remote, the default | The budget itself, one network round trip away | Serverless functions, edge handlers, short-lived jobs |
+| [Local](/budgets/local-mode) | A lease held in your process's memory, with no network round trip | API servers, queue workers, agent runners |
+
+Both modes enforce the same cap. Unprice debits a lease from the budget before the process spends
+it, so local spending never exceeds what the budget granted.
+
+## What a budget does not do
+
+- **It does not stop the provider by itself.** Your integration must keep the call within the
+  amount it authorized, for example with `maxOutputTokens`.
+- **It does not price usage.** `estimate` and `actual` come from your code, in the budget's unit.
+- **It does not bill your customers.** Keep your billing system, or use
+  [Unprice billing](/concepts/how-unprice-works) when you want plans, credits, and invoices.
+
+## Where budget state lives
+
+Cloudflare creates each budget near its first request, so checks stay fast wherever your backend
+runs. A budget's state may therefore live outside the EU, unlike the rest of the hosted Unprice
+runtime.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="bolt-lightning" href="/budgets/quickstart">
+    Cap one customer's model calls in five minutes.
+  </Card>
+  <Card title="Keys and limits" icon="sliders" href="/budgets/keys-and-limits">
+    Choose keys, units, windows, and who may raise a cap.
+  </Card>
+  <Card title="Spend against a budget" icon="gauge" href="/budgets/spend">
+    `spend`, `authorize`, `charge`, and `record`, and when to use each.
+  </Card>
+  <Card title="Local mode" icon="microchip" href="/budgets/local-mode">
+    Answer checks from memory in long-lived processes.
+  </Card>
+</CardGroup>

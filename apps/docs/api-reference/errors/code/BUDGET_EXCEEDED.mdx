@@ -1,0 +1,24 @@
+---
+title: BUDGET_EXCEEDED
+openapi-schema: ErrBudgetExceeded
+---
+
+## Cause
+
+The request does not fit a hard limit of the budget. Unprice reserved and consumed nothing. Do not
+run the work.
+
+## Action
+
+Read `details.blocked`. It names the limit (`limitId`, `window`), its `remaining` and `held` amounts,
+when it resets (`resetsAt`), and the `remedy` that would let the same request through:
+
+- `release_holds`: releasing open holds would make the request fit.
+- `wait_for_reset`: the request fits once the failing windows reset.
+- `raise_limit`: a limit needs a change, which takes a config key.
+
+See [errors and recovery](/budgets/errors) for how the TypeScript SDK surfaces this denial.
+
+## Support evidence
+
+Include the error response and `requestId` if you contact [support](mailto:seb@unprice.dev).

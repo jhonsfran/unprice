@@ -20,13 +20,20 @@ function upsert(input: BudgetConfigInput): BudgetCommand {
   }
 }
 
-function ok(result: ReturnType<MemoryBudgetStore["run"]>): BudgetTransition {
+type Accepted = Extract<BudgetTransition, { ok: true }>
+
+function ok(result: ReturnType<MemoryBudgetStore["run"]>): Accepted {
   if (result.err) throw result.err
+  if (!result.val.ok) throw new Error(`expected an outcome, got ${result.val.rejection.code}`)
   return result.val
 }
 
 function rejection(result: ReturnType<MemoryBudgetStore["run"]>) {
-  if (!result.err) throw new Error(`expected rejection, received ${result.val.outcome.type}`)
+  if (!result.err) {
+    throw new Error(
+      `expected rejection, received ${result.val.ok ? result.val.outcome.type : "a refusal"}`
+    )
+  }
   return result.err.rejection
 }
 

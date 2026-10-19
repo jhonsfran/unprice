@@ -1,6 +1,10 @@
 import { reset, runInDurableObject } from "cloudflare:test"
 import { env } from "cloudflare:workers"
-import { type BudgetConfigInput, upsertBudgetInputSchema } from "@unprice/db/validators"
+import {
+  type BudgetConfigInput,
+  RECORD_DEDUPE_MS,
+  upsertBudgetInputSchema,
+} from "@unprice/db/validators"
 import { isOutcomeOf } from "@unprice/services/budgets"
 import type { BudgetReply, BudgetRequest } from "@unprice/services/use-cases"
 import { drizzle } from "drizzle-orm/durable-sqlite"
@@ -12,7 +16,6 @@ import * as schema from "./db/schema"
 import { BudgetProcessor } from "./processor"
 
 const UNIT = BigInt(100_000_000)
-const DAY = 24 * 60 * 60 * 1000
 const SAMPLES = 21
 type NativeCursor = SqlStorageCursor<Record<string, SqlStorageValue>>
 type SqlSample = { statements: number; rowsRead: number; rowsWritten: number }
@@ -362,24 +365,47 @@ describe("BudgetDO measured work", () => {
     }
   }, 120_000)
 
-  it("measures replay and denied admission with 1000 receipts", async () => {
+  it("measures replay, denied admission, and a refused lease with 1000 receipts", async () => {
     const stub = await prepare("bench:replay-denial", 1, 1000, "1000")
     const before = await inspect(stub)
-    for (const type of ["replay", "denial"] as const) {
+    const refusal = (i: number): BudgetRequest => ({
+      type: "lease",
+      leaseKey: `refused_${i}`,
+      amount: UNIT,
+      ttlMs: 60_000,
+    })
+    const cases = {
+      replay: {
+        request: (): BudgetRequest => ({
+          type: "record",
+          idempotencyKey: "seed_0",
+          amount: UNIT,
+          occurredAt: Date.now(),
+        }),
+        receipts: 1000,
+      },
+      denial: {
+        request: (i: number): BudgetRequest => ({
+          type: "charge",
+          idempotencyKey: `deny_${i}`,
+          amount: UNIT,
+        }),
+        receipts: 1000,
+      },
+      "lease:refusal": { request: refusal, receipts: 1000 + SAMPLES },
+      "lease:refusalReplay": { request: refusal, receipts: 1000 + SAMPLES },
+    }
+    for (const [type, { request, receipts }] of Object.entries(cases)) {
       const samples: SqlSample[] = []
       const rpcMs: number[] = []
       for (let i = 0; i < SAMPLES; i++) {
-        const measured = await sample(
-          stub,
-          type === "replay"
-            ? { type: "record", idempotencyKey: "seed_0", amount: UNIT, occurredAt: Date.now() }
-            : { type: "charge", idempotencyKey: `deny_${i}`, amount: UNIT }
-        )
+        const measured = await sample(stub, request(i))
         if (type === "replay") {
           const outcome = accepted(measured.reply)
           expect(isOutcomeOf(outcome, "record") && outcome.replayed).toBe(true)
           expect(isOutcomeOf(outcome, "record") && outcome.balance.remaining).toBe(BigInt(0))
         } else {
+          // A denied charge writes nothing; a refused lease is kept, so its replay is read back.
           expect(measured.reply).toMatchObject({
             ok: false,
             rejection: { code: "LIMIT_EXCEEDED", blocked: { remaining: BigInt(0) } },
@@ -388,7 +414,7 @@ describe("BudgetDO measured work", () => {
         samples.push(measured.sql)
         rpcMs.push(measured.rpcMs)
       }
-      expect((await inspect(stub)).receipts).toBe(1000)
+      expect((await inspect(stub)).receipts).toBe(receipts)
       report(`${type}:history=1000`, samples, rpcMs, { before })
     }
   })
@@ -549,7 +575,7 @@ describe("BudgetDO measured work", () => {
               })
             )
           }
-          clock.now = start + 8 * DAY - 2999
+          clock.now = start + RECORD_DEDUPE_MS - 2999
           for (let i = 0; i < 64; i++) {
             accepted(
               await clock.processor.execute({
@@ -560,7 +586,7 @@ describe("BudgetDO measured work", () => {
               })
             )
           }
-          clock.now = start + 8 * DAY + 2
+          clock.now = start + RECORD_DEDUPE_MS + 2
           sqlSample(state.storage.sql)
         })
         const before = await inspect(stub)

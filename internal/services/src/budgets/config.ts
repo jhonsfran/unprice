@@ -9,6 +9,7 @@ export type { BudgetConfig, BudgetConfigInput, BudgetOperations } from "@unprice
 export {
   CLOSED_BUDGET_RETENTION_MS,
   DEFAULT_HOLD_TTL_MS,
+  LEASE_REFUSAL_RETENTION_MS,
   MAX_HOLD_TTL_MS,
   MAX_RETAINED_ANCHORED_WINDOWS,
   MIN_HOLD_TTL_MS,

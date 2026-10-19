@@ -1,10 +1,9 @@
-import { name, version } from "../package.json"
-import type { UnpriceOptions } from "./client"
+import type { SdkIdentity, UnpriceOptions } from "./transport"
 
 export interface Telemetry {
   /**
    * Unprice-Telemetry-Sdk
-   * @example @unprice/trpc@v1.1.1
+   * @example @unprice/budgets@0.1.0
    */
   sdkVersions: string[]
   /**
@@ -19,10 +18,10 @@ export interface Telemetry {
   runtime?: string
 }
 
-export function getTelemetry(opts: UnpriceOptions): Telemetry | null {
+export function getTelemetry(opts: UnpriceOptions, sdk: SdkIdentity): Telemetry | null {
   let platform = "unknown"
   let runtime = "unknown"
-  const sdkVersions = [`${name}@${version}`]
+  const sdkVersions = [`${sdk.name}@${sdk.version}`]
 
   try {
     if (typeof process !== "undefined") {

@@ -5,12 +5,18 @@ import { APP_DOMAIN, AUTH_ROUTES, BASE_URL } from "@unprice/config"
 import {
   ACQUISITION_SIGNUP_URL,
   PRIVACY_URL,
+  type SignupIntent,
   TERMS_URL,
   buildAuthHref,
   createFunnelPageEventClaimer,
   getSafeNextPath,
   getSignupIntent,
   getSingleSearchParam,
+  intentLanding,
+  newWorkspacePath,
+  nextAfterAuth,
+  signupIntentSchema,
+  workspaceLanding,
 } from "./signup-funnel"
 
 describe("signup funnel URLs", () => {
@@ -81,6 +87,40 @@ describe("signup funnel URLs", () => {
     expect(getSignupIntent("other")).toBeUndefined()
     expect(getSignupIntent(["paid-action", "other"])).toBeUndefined()
   })
+
+  it("carries the budgets intent through auth and workspace creation to the Budgets setup", () => {
+    const next = nextAfterAuth("budgets")
+    const href = buildAuthHref(AUTH_ROUTES.SIGNUP, { intent: "budgets", next })
+    const url = new URL(href, "https://app.example")
+
+    expect(getSignupIntent("budgets")).toBe("budgets")
+    expect(url.searchParams.get("intent")).toBe("budgets")
+    expect(url.searchParams.get("next")).toBe("/new?intent=budgets")
+    expect(getSafeNextPath(next)).toBe("/new?intent=budgets")
+    expect(newWorkspacePath("budgets")).toBe("/new?intent=budgets")
+    expect(intentLanding("acme", "budgets")).toBe("/acme/onboarding/budgets")
+    expect(workspaceLanding("acme", "budgets")).toBe("/acme/onboarding/budgets")
+  })
+
+  it("lands the paid-action intent, and no intent, on the workspace itself", () => {
+    expect(nextAfterAuth("paid-action")).toBeUndefined()
+    expect(newWorkspacePath("paid-action")).toBe("/new?intent=paid-action")
+    expect(newWorkspacePath()).toBe("/new")
+    expect(intentLanding("acme", "paid-action")).toBeNull()
+    expect(intentLanding("acme")).toBeNull()
+    expect(workspaceLanding("acme", "paid-action")).toBe("/acme")
+    expect(workspaceLanding("acme")).toBe("/acme")
+  })
+
+  it.each(signupIntentSchema.options)(
+    "routes the %s intent to a safe path on every step",
+    (intent: SignupIntent) => {
+      const next = nextAfterAuth(intent)
+      if (next !== undefined) expect(getSafeNextPath(next)).toBe(next)
+      expect(getSafeNextPath(newWorkspacePath(intent))).toBe(newWorkspacePath(intent))
+      expect(workspaceLanding("acme", intent).startsWith("/acme")).toBe(true)
+    }
+  )
 
   it("omits empty optional params", () => {
     expect(buildAuthHref(AUTH_ROUTES.SIGNIN, {})).toBe(AUTH_ROUTES.SIGNIN)

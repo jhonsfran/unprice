@@ -44,13 +44,15 @@ type ServerLease = {
 }
 
 /**
- * A lease server with `room` capacity under one hard limit, on the fake clock. `lose` applies the
- * next request and drops its answer; `down` refuses every request; `block` parks reports.
+ * A lease server with `room` capacity under one hard limit, on the fake clock. A refused grant
+ * replays its 402 under the same lease key. `lose` applies the next request and drops its answer;
+ * `down` refuses every request; `block` parks reports.
  */
 function createServer(room: string) {
   const state = {
     room: units(room),
     leases: new Map<string, ServerLease>(),
+    refusals: new Map<string, ApiError>(),
     lose: 0,
     down: false,
     parked: [] as Array<() => void>,
@@ -107,17 +109,19 @@ function createServer(room: string) {
       return answer(() => {
         const known = state.leases.get(request.leaseKey)
         if (known?.grant) return { result: { ...known.grant, replayed: true } }
+        const refusal = state.refusals.get(request.leaseKey)
+        if (refusal) return { error: refusal }
         const granted = smaller(units(request.amount), state.room)
         if (granted === ZERO) {
-          return {
-            error: {
-              code: "BUDGET_EXCEEDED",
-              message: "Limit month has 0 remaining",
-              docs: "https://docs.unprice.dev/api-reference/errors/code/BUDGET_EXCEEDED",
-              requestId: "req_402",
-              details: exceeded(units(request.amount)),
-            },
+          const error: ApiError = {
+            code: "BUDGET_EXCEEDED",
+            message: "Limit month has 0 remaining",
+            docs: "https://docs.unprice.dev/api-reference/errors/code/BUDGET_EXCEEDED",
+            requestId: "req_402",
+            details: exceeded(units(request.amount)),
           }
+          state.refusals.set(request.leaseKey, error)
+          return { error }
         }
         state.room -= granted
         const lease: ServerLease = {
@@ -453,6 +457,78 @@ describe("local budget handle", () => {
     const [first, second] = server.requests
     expect(second).toEqual(first)
     expect(server.state.leases.size).toBe(1)
+  })
+
+  it("answers a refused key's calls from memory for a flush interval, then asks again", async () => {
+    const server = createServer("0")
+    const local = createHandle(server, { amount: "1" })
+
+    const denied = await local.authorize({ amount: "0.1", idempotencyKey: "a" })
+    expect(denied.result).toMatchObject({ allowed: false, blocked: { reason: "limit" } })
+    server.state.room = units("10")
+    await vi.advanceTimersByTimeAsync(999)
+    expect(await local.charge({ amount: "0.1", idempotencyKey: "b" })).toEqual(denied)
+    expect(server.requests).toHaveLength(1)
+
+    await vi.advanceTimersByTimeAsync(1)
+    expect(await local.authorize({ amount: "0.1", idempotencyKey: "a" })).toMatchObject({
+      result: { allowed: true },
+    })
+    const leaseKeys = server.requests.map(([, body]) => body.leaseKey)
+    expect(new Set(leaseKeys).size).toBe(2)
+  })
+
+  it("closes a refused key without asking the server again", async () => {
+    const server = createServer("0")
+    const local = createHandle(server, { amount: "1" })
+
+    await local.authorize({ amount: "0.1", idempotencyKey: "a" })
+
+    expect(await local.close()).toEqual({ result: null })
+    expect(server.requests).toHaveLength(1)
+  })
+
+  it("keeps a refusal whose answer was lost, even once room returns", async () => {
+    const server = createServer("0")
+    const local = createHandle(server, { amount: "1" })
+    server.state.lose = 1
+
+    const lost = await local.authorize({ amount: "0.1", idempotencyKey: "a" })
+    server.state.room = units("10")
+    const replayed = await local.authorize({ amount: "0.1", idempotencyKey: "a" })
+    await vi.advanceTimersByTimeAsync(1_000)
+    const fresh = await local.authorize({ amount: "0.1", idempotencyKey: "a" })
+
+    expect(lost.result).toMatchObject({ allowed: false, degraded: true })
+    expect(replayed.result).toMatchObject({ allowed: false, degraded: false })
+    expect(fresh.result).toMatchObject({ allowed: true })
+    const [first, second, third] = server.requests
+    expect(second).toEqual(first)
+    expect(third?.[1].leaseKey).not.toBe(first?.[1].leaseKey)
+  })
+
+  it("refuses a ttlMs of three flush intervals or less, and renews one just over at the third tick", async () => {
+    const server = createServer("10")
+
+    expect(() =>
+      createHandle(server, { amount: "1", ttlMs: 1_001, flushIntervalMs: 2_000 })
+    ).toThrow(
+      new RangeError(
+        "lease.ttlMs must exceed 3 × lease.flushIntervalMs, received ttlMs 1001 and flushIntervalMs 2000"
+      )
+    )
+    expect(() => createHandle(server, { amount: "1", ttlMs: 3_000 })).toThrow(
+      new RangeError(
+        "lease.ttlMs must exceed 3 × lease.flushIntervalMs, received ttlMs 3000 and flushIntervalMs 1000"
+      )
+    )
+    const local = createHandle(server, { amount: "1", ttlMs: 3_001 })
+    await allowedHold(local, "0.1", "running")
+    const grantedAt = Date.now()
+
+    await vi.advanceTimersByTimeAsync(3_000)
+    const [lease] = server.state.leases.values()
+    expect(lease?.expiresAt).toBe(grantedAt + 3_000 + 3_001)
   })
 
   it("reports changed consumption each flush interval and renews before the last third", async () => {

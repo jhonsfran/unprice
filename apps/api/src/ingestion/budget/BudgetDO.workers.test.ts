@@ -683,6 +683,60 @@ describe("BudgetDO alarm", () => {
     })
   })
 
+  it("keeps a refused lease for 10 minutes, so its key replays the refusal, then purges it", async () => {
+    const key = "customer:lease-refused"
+    const stub = stubFor(key)
+    const t0 = midMonthAhead()
+    let now = t0
+    const lease: BudgetRequest = {
+      type: "lease",
+      leaseKey: "proc-1",
+      amount: units(5),
+      ttlMs: MINUTE,
+    }
+    await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
+      await migrate(drizzle(state.storage), migrations)
+      const processor = realStorageProcessor(state, () => now)
+      await processor.execute(upsert(key, fiftyPerMonth))
+      outcome(
+        await processor.execute({ type: "authorize", idempotencyKey: "k1", amount: units(50) }),
+        "authorize"
+      )
+
+      expect(rejection(await processor.execute(lease))).toMatchObject({
+        code: "LIMIT_EXCEEDED",
+        blocked: { limitId: "month", remaining: BigInt(0) },
+      })
+      expect(
+        state.storage.sql
+          .exec("SELECT id, status, due_at FROM budget_operations WHERE kind = 'lease'")
+          .toArray()
+      ).toEqual([{ id: `l:${sha256HexSync("proc-1")}`, status: "done", due_at: t0 + 10 * MINUTE }])
+      // The refusal is a rejection, and it still lowers the alarm to its own purge.
+      await expect(state.storage.getAlarm()).resolves.toBe(t0 + 10 * MINUTE)
+
+      outcome(await processor.execute({ type: "release", holdId: "h_1" }), "release")
+      now = t0 + 10 * MINUTE - 1
+      // The release returned room, so only the kept refusal can still deny the same key.
+      expect(rejection(await processor.execute(lease))).toMatchObject({
+        code: "LIMIT_EXCEEDED",
+        blocked: { limitId: "month" },
+        balance: { remaining: units(50) },
+      })
+
+      now = t0 + 10 * MINUTE
+      await processor.alarm()
+      expect(
+        state.storage.sql
+          .exec("SELECT count(*) AS n FROM budget_operations WHERE kind = 'lease'")
+          .one()
+      ).toEqual({ n: 0 })
+      expect(outcome(await processor.execute(lease), "lease").lease.granted).toBe(units(5))
+      const read = outcome(await processor.execute({ type: "get" }), "get")
+      expect(read.budget.operations).toMatchObject({ authorize: 1, release: 1, lease: 1 })
+    })
+  })
+
   it("settles expired holds in batches, and the next day has the capacity back", async () => {
     const key = "customer:many-uncertain"
     const stub = stubFor(key)
@@ -747,7 +801,7 @@ describe("BudgetDO alarm", () => {
       await processor.execute(upsert(key, { ...fiftyPerMonth, closesAt }))
       await expect(state.storage.getAlarm()).resolves.toBe(deletable)
 
-      // A record still accepted after the close keeps its row for 8 days, well inside the 30.
+      // A record still accepted after the close keeps its row for 25 hours, well inside the 30 days.
       now = closesAt + MINUTE
       const late = {
         type: "record",
@@ -756,8 +810,8 @@ describe("BudgetDO alarm", () => {
         amount: units(1),
       } as const
       outcome(await processor.execute(late), "record")
-      await expect(state.storage.getAlarm()).resolves.toBe(now + 8 * DAY)
-      now += 8 * DAY
+      await expect(state.storage.getAlarm()).resolves.toBe(now + 25 * HOUR)
+      now += 25 * HOUR
       await processor.alarm()
       expect(state.storage.sql.exec("SELECT count(*) AS n FROM budget_operations").one()).toEqual({
         n: 0,
@@ -849,7 +903,7 @@ describe("BudgetDO alarm", () => {
     })
   })
 
-  it("keeps a record's row through alarms for 8 days, conflicts included", async () => {
+  it("keeps a record's row through alarms for 25 hours, conflicts included", async () => {
     const key = "customer:record-replay"
     const stub = stubFor(key)
     const t0 = midMonthAhead()
@@ -870,7 +924,8 @@ describe("BudgetDO alarm", () => {
       expect(outcome(await processor.execute(request), "record").replayed).toBe(false)
       const rows = () => state.storage.sql.exec("SELECT count(*) AS n FROM budget_operations").one()
 
-      now = t0 + 25 * HOUR
+      // Past the accept window, the row still answers the replay.
+      now = t0 + DAY + 30 * MINUTE
       await processor.alarm()
       expect(rows()).toEqual({ n: 1 })
       const replay = outcome(await processor.execute({ ...request, occurredAt: t0 + 1 }), "record")
@@ -884,7 +939,7 @@ describe("BudgetDO alarm", () => {
         idempotencyKey: "evt_1",
       })
 
-      now = t0 + 8 * 24 * HOUR
+      now = t0 + 25 * HOUR
       await processor.alarm()
       expect(rows()).toEqual({ n: 0 })
       expect(rejection(await processor.execute(request)).code).toBe("TOO_LATE")

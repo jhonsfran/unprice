@@ -1,21 +1,19 @@
 import {
   type BudgetCommand,
-  type BudgetOutcome,
-  type BudgetRejection,
+  type BudgetReply,
   deletableAt,
   loadView,
   transition,
 } from "@unprice/services/budgets"
-import type { BudgetReply, BudgetRequest } from "@unprice/services/use-cases"
+import type { BudgetRequest } from "@unprice/services/use-cases"
 import type { BudgetProcessorDeps, BudgetStoreTx } from "./ports"
 
 export const ALARM_PURGE_LIMIT = 2048
 export const ALARM_CONTINUE_MS = 1_000
 export const ALARM_RETRY_MS = 30_000
 
-type Committed =
-  | { ok: true; outcome: BudgetOutcome; wakeAt: number | null; now: number }
-  | { ok: false; rejection: BudgetRejection }
+/** A command's reply, and the alarm its written rows need: a refused lease is written too. */
+type Committed = { reply: BudgetReply; wakeAt: number | null; now: number }
 
 /** What the alarm does after a sweep: wake again (or never), or delete the closed budget. */
 type Swept = { destroy: true } | { destroy: false; next: number | null }
@@ -49,10 +47,9 @@ export class BudgetProcessor {
 
   async execute(request: BudgetRequest): Promise<BudgetReply> {
     const clockMs = this.deps.clock.now()
-    const committed = this.deps.store.atomically((tx) => commit(tx, request, clockMs))
-    if (!committed.ok) return committed
-    await this.lowerAlarm(committed.wakeAt)
-    return { ok: true, outcome: committed.outcome }
+    const { reply, wakeAt } = this.deps.store.atomically((tx) => commit(tx, request, clockMs))
+    await this.lowerAlarm(wakeAt)
+    return reply
   }
 
   async alarm(): Promise<void> {
@@ -99,11 +96,17 @@ export class BudgetProcessor {
 function commit(tx: BudgetStoreTx, command: BudgetCommand, clockMs: number): Committed {
   const view = loadView(tx, command, clockMs)
   const result = transition({ view, command, clockMs })
-  if (result.err) return { ok: false, rejection: result.err.rejection }
+  // Nothing was written. Only the sweep reads `now`, and a sweep is never rejected.
+  if (result.err) {
+    return { reply: { ok: false, rejection: result.err.rejection }, wakeAt: null, now: clockMs }
+  }
 
-  const { write, outcome, now, wakeAt } = result.val
+  const { write, now, wakeAt } = result.val
   if (write) tx.commit(result.val)
-  return { ok: true, outcome, wakeAt: write ? wakeAt : null, now }
+  const reply: BudgetReply = result.val.ok
+    ? { ok: true, outcome: result.val.outcome }
+    : { ok: false, rejection: result.val.rejection }
+  return { reply, wakeAt: write ? wakeAt : null, now }
 }
 
 /**
@@ -114,7 +117,7 @@ function sweep(tx: BudgetStoreTx, clockMs: number): Swept {
   const budget = tx.readBudget()
   if (budget === null) return { destroy: false, next: null }
   const swept = commit(tx, { type: "sweep" }, clockMs)
-  if (!swept.ok) throw new Error(`budget sweep rejected: ${swept.rejection.code}`)
+  if (!swept.reply.ok) throw new Error(`budget sweep rejected: ${swept.reply.rejection.code}`)
   // The sweep moved the budget's clock to `now`, so purging at it never runs ahead of a command.
   tx.purgeOperations(swept.now, ALARM_PURGE_LIMIT)
   const due = tx.nextDueAt()

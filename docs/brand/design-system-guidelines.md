@@ -412,6 +412,14 @@ titles stay in the ledger-row grammar above each panel, and all specimens share 
 fictional universe (pro@v3 at $0.002/token, the $4.10 request, acme-corp, ticket numbers in
 sequence) so cross-section callbacks compound instead of multiplying examples.
 
+Budgets page (2026-10-19, `/budgets`): the launch page for Unprice Budgets reuses the home page's
+grammar on its own arc (promise, incident, objection, integration, checks, questions, offer). Its
+hero specimen is the BudgetDO concurrency test rendered as its 100 agents: solid cells ran, ghost
+cells were refused, and the one amber fact is the decision, `$0.00` over the cap. Station 02 renders
+the same night under one shared provider-key cap (every customer refused) and under a budget per
+key (only the runaway stops, in amber). The checks cards state network calls per check (0 local, 1
+remote) instead of a millisecond figure that depends on the reader's machine.
+
 Hero copy compression: the subheadline is one loss-framed sentence plus the category frame. Noun
 enumerations (versioned plans, separate entitlements, budgets, evidence) belong in the first
 scroll section, not the hero. If the subheadline needs a second sentence, it is carrying body-copy

@@ -113,7 +113,7 @@ share the budget and assert the exact balance each one leaves.
 | `soft limit: reports crossing without denying` | A soft limit appears in `crossed` and goes negative |
 | `hard limit: denies with the blocking limit and remedy` | `raise_limit`, `wait_for_reset`, and `release_holds` remedies |
 | `record: never denied, counted once per key and amount` | Pushes remaining negative; a retry with another `occurredAt` replays, another amount is a 409 |
-| `errors: maps rejections to statuses` | Unknown hold 404, TTL over max 400, unit change 409, usage older than 7 days 409, nine decimals 400, unknown budget 404 |
+| `errors: maps rejections to statuses` | Unknown hold 404, TTL over max 400, unit change 409, usage older than 24 hours 409, nine decimals 400, unknown budget 404 |
 | `closesAt: stops new spend, keeps settle and record` | Authorize after close is 409 `budget_closed`; an open hold still settles; record still counts |
 
 The hard limit is monthly, so a run that straddles a UTC month boundary fails its balance

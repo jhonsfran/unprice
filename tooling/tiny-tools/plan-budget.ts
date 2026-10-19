@@ -4,7 +4,7 @@ import {
   type BudgetBalance,
   type BudgetHold,
   Unprice,
-} from "@unprice/api"
+} from "@unprice/budgets"
 import { assert, colors, passed, step } from "./harness"
 
 // End-to-end walk through one budget: every verb, its replay, its denial, and the closing rules.
@@ -266,10 +266,10 @@ async function rejectsBadRequests(): Promise<void> {
       key: KEY,
       amount: "1",
       idempotencyKey: "evt-old",
-      occurredAt: Date.now() - 8 * 24 * 60 * 60 * 1000,
+      occurredAt: Date.now() - 2 * 24 * 60 * 60 * 1000,
     }),
     "CONFLICT",
-    "usage older than 7 days"
+    "usage older than 24 hours"
   )
   failsWith(
     await unprice.budgets.charge({ key: KEY, amount: "0.000000001", idempotencyKey: "nine" }),

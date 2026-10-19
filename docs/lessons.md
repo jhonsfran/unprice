@@ -68,6 +68,9 @@ patterns. Keep it cheap to load and useful.
 
 ## Cloudflare, API, And Ingestion
 
+- 2026-10-19: Preview native logs/traces and BudgetDO placement diagnostics were temporary and are
+  disabled. Keep sampled request events with the budget operation, outcome, and RPC duration;
+  failed alarms remain error logs.
 - 2026-09-20: Default authenticated SDK requests to `cache: "no-store"`; Cloudflare Workers reject
   an explicitly supplied `cache: "default"` before the request reaches the API.
 - 2026-09-20: Treat a missing or disabled payment provider during paid plan publication as an
@@ -243,10 +246,24 @@ patterns. Keep it cheap to load and useful.
 - 2026-10-18: Budgets use automatic placement (`getBudgetStub`: no jurisdiction, no hint); every
   other DO stays EU-pinned. evlog `keep` rules only add; to except a request, drop the global rule
   and decide in the middleware's `keep` callback (`keepFailedRequest` in `apps/api/src/observability.ts`).
+- 2026-10-19: CI passes secrets between jobs with `.github/actions/secret-outputs` (gpg symmetric, base64),
+  which replaced the cloudposse Docker action after public.ecr.aws rate limits failed preview deploys
+  repeatedly. Run `.github/actions/secret-outputs/secret-outputs.test.sh` (Docker) after touching it.
+  No ciphertext outlives a run: preview encodes `DATABASE_URL_ENCRYPTED` and decodes it in later jobs.
+- 2026-10-19: Never time Durable Object work from the object's `Date.now()`: it is stale until the
+  object's next I/O. A Worker-to-object `queueMs` read 0 on about 27,000 preview requests and was
+  removed; use caller-side RPC timing instead.
+- 2026-10-18: In DO SQLite, `DELETE ... RETURNING` costs one extra row read per deleted row (measured on
+  the alarm purge: +2,048 rows read at its cap). Count deletions with `SELECT changes()` in the same
+  transaction instead: one statement, no rows read.
 - 2026-10-18: In a non-TTY shell vitest-pool-workers swallows the benchmarks' `console.info`; run
   `pnpm --filter api test:workers:bench --disableConsoleIntercept` to see `BUDGET_BENCHMARK` lines.
   Measured there: an UPDATE that moves `due_at` adds no row written (lease report 3 with or
   without renewal), so measure rather than count index entries.
+- 2026-10-18: A stored `record` receipt costs 330 B (36-character key) to 559 B (256-character key) of
+  BudgetDO SQLite (`bytesPerReceipt` in `BudgetDO.storage.benchmark`). Each 10 GB object holds
+  `RECORD_DEDUPE_MS` × rate of them. At 8 days that was 26-44 records/s; at 25 hours it is ~200-340/s.
+  A 150 s k6 run on a fresh budget shows neither the ceiling nor an alarm purge.
 - 2026-10-18: After extending `budget.properties.test.ts` with a verb, flip one of its core rules
   and confirm the property fails. Lease reports first reached their accepted path 1% of the time
   and survived every mutation; planning them against live leases and adding a steady-clock
@@ -254,9 +271,25 @@ patterns. Keep it cheap to load and useful.
 - 2026-10-18: A nullable discriminated union in a response schema renders in OpenAPI 3.0 as a
   `oneOf` with a bare `{ nullable: true }` member, and openapi-typescript then types the field as
   `unknown`. Make such a field optional (absent instead of null) and check `openapi.d.ts`.
-- 2026-10-18: tsx cannot import `packages/api/src` (its CommonJS `export *`); tooling scripts import
-  the built `@unprice/api`, so run `pnpm --filter @unprice/api build` first. Run tooling probes
+- 2026-10-18: tsx cannot import `packages/api/src` (its CommonJS `export *`); budget tooling scripts
+  import the built `@unprice/budgets`, so run `pnpm --filter @unprice/budgets build` first. Run tooling probes
   with explicit env vars rather than `--env-file`, which loads the operator's credentials.
+- 2026-10-18: `apps/api/src/routes/budgets/local-mode.fuzz.test.ts` runs the built SDK's local mode
+  through the real budget routes and processor on fake timers; rebuild `@unprice/budgets` before it.
+  Keep `setImmediate` real and step with `vi.advanceTimersToNextTimer()`: the async advance waits a
+  real 1 ms per timer. Never put `vi.fn()` on a per-request path there: it keeps every Hono context.
+- 2026-10-18: A refusal that writes nothing is not idempotent: a late copy of the request (an HTTP
+  retry still in flight) is decided again and can succeed once room returns. Budget leases write
+  their refusal (`status: "refused"`, 10-minute retention), and the SDK waits a flush interval
+  before asking again, so a blocked key writes one row per interval rather than per call.
+- 2026-10-19: `BudgetTransition` is the rows to write plus a `BudgetReply`. A refused lease is the
+  one rejection that writes: `ok: false` with LIMIT_EXCEEDED, committed and armed like any write.
+  Every other rejection is the `Err` of `transition` and writes nothing; core tests narrow with `ok()`.
+- 2026-10-18: The local-mode fuzz test asserts that every lease on the server reached its client.
+  Reverting the refusal row failed it after about 390 runs at the old fault weights; stray copies
+  weighted 3, faults on half the steps, and close weighted 2 cut that to about 40 (at most 110).
+- 2026-10-18: `pnpm add` can re-resolve unrelated peer variants in `pnpm-lock.yaml`; add only the
+  importer entries and confirm with `corepack pnpm install --frozen-lockfile`.
 - 2026-10-16: Budget amounts are `@unprice/money` `Amount` (bigint at `LEDGER_SCALE`) and the wire
   patterns live in `@unprice/db/validators`; never redeclare them in the budget core.
 - 2026-10-16: `Omit` over a generic `BudgetOutcome & { type: T }` does not narrow; strip `type` at
@@ -363,6 +396,12 @@ patterns. Keep it cheap to load and useful.
   need `jurisdiction()` too — use `ingestion/testing/durable-object-namespace-mock.ts`.
 
 ## Next.js And Dashboard
+
+- 2026-10-19: A signup intent routes past auth only through `next`: `INTENT_LANDING` in
+  `lib/signup-funnel.ts` is the one table of intents, and `/new` must forward `intent` into the
+  workspace signUp `successUrl` (the provider appends `workspace_id`) or it dies at workspace creation.
+- 2026-10-19: The `@sidebar/[...all]` slot decides per route whether to hide the sidebar; a nested
+  route under a hidden section (`/{ws}/onboarding/budgets`) needs that check widened.
 
 - 2026-08-01: Auth middleware that enriches sessions from Postgres must declare
   `config.runtime = "nodejs"`; leaving it on Edge can surface the database failure as a misleading
@@ -667,6 +706,13 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 
 ## API SDK And Public Contracts
 
+- 2026-10-19: Both SDKs share one transport, `packages/budgets/src/transport.ts` (retries, error
+  mapping, headers, telemetry); fix it there, never in `packages/api`.
+- 2026-10-19: SDK codegen lives in `tooling/scripts/sdk-codegen/`; `@unprice/budgets` types a subset
+  piped from `budget-openapi.mjs`. `pnpm --filter @unprice/api generate` regenerates both SDKs.
+- 2026-10-19: The SDKs resolve to `dist`, so turbo's `typecheck`/`test` depend on `^build`; a job
+  running them outside turbo must build `./packages/api` (and with it `@unprice/budgets`) first.
+
 - 2026-09-01: Public API adapters must map expected service errors through
   `resolveDomainErrorKind`; never use a catch-all `BaseError -> BAD_REQUEST` rule, which turns
   disabled, conflict, precondition, and internal failures into the same client error.
@@ -792,6 +838,10 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   The superlink component disables the auto fetch of next.js, allowing to reduce unnecesary load.
 
 ## Tests, Tooling, And Docs
+
+- 2026-10-19: Every API error's `docs` field links to
+  `docs.unprice.dev/api-reference/errors/code/<CODE>`; give each code the API returns a page there
+  and list it in `docs.json` (`BUDGET_EXCEEDED` and `INSUFFICIENT_PERMISSIONS` were missing).
 
 - 2026-10-16: Keep `getAnchor` month-length calculations entirely in UTC; local `endOfMonth`
   combined with `getUTCDate` returns day 1 in Bogotá. Verify billing changes under both
@@ -998,7 +1048,7 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   API: the same load is clean with `K6_NO_CONNECTION_REUSE=true` and with Node's `fetch`. Check
   for it before chasing a server bug.
 - 2026-10-16: A dedupe that relies on a client-sent timestamp (`record`'s `occurredAt` bounding
-  replays past the 8-day receipt) breaks the moment the SDK defaults that timestamp to the time of
+  replays past the 25-hour receipt) breaks the moment the SDK defaults that timestamp to the time of
   the call: a retry gets a fresh time and passes the bound. Require it in the SDK, and keep clock
   values out of the request hash so a re-stamped retry replays instead of conflicting.
 - 2026-10-16: Don't store a flag the config already implies. The budget's anchored counters used

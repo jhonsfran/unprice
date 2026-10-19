@@ -17,6 +17,7 @@ const linkGroups: {
   {
     label: "Read",
     links: [
+      { title: "Budgets", href: "/budgets" },
       { title: "Manifesto", href: "/manifesto" },
       { title: "Docs", href: `${DOCS_DOMAIN}`, external: true },
     ],
@@ -75,8 +76,8 @@ export default function FooterMarketing() {
           <div className="flex max-w-sm flex-col items-start">
             <Logo size="md" />
             <p className="mt-4 text-background-text text-sm leading-6">
-              Open-source spend authorization for AI agents. Authorize before the provider call,
-              keep the receipt after.
+              Open-source spend authorization for AI agents. Check the budget before the provider
+              call, and keep a record of every decision.
             </p>
             <div className="mt-6 flex w-full flex-col border-background-border border-t pt-2">
               {footerFacts.map((row) => (

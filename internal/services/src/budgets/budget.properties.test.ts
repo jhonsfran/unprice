@@ -75,9 +75,11 @@ type ModelLease = {
   granted: bigint
   captured: bigint
   expiresAt: number
-  status: "open" | "closed" | "expired"
+  status: "open" | "closed" | "expired" | "refused"
   changedAt: number
   last: ModelReport | null
+  /** What a refused lease said blocked it. */
+  blocked?: { limitId: string; remedy: string }
 }
 type KeyedRecord = {
   verb: "authorize" | "charge" | "record"
@@ -93,9 +95,9 @@ type KeyedRecord = {
  */
 type Segment = { id: string; window: Window; anchor?: number; from: number; until: number | null }
 
-type Expected =
-  | { error: string; limitId?: string; remedy?: string }
-  | { outcome: Record<string, unknown>; checkBalance: boolean }
+/** A refused lease is the one rejection that is kept; `wrote` says whether this call wrote it. */
+type Rejected = { error: string; limitId?: string; remedy?: string; wrote?: boolean }
+type Expected = Rejected | { outcome: Record<string, unknown>; checkBalance: boolean }
 
 /** Calendar math written independently of `windows.ts`: Date.UTC with field overflow. */
 function windowRange(window: Window, t: number): Range {
@@ -199,14 +201,16 @@ class ReferenceBudget {
 
   /**
    * A closed row answers until its retention ends at the command's clock: a hold or a charge for a
-   * day after it closed, a record for 8 days. Only the alarm deletes rows.
+   * day after it closed, a record for 25 hours, a refused lease for 10 minutes. Only the alarm
+   * deletes rows.
    */
   private holdLive(hold: ModelHold, now: number) {
     return hold.status === "open" || now < hold.changedAt + day
   }
 
   private leaseLive(lease: ModelLease, now: number) {
-    return lease.status === "open" || now < lease.changedAt + day
+    if (lease.status === "open") return true
+    return now < lease.changedAt + (lease.status === "refused" ? 10 * minute : day)
   }
 
   private keyedLive(rec: KeyedRecord, now: number) {
@@ -214,7 +218,7 @@ class ReferenceBudget {
       const hold = this.holds.get(rec.holdNo)
       return hold !== undefined && this.holdLive(hold, now)
     }
-    return now < rec.createdAt + (rec.verb === "record" ? 8 * day : day)
+    return now < rec.createdAt + (rec.verb === "record" ? 25 * hour : day)
   }
 
   /**
@@ -406,7 +410,10 @@ class ReferenceBudget {
     }
   }
 
-  /** B10: debit first, grant what fits under every hard limit, refuse when nothing fits. */
+  /**
+   * B10: debit first, grant what fits under every hard limit. Nothing fitting is a refusal that is
+   * kept, so the same key replays it even after room returns. It changes no balance or count.
+   */
   private grant(
     command: Extract<BudgetCommand, { type: "lease" }>,
     config: ModelConfig,
@@ -419,6 +426,7 @@ class ReferenceBudget {
       if (prior.requested !== amount || prior.ttlMs !== ttlMs) {
         return { error: "IDEMPOTENCY_CONFLICT" }
       }
+      if (prior.blocked) return { error: "LIMIT_EXCEEDED", ...prior.blocked, wrote: false }
       const outcome = { lease: this.leaseView(leaseKey, prior), replayed: true }
       return { outcome, wrote: false, checkBalance: true }
     }
@@ -427,20 +435,21 @@ class ReferenceBudget {
     const room = this.room(now)
     const granted = room === null || room >= amount ? amount : room
     const blocked = granted === ZERO ? this.block(now, amount) : null
-    if (blocked) return { error: "LIMIT_EXCEEDED", ...blocked }
     const lease: ModelLease = {
       requested: amount,
       ttlMs,
       granted,
       captured: ZERO,
       expiresAt: now + ttlMs,
-      status: "open",
+      status: blocked ? "refused" : "open",
       changedAt: now,
       last: null,
+      ...(blocked ? { blocked } : {}),
     }
     // Newest last, so a planned report can name a lease by its distance from the newest.
     this.leases.delete(leaseKey)
     this.leases.set(leaseKey, lease)
+    if (blocked) return { error: "LIMIT_EXCEEDED", ...blocked, wrote: true }
     const outcome = { lease: this.leaseView(leaseKey, lease), replayed: false }
     return { outcome, wrote: true, checkBalance: true }
   }
@@ -457,7 +466,8 @@ class ReferenceBudget {
     const { leaseKey, seq, request } = command
     const stored = this.leases.get(leaseKey)
     const lease = stored && this.leaseLive(stored, now) ? stored : undefined
-    if (!lease) return { error: "LEASE_NOT_FOUND" }
+    // A refused lease was never granted.
+    if (!lease || lease.status === "refused") return { error: "LEASE_NOT_FOUND" }
     const extend = request.final ? ZERO : request.extend
     const last = lease.last
     const retry =
@@ -509,7 +519,8 @@ class ReferenceBudget {
   apply(command: BudgetCommand, clock: number): Expected {
     const now = Math.max(clock, this.lastWriteAt)
     const decided = this.decide(command, now)
-    if ("error" in decided) return decided
+    // A rejection writes nothing, except a refused lease, which is kept like an accepted command.
+    if ("error" in decided && decided.wrote === undefined) return decided
     // An accepted command also persists the roll of every reported period that ended, and a sweep
     // always moves the clock.
     const rolled = this.rolledPeriods(now).length
@@ -521,17 +532,16 @@ class ReferenceBudget {
     if (decided.wrote || rolled > this.rolledCount || sweep || retired) {
       this.lastWriteAt = now
     }
-    if (decided.wrote) this.calls[command.type] = (this.calls[command.type] ?? 0) + 1
     this.rolledCount = rolled
+    if ("error" in decided) return decided
+    if (decided.wrote) this.calls[command.type] = (this.calls[command.type] ?? 0) + 1
     return { outcome: decided.outcome, checkBalance: decided.checkBalance }
   }
 
   private decide(
     command: BudgetCommand,
     now: number
-  ):
-    | { error: string; limitId?: string; remedy?: string }
-    | { outcome: Record<string, unknown>; wrote: boolean; checkBalance: boolean } {
+  ): Rejected | { outcome: Record<string, unknown>; wrote: boolean; checkBalance: boolean } {
     if (command.type === "upsert") {
       const next: ModelConfig = {
         limits: command.config.limits.map((l) => ({ ...l })),
@@ -684,7 +694,7 @@ class ReferenceBudget {
     if (occurredAt !== undefined && occurredAt > now + 5 * minute) {
       return { error: "INVALID_OCCURRED_AT" }
     }
-    if (occurredAt !== undefined && occurredAt < now - 7 * day) return { error: "TOO_LATE" }
+    if (occurredAt !== undefined && occurredAt < now - day) return { error: "TOO_LATE" }
     const grace = command.type === "record" ? day : 0
     if (config.closesAt !== null && now >= config.closesAt + grace) {
       return { error: "BUDGET_CLOSED" }
@@ -848,10 +858,10 @@ function commandArb(scale: bigint): fc.Arbitrary<Planned> {
     0,
     -minute,
     -hour,
+    -12 * hour,
+    -day,
+    -day - 1,
     -2 * day,
-    -7 * day,
-    -7 * day - 1,
-    -8 * day,
     5 * minute,
     5 * minute + 1,
     hour
@@ -963,7 +973,9 @@ function resolve(
       }
     case "report-ref": {
       const { extend } = planned
-      const keys = [...model.leases.keys()]
+      const keys = [...model.leases].flatMap(([key, lease]) =>
+        lease.status === "refused" ? [] : [key]
+      )
       // With no lease to report on, open one, so most reports find a lease.
       if (keys.length === 0) {
         return { type: "lease", leaseKey: planned.leaseKey, amount: extend, ttlMs: hour }
@@ -992,7 +1004,7 @@ function resolve(
 const advanceArb = fc.oneof(
   { weight: 4, arbitrary: fc.constantFrom(0, second, minute, 10 * minute) },
   { weight: 2, arbitrary: fc.constantFrom(hour, 6 * hour, day) },
-  { weight: 1, arbitrary: fc.constantFrom(3 * day, 8 * day, 32 * day) },
+  { weight: 1, arbitrary: fc.constantFrom(25 * hour, 3 * day, 32 * day) },
   { weight: 1, arbitrary: fc.constantFrom(-minute, -2 * hour, -3 * day) },
   { weight: 1, arbitrary: fc.constantFrom<"hour-edge" | "day-edge">("hour-edge", "day-edge") }
 )
@@ -1127,7 +1139,8 @@ describe("budget core against a reference model", () => {
           const result = store.run(command, clock)
 
           if ("error" in expected) {
-            const rejection = result.err?.rejection
+            const kept = result.err || result.val.ok ? undefined : result.val.rejection
+            const rejection = result.err?.rejection ?? kept
             const blocked = rejection?.code === "LIMIT_EXCEEDED" ? rejection.blocked : undefined
             expect({
               code: rejection?.code,
@@ -1138,10 +1151,14 @@ describe("budget core against a reference model", () => {
               limitId: expected.limitId,
               remedy: expected.remedy,
             })
-            expect(store.writes).toBe(writesBefore)
+            // A kept refusal may also write the roll of an ended period; any other rejection writes
+            // nothing.
+            if (expected.wrote === undefined) expect(store.writes).toBe(writesBefore)
+            else expect(kept).toBeDefined()
             continue
           }
           if (result.err) throw result.err
+          if (!result.val.ok) throw new Error(`unexpected ${result.val.rejection.code}`)
 
           const { outcome, ledger } = result.val
           if (command.type === "record" && outcome.type === "record" && !outcome.replayed) {
@@ -1213,7 +1230,7 @@ describe("budget core against a reference model", () => {
 
   it("keeps the record dedupe window longer than any replay that is still accepted", () => {
     expect(RECORD_DEDUPE_MS - RECORD_ACCEPT_WINDOW_MS - RECORD_FUTURE_SKEW_MS).toBe(
-      day - 5 * minute
+      hour - 5 * minute
     )
   })
 

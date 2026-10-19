@@ -49,7 +49,7 @@ jobs:
             fi
           fi
 
-      - uses: cloudposse/github-action-secret-outputs@67ae2f7ee1890986ba0012bacd079a5a36ecb449 # main
+      - uses: ./.github/actions/secret-outputs
         if: inputs.env == 'preview'
         id: db-url
         with:

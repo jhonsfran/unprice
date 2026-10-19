@@ -3,6 +3,7 @@ import { cn, focusRing } from "@unprice/ui/utils"
 import { Link } from "next-view-transitions"
 import Balancer from "react-wrap-balancer"
 import { AcquisitionLink } from "./acquisition-link"
+import { DecisionBracket } from "./decision-bracket"
 import { Reveal } from "./reveal"
 import { SectionShell } from "./station"
 import { StationHeader } from "./station-header"
@@ -25,14 +26,6 @@ import { StationHeader } from "./station-header"
 //
 // The one mailto is the only other way out of this section, and it is inside
 // the founder's own sentence — a person to answer, not a competing CTA.
-
-// The logo's containment motif marks the decision moment.
-const BRACKET_CORNERS = [
-  "top-0 left-0 border-t-2 border-l-2",
-  "top-0 right-0 border-t-2 border-r-2",
-  "bottom-0 left-0 border-b-2 border-l-2",
-  "right-0 bottom-0 border-r-2 border-b-2",
-]
 
 const inlineLink = cn(
   "rounded-sm font-medium text-background-textContrast underline decoration-background-borderHover underline-offset-4 transition-colors duration-quick ease-out-quad hover:decoration-background-textContrast",
@@ -59,8 +52,7 @@ export default function Cta() {
         {/* One prerequisite, one exit to the long argument. */}
         <p className="mt-5 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
           <Balancer>
-            Bring the agent run or paid workflow that burns margin when a customer triggers it. That
-            is the only prerequisite. Read the argument in{" "}
+            Bring one agent run that costs you money. The reasoning is in{" "}
             <Link href="/manifesto" className={inlineLink}>
               the manifesto
             </Link>
@@ -68,21 +60,14 @@ export default function Cta() {
           </Balancer>
         </p>
 
-        <div className="relative mt-12 px-6 py-5">
-          {BRACKET_CORNERS.map((corner) => (
-            <span
-              key={corner}
-              aria-hidden
-              className={cn("absolute size-3 border-background-textContrast", corner)}
-            />
-          ))}
+        <DecisionBracket className="mt-12">
           <AcquisitionLink
             source="closing_cta"
             className={buttonVariants({ variant: "primary", className: "gap-1.5" })}
           >
             Start with one agent action
           </AcquisitionLink>
-        </div>
+        </DecisionBracket>
 
         {/* The afternoon, itemized honestly. */}
         <p className="mt-5 font-mono text-[11px] text-background-text leading-5">
@@ -102,21 +87,20 @@ export default function Cta() {
             </span>
           </div>
           <p className="mt-3 text-background-text text-sm leading-6">
-            Test the reservation with Unprice&apos;s built-in Sandbox before it touches production.
-            If the result does not match your model, remove it. No provider traffic, payment
-            processor, or contract changed.
+            Try it in Unprice&apos;s built-in Sandbox first. If it doesn&apos;t fit, remove it.
+            Nothing else changes.
           </p>
           {/* Honest scarcity: a real constraint on my own time, stated as a
               number. No countdown, no fake stock (marketing-framework.md). */}
           <p className="mt-4 text-background-text text-sm leading-6">
-            I am taking ten design partners and I onboard each one myself.{" "}
+            I&apos;m onboarding ten design partners myself.{" "}
             <a
               href="mailto:seb@unprice.dev?subject=What%20runs%20when%20customers%20overspend%3F"
               className={inlineLink}
             >
-              Email me your action
+              Email me the action
             </a>{" "}
-            and I&apos;ll reply with the first step, even if no slot is left.
+            you want to budget, and I&apos;ll reply with the first step.
           </p>
           <p className="mt-4 font-medium text-background-textContrast text-sm leading-6">
             Seb, founder of Unprice · <span className="font-mono text-xs">seb@unprice.dev</span>

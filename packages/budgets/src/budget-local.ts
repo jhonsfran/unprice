@@ -9,6 +9,7 @@ import {
   type BudgetHold,
   type SpendSettlement,
   createSpend,
+  retryable,
   toDenial,
 } from "./budgets"
 import type { ApiError } from "./errors"
@@ -48,9 +49,15 @@ export type LocalLeaseOptions = {
   amount: AmountInput
   /** Refill in the background below this. Defaults to a quarter of `amount`. */
   lowWater?: AmountInput
-  /** The lease's TTL, renewed while the process reports. Defaults to 60 s. */
+  /**
+   * The lease's TTL, renewed while the process reports. Must exceed three flush intervals.
+   * Defaults to 60 s.
+   */
   ttlMs?: number
-  /** How often consumption is reported while it changes. Defaults to 1 s. */
+  /**
+   * How often consumption is reported while it changes, and how long a key whose grant was refused
+   * answers with that denial before it asks again. Defaults to 1 s.
+   */
   flushIntervalMs?: number
   /**
    * Returns the lease after this long without a local authorize, charge, settle, or release, once
@@ -111,6 +118,11 @@ type Epoch =
   | { phase: "idle"; replay: LeaseRequest | null }
   | { phase: "granting"; granted: Promise<ApiResult<Lease>> }
   | { phase: "open"; lease: Lease }
+  /**
+   * The server keeps a row for each refused grant, so for one flush interval after a 402 the key's
+   * calls get that denial from memory instead of a refused grant each.
+   */
+  | { phase: "refused"; error: ApiError }
 
 type Spent<T> = Readonly<{ lease: Lease; value: T }> | ApiResult<BudgetDenial>
 
@@ -209,6 +221,17 @@ const createShell = ({
     if (calls === 0 && epoch.phase === "idle" && epoch.replay === null) forget()
   }
 
+  const refuse = (error: ApiError): Epoch => {
+    const refused: Epoch = { phase: "refused", error }
+    const lapse = setTimeout(() => {
+      if (epoch !== refused) return
+      epoch = { phase: "idle", replay: null }
+      forgetIfDone()
+    }, flushIntervalMs)
+    if (typeof lapse === "object") lapse.unref()
+    return refused
+  }
+
   const tracked =
     <A extends unknown[], R>(call: (...args: A) => Promise<R>) =>
     async (...args: A): Promise<R> => {
@@ -239,6 +262,7 @@ const createShell = ({
   const grant = (need: Units): Promise<ApiResult<Lease>> => {
     if (epoch.phase === "granting") return epoch.granted
     if (epoch.phase === "open") return Promise.resolve({ result: epoch.lease })
+    if (epoch.phase === "refused") return Promise.resolve({ error: epoch.error })
     const request = epoch.replay ?? {
       key,
       leaseKey: globalThis.crypto.randomUUID(),
@@ -248,7 +272,10 @@ const createShell = ({
     const sentAt = now()
     const granted = transport.lease(request).then((response): ApiResult<Lease> => {
       if (response.error) {
-        epoch = { phase: "idle", replay: retryable(response.error) ? request : null }
+        epoch =
+          response.error.code === "BUDGET_EXCEEDED"
+            ? refuse(response.error)
+            : { phase: "idle", replay: retryable(response.error) ? request : null }
         return { error: response.error }
       }
       const { result } = response
@@ -458,6 +485,7 @@ const createShell = ({
         await epoch.granted
         continue
       }
+      if (epoch.phase === "refused") return { result: null }
       if (epoch.phase === "idle") {
         if (!epoch.replay) return { result: null }
         // The lost grant may have committed: replay it so its capacity can be returned.
@@ -489,14 +517,23 @@ function leaseSettings(options: LocalLeaseOptions): LeaseSettings {
   if (amount === ZERO) throw new RangeError("lease.amount must be positive")
   const idleMs = options.idleMs ?? DEFAULT_IDLE_MS
   if (!(idleMs > 0)) throw new RangeError(`lease.idleMs must be positive, received ${idleMs}`)
+  const ttlMs = options.ttlMs ?? DEFAULT_LEASE_TTL_MS
+  const flushIntervalMs = options.flushIntervalMs ?? DEFAULT_FLUSH_INTERVAL_MS
+  // Renewal is checked on flush ticks once less than a third of the TTL is left; with a third no
+  // longer than a tick, the lease can expire between two ticks on a perfect network.
+  if (!(ttlMs > 3 * flushIntervalMs)) {
+    throw new RangeError(
+      `lease.ttlMs must exceed 3 × lease.flushIntervalMs, received ttlMs ${ttlMs} and flushIntervalMs ${flushIntervalMs}`
+    )
+  }
   return {
     amount,
     lowWater:
       options.lowWater === undefined
         ? amount / BigInt(4)
         : optionUnits(options.lowWater, "lease.lowWater"),
-    ttlMs: options.ttlMs ?? DEFAULT_LEASE_TTL_MS,
-    flushIntervalMs: options.flushIntervalMs ?? DEFAULT_FLUSH_INTERVAL_MS,
+    ttlMs,
+    flushIntervalMs,
     idleMs,
   }
 }
@@ -542,12 +579,6 @@ const toReportRequest = (
     ? { key, leaseKey, seq, captured, final: true }
     : { key, leaseKey, seq, captured, final: false, extend: fromUnits(report.extend) }
 }
-
-// The answer of a lost or refused request may still have committed; resending it is safe.
-const retryable = (error: ApiError) =>
-  error.code === "FETCH_ERROR" ||
-  error.code === "INTERNAL_SERVER_ERROR" ||
-  error.code === "TOO_MANY_REQUESTS"
 
 const failed = (error: ApiError): ApiResult<BudgetDenial> => {
   const denial = toDenial(error)

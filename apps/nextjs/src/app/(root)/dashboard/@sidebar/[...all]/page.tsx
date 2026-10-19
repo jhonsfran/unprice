@@ -21,8 +21,9 @@ export default async function DashboardNavigationDesktopSlot(props: {
   // delete first segment because it's always "/app" for the redirection from the middleware
   all.shift()
 
-  // If you want to hide the sidebar for a specific route, you can return null here
-  if (all.length === 2 && all.includes("onboarding")) {
+  // If you want to hide the sidebar for a specific route, you can return null here. Onboarding
+  // hides it on every one of its pages (`/[workspace]/onboarding/...`).
+  if (all.at(1) === "onboarding") {
     return null
   }
 

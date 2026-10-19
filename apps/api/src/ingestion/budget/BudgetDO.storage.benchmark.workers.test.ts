@@ -1,6 +1,6 @@
 import { reset, runInDurableObject } from "cloudflare:test"
 import { env } from "cloudflare:workers"
-import { upsertBudgetInputSchema } from "@unprice/db/validators"
+import { RECORD_DEDUPE_MS, upsertBudgetInputSchema } from "@unprice/db/validators"
 import { isOutcomeOf } from "@unprice/services/budgets"
 import type { BudgetReply, BudgetRequest } from "@unprice/services/use-cases"
 import { drizzle } from "drizzle-orm/durable-sqlite"
@@ -85,6 +85,11 @@ function upsert(key: string) {
 function accepted(reply: BudgetReply) {
   if (!reply.ok) throw new Error(`expected success, got ${reply.rejection.code}`)
   return reply.outcome
+}
+
+function rejection(reply: BudgetReply) {
+  if (reply.ok) throw new Error(`expected a rejection, got ${reply.outcome.type}`)
+  return reply.rejection
 }
 
 function stubFor(key: string) {
@@ -185,15 +190,14 @@ describe("BudgetDO storage work", () => {
         report(`${replay ? "replay" : "record"}:key-length=${keyLength}`, samples, rpcMs)
       }
       expect(
-        await stub.execute({
-          type: "charge",
-          idempotencyKey: requestKey(0, keyLength),
-          amount: UNIT,
-        })
-      ).toEqual({
-        ok: false,
-        rejection: { code: "IDEMPOTENCY_CONFLICT", idempotencyKey: requestKey(0, keyLength) },
-      })
+        rejection(
+          await stub.execute({
+            type: "charge",
+            idempotencyKey: requestKey(0, keyLength),
+            amount: UNIT,
+          })
+        )
+      ).toEqual({ code: "IDEMPOTENCY_CONFLICT", idempotencyKey: requestKey(0, keyLength) })
       const current = accepted(await stub.execute({ type: "get" }))
       expect(isOutcomeOf(current, "get") && current.budget.balance.remaining).toBe(
         BigInt(1_000_000 - HISTORY - SAMPLES) * UNIT
@@ -236,7 +240,7 @@ describe("BudgetDO storage work", () => {
             )
         }
         // Opened just before cleanup, so the holds are still open while the receipts are purged.
-        clock.now = start + 8 * DAY - 1000
+        clock.now = start + RECORD_DEDUPE_MS - 1000
         for (let i = 0; i < 512; i++)
           accepted(
             await clock.processor.execute({
@@ -257,7 +261,7 @@ describe("BudgetDO storage work", () => {
         const result = await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
           const clock = clocks.get(state.storage.sql)
           if (!clock) throw new Error("missing clock")
-          clock.now = start + 8 * DAY + second * 1000
+          clock.now = start + RECORD_DEDUPE_MS + second * 1000
           const countBefore = inspect(state.storage.sql).receipts
           await clock.processor.alarm()
           const sql = measure(state.storage.sql)

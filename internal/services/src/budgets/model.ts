@@ -155,11 +155,14 @@ export type AppliedReport = Readonly<{
 /**
  * open counts `granted - captured` against every limit. closed consumed `captured` and returned
  * the rest. expired consumed all of `granted`: a timer cannot prove the process stopped (B3, B10).
+ * refused granted nothing because nothing fit; it keeps what blocked it, so a later copy of the
+ * request replays the refusal instead of taking capacity no process holds.
  */
 export type LeaseState =
   | Readonly<{ status: "open" }>
   | Readonly<{ status: "closed"; closedAt: number }>
   | Readonly<{ status: "expired"; closedAt: number }>
+  | Readonly<{ status: "refused"; closedAt: number; blocked: Blocked }>
 
 /**
  * Capacity debited up front for a process to spend in its own memory (B10 `local`). Its id is
@@ -272,13 +275,14 @@ export type BudgetSnapshot = Readonly<
   } & BudgetConfig
 >
 
+/** A granted lease; a refused one answers with the LIMIT_EXCEEDED rejection instead. */
 export type LeaseView = Readonly<{
   leaseKey: string
   seq: number
   granted: Amount
   captured: Amount
   expiresAt: number
-  status: LeaseState["status"]
+  status: Exclude<LeaseState["status"], "refused">
 }>
 
 /** What a local handle needs to answer like the budget: hold TTL bounds and the close time. */
@@ -407,6 +411,13 @@ export type BudgetRejection =
     }>
 
 export type BudgetErrorCode = BudgetRejection["code"]
+
+/**
+ * What a command answers. Error classes do not survive Workers RPC, so a rejection is plain data.
+ */
+export type BudgetReply =
+  | Readonly<{ ok: true; outcome: BudgetOutcome }>
+  | Readonly<{ ok: false; rejection: BudgetRejection }>
 
 /** An expected budget failure. `rejection` is plain data and is what crosses an RPC boundary. */
 export class UnPriceBudgetError extends BaseError<{ code: BudgetErrorCode }> {

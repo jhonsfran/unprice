@@ -1,8 +1,8 @@
-import type { UnpriceOptions } from "./client"
 import type { ApiError, ErrorResponse } from "./errors"
 import type { GeneratedSdkResources } from "./generated/sdk-resources"
 import type { OperationResponse } from "./operation-types"
 import type { ApiResult } from "./result"
+import type { UnpriceOptions } from "./transport"
 
 type BudgetResources = GeneratedSdkResources["budgets"]
 
@@ -85,7 +85,7 @@ export type ChargeBudgetInput = {
 
 /**
  * Usage that already happened. It always counts, even past a hard limit, and `crossed` names any
- * limit it passed; authorize before work that needs guaranteed capacity. Within 8 days, the same
+ * limit it passed; authorize before work that needs guaranteed capacity. Within 25 hours, the same
  * event key and amount replay; another amount is 409.
  */
 export type RecordBudgetInput = {
@@ -93,8 +93,8 @@ export type RecordBudgetInput = {
   idempotencyKey: string
   /**
    * When the usage happened, in epoch ms: the event's own time, never the time of the call. Usage
-   * older than 7 days is refused (409), which is what stops a retry from counting twice once its
-   * key's 8-day dedupe has ended, so a retry must send the same time.
+   * older than 24 hours is refused (409), which is what stops a retry from counting twice once its
+   * key's 25-hour dedupe has ended, so a retry must send the same time.
    */
   occurredAt: number
 }
@@ -153,8 +153,9 @@ export class BudgetExceededError extends Error {
 }
 
 /**
- * Unprice could not be reached, so nothing ran. The authorization may still have committed:
- * retry with the same estimate, TTL, and `idempotencyKey` so it replays instead of holding twice.
+ * Unprice could not be reached, or answered 429 or 500 after the client's retries, so nothing ran.
+ * The authorization may still have committed: retry with the same estimate, TTL, and
+ * `idempotencyKey` so it replays instead of holding twice.
  */
 export class BudgetUnavailableError extends Error {
   constructor(
@@ -255,6 +256,12 @@ export const toDecimal = (amount: AmountInput): string => {
 
 const newIdempotencyKey = () => globalThis.crypto.randomUUID()
 
+// The answer of a lost or refused request may still have committed; resending it is safe.
+export const retryable = (error: ApiError) =>
+  error.code === "FETCH_ERROR" ||
+  error.code === "INTERNAL_SERVER_ERROR" ||
+  error.code === "TOO_MANY_REQUESTS"
+
 // Only a transport failure is "unavailable". An API error response means Unprice answered.
 export const toDenial = (error: ApiError): BudgetDenial | null => {
   if (error.code === "FETCH_ERROR") {
@@ -303,6 +310,9 @@ export const createSpend =
     const authorized = await authorize({ ...options, amount: estimate, idempotencyKey })
 
     if (authorized.error) {
+      if (retryable(authorized.error)) {
+        throw new BudgetUnavailableError(authorized.error, idempotencyKey)
+      }
       throw new BudgetRequestError(authorized.error, idempotencyKey)
     }
 

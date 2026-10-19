@@ -24,6 +24,7 @@ import type {
   BudgetBalance,
   BudgetCommand,
   BudgetOutcome,
+  BudgetReply,
   BudgetView,
   LeaseOperation,
   LeaseView,
@@ -103,6 +104,10 @@ function targetOf(reader: BudgetReader, command: BudgetCommand): Operation | nul
   }
 }
 
+/**
+ * What to write, and what the command answers. Almost every rejection is an Err that writes
+ * nothing; a refused lease is the one rejection that is written, so its key replays the refusal.
+ */
 export type BudgetTransition = Readonly<{
   /** The clamped clock; the written ledger's `lastAt`. */
   now: number
@@ -119,14 +124,14 @@ export type BudgetTransition = Readonly<{
   periods: readonly WindowPeriod[]
   /** Anchored schedules whose inactive current period ended. */
   retiredWindows: readonly WindowId[]
-  outcome: BudgetOutcome
   /**
    * Earliest `alarmAt` among the written rows, and a new config's `deletableAt`; the store only
    * ever lowers its alarm to it. A window boundary needs no wake: a counter keeps its period's
    * start, so the next command rolls it the same however late it comes.
    */
   wakeAt: number | null
-}>
+}> &
+  BudgetReply
 
 /**
  * Clamps the clock, rolls ended windows, decides, applies and checks the change.
@@ -213,7 +218,8 @@ export function transition(params: {
     operations,
     periods,
     retiredWindows: rolled.retired,
-    outcome: outcomeOf(command, {
+    wakeAt,
+    ...replyOf(command, {
       budget,
       ledger,
       row: change.row,
@@ -222,21 +228,22 @@ export function transition(params: {
       history: [...periods, ...view.history],
       now,
     }),
-    wakeAt,
   })
 }
 
 /**
- * Counts a caller's command that changed the budget. A replay, an upsert that changed nothing, and
- * the alarm's sweep (which closes expired reservations) are not counted.
+ * Counts a caller's command that changed the budget. A replay, an upsert that changed nothing, a
+ * refused lease (written only so its key stays refused), and the alarm's sweep (which closes
+ * expired reservations) are not counted.
  */
 function countCall(
   operations: BudgetOperations,
   command: BudgetCommand,
-  change: Pick<Change, "rows" | "configured">
+  change: Pick<Change, "rows" | "configured" | "row">
 ): BudgetOperations {
   if (command.type === "get" || command.type === "sweep") return operations
   if (change.rows.length === 0 && change.configured === undefined) return operations
+  if (refusalOf(change.row)) return operations
   return { ...operations, [command.type]: operations[command.type] + 1 }
 }
 
@@ -246,19 +253,33 @@ function isPastRetention(row: Operation, now: number): boolean {
   return due !== null && due <= now
 }
 
-function outcomeOf(
-  command: BudgetCommand,
-  params: Readonly<{
-    budget: BudgetRecord | null
-    ledger: Ledger
-    row: Operation | null
-    replayed: boolean
-    changes: readonly ConfigChange[]
-    /** This transition's periods, then the stored ones. */
-    history: readonly WindowPeriod[]
-    now: number
-  }>
-): BudgetOutcome {
+/** What a refused lease said blocked it; null for any other row. */
+function refusalOf(row: Operation | null) {
+  return row?.kind === "lease" && row.state.status === "refused" ? row.state.blocked : null
+}
+
+type OutcomeParams = Readonly<{
+  budget: BudgetRecord | null
+  ledger: Ledger
+  row: Operation | null
+  replayed: boolean
+  changes: readonly ConfigChange[]
+  /** This transition's periods, then the stored ones. */
+  history: readonly WindowPeriod[]
+  now: number
+}>
+
+/** A refused lease, first or replayed, answers like any denial: LIMIT_EXCEEDED. */
+function replyOf(command: BudgetCommand, params: OutcomeParams): BudgetReply {
+  const { budget, ledger, row, now } = params
+  const blocked = refusalOf(row)
+  if (!blocked) return { ok: true, outcome: outcomeOf(command, params) }
+  if (!budget) throw new Error("lease refused without a budget")
+  const balance = balanceOf({ budget, ledger }, now)
+  return { ok: false, rejection: { code: "LIMIT_EXCEEDED", blocked, balance } }
+}
+
+function outcomeOf(command: BudgetCommand, params: OutcomeParams): BudgetOutcome {
   const { budget, ledger, row, replayed, now } = params
   if (command.type === "sweep") return { type: "sweep" }
   if (!budget) throw new Error(`${command.type} accepted without a budget`)
@@ -335,6 +356,7 @@ function outcomeOf(
 
 function leaseView(lease: LeaseOperation): LeaseView {
   const { leaseKey, granted, captured, expiresAt, last, state } = lease
+  if (state.status === "refused") throw new Error(`lease ${leaseKey} was refused`)
   return { leaseKey, seq: last?.seq ?? 0, granted, captured, expiresAt, status: state.status }
 }
 

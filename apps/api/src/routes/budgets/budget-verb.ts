@@ -9,9 +9,13 @@ import {
   type UnPriceBudgetError,
   formatBudgetConfig,
 } from "@unprice/services/budgets"
-import { type BudgetVerbRequest, executeBudgetCommand } from "@unprice/services/use-cases"
+import {
+  type BudgetVerbRequest,
+  type ExecuteBudgetCommandInput,
+  executeBudgetCommand,
+} from "@unprice/services/use-cases"
 import type { Context } from "hono"
-import { endTime, startTime } from "hono/timing"
+import { setMetric } from "hono/timing"
 import { keyAuth } from "~/auth/key"
 import { UnpriceApiError } from "~/errors"
 import type { HonoEnv } from "~/hono/env"
@@ -31,16 +35,39 @@ export async function runBudgetVerb<R extends BudgetVerbRequest>(
   apiKey?: Pick<ApiKeyExtended, "projectId">
 ) {
   const { projectId } = apiKey ?? (await keyAuth(c))
-  // The round trip to the budget's Durable Object, apart from key auth and the rest of the Worker.
-  startTime(c, "budget")
-  const result = await executeBudgetCommand(
-    { budgets: new CloudflareBudgetClient(c.env) },
-    { projectId, key, request }
-  )
-  endTime(c, "budget")
+  const result = await callBudget(c, { projectId, key, request })
   if (result.err) throw budgetApiError(c, result.err)
   setRemaining(c, result.val)
   return result.val
+}
+
+/**
+ * Runs the verb on the budget's Durable Object and reports the call on the request's wide event
+ * (`budget_*` in Axiom) and on Server-Timing. Timed by hand, apart from key auth and the rest of
+ * the Worker.
+ */
+async function callBudget<R extends BudgetVerbRequest>(
+  c: Context<HonoEnv>,
+  input: ExecuteBudgetCommandInput<R>
+) {
+  const budgets = new CloudflareBudgetClient(c.env)
+  const startedAt = performance.now()
+  let outcome = "error"
+  try {
+    const result = await executeBudgetCommand({ budgets }, input)
+    outcome = result.err ? result.err.rejection.code : "ok"
+    return result
+  } finally {
+    const doMs = performance.now() - startedAt
+    setMetric(c, "budget", doMs)
+    c.get("logger").set({
+      budget: {
+        command: input.request.type,
+        outcome,
+        do_ms: doMs,
+      },
+    })
+  }
 }
 
 /** A budget value on the wire: every amount (a `bigint`) becomes its canonical decimal string. */

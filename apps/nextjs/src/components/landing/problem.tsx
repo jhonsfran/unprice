@@ -40,19 +40,18 @@ export function ProblemSection() {
             id="problem-title"
             className="mt-6 max-w-xl font-primary text-background-textContrast text-display-3"
           >
-            The provider was already paid before anything checked.
+            Your provider gets paid before anything checks the budget.
           </h2>
           <p className="mt-5 max-w-xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
             <span className="text-background-textContrast">
               Your Redis counter is not a budget.
             </span>{" "}
-            It records the spend after the provider call already made it. When a customer disputes
-            the invoice, engineering reconstructs the charge from logs.
+            It counts spend only after it happens.
           </p>
         </div>
 
         <figure
-          aria-label="A trace of the DIY stack. The usage reset last succeeded three days ago. Paid work creates cost, then the invoice bills $1,204 thirty days later. The customer disputes the charge against a $500 budget. Engineering has no plan version, budget check, credit reservation, or ledger entry, so it must reconstruct the evidence from logs."
+          aria-label="A trace of the DIY stack. The usage reset last succeeded three days ago. Paid work creates cost, then the invoice bills $1,204 thirty days later. The customer disputes the charge against a $500 budget. Engineering has no plan version, budget check, or ledger entry, so it must rebuild the evidence from logs."
           className="h-fit rounded-lg border border-background-border bg-surface-panel p-4 shadow-ambient sm:p-5"
         >
           <figcaption className="mb-4 flex items-baseline justify-between gap-4 border-background-border border-b pb-3">
@@ -125,7 +124,7 @@ export function ProblemSection() {
           <div aria-hidden className="relative py-1.5">
             <span className="-translate-y-1/2 absolute top-1/2 left-0 h-px w-3 bg-background-border" />
             <span className="pl-6 font-mono text-[10px] text-background-text uppercase tracking-widest">
-              what engineering can pull up
+              what engineering can find
             </span>
           </div>
 
@@ -153,7 +152,7 @@ export function ProblemSection() {
             <LedgerRow
               label="evidence"
               variant="ghost"
-              fact="reconstructed by hand"
+              fact="rebuilt by hand"
               factClassName="text-danger-text"
             />
           </div>

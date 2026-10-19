@@ -23,7 +23,8 @@
   "author": "Sebastian Franco",
   "license": "AGPL-3.0-only",
   "dependencies": {
-    "@unprice/api": "workspace:^"
+    "@unprice/api": "workspace:^",
+    "@unprice/budgets": "workspace:^"
   },
   "devDependencies": {
     "@types/node": "24.13.2",

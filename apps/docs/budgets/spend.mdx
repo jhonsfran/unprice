@@ -1,0 +1,146 @@
+---
+title: "Spend against a budget"
+description: "Reserve before work runs, settle what it cost, and pick the call that fits the work."
+---
+
+Take a handle with `unprice.budget(key)`, then call the verb that matches the work.
+
+| Work | Call | When usage counts |
+| --- | --- | --- |
+| A call whose cost is known only after it returns, such as an LLM call | `spend` | At settle, after the work |
+| The same, with your own control over each step | `authorize`, then `hold.settle` or `hold.release` | At settle |
+| A known, cheap amount gated before it runs | `charge` | Immediately, if it fits |
+| Usage that already happened | `record` | Always, even past a hard limit |
+
+## `spend`
+
+`spend` reserves `estimate` as the most the work may use, runs your function, and settles the
+`actual` it returns.
+
+```ts
+const acme = unprice.budget("customer:acme");
+
+const text = await acme.spend(
+  { estimate, idempotencyKey: request.id },
+  async () => {
+    const r = await generateText({ model, prompt, maxOutputTokens });
+    return { value: r.text, actual: costOf(r.usage) };
+  }
+);
+```
+
+- **`estimate`** must cover every billable unit, including input and the configured output limit.
+  Your provider integration must keep the work within it: a budget cannot stop a provider by itself.
+- **`actual`** may not exceed the estimate. Return `actual: 0` when the work used nothing.
+- **`idempotencyKey`** is a stable key for each operation, such as the request id. Without one,
+  `spend` generates a key and puts it on its errors as `error.idempotencyKey`.
+- **`ttlMs`** is the deadline for the work. It defaults to the budget's `holds.defaultTtlMs`.
+
+`spend` throws when the budget denies the estimate, when Unprice cannot be reached, and when the
+work or the settle fails. [Errors and recovery](/budgets/errors) covers each case.
+
+## `authorize`, `settle`, and `release`
+
+Use the manual calls when the authorize and the settle happen in different places, for example
+across a queue.
+
+```ts
+const { result, error } = await acme.authorize({
+  amount: "0.40",
+  ttlMs: 5 * 60 * 1000,
+  idempotencyKey: `job:${jobId}`
+});
+
+if (error) throw new Error(`${error.code}: ${error.message}`);
+if (!result.allowed) return { refused: result.blocked };
+
+const { hold } = result;
+const usage = await runJob(jobId, { maximumCost: hold.amount });
+
+if (usage === 0) await hold.release();
+else await hold.settle({ amount: usage });
+```
+
+A denial is a result, not an error: `result.allowed` is `false` and `result.blocked` names the limit
+and the remedy. When Unprice cannot be reached, the denial has `degraded: true`.
+
+`authorize` requires your own idempotency key. Keep it before you send, and retry an uncertain
+answer with the same key and input: the retry returns the same hold, with `replayed: true`. The
+same key with another amount or `ttlMs` returns 409. `hold.settle` and `hold.release` are safe to
+retry, because the hold id is their idempotency key.
+
+Call `release` only after confirming the work used nothing and has stopped. Releasing twice changes
+nothing. Releasing a settled hold returns 409.
+
+## Holds and expiry
+
+A hold reserves capacity until it is settled, released, or reaches its `expiresAt`.
+
+- **A hold still open at `expiresAt` is settled at its full amount**, never released. The cap
+  assumes the work used everything it reserved. That capacity stays used until its window resets.
+- After expiry, only a settle of the full amount succeeds. Any other settle or a release returns
+  409.
+- A closed hold keeps its result for one day, so retries replay. Later retries return 409.
+
+Pass a `ttlMs` that covers the work, within the budget's `holds.maxTtlMs`.
+
+## `charge`
+
+`charge` consumes an amount in one call when it fits every hard limit. Use it for cheap work gated
+before it runs, such as a free-tier quota counted in `units:`.
+
+```ts
+const { result, error } = await unprice.budget(`user:${userId}`).charge({
+  amount: 1,
+  idempotencyKey: request.id
+});
+
+if (error) throw new Error(`${error.code}: ${error.message}`);
+if (!result.allowed) return new Response("Daily limit reached", { status: 429 });
+```
+
+## `record`
+
+`record` reports usage that already happened. It always counts, even past a hard limit, because the
+work cannot be undone. `crossed` names each limit it passed, and a crossed hard limit then denies
+`authorize` and `charge`.
+
+```ts
+await acme.record({
+  amount: event.cost,
+  idempotencyKey: event.id,
+  occurredAt: event.timestamp
+});
+```
+
+- Pass the event's own id as the key and its own time as `occurredAt`, never the time of the call.
+- `occurredAt` must be at most one day old and at most five minutes ahead. Older usage returns 409.
+- For 25 hours, the same key and amount replay instead of counting twice, and the same key with
+  another amount returns 409.
+
+`record` does not authorize work after the fact. Authorize before work that needs guaranteed
+capacity.
+
+## Settle in the background
+
+In a serverless function, pass the platform's `waitUntil` to the client so the settle does not
+delay the response. `spend` then returns the work's value as soon as your function finishes and
+settles in the background.
+
+```ts
+import { waitUntil } from "@vercel/functions";
+import { Unprice } from "@unprice/budgets";
+
+const unprice = new Unprice({
+  token: process.env.UNPRICE_TOKEN!,
+  waitUntil,
+  onSettleError: (error) => console.error(error.message, error.actual)
+});
+```
+
+Next.js `after` works the same way. On Cloudflare Workers, create the client in the handler with
+`waitUntil: (promise) => ctx.waitUntil(promise)`.
+
+Denials, authorization errors, and `BudgetRecoveryError` still throw from `spend`. A failed
+background settle goes to `onSettleError` instead. Its hold stays open and counts its full estimate
+when it expires, so a lost settle can over-count usage, never under-count it.

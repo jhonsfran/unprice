@@ -51,6 +51,7 @@ call, API request, data job, workflow, export, or tool run.
 | Report usage without blocking the request | `usage.record` | Asynchronous ingestion. It is not a spend gate. |
 | Hold a maximum for one call whose cost is unknown until it returns | `reservations.reserve` then `reservation.settle` | TypeScript SDK helper over `runs`. The common agent-call shape. |
 | Authorize a budget across a multi-step workload | `runs.start` / `runs.consume` / `runs.settle` / `runs.end` | Full control for a job, workflow, tool chain, or agent. |
+| Cap spend on a key you choose, with no plans or customers in Unprice | `budget(key).spend` | [Unprice Budgets](/budgets/overview). Your billing stays where it is. |
 
 ## Why not a counter?
 

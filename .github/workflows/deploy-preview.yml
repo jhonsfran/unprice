@@ -114,7 +114,7 @@ jobs:
           database: ${{ env.NEON_DATABASE_NAME }}
           api_key: ${{ env.NEON_API_KEY }}
 
-      - uses: cloudposse/github-action-secret-outputs@67ae2f7ee1890986ba0012bacd079a5a36ecb449 # main
+      - uses: ./.github/actions/secret-outputs
         id: db-url
         with:
           ## PASSWORD is a gpg passphrase stored in Github Secrets.
@@ -122,7 +122,7 @@ jobs:
           op: encode
           in: ${{ steps.create-branch.outputs.db_url_with_pooler }}
 
-      - uses: cloudposse/github-action-secret-outputs@67ae2f7ee1890986ba0012bacd079a5a36ecb449 # main
+      - uses: ./.github/actions/secret-outputs
         id: db-branch
         with:
           ## PASSWORD is a gpg passphrase stored in Github Secrets.
@@ -172,7 +172,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: cloudposse/github-action-secret-outputs@67ae2f7ee1890986ba0012bacd079a5a36ecb449 # main
+      - uses: ./.github/actions/secret-outputs
         id: db-url
         with:
           ## PASSWORD is a gpg passphrase stored in Github Secrets.
@@ -240,7 +240,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: cloudposse/github-action-secret-outputs@67ae2f7ee1890986ba0012bacd079a5a36ecb449 # main
+      - uses: ./.github/actions/secret-outputs
         id: db-url
         with:
           ## PASSWORD is a gpg passphrase stored in Github Secrets.

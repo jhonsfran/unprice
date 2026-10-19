@@ -1,0 +1,100 @@
+---
+title: "Errors and recovery"
+description: "What each budget error means, whether the work ran, and how to recover."
+---
+
+`spend` throws one of five errors. The table says whether your function ran.
+
+| Error | Meaning | Did the work run? |
+| --- | --- | --- |
+| `BudgetExceededError` | A limit denied the estimate | No |
+| `BudgetUnavailableError` | Unprice could not be reached, or answered 429 or 500, after the client's retries | No |
+| `BudgetRequestError` | The API rejected the authorization | No |
+| `BudgetRecoveryError` | Your function threw, or your idempotency key replayed | Maybe after `work_failed`. Not in this call after `authorization_replayed` |
+| `BudgetSettleError` | The work succeeded, but its settle failed | Yes |
+
+All five carry `error.idempotencyKey`. The manual calls `authorize` and `charge` do not throw. They
+return a denial as a result and every other failure as `{ error }`.
+
+## `BudgetExceededError`
+
+A limit denied the estimate, and your function did not run. `error.blocked` names the limit and what
+would let the same request through:
+
+| `remedy` | Meaning |
+| --- | --- |
+| `release_holds` | Releasing open holds would make the request fit |
+| `wait_for_reset` | The request fits once the failing windows reset, at `resetsAt` |
+| `raise_limit` | Neither is enough: a limit needs a change, which takes a config key |
+
+`error.blocked` also carries `limitId`, `window`, `remaining`, `held`, and `resetsAt`, and
+`error.balance` holds the budget's balance at the denial.
+
+## `BudgetUnavailableError`
+
+Unprice could not be reached, or it answered 429 `TOO_MANY_REQUESTS` or 500
+`INTERNAL_SERVER_ERROR` after the client's retries. Your function did not run. The authorization
+may still have committed, so retry with the same estimate, `ttlMs`, and `error.idempotencyKey`:
+
+```ts
+try {
+  return await acme.spend({ estimate }, work);
+} catch (error) {
+  if (!(error instanceof BudgetUnavailableError)) throw error;
+  return await acme.spend({ estimate, idempotencyKey: error.idempotencyKey }, work);
+}
+```
+
+If that retry throws `BudgetRecoveryError` with `reason: "authorization_replayed"`, the first
+attempt committed and the work never ran. Run it and settle through `error.hold`, or release that
+hold.
+
+The default handle denies new work while Unprice is unreachable. In
+[local mode](/budgets/local-mode), spending continues within the lease until its deadline.
+
+## `BudgetRequestError`
+
+The API rejected the authorization, for example because the budget does not exist (404), has closed
+(409), or the request is invalid (400). Your function did not run. `error.error` holds the API
+error with its `code` and `requestId`.
+
+## `BudgetRecoveryError`
+
+The SDK cannot tell what the work used, so it keeps the hold and hands it to you as `error.hold`.
+
+**`reason: "work_failed"`.** Your function threw. The original error is `error.cause`. A provider
+timeout can follow billable work, so check the provider's result first. Settle known usage with
+`error.hold.settle({ amount })`. Call `error.hold.release()` only after confirming the usage is
+zero.
+
+**`reason: "authorization_replayed"`.** An authorization under your own idempotency key replayed,
+so `spend` did not run your function again. Recover the provider's result and settle through the
+hold. A generated key never leaves the call, so its replay only means the client retried a lost
+response, and `spend` runs the function.
+
+The idempotency key protects budget accounting. It does not give exactly-once provider execution:
+use the provider's own idempotency, or a durable workflow, when the work must survive a crash.
+
+## `BudgetSettleError`
+
+The work succeeded and produced `error.value`, but the settle failed. The first settle may have
+committed, so do not rerun the work and do not `record` that usage.
+
+- **Transport failure** (`error.cause`): retry `error.hold.settle({ amount: error.actual })`.
+- **API error** (`error.error`): usage above the reserved maximum returns 409 and keeps the hold
+  open. Reconcile the provider failure that let the work exceed its maximum. Do not clamp the amount
+  or release the hold to hide the excess.
+
+With the client's `waitUntil`, a failed background settle goes to `onSettleError` instead of
+throwing. See [settle in the background](/budgets/spend#settle-in-the-background).
+
+## API error codes
+
+| Status | Code | When |
+| --- | --- | --- |
+| 402 | [`BUDGET_EXCEEDED`](/api-reference/errors/code/BUDGET_EXCEEDED) | The request does not fit a hard limit |
+| 403 | [`INSUFFICIENT_PERMISSIONS`](/api-reference/errors/code/INSUFFICIENT_PERMISSIONS) | A runtime key tried to loosen a budget, or the key type cannot call the operation |
+| 404 | [`NOT_FOUND`](/api-reference/errors/code/NOT_FOUND) | No budget at the key |
+| 409 | [`CONFLICT`](/api-reference/errors/code/CONFLICT) | The budget has closed, a settle exceeds its hold, a cap is below current usage, or an idempotency key was reused with another request |
+| 429 | [`TOO_MANY_REQUESTS`](/api-reference/errors/code/TOO_MANY_REQUESTS) | Unprice rate-limited the request. Retry it with the same idempotency key |
+| 500 | [`INTERNAL_SERVER_ERROR`](/api-reference/errors/code/INTERNAL_SERVER_ERROR) | Unprice failed while it handled the request. Retry it with the same idempotency key |

@@ -103,17 +103,31 @@ function budgetWith(input: BudgetConfigInput, at = t0) {
   return store
 }
 
-function ok(result: ReturnType<MemoryBudgetStore["run"]>): BudgetTransition {
+type Accepted = Extract<BudgetTransition, { ok: true }>
+
+function ok(result: ReturnType<MemoryBudgetStore["run"]>): Accepted {
   if (result.err) throw result.err
+  if (!result.val.ok) throw new Error(`expected an outcome, got ${result.val.rejection.code}`)
   return result.val
 }
 
 function rejection(result: ReturnType<MemoryBudgetStore["run"]>) {
-  if (!result.err) throw new Error(`expected a rejection, got ${result.val.outcome.type}`)
+  if (!result.err) {
+    throw new Error(
+      `expected a rejection, got ${result.val.ok ? result.val.outcome.type : "a refusal"}`
+    )
+  }
   return result.err.rejection
 }
 
-function remaining(transition: BudgetTransition) {
+/** A rejection the store wrote: a refused lease, kept so its key replays the refusal. */
+function refusal(result: ReturnType<MemoryBudgetStore["run"]>) {
+  if (result.err) throw result.err
+  if (result.val.ok) throw new Error(`expected a refusal, got ${result.val.outcome.type}`)
+  return result.val
+}
+
+function remaining(transition: Accepted) {
   const { outcome } = transition
   const balance =
     "balance" in outcome ? outcome.balance : "budget" in outcome ? outcome.budget.balance : null
@@ -549,7 +563,7 @@ describe("expiry and final settlement", () => {
 describe("leases", () => {
   const terms = { holds: { defaultTtlMs: 15 * minute, maxTtlMs: day }, closesAt: null }
 
-  it("grants what fits under every hard limit, refuses when nothing fits, and replays its key", () => {
+  it("grants what fits under every hard limit and replays its key", () => {
     const store = budgetWith(month100)
     ok(store.run(charge("c1", 70), t0))
 
@@ -571,17 +585,6 @@ describe("leases", () => {
     expect(granted.wakeAt).toBe(t0 + minute)
 
     const writes = store.writes
-    expect(rejection(store.run(lease("l2", 1), t0))).toMatchObject({
-      code: "LIMIT_EXCEEDED",
-      blocked: {
-        limitId: "month",
-        window: "month",
-        remaining: $(0),
-        held: $(30),
-        resetsAt: nov1,
-        remedy: "release_holds",
-      },
-    })
     expect(ok(store.run(lease("l1", 50), t0 + minute / 2)).outcome).toMatchObject({
       lease: { granted: $(30), expiresAt: t0 + minute },
       replayed: true,
@@ -590,6 +593,56 @@ describe("leases", () => {
     expect(rejection(store.run(lease("l1", 40), t0))).toEqual(conflict)
     expect(rejection(store.run(lease("l1", 50, hour), t0))).toEqual(conflict)
     expect(store.writes).toBe(writes)
+  })
+
+  it("writes a refusal when nothing fits, which its key replays for 10 minutes", () => {
+    const store = budgetWith(month100)
+    ok(store.run(authorize("k1", 100), t0))
+    const blocked = {
+      limitId: "month",
+      window: "month",
+      remaining: $(0),
+      held: $(100),
+      resetsAt: nov1,
+      remedy: "release_holds",
+    }
+
+    const refused = refusal(store.run(lease("l1", 1), t0))
+    expect(refused.rejection).toEqual({
+      code: "LIMIT_EXCEEDED",
+      blocked,
+      balance: expect.objectContaining({ remaining: $(0), held: $(100) }),
+    })
+    expect([refused.write, refused.wakeAt]).toEqual([true, t0 + 10 * minute])
+    expect(store.rows.get("l:l1")).toMatchObject({
+      granted: $(0),
+      state: { status: "refused", closedAt: t0, blocked },
+    })
+
+    // A late copy of the request finds the room a release returned and still gets the refusal.
+    ok(store.run(release("h_1"), t0))
+    const writes = store.writes
+    const replayed = refusal(store.run(lease("l1", 1), t0 + 10 * minute - 1))
+    expect([replayed.write, replayed.rejection]).toMatchObject([
+      false,
+      { code: "LIMIT_EXCEEDED", blocked, balance: { remaining: $(100), held: $(0) } },
+    ])
+    expect(rejection(store.run(lease("l1", 2), t0))).toEqual({
+      code: "IDEMPOTENCY_CONFLICT",
+      idempotencyKey: "l1",
+    })
+    expect(rejection(store.run(finalReport("l1", 1, 0), t0))).toEqual({
+      code: "LEASE_NOT_FOUND",
+      leaseKey: "l1",
+    })
+    expect(store.writes).toBe(writes)
+    expect([store.ledger.held, store.ledger.usage.month.consumed]).toEqual([$(0), $(0)])
+    expect(store.ledger.operations).toMatchObject({ authorize: 1, release: 1, lease: 0 })
+
+    const regranted = ok(store.run(lease("l1", 1), t0 + 10 * minute))
+    expect(regranted.outcome).toMatchObject({ type: "lease", lease: { granted: $(1) } })
+    expect(regranted.purged).toEqual([expect.objectContaining({ id: "l:l1" })])
+    expect(store.ledger.operations.lease).toBe(1)
   })
 
   it("refuses a lease on a closed budget and a TTL outside the hold bounds", () => {
@@ -1089,10 +1142,10 @@ describe("closesAt", () => {
       replayed: false,
     })
     expect(ok(store.run(release("h_2"), closesAt)).outcome).toMatchObject({ released: $(10) })
-    expect(ok(store.run(record("r1", 5), closesAt + day - 1)).outcome).toMatchObject({
+    expect(ok(store.run(record("r1", 5, closesAt), closesAt + day - 1)).outcome).toMatchObject({
       replayed: false,
     })
-    expect(rejection(store.run(record("r2", 5), closesAt + day))).toEqual(closed)
+    expect(rejection(store.run(record("r2", 5, closesAt), closesAt + day))).toEqual(closed)
 
     expect(ok(store.run({ type: "get" }, closesAt + day)).outcome).toMatchObject({
       budget: { closesAt, closed: true, balance: { held: $(0), limits: [{ consumed: $(30) }] } },
@@ -1219,12 +1272,12 @@ describe("window history", () => {
 })
 
 describe("record dedupe", () => {
-  it("accepts usage from the last 7 days up to 5 minutes ahead", () => {
+  it("accepts usage from the last day up to 5 minutes ahead", () => {
     const store = budgetWith(month100)
-    expect(rejection(store.run(record("r1", 1, t0 - 7 * day - 1), t0))).toEqual({
+    expect(rejection(store.run(record("r1", 1, t0 - day - 1), t0))).toEqual({
       code: "TOO_LATE",
-      occurredAt: t0 - 7 * day - 1,
-      oldestAccepted: t0 - 7 * day,
+      occurredAt: t0 - day - 1,
+      oldestAccepted: t0 - day,
     })
     expect(rejection(store.run(record("r1", 1, t0 + 5 * minute + 1), t0))).toEqual({
       code: "INVALID_OCCURRED_AT",
@@ -1233,7 +1286,7 @@ describe("record dedupe", () => {
     })
     expect(store.writes).toBe(1)
 
-    expect(ok(store.run(record("r1", 1, t0 - 7 * day), t0)).outcome).toMatchObject({
+    expect(ok(store.run(record("r1", 1, t0 - day), t0)).outcome).toMatchObject({
       replayed: false,
     })
     const ahead = ok(store.run(record("r2", 2, t0 + 5 * minute), t0))
@@ -1249,33 +1302,35 @@ describe("record dedupe", () => {
     expect(rejection(store.run(record("r1", 31), t0 + minute)).code).toBe("IDEMPOTENCY_CONFLICT")
   })
 
-  it("keeps a record's row for 8 days, then refuses the replay as too late", () => {
+  it("keeps a record's row for 25 hours, then refuses the replay as too late", () => {
     const store = budgetWith({ limits: [{ id: "life", amount: "100", window: "never" }] })
     ok(store.run(record("r1", 30), t0))
     ok(store.run(record("r2", 70), t0))
 
-    store.alarm(t0 + day)
+    // Past the accept window the row still answers: the replay never counts twice.
+    const late = t0 + day + 30 * minute
+    store.alarm(late)
     expect([...store.rows.keys()]).toEqual(["o:r1", "o:r2"])
-    expect(ok(store.run(record("r2", 70), t0 + 6 * day)).outcome).toMatchObject({
+    expect(ok(store.run(record("r2", 70), late)).outcome).toMatchObject({
       type: "record",
       amount: $(70),
       crossed: [],
       replayed: true,
       balance: { remaining: $(0) },
     })
-    expect(rejection(store.run(record("r1", 31), t0 + 6 * day)).code).toBe("IDEMPOTENCY_CONFLICT")
-    expect(rejection(store.run(charge("r1", 30), t0 + 6 * day)).code).toBe("IDEMPOTENCY_CONFLICT")
+    expect(rejection(store.run(record("r1", 31), late)).code).toBe("IDEMPOTENCY_CONFLICT")
+    expect(rejection(store.run(charge("r1", 30), late)).code).toBe("IDEMPOTENCY_CONFLICT")
 
-    store.alarm(t0 + 8 * day)
+    store.alarm(t0 + 25 * hour)
     expect(store.rows.size).toBe(0)
-    expect(rejection(store.run(record("r1", 30), t0 + 8 * day)).code).toBe("TOO_LATE")
+    expect(rejection(store.run(record("r1", 30), t0 + 25 * hour)).code).toBe("TOO_LATE")
   })
 
   it("stops answering from a row when its retention ends, even before the alarm purges it", () => {
     const store = budgetWith(month100)
     ok(store.run(record("r1", 30), t0))
 
-    const reused = ok(store.run(record("r1", 5, t0 + 8 * day), t0 + 8 * day))
+    const reused = ok(store.run(record("r1", 5, t0 + 25 * hour), t0 + 25 * hour))
     expect(reused.outcome).toMatchObject({ amount: $(5), replayed: false })
     expect([store.rows.size, store.rows.get("o:r1")]).toMatchObject([1, { amount: $(5) }])
   })
@@ -1519,6 +1574,44 @@ describe("checkTransition for leases", () => {
         periods: [],
       })
     ).toEqual(["lease l:l1 expired without capturing its grant"])
+  })
+
+  it("catches a refused lease that was granted something", () => {
+    const refused: LeaseOperation = {
+      kind: "lease",
+      id: "l:l1",
+      leaseKey: "l1",
+      requested: $(40),
+      ttlMs: minute,
+      createdAt: t0,
+      granted: $(10),
+      captured: $(0),
+      last: null,
+      expiresAt: t0 + minute,
+      state: {
+        status: "refused",
+        closedAt: t0,
+        blocked: {
+          limitId: "month",
+          window: "month",
+          remaining: $(0),
+          held: $(0),
+          resetsAt: nov1,
+          remedy: "raise_limit",
+        },
+      },
+    }
+    const before = { ...emptyLedger, lastAt: t0 }
+    expect(
+      checkTransition({
+        before,
+        after: before,
+        limits: [],
+        resultingLimits: [],
+        steps: [[undefined, refused]],
+        periods: [],
+      })
+    ).toEqual(["lease l:l1 was created refused"])
   })
 })
 

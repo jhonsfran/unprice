@@ -1,0 +1,102 @@
+---
+title: "Local mode"
+description: "Answer budget checks from a lease held in your process's memory."
+---
+
+A long-lived process, such as an API server, a queue worker, or an agent runner, can spend from a
+lease held in its own memory. Unprice debits the lease from the budget up front. `authorize`,
+`settle`, `release`, `charge`, and `spend` then answer in memory, with the same contract and
+shapes and without a network round trip. `record` and `get` still call the API.
+
+```ts
+const acme = unprice.budget("customer:acme", { mode: "local", lease: { amount: "5" } });
+
+const text = await acme.spend({ estimate }, async () => {
+  const r = await generateText({ model, prompt, maxOutputTokens });
+  return { value: r.text, actual: costOf(r.usage) };
+});
+
+process.on("SIGTERM", () => void unprice.close());
+```
+
+The cap holds in local mode too. A lease is capacity the budget already granted, so a process
+never spends more than its lease, and the budget never grants more than its hard limits allow.
+
+## When to use it
+
+| Process | Mode |
+| --- | --- |
+| API server, queue worker, agent runner, anything that runs for minutes or longer | Local |
+| Serverless function, edge handler, short-lived script | Remote, the default handle |
+
+A short-lived process cannot report its lease before it is frozen or killed, so its lease would
+expire and count in full.
+
+## How a lease runs
+
+- **Reports.** The handle reports consumption every `flushIntervalMs`.
+- **Refills.** It tops the lease back up to `amount` in the background once it falls below
+  `lowWater`. Only a request the lease cannot cover waits for a refill. When the budget has no room
+  left, that request gets the usual limit denial.
+- **Refusals.** When a new lease is refused, the key's calls get that denial for `flushIntervalMs`
+  before the handle asks again.
+- **Renewal.** It renews the lease once less than a third of `ttlMs` is left.
+- **Outages.** If Unprice cannot be reached, spending continues within the lease until its
+  deadline. After that, `authorize` and `charge` deny with `degraded: true`.
+- **Idle keys.** A lease idle for `idleMs` with no open hold goes back to Unprice: the handle sends
+  its final report, and the unused capacity returns. The next call takes a new lease in one round
+  trip, so per-run keys such as `run:<id>` do not accumulate in the process.
+
+## Options
+
+<ParamField body="amount" type="string | number" required>
+  Capacity to lease per grant, and the level a refill tops the lease back up to.
+</ParamField>
+
+<ParamField body="lowWater" type="string | number">
+  Refill in the background below this. Defaults to a quarter of `amount`.
+</ParamField>
+
+<ParamField body="ttlMs" type="integer" default="60000">
+  The lease's lifetime, renewed while the process reports. Must exceed three flush intervals, or
+  the handle throws a `RangeError`.
+</ParamField>
+
+<ParamField body="flushIntervalMs" type="integer" default="1000">
+  How often consumption is reported while it changes.
+</ParamField>
+
+<ParamField body="idleMs" type="integer" default="10000">
+  Return the lease after this long without a local call, once no hold is open. `Infinity` keeps it
+  while the process runs.
+</ParamField>
+
+<ParamField body="onError" type="(error: ApiError) => void">
+  Receives background report failures. Spending continues within the lease until its deadline. An
+  `ApiError` has `code`, `message`, `docs`, and `requestId`.
+</ParamField>
+
+## One lease per key
+
+A client holds at most one lease per key. Every `unprice.budget(key, { mode: "local", ... })` call on
+it spends from that lease, so taking a handle per request is fine. Taking one with other lease
+options while the key's lease is open throws a `RangeError`. `onError` comes from the handle that
+opened the lease.
+
+## Shut down cleanly
+
+Call `unprice.close()` before the process exits. It sends each open lease's final report, which
+counts open holds at their full amount and returns the rest of the lease. It resolves with a
+`{ key, error }` for each lease it could not return. `acme.close()` does the same for one key, and
+`acme.flush()` reports consumption now.
+
+A process that crashes or never closes still keeps the cap: its lease expires after `ttlMs` and
+counts in full, so that capacity stays used until its window resets.
+
+## What differs from remote answers
+
+- Local answers carry the balance from the last report, and their `crossed` is empty.
+- Idempotency keys replay for the life of the lease, up to its most recent 100,000 keys.
+
+Other languages can run the same protocol over HTTP with `/v1/budgets/lease` and
+`/v1/budgets/report`. See the [API reference](/api-reference/overview).

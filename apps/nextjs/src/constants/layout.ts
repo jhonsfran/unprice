@@ -3,6 +3,12 @@ import type { SiteConfig } from "../types"
 
 export const navItems = [
   {
+    href: `${BASE_URL}/budgets`,
+    title: "Budgets",
+    isMarketing: true,
+    isDashboard: false,
+  },
+  {
     href: `${BASE_URL}/manifesto`,
     title: "Manifesto",
     isMarketing: true,

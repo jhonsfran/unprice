@@ -1,4 +1,4 @@
-import { type BudgetHandle, Unprice } from "@unprice/api"
+import { type BudgetHandle, Unprice } from "@unprice/budgets"
 
 // Latency probe for budget local mode (ADR-0006 B10), not a load test. One process times N
 // authorize+settle pairs against one budget, first remote (one round trip per verb), then local
@@ -6,7 +6,7 @@ import { type BudgetHandle, Unprice } from "@unprice/api"
 //
 //   BASE_URL=http://localhost:8787 UNPRICE_TOKEN=unprice_dev_xxx pnpm --filter @unprice/k6 budget-local
 //
-// The script builds @unprice/api first, so it measures the SDK in this checkout.
+// The script builds @unprice/budgets first, so it measures the SDK in this checkout.
 //
 // An authorize "waited" when a lease or report answer arrived during it: the fast path never
 // yields to the event loop, so no response can land inside a call that did not wait for one.

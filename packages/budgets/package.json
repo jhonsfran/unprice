@@ -1,0 +1,52 @@
+{
+  "name": "@unprice/budgets",
+  "description": "Hard caps for AI agents. A budget on any key you choose (a customer, a run, an agent, an API key), checked before the work, remotely or from a lease in memory.",
+  "private": false,
+  "version": "0.0.0",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "license": "MIT",
+  "files": ["./dist/**"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": ["unprice", "budgets", "spend caps", "ai agents", "llm", "billing", "rate limiting"],
+  "bugs": {
+    "url": "https://github.com/jhonsfran/unprice/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jhonsfran/unprice.git",
+    "directory": "packages/budgets"
+  },
+  "homepage": "https://github.com/jhonsfran/unprice#readme",
+  "scripts": {
+    "clean": "rm -rf .turbo node_modules dist",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "generate:types": "node ../../tooling/scripts/sdk-codegen/budget-openapi.mjs ../../apps/docs/openapi.json | openapi-typescript -o ./src/openapi.d.ts --default-non-nullable false && pnpm biome format ./src/openapi.d.ts --write",
+    "generate:resources": "node ../../tooling/scripts/sdk-codegen/budget-openapi.mjs ../../apps/docs/openapi.json | node ../../tooling/scripts/sdk-codegen/generate-sdk-resources.mjs - ./src/generated/sdk-resources.ts",
+    "generate": "pnpm generate:types && pnpm generate:resources",
+    "build": "rm -rf dist && tsup",
+    "dev": "tsup --watch"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.2",
+    "fast-check": "^4.5.3",
+    "openapi-typescript": "7.0.0-next.7",
+    "tsup": "^8.4.0",
+    "typescript": "^5.3.3",
+    "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "openapi-fetch": "0.17.0"
+  }
+}

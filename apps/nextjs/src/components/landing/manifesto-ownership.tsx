@@ -1,6 +1,7 @@
 import { buttonVariants } from "@unprice/ui/button"
 import { GitHub } from "@unprice/ui/icons"
 import { Link } from "next-view-transitions"
+import { siteConfig } from "~/constants/layout"
 import { LedgerRow, SectionShell } from "./station"
 import { StationHeader } from "./station-header"
 
@@ -20,11 +21,8 @@ const consolidationTrace = [
 const ownershipFacts = [
   { label: "license", fact: "AGPL-3.0 core · commercial available" },
   { label: "wallet ledger", fact: "double-entry · always balances" },
-  { label: "schemas", fact: "plans · versions · meters · entitlements" },
-  { label: "SDK", fact: "generated from OpenAPI contracts" },
-  { label: "runtime", fact: "Cloudflare Workers + DOs · your account" },
-  { label: "payments", fact: "Stripe-first · provider-extensible" },
-  { label: "funds flow", fact: "yours · unprice never sits in it" },
+  { label: "runtime", fact: "Workers and Durable Objects · your account" },
+  { label: "funds flow", fact: "yours · Unprice never holds it" },
 ]
 
 export default function ManifestoOwnership() {
@@ -40,19 +38,15 @@ export default function ManifestoOwnership() {
             The billing layer you rent can be acquired. The money path you own cannot.
           </h2>
           <p className="mt-5 max-w-xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-            Between 2025 and 2026, four venture-backed billing vendors were acquired or taken
-            private. When your revenue logic runs in a closed vendor runtime, an acquisition can
-            change the product and roadmap you depend on.
+            Four venture-backed billing vendors were bought or taken private in 2025 and 2026. If
+            your billing runs on one of them, its new owner sets your roadmap.
           </p>
           <p className="mt-4 max-w-xl text-background-text text-sm leading-6">
-            Unprice keeps the customer spend decision, the double-entry ledger, and the invoice
-            explanation in one open money path you can read, fork, and run in your own Cloudflare
-            account. Read the code that guards your money, or have your agent inspect it, before you
-            trust it.
+            Unprice is open source. Read it, fork it, and run it in your own Cloudflare account.
           </p>
           <div className="mt-8">
             <Link
-              href="https://github.com/jhonsfran1165/unprice"
+              href={siteConfig.links.github}
               target="_blank"
               className={buttonVariants({ variant: "outline", className: "gap-2" })}
             >
@@ -64,7 +58,7 @@ export default function ManifestoOwnership() {
 
         <div className="flex h-fit flex-col gap-6">
           <figure
-            aria-label="The billing middle market, traced: Zuora taken private by Silver Lake in February 2025, OpenMeter acquired by Kong in September 2025, Metronome acquired by Stripe for about one billion dollars in January 2026, Orb acquired by Adyen for 335 million dollars in June 2026. No independent metering-first vendor remains."
+            aria-label="The billing middle market, traced: Zuora taken private by Silver Lake in February 2025, OpenMeter acquired by Kong in September 2025, Metronome acquired by Stripe for about one billion dollars in January 2026, Orb acquired by Adyen for 335 million dollars in June 2026. The venture-backed metering vendors were acquired or pivoted."
             className="rounded-lg border border-background-border bg-surface-raised p-4 sm:p-5"
           >
             <figcaption className="mb-4 flex items-baseline justify-between gap-4 border-background-border border-b pb-3">
@@ -117,7 +111,7 @@ export default function ManifestoOwnership() {
                 What you own
               </span>
               <span className="hidden font-mono text-[10px] text-background-text sm:inline">
-                inspect before you trust
+                read before you trust
               </span>
             </div>
             <div className="flex flex-col">

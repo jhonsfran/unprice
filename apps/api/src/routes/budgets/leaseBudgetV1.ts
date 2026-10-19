@@ -1,5 +1,10 @@
 import { createRoute } from "@hono/zod-openapi"
-import { leaseBudgetInputSchema, leaseBudgetResponseSchema } from "@unprice/db/validators"
+import {
+  LEASE_REFUSAL_RETENTION_MS,
+  describeDuration,
+  leaseBudgetInputSchema,
+  leaseBudgetResponseSchema,
+} from "@unprice/db/validators"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { openApiBudgetErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
@@ -13,8 +18,7 @@ export const route = createRoute(
       path: "/v1/budgets/lease",
       operationId: "budgets.lease",
       summary: "debit capacity for a long-lived process to spend locally",
-      description:
-        "Debit capacity against every hard limit before it is spent, for a long-lived process to authorize, settle, and charge in its own memory. Near a limit less than asked for is granted; when nothing fits, 402. Report usage to /v1/budgets/report before expiresAt, or the whole grant counts as used. A retry with the same lease key, amount, and ttlMs returns the same lease. A budget past its closesAt returns 409.",
+      description: `Debit capacity against every hard limit before it is spent, for a long-lived process to authorize, settle, and charge in its own memory. Near a limit less than asked for is granted; when nothing fits, 402. Report usage to /v1/budgets/report before expiresAt, or the whole grant counts as used. A retry with the same lease key, amount, and ttlMs returns the same lease, or for ${describeDuration(LEASE_REFUSAL_RETENTION_MS)} the same 402. A budget past its closesAt returns 409.`,
       method: "post",
       tags: ["budgets"],
       request: {

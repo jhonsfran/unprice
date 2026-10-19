@@ -1,0 +1,139 @@
+---
+title: "Keys and limits"
+description: "Choose what a budget caps, in which unit, over which windows, and who may raise it."
+---
+
+A budget is one definition at one key. `budgets.upsert` creates it or replaces it, and
+`unprice.budget(key)` takes a handle that spends against it. The handle never creates or changes
+the budget.
+
+```ts
+await unprice.budgets.upsert({
+  key: "customer:acme",
+  unit: "USD",
+  limits: [
+    { amount: "5", window: "day" },
+    { amount: "50", window: "month" }
+  ]
+});
+```
+
+## Keys
+
+The key names what the cap is about. You choose it, and it is unique within the project: up to 128
+letters, digits, and `: / _ . @ -`, starting with a letter or digit.
+
+| Cap | Key |
+| --- | --- |
+| One end customer of your product | `customer:acme` |
+| One agent run | `run:r_42` |
+| One agent, across its runs | `agent:researcher` |
+| One API key you issued | `key:k_1` |
+| One free-tier user, counted in generations | `user:u_9` |
+
+## Units
+
+`unit` is fixed when the budget is created and cannot change.
+
+| Unit | Example | Use it for |
+| --- | --- | --- |
+| A currency code | `USD` (shorthand for `money:USD`) | Model and tool spend in money |
+| `credits:<id>` | `credits:app` | Credits your product sells |
+| `units:<slug>` | `units:generations` | Counts with no price, such as a free-tier quota |
+
+Amounts are decimal strings with at most 8 decimal places. The SDK also accepts numbers and rounds
+them to 8 places.
+
+## Limits
+
+A budget takes up to 16 limits. Each authorization and charge must fit every hard limit.
+
+<ParamField body="amount" type="string" required>
+  The cap, in the budget's unit.
+</ParamField>
+
+<ParamField body="window" type="string" required>
+  The period the limit counts over: `hour`, `day`, `week`, `month`, or `never`. Without an anchor,
+  `hour`, `day`, `week` (ISO, from Monday), and `month` are UTC calendar periods. `never` counts for
+  the life of the budget.
+</ParamField>
+
+<ParamField body="anchor" type="integer">
+  Epoch milliseconds. Starts `day`, `week`, and `month` periods at this instant instead of the UTC
+  calendar, for example a billing cycle from the customer's signup date. A month anchored on the 31st
+  starts on the last day of shorter months.
+</ParamField>
+
+<ParamField body="enforce" type="string" default="hard">
+  `hard` denies work that does not fit. `soft` never denies: it counts usage against the amount, and
+  its `remaining` can go negative.
+</ParamField>
+
+<ParamField body="id" type="string">
+  Unique within the budget. Defaults to the window name. The id fixes the limit's schedule, so give
+  a limit with a different schedule a new id.
+</ParamField>
+
+An empty `limits` list makes a budget that only counts.
+
+## Budgets that end
+
+Give short-lived budgets, such as one per run, a `closesAt` in epoch milliseconds.
+
+```ts
+await unprice.budgets.upsert({
+  key: `run:${runId}`,
+  unit: "USD",
+  limits: [{ amount: "2", window: "never" }],
+  closesAt: Date.now() + 60 * 60 * 1000
+});
+```
+
+From `closesAt`, `authorize` and `charge` return 409, `record` is accepted for one more day, and
+`settle` and `release` keep working. 30 days after it closes, once nothing is left to settle, the
+budget is deleted: `get` returns 404, and an upsert creates it again.
+
+## Holds
+
+`holds` sets how long an authorization may stay open: `defaultTtlMs` for an authorize that sends no
+`ttlMs` (15 minutes by default), and `maxTtlMs`, the longest one may ask for (one day by default).
+See [what happens when a hold expires](/budgets/spend#holds-and-expiry).
+
+## Changing a budget
+
+Each upsert sends the whole definition. A field it leaves out takes its default, so an omitted
+`closesAt` reopens a closing budget, and omitted hold TTLs return to their defaults. Sending the same
+definition again changes nothing.
+
+A hard cap below the current consumption plus open holds returns 409.
+
+## Who can change a cap
+
+A runtime key can create a budget and tighten it. Loosening it needs a **config** key, and a
+runtime key gets 403 `INSUFFICIENT_PERMISSIONS`:
+
+| Change | Runtime key | Config key |
+| --- | --- | --- |
+| Create a budget | Yes | Yes |
+| Lower a hard limit, add a limit, or close the budget sooner | Yes | Yes |
+| Raise or remove a hard limit, or make it soft | No | Yes |
+| Clear or postpone `closesAt` | No | Yes |
+| Read, authorize, charge, record, settle, or lease | Yes | No |
+
+So code that spends under a cap, or an agent that holds its key, cannot lift the cap. Keep the
+config key out of the environment that spends. A runtime key also cannot close a budget in the
+past: an earlier `closesAt` takes effect now.
+
+## Reading a budget
+
+```ts
+const { result } = await unprice.budget("customer:acme").get();
+```
+
+`result.budget.balance` has the least `remaining` over the hard limits (null without one), the
+amount `held` by open holds and leases, and each limit's `consumed`, `held`, `remaining`, and
+`resetsAt`. `result.history` holds up to 12 ended periods for each limited window.
+`result.budget.operations` counts the accepted calls that changed the budget, per verb. It does not
+count replays, rejections, or reads.
+
+The full request and response schemas are in the [API reference](/api-reference/overview).

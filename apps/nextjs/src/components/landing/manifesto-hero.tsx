@@ -7,8 +7,8 @@ import { LedgerRow } from "./station"
 
 const staticSigns = [
   { label: "over-budget usage", fact: "no way to stop it before it runs" },
-  { label: "packaging change", fact: "edits product code · scripts · cron" },
-  { label: "pricing logic", fact: "hardcoded · config, not decision" },
+  { label: "pricing change", fact: "edits product code · scripts · cron" },
+  { label: "pricing logic", fact: "hardcoded in the product" },
   { label: "disputed invoice", fact: "reconstructed from logs · by hand" },
 ]
 
@@ -30,20 +30,18 @@ export default function ManifestoHero() {
         </h1>
         <p className="mt-6 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
           <Balancer>
-            An agent can spend a customer's credits before an end-of-cycle invoice exists. A usage
-            counter can record the cost, but it cannot decide whether the work should run.
+            An agent can spend a customer&apos;s credits before any invoice exists. A usage counter
+            records the cost but can&apos;t stop the work.
           </Balancer>
         </p>
         <p className="mt-4 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
           <Balancer>
-            Put the commercial decision before the run. Check the plan and budget, reserve customer
-            credits, and deny unfunded work. Then settle actual usage and trace the invoice line to
-            the authorization.
+            So check the budget before the run, and deny the work the customer can&apos;t pay for.
           </Balancer>
         </p>
 
         <figure
-          aria-label="The signs of static, after-the-fact pricing: over-budget usage cannot be stopped before it runs, packaging changes edit product code and scripts and cron jobs at once, pricing logic is hardcoded configuration instead of a decision, and disputed invoices are reconstructed from logs by hand."
+          aria-label="The signs of static, after-the-fact pricing: over-budget usage cannot be stopped before it runs, pricing changes edit product code and scripts and cron jobs at once, pricing logic is hardcoded in the product, and disputed invoices are reconstructed from logs by hand."
           className="mt-12 w-full max-w-xl rounded-lg border border-background-border bg-surface-panel p-4 text-left shadow-ambient sm:p-5"
         >
           <figcaption className="mb-3 flex items-baseline justify-between gap-4 border-background-border border-b pb-3">
@@ -60,7 +58,7 @@ export default function ManifestoHero() {
             ))}
           </div>
           <p className="mt-3 border-background-border border-t pt-3 font-mono text-[11px] text-background-text">
-            cause: the money decision runs after the cost exists
+            cause: the billing decision happens after the cost
           </p>
         </figure>
       </div>
