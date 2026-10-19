@@ -71,6 +71,9 @@ patterns. Keep it cheap to load and useful.
 - 2026-10-19: Keep native preview logs and traces in `unprice-preview-traces`; `unprice-staging`
   reaches its field limit and rejects OTLP data. The `axiom-preview-*` destinations own the ingest
   token and dataset headers; keep credentials out of Wrangler configuration.
+- 2026-10-19: Set `Content-Encoding: gzip` on native Axiom export destinations. Cloudflare's
+  preflight sends uncompressed samples, so create these destinations with `skipPreflightCheck: true`
+  and verify an actual marked preview request in Axiom before calling delivery complete.
 - 2026-09-20: Default authenticated SDK requests to `cache: "no-store"`; Cloudflare Workers reject
   an explicitly supplied `cache: "default"` before the request reaches the API.
 - 2026-09-20: Treat a missing or disabled payment provider during paid plan publication as an
