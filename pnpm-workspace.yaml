@@ -48,3 +48,6 @@ packageExtensions:
   react-virtual:
     peerDependencies:
       react: ">=16.6.3"
+
+patchedDependencies:
+  "@unkey/cache@1.5.0": patches/@unkey__cache@1.5.0.patch
