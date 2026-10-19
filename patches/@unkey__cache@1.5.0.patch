@@ -1,0 +1,26 @@
+diff --git a/dist/index.js b/dist/index.js
+index 93eadbce34efeee99f07b85c2dfefaef87221545..40ff716eda02c48cec31247facfffad4fa16b13b 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -75,7 +75,7 @@ var TieredStore = class {
+       if (typeof res.val !== "undefined") {
+         this.ctx.waitUntil(
+           Promise.all(
+-            this.tiers.filter((_, j) => j < i).map((t) => () => t.set(namespace, key, res.val))
++            this.tiers.filter((_, j) => j < i).map((t) => t.set(namespace, key, res.val))
+           ).catch((err) => {
+             return error.Err(
+               new CacheError({
+diff --git a/dist/index.mjs b/dist/index.mjs
+index 386b7fbf054cb4a5e3e35e0c0ddb4760de9acbde..ad7dce90ce0abae62d8088582e4f230631aa3292 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -73,7 +73,7 @@ var TieredStore = class {
+       if (typeof res.val !== "undefined") {
+         this.ctx.waitUntil(
+           Promise.all(
+-            this.tiers.filter((_, j) => j < i).map((t) => () => t.set(namespace, key, res.val))
++            this.tiers.filter((_, j) => j < i).map((t) => t.set(namespace, key, res.val))
+           ).catch((err) => {
+             return Err(
+               new CacheError({
