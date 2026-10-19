@@ -29,6 +29,10 @@ Do not re-derive these. Copy from here; if they change, change them here first.
 - Subheadline: Authorize every agent run and paid workflow before it creates cost. Reserve customer
   credits up front, then trace the decision through usage and the invoice.
 - Promise line: Sell AI credits and usage without paying for unfunded agent work.
+- Budgets (product line, 2026-10): Unprice Budgets, published as `@unprice/budgets` (MIT). Hard caps
+  on any key the builder picks, checked before the call, with no billing migration. Page h1: "Hard
+  caps. Per key. Actually hard." Tagline: "The missing primitive for billing." Home: `/budgets`.
+  Budgets is the entry product; Unprice billing is what a team adds when it charges for usage.
 - Name meaning: "Unprice" = un-hardcoding pricing from your codebase, not removing price.
 - Payments: Stripe-first today, provider-extensible by design. Unprice never sits in the buyer's
   funds flow.

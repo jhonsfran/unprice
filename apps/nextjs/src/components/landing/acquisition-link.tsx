@@ -10,7 +10,13 @@ import { type ComponentProps, type MouseEvent, useEffect, useState, useTransitio
 import { getOrCreateConversionId, persistConversionId } from "~/lib/conversion-session"
 import { ACQUISITION_SIGNUP_URL, buildAuthHref } from "~/lib/signup-funnel"
 
-type AcquisitionSource = "header" | "hero" | "closing_cta" | "manifesto"
+type AcquisitionSource =
+  | "header"
+  | "hero"
+  | "closing_cta"
+  | "manifesto"
+  | "budgets_hero"
+  | "budgets_cta"
 
 type AcquisitionLinkProps = Omit<ComponentProps<typeof Link>, "href"> & {
   source: AcquisitionSource

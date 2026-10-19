@@ -13,7 +13,13 @@ import type { ComponentProps } from "react"
 // analytics script never costs the reader the click. `href` is required and
 // passed explicitly rather than spread, so this stays a navigation element.
 
-type ProofSource = "hero_demo" | "demo_source" | "demo_benchmark" | "integration_sdk"
+type ProofSource =
+  | "hero_demo"
+  | "demo_source"
+  | "demo_benchmark"
+  | "integration_sdk"
+  | "budgets_test"
+  | "budgets_benchmark"
 
 export function ProofLink({
   source,

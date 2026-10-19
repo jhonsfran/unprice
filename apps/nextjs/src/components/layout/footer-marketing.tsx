@@ -17,6 +17,7 @@ const linkGroups: {
   {
     label: "Read",
     links: [
+      { title: "Budgets", href: "/budgets" },
       { title: "Manifesto", href: "/manifesto" },
       { title: "Docs", href: `${DOCS_DOMAIN}`, external: true },
     ],
