@@ -68,6 +68,9 @@ patterns. Keep it cheap to load and useful.
 
 ## Cloudflare, API, And Ingestion
 
+- 2026-10-19: The API's `c.get("services")` is its own `DomainServiceContext` (`hono/env.ts`), filled
+  in `middleware/init.ts`; a service added to `createServiceContext` must be added there too, and to
+  the route test harnesses (`budgets.test.ts`, `local-mode.fuzz.test.ts`) that set `services` by hand.
 - 2026-10-19: Preview native logs/traces and BudgetDO placement diagnostics were temporary and are
   disabled. Keep sampled request events with the budget operation, outcome, and RPC duration;
   failed alarms remain error logs.

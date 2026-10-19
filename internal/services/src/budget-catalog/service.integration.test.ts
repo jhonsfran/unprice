@@ -126,7 +126,9 @@ describe("BudgetCatalogService", () => {
     })
 
     it("filters by status, unit, and cap", async () => {
-      expect(await keys({ filters: { status: ["closing"] } })).toEqual(["run:r_42"])
+      expect(await keys({ filters: { status: ["closing", "stale-url-value"] } })).toEqual([
+        "run:r_42",
+      ])
       expect(await keys({ filters: { status: ["closed", "closing"] } })).toEqual([
         "run:r_41",
         "run:r_42",

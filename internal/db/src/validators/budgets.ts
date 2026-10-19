@@ -723,13 +723,23 @@ export const budgetCatalogRowSchema = budgetCatalogFactsSchema.extend({
   updatedAt: budgetEpochMsSchema,
 })
 
+/** Keeps the values a filter knows, so a stale URL drops a value instead of failing the page. */
+function knownFilterValues<T extends z.ZodTypeAny>(schema: T) {
+  return z.array(z.unknown()).transform((values) =>
+    values.flatMap((value) => {
+      const parsed = schema.safeParse(value)
+      return parsed.success ? [parsed.data as z.output<T>] : []
+    })
+  )
+}
+
 /** The data-table search, where `search` is a key prefix. */
 export const listBudgetsInputSchema = searchParamsSchemaDataTable.extend({
   filters: z
     .object({
-      status: z.array(budgetCatalogStatusSchema).optional(),
-      unit: z.array(z.string()).optional(),
-      cap: z.array(budgetCapSchema).optional(),
+      status: knownFilterValues(budgetCatalogStatusSchema).optional(),
+      unit: knownFilterValues(z.string()).optional(),
+      cap: knownFilterValues(budgetCapSchema).optional(),
     })
     .default({}),
 })
