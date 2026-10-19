@@ -1,5 +1,18 @@
 # @unprice/api
 
+## 0.5.0
+
+### Minor Changes
+
+- 88a1077: Add `@unprice/budgets`, the budget client on its own: hard caps on any key you choose, without the rest of the API. Its `Unprice` client has the same `unprice.budgets.*` operations, `unprice.budget(key)` handles (remote, or `{ mode: "local" }` from a lease in memory) and `unprice.close()` as `@unprice/api`, so code moves between the two by changing the import. `@unprice/api` now depends on `@unprice/budgets` and re-exports its handles, errors and types; `unprice.budget()` and `unprice.close()` behave as before, and `BudgetExceededError` and the other budget errors are the same classes from either package.
+- 36065fd: Add local mode for budgets. In a long-lived process, `unprice.budget(key, { mode: "local", lease: { amount } })` returns a handle whose `authorize`, `settle`, `release`, `charge`, and `spend` answer in memory against a lease the API debits up front, with the same results as the remote handle; `record` and `get` stay remote. The handle reports consumption every `flushIntervalMs` (1 s), tops the lease back up below `lowWater`, and returns it after `idleMs` (10 s) with no spending and no open hold. A client holds one lease per key however many handles it takes, and `unprice.close()` returns every open lease, resolving with the keys it could not return; a lease never closed expires after `ttlMs` (60 s) and counts in full. `ttlMs` must exceed three flush intervals, and after a refused lease the key answers with that denial from memory for one flush interval. The client also accepts `waitUntil` and `onSettleError`: with `waitUntil`, `spend` returns as soon as the work finishes and settles in the background, and a settle that fails goes to `onSettleError` while its hold expires at its full estimate. `unprice.budgets.lease` and `unprice.budgets.report` are the operations local mode uses.
+
+### Patch Changes
+
+- Updated dependencies [88a1077]
+- Updated dependencies [72a8741]
+  - @unprice/budgets@0.1.0
+
 ## 0.4.0
 
 ### Minor Changes

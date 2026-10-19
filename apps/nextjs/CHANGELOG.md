@@ -1,5 +1,13 @@
 # nextjs
 
+## 0.0.5
+
+### Patch Changes
+
+- Updated dependencies [88a1077]
+- Updated dependencies [36065fd]
+  - @unprice/api@0.5.0
+
 ## 0.0.4
 
 ### Patch Changes
