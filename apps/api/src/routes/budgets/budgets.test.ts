@@ -1,12 +1,12 @@
 import { OpenAPIHono } from "@hono/zod-openapi"
 import { Err, Ok } from "@unprice/error"
 import { type BudgetBalance, UnPriceBudgetError } from "@unprice/services/budgets"
-import type { ExecutionContext } from "hono"
+import type { ExecutionContext, MiddlewareHandler } from "hono"
 import { timing } from "hono/timing"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { UnpriceApiError, handleError, handleZodError } from "~/errors"
 import type { HonoEnv } from "~/hono/env"
-import type { BudgetPlacement } from "~/ingestion/budget/BudgetDO"
+import type { BudgetTelemetry } from "~/ingestion/budget/BudgetDO"
 import { placementTiming } from "~/middleware/placement-timing"
 import { registerAuthorizeBudgetV1 } from "./authorizeBudgetV1"
 import { registerChargeBudgetV1 } from "./chargeBudgetV1"
@@ -21,7 +21,8 @@ import { registerUpsertBudgetV1 } from "./upsertBudgetV1"
 const mocks = vi.hoisted(() => ({
   keyAuth: vi.fn(),
   execute: vi.fn(),
-  placement: undefined as BudgetPlacement | undefined,
+  telemetry: undefined as BudgetTelemetry | undefined,
+  log: vi.fn(),
 }))
 
 vi.mock("~/auth/key", async (importOriginal) => ({
@@ -32,7 +33,7 @@ vi.mock("~/auth/key", async (importOriginal) => ({
 vi.mock("~/ingestion/budget/client", () => ({
   CloudflareBudgetClient: class {
     execute = mocks.execute
-    placement = mocks.placement
+    telemetry = mocks.telemetry
   },
 }))
 
@@ -63,8 +64,14 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.clearAllMocks()
-  mocks.placement = undefined
+  mocks.telemetry = undefined
 })
+
+/** The request logger, whose `set` fields become the request's wide event. */
+const withLogger: MiddlewareHandler<HonoEnv> = async (c, next) => {
+  c.set("logger", { set: mocks.log } as unknown as HonoEnv["Variables"]["logger"])
+  await next()
+}
 
 function createTestApp() {
   const app = new OpenAPIHono<HonoEnv>({ defaultHook: handleZodError })
@@ -73,6 +80,7 @@ function createTestApp() {
     c.set("requestId", "req_test")
     await next()
   })
+  app.use("*", withLogger)
   for (const register of [
     registerUpsertBudgetV1,
     registerAuthorizeBudgetV1,
@@ -324,7 +332,7 @@ describe("budgets API", () => {
     })
   })
 
-  it("adds placement and cold-start markers to Server-Timing outside production only", async () => {
+  it("reports the budget call on the wide event everywhere and its placement and queue outside production", async () => {
     mocks.execute.mockResolvedValue(
       Ok({
         type: "authorize",
@@ -338,9 +346,10 @@ describe("budgets API", () => {
     const app = new OpenAPIHono<HonoEnv>({ defaultHook: handleZodError })
     app.use(timing())
     app.use(placementTiming())
+    app.use("*", withLogger)
     registerAuthorizeBudgetV1(app)
-    const serverTiming = async (APP_ENV: string, placement: BudgetPlacement) => {
-      mocks.placement = placement
+    const serverTiming = async (APP_ENV: string, telemetry: BudgetTelemetry) => {
+      mocks.telemetry = telemetry
       const request = new Request("https://example.com/v1/budgets/authorize", {
         method: "POST",
         headers: { authorization: "Bearer key", "content-type": "application/json" },
@@ -355,15 +364,63 @@ describe("budgets API", () => {
       return response.headers.get("Server-Timing")
     }
 
-    expect(await serverTiming("preview", { colo: "LHR", cold: true })).toMatch(
-      /^edge;desc="EWR",isolate;desc="cold",budget;dur=\d+\.\d;desc="do=LHR cold",total;dur=\d+\.\d;desc="Total Response Time"$/
+    expect(
+      await serverTiming("preview", { queueMs: 12, cold: true, served: 1, colo: "LHR" })
+    ).toMatch(
+      /^edge;desc="EWR",isolate;desc="cold",budget;dur=\d+\.\d;desc="do=LHR cold",budgetQueue;dur=12\.0,total;dur=\d+\.\d;desc="Total Response Time"$/
     )
-    expect(await serverTiming("preview", { colo: "unknown", cold: false })).toMatch(
-      /^edge;desc="EWR",isolate;desc="warm",budget;dur=\d+\.\d;desc="do=unknown warm",total;/
+    expect(mocks.log).toHaveBeenLastCalledWith({
+      budget: {
+        command: "authorize",
+        outcome: "ok",
+        do_ms: expect.any(Number),
+        queue_ms: 12,
+        cold: true,
+        served: 1,
+        colo: "LHR",
+      },
+    })
+    expect(
+      await serverTiming("preview", { queueMs: 0, cold: false, served: 7, colo: "unknown" })
+    ).toMatch(
+      /^edge;desc="EWR",isolate;desc="warm",budget;dur=\d+\.\d;desc="do=unknown warm",budgetQueue;dur=0\.0,total;/
     )
-    expect(await serverTiming("production", { colo: "LHR", cold: false })).toMatch(
+    expect(await serverTiming("production", { queueMs: 9, cold: false, served: 2 })).toMatch(
       /^budget;dur=\d+\.\d,total;dur=\d+\.\d;desc="Total Response Time"$/
     )
+    expect(mocks.log).toHaveBeenLastCalledWith({
+      budget: {
+        command: "authorize",
+        outcome: "ok",
+        do_ms: expect.any(Number),
+        queue_ms: 9,
+        cold: false,
+        served: 2,
+      },
+    })
+  })
+
+  it("names the rejection, or an error, as the budget call's outcome", async () => {
+    mocks.telemetry = { queueMs: 3, cold: false, served: 4 }
+    rejectWith({ code: "BUDGET_NOT_FOUND" })
+    expect((await call("/v1/budgets/get?key=customer:missing")).status).toBe(404)
+    expect(mocks.log).toHaveBeenLastCalledWith({
+      budget: {
+        command: "get",
+        outcome: "BUDGET_NOT_FOUND",
+        do_ms: expect.any(Number),
+        queue_ms: 3,
+        cold: false,
+        served: 4,
+      },
+    })
+
+    mocks.telemetry = undefined
+    mocks.execute.mockRejectedValue(new Error("Durable Object reset"))
+    expect((await call("/v1/budgets/get?key=customer:missing")).status).toBe(500)
+    expect(mocks.log).toHaveBeenLastCalledWith({
+      budget: { command: "get", outcome: "error", do_ms: expect.any(Number) },
+    })
   })
 
   it("returns 402 with the blocking limit when a charge does not fit", async () => {

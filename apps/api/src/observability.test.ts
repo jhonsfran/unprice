@@ -65,6 +65,17 @@ describe("shouldAlwaysKeepDoLogEvent", () => {
     expect(shouldAlwaysKeepDoLogEvent({ cold_start: true })).toBe(true)
   })
 
+  it("keeps a budget alarm that filled its batch", async () => {
+    const { shouldAlwaysKeepDoLogEvent } = await loadObservability()
+
+    expect(shouldAlwaysKeepDoLogEvent({ budget: { expired: 256, purged: 0, capped: true } })).toBe(
+      true
+    )
+    expect(shouldAlwaysKeepDoLogEvent({ budget: { expired: 3, purged: 1, capped: false } })).toBe(
+      false
+    )
+  })
+
   it("samples happy-path events", async () => {
     const { shouldAlwaysKeepDoLogEvent } = await loadObservability()
 
@@ -221,11 +232,39 @@ describe("keepFailedRequest", () => {
     expect(keeps(keep, 200, "/v1/budgets/authorize")).toBe(false)
     expect(keeps(keep, undefined, "/v1/budgets/authorize")).toBe(false)
   })
+})
 
-  it("is the request middleware's tail sampler", async () => {
-    const { keepFailedRequest } = await loadObservability()
+describe("keepSlowBudgetCall", () => {
+  const budgetCall = (doMs: number | undefined, status = 200): TailSamplingContext => ({
+    status,
+    path: "/v1/budgets/record",
+    context: { budget: { command: "record", outcome: "ok", do_ms: doMs } },
+  })
+  function keeps(keep: (ctx: TailSamplingContext) => void, ctx: TailSamplingContext) {
+    keep(ctx)
+    return ctx.shouldKeep === true
+  }
+
+  it("keeps a budget call whose Durable Object round trip took 300 ms or more", async () => {
+    const { keepSlowBudgetCall: keep } = await loadObservability()
+
+    expect(keeps(keep, budgetCall(300))).toBe(true)
+    expect(keeps(keep, budgetCall(1_170))).toBe(true)
+    expect(keeps(keep, budgetCall(450, 402))).toBe(true)
+    expect(keeps(keep, budgetCall(299.9))).toBe(false)
+    expect(keeps(keep, budgetCall(undefined))).toBe(false)
+    expect(keeps(keep, { status: 200, path: "/v1/access/check", context: {} })).toBe(false)
+  })
+
+  it("joins the failed-request rule as the request middleware's tail sampler", async () => {
+    await loadObservability()
     const { evlog } = await import("evlog/hono")
+    const keep = vi.mocked(evlog).mock.calls[0]?.[0]?.keep
+    if (!keep) throw new Error("the request middleware has no tail sampler")
 
-    expect(evlog).toHaveBeenCalledWith({ keep: keepFailedRequest })
+    expect(keeps(keep, budgetCall(300))).toBe(true)
+    expect(keeps(keep, budgetCall(20, 500))).toBe(true)
+    expect(keeps(keep, budgetCall(20, 402))).toBe(false)
+    expect(keeps(keep, budgetCall(20))).toBe(false)
   })
 })

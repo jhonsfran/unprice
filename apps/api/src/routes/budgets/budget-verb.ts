@@ -9,14 +9,17 @@ import {
   type UnPriceBudgetError,
   formatBudgetConfig,
 } from "@unprice/services/budgets"
-import { type BudgetVerbRequest, executeBudgetCommand } from "@unprice/services/use-cases"
+import {
+  type BudgetVerbRequest,
+  type ExecuteBudgetCommandInput,
+  executeBudgetCommand,
+} from "@unprice/services/use-cases"
 import type { Context } from "hono"
-import { setMetric } from "hono/timing"
 import { keyAuth } from "~/auth/key"
 import { UnpriceApiError } from "~/errors"
 import type { HonoEnv } from "~/hono/env"
 import { CloudflareBudgetClient } from "~/ingestion/budget/client"
-import { budgetPlacementDescription } from "~/middleware/placement-timing"
+import { budgetTiming } from "~/middleware/placement-timing"
 
 export const BUDGET_REMAINING_HEADER = "Unprice-Budget-Remaining"
 
@@ -32,21 +35,44 @@ export async function runBudgetVerb<R extends BudgetVerbRequest>(
   apiKey?: Pick<ApiKeyExtended, "projectId">
 ) {
   const { projectId } = apiKey ?? (await keyAuth(c))
-  const budgets = new CloudflareBudgetClient(c.env)
-  // The round trip to the budget's Durable Object, apart from key auth and the rest of the Worker.
-  // Timed by hand: the object's placement, known only once it answers, joins the entry's desc.
-  const startedAt = performance.now()
-  const result = await executeBudgetCommand({ budgets }, { projectId, key, request }).finally(() =>
-    setMetric(
-      c,
-      "budget",
-      performance.now() - startedAt,
-      budgetPlacementDescription(c.env.APP_ENV, budgets.placement)
-    )
-  )
+  const result = await callBudget(c, { projectId, key, request })
   if (result.err) throw budgetApiError(c, result.err)
   setRemaining(c, result.val)
   return result.val
+}
+
+/**
+ * Runs the verb on the budget's Durable Object and reports the call on the request's wide event
+ * (`budget_*` in Axiom) and on Server-Timing. Timed by hand, apart from key auth and the rest of
+ * the Worker: what the object says about the call is known only once it answers.
+ */
+async function callBudget<R extends BudgetVerbRequest>(
+  c: Context<HonoEnv>,
+  input: ExecuteBudgetCommandInput<R>
+) {
+  const budgets = new CloudflareBudgetClient(c.env)
+  const startedAt = performance.now()
+  let outcome = "error"
+  try {
+    const result = await executeBudgetCommand({ budgets }, input)
+    outcome = result.err ? result.err.rejection.code : "ok"
+    return result
+  } finally {
+    const doMs = performance.now() - startedAt
+    const telemetry = budgets.telemetry
+    budgetTiming(c, doMs, telemetry)
+    c.get("logger").set({
+      budget: {
+        command: input.request.type,
+        outcome,
+        do_ms: doMs,
+        queue_ms: telemetry?.queueMs,
+        cold: telemetry?.cold,
+        served: telemetry?.served,
+        colo: telemetry?.colo,
+      },
+    })
+  }
 }
 
 /** A budget value on the wire: every amount (a `bigint`) becomes its canonical decimal string. */

@@ -24,8 +24,8 @@ export type BudgetStoreTx = BudgetReader & {
       "budget" | "ledger" | "purged" | "operations" | "periods" | "retiredWindows" | "now"
     >
   ): void
-  /** Deletes up to `limit` closed rows whose retention ended by `now`. */
-  purgeOperations(now: number, limit: number): void
+  /** Deletes up to `limit` closed rows whose retention ended by `now`; returns how many. */
+  purgeOperations(now: number, limit: number): number
   /** The earliest `alarmAt` of any row: an open hold's expiry or a closed row's retention end. */
   nextDueAt(): number | null
 }

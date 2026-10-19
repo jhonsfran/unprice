@@ -1,7 +1,7 @@
-import type { MiddlewareHandler } from "hono"
+import type { Context, MiddlewareHandler } from "hono"
 import { setMetric } from "hono/timing"
 import type { HonoEnv } from "~/hono/env"
-import type { BudgetPlacement } from "~/ingestion/budget/BudgetDO"
+import type { BudgetTelemetry } from "~/ingestion/budget/BudgetDO"
 
 /** Placement and cold-start markers on Server-Timing; production adds neither them nor their fetch. */
 export function reportsPlacement(appEnv: string): boolean {
@@ -24,11 +24,20 @@ export function placementTiming(): MiddlewareHandler<HonoEnv> {
   }
 }
 
-/** The description of the `budget` entry: `do=EWR warm`, or nothing in production. */
-export function budgetPlacementDescription(
-  appEnv: string,
-  placement: BudgetPlacement | undefined
-): string | undefined {
-  if (!placement || !reportsPlacement(appEnv)) return undefined
-  return `do=${placement.colo} ${placement.cold ? "cold" : "warm"}`
+/**
+ * The `budget` entry is the Worker's round trip to the budget's object. Outside production its desc
+ * says where the object ran and whether the request woke it (`do=EWR warm`; the benchmark harness
+ * parses it), and `budgetQueue` follows with the time from dispatch to the object starting it.
+ */
+export function budgetTiming(
+  c: Context<HonoEnv>,
+  durationMs: number,
+  telemetry: BudgetTelemetry | undefined
+): void {
+  const placed = reportsPlacement(c.env.APP_ENV) ? telemetry : undefined
+  const description = placed?.colo
+    ? `do=${placed.colo} ${placed.cold ? "cold" : "warm"}`
+    : undefined
+  setMetric(c, "budget", durationMs, description)
+  if (placed?.queueMs !== undefined) setMetric(c, "budgetQueue", placed.queueMs)
 }

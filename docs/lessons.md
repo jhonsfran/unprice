@@ -243,10 +243,16 @@ patterns. Keep it cheap to load and useful.
 - 2026-10-18: Budgets use automatic placement (`getBudgetStub`: no jurisdiction, no hint); every
   other DO stays EU-pinned. evlog `keep` rules only add; to except a request, drop the global rule
   and decide in the middleware's `keep` callback (`keepFailedRequest` in `apps/api/src/observability.ts`).
+  That callback's `ctx.context` holds every field set through `c.get("logger").set`, so a rule can
+  read route fields (`keepSlowBudgetCall` reads `budget.do_ms`).
 - 2026-10-18: Outside production, Server-Timing adds `edge`, `isolate`, and `budget;desc="do=<colo> cold|warm"`
-  (`middleware/placement-timing.ts`). BudgetDO returns `placement` beside its RPC reply and learns its colo
+  (`middleware/placement-timing.ts`), plus `budgetQueue`. BudgetDO returns `telemetry` (`queueMs`, `cold`,
+  `served`, and `colo` outside production) beside every RPC reply and learns its colo
   from a never-awaited `cdn-cgi/trace` fetch in preview only (`local` elsewhere, so tests stay off the network). Local workerd evicts an idle DO after about 10 s, so manual
   curls see `cold` again.
+- 2026-10-18: In DO SQLite, `DELETE ... RETURNING` costs one extra row read per deleted row (measured on
+  the alarm purge: +2,048 rows read at its cap). Count deletions with `SELECT changes()` in the same
+  transaction instead: one statement, no rows read.
 - 2026-10-18: In a non-TTY shell vitest-pool-workers swallows the benchmarks' `console.info`; run
   `pnpm --filter api test:workers:bench --disableConsoleIntercept` to see `BUDGET_BENCHMARK` lines.
   Measured there: an UPDATE that moves `due_at` adds no row written (lease report 3 with or

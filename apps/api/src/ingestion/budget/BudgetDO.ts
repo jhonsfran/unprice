@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers"
+import type { Logger } from "@unprice/logs"
 import type { BudgetReply, BudgetRequest } from "@unprice/services/use-cases"
 import { drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
@@ -10,8 +11,27 @@ import * as schema from "./db/schema"
 import migrations from "./drizzle/migrations"
 import { BudgetProcessor } from "./processor"
 
-/** Where the object ran and whether this request woke it; reported outside production only. */
-export type BudgetPlacement = Readonly<{ colo: string; cold: boolean }>
+/** When the Worker sent the request; travels beside it so the shared BudgetRequest stays as it is. */
+export type BudgetDispatch = Readonly<{ sentAt: number }>
+
+/**
+ * How this instance served one request, returned beside every reply. The object's clock stands
+ * still during synchronous SQLite work, so it can say when a request started, not how long it ran.
+ */
+export type BudgetTelemetry = Readonly<{
+  /**
+   * From the Worker's `sentAt` to this object starting the request: one-way transit plus any wait
+   * behind the object's other work. Two machines' clocks that advance only on I/O, so it is coarse
+   * and clamped at zero.
+   */
+  queueMs?: number
+  /** This request woke the instance. */
+  cold: boolean
+  /** Requests this instance has started, this one included. */
+  served: number
+  /** Where the object runs; outside production only, as learning it takes a fetch. */
+  colo?: string
+}>
 
 /** Cloudflare adapter; budget behavior lives in BudgetProcessor and the pure core. */
 export class BudgetDO extends DurableObject {
@@ -27,14 +47,17 @@ export class BudgetDO extends DurableObject {
   private colo: string | null = null
   /** Set by the first request or alarm on this instance: that one woke it. */
   private woken = false
+  private served = 0
+  private readonly logger: Logger
 
   constructor(state: DurableObjectState, env: Env) {
     super(state, env as unknown as Cloudflare.Env)
 
     this.db = drizzle(this.ctx.storage, { schema, logger: false })
+    this.logger = createDoLogger(this.ctx.id.toString())
     this.processor = new BudgetProcessor({
       clock: { now: () => Date.now() },
-      logger: createDoLogger(this.ctx.id.toString()),
+      logger: this.logger,
       runtime: {
         // Nothing interleaves: the next request finds no schema, as for a key never upserted.
         destroy: () =>
@@ -54,18 +77,26 @@ export class BudgetDO extends DurableObject {
     if (reportsPlacement(env.APP_ENV)) this.traceColo(env.APP_ENV)
   }
 
-  async execute(request: BudgetRequest): Promise<BudgetReply & { placement?: BudgetPlacement }> {
+  async execute(
+    request: BudgetRequest,
+    dispatch?: BudgetDispatch
+  ): Promise<BudgetReply & { telemetry: BudgetTelemetry }> {
+    // Before any await, while the clock still reads the moment this request started.
+    const queueMs = dispatch && Math.max(0, Date.now() - dispatch.sentAt)
     const cold = !this.woken
     this.woken = true
+    const served = ++this.served
     const reply = await this.run(request)
-    return this.colo === null ? reply : { ...reply, placement: { colo: this.colo, cold } }
+    return { ...reply, telemetry: { queueMs, cold, served, colo: this.colo ?? undefined } }
   }
 
   override async alarm(): Promise<void> {
+    const cold = !this.woken
     this.woken = true
     if (!this.ready) return
     await this.ready
-    return this.processor.alarm()
+    const run = await this.processor.alarm()
+    this.logger.info("budget alarm", { operation: "alarm", budget: { ...run, cold } })
   }
 
   private async run(request: BudgetRequest): Promise<BudgetReply> {

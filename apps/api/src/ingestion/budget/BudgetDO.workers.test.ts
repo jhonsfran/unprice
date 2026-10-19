@@ -513,17 +513,29 @@ describe("BudgetDO verbs", () => {
     expect(next.holdId).toBe("h_2")
   })
 
-  it("reports the first request after construction as cold and the rest as warm", async () => {
-    const key = "customer:placement"
+  it("reports how long each request waited, whether it woke the object, and how many it served", async () => {
+    const key = "customer:telemetry"
     const stub = stubFor(key)
-    const cold = (reply: { placement?: { cold: boolean } }) => reply.placement?.cold
+    const sentAt = Date.now() - 5_000
 
-    expect(cold(await stub.execute({ type: "get" }))).toBe(true)
-    expect(cold(await stub.execute(upsert(key, fiftyPerMonth)))).toBe(false)
+    const first = (await stub.execute({ type: "get" }, { sentAt })).telemetry
+    const second = (await stub.execute(upsert(key, fiftyPerMonth), { sentAt })).telemetry
+    expect(first).toEqual({ queueMs: expect.any(Number), cold: true, served: 1, colo: "local" })
+    expect(second).toEqual({ queueMs: expect.any(Number), cold: false, served: 2, colo: "local" })
+    expect(first.queueMs).toBeGreaterThanOrEqual(5_000)
+    expect(second.queueMs).toBeGreaterThanOrEqual(5_000)
+
+    // A dispatch time ahead of the object's clock reads as no wait rather than a negative one.
+    const ahead = await stub.execute({ type: "get" }, { sentAt: Date.now() + 60_000 })
+    expect(ahead.telemetry).toEqual({ queueMs: 0, cold: false, served: 3, colo: "local" })
+
     await evictDurableObject(stub)
     const revived = getBudgetStub(env, { projectId: "proj_1", key })
-    expect(cold(await revived.execute({ type: "get" }))).toBe(true)
-    expect((await revived.execute({ type: "get" })).placement?.colo).toEqual(expect.any(String))
+    expect((await revived.execute({ type: "get" })).telemetry).toEqual({
+      cold: true,
+      served: 1,
+      colo: "local",
+    })
   })
 
   it("rolls back the ledger when a later write in the same command fails", async () => {
@@ -719,14 +731,18 @@ describe("BudgetDO alarm", () => {
         )
       }
       now += HOUR
-      await processor.alarm()
+      expect(await processor.alarm()).toEqual({
+        expired: EXPIRED_PER_SWEEP,
+        purged: 0,
+        capped: true,
+      })
       // A full batch leaves expired holds behind, so the alarm comes straight back for them.
       await expect(state.storage.getAlarm()).resolves.toBe(now + ALARM_CONTINUE_MS)
       expect(outcome(await processor.execute({ type: "get" }), "get").budget.balance.held).toBe(
         units(44)
       )
       now += ALARM_CONTINUE_MS
-      await processor.alarm()
+      expect(await processor.alarm()).toEqual({ expired: 44, purged: 0, capped: false })
     })
     await evictDurableObject(stub)
     await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
@@ -771,7 +787,7 @@ describe("BudgetDO alarm", () => {
       outcome(await processor.execute(late), "record")
       await expect(state.storage.getAlarm()).resolves.toBe(now + 8 * DAY)
       now += 8 * DAY
-      await processor.alarm()
+      expect(await processor.alarm()).toEqual({ expired: 0, purged: 1, capped: false })
       expect(state.storage.sql.exec("SELECT count(*) AS n FROM budget_operations").one()).toEqual({
         n: 0,
       })
@@ -949,7 +965,7 @@ describe("BudgetDO alarm", () => {
         },
       })
 
-      await processor.alarm()
+      expect(await processor.alarm()).toEqual({ expired: 0, purged: 0, capped: false })
 
       expect(errors).toEqual(["budget alarm failed: storage unavailable"])
       await expect(state.storage.getAlarm()).resolves.toBe(t0 + 30_000)
