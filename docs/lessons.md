@@ -267,6 +267,12 @@ patterns. Keep it cheap to load and useful.
 - 2026-10-18: tsx cannot import `packages/api/src` (its CommonJS `export *`); tooling scripts import
   the built `@unprice/api`, so run `pnpm --filter @unprice/api build` first. Run tooling probes
   with explicit env vars rather than `--env-file`, which loads the operator's credentials.
+- 2026-10-18: `apps/api/src/routes/budgets/local-mode.fuzz.test.ts` runs the built SDK's local mode
+  through the real budget routes and processor on fake timers; rebuild `@unprice/api` before it.
+  Keep `setImmediate` real and step with `vi.advanceTimersToNextTimer()`: the async advance waits a
+  real 1 ms per timer. Never put `vi.fn()` on a per-request path there: it keeps every Hono context.
+- 2026-10-18: `pnpm add` can re-resolve unrelated peer variants in `pnpm-lock.yaml`; add only the
+  importer entries and confirm with `corepack pnpm install --frozen-lockfile`.
 - 2026-10-16: Budget amounts are `@unprice/money` `Amount` (bigint at `LEDGER_SCALE`) and the wire
   patterns live in `@unprice/db/validators`; never redeclare them in the budget core.
 - 2026-10-16: `Omit` over a generic `BudgetOutcome & { type: T }` does not narrow; strip `type` at

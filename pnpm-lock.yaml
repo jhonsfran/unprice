@@ -173,6 +173,9 @@ importers:
       '@types/node':
         specifier: 24.13.2
         version: 24.13.2
+      '@unprice/api':
+        specifier: workspace:^
+        version: link:../../packages/api
       '@unprice/tsconfig':
         specifier: workspace:^
         version: link:../../tooling/typescript
@@ -182,6 +185,9 @@ importers:
       drizzle-kit:
         specifier: ^0.30.5
         version: 0.30.6
+      fast-check:
+        specifier: ^4.5.3
+        version: 4.5.3
       typescript:
         specifier: ^5.3.3
         version: 5.9.3
