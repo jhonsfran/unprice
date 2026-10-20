@@ -156,18 +156,21 @@ function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): Unprice
       return new UnpriceApiError({
         code: "BUDGET_EXCEEDED",
         message,
+        cause: error,
         details: exceededDetails(rejection.blocked, rejection.balance),
       })
     case "BUDGET_CLOSED":
       return new UnpriceApiError({
         code: "CONFLICT",
         message,
+        cause: error,
         details: closedDetails(rejection.closedAt),
       })
     case "HOLD_AMOUNT_EXCEEDED":
       return new UnpriceApiError({
         code: "CONFLICT",
         message,
+        cause: error,
         details: {
           kind: "hold_amount_exceeded",
           holdId: rejection.holdId,
@@ -179,6 +182,7 @@ function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): Unprice
       return new UnpriceApiError({
         code: "CONFLICT",
         message,
+        cause: error,
         details: {
           kind: "limit_below_usage",
           limitId: rejection.limitId,
@@ -190,6 +194,7 @@ function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): Unprice
       return new UnpriceApiError({
         code: "CONFLICT",
         message,
+        cause: error,
         details: {
           kind: "window_capacity_exceeded",
           maximum: rejection.maximum,
@@ -200,6 +205,7 @@ function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): Unprice
       return new UnpriceApiError({
         code: "INSUFFICIENT_PERMISSIONS",
         message: `${message}. A runtime key can create or tighten a budget; raising or removing a hard limit, making it soft, or clearing or postponing closesAt needs a config key.`,
+        cause: error,
       })
     case "IDEMPOTENCY_CONFLICT":
     case "HOLD_CLOSED":
@@ -210,14 +216,14 @@ function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): Unprice
     case "LEASE_CLOSED":
     case "LEASE_SEQ_CONFLICT":
     case "LEASE_CAPTURE_OUT_OF_RANGE":
-      return new UnpriceApiError({ code: "CONFLICT", message })
+      return new UnpriceApiError({ code: "CONFLICT", message, cause: error })
     case "BUDGET_NOT_FOUND":
     case "HOLD_NOT_FOUND":
     case "LEASE_NOT_FOUND":
-      return new UnpriceApiError({ code: "NOT_FOUND", message })
+      return new UnpriceApiError({ code: "NOT_FOUND", message, cause: error })
     case "INVALID_TTL":
     case "INVALID_OCCURRED_AT":
-      return new UnpriceApiError({ code: "BAD_REQUEST", message })
+      return new UnpriceApiError({ code: "BAD_REQUEST", message, cause: error })
   }
 }
 

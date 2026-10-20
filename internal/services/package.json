@@ -8,6 +8,7 @@
     "./budget-catalog": "./src/budget-catalog/index.ts",
     "./budget-runs": "./src/budget-runs/index.ts",
     "./budgets": "./src/budgets/index.ts",
+    "./budgets/memory-store": "./src/budgets/memory-store.fixture.ts",
     "./domain-error-kind": "./src/domain-error-kind.ts",
     "./deps": "./src/deps.ts",
     "./context": "./src/context.ts",

@@ -4,6 +4,7 @@ import {
   budgetExceededDetailsSchema,
   budgetHoldAmountExceededDetailsSchema,
   budgetLimitBelowUsageDetailsSchema,
+  budgetReleaseRejectedDetailsSchema,
   budgetWindowCapacityExceededDetailsSchema,
 } from "@unprice/db/validators"
 import { FetchError } from "@unprice/error"
@@ -73,6 +74,7 @@ export const apiErrorDetailsSchema = z.discriminatedUnion("kind", [
   budgetHoldAmountExceededDetailsSchema,
   budgetLimitBelowUsageDetailsSchema,
   budgetWindowCapacityExceededDetailsSchema,
+  budgetReleaseRejectedDetailsSchema,
 ])
 
 export type ApiErrorDetails = z.infer<typeof apiErrorDetailsSchema>
@@ -205,12 +207,15 @@ export class UnpriceApiError extends HTTPException {
     code,
     message,
     details,
+    cause,
   }: {
     code: z.infer<typeof ErrorCode>
     message: string
     details?: ApiErrorDetails
+    /** The domain error this answer maps, for an adapter that needs more than the code. */
+    cause?: unknown
   }) {
-    super(codeToStatus(code) as ContentfulStatusCode, { message })
+    super(codeToStatus(code) as ContentfulStatusCode, { message, cause })
     this.code = code
     this.details = details
   }
