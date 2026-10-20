@@ -75,6 +75,11 @@ patterns. Keep it cheap to load and useful.
 - 2026-10-19: A gateway to an internal route reads "not found" only from the API's JSON error body
   (`error.code === "NOT_FOUND"`); Hono's default 404 for a missing route is plain text, and
   read-repair that trusted a bare 404 would forget catalog rows during a split deploy.
+- 2026-10-19: The internal release route gets the budget's rejection from `UnpriceApiError.cause`
+  (`budgetApiError` sets it) and adds it as `details: { kind: "release_rejected" }`; the public
+  route's answer is unchanged. The gateway reads a rejection only from those details.
+- 2026-10-19: A route test can run the real budget core behind the mocked `CloudflareBudgetClient`:
+  `MemoryBudgetStore` from `@unprice/services/budgets/memory-store` (see `releaseBudgetInternalV1.test.ts`).
 - 2026-10-19: DO SQLite binds a JS number as REAL, so `'h_' || ?` gives `h_1.0` and `? % 1000` is
   float math. Seed SQL with `CAST(? AS INTEGER)` (see the 1,000,000-row inspect bench).
 - 2026-10-19: `BudgetDO.inspect` reads through `BudgetSqliteStore.inspecting`, not `atomically`, so
@@ -415,6 +420,9 @@ patterns. Keep it cheap to load and useful.
 - 2026-10-19: The pre-commit react-doctor fails on `const query = useQuery(...)`; destructure the
   fields you read. Component tests in `apps/nextjs` render with `renderToString` (automatic JSX in
   `vitest.config.ts`), seeding the query cache instead of mocking tRPC.
+- 2026-10-19: `renderToString` never renders a Radix `DialogContent` (it portals); test a controlled
+  form inside a bare `<Dialog>`, and detect a disabled button by `disabled=""`, since class names
+  contain `disabled:` (see `release-hold-dialog.test.tsx`).
 - 2026-10-19: A signup intent routes past auth only through `next`: `INTENT_LANDING` in
   `lib/signup-funnel.ts` is the one table of intents, and `/new` must forward `intent` into the
   workspace signUp `successUrl` (the provider appends `workspace_id`) or it dies at workspace creation.
