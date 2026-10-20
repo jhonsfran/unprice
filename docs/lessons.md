@@ -1109,3 +1109,9 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-10-17: A Durable Object that deletes its own storage must also reset any "schema ready"
   latch inside the same `blockConcurrencyWhile` (`BudgetDO` sets `ready = null`), or the next
   request on the live instance runs against dropped tables.
+
+## AI budget integrations
+
+- 2026-10-20: AI budget adapters share final serialized request policy in `packages/budgets-ai`; Pi and AI SDK wrappers only convert native calls and usage. Keep a hold per physical dispatch and preserve JSON versus SSE mode.
+- 2026-10-20: Public integration packages must be added to `tooling/scripts/assert-publishable-packages.mjs` and ship their own MIT license. Build workspace dependencies before standalone package tests or archive consumer tests.
+- 2026-10-20: Anthropic and Gemini preflight counts are estimates. Budget holds use trusted model input limits; refunds require final raw usage evidence because native SDKs can emit finish events from preliminary counters.

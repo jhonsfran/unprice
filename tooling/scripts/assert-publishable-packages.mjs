@@ -95,7 +95,13 @@ const publishablePackages = workspacePackages
   .filter((workspacePackage) => !workspacePackage.private)
   .sort((left, right) => left.name.localeCompare(right.name))
 const publishableNames = publishablePackages.map((workspacePackage) => workspacePackage.name)
-const expectedPublishableNames = ["@unprice/api", "@unprice/budgets"]
+const expectedPublishableNames = [
+  "@unprice/ai-sdk-budget",
+  "@unprice/api",
+  "@unprice/budgets",
+  "@unprice/budgets-ai",
+  "@unprice/pi-budget",
+]
 const expectedRepositoryUrl = "git+https://github.com/jhonsfran/unprice.git"
 
 if (JSON.stringify(publishableNames) !== JSON.stringify(expectedPublishableNames)) {

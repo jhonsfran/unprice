@@ -1,0 +1,44 @@
+{
+  "name": "@unprice/budgets-ai",
+  "version": "0.1.0",
+  "private": false,
+  "description": "SDK-independent budget enforcement for bounded AI requests.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "license": "MIT",
+  "files": ["dist", "README.md"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jhonsfran/unprice.git",
+    "directory": "packages/budgets-ai"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@unprice/budgets": "workspace:^"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.2",
+    "tsup": "^8.4.0",
+    "typescript": "^5.3.3",
+    "vitest": "^4.1.10"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}
