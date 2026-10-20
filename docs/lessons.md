@@ -302,6 +302,9 @@ patterns. Keep it cheap to load and useful.
 - 2026-10-19: `BudgetTransition` is the rows to write plus a `BudgetReply`. A refused lease is the
   one rejection that writes: `ok: false` with LIMIT_EXCEEDED, committed and armed like any write.
   Every other rejection is the `Err` of `transition` and writes nothing; core tests narrow with `ok()`.
+- 2026-10-19: For billing, keep durable usage facts separate from BudgetDO replay receipts and
+  cumulative lease reports. Local `record` still calls the remote API; `occurredAt` only bounds
+  acceptance, and an expired unreported lease counts its whole grant, not proven actual usage.
 - 2026-10-18: The local-mode fuzz test asserts that every lease on the server reached its client.
   Reverting the refusal row failed it after about 390 runs at the old fault weights; stray copies
   weighted 3, faults on half the steps, and close weighted 2 cut that to about 40 (at most 110).
