@@ -9,6 +9,7 @@ import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
 import { dataTableParams } from "~/lib/searchParams"
 import { api } from "~/trpc/server"
+import { OpenBudgetByKey } from "../_components/open-budget-by-key"
 import { columns } from "../_components/table-budgets/columns"
 
 export const dynamic = "force-dynamic"
@@ -24,6 +25,7 @@ export default async function ProjectBudgetsPage(props: { searchParams: Promise<
         <HeaderTab
           title="Budgets"
           description="Spend caps your app enforces per customer, run, or agent. Configuration as of each budget's last change."
+          action={<OpenBudgetByKey />}
         />
       }
     >
