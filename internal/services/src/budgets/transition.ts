@@ -225,6 +225,7 @@ export function transition(params: {
       row: change.row,
       replayed: change.rows.length === 0,
       changes: change.configured?.changes ?? [],
+      created: change.configured !== undefined && command.type !== "upsert",
       history: [...periods, ...view.history],
       now,
     }),
@@ -264,6 +265,8 @@ type OutcomeParams = Readonly<{
   row: Operation | null
   replayed: boolean
   changes: readonly ConfigChange[]
+  /** A keyed verb created the budget it ran against. */
+  created: boolean
   /** This transition's periods, then the stored ones. */
   history: readonly WindowPeriod[]
   now: number
@@ -284,6 +287,7 @@ function outcomeOf(command: BudgetCommand, params: OutcomeParams): BudgetOutcome
   if (command.type === "sweep") return { type: "sweep" }
   if (!budget) throw new Error(`${command.type} accepted without a budget`)
   const balance = balanceOf({ budget, ledger }, now)
+  const created = params.created ? snapshotOf(budget, ledger, balance, now) : null
 
   switch (command.type) {
     case "upsert":
@@ -301,13 +305,20 @@ function outcomeOf(command: BudgetCommand, params: OutcomeParams): BudgetOutcome
     case "authorize": {
       if (row?.kind !== "hold") throw new Error("authorize produced no hold row")
       const { id: holdId, amount, expiresAt } = row
-      return { type: "authorize", holdId, amount, expiresAt, replayed, balance }
+      return { type: "authorize", holdId, amount, expiresAt, replayed, balance, created }
     }
     case "charge":
     case "record": {
       if (row?.kind !== command.type)
         throw new Error(`${command.type} produced no ${command.type} row`)
-      return { type: command.type, amount: row.amount, crossed: row.crossed, replayed, balance }
+      return {
+        type: command.type,
+        amount: row.amount,
+        crossed: row.crossed,
+        replayed,
+        balance,
+        created,
+      }
     }
     case "release": {
       if (row?.kind !== "hold" || row.state.status !== "released") {
@@ -333,7 +344,14 @@ function outcomeOf(command: BudgetCommand, params: OutcomeParams): BudgetOutcome
     }
     case "lease": {
       if (row?.kind !== "lease") throw new Error("lease produced no lease row")
-      return { type: "lease", lease: leaseView(row), terms: termsOf(budget), replayed, balance }
+      return {
+        type: "lease",
+        lease: leaseView(row),
+        terms: termsOf(budget),
+        replayed,
+        balance,
+        created,
+      }
     }
     case "report": {
       if (row?.kind !== "lease" || !row.last) {

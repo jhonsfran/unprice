@@ -1,109 +1,121 @@
 # @unprice/ai-sdk-budget
 
-Apply an Unprice budget to AI SDK model calls. This package supports text and local function tools
-through OpenAI Responses, Anthropic Messages, and Gemini GenerateContent. It uses
-`@unprice/budgets` for authorization and settlement.
+Cap AI spend per customer, run, or agent in the Vercel AI SDK. One wrapper puts every model step
+inside an Unprice budget: before the step runs, the adapter reserves what the step can cost at
+most and caps its output; after it runs, the step settles at its real usage. A step the cap cannot
+cover never reaches the provider.
+
+```bash
+pnpm add @unprice/ai-sdk-budget @unprice/budgets
+```
+
+Requires AI SDK 7 and one of `@ai-sdk/openai`, `@ai-sdk/anthropic`, or `@ai-sdk/google`.
+
+## Use
 
 ```ts
 import { createOpenAI } from "@ai-sdk/openai"
-import { createUnpriceBudgetMiddleware } from "@unprice/ai-sdk-budget"
+import { budgetSpent, budgeted } from "@unprice/ai-sdk-budget"
 import { Unprice } from "@unprice/budgets"
-import { generateText, wrapLanguageModel } from "ai"
+import { generateText, stepCountIs, tool } from "ai"
+import { z } from "zod"
 
 const unprice = new Unprice({ token: process.env.UNPRICE_TOKEN! })
-const budget = createUnpriceBudgetMiddleware({
-  getBudget: () => unprice.budget("customer:acme"),
-  getPricing: (modelId) => prices[modelId],
-  maxOutputTokens: 4096,
-})
-const openai = createOpenAI({ fetch: budget.fetch })
-const model = wrapLanguageModel({
-  model: openai.responses(modelId),
-  middleware: budget.middleware,
+
+const openai = budgeted(createOpenAI, {
+  unprice,
+  defaults: { unit: "USD", limits: [{ amount: "5", window: "month" }] },
 })
 
-const result = await generateText({ model, prompt, maxRetries: 0 })
+const run = unprice.budget(`run:${runId}`)
+
+const search = tool({
+  inputSchema: z.object({ q: z.string() }),
+  execute: run.wrap({ amount: 0.01 }, searchApi),
+})
+
+await generateText({
+  model: openai("gpt-5"),
+  tools: { search },
+  stopWhen: [stepCountIs(20), budgetSpent()],
+  providerOptions: { unprice: { budget: run.key } },
+})
 ```
 
-Define `prices`, `modelId`, and `prompt` in your application. Pricing uses USD per million tokens:
-`{ input, output, cacheRead, cacheWrite, tiers? }`. Supply all applicable pricing tiers. The maximum
-rate across tiers bounds the hold. Keep pricing current for the model and your provider account.
+`budgeted` takes the provider factory and returns a provider whose language models run inside
+the budget. Pass the factory's own settings as the third argument; your `fetch` there still
+carries the model traffic.
 
-Use both returned values. The middleware identifies each model call, and the paired fetch checks
-the final serialized request before it reaches the provider. A missing or mismatched middleware blocks
-the request. The adapter removes its internal header before the count and generation requests.
+Each call names its budget in `providerOptions.unprice.budget`. A call that names none uses the
+wrapper's `budget` option. With `defaults`, the first call on a key that has no budget creates
+one from that definition; an existing budget is never changed. Keys are your own ids.
 
-`generateText` and `streamText` use the same wrapped model. Each generation dispatch has a separate
-hold, including SDK retries and tool-loop steps. Set `maxRetries: 0` to avoid paid retries after
-uncertain provider failures. Stream retries also make new paid attempts.
+`wrap({ amount }, fn)` charges a fixed price before a tool runs, keyed by the AI SDK's
+`toolCallId`, so a tool call that runs again does not pay twice. `budgetSpent()` ends the loop
+once the last step left less than the next step would need, instead of failing on a denied hold.
 
-The adapter permits one generation dispatch per middleware call. It clamps the output limit,
-counts the final input for OpenAI, and rejects unsupported request fields and provider tools.
-It preserves the provider's JSON or streaming response mode. Local tool execution costs need
-their own budget integration.
+## What a step costs
 
-Generation returns only after settlement. Streaming text can arrive before settlement, but the
-final `finish` event waits for settlement. Provider error events also wait for settlement.
-The adapter reads only when the consumer requests data. Cancellation, an abandoned stream's
-deadline, missing usage, or an incomplete stream settles the full authorized amount. A settlement failure
-propagates and does not release the hold. Settlement above the authorized amount fails.
+Prices and limits come from the Unprice catalog, fetched once an hour per model and shared by
+every call in the process. You maintain no price table. The hold for a step is the byte bound of
+the request body at the model's highest input rate, plus the output limit at its output rate.
+Byte-level tokenizers never emit more tokens than bytes, so the step cannot cost more than the
+hold. Settlement returns the difference at once. No count request goes to the provider.
 
-In Cloudflare Workers, pass `waitUntil: (work) => ctx.waitUntil(work)` to preserve this work after
-disconnects. Each call has a 120-second deadline. `budgetTimeoutMs` sets the authorization and
-settlement deadline, with a default of 10 seconds. The default output limit is 4096 tokens;
-configured limits must be safe integers of at least 16.
-
-For Anthropic or Gemini, select the protocol and provide trusted model limits. The resolver must
-return the provider's maximum accepted input and output token counts for that model.
+The protocol comes from the model itself: OpenAI Responses, Anthropic Messages, and Google
+Generative AI. A model the catalog does not know is refused before any hold; pass its row in
+`models`:
 
 ```ts
-import { createAnthropic } from "@ai-sdk/anthropic"
-import { createGoogle } from "@ai-sdk/google"
-
-const anthropicBudget = createUnpriceBudgetMiddleware({
-  protocol: "anthropic-messages",
-  getBudget: () => unprice.budget("customer:acme"),
-  getPricing: resolveAnthropicPricing,
-  getModelLimits: resolveAnthropicLimits,
-})
-const anthropic = createAnthropic({ fetch: anthropicBudget.fetch })
-const claude = wrapLanguageModel({
-  model: anthropic.messages(claudeModelId),
-  middleware: anthropicBudget.middleware,
-})
-
-const googleBudget = createUnpriceBudgetMiddleware({
-  protocol: "google-generative-ai",
-  getBudget: () => unprice.budget("customer:acme"),
-  getPricing: resolveGooglePricing,
-  getModelLimits: resolveGoogleLimits,
-})
-const google = createGoogle({ fetch: googleBudget.fetch })
-const gemini = wrapLanguageModel({
-  model: google.chat(geminiModelId),
-  middleware: googleBudget.middleware,
+budgeted(createOpenAI, {
+  unprice,
+  models: {
+    "openai/my-finetune": {
+      rates: { input: 2, output: 8, cacheRead: 1, cacheWrite: 2 },
+      limits: { context: 128_000, output: 16_384 },
+    },
+  },
 })
 ```
 
-Each limit resolver returns `{ maxInputTokens, maxOutputTokens }`. The adapter validates and
-copies these values for each call. It clamps the native output parameter before the provider
-serializes the request. The shared policy checks the final request again.
+Every step carries `providerMetadata.unprice` on its result and on a stream's finish part:
+`budget`, `holdId`, `hold`, `actual`, `remaining`, and `exhausted`.
 
-Anthropic and Gemini token-count APIs provide estimates. These protocols reserve the full trusted
-input limit plus the bounded output cost. They make no count request. This holds more budget than
-a typical call consumes, but it gives concurrent calls a hard bound. Final usage releases the
-unused amount. OpenAI keeps its exact input-count preflight; its protocol remains the default.
+## Options
 
-Anthropic supports default or explicit five-minute cache writes. Set `cacheWrite` to that rate.
-One-hour cache writes, hosted tools, compaction, and server-side fallback operations are rejected.
-Gemini supports implicit cache reads. Explicit cache resources, hosted tools, media, and
-Interactions requests are rejected. Output usage already includes reasoning tokens in both
-providers; the adapter counts them once.
+| Option            | Meaning                                                                                      |
+| ----------------- | -------------------------------------------------------------------------------------------- |
+| `unprice`         | The `Unprice` client.                                                                        |
+| `budget`          | The key of a call that names none in `providerOptions`.                                      |
+| `defaults`        | The budget to create on first use: `unit`, `limits`, and the other upsert fields.            |
+| `budgets`         | `(key) => handle`, for local mode: `(key) => unprice.budget(key, { mode: "local", lease })`. |
+| `models`          | Rates and limits by `provider/model` id, replacing or adding catalog rows.                   |
+| `maxOutputTokens` | The output cap of every step. Defaults to 4096; the model's own limit clamps it.             |
+| `budgetTimeoutMs` | The deadline of each budget call. Defaults to 10 seconds.                                    |
+| `waitUntil`       | Keeps settlement alive after the response: `(work) => ctx.waitUntil(work)` on Workers.       |
 
-For Anthropic and Gemini streams, a native SDK `finish` event alone does not prove final usage.
-The adapter checks raw provider completion events internally. Missing terminal usage, early usage
-followed by more content, or an unknown Anthropic completion settles the full hold. Internal raw
-events remain hidden unless the caller requested raw chunks.
+Set `maxRetries: 0` on `generateText` and `streamText` unless you want paid retries: each attempt
+is a step with its own hold.
 
-Requires AI SDK 7 and its V4 model contract. Provider instances that bypass the paired fetch,
-hidden transport retries, and custom gateways need a separate integration.
+## What is refused
+
+Text and local function tools are budgeted. Image and file parts, provider-run tools, explicit
+Gemini caches, one-hour Anthropic cache writes, and the OpenAI chat completions API are refused
+before any hold, so a request the bound does not cover never runs.
+
+## When something fails
+
+Generation returns only after settlement; a stream's finish part waits for it. Cancellation, a
+missing usage report, or an incomplete stream settles the full hold. A failed settlement throws
+`BudgetSettleError` with the hold, so you can settle it later; the hold is never released, and an
+open hold expires at its full amount. Spend is over-counted, never under-counted.
+
+Without `waitUntil` on a platform that stops the function at the response, settlement may not run
+and the hold expires at its full amount. The cap stays safe; accuracy and capacity suffer until it
+expires.
+
+## Lower level
+
+`createUnpriceBudgetMiddleware(options)` returns `{ fetch, middleware }` for a provider `budgeted`
+cannot build. Give the provider the `fetch` and wrap each model with the `middleware`; the two are
+paired, and a request that reaches the `fetch` without the middleware is refused.

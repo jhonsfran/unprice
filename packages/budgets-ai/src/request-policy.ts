@@ -1,9 +1,9 @@
 export type BudgetProtocol = "openai-responses" | "anthropic-messages" | "google-generative-ai"
 
-/** Provider-enforced model limits. These must match the endpoint and selected model. */
+/** The model's context and output limits, as the catalog row carries them. */
 export interface ModelLimits {
-  maxInputTokens: number
-  maxOutputTokens: number
+  context: number
+  output: number
 }
 
 export interface RequestLimits {
@@ -16,4 +16,6 @@ export interface PreparedRequest {
   readonly payload: object
   readonly body: string
   readonly outputTokens: number
+  /** Messages and tool items in the request, for the per-message overhead of the input bound. */
+  readonly messages: number
 }

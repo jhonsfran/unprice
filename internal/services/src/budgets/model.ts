@@ -211,6 +211,17 @@ export type BudgetView = Readonly<{
 
 // Commands
 
+/**
+ * The budget a keyed verb creates when its key has none (ADR-0006 D8): the upsert a runtime key
+ * would send, at the address the verb is sent to. An existing budget ignores it.
+ */
+export type BudgetDefinition = Readonly<{
+  key: string
+  projectId: string
+  unit: string
+  config: BudgetConfig
+}>
+
 export type BudgetCommand =
   | Readonly<{
       type: "upsert"
@@ -224,10 +235,21 @@ export type BudgetCommand =
        */
       mayLoosen: boolean
     }>
-  | Readonly<{ type: "authorize"; idempotencyKey: string; amount: Amount; ttlMs?: number }>
+  | Readonly<{
+      type: "authorize"
+      idempotencyKey: string
+      amount: Amount
+      ttlMs?: number
+      ifMissing?: BudgetDefinition
+    }>
   | Readonly<{ type: "settle"; holdId: string; amount: Amount }>
   | Readonly<{ type: "release"; holdId: string }>
-  | Readonly<{ type: "charge"; idempotencyKey: string; amount: Amount }>
+  | Readonly<{
+      type: "charge"
+      idempotencyKey: string
+      amount: Amount
+      ifMissing?: BudgetDefinition
+    }>
   | Readonly<{
       type: "record"
       idempotencyKey: string
@@ -236,7 +258,13 @@ export type BudgetCommand =
       occurredAt: number
     }>
   /** Debits `min(amount, room)` under every hard limit for a process to spend locally. */
-  | Readonly<{ type: "lease"; leaseKey: string; amount: Amount; ttlMs: number }>
+  | Readonly<{
+      type: "lease"
+      leaseKey: string
+      amount: Amount
+      ttlMs: number
+      ifMissing?: BudgetDefinition
+    }>
   | Readonly<{ type: "report"; leaseKey: string; seq: number; request: LeaseReportRequest }>
   | Readonly<{ type: "get" }>
   | Readonly<{ type: "sweep" }>
@@ -311,6 +339,8 @@ export type BudgetOutcome =
       expiresAt: number
       replayed: boolean
       balance: BudgetBalance
+      /** The budget this verb created from its `ifMissing`; null when it already existed. */
+      created: BudgetSnapshot | null
     }>
   | Readonly<{
       type: "settle"
@@ -337,9 +367,13 @@ export type BudgetOutcome =
       crossed: readonly string[]
       replayed: boolean
       balance: BudgetBalance
+      /** The budget a charge created from its `ifMissing`; null otherwise, always for a record. */
+      created: BudgetSnapshot | null
     }>
   | Readonly<{
       type: "lease"
+      /** The budget this lease created from its `ifMissing`; null when it already existed. */
+      created: BudgetSnapshot | null
       lease: LeaseView
       terms: LeaseTerms
       replayed: boolean

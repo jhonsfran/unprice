@@ -14,9 +14,11 @@ import {
 import {
   type BudgetAddress,
   type BudgetVerbRequest,
+  type CreatingVerbRequest,
   type ExecuteBudgetCommandDeps,
   type ExecuteBudgetCommandInput,
   executeBudgetCommand,
+  executeCreatingVerb,
 } from "@unprice/services/use-cases"
 import type { Context } from "hono"
 import { setMetric } from "hono/timing"
@@ -53,6 +55,26 @@ export async function runBudgetVerb<R extends BudgetVerbRequest>(
   if (result.err) throw budgetApiError(c, result.err)
   setRemaining(c, result.val)
   return result.val
+}
+
+/**
+ * The executor of a verb that may create its budget from `ifMissing`: it records a budget it
+ * created in the dashboard catalog, as an upsert does.
+ */
+export function creatingVerb<R extends CreatingVerbRequest>(
+  c: Context<HonoEnv>
+): BudgetVerbExecutor<R> {
+  const { budgetCatalog } = c.get("services")
+  return (deps, input) =>
+    executeCreatingVerb(
+      {
+        ...deps,
+        services: { budgetCatalog },
+        waitUntil: c.get("waitUntil"),
+        logger: c.get("logger"),
+      },
+      input
+    )
 }
 
 /**

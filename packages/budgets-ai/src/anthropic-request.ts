@@ -280,7 +280,14 @@ export function prepareRequest(value: unknown, limits: RequestLimits): PreparedR
       ? {}
       : { thinking: boundThinking(payload.thinking, outputTokens) }),
   }
-  return { payload: generation, body: JSON.stringify(generation), outputTokens }
+  const messageCount =
+    (payload.messages as unknown[]).length + (payload.system === undefined ? 0 : 1)
+  return {
+    payload: generation,
+    body: JSON.stringify(generation),
+    outputTokens,
+    messages: messageCount,
+  }
 }
 
 export function validateRoute(

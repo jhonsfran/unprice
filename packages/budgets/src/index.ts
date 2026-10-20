@@ -15,6 +15,7 @@ export type {
   BudgetBalance,
   BudgetBlocked,
   BudgetCharge,
+  BudgetDefinitionInput,
   BudgetDenial,
   BudgetHandle,
   BudgetHold,
@@ -25,6 +26,13 @@ export type {
   SpendBudgetInput,
   SpendSettlement,
 } from "./budgets"
+export { MODEL_CACHE_TTL_MS, createModelCatalog, parseModelId } from "./model-catalog"
+export type {
+  ModelCatalog,
+  ModelCatalogTransport,
+  ModelRate,
+  ModelTokenRates,
+} from "./model-catalog"
 export { createLocalLeases } from "./budget-local"
 export type {
   LeaseReportResponse,

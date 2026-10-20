@@ -1,6 +1,6 @@
 import type { ApiError, ErrorResponse } from "./errors"
 import type { GeneratedSdkResources } from "./generated/sdk-resources"
-import type { OperationResponse } from "./operation-types"
+import type { OperationInput, OperationResponse } from "./operation-types"
 import type { ApiResult } from "./result"
 import type { UnpriceOptions } from "./transport"
 
@@ -61,8 +61,22 @@ export type BudgetHold = {
   release(): Promise<ApiResult<BudgetRelease>>
 }
 
+/**
+ * The budget a handle creates on first use: an upsert body without the key (ADR-0006 D8). It is
+ * sent with every authorize, charge, and lease; an existing budget ignores it.
+ */
+export type BudgetDefinitionInput = NonNullable<OperationInput<"budgets.authorize">["ifMissing"]>
+
 export type BudgetAuthorization =
-  | { allowed: true; degraded: false; hold: BudgetHold; balance: BudgetBalance; replayed: boolean }
+  | {
+      allowed: true
+      degraded: false
+      hold: BudgetHold
+      balance: BudgetBalance
+      replayed: boolean
+      /** This call created the budget from the handle's `ifMissing`. */
+      created: boolean
+    }
   | BudgetDenial
 
 export type BudgetCharge =
@@ -134,6 +148,20 @@ export type BudgetHandle = {
     input: SpendBudgetInput,
     fn: (hold: BudgetHold) => Promise<{ value: T; actual: AmountInput }>
   ): Promise<T>
+  /**
+   * `fn` with a charge of `price.amount` in front. As an AI SDK tool's `execute`, the charge is
+   * keyed by the call's `toolCallId`, so a tool call that runs again replays its charge instead of
+   * paying twice; any other call charges under a fresh key. A denied charge throws and `fn` does
+   * not run.
+   *
+   * @throws BudgetExceededError when a limit denies the charge.
+   * @throws BudgetUnavailableError when Unprice cannot be reached after the client's retries.
+   * @throws BudgetRequestError when the API rejects the charge.
+   */
+  wrap<A extends unknown[], R>(
+    price: { amount: AmountInput },
+    fn: (...args: A) => R
+  ): (...args: A) => Promise<Awaited<R>>
 }
 
 /** A limit denied the estimate. `blocked` names it and the remedy. */
@@ -372,11 +400,44 @@ const settleOutcome = async (
   return null
 }
 
+const toolCallIdOf = (options: unknown): string | undefined =>
+  typeof options === "object" &&
+  options !== null &&
+  "toolCallId" in options &&
+  typeof options.toolCallId === "string" &&
+  options.toolCallId.length > 0
+    ? options.toolCallId
+    : undefined
+
+/** `wrap` over any `charge`, so the remote and local handles share one contract. */
+export function createWrap(charge: BudgetHandle["charge"]): BudgetHandle["wrap"] {
+  return <A extends unknown[], R>(price: { amount: AmountInput }, fn: (...args: A) => R) =>
+    async (...args: A): Promise<Awaited<R>> => {
+      const idempotencyKey = toolCallIdOf(args[1]) ?? newIdempotencyKey()
+      const charged = await charge({ amount: price.amount, idempotencyKey })
+      if (charged.error) {
+        if (retryable(charged.error)) {
+          throw new BudgetUnavailableError(charged.error, idempotencyKey)
+        }
+        throw new BudgetRequestError(charged.error, idempotencyKey)
+      }
+      if (!charged.result.allowed) {
+        if (charged.result.degraded) {
+          throw new BudgetUnavailableError(charged.result.blocked.error, idempotencyKey)
+        }
+        throw new BudgetExceededError(charged.result, idempotencyKey)
+      }
+      return await fn(...args)
+    }
+}
+
 export const createBudgetHandle = (
   budgets: BudgetResources,
   key: string,
-  settlement?: SpendSettlement
+  settlement?: SpendSettlement,
+  ifMissing?: BudgetDefinitionInput
 ): BudgetHandle => {
+  const creating = ifMissing ? { ifMissing } : {}
   const authorize = async ({
     amount,
     idempotencyKey,
@@ -384,6 +445,7 @@ export const createBudgetHandle = (
   }: AuthorizeBudgetInput): Promise<ApiResult<BudgetAuthorization>> => {
     const response = await budgets.authorize({
       ...options,
+      ...creating,
       key,
       amount: toDecimal(amount),
       idempotencyKey,
@@ -401,34 +463,35 @@ export const createBudgetHandle = (
         hold: createHold(budgets, key, response.result),
         balance: response.result.balance,
         replayed: response.result.replayed,
+        created: response.result.created,
       },
     }
+  }
+
+  const charge: BudgetHandle["charge"] = async ({ amount, idempotencyKey }) => {
+    const response = await budgets.charge({
+      ...creating,
+      key,
+      amount: toDecimal(amount),
+      idempotencyKey,
+    })
+
+    if (response.error) {
+      const denial = toDenial(response.error)
+      return denial ? { result: denial } : { error: response.error }
+    }
+
+    return { result: { ...response.result, allowed: true, degraded: false } }
   }
 
   return {
     key,
     authorize,
-
-    charge: async ({ amount, idempotencyKey }) => {
-      const response = await budgets.charge({
-        key,
-        amount: toDecimal(amount),
-        idempotencyKey,
-      })
-
-      if (response.error) {
-        const denial = toDenial(response.error)
-        return denial ? { result: denial } : { error: response.error }
-      }
-
-      return { result: { ...response.result, allowed: true, degraded: false } }
-    },
-
+    charge,
     record: async ({ amount, ...input }) =>
       budgets.record({ ...input, key, amount: toDecimal(amount) }),
-
     get: () => budgets.get({ key }),
-
     spend: createSpend(authorize, settlement),
+    wrap: createWrap(charge),
   }
 }

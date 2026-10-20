@@ -159,24 +159,52 @@ export function decide(
       budget ? decideSweep({ budget, ledger: view.ledger }, view.expired, now) : unchanged(null)
     )
   }
-  if (!budget) return reject({ code: "BUDGET_NOT_FOUND" })
-  const state = { budget, ledger: view.ledger }
+  if (budget) return decideVerb(command, { budget, ledger: view.ledger }, view.target, now)
 
+  // A keyed verb may carry the budget to create when its key has none (ADR-0006 D8). The verb
+  // then runs against the new budget in the same change, so a denial creates nothing.
+  const definition = "ifMissing" in command ? command.ifMissing : undefined
+  if (!definition) return reject({ code: "BUDGET_NOT_FOUND" })
+  const created = decideUpsert(
+    { type: "upsert", ...definition, mayLoosen: false },
+    null,
+    view.ledger,
+    now
+  )
+  if (created.err) return created
+  const { configured } = created.val
+  if (!configured) throw new Error(`creating ${definition.key} configured nothing`)
+  const decided = decideVerb(
+    command,
+    { budget: configured.budget, ledger: view.ledger },
+    view.target,
+    now
+  )
+  if (decided.err) return decided
+  return Ok({ ...decided.val, configured })
+}
+
+function decideVerb(
+  command: Exclude<BudgetCommand, { type: "upsert" | "sweep" }>,
+  state: Funded,
+  target: Operation | null,
+  now: number
+): Result<Change, UnPriceBudgetError> {
   switch (command.type) {
     case "get":
       return Ok(unchanged(null))
     case "authorize":
     case "charge":
     case "record":
-      return decideKeyed(command, state, view.target, now)
+      return decideKeyed(command, state, target, now)
     case "settle":
-      return decideSettle(command, state, view.target, now)
+      return decideSettle(command, state, target, now)
     case "release":
-      return decideRelease(command, state.ledger, view.target, now)
+      return decideRelease(command, state.ledger, target, now)
     case "lease":
-      return decideLease(command, state, view.target, now)
+      return decideLease(command, state, target, now)
     case "report":
-      return decideReport(command, state, view.target, now)
+      return decideReport(command, state, target, now)
   }
 }
 

@@ -45,6 +45,7 @@
   "scripts": {
     "clean": "rm -rf .turbo node_modules",
     "typecheck": "tsc --noEmit",
+    "sync:model-catalog": "pnpm --filter @unprice/db exec tsx ../services/scripts/sync-model-catalog.cts",
     "test": "vitest run",
     "test:billing-model": "vitest run src/test-fixtures/reference-model.test.ts src/test-fixtures/scenario-dsl.test.ts",
     "test:billing-properties": "vitest run src/test-fixtures/reference-model.properties.test.ts src/tests/billing-scenarios/rating-service.properties.test.ts",

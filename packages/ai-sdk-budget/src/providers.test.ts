@@ -2,15 +2,19 @@ import { createAnthropic } from "@ai-sdk/anthropic"
 import { createGoogle } from "@ai-sdk/google"
 import type { LanguageModelV4, LanguageModelV4StreamPart } from "@ai-sdk/provider"
 import { Unprice } from "@unprice/budgets"
-import type { BudgetProtocol, ModelLimits } from "@unprice/budgets-ai"
+import { type BudgetProtocol, type ModelLimits, inputBound } from "@unprice/budgets-ai"
 import { generateText, jsonSchema, streamText, wrapLanguageModel } from "ai"
 import { describe, expect, it, vi } from "vitest"
 import { createUnpriceBudgetMiddleware } from "./index"
 
 type AddedProtocol = Exclude<BudgetProtocol, "openai-responses">
 const protocols: AddedProtocol[] = ["anthropic-messages", "google-generative-ai"]
+const catalogIds: Record<AddedProtocol, string> = {
+  "anthropic-messages": "anthropic/claude-test",
+  "google-generative-ai": "google/gemini-test",
+}
 const pricing = { input: 1, output: 4, cacheRead: 0.5, cacheWrite: 1.25 }
-const limits = { maxInputTokens: 100, maxOutputTokens: 2048 }
+const limits = { context: 100, output: 2048 }
 const balance = { remaining: "1", held: "0", limits: [], asOf: 1_792_000_000_000 }
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
@@ -152,6 +156,7 @@ function harness(
     settleGate?: Promise<void>
     streamChunks?: readonly unknown[]
     jsonResponse?: unknown
+    unknownModel?: boolean
   } = {}
 ) {
   const authorizations: unknown[] = []
@@ -163,6 +168,8 @@ function harness(
     disableTelemetry: true,
     retry: { attempts: 0 },
     fetch: async (request) => {
+      if (new URL(request.url).pathname === "/v1/budgets/models")
+        return json({ version: "2026-10-20", models: [] })
       const body: unknown = await request.json()
       if (request.url.endsWith("/authorize")) {
         authorizations.push(body)
@@ -215,10 +222,17 @@ function harness(
     },
   })
   const adapter = createUnpriceBudgetMiddleware({
-    protocol,
-    getBudget: () => unprice.budget(options.key ?? protocol),
-    getPricing: () => pricing,
-    getModelLimits: () => options.modelLimits ?? limits,
+    unprice,
+    budget: options.key ?? protocol,
+    models: options.unknownModel
+      ? {}
+      : {
+          [catalogIds[protocol]]: {
+            rates: pricing,
+            tiers: [],
+            limits: options.modelLimits ?? limits,
+          },
+        },
     maxOutputTokens: options.maxOutputTokens ?? 4096,
     fetch: async (input, init) => {
       const request = new Request(input, init)
@@ -247,6 +261,24 @@ function harness(
 
 const generate = (model: LanguageModelV4) => generateText({ model, prompt: "hello", maxRetries: 0 })
 
+/**
+ * The hold the cap requires for the body the provider received: its byte bound at the highest
+ * input rate (cacheWrite, 1.25) plus the output limit at 4, rounded up at eight decimals and
+ * formatted as the API carries amounts. Stated here on its own so the test does not borrow the
+ * adapter's arithmetic.
+ */
+async function fullHold(h: ReturnType<typeof harness>, outputTokens = 2048): Promise<string> {
+  const request = h.requests[0]
+  if (!request) throw new Error("Missing provider request")
+  const body = await request.clone().text()
+  const native = JSON.parse(body) as Record<string, unknown>
+  const messages = Array.isArray(native.messages)
+    ? native.messages.length + (native.system === undefined ? 0 : 1)
+    : (native.contents as unknown[]).length + (native.systemInstruction === undefined ? 0 : 1)
+  const cost = (inputBound(body, messages) * 1.25 + outputTokens * 4) / 1_000_000
+  return (Math.ceil(cost * 100_000_000) / 100_000_000).toFixed(8).replace(/\.?0+$/, "")
+}
+
 async function nativeParts(model: LanguageModelV4, includeRawChunks = false) {
   const result = await model.doStream({
     prompt: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
@@ -270,7 +302,7 @@ describe.each(protocols)("AI SDK %s", (protocol) => {
     expect(result.text).toBe("answer")
     expect(result.usage.inputTokens).toBe(13)
     expect(result.usage.outputTokens).toBe(4)
-    expect(h.authorizations).toMatchObject([{ amount: "0.008317", key: protocol }])
+    expect(h.authorizations).toMatchObject([{ amount: await fullHold(h), key: protocol }])
     expect(h.settlements).toMatchObject([{ amount: actual }])
     expect(h.requests).toHaveLength(1)
     expect(h.requests[0]?.url).not.toMatch(/count/)
@@ -309,15 +341,15 @@ describe.each(protocols)("AI SDK %s", (protocol) => {
   })
 
   it("clamps native output before serialization to the model's limit", async () => {
-    const h = harness(protocol, { modelLimits: { maxInputTokens: 100, maxOutputTokens: 1024 } })
+    const h = harness(protocol, { modelLimits: { context: 100, output: 1024 } })
     await generate(h.model)
-    const body: unknown = await h.requests[0]?.json()
+    const body: unknown = await h.requests[0]?.clone().json()
     expect(body).toMatchObject(
       protocol === "anthropic-messages"
         ? { max_tokens: 1024 }
         : { generationConfig: { maxOutputTokens: 1024 } }
     )
-    expect(h.authorizations).toMatchObject([{ amount: "0.004221" }])
+    expect(h.authorizations).toMatchObject([{ amount: await fullHold(h, 1024) }])
   })
 
   it("supports local function calls with their native usage", async () => {
@@ -362,13 +394,13 @@ describe.each(protocols)("AI SDK %s", (protocol) => {
       prompt: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
     })
     await result.stream.cancel()
-    expect(h.settlements).toMatchObject([{ amount: "0.008317" }])
+    expect(h.settlements).toMatchObject([{ amount: await fullHold(h) }])
     gate.resolve()
   })
 
   it("rejects invalid resolved limits before authorization or generation", async () => {
-    const h = harness(protocol, { modelLimits: { maxInputTokens: 0, maxOutputTokens: 2048 } })
-    await expect(generate(h.model)).rejects.toThrow("Model limits")
+    const h = harness(protocol, { modelLimits: { context: 0, output: 2048 } })
+    await expect(generate(h.model)).rejects.toThrow("model limits")
     expect(h.authorizations).toEqual([])
     expect(h.requests).toEqual([])
   })
@@ -477,7 +509,7 @@ describe("native terminal usage evidence", () => {
       })
       const parts = await nativeParts(h.model)
       expect(parts.some((part) => part.type === "finish")).toBe(true)
-      expect(h.settlements).toMatchObject([{ amount: "0.008317" }])
+      expect(h.settlements).toMatchObject([{ amount: await fullHold(h) }])
     }
   )
 
@@ -503,7 +535,7 @@ describe("native terminal usage evidence", () => {
       ],
     })
     await nativeParts(h.model)
-    expect(h.settlements).toMatchObject([{ amount: "0.008317" }])
+    expect(h.settlements).toMatchObject([{ amount: await fullHold(h) }])
   })
 
   it("keeps the full Gemini hold if terminal usage omits output counts", async () => {
@@ -516,7 +548,7 @@ describe("native terminal usage evidence", () => {
       ],
     })
     await nativeParts(h.model)
-    expect(h.settlements).toMatchObject([{ amount: "0.008317" }])
+    expect(h.settlements).toMatchObject([{ amount: await fullHold(h) }])
   })
 
   it("keeps the full Anthropic hold without final message_delta usage", async () => {
@@ -542,7 +574,7 @@ describe("native terminal usage evidence", () => {
       ],
     })
     await nativeParts(h.model)
-    expect(h.settlements).toMatchObject([{ amount: "0.008317" }])
+    expect(h.settlements).toMatchObject([{ amount: await fullHold(h) }])
   })
 
   it("keeps the full Anthropic hold for unknown JSON completion", async () => {
@@ -550,7 +582,7 @@ describe("native terminal usage evidence", () => {
       jsonResponse: { ...providerResponse("anthropic-messages", false), stop_reason: null },
     })
     await generate(h.model)
-    expect(h.settlements).toMatchObject([{ amount: "0.008317" }])
+    expect(h.settlements).toMatchObject([{ amount: await fullHold(h) }])
   })
 
   it("keeps the full Anthropic hold for an unknown streaming completion", async () => {
@@ -578,32 +610,34 @@ describe("native terminal usage evidence", () => {
       ],
     })
     await nativeParts(h.model)
-    expect(h.settlements).toMatchObject([{ amount: "0.008317" }])
+    expect(h.settlements).toMatchObject([{ amount: await fullHold(h) }])
   })
 })
 
 describe("explicit provider configuration", () => {
-  it("requires a model limit resolver for non-OpenAI protocols", () => {
-    expect(() =>
-      Reflect.apply(createUnpriceBudgetMiddleware, undefined, [
-        {
-          protocol: "anthropic-messages",
-          getBudget: () => new Unprice({ token: "test" }).budget("a"),
-          getPricing: () => pricing,
-        },
-      ])
-    ).toThrow("getModelLimits")
-  })
+  it.each(protocols)(
+    "refuses a %s model the catalog does not know before any hold or provider call",
+    async (protocol) => {
+      const h = harness(protocol, { unknownModel: true })
+      await expect(generate(h.model)).rejects.toThrow(catalogIds[protocol])
+      expect(h.authorizations).toEqual([])
+      expect(h.requests).toEqual([])
+    }
+  )
 
   it("keeps concurrent providers, limits, and budget keys separate", async () => {
     const anthropic = harness("anthropic-messages", {
       key: "customer:a",
-      modelLimits: { maxInputTokens: 100, maxOutputTokens: 1024 },
+      modelLimits: { context: 100, output: 1024 },
     })
     const google = harness("google-generative-ai", { key: "customer:b" })
     await Promise.all([generate(anthropic.model), generate(google.model)])
-    expect(anthropic.authorizations).toMatchObject([{ key: "customer:a", amount: "0.004221" }])
-    expect(google.authorizations).toMatchObject([{ key: "customer:b", amount: "0.008317" }])
+    expect(anthropic.authorizations).toMatchObject([
+      { key: "customer:a", amount: await fullHold(anthropic, 1024) },
+    ])
+    expect(google.authorizations).toMatchObject([
+      { key: "customer:b", amount: await fullHold(google) },
+    ])
     expect(anthropic.settlements).toMatchObject([{ amount: "0.00002875" }])
     expect(google.settlements).toMatchObject([{ amount: "0.000028" }])
   })

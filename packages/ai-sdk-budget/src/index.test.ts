@@ -1,11 +1,13 @@
 import { createOpenAI } from "@ai-sdk/openai"
 import type { LanguageModelV4, LanguageModelV4StreamPart } from "@ai-sdk/provider"
 import { BudgetSettleError, Unprice } from "@unprice/budgets"
+import { inputBound } from "@unprice/budgets-ai"
 import { generateText, jsonSchema, streamText, wrapLanguageModel } from "ai"
 import { describe, expect, it, vi } from "vitest"
 import { createUnpriceBudgetMiddleware } from "./index"
 
 const pricing = { input: 1, output: 4, cacheRead: 0.5, cacheWrite: 1 }
+const limits = { context: 1_000_000, output: 4096 }
 const json = (value: unknown, status = 200) =>
   new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } })
 const deferred = <T>() => Promise.withResolvers<T>()
@@ -115,8 +117,9 @@ function harness(
     },
   })
   const adapter = createUnpriceBudgetMiddleware({
-    getBudget: () => unprice.budget(options.key ?? "customer:a"),
-    getPricing: () => options.pricing ?? pricing,
+    unprice,
+    budget: options.key ?? "customer:a",
+    models: { "openai/gpt-test": { rates: options.pricing ?? pricing, tiers: [], limits } },
     maxOutputTokens: 16,
     ...(options.background
       ? {
@@ -128,9 +131,6 @@ function harness(
     fetch: async (input, init) => {
       const request = new Request(input, init)
       requests.push(request.clone())
-      if (request.url.endsWith("/input_tokens")) {
-        return json({ object: "response.input_tokens", input_tokens: 10 })
-      }
       generationCount++
       if (generationCount <= (options.generationFailures ?? 0)) {
         return new Response(
@@ -223,6 +223,23 @@ function settlementBody(value: unknown) {
   return { amount: value.amount, holdId: value.holdId }
 }
 
+/**
+ * The hold the harness's 16-token cap requires for the body the provider received: its byte bound
+ * at the highest input rate (input and cacheWrite, 1) plus 16 output tokens at 4, rounded up at
+ * eight decimals and formatted as the API carries amounts. Stated here on its own so the test does
+ * not borrow the adapter's arithmetic.
+ */
+async function fullHold(h: ReturnType<typeof harness>, index = 0): Promise<string> {
+  const request = h.requests[index]
+  if (!request) throw new Error("Missing provider request")
+  const body = await request.clone().text()
+  const { input, instructions } = JSON.parse(body) as { input: unknown; instructions?: string }
+  const items = typeof input === "string" ? 1 : (input as unknown[]).length
+  const messages = items + (instructions === undefined ? 0 : 1)
+  const cost = (inputBound(body, messages) * 1 + 16 * 4) / 1_000_000
+  return (Math.ceil(cost * 100_000_000) / 100_000_000).toFixed(8).replace(/\.?0+$/, "")
+}
+
 const generate = (model: LanguageModelV4) =>
   generateText({ model, prompt: "hello", maxOutputTokens: 16, maxRetries: 0 })
 
@@ -290,7 +307,7 @@ describe("AI SDK budget middleware", () => {
     expect(pulls).toBe(1)
     controller.abort(new Error("abandoned"))
     await Promise.all(background)
-    expect(h.settled[0]?.amount).toBe("0.000074")
+    expect(h.settled[0]?.amount).toBe(await fullHold(h))
     expect(cancellations).toBe(1)
     expect(background).toHaveLength(1)
     if (!token) throw new Error("Missing test call token")
@@ -414,13 +431,13 @@ describe("AI SDK budget middleware", () => {
     const h = harness()
     const result = await generate(h.model)
     expect(result.text).toBe("answer")
-    expect(h.authorized[0]?.amount).toBe("0.000074")
+    expect(h.authorized[0]?.amount).toBe(await fullHold(h))
     expect(h.settled).toEqual([{ holdId: "h_1", amount: "0.000025" }])
-    expect(h.requests).toHaveLength(2)
+    expect(h.requests).toHaveLength(1)
     for (const request of h.requests) {
       expect(request.headers.has("x-unprice-budget-call")).toBe(false)
     }
-    const generation: unknown = await h.requests[1]?.json()
+    const generation: unknown = await h.requests[0]?.json()
     expect(generation).toMatchObject({
       model: "gpt-test",
       max_output_tokens: 16,
@@ -468,7 +485,7 @@ describe("AI SDK budget middleware", () => {
     expect(h.settled).toEqual([])
     controller.abort(new Error("abandoned"))
     await Promise.all(background)
-    expect(h.settled[0]?.amount).toBe("0.000074")
+    expect(h.settled[0]?.amount).toBe(await fullHold(h))
   })
 
   it("keeps waitUntil pending through the complete stream lifetime", async () => {
@@ -496,7 +513,7 @@ describe("AI SDK budget middleware", () => {
     const h = harness({ streamGate: gate.promise })
     const result = await h.model.doStream({ prompt: [] })
     await result.stream.cancel("caller disconnected")
-    expect(h.settled[0]?.amount).toBe("0.000074")
+    expect(h.settled[0]?.amount).toBe(await fullHold(h))
     gate.resolve()
   })
 
@@ -508,7 +525,7 @@ describe("AI SDK budget middleware", () => {
     controller.abort(new Error("caller aborted"))
     await vi.waitFor(() => expect(h.settled).toHaveLength(1))
     await expect(result.stream.getReader().read()).rejects.toThrow("caller aborted")
-    expect(h.settled[0]?.amount).toBe("0.000074")
+    expect(h.settled[0]?.amount).toBe(await fullHold(h))
     gate.resolve()
   })
 
@@ -548,7 +565,7 @@ describe("AI SDK budget middleware", () => {
       ],
     })
     await generate(unknown)
-    expect(h.settled[0]?.amount).toBe("0.000074")
+    expect(h.settled[0]?.amount).toBe(await fullHold(h))
   })
 
   it("keeps parallel calls and budget keys separate", async () => {
@@ -569,7 +586,7 @@ describe("AI SDK budget middleware", () => {
     expect(h.authorized).toHaveLength(2)
     expect(h.authorized[0]?.idempotencyKey).not.toBe(h.authorized[1]?.idempotencyKey)
     expect(h.settled).toEqual([
-      { holdId: "h_1", amount: "0.000074" },
+      { holdId: "h_1", amount: await fullHold(h, 0) },
       { holdId: "h_2", amount: "0.000025" },
     ])
   })
@@ -637,7 +654,7 @@ describe("AI SDK budget middleware", () => {
       while (!(await reader.read()).done) {}
     })()
     await expect(reading).rejects.toThrow("without final usage")
-    expect(h.settled[0]?.amount).toBe("0.000074")
+    expect(h.settled[0]?.amount).toBe(await fullHold(h))
   })
 
   it("settles measured usage for an error finish", async () => {

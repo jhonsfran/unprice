@@ -1,5 +1,6 @@
 export * from "./budget-client"
 export * from "./execute-budget-command"
+export * from "./create-on-first-use"
 export * from "./upsert-budget"
 export * from "./inspect-budget"
 export * from "./open-budget-by-key"

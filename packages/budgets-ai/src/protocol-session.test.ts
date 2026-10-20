@@ -1,9 +1,10 @@
 import { Unprice } from "@unprice/budgets"
 import { describe, expect, it } from "vitest"
 import { type BudgetProtocol, createBudgetSession } from "./index"
+import { inputBound } from "./input-bound"
 
 const pricing = { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.25 }
-const limits = { maxInputTokens: 1000, maxOutputTokens: 256 }
+const limits = { context: 1000, output: 256 }
 const providers = [
   {
     protocol: "anthropic-messages",
@@ -19,6 +20,16 @@ const providers = [
     },
   },
 ] as const
+
+/**
+ * The hold the cap requires for the body the provider received: its byte bound at the highest
+ * input rate (cacheWrite, 1.25) plus the 256-token output limit at 2, rounded up at eight
+ * decimals. Stated here on its own so the test does not borrow the adapter's arithmetic.
+ */
+function hold(body: unknown, messages: number): number {
+  const bound = inputBound(JSON.stringify(body), messages)
+  return Math.ceil(((bound * 1.25 + 256 * 2) / 1_000_000) * 100_000_000) / 100_000_000
+}
 
 function fixture(protocol: Exclude<BudgetProtocol, "openai-responses">, denied = false) {
   const order: string[] = []
@@ -71,20 +82,19 @@ function fixture(protocol: Exclude<BudgetProtocol, "openai-responses">, denied =
   const modelLimits = { ...limits }
   const session = createBudgetSession({
     protocol,
-    modelLimits,
     getBudget: () => client.budget("customer"),
-    modelId: "model",
-    pricing,
+    model: { id: "model", pricing, limits: modelLimits },
     maxOutputTokens: 4096,
     mode: "generate",
     fetch: async (input, init) => {
-      order.push("generate")
-      bodies.push(await new Request(input, init).json())
+      const request = new Request(input, init)
+      order.push(request.url.includes("count") ? "count" : "generate")
+      bodies.push(await request.json())
       return Response.json({})
     },
   })
-  modelLimits.maxInputTokens = 1
-  modelLimits.maxOutputTokens = 32
+  modelLimits.context = 1
+  modelLimits.output = 32
   return { session, order, amounts, bodies }
 }
 
@@ -99,12 +109,12 @@ for (const provider of providers)
         headers: { "content-type": "application/json" },
         body: JSON.stringify(provider.body),
       })
-    it("reserves trusted input and final output limits before one paid request", async () => {
+    it("reserves the byte bound and the final output limit before one paid request, with no count", async () => {
       const test = fixture(provider.protocol)
       await dispatch(test.session)
       await test.session.settle(0.00002)
       expect(test.order).toEqual(["authorize", "generate", "settle"])
-      expect(test.amounts).toEqual([0.001762, 0.00002])
+      expect(test.amounts).toEqual([hold(test.bodies[0], 1), 0.00002])
       expect(test.bodies[0]).toMatchObject(
         provider.protocol === "anthropic-messages"
           ? { max_tokens: 256, service_tier: "standard_only", stream: false }
@@ -122,7 +132,8 @@ for (const provider of providers)
       const test = fixture(provider.protocol)
       await dispatch(test.session)
       await test.session.settle()
-      expect(test.amounts).toEqual([0.001762, 0.001762])
+      const reserved = hold(test.bodies[0], 1)
+      expect(test.amounts).toEqual([reserved, reserved])
     })
     it("blocks a denied reservation without a provider request", async () => {
       const test = fixture(provider.protocol, true)
@@ -138,32 +149,25 @@ for (const provider of providers)
     })
   })
 
-describe("trusted limits", () => {
-  it.each([0, 0.5, Number.POSITIVE_INFINITY])(
-    "rejects invalid input bound %s",
-    (maxInputTokens) => {
-      expect(() =>
-        createBudgetSession({
-          protocol: "anthropic-messages",
-          modelLimits: { ...limits, maxInputTokens },
-          modelId: "model",
-          pricing,
-          maxOutputTokens: 256,
-          mode: "generate",
-          getBudget: () => {
-            throw new Error("unused")
-          },
-        })
-      ).toThrow("trusted model limits")
-    }
-  )
+describe("model limits", () => {
+  it.each([0, 0.5, Number.POSITIVE_INFINITY])("rejects context limit %s", (context) => {
+    expect(() =>
+      createBudgetSession({
+        protocol: "anthropic-messages",
+        model: { id: "model", pricing, limits: { ...limits, context } },
+        maxOutputTokens: 256,
+        mode: "generate",
+        getBudget: () => {
+          throw new Error("unused")
+        },
+      })
+    ).toThrow("model limits")
+  })
   it("validates the caller output cap before clamping to the model limit", () => {
     expect(() =>
       createBudgetSession({
         protocol: "google-generative-ai",
-        modelLimits: limits,
-        modelId: "model",
-        pricing,
+        model: { id: "model", pricing, limits },
         maxOutputTokens: 4096.5,
         mode: "generate",
         getBudget: () => {

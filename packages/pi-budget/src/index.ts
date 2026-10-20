@@ -117,10 +117,12 @@ export function withUnpriceBudget(provider: Provider, config: UnpriceBudgetOptio
           : AbortSignal.timeout(120_000)
         session = createBudgetSession({
           protocol,
-          modelLimits: { maxInputTokens: model.contextWindow, maxOutputTokens: model.maxTokens },
           getBudget: config.getBudget,
-          modelId: model.id,
-          pricing: model.cost,
+          model: {
+            id: model.id,
+            pricing: model.cost,
+            limits: { context: model.contextWindow, output: model.maxTokens },
+          },
           maxOutputTokens: maxTokens,
           mode: "stream",
           signal,

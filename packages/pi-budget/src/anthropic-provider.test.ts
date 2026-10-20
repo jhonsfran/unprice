@@ -1,7 +1,8 @@
-import { type Context, Type } from "@earendil-works/pi-ai"
+import { type Context, type Model, Type } from "@earendil-works/pi-ai"
 import { createModels } from "@earendil-works/pi-ai/models"
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic"
 import { Unprice } from "@unprice/budgets"
+import { inputBound } from "@unprice/budgets-ai"
 import { describe, expect, it } from "vitest"
 import { z } from "zod"
 import { withUnpriceBudget } from "./index"
@@ -58,6 +59,33 @@ function responseStream(modelId: string, partial = false): Response {
   )
 }
 
+/**
+ * The hold the cap requires for the body the provider received: its byte bound at the model's
+ * highest input rate across its base rates and tiers, plus the output limit at its highest output
+ * rate, rounded up at eight decimals. Stated here on its own so the test does not borrow the
+ * adapter's arithmetic.
+ */
+function hold(
+  cost: Model<"anthropic-messages">["cost"],
+  text: string | undefined,
+  outputTokens: number
+): number {
+  if (text === undefined) throw new Error("Missing provider request")
+  const body = jsonObject.parse(JSON.parse(text))
+  const messages =
+    z.array(z.unknown()).parse(body.messages).length + (body.system === undefined ? 0 : 1)
+  const rates = [cost, ...(cost.tiers ?? [])]
+  const inputRate = Math.max(
+    ...rates.flatMap((rate) => [rate.input, rate.cacheRead, rate.cacheWrite])
+  )
+  const outputRate = Math.max(...rates.map((rate) => rate.output))
+  const bound = inputBound(text, messages)
+  return (
+    Math.ceil(((bound * inputRate + outputTokens * outputRate) / 1_000_000) * 100_000_000) /
+    100_000_000
+  )
+}
+
 function fixture(
   modelId = "claude-sonnet-4-6",
   auth: "apiKey" | "bearer" = "apiKey",
@@ -68,7 +96,12 @@ function fixture(
   if (model === undefined) throw new Error("Native Anthropic test model is missing")
   const order: string[] = []
   const amounts: number[] = []
-  const requests: { url: string; headers: Headers; body: Record<string, unknown> }[] = []
+  const requests: {
+    url: string
+    headers: Headers
+    body: Record<string, unknown>
+    text: string
+  }[] = []
   let deny = false
   const client = new Unprice({
     token: "budget-test",
@@ -119,10 +152,12 @@ function fixture(
   const fetch: typeof globalThis.fetch = async (input, init) => {
     const request = new Request(input, init)
     order.push("generate")
+    const text = await request.text()
     requests.push({
       url: request.url,
       headers: request.headers,
-      body: jsonObject.parse(await request.json()),
+      body: jsonObject.parse(JSON.parse(text)),
+      text,
     })
     return responseStream(model.id, partial)
   }
@@ -173,7 +208,7 @@ describe("native Pi Anthropic budget transport", () => {
         usage: { input: 8, cacheRead: 2, cacheWrite: 3, output: 4, reasoning: 1, totalTokens: 17 },
       })
       expect(test.order).toEqual(["authorize", "generate", "settle"])
-      expect(test.amounts[0]).toBe(3.78072)
+      expect(test.amounts[0]).toBe(hold(test.model.cost, test.requests[0]?.text, 2048))
       expect(test.amounts[1]).toBeCloseTo(0.00009585, 12)
       expect(test.requests).toHaveLength(1)
       const request = test.requests[0]
@@ -407,7 +442,8 @@ describe("native Pi Anthropic budget transport", () => {
     })
     expect(test.order).toEqual(["authorize", "generate", "settle"])
     expect(message.usage.cost.total).toBeCloseTo(0.00003585, 12)
-    expect(test.amounts).toEqual([3.78072, 3.78072])
+    const reserved = hold(test.model.cost, test.requests[0]?.text, 2048)
+    expect(test.amounts).toEqual([reserved, reserved])
   })
 
   it("denies generation without a provider request", async () => {

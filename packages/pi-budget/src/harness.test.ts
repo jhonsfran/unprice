@@ -218,7 +218,7 @@ describe("Unprice budget through Pi AI and Pi Durable", () => {
           stopReason: "stop",
           content: [{ type: "text", text: "Models reply" }],
         })
-        expect(test.order).toEqual(["count", "authorize", "generate", "settle"])
+        expect(test.order).toEqual(["authorize", "generate", "settle"])
       } finally {
         await test.harness.close(context)
       }
@@ -231,7 +231,7 @@ describe("Unprice budget through Pi AI and Pi Durable", () => {
       const root = await test.harness.root(context)
       await root.configure({ model: modelRef }, context)
       expect(await ask(root, "Hello")).toMatchObject({ status: "done", type: "input" })
-      expect(test.order).toEqual(["count", "authorize", "generate", "settle"])
+      expect(test.order).toEqual(["authorize", "generate", "settle"])
       expect((await root.context(context)).messages.at(-1)).toMatchObject({
         role: "assistant",
         content: [{ type: "text", text: "Harness reply" }],
@@ -272,7 +272,7 @@ describe("Unprice budget through Pi AI and Pi Durable", () => {
         role: "user",
         content: [{ type: "text", text: expect.stringContaining("Budgeted summary") }],
       })
-      expect(test.order).toEqual(["count", "authorize", "generate", "settle"])
+      expect(test.order).toEqual(["authorize", "generate", "settle"])
       expect(
         (await test.harness.usage(context)).models["openai/budget-harness"]?.cost.total
       ).toBeCloseTo(0.000306, 10)
@@ -298,7 +298,7 @@ describe("Unprice budget through Pi AI and Pi Durable", () => {
         status: "failed",
         error: { message: expect.stringContaining("budget cannot cover") },
       })
-      expect(test.order).toEqual(["count", "authorize"])
+      expect(test.order).toEqual(["authorize"])
       expect(test.providerPayloads).toHaveLength(2)
       expect((await root.context(context)).entries.some(CompactionEntry.is)).toBe(false)
     } finally {
@@ -339,7 +339,7 @@ describe("Unprice budget through Pi AI and Pi Durable", () => {
       await root.configure({ model: modelRef, tools: [delegate] }, context)
       expect(await ask(root, "Ask a child")).toMatchObject({ status: "done" })
       expect(test.order).toEqual(
-        Array.from({ length: 3 }, () => ["count", "authorize", "generate", "settle"]).flat()
+        Array.from({ length: 3 }, () => ["authorize", "generate", "settle"]).flat()
       )
       const authorizations = test.budgetRequests.filter(({ path }) => path.endsWith("/authorize"))
       const settlements = test.budgetRequests.filter(({ path }) => path.endsWith("/settle"))
@@ -366,7 +366,7 @@ describe("Unprice budget through Pi AI and Pi Durable", () => {
       await root.configure({ model: modelRef }, context)
       const result = await ask(root, "Hello")
       expect(result.status).toBe("unanswered")
-      expect(test.order).toEqual(["count"])
+      expect(test.order).toEqual([])
       expect(test.providerPayloads).toEqual([])
     } finally {
       await test.harness.close(context)

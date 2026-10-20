@@ -1,5 +1,6 @@
 import { upsertBudgetInputSchema } from "@unprice/db/validators"
 import { formatAmount } from "@unprice/money"
+import * as fc from "fast-check"
 import { describe, expect, it } from "vitest"
 import {
   type BudgetCommand,
@@ -1650,4 +1651,136 @@ describe("history does not slow the hot path", () => {
     }
     expect((performance.now() - started) / runs).toBeLessThan(1)
   }, 60_000)
+})
+
+describe("create on first use", () => {
+  /** What a run answered: a written refusal, a rejection that wrote nothing, or an outcome. */
+  function answerOf(result: ReturnType<MemoryBudgetStore["run"]>) {
+    if (result.err) return { kind: "rejected" as const, rejection: result.err.rejection }
+    if (!result.val.ok) return { kind: "refused" as const, rejection: result.val.rejection }
+    return { kind: "ok" as const, outcome: result.val.outcome as { created: unknown } }
+  }
+  const definition = (input: BudgetConfigInput) => ({
+    key: "customer:acme",
+    projectId: "proj_1",
+    unit: "money:USD",
+    config: config(input),
+  })
+  const withDefinition = (command: BudgetCommand, input: BudgetConfigInput): BudgetCommand => {
+    if (command.type !== "authorize" && command.type !== "charge" && command.type !== "lease")
+      throw new Error(`${command.type} cannot create a budget`)
+    return { ...command, ifMissing: definition(input) }
+  }
+
+  it("creates the budget from ifMissing and opens the hold in one write", () => {
+    const store = new MemoryBudgetStore()
+    const held = ok(store.run(withDefinition(authorize("k1", 30), month100), t0))
+    expect(held.outcome).toMatchObject({
+      type: "authorize",
+      holdId: "h_1",
+      amount: $(30),
+      replayed: false,
+      created: { key: "customer:acme", unit: "money:USD", version: 1, closed: false },
+      balance: { remaining: $(70), held: $(30) },
+    })
+    expect(store.writes).toBe(1)
+    expect(store.budget).toMatchObject({ key: "customer:acme", projectId: "proj_1", version: 1 })
+    expect(store.ledger.operations).toMatchObject({ upsert: 0, authorize: 1 })
+    expect(remaining(ok(store.run(settle("h_1", 10), t0 + minute)))).toEqual([["month", $(90)]])
+  })
+
+  it("ignores ifMissing on an existing budget, even a looser one", () => {
+    const store = budgetWith(month100)
+    const looser: BudgetConfigInput = { limits: [{ id: "month", amount: "1000", window: "month" }] }
+    const held = ok(store.run(withDefinition(authorize("k1", 30), looser), t0))
+    expect(held.outcome).toMatchObject({ type: "authorize", created: null })
+    expect(store.budget?.version).toBe(1)
+    expect(remaining(held)).toEqual([["month", $(70)]])
+  })
+
+  it("creates for a charge and for a lease too", () => {
+    const charged = new MemoryBudgetStore()
+    expect(ok(charged.run(withDefinition(charge("c1", 5), month100), t0)).outcome).toMatchObject({
+      type: "charge",
+      amount: $(5),
+      created: { version: 1 },
+      balance: { remaining: $(95) },
+    })
+    const leased = new MemoryBudgetStore()
+    expect(ok(leased.run(withDefinition(lease("l1", 20), month100), t0)).outcome).toMatchObject({
+      type: "lease",
+      lease: { granted: $(20) },
+      created: { version: 1 },
+    })
+  })
+
+  it("creates nothing when the first call is denied", () => {
+    const store = new MemoryBudgetStore()
+    expect(rejection(store.run(withDefinition(authorize("k1", 200), month100), t0))).toMatchObject({
+      code: "LIMIT_EXCEEDED",
+      blocked: { limitId: "month", remaining: $(100) },
+    })
+    expect(store.budget).toBeNull()
+    expect(store.writes).toBe(0)
+    expect(rejection(store.run(authorize("k2", 1), t0))).toEqual({ code: "BUDGET_NOT_FOUND" })
+  })
+
+  it("replays a repeated first call without creating twice", () => {
+    const store = new MemoryBudgetStore()
+    const command = withDefinition(authorize("k1", 30), month100)
+    ok(store.run(command, t0))
+    const again = ok(store.run(command, t0 + minute))
+    expect(again.outcome).toMatchObject({ holdId: "h_1", replayed: true, created: null })
+    expect(store.writes).toBe(1)
+    expect(store.budget?.version).toBe(1)
+  })
+
+  it("is the same budget as an upsert followed by the verb", () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 1, max: 1000 }),
+        fc.integer({ min: 1, max: 1000 }),
+        fc.constantFrom("authorize", "charge", "lease"),
+        (limit, amount, verb) => {
+          const input: BudgetConfigInput = {
+            limits: [{ id: "month", amount: String(limit), window: "month" }],
+          }
+          const command: BudgetCommand =
+            verb === "authorize"
+              ? authorize("k", amount)
+              : verb === "charge"
+                ? charge("k", amount)
+                : lease("k", amount)
+          const direct = new MemoryBudgetStore()
+          const stepwise = new MemoryBudgetStore()
+          const one = answerOf(direct.run(withDefinition(command, input), t0))
+          ok(stepwise.run(upsert(input), t0))
+          const two = answerOf(stepwise.run(command, t0))
+          expect(one.kind).toBe(two.kind)
+          if (one.kind === "rejected") {
+            // A rejection writes nothing, so the key stays without a budget.
+            expect(one.rejection).toEqual(two.rejection)
+            expect(direct.budget).toBeNull()
+            return
+          }
+          if (one.kind !== "ok" || two.kind !== "ok") {
+            // A refused lease is written, and so is the budget it was refused under.
+            expect(one).toEqual(two)
+          } else {
+            const { created, ...outcome } = one.outcome
+            expect(created).not.toBeNull()
+            const { created: _, ...expected } = two.outcome
+            expect(outcome).toEqual(expected)
+          }
+          expect(direct.budget).toEqual(stepwise.budget)
+          expect([...direct.rows.entries()]).toEqual([...stepwise.rows.entries()])
+          expect({ ...direct.ledger, operations: null }).toEqual({
+            ...stepwise.ledger,
+            operations: null,
+          })
+        }
+      ),
+      { numRuns: 100 }
+    )
+  })
 })

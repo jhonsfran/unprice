@@ -294,6 +294,9 @@ patterns. Keep it cheap to load and useful.
 - 2026-10-18: tsx cannot import `packages/api/src` (its CommonJS `export *`); budget tooling scripts
   import the built `@unprice/budgets`, so run `pnpm --filter @unprice/budgets build` first. Run tooling probes
   with explicit env vars rather than `--env-file`, which loads the operator's credentials.
+- 2026-10-20: A tsx script that reaches `@unprice/db/validators` must be a `.cts` entry (see
+  `internal/services/scripts/sync-model-catalog.cts`): `@unprice/error` is untyped CommonJS whose
+  `export *` barrel hides `BaseError` from Node's ESM loader, so an ESM `.ts` entry fails to import it.
 - 2026-10-18: `apps/api/src/routes/budgets/local-mode.fuzz.test.ts` runs the built SDK's local mode
   through the real budget routes and processor on fake timers; rebuild `@unprice/budgets` before it.
   Keep `setImmediate` real and step with `vi.advanceTimersToNextTimer()`: the async advance waits a
@@ -1115,3 +1118,17 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-10-20: AI budget adapters share final serialized request policy in `packages/budgets-ai`; Pi and AI SDK wrappers only convert native calls and usage. Keep a hold per physical dispatch and preserve JSON versus SSE mode.
 - 2026-10-20: Public integration packages must be added to `tooling/scripts/assert-publishable-packages.mjs` and ship their own MIT license. Build workspace dependencies before standalone package tests or archive consumer tests.
 - 2026-10-20: Anthropic and Gemini preflight counts are estimates. Budget holds use trusted model input limits; refunds require final raw usage evidence because native SDKs can emit finish events from preliminary counters.
+- 2026-10-20: Downstream packages test and typecheck against each other's built `dist`; after a change to
+  `packages/budgets` or `packages/budgets-ai`, run `pnpm --filter @unprice/budgets build` then
+  `pnpm --filter @unprice/budgets-ai build` before the ai-sdk and Pi suites, or they run the old code and
+  typecheck reports missing declarations.
+- 2026-10-20: `pnpm --filter @unprice/api generate:openapi` curls a running dev server on port 8787
+  (`pnpm --filter api start`); then `pnpm --filter @unprice/budgets generate` and the api `generate:*`
+  scripts, then rebuild `@unprice/budgets` and `@unprice/api` so `internal/services` typechecks.
+- 2026-10-20: `pnpm exec biome ...` under the rtk hook dies with "Linter process terminated abnormally";
+  run it as `rtk proxy pnpm exec biome ...`.
+- 2026-10-20: A keyed budget verb with `ifMissing` creates its budget inside the same `decide` change
+  (`decideUpsert` then the verb, `configured` merged); outcomes carry `created`, and a denial creates
+  nothing because a rejection writes nothing. The DO prepares storage only for an upsert or a verb with
+  `ifMissing`.
+

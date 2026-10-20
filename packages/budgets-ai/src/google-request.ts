@@ -219,7 +219,8 @@ export function prepareRequest(value: unknown, limits: RequestLimits): PreparedR
       responseModalities: ["TEXT"],
     },
   }
-  return { payload: generation, body: JSON.stringify(generation), outputTokens }
+  const messages = payload.contents.length + (payload.systemInstruction === undefined ? 0 : 1)
+  return { payload: generation, body: JSON.stringify(generation), outputTokens, messages }
 }
 
 export function validateRoute(

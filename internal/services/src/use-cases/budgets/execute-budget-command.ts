@@ -1,14 +1,27 @@
 import { Ok, type Result } from "@unprice/error"
-import { type OutcomeOf, type UnPriceBudgetError, isOutcomeOf } from "../../budgets"
+import {
+  type BudgetDefinition,
+  type OutcomeOf,
+  type UnPriceBudgetError,
+  isOutcomeOf,
+} from "../../budgets"
 import type { BudgetClient, BudgetRequest } from "./budget-client"
+
+/** The budget a verb creates when its key has none, before the address is added to it. */
+export type BudgetDefinitionInput = Omit<BudgetDefinition, "key" | "projectId">
+
+type Addressed<T> = T extends { ifMissing?: BudgetDefinition }
+  ? Omit<T, "ifMissing"> & { ifMissing?: BudgetDefinitionInput }
+  : T
 
 /**
  * A verb as an adapter receives it, already parsed by the `@unprice/db/validators` schemas. The
- * key travels beside it, and an upsert takes its key and project from the address.
+ * key travels beside it: an upsert takes its key and project from the address, and so does the
+ * `ifMissing` definition of a verb that creates its budget on first use.
  */
 export type BudgetVerbRequest =
   | Omit<Extract<BudgetRequest, { type: "upsert" }>, "key" | "projectId">
-  | Exclude<BudgetRequest, { type: "upsert" }>
+  | Addressed<Exclude<BudgetRequest, { type: "upsert" }>>
 
 export type ExecuteBudgetCommandDeps = { budgets: BudgetClient }
 
@@ -16,6 +29,14 @@ export type ExecuteBudgetCommandInput<R extends BudgetVerbRequest = BudgetVerbRe
   projectId: string
   key: string
   request: R
+}
+
+function toCommand(request: BudgetVerbRequest, projectId: string, key: string): BudgetRequest {
+  if (request.type === "upsert") return { ...request, key, projectId }
+  if ("ifMissing" in request && request.ifMissing) {
+    return { ...request, ifMissing: { ...request.ifMissing, key, projectId } }
+  }
+  return request as BudgetRequest
 }
 
 /**
@@ -28,9 +49,7 @@ export async function executeBudgetCommand<R extends BudgetVerbRequest>(
   input: ExecuteBudgetCommandInput<R>
 ): Promise<Result<OutcomeOf<R["type"]>, UnPriceBudgetError>> {
   const { projectId, key } = input
-  const request: BudgetVerbRequest = input.request
-  const command: BudgetRequest =
-    request.type === "upsert" ? { ...request, key, projectId } : request
+  const command = toCommand(input.request, projectId, key)
   const result = await deps.budgets.execute({ projectId, key }, command)
   if (result.err) return result
   // RPC erases the verb's type; the budget always answers with the outcome of the verb it ran.

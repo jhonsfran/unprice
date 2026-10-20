@@ -3,11 +3,14 @@ import { describe, expect, it } from "vitest"
 import { type BudgetSessionOptions, createBudgetSession, usageCost } from "./index"
 
 const pricing = { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.25 }
+const limits = { context: 1_000_000, output: 4096 }
+/**
+ * The generation body is 139 bytes and one message, so the bound is 139 + 8 + 32 = 179 tokens at
+ * the highest input rate (cacheWrite, 1.25), plus 32 output tokens at 2: 0.00028775.
+ */
+const HOLD = 0.00028775
 
-function fixture(
-  overrides: Partial<Extract<BudgetSessionOptions, { protocol?: "openai-responses" }>> = {},
-  denied = false
-) {
+function fixture(overrides: Partial<BudgetSessionOptions> = {}, denied = false) {
   const order: string[] = []
   const amounts: number[] = []
   const payloads: Record<string, unknown>[] = []
@@ -59,17 +62,12 @@ function fixture(
   const transport: typeof fetch = async (input, init) => {
     const request = new Request(input, init)
     payloads.push((await request.json()) as Record<string, unknown>)
-    if (request.url.endsWith("/input_tokens")) {
-      order.push("count")
-      return Response.json({ object: "response.input_tokens", input_tokens: 20 })
-    }
-    order.push("generate")
+    order.push(request.url.endsWith("/input_tokens") ? "count" : "generate")
     return Response.json({})
   }
   const session = createBudgetSession({
     getBudget: () => client.budget("customer"),
-    modelId: "model",
-    pricing,
+    model: { id: "model", pricing, limits },
     maxOutputTokens: 4096,
     mode: "generate",
     fetch: transport,
@@ -85,27 +83,30 @@ function fixture(
 }
 
 describe("shared AI budget request", () => {
-  it("counts the final request, preserves the smaller cap and JSON mode, and settles once", async () => {
+  it("bounds the input by its bytes, preserves the smaller cap and JSON mode, and settles once", async () => {
     const test = fixture()
     await test.dispatch()
     await test.session.settle(0.00001)
     await test.session.settle(0.00002)
-    expect(test.order).toEqual(["count", "authorize", "generate", "settle"])
-    expect(test.amounts).toEqual([0.000089, 0.00001])
-    expect(test.payloads[1]).toMatchObject({
-      max_output_tokens: 32,
-      stream: false,
-      service_tier: "default",
-      background: false,
-      truncation: "disabled",
-    })
-    expect(test.payloads[0]?.input).toBe(test.payloads[1]?.input)
+    expect(test.order).toEqual(["authorize", "generate", "settle"])
+    expect(test.amounts).toEqual([HOLD, 0.00001])
+    expect(test.payloads).toEqual([
+      {
+        model: "model",
+        input: "Hello",
+        max_output_tokens: 32,
+        service_tier: "default",
+        background: false,
+        truncation: "disabled",
+        stream: false,
+      },
+    ])
   })
 
   it("denies without dispatching generation", async () => {
     const test = fixture({}, true)
     await expect(test.dispatch()).rejects.toThrow("Budget exceeded")
-    expect(test.order).toEqual(["count", "authorize"])
+    expect(test.order).toEqual(["authorize"])
     expect(test.session.authorized).toBe(false)
     expect(test.session.error).toBeInstanceOf(Error)
   })
@@ -114,29 +115,37 @@ describe("shared AI budget request", () => {
     const test = fixture()
     await test.dispatch()
     await test.session.settle()
-    expect(test.amounts).toEqual([0.000089, 0.000089])
+    expect(test.amounts).toEqual([HOLD, HOLD])
   })
 
   it("rejects a second physical generation dispatch", async () => {
     const test = fixture()
     await test.dispatch()
     await expect(test.dispatch()).rejects.toThrow("one generation")
-    expect(test.order).toEqual(["count", "authorize", "generate"])
+    expect(test.order).toEqual(["authorize", "generate"])
   })
 
   it("does not lower a known actual cost to fit its reservation", async () => {
     const test = fixture()
     await test.dispatch()
     await test.session.settle(0.001)
-    expect(test.amounts).toEqual([0.000089, 0.001])
+    expect(test.amounts).toEqual([HOLD, 0.001])
   })
 
   it("snapshots rates before dispatch", async () => {
     const rates = { ...pricing }
-    const test = fixture({ pricing: rates })
+    const test = fixture({ model: { id: "model", pricing: rates, limits } })
     rates.output = 100
     await test.dispatch()
-    expect(test.amounts).toEqual([0.000089])
+    expect(test.amounts).toEqual([HOLD])
+  })
+
+  it("clamps the output cap to the model's output limit", async () => {
+    const test = fixture({ model: { id: "model", pricing, limits: { ...limits, output: 16 } } })
+    await test.dispatch()
+    expect(test.payloads[0]?.max_output_tokens).toBe(16)
+    // 179 × 1.25 + 16 × 2, in millionths, rounded up at eight decimals.
+    expect(test.amounts).toEqual([0.00025575])
   })
 
   it("prices cached input once and includes reasoning in output once", () => {
@@ -158,12 +167,25 @@ describe("shared AI budget request", () => {
   it.each([-1, Number.NaN, Number.POSITIVE_INFINITY])(
     "rejects invalid configured rate %s",
     (input) => {
-      expect(() => fixture({ pricing: { ...pricing, input } })).toThrow("pricing")
+      expect(() =>
+        fixture({ model: { id: "model", pricing: { ...pricing, input }, limits } })
+      ).toThrow("pricing")
     }
   )
 
   it.each([0, 15, 16.5])("rejects invalid output cap %s", (maxOutputTokens) => {
     expect(() => fixture({ maxOutputTokens })).toThrow("maxOutputTokens")
+  })
+
+  it.each([
+    { context: 0, output: 4096 },
+    { context: 0.5, output: 4096 },
+    { context: 1000, output: 15 },
+    { context: 1000, output: Number.POSITIVE_INFINITY },
+  ])("rejects model limits %j", (invalid) => {
+    expect(() => fixture({ model: { id: "model", pricing, limits: invalid } })).toThrow(
+      "model limits"
+    )
   })
 })
 
@@ -172,7 +194,13 @@ describe("pricing tier configuration", () => {
     "rejects tier threshold %s before dispatch",
     (inputTokensAbove) => {
       expect(() =>
-        fixture({ pricing: { ...pricing, tiers: [{ ...pricing, inputTokensAbove }] } })
+        fixture({
+          model: {
+            id: "model",
+            pricing: { ...pricing, tiers: [{ ...pricing, inputTokensAbove }] },
+            limits,
+          },
+        })
       ).toThrow("threshold")
     }
   )

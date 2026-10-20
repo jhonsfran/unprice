@@ -138,6 +138,7 @@ function createServer(room: string) {
           lease: view(request.leaseKey, lease),
           terms,
           replayed: false,
+          created: false,
           balance: balance(),
         }
         return { result: lease.grant }
@@ -704,7 +705,13 @@ describe("Unprice.budget local mode", () => {
         const body = (await request.json()) as { leaseKey: string; captured?: string }
         bodies.push([request.url, body])
         const answer: LeaseResponse | LeaseReportResponse = request.url.endsWith("/lease")
-          ? { lease: view(body.leaseKey, "0", "open"), terms, replayed: false, balance }
+          ? {
+              lease: view(body.leaseKey, "0", "open"),
+              terms,
+              replayed: false,
+              created: false,
+              balance,
+            }
           : {
               lease: view(body.leaseKey, body.captured ?? "0", "closed"),
               terms,

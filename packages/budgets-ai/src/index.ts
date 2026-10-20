@@ -4,10 +4,12 @@ import {
   type BudgetHold,
   BudgetRequestError,
   BudgetSettleError,
+  type BudgetSettlement,
   BudgetUnavailableError,
 } from "@unprice/budgets"
 import { DEFAULT_BUDGET_TIMEOUT_MS, withDeadline } from "./deadline"
 export { DEFAULT_BUDGET_TIMEOUT_MS, withDeadline } from "./deadline"
+export { MESSAGE_OVERHEAD_TOKENS, REQUEST_OVERHEAD_TOKENS, inputBound } from "./input-bound"
 import { prepareBudgetRequest } from "./provider-request"
 import type { BudgetProtocol, ModelLimits } from "./request-policy"
 export type { BudgetProtocol, ModelLimits } from "./request-policy"
@@ -33,6 +35,19 @@ export interface TokenUsage {
   cacheWrite: number
 }
 
+/** The model a session prices: the id the provider expects, its rates, and its limits. */
+export interface BudgetModel {
+  id: string
+  pricing: TokenPricing
+  limits: ModelLimits
+}
+
+const PROTOCOLS: readonly BudgetProtocol[] = [
+  "openai-responses",
+  "anthropic-messages",
+  "google-generative-ai",
+]
+
 function validatedPricing(pricing: TokenPricing): TokenPricing {
   const rates = [pricing, ...(pricing.tiers ?? [])]
   for (const tier of pricing.tiers ?? []) {
@@ -53,7 +68,23 @@ function validatedPricing(pricing: TokenPricing): TokenPricing {
   }
 }
 
-function maximumCost(pricing: TokenPricing, inputTokens: number, outputTokens: number): number {
+function validatedLimits(limits: ModelLimits): ModelLimits {
+  if (
+    !Number.isSafeInteger(limits.context) ||
+    limits.context <= 0 ||
+    !Number.isSafeInteger(limits.output) ||
+    limits.output < 16
+  )
+    throw new Error("Invalid model limits: context must be positive and output at least 16")
+  return { context: limits.context, output: limits.output }
+}
+
+/** The most a step can cost at the highest rates, rounded up at eight decimals. */
+export function maximumCost(
+  pricing: TokenPricing,
+  inputTokens: number,
+  outputTokens: number
+): number {
   const rates = [pricing, ...(pricing.tiers ?? [])]
   const inputRate = Math.max(
     ...rates.flatMap((rate) => [rate.input, rate.cacheRead, rate.cacheWrite])
@@ -88,10 +119,11 @@ export function usageCost(pricing: TokenPricing, usage: TokenUsage): number {
   return cost
 }
 
-interface BaseSessionOptions {
+export interface BudgetSessionOptions {
   getBudget: () => BudgetHandle | Promise<BudgetHandle>
-  modelId: string
-  pricing: TokenPricing
+  /** The provider wire protocol of the request. Defaults to OpenAI Responses. */
+  protocol?: BudgetProtocol
+  model: BudgetModel
   maxOutputTokens: number
   mode: "stream" | "generate"
   budgetTimeoutMs?: number
@@ -99,51 +131,47 @@ interface BaseSessionOptions {
   fetch?: typeof globalThis.fetch
 }
 
-export type BudgetSessionOptions = BaseSessionOptions &
-  (
-    | { protocol?: "openai-responses"; modelLimits?: ModelLimits }
-    | { protocol: "anthropic-messages" | "google-generative-ai"; modelLimits: ModelLimits }
-  )
+/** What the session reserved for its one request, once authorized. */
+export interface BudgetReservation {
+  readonly hold: BudgetHold
+  readonly inputTokens: number
+  readonly outputTokens: number
+  readonly maximumCost: number
+}
 
 export interface BudgetSession {
   readonly fetch: typeof globalThis.fetch
   readonly authorized: boolean
   readonly error: unknown
-  settle(actualCost?: number): Promise<void>
+  readonly reserved: BudgetReservation | undefined
+  /** Settles once and resolves with the settlement; later calls return the same promise. */
+  settle(actualCost?: number): Promise<BudgetSettlement>
 }
 
 type RequestState =
   | { status: "ready" | "preparing" }
   | { status: "blocked"; error: unknown }
-  | { status: "authorized"; hold: BudgetHold; maximumCost: number; key: string }
+  | { status: "authorized"; reserved: BudgetReservation; key: string }
 
 /** One physical model dispatch and its settlement, independent of any model SDK. */
 export function createBudgetSession(options: BudgetSessionOptions): BudgetSession {
   const protocol: BudgetProtocol = options.protocol ?? "openai-responses"
-  const limits = options.modelLimits ? { ...options.modelLimits } : undefined
-  if (protocol !== "openai-responses" && !limits)
-    throw new Error("Trusted model limits are required for this protocol")
-  if (
-    limits &&
-    (!Number.isSafeInteger(limits.maxInputTokens) ||
-      limits.maxInputTokens <= 0 ||
-      !Number.isSafeInteger(limits.maxOutputTokens) ||
-      limits.maxOutputTokens < 16)
-  )
-    throw new Error("Invalid trusted model limits")
+  if (!PROTOCOLS.includes(protocol)) throw new Error("Unsupported budget protocol")
+  const pricing = validatedPricing(options.model.pricing)
+  const limits = validatedLimits(options.model.limits)
   if (!Number.isSafeInteger(options.maxOutputTokens) || options.maxOutputTokens < 16)
     throw new Error("maxOutputTokens must be a safe integer of at least 16")
-  const cap = Math.min(options.maxOutputTokens, limits?.maxOutputTokens ?? options.maxOutputTokens)
+  const cap = Math.min(options.maxOutputTokens, limits.output)
   const timeoutMs = options.budgetTimeoutMs ?? DEFAULT_BUDGET_TIMEOUT_MS
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 2_147_483_647)
     throw new Error("budgetTimeoutMs must be a positive 32-bit integer")
-  const pricing = validatedPricing(options.pricing)
+  const modelId = options.model.id
   const transport = options.fetch ?? globalThis.fetch.bind(globalThis)
   const callSignal = options.signal
     ? AbortSignal.any([options.signal, AbortSignal.timeout(120_000)])
     : AbortSignal.timeout(120_000)
   let state: RequestState = { status: "ready" }
-  let settlement: Promise<void> | undefined
+  let settlement: Promise<BudgetSettlement> | undefined
   let failure: unknown
 
   return {
@@ -152,6 +180,9 @@ export function createBudgetSession(options: BudgetSessionOptions): BudgetSessio
     },
     get error() {
       return failure
+    },
+    get reserved() {
+      return state.status === "authorized" ? state.reserved : undefined
     },
     fetch: async (input, init) => {
       if (state.status !== "ready") {
@@ -168,14 +199,8 @@ export function createBudgetSession(options: BudgetSessionOptions): BudgetSessio
           () =>
             prepareBudgetRequest(
               new Request(incoming, { signal }),
-              {
-                modelId: options.modelId,
-                maxOutputTokens: cap,
-                mode: options.mode,
-              },
-              protocol,
-              limits,
-              transport
+              { modelId, maxOutputTokens: cap, mode: options.mode },
+              protocol
             ),
           { timeoutMs: 120_000, signal }
         )
@@ -197,7 +222,16 @@ export function createBudgetSession(options: BudgetSessionOptions): BudgetSessio
           throw new BudgetExceededError(authorized.result, key)
         }
         if (authorized.result.replayed) throw new Error("Budget authorization was replayed")
-        state = { status: "authorized", hold: authorized.result.hold, maximumCost: maximum, key }
+        state = {
+          status: "authorized",
+          reserved: {
+            hold: authorized.result.hold,
+            inputTokens: bounded.inputTokens,
+            outputTokens: bounded.outputTokens,
+            maximumCost: maximum,
+          },
+          key,
+        }
         signal.throwIfAborted()
         if (failure !== undefined) throw failure
       } catch (error) {
@@ -213,18 +247,19 @@ export function createBudgetSession(options: BudgetSessionOptions): BudgetSessio
       settlement = (async () => {
         if (authorized.status === "blocked") throw authorized.error
         if (authorized.status !== "authorized") throw new Error("Model request was not budgeted")
+        const { hold, maximumCost: reserved } = authorized.reserved
         const amount =
           typeof actualCost === "number" && Number.isFinite(actualCost) && actualCost >= 0
             ? actualCost
-            : authorized.maximumCost
+            : reserved
         let settled: Awaited<ReturnType<BudgetHold["settle"]>>
         try {
-          settled = await withDeadline(() => authorized.hold.settle({ amount }), { timeoutMs })
+          settled = await withDeadline(() => hold.settle({ amount }), { timeoutMs })
         } catch (cause) {
           throw new BudgetSettleError({
             value: undefined,
             actual: amount,
-            hold: authorized.hold,
+            hold,
             idempotencyKey: authorized.key,
             cause,
           })
@@ -233,11 +268,12 @@ export function createBudgetSession(options: BudgetSessionOptions): BudgetSessio
           throw new BudgetSettleError({
             value: undefined,
             actual: amount,
-            hold: authorized.hold,
+            hold,
             idempotencyKey: authorized.key,
             error: settled.error,
           })
         if (failure !== undefined) throw failure
+        return settled.result
       })()
       return settlement
     },

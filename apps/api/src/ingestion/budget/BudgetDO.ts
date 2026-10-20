@@ -15,9 +15,10 @@ export class BudgetDO extends DurableObject {
   private readonly db: ReturnType<typeof drizzle<typeof schema>>
   private readonly processor: BudgetProcessor
   /**
-   * Settles once the schema exists. Null until the first upsert: a verb on a key that was never
-   * upserted must not create storage, or every mistyped key would leave an object behind forever.
-   * Null again once a closed budget deleted its storage.
+   * Settles once the schema exists. Null until the first upsert, or the first verb that carries
+   * the budget to create: any other verb on a key that was never upserted must not create storage,
+   * or every mistyped key would leave an object behind forever. Null again once a closed budget
+   * deleted its storage.
    */
   private ready: Promise<void> | null
 
@@ -48,7 +49,8 @@ export class BudgetDO extends DurableObject {
 
   async execute(request: BudgetRequest): Promise<BudgetReply> {
     if (!this.ready) {
-      if (request.type !== "upsert") return { ok: false, rejection: { code: "BUDGET_NOT_FOUND" } }
+      const creates = request.type === "upsert" || ("ifMissing" in request && !!request.ifMissing)
+      if (!creates) return { ok: false, rejection: { code: "BUDGET_NOT_FOUND" } }
       this.ready = this.prepare()
     }
     await this.ready
