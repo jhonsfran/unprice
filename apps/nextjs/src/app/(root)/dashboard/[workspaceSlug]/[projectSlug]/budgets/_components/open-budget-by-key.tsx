@@ -5,7 +5,7 @@ import { TRPCClientError } from "@trpc/client"
 import { budgetKeyInputSchema } from "@unprice/db/validators"
 import { Button } from "@unprice/ui/button"
 import { Input } from "@unprice/ui/input"
-import { Loader2 } from "lucide-react"
+import { ArrowRight, Loader2, Search } from "lucide-react"
 import { useParams, useRouter } from "next/navigation"
 import { useState } from "react"
 import { useTRPC } from "~/trpc/client"
@@ -32,7 +32,7 @@ export function OpenBudgetByKey() {
 
   return (
     <form
-      className="flex flex-col items-end gap-1"
+      className="flex w-full flex-col items-end gap-1 md:w-auto"
       onSubmit={(event) => {
         event.preventDefault()
         const parsed = budgetKeyInputSchema.safeParse(key.trim())
@@ -44,20 +44,36 @@ export function OpenBudgetByKey() {
         mutate({ key: parsed.data })
       }}
     >
-      <div className="flex items-center gap-2">
-        <Input
-          aria-label="Budget key"
-          placeholder="customer:acme"
-          value={key}
-          onChange={(event) => setKey(event.target.value)}
-          aria-invalid={problem !== null}
-          className="h-8 w-56 font-mono text-xs"
-          autoComplete="off"
-          spellCheck={false}
-        />
-        <Button type="submit" variant="outline" size="sm" disabled={isPending || key.trim() === ""}>
-          {isPending && <Loader2 className="mr-1.5 size-3.5 animate-spin" />}
-          Open by key
+      <div className="flex w-full items-center md:w-auto">
+        <div className="relative flex-1 md:w-64 md:flex-none">
+          <Search
+            aria-hidden
+            className="-translate-y-1/2 pointer-events-none absolute top-1/2 left-2.5 size-3.5 text-muted-foreground"
+          />
+          <Input
+            aria-label="Budget key"
+            placeholder="Open by exact key…"
+            value={key}
+            onChange={(event) => setKey(event.target.value)}
+            aria-invalid={problem !== null}
+            className="h-8 rounded-r-none pl-8 font-mono text-xs"
+            autoComplete="off"
+            spellCheck={false}
+          />
+        </div>
+        <Button
+          type="submit"
+          variant="outline"
+          size="sm"
+          className="-ml-px h-8 shrink-0 rounded-l-none"
+          disabled={isPending || key.trim() === ""}
+        >
+          {isPending ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            <ArrowRight className="size-3.5" />
+          )}
+          <span className="sr-only">Open budget</span>
         </Button>
       </div>
       {problem && (

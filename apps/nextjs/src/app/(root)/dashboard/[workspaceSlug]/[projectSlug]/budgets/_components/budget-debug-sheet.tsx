@@ -77,8 +77,8 @@ export function BudgetDebugSheet({ id, budgetKey }: { id: string; budgetKey: str
         <Bug className="mr-1.5 size-3.5" />
         Debug
       </Button>
-      <SheetContent className="flex h-[100dvh] max-h-[100dvh] w-full flex-col gap-0 p-0 sm:max-w-lg">
-        <SheetHeader className="shrink-0 border-border border-b px-6 py-5 pr-12 text-left">
+      <SheetContent className="flex h-[100dvh] max-h-[100dvh] w-full max-w-full flex-col gap-0 overflow-x-hidden p-0 sm:max-w-lg">
+        <SheetHeader className="shrink-0 border-border border-b px-4 py-5 pr-12 text-left sm:px-6">
           <SheetTitle className="truncate font-medium font-mono text-base">
             Debug · {budgetKey}
           </SheetTitle>
@@ -104,7 +104,7 @@ export function BudgetDebugSheet({ id, budgetKey }: { id: string; budgetKey: str
               <RadioGroup
                 value={findBy}
                 onValueChange={(value) => setFindBy(value as Find["by"])}
-                className="flex flex-wrap gap-4"
+                className="flex flex-wrap gap-x-4 gap-y-2"
               >
                 {FIND_BY.map((option) => (
                   <div key={option.by} className="flex items-center gap-2">
@@ -189,19 +189,32 @@ export function BudgetDebugSheet({ id, budgetKey }: { id: string; budgetKey: str
           {snapshot ? (
             <>
               <Section title="Counters">
-                <p className="font-mono text-xs leading-6">
-                  {Object.entries(snapshot.budget.operations)
-                    .map(([verb, count]) => `${verb} ${count.toLocaleString()}`)
-                    .join(" · ")}
-                </p>
+                <dl className="grid grid-cols-2 gap-x-6 gap-y-1.5 font-mono text-xs sm:grid-cols-4">
+                  {Object.entries(snapshot.budget.operations).map(([verb, count]) => (
+                    <div key={verb} className="flex items-baseline justify-between gap-2">
+                      <dt className="text-muted-foreground">{verb}</dt>
+                      <dd className="tabular-nums">{count.toLocaleString()}</dd>
+                    </div>
+                  ))}
+                </dl>
               </Section>
               <Section title="Scan">
-                <p className="font-mono text-xs">
-                  examined {snapshot.expiringNext.examined.toLocaleString()} rows · listed{" "}
-                  {snapshot.expiringNext.rows.length.toLocaleString()} (
-                  {formatBudgetAmount(snapshot.listed, unit)} of{" "}
-                  {formatBudgetAmount(snapshot.budget.balance.held, unit)} held)
-                </p>
+                <dl className="flex flex-col gap-1.5 font-mono text-xs">
+                  <div className="flex items-baseline justify-between gap-4">
+                    <dt className="text-muted-foreground">examined</dt>
+                    <dd className="tabular-nums">
+                      {snapshot.expiringNext.examined.toLocaleString()} rows
+                    </dd>
+                  </div>
+                  <div className="flex items-baseline justify-between gap-4">
+                    <dt className="text-muted-foreground">listed</dt>
+                    <dd className="text-right tabular-nums">
+                      {snapshot.expiringNext.rows.length.toLocaleString()} (
+                      {formatBudgetAmount(snapshot.listed, unit)} of{" "}
+                      {formatBudgetAmount(snapshot.budget.balance.held, unit)} held)
+                    </dd>
+                  </div>
+                </dl>
               </Section>
               <Section title="Raw">
                 <div className="relative overflow-x-auto rounded-md border border-border bg-surface-panel">
@@ -256,7 +269,7 @@ function FoundOperation({
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="flex flex-col gap-3 px-6 py-5">
+    <section className="flex min-w-0 flex-col gap-3 px-4 py-5 sm:px-6">
       <h3 className="font-medium text-[11px] text-muted-foreground uppercase tracking-[0.08em]">
         {title}
       </h3>

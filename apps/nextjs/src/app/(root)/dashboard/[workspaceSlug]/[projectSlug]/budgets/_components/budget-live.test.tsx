@@ -109,14 +109,17 @@ function render(
 }
 
 describe("BudgetLive", () => {
-  it("renders the live balance, the limit line, and the money line from one inspection", () => {
+  it("renders the live balance, the limit line, and every activity tab from one inspection", () => {
     const html = render([page])
 
     expect(
       [
-        "61.20 USD",
-        "Consumed today",
-        "26.40 used · 12.40 held · 61.20 left of 100.00",
+        "61.20",
+        "USD",
+        "26.40 used",
+        "12.40 held",
+        "61.20 left",
+        "of 100.00",
         "8.00 of 12.40 held listed",
         "job-991",
         "Scan further",

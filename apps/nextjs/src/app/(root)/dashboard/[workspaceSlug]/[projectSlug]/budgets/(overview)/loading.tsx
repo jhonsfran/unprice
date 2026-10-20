@@ -8,7 +8,7 @@ export default function Loading() {
       header={
         <HeaderTab
           title="Budgets"
-          description="Spend caps your app enforces per customer, run, or agent. Configuration as of each budget's last change."
+          description="Spend caps your app enforces per customer, run, or agent. Open one for its live balance."
         />
       }
     >

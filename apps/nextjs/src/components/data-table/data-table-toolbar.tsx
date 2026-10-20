@@ -1,6 +1,7 @@
 "use client"
 
 import type { Table } from "@tanstack/react-table"
+import type { ReactNode } from "react"
 
 import { Button } from "@unprice/ui/button"
 import { XCircle } from "@unprice/ui/icons"
@@ -14,9 +15,14 @@ import { DataTableViewOptions } from "./data-table-view-options"
 interface DataTableToolbarProps<TData> {
   table: Table<TData>
   filterOptions?: FilterOptionDataTable
+  action?: ReactNode
 }
 
-export function DataTableToolbar<TData>({ table, filterOptions }: DataTableToolbarProps<TData>) {
+export function DataTableToolbar<TData>({
+  table,
+  filterOptions,
+  action,
+}: DataTableToolbarProps<TData>) {
   const isFiltered = table.getState().columnFilters.length > 0
   const filterBy = filterOptions?.filterBy ?? ""
 
@@ -90,6 +96,7 @@ export function DataTableToolbar<TData>({ table, filterOptions }: DataTableToolb
           <DateRangePicker triggerSize="sm" triggerClassName="w-full sm:w-60" align="end" />
         )}
         {filterOptions?.filterColumns && <DataTableViewOptions table={table} />}
+        {action}
       </div>
     </div>
   )

@@ -62,20 +62,22 @@ function BudgetHeader({
   action?: ReactNode
 }) {
   return (
-    <div className="flex w-full flex-col items-start justify-between gap-4 md:flex-row md:items-center">
-      <div className="flex min-w-0 flex-col gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <Typography variant="h3" className="truncate font-mono" title={budget.key}>
+    <div className="flex w-full flex-col items-start justify-between gap-4 sm:flex-row">
+      <div className="flex w-full min-w-0 flex-col gap-1.5">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <Typography variant="h3" className="min-w-0 font-mono [overflow-wrap:anywhere]">
             {budget.key}
           </Typography>
-          <CopyButton value={budget.key} />
-          <BudgetStatusBadge status={budget.status} closesAt={budget.closesAt} />
+          <span className="flex items-center gap-2">
+            <CopyButton value={budget.key} />
+            <BudgetStatusBadge status={budget.status} closesAt={budget.closesAt} />
+          </span>
         </div>
-        <span className="text-muted-foreground text-sm">
+        <span className="font-mono text-muted-foreground text-xs">
           {formatUnit(budget.unit)} · v{budget.version}
         </span>
       </div>
-      {action}
+      <div className="shrink-0">{action}</div>
     </div>
   )
 }

@@ -24,8 +24,7 @@ export default async function ProjectBudgetsPage(props: { searchParams: Promise<
       header={
         <HeaderTab
           title="Budgets"
-          description="Spend caps your app enforces per customer, run, or agent. Configuration as of each budget's last change."
-          action={<OpenBudgetByKey />}
+          description="Spend caps your app enforces per customer, run, or agent. Open one for its live balance."
         />
       }
     >
@@ -62,6 +61,7 @@ export default async function ProjectBudgetsPage(props: { searchParams: Promise<
                 }
           }
           hidePaginationWhenEmpty
+          toolbarAction={<OpenBudgetByKey />}
           filterOptions={{
             filterBy: "key",
             filterPlaceholder: "Filter by key prefix…",

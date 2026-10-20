@@ -3,12 +3,13 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
 import { TRPCClientError } from "@trpc/client"
 import type { RouterOutputs } from "@unprice/trpc/routes"
-import { Badge } from "@unprice/ui/badge"
 import { Button } from "@unprice/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
+import { Card } from "@unprice/ui/card"
 import { Skeleton } from "@unprice/ui/skeleton"
+import { StationDot } from "@unprice/ui/station"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@unprice/ui/table"
-import { formatDistanceStrict } from "date-fns"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@unprice/ui/tabs"
+import { cn } from "@unprice/ui/utils"
 import { Loader2 } from "lucide-react"
 import { type ReactNode, useEffect, useState } from "react"
 import { formatDate } from "~/lib/dates"
@@ -33,12 +34,12 @@ type AuditRow = RouterOutputs["budgets"]["audit"][number]
 
 const REFRESH_MS = 30_000
 
-const CURRENT_PERIOD: Record<Limit["window"], string> = {
-  hour: "this hour",
-  day: "today",
-  week: "this week",
-  month: "this month",
-  never: "in total",
+const WINDOW_LABEL: Record<Limit["window"], string> = {
+  hour: "hourly",
+  day: "daily",
+  week: "weekly",
+  month: "monthly",
+  never: "lifetime",
 }
 
 export function BudgetLive({
@@ -54,6 +55,7 @@ export function BudgetLive({
   const trpc = useTRPC()
   const client = useTRPCClient()
   const now = useNow(1000)
+  const { data: audit } = useQuery(trpc.budgets.audit.queryOptions({ id }))
   // every page refreshes together, so "Scan further" rows never lag the first page's balance
   const { data, error, isRefetchError, hasNextPage, isFetchingNextPage, fetchNextPage } =
     useInfiniteQuery({
@@ -82,209 +84,216 @@ export function BudgetLive({
   const { unit, balance } = budget
   const amount = (value: string) => formatBudgetAmount(value, unit)
   const reservations = pages.flatMap((page) => page.expiringNext.rows)
-  const tightest = tightestLimit(balance.limits)
-  const nextReset = nextResettingLimit(balance.limits)
 
   return (
-    <div className="flex flex-col gap-6">
-      <p className="text-muted-foreground text-xs">
-        Live from the budget · as of {formatDate(balance.asOf, undefined, "HH:mm:ss")} · refreshes
-        every 30 s{isRefetchError ? " · the last refresh failed" : ""}
-      </p>
+    <div className="flex flex-col gap-8">
+      <Card className="flex flex-col gap-6 p-5 sm:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-x-8 gap-y-4">
+          <div className="flex min-w-0 flex-wrap gap-x-10 gap-y-4">
+            <Fact label="Remaining" emphasis>
+              {balance.remaining === null ? "uncapped" : amount(balance.remaining)}
+              <span className="ml-2 text-muted-foreground text-sm">{formatUnit(unit)}</span>
+            </Fact>
+            <Fact label="Held (locked)">
+              <span
+                className={toBaseUnits(balance.held) > BigInt(0) ? "" : "text-muted-foreground"}
+              >
+                {amount(balance.held)}
+              </span>
+            </Fact>
+          </div>
+          <LiveStamp asOf={balance.asOf} failed={isRefetchError} />
+        </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat
-          label="Remaining"
-          value={
-            balance.remaining === null
-              ? "uncapped"
-              : `${amount(balance.remaining)} ${formatUnit(unit)}`
-          }
-        />
-        <Stat label="Held (locked)" value={`${amount(balance.held)} ${formatUnit(unit)}`} />
-        <Stat
-          label={tightest ? `Consumed ${CURRENT_PERIOD[tightest.window]}` : "Consumed"}
-          value={tightest ? `${amount(tightest.consumed)} of ${amount(tightest.amount)}` : "-"}
-          hint={tightest ? tightest.id : "No limits"}
-        />
-        <Stat
-          label="Resets"
-          value={
-            nextReset?.resetsAt ? `in ${formatDistanceStrict(nextReset.resetsAt, now)}` : "never"
-          }
-          hint={
-            nextReset?.resetsAt
-              ? `${formatDate(nextReset.resetsAt, undefined, "MMM d, HH:mm")} (${nextReset.window})`
-              : undefined
-          }
-        />
-      </div>
-
-      <Section title="Limits">
         {balance.limits.length === 0 ? (
-          <Muted>No limits. Every request passes and usage is only counted.</Muted>
+          <p className="text-muted-foreground text-xs">
+            No limits. Every request passes and usage is only counted.
+          </p>
         ) : (
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-5">
             {balance.limits.map((limit) => (
               <LimitRow key={limit.id} limit={limit} unit={unit} />
             ))}
           </div>
         )}
-      </Section>
+      </Card>
 
-      <Section title="Usage by period">
-        <UsageByPeriod history={history} unit={unit} />
-      </Section>
+      <Tabs defaultValue="open">
+        <TabsList variant="line" className="hide-scrollbar overflow-x-auto">
+          <TabsTrigger value="open">
+            Open reservations
+            <Count value={reservations.length} more={hasNextPage} />
+          </TabsTrigger>
+          <TabsTrigger value="closed">
+            Closed in the last hour
+            <Count value={closedRecently.length} />
+          </TabsTrigger>
+          <TabsTrigger value="usage">Usage by period</TabsTrigger>
+          <TabsTrigger value="operator">
+            Operator actions
+            <Count value={audit?.length ?? 0} />
+          </TabsTrigger>
+        </TabsList>
 
-      <Section
-        title="Expiring next"
-        description={`${amount(sumAmounts(pages.map((page) => page.listed)))} of ${amount(balance.held)} held listed`}
-      >
-        {reservations.length === 0 ? (
-          <Muted>No open holds or leases in the rows scanned.</Muted>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Kind</TableHead>
-                <TableHead>Id</TableHead>
-                <TableHead>Idempotency key</TableHead>
-                <TableHead className="text-right">Amount</TableHead>
-                <TableHead>Opened</TableHead>
-                <TableHead>Expires</TableHead>
-                <TableHead />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {reservations.map((row) => (
-                <ReservationRow
-                  key={`${row.kind}:${row.id}`}
-                  row={row}
-                  unit={unit}
-                  now={now}
-                  release={
-                    canRelease && row.kind === "hold" ? (
-                      <ReleaseHoldDialog budgetId={id} hold={row} unit={unit} />
-                    ) : null
-                  }
-                />
-              ))}
-            </TableBody>
-          </Table>
-        )}
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-muted-foreground text-xs">
-            At expiry an open hold is charged in full. Capacity returns when its window resets.
-          </p>
-          <div className="flex items-center gap-3">
-            {pages.length > 1 && lastPage.expiringNext.rows.length === 0 && (
-              <span className="text-muted-foreground text-xs">
-                {hasNextPage
-                  ? `No open reservations in the last ${lastPage.expiringNext.examined.toLocaleString()} rows scanned.`
-                  : "No more open reservations."}
-              </span>
-            )}
-            {hasNextPage && (
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={isFetchingNextPage}
-                onClick={() => void fetchNextPage()}
-              >
-                {isFetchingNextPage && <Loader2 className="mr-1.5 size-3.5 animate-spin" />}
-                Scan further
-              </Button>
-            )}
-          </div>
-        </div>
-      </Section>
+        <Panel value="open">
+          <Explainer>
+            Holds and leases, soonest expiry first. At expiry an open hold is charged in full.{" "}
+            {amount(sumAmounts(pages.map((page) => page.listed)))} of {amount(balance.held)} held
+            listed.
+          </Explainer>
+          {reservations.length === 0 ? (
+            <Muted>No open holds or leases in the rows scanned.</Muted>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Kind</TableHead>
+                  <TableHead>Id</TableHead>
+                  <TableHead>Idempotency key</TableHead>
+                  <TableHead className="text-right">Amount</TableHead>
+                  <TableHead>Opened</TableHead>
+                  <TableHead>Expires</TableHead>
+                  <TableHead />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {reservations.map((row) => (
+                  <ReservationRow
+                    key={`${row.kind}:${row.id}`}
+                    row={row}
+                    unit={unit}
+                    now={now}
+                    release={
+                      canRelease && row.kind === "hold" ? (
+                        <ReleaseHoldDialog budgetId={id} hold={row} unit={unit} />
+                      ) : null
+                    }
+                  />
+                ))}
+              </TableBody>
+            </Table>
+          )}
+          {(hasNextPage || pages.length > 1) && (
+            <div className="flex flex-wrap items-center justify-end gap-3">
+              {pages.length > 1 && lastPage.expiringNext.rows.length === 0 && (
+                <span className="text-muted-foreground text-xs">
+                  {hasNextPage
+                    ? `No open reservations in the last ${lastPage.expiringNext.examined.toLocaleString()} rows scanned.`
+                    : "No more open reservations."}
+                </span>
+              )}
+              {hasNextPage && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={isFetchingNextPage}
+                  onClick={() => void fetchNextPage()}
+                >
+                  {isFetchingNextPage && <Loader2 className="mr-1.5 size-3.5 animate-spin" />}
+                  Scan further
+                </Button>
+              )}
+            </div>
+          )}
+        </Panel>
 
-      <Section
-        title="Closed in the last hour"
-        description="Recent rows, newest first. The list can miss rows when many closed."
-      >
-        {closedRecently.length === 0 ? (
-          <Muted>Nothing closed in the last hour.</Muted>
-        ) : (
-          <Table>
-            <TableBody>
-              {closedRecently.map((operation) => {
-                const line = describeOperation(operation, unit)
-                return (
-                  <TableRow key={`${operation.kind}:${operation.id}`}>
-                    <TableCell className="whitespace-nowrap font-mono text-xs tabular-nums">
-                      {formatDate(line.at, undefined, "HH:mm:ss")}
-                    </TableCell>
-                    <TableCell className="text-xs">{line.kind}</TableCell>
-                    <TableCell className="max-w-64 truncate font-mono text-xs" title={line.id}>
-                      {line.id}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs tabular-nums">{line.detail}</TableCell>
-                  </TableRow>
-                )
-              })}
-            </TableBody>
-          </Table>
-        )}
-      </Section>
+        <Panel value="closed">
+          <Explainer>Newest first. The list can miss rows when many closed.</Explainer>
+          {closedRecently.length === 0 ? (
+            <Muted>Nothing closed in the last hour.</Muted>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Closed</TableHead>
+                  <TableHead>Kind</TableHead>
+                  <TableHead>Id</TableHead>
+                  <TableHead>Outcome</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {closedRecently.map((operation) => {
+                  const line = describeOperation(operation, unit)
+                  return (
+                    <TableRow key={`${operation.kind}:${operation.id}`}>
+                      <TableCell className="whitespace-nowrap font-mono text-xs tabular-nums">
+                        {formatDate(line.at, undefined, "HH:mm:ss")}
+                      </TableCell>
+                      <TableCell className="text-xs">{line.kind}</TableCell>
+                      <TableCell className="max-w-64 truncate font-mono text-xs" title={line.id}>
+                        {line.id}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap font-mono text-xs tabular-nums">
+                        {line.detail}
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </Panel>
 
-      <OperatorActions id={id} unit={unit} />
+        <Panel value="usage">
+          <Explainer>Consumption per ended period, oldest to newest.</Explainer>
+          <UsageByPeriod history={history} unit={unit} />
+        </Panel>
+
+        <Panel value="operator">
+          <Explainer>Holds released by a workspace owner or admin, newest first.</Explainer>
+          <OperatorActions rows={audit} unit={unit} />
+        </Panel>
+      </Tabs>
     </div>
   )
 }
 
-function OperatorActions({ id, unit }: { id: string; unit: string }) {
+function OperatorActions({ rows, unit }: { rows: AuditRow[] | undefined; unit: string }) {
   const trpc = useTRPC()
-  const { data: rows } = useQuery(trpc.budgets.audit.queryOptions({ id }))
   const { data: members } = useQuery(trpc.workspaces.listMembersByActiveWorkspace.queryOptions())
   const actorOf = (userId: string) => {
     const user = members?.members.find((member) => member.userId === userId)?.user
     return user?.name ?? user?.email ?? userId
   }
 
+  if (!rows) return <Skeleton className="h-12" />
+  if (rows.length === 0) return <Muted>No operator actions.</Muted>
+
   return (
-    <Section title="Operator actions">
-      {!rows ? (
-        <Skeleton className="h-12" />
-      ) : rows.length === 0 ? (
-        <Muted>No operator actions.</Muted>
-      ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Time</TableHead>
-              <TableHead>Actor</TableHead>
-              <TableHead>Action</TableHead>
-              <TableHead>Hold</TableHead>
-              <TableHead className="text-right">Amount</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Reason</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((row) => (
-              <TableRow key={row.id}>
-                <TableCell className="whitespace-nowrap font-mono text-xs tabular-nums">
-                  {formatDate(row.createdAt, undefined, "MMM d, HH:mm")}
-                </TableCell>
-                <TableCell className="max-w-40 truncate text-xs">
-                  {actorOf(row.actorUserId)}
-                </TableCell>
-                <TableCell className="whitespace-nowrap text-xs">release hold</TableCell>
-                <TableCell className="font-mono text-xs">{row.subject}</TableCell>
-                <TableCell className="whitespace-nowrap text-right font-mono text-xs tabular-nums">
-                  {row.status === "applied" ? formatBudgetAmount(row.released, unit) : "-"}
-                </TableCell>
-                <TableCell className="text-xs">{auditStatus(row)}</TableCell>
-                <TableCell className="max-w-72 truncate text-xs" title={row.reason}>
-                  {row.reason}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      )}
-    </Section>
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Time</TableHead>
+          <TableHead>Actor</TableHead>
+          <TableHead>Action</TableHead>
+          <TableHead>Hold</TableHead>
+          <TableHead className="text-right">Amount</TableHead>
+          <TableHead>Status</TableHead>
+          <TableHead>Reason</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map((row) => (
+          <TableRow key={row.id}>
+            <TableCell className="whitespace-nowrap font-mono text-xs tabular-nums">
+              {formatDate(row.createdAt, undefined, "MMM d, HH:mm")}
+            </TableCell>
+            <TableCell className="max-w-40 truncate text-xs">{actorOf(row.actorUserId)}</TableCell>
+            <TableCell className="whitespace-nowrap text-xs">release hold</TableCell>
+            <TableCell className="font-mono text-xs">{row.subject}</TableCell>
+            <TableCell className="whitespace-nowrap text-right font-mono text-xs tabular-nums">
+              {row.status === "applied" ? formatBudgetAmount(row.released, unit) : "-"}
+            </TableCell>
+            <TableCell className="whitespace-nowrap font-mono text-xs">
+              {auditStatus(row)}
+            </TableCell>
+            <TableCell className="max-w-72 truncate text-xs" title={row.reason}>
+              {row.reason}
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   )
 }
 
@@ -361,26 +370,26 @@ function LimitRow({ limit, unit }: { limit: Limit; unit: string }) {
     remaining < BigInt(0)
       ? `over by ${amount(limit.remaining.slice(1))}`
       : `${amount(limit.remaining)} left`
+  // the meter escalates on what is committed: consumed plus held
+  const committed = consumed + held
+  const fill =
+    committed >= 100 ? "bg-danger-solid" : committed >= 80 ? "bg-warning-solid" : "bg-primary-solid"
+  const window = WINDOW_LABEL[limit.window]
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <span className="flex items-center gap-2">
-          <span className="font-medium font-mono text-sm">{limit.id}</span>
-          <Badge variant={limit.enforce === "hard" ? "default" : "secondary"}>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <span className="flex min-w-0 items-baseline gap-2">
+          <span className="truncate font-medium font-mono text-sm">{limit.id}</span>
+          <span className="whitespace-nowrap font-mono text-muted-foreground text-xs">
             {limit.enforce}
-          </Badge>
-          <span className="text-muted-foreground text-xs">{limit.window}</span>
-        </span>
-        <span className="font-mono text-xs tabular-nums">
-          {amount(limit.consumed)} used · {amount(limit.held)} held · {left} of{" "}
-          {amount(limit.amount)}
-          <span className="text-muted-foreground">
-            {" · "}
-            {limit.resetsAt === null
-              ? "never resets"
-              : `resets ${formatDate(limit.resetsAt, undefined, "MMM d, HH:mm")}`}
+            {window === limit.id ? "" : ` · ${window}`}
           </span>
+        </span>
+        <span className="whitespace-nowrap font-mono text-muted-foreground text-xs tabular-nums">
+          {limit.resetsAt === null
+            ? "never resets"
+            : `resets ${formatDate(limit.resetsAt, undefined, "MMM d, HH:mm")}`}
         </span>
       </div>
       <div
@@ -388,8 +397,23 @@ function LimitRow({ limit, unit }: { limit: Limit; unit: string }) {
         role="img"
         aria-label={`${amount(limit.consumed)} used and ${amount(limit.held)} held of ${amount(limit.amount)}`}
       >
-        <div className="h-full bg-primary-solid" style={{ width: `${consumed}%` }} />
-        <div className="h-full bg-warning-solid" style={{ width: `${held}%` }} />
+        <div className={`h-full ${fill}`} style={{ width: `${consumed}%` }} />
+        <div className="h-full bg-info-solid" style={{ width: `${held}%` }} />
+      </div>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 font-mono text-xs tabular-nums">
+        <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="flex items-center gap-1.5">
+            <span aria-hidden className={`size-2 rounded-full ${fill}`} />
+            {amount(limit.consumed)} used
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span aria-hidden className="size-2 rounded-full bg-info-solid" />
+            {amount(limit.held)} held
+          </span>
+        </span>
+        <span>
+          {left} <span className="text-muted-foreground">of {amount(limit.amount)}</span>
+        </span>
       </div>
     </div>
   )
@@ -407,20 +431,20 @@ function UsageByPeriod({ history, unit }: { history: Period[]; unit: string }) {
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-6">
       {[...windows].map(([windowId, periods]) => {
         const shown = periods.slice(-12)
         const max = shown.reduce((top, p) => Math.max(top, Number(toBaseUnits(p.consumed))), 0)
         return (
-          <div key={windowId} className="flex items-end gap-4">
-            <span className="w-40 shrink-0 text-muted-foreground text-xs">
-              {windowId.split("@")[0]}, last {shown.length}
+          <div key={windowId} className="flex flex-col gap-2">
+            <span className="font-mono text-muted-foreground text-xs">
+              {windowId.split("@")[0]} · last {shown.length}
             </span>
-            <div className="flex h-10 items-end gap-1">
+            <div className="flex h-16 items-end gap-1">
               {shown.map((period) => (
                 <div
                   key={period.start}
-                  className="w-3 rounded-sm bg-primary-solid"
+                  className="w-4 rounded-sm bg-primary-solid"
                   style={{
                     height: `${max > 0 ? Math.max(4, (Number(toBaseUnits(period.consumed)) / max) * 100) : 4}%`,
                   }}
@@ -435,26 +459,6 @@ function UsageByPeriod({ history, unit }: { history: Period[]; unit: string }) {
   )
 }
 
-/** The hard limit with the least room, or the tightest soft one when none is hard. */
-function tightestLimit(limits: Limit[]): Limit | undefined {
-  const hard = limits.filter((limit) => limit.enforce === "hard")
-  return (hard.length > 0 ? hard : limits).reduce<Limit | undefined>(
-    (tightest, limit) =>
-      !tightest || toBaseUnits(limit.remaining) < toBaseUnits(tightest.remaining)
-        ? limit
-        : tightest,
-    undefined
-  )
-}
-
-function nextResettingLimit(limits: Limit[]): Limit | undefined {
-  return limits.reduce<Limit | undefined>(
-    (next, limit) =>
-      limit.resetsAt !== null && (!next?.resetsAt || limit.resetsAt < next.resetsAt) ? limit : next,
-    undefined
-  )
-}
-
 function useNow(intervalMs: number): number {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
@@ -464,41 +468,75 @@ function useNow(intervalMs: number): number {
   return now
 }
 
-function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  return (
-    <Card>
-      <CardHeader className="p-4 pb-1">
-        <CardDescription className="text-xs">{label}</CardDescription>
-        <CardTitle className="font-mono text-lg tabular-nums">{value}</CardTitle>
-      </CardHeader>
-      <CardContent className="min-h-8 px-4 pb-4 text-muted-foreground text-xs">{hint}</CardContent>
-    </Card>
-  )
-}
-
-function Section({
-  title,
-  description,
+function Fact({
+  label,
+  emphasis,
   children,
 }: {
-  title: string
-  description?: string
+  label: string
+  emphasis?: boolean
   children: ReactNode
 }) {
   return (
-    <section className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h3 className="font-medium text-sm">{title}</h3>
-        {description && <span className="text-muted-foreground text-xs">{description}</span>}
-      </div>
-      {children}
-    </section>
+    <div className="flex min-w-0 flex-col gap-1">
+      <span className="text-muted-foreground text-xs">{label}</span>
+      <span
+        className={cn(
+          "font-mono tabular-nums [overflow-wrap:anywhere]",
+          emphasis ? "font-medium text-2xl text-background-textContrast" : "pt-1.5 text-lg"
+        )}
+      >
+        {children}
+      </span>
+    </div>
   )
+}
+
+function LiveStamp({ asOf, failed }: { asOf: number; failed: boolean }) {
+  return (
+    <span
+      className={cn(
+        "flex items-center gap-2 whitespace-nowrap font-mono text-xs",
+        failed ? "text-danger-text" : "text-muted-foreground"
+      )}
+      title={`Read live from the budget. Refreshes every ${REFRESH_MS / 1000} s.`}
+    >
+      <StationDot variant={failed ? "danger" : "live"} />
+      {failed ? "refresh failed" : "live"} · {formatDate(asOf, undefined, "HH:mm:ss")}
+    </span>
+  )
+}
+
+function Count({ value, more }: { value: number; more?: boolean }) {
+  if (value === 0 && !more) return null
+  return (
+    <span className="ml-2 rounded bg-background-bgHover px-1.5 font-mono text-[11px] text-muted-foreground tabular-nums">
+      {value}
+      {more ? "+" : ""}
+    </span>
+  )
+}
+
+function Panel({ value, children }: { value: string; children: ReactNode }) {
+  // mounted while hidden so each tab's count and rows stay current under the poll
+  return (
+    <TabsContent
+      value={value}
+      forceMount
+      className="flex flex-col gap-3 pt-4 data-[state=inactive]:hidden"
+    >
+      {children}
+    </TabsContent>
+  )
+}
+
+function Explainer({ children }: { children: ReactNode }) {
+  return <p className="text-muted-foreground text-xs">{children}</p>
 }
 
 function Muted({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-md border border-border bg-surface-panel px-4 py-3 text-muted-foreground text-xs">
+    <div className="rounded-md border border-border border-dashed px-4 py-3 text-muted-foreground text-xs">
       {children}
     </div>
   )
@@ -506,16 +544,13 @@ function Muted({ children }: { children: ReactNode }) {
 
 export function BudgetLiveSkeleton() {
   return (
-    <div className="flex flex-col gap-6">
-      <Skeleton className="h-4 w-80" />
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {["remaining", "held", "consumed", "resets"].map((key) => (
-          <Skeleton key={key} className="h-24" />
-        ))}
-      </div>
-      <Skeleton className="h-28" />
-      <Skeleton className="h-16" />
+    <div className="flex flex-col gap-8">
       <Skeleton className="h-48" />
+      <div className="flex flex-col gap-4">
+        <Skeleton className="h-9" />
+        <Skeleton className="h-4 w-96 max-w-full" />
+        <Skeleton className="h-24" />
+      </div>
     </div>
   )
 }
