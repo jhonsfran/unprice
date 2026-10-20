@@ -36,15 +36,29 @@ function toFind(by: Find["by"], value: string) {
   return budgetInspectFindSchema.safeParse({ by, idempotencyKey: text })
 }
 
+type Parsed<T> =
+  | { success: true; data: T }
+  | { success: false; error: { issues: { message: string }[] } }
+
+/** A text field whose submitted value is parsed; the last failed parse is its problem. */
+function useParsedInput<T>(parse: (text: string) => Parsed<T>) {
+  const [text, setText] = useState("")
+  const [value, setValue] = useState<T | null>(null)
+  const [problem, setProblem] = useState<string | null>(null)
+  const submit = () => {
+    const parsed = parse(text.trim())
+    setProblem(parsed.success ? null : (parsed.error.issues[0]?.message ?? "Invalid value"))
+    if (parsed.success) setValue(parsed.data)
+  }
+  return { text, setText, value, problem, submit }
+}
+
 export function BudgetDebugSheet({ id, budgetKey }: { id: string; budgetKey: string }) {
   const trpc = useTRPC()
   const [open, setOpen] = useState(false)
   const [findBy, setFindBy] = useState<Find["by"]>("hold")
-  const [findText, setFindText] = useState("")
-  const [find, setFind] = useState<Find | null>(null)
-  const [probeText, setProbeText] = useState("")
-  const [probe, setProbe] = useState<string | null>(null)
-  const [problem, setProblem] = useState<{ find?: string; probe?: string }>({})
+  const find = useParsedInput<Find>((text) => toFind(findBy, text))
+  const probe = useParsedInput<string>((text) => budgetAmountInputSchema.safeParse(text))
 
   const { data: snapshot, error: snapshotError } = useQuery(
     trpc.budgets.inspect.queryOptions({ id }, { enabled: open })
@@ -55,8 +69,8 @@ export function BudgetDebugSheet({ id, budgetKey }: { id: string; budgetKey: str
     isFetching: finding,
   } = useQuery(
     trpc.budgets.inspect.queryOptions(
-      { id, find: find ?? undefined },
-      { enabled: open && find !== null }
+      { id, find: find.value ?? undefined },
+      { enabled: open && find.value !== null }
     )
   )
   const {
@@ -65,8 +79,8 @@ export function BudgetDebugSheet({ id, budgetKey }: { id: string; budgetKey: str
     isFetching: probing,
   } = useQuery(
     trpc.budgets.inspect.queryOptions(
-      { id, probe: probe ?? undefined },
-      { enabled: open && probe !== null }
+      { id, probe: probe.value ?? undefined },
+      { enabled: open && probe.value !== null }
     )
   )
   const unit = snapshot?.budget.unit ?? ""
@@ -93,12 +107,7 @@ export function BudgetDebugSheet({ id, budgetKey }: { id: string; budgetKey: str
               className="flex flex-col gap-3"
               onSubmit={(event) => {
                 event.preventDefault()
-                const parsed = toFind(findBy, findText)
-                setProblem((current) => ({
-                  ...current,
-                  find: parsed.success ? undefined : parsed.error.issues[0]?.message,
-                }))
-                if (parsed.success) setFind(parsed.data)
+                find.submit()
               }}
             >
               <RadioGroup
@@ -119,20 +128,20 @@ export function BudgetDebugSheet({ id, budgetKey }: { id: string; budgetKey: str
                 <Input
                   aria-label="Operation to find"
                   placeholder={FIND_BY.find((option) => option.by === findBy)?.placeholder}
-                  value={findText}
-                  onChange={(event) => setFindText(event.target.value)}
+                  value={find.text}
+                  onChange={(event) => find.setText(event.target.value)}
                   className="h-8 font-mono text-xs"
                   autoComplete="off"
                   spellCheck={false}
                 />
-                <Button type="submit" variant="outline" size="sm" disabled={!findText.trim()}>
+                <Button type="submit" variant="outline" size="sm" disabled={!find.text.trim()}>
                   Find
                 </Button>
               </div>
             </form>
-            {problem.find ? (
-              <Muted>{problem.find}</Muted>
-            ) : find === null ? null : finding && !found ? (
+            {find.problem ? (
+              <Muted>{find.problem}</Muted>
+            ) : find.value === null ? null : finding && !found ? (
               <Skeleton className="h-10" />
             ) : findError ? (
               <Muted>{findError.message}</Muted>
@@ -150,30 +159,25 @@ export function BudgetDebugSheet({ id, budgetKey }: { id: string; budgetKey: str
               className="flex gap-2"
               onSubmit={(event) => {
                 event.preventDefault()
-                const parsed = budgetAmountInputSchema.safeParse(probeText.trim())
-                setProblem((current) => ({
-                  ...current,
-                  probe: parsed.success ? undefined : parsed.error.issues[0]?.message,
-                }))
-                if (parsed.success) setProbe(parsed.data)
+                probe.submit()
               }}
             >
               <Input
                 aria-label="Amount to authorize"
                 placeholder="70.00"
                 inputMode="decimal"
-                value={probeText}
-                onChange={(event) => setProbeText(event.target.value)}
+                value={probe.text}
+                onChange={(event) => probe.setText(event.target.value)}
                 className="h-8 font-mono text-xs"
                 autoComplete="off"
               />
-              <Button type="submit" variant="outline" size="sm" disabled={!probeText.trim()}>
+              <Button type="submit" variant="outline" size="sm" disabled={!probe.text.trim()}>
                 Check
               </Button>
             </form>
-            {problem.probe ? (
-              <Muted>{problem.probe}</Muted>
-            ) : probe === null ? null : probing && !probed ? (
+            {probe.problem ? (
+              <Muted>{probe.problem}</Muted>
+            ) : probe.value === null ? null : probing && !probed ? (
               <Skeleton className="h-10" />
             ) : probeError ? (
               <Muted>{probeError.message}</Muted>

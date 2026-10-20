@@ -392,10 +392,10 @@ function LimitRow({ limit, unit }: { limit: Limit; unit: string }) {
             : `resets ${formatDate(limit.resetsAt, undefined, "MMM d, HH:mm")}`}
         </span>
       </div>
+      {/* decorative: the figures under the bar carry the same numbers */}
       <div
+        aria-hidden
         className="flex h-2 w-full overflow-hidden rounded-full bg-background-bgHover"
-        role="img"
-        aria-label={`${amount(limit.consumed)} used and ${amount(limit.held)} held of ${amount(limit.amount)}`}
       >
         <div className={`h-full ${fill}`} style={{ width: `${consumed}%` }} />
         <div className="h-full bg-info-solid" style={{ width: `${held}%` }} />

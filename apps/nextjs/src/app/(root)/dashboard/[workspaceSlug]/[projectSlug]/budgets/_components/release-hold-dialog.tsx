@@ -1,8 +1,6 @@
 "use client"
 
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { budgetOperatorReasonSchema } from "@unprice/db/validators"
-import type { RouterInputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
 import { Checkbox } from "@unprice/ui/checkbox"
 import {
@@ -22,30 +20,9 @@ import { useState } from "react"
 import { toast } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
 import { formatBudgetAmount, formatUnit } from "./budget-format"
+import { type ReleasableHold, canReleaseWith, releaseHoldInput } from "./release-hold"
 
 const REASON_MAX = 500
-
-export type ReleasableHold = {
-  id: string
-  amount: string
-  idempotencyKey: string
-  createdAt: number
-}
-
-/** The release names the hold by its id and creation time, as the audit row is keyed. */
-export function releaseHoldInput(
-  budgetId: string,
-  hold: ReleasableHold,
-  reason: string
-): RouterInputs["budgets"]["releaseHold"] {
-  return {
-    id: budgetId,
-    holdId: hold.id,
-    holdCreatedAt: hold.createdAt,
-    reason: reason.trim(),
-    confirm: true,
-  }
-}
 
 /** The trigger and dialog that release one open hold for an OWNER or ADMIN. */
 export function ReleaseHoldDialog({
@@ -122,10 +99,6 @@ export function ReleaseHoldDialog({
       </DialogContent>
     </Dialog>
   )
-}
-
-export function canReleaseWith(reason: string, attested: boolean): boolean {
-  return attested && budgetOperatorReasonSchema.safeParse(reason).success
 }
 
 /** The dialog's body, controlled by its parent so a test can render each state. */

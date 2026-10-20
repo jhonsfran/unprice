@@ -1,7 +1,8 @@
 import { Dialog } from "@unprice/ui/dialog"
 import { renderToString } from "react-dom/server"
 import { describe, expect, it } from "vitest"
-import { ReleaseHoldForm, releaseHoldInput } from "./release-hold-dialog"
+import { releaseHoldInput } from "./release-hold"
+import { ReleaseHoldForm } from "./release-hold-dialog"
 
 const hold = { id: "h_4812", amount: "5", idempotencyKey: "job-991", createdAt: 1_796_083_140_000 }
 
