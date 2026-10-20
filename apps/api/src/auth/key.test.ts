@@ -1,6 +1,9 @@
 import { OpenAPIHono } from "@hono/zod-openapi"
+import { DefaultStatefulContext, Namespace, createCache } from "@unkey/cache"
+import { MemoryStore } from "@unkey/cache/stores"
 import type { ApiKeyExtended, ApiKeyType } from "@unprice/db/validators"
 import { Ok } from "@unprice/error"
+import { ApiKeysService } from "@unprice/services/apikey"
 import type { ExecutionContext } from "hono"
 import { timing } from "hono/timing"
 import { describe, expect, it, vi } from "vitest"
@@ -292,5 +295,119 @@ describe("keyAuth key type boundary", () => {
     await request()
 
     expect(loggerSet).toHaveBeenCalledWith({ error: { type: "INSUFFICIENT_PERMISSIONS" } })
+  })
+})
+
+describe("keyAuth with an unknown key", () => {
+  // Production reads go to the read replicas (`withReplicas`). A replica that fails must not turn
+  // "this key does not exist" into a 500: the lookup retries on the primary, which answers no row.
+  function createUnknownKeyApp(opts: {
+    replica: () => Promise<unknown>
+    primary: () => Promise<unknown>
+  }) {
+    const replicaFindFirst = vi.fn(opts.replica)
+    const primaryFindFirst = vi.fn(opts.primary)
+    const ctx = new DefaultStatefulContext()
+    const cache = createCache({
+      apiKeyByHash: new Namespace(ctx, {
+        stores: [new MemoryStore({ persistentMap: new Map() })],
+        fresh: 60_000,
+        stale: 86_400_000,
+      }),
+    })
+    const logger = { set: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+    const apikey = new ApiKeysService({
+      cache: cache as never,
+      metrics: { emit: vi.fn() } as never,
+      analytics: {} as never,
+      logger: logger as never,
+      db: {
+        query: { apikeys: { findFirst: replicaFindFirst } },
+        $primary: { query: { apikeys: { findFirst: primaryFindFirst } } },
+      } as never,
+      waitUntil: vi.fn(),
+      hashCache: new Map(),
+    })
+
+    const app = new OpenAPIHono<HonoEnv>()
+    app.use(timing())
+    app.onError((error, c) => {
+      if (error instanceof UnpriceApiError) {
+        return c.json({ code: error.code, message: error.message }, error.status)
+      }
+      throw error
+    })
+    app.use("*", async (c, next) => {
+      c.set("services", { apikey } as never)
+      c.set("logger", logger as never)
+      await next()
+    })
+    app.post("/v1/budgets/authorize", async (c) => {
+      await keyAuth(c)
+      return c.json({ ok: true })
+    })
+
+    const request = () =>
+      app.fetch(
+        new Request("https://api.unprice.dev/v1/budgets/authorize", {
+          method: "POST",
+          // well-formed, so it passes the production shape check and reaches the lookup
+          headers: { authorization: "Bearer unprice_live_5555555555555555555555" },
+        }),
+        { APP_ENV: "production" },
+        { passThroughOnException: vi.fn(), waitUntil: vi.fn() } as unknown as ExecutionContext
+      )
+
+    return { request, replicaFindFirst, primaryFindFirst }
+  }
+
+  it("answers 401 when the key has no row", async () => {
+    const { request, primaryFindFirst } = createUnknownKeyApp({
+      replica: async () => undefined,
+      primary: async () => undefined,
+    })
+
+    const response = await request()
+
+    expect(response.status).toBe(401)
+    await expect(response.json()).resolves.toEqual({
+      code: "UNAUTHORIZED",
+      message: "key not found",
+    })
+    expect(primaryFindFirst).not.toHaveBeenCalled()
+  })
+
+  it("answers 401, not 500, when the replica lookup fails and the primary has no row", async () => {
+    const { request, replicaFindFirst, primaryFindFirst } = createUnknownKeyApp({
+      replica: async () => {
+        throw new Error("replica unavailable")
+      },
+      primary: async () => undefined,
+    })
+
+    const response = await request()
+
+    expect(response.status).toBe(401)
+    await expect(response.json()).resolves.toEqual({
+      code: "UNAUTHORIZED",
+      message: "key not found",
+    })
+    expect(replicaFindFirst).toHaveBeenCalledOnce()
+    expect(primaryFindFirst).toHaveBeenCalledOnce()
+  })
+
+  it("still answers 500 when the primary fails too", async () => {
+    const { request } = createUnknownKeyApp({
+      replica: async () => {
+        throw new Error("replica unavailable")
+      },
+      primary: async () => {
+        throw new Error("primary unavailable")
+      },
+    })
+
+    const response = await request()
+
+    expect(response.status).toBe(500)
   })
 })
