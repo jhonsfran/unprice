@@ -73,6 +73,40 @@ export class BudgetCatalogService {
       })
   }
 
+  /** Deletes the row of a key whose object answered that it has no budget. */
+  async forget(projectId: string, key: string): Promise<void> {
+    await this.deps.db
+      .delete(budgets)
+      .where(and(eq(budgets.projectId, projectId), eq(budgets.key, key)))
+  }
+
+  /** One of the project's budgets, by its catalog id or its key; null when there is none. */
+  async get(
+    projectId: string,
+    where: Readonly<{ id: string }> | Readonly<{ key: string }>,
+    now = Date.now()
+  ): Promise<Result<BudgetCatalogRow | null, BudgetCatalogServiceError>> {
+    try {
+      const [row] = await this.deps.db
+        .select()
+        .from(budgets)
+        .where(
+          and(
+            eq(budgets.projectId, projectId),
+            "id" in where ? eq(budgets.id, where.id) : eq(budgets.key, where.key)
+          )
+        )
+        .limit(1)
+      return Ok(row ? toRow(row, now) : null)
+    } catch (error) {
+      this.deps.logger.error(error instanceof Error ? error : new Error(String(error)), {
+        context: "error reading a budget",
+        projectId,
+      })
+      return Err(new BudgetCatalogServiceError({ message: "Failed to read the budget" }))
+    }
+  }
+
   /** A page of the project's budgets, most recently changed first, without long-closed ones. */
   async list(
     projectId: string,
@@ -118,21 +152,7 @@ export class BudgetCatalogService {
       ])
 
       return Ok({
-        rows: data.map((row) => {
-          const closesAt = row.closesAt?.getTime() ?? null
-          return {
-            id: row.id,
-            key: row.key,
-            unit: row.unit,
-            version: row.version,
-            cap: row.cap,
-            limits: row.limits,
-            closesAt,
-            status: catalogStatusOf(closesAt, now),
-            createdAt: row.createdAt.getTime(),
-            updatedAt: row.updatedAt.getTime(),
-          }
-        }),
+        rows: data.map((row) => toRow(row, now)),
         pageCount: Math.ceil(total / input.page_size),
       })
     } catch (error) {
@@ -142,6 +162,22 @@ export class BudgetCatalogService {
       })
       return Err(new BudgetCatalogServiceError({ message: "Failed to list budgets" }))
     }
+  }
+}
+
+function toRow(row: typeof budgets.$inferSelect, now: number): BudgetCatalogRow {
+  const closesAt = row.closesAt?.getTime() ?? null
+  return {
+    id: row.id,
+    key: row.key,
+    unit: row.unit,
+    version: row.version,
+    cap: row.cap,
+    limits: row.limits,
+    closesAt,
+    status: catalogStatusOf(closesAt, now),
+    createdAt: row.createdAt.getTime(),
+    updatedAt: row.updatedAt.getTime(),
   }
 }
 

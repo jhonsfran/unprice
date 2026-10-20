@@ -20,6 +20,10 @@ import { RatingService } from "./rating/service"
 import { DrizzleSubscriptionRepository } from "./subscriptions/repository.drizzle"
 import { SubscriptionService } from "./subscriptions/service"
 import { HttpBillingReservationFlushGateway } from "./use-cases/billing/reservation-flush-gateway"
+import {
+  type BudgetOperatorGateway,
+  HttpBudgetOperatorGateway,
+} from "./use-cases/budgets/operator-gateway"
 import { WalletService } from "./wallet"
 import { WorkspaceService } from "./workspaces/service"
 
@@ -32,6 +36,8 @@ import { WorkspaceService } from "./workspaces/service"
 export interface ServiceContext {
   budgetRuns: BudgetRunService
   budgetCatalog: BudgetCatalogService
+  /** The dashboard's operator calls on budgets, through the API's internal routes. */
+  budgetOperator: BudgetOperatorGateway
   analytics: AnalyticsService
   apikeys: ApiKeysService
   customers: CustomerService
@@ -223,9 +229,15 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     }),
   })
 
+  const budgetOperator = new HttpBudgetOperatorGateway({
+    baseUrl: env.UNPRICE_API_URL,
+    token: env.UNPRICE_API_KEY,
+  })
+
   return {
     budgetRuns,
     budgetCatalog,
+    budgetOperator,
     analytics,
     apikeys,
     customers,

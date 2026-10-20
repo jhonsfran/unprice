@@ -13,7 +13,15 @@ export type { BudgetCap, BudgetCatalogFacts, BudgetCatalogLimit, BudgetCatalogSt
 
 /** The catalog facts of a committed budget, as an upsert returns it. */
 export function catalogFactsOf(budget: BudgetSnapshot): BudgetCatalogFacts {
-  const limits = formatBudgetConfig(budget).limits.map(({ id, window, enforce, amount }) => ({
+  return catalogFactsFrom({ ...budget, limits: formatBudgetConfig(budget).limits })
+}
+
+/** The catalog facts of a budget whose config is already formatted, as the wire carries it. */
+export function catalogFactsFrom(
+  budget: Pick<BudgetCatalogFacts, "key" | "unit" | "version" | "closesAt"> &
+    Readonly<{ limits: readonly BudgetCatalogLimit[] }>
+): BudgetCatalogFacts {
+  const limits = budget.limits.map(({ id, window, enforce, amount }) => ({
     id,
     window,
     enforce,

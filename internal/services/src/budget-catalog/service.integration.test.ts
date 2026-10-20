@@ -98,6 +98,25 @@ describe("BudgetCatalogService", () => {
     })
   })
 
+  describe("get and forget", () => {
+    it("reads a row by id or key within its project, and forgets one key", async () => {
+      await catalog.record(projectId, facts({ key: "customer:acme" }))
+      await catalog.record(projectId, facts({ key: "run:r_42", version: 2 }))
+      const byKey = await catalog.get(projectId, { key: "run:r_42" })
+      const id = byKey.val?.id ?? ""
+
+      const byId = await catalog.get(projectId, { id })
+      const elsewhere = await catalog.get("proj_other", { id })
+      await catalog.forget(projectId, "run:r_42")
+
+      expect(byKey.val).toMatchObject({ key: "run:r_42", version: 2, status: "open" })
+      expect(byId.val).toEqual(byKey.val)
+      expect(elsewhere.val).toBeNull()
+      expect((await catalog.get(projectId, { id })).val).toBeNull()
+      expect(await keys()).toEqual(["customer:acme"])
+    })
+  })
+
   describe("list", () => {
     beforeEach(async () => {
       const now = Date.now()
