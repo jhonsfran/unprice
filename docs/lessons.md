@@ -68,6 +68,26 @@ patterns. Keep it cheap to load and useful.
 
 ## Cloudflare, API, And Ingestion
 
+- 2026-10-19: The API's `c.get("services")` is its own `DomainServiceContext` (`hono/env.ts`), filled
+  in `middleware/init.ts`; a service added to `createServiceContext` must be added there too, and to
+  the route test harnesses (`budgets.test.ts`, `local-mode.fuzz.test.ts`) that set `services` by hand.
+  Exception: `budgetOperator` calls the API itself, so the API's bag leaves it out.
+- 2026-10-19: A gateway to an internal route reads "not found" only from the API's JSON error body
+  (`error.code === "NOT_FOUND"`); Hono's default 404 for a missing route is plain text, and
+  read-repair that trusted a bare 404 would forget catalog rows during a split deploy.
+- 2026-10-19: The internal release route gets the budget's rejection from `UnpriceApiError.cause`
+  (`budgetApiError` sets it) and adds it as `details: { kind: "release_rejected" }`; the public
+  route's answer is unchanged. The gateway reads a rejection only from those details.
+- 2026-10-19: A budget recreated at the same key keeps its catalog id but restarts hold ids at `h_1`,
+  so anything outside the budget that is keyed per hold uses the hold's id plus its `createdAt`
+  (`budget_audit.subject_created_at`); the id alone matches the closed budget's row.
+- 2026-10-19: A route test can run the real budget core behind the mocked `CloudflareBudgetClient`:
+  `MemoryBudgetStore` from `@unprice/services/budgets/memory-store` (see `releaseBudgetInternalV1.test.ts`).
+- 2026-10-19: DO SQLite binds a JS number as REAL, so `'h_' || ?` gives `h_1.0` and `? % 1000` is
+  float math. Seed SQL with `CAST(? AS INTEGER)` (see the 1,000,000-row inspect bench).
+- 2026-10-19: `BudgetDO.inspect` reads through `BudgetSqliteStore.inspecting`, not `atomically`, so
+  no verb's transaction binds the inspect reads. Its walk and closed-row scans stay on the `due_at`
+  index: 2,108 rows read at 1,000,000 rows; check `rowsRead` in the storage bench after changing them.
 - 2026-10-19: Preview native logs/traces and BudgetDO placement diagnostics were temporary and are
   disabled. Keep sampled request events with the budget operation, outcome, and RPC duration;
   failed alarms remain error logs.
@@ -285,6 +305,9 @@ patterns. Keep it cheap to load and useful.
 - 2026-10-19: `BudgetTransition` is the rows to write plus a `BudgetReply`. A refused lease is the
   one rejection that writes: `ok: false` with LIMIT_EXCEEDED, committed and armed like any write.
   Every other rejection is the `Err` of `transition` and writes nothing; core tests narrow with `ok()`.
+- 2026-10-19: For billing, keep durable usage facts separate from BudgetDO replay receipts and
+  cumulative lease reports. Local `record` still calls the remote API; `occurredAt` only bounds
+  acceptance, and an expired unreported lease counts its whole grant, not proven actual usage.
 - 2026-10-18: The local-mode fuzz test asserts that every lease on the server reached its client.
   Reverting the refusal row failed it after about 390 runs at the old fault weights; stray copies
   weighted 3, faults on half the steps, and close weighted 2 cut that to about 40 (at most 110).
@@ -397,6 +420,15 @@ patterns. Keep it cheap to load and useful.
 
 ## Next.js And Dashboard
 
+- 2026-10-19: tRPC `infiniteQueryOptions` exists only for inputs with a `cursor` field, and
+  `budgets.inspect` pages with `after`; `budget-live.tsx` uses `useInfiniteQuery` with
+  `useTRPCClient` under the key `[path, { input, type: "infinite" }]` so `pathFilter` still reaches it.
+- 2026-10-19: The pre-commit react-doctor fails on `const query = useQuery(...)`; destructure the
+  fields you read. Component tests in `apps/nextjs` render with `renderToString` (automatic JSX in
+  `vitest.config.ts`), seeding the query cache instead of mocking tRPC.
+- 2026-10-19: `renderToString` never renders a Radix `DialogContent` (it portals); test a controlled
+  form inside a bare `<Dialog>`, and detect a disabled button by `disabled=""`, since class names
+  contain `disabled:` (see `release-hold-dialog.test.tsx`).
 - 2026-10-19: A signup intent routes past auth only through `next`: `INTENT_LANDING` in
   `lib/signup-funnel.ts` is the one table of intents, and `/new` must forward `intent` into the
   workspace signUp `successUrl` (the provider appends `workspace_id`) or it dies at workspace creation.

@@ -58,6 +58,8 @@ interface DataTableProps<TData, TValue> {
   hidePaginationWhenEmpty?: boolean
   // low-signal columns ship hidden; the View menu opts them back in
   initialColumnVisibility?: VisibilityState
+  // a page control that sits at the toolbar's right edge, beside the view options
+  toolbarAction?: React.ReactNode
 }
 
 export function DataTable<TData, TValue>({
@@ -70,6 +72,7 @@ export function DataTable<TData, TValue>({
   emptyState,
   hidePaginationWhenEmpty,
   initialColumnVisibility,
+  toolbarAction,
 }: DataTableProps<TData, TValue>) {
   const [rowSelection, setRowSelection] = React.useState({})
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>(
@@ -131,7 +134,7 @@ export function DataTable<TData, TValue>({
 
   return (
     <div className={cn("flex w-full flex-col gap-4 overflow-auto", className)}>
-      <DataTableToolbar table={table} filterOptions={filterOptions} />
+      <DataTableToolbar table={table} filterOptions={filterOptions} action={toolbarAction} />
       <div className="overflow-hidden rounded-md border">
         <Table>
           <TableHeader>

@@ -8,7 +8,7 @@ import type { AppRouter } from "@unprice/trpc/routes"
 import { useState } from "react"
 import { createQueryClient, endingLinkClient } from "./shared"
 
-export const { TRPCProvider, useTRPC } = createTRPCContext<AppRouter>()
+export const { TRPCProvider, useTRPC, useTRPCClient } = createTRPCContext<AppRouter>()
 
 let browserQueryClient: QueryClient
 

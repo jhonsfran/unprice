@@ -302,6 +302,73 @@
                       }
                     },
                     "required": ["kind", "maximum", "retained"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["release_rejected"]
+                      },
+                      "rejection": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["BUDGET_NOT_FOUND"]
+                              }
+                            },
+                            "required": ["code"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["HOLD_NOT_FOUND"]
+                              },
+                              "holdId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["code", "holdId"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["HOLD_RETIRED"]
+                              },
+                              "holdId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["code", "holdId"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["HOLD_CLOSED"]
+                              },
+                              "holdId": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["settled", "released", "expired"]
+                              }
+                            },
+                            "required": ["code", "holdId", "status"]
+                          }
+                        ]
+                      }
+                    },
+                    "required": ["kind", "rejection"]
                   }
                 ]
               }
@@ -569,6 +636,73 @@
                       }
                     },
                     "required": ["kind", "maximum", "retained"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["release_rejected"]
+                      },
+                      "rejection": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["BUDGET_NOT_FOUND"]
+                              }
+                            },
+                            "required": ["code"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["HOLD_NOT_FOUND"]
+                              },
+                              "holdId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["code", "holdId"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["HOLD_RETIRED"]
+                              },
+                              "holdId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["code", "holdId"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["HOLD_CLOSED"]
+                              },
+                              "holdId": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["settled", "released", "expired"]
+                              }
+                            },
+                            "required": ["code", "holdId", "status"]
+                          }
+                        ]
+                      }
+                    },
+                    "required": ["kind", "rejection"]
                   }
                 ]
               }
@@ -836,6 +970,73 @@
                       }
                     },
                     "required": ["kind", "maximum", "retained"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["release_rejected"]
+                      },
+                      "rejection": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["BUDGET_NOT_FOUND"]
+                              }
+                            },
+                            "required": ["code"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["HOLD_NOT_FOUND"]
+                              },
+                              "holdId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["code", "holdId"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["HOLD_RETIRED"]
+                              },
+                              "holdId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["code", "holdId"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["HOLD_CLOSED"]
+                              },
+                              "holdId": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["settled", "released", "expired"]
+                              }
+                            },
+                            "required": ["code", "holdId", "status"]
+                          }
+                        ]
+                      }
+                    },
+                    "required": ["kind", "rejection"]
                   }
                 ]
               }
@@ -1103,6 +1304,73 @@
                       }
                     },
                     "required": ["kind", "maximum", "retained"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["release_rejected"]
+                      },
+                      "rejection": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["BUDGET_NOT_FOUND"]
+                              }
+                            },
+                            "required": ["code"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["HOLD_NOT_FOUND"]
+                              },
+                              "holdId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["code", "holdId"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["HOLD_RETIRED"]
+                              },
+                              "holdId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["code", "holdId"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["HOLD_CLOSED"]
+                              },
+                              "holdId": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["settled", "released", "expired"]
+                              }
+                            },
+                            "required": ["code", "holdId", "status"]
+                          }
+                        ]
+                      }
+                    },
+                    "required": ["kind", "rejection"]
                   }
                 ]
               }
@@ -1370,6 +1638,73 @@
                       }
                     },
                     "required": ["kind", "maximum", "retained"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["release_rejected"]
+                      },
+                      "rejection": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["BUDGET_NOT_FOUND"]
+                              }
+                            },
+                            "required": ["code"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["HOLD_NOT_FOUND"]
+                              },
+                              "holdId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["code", "holdId"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["HOLD_RETIRED"]
+                              },
+                              "holdId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["code", "holdId"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["HOLD_CLOSED"]
+                              },
+                              "holdId": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["settled", "released", "expired"]
+                              }
+                            },
+                            "required": ["code", "holdId", "status"]
+                          }
+                        ]
+                      }
+                    },
+                    "required": ["kind", "rejection"]
                   }
                 ]
               }
@@ -1637,6 +1972,73 @@
                       }
                     },
                     "required": ["kind", "maximum", "retained"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["release_rejected"]
+                      },
+                      "rejection": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["BUDGET_NOT_FOUND"]
+                              }
+                            },
+                            "required": ["code"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["HOLD_NOT_FOUND"]
+                              },
+                              "holdId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["code", "holdId"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["HOLD_RETIRED"]
+                              },
+                              "holdId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["code", "holdId"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["HOLD_CLOSED"]
+                              },
+                              "holdId": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["settled", "released", "expired"]
+                              }
+                            },
+                            "required": ["code", "holdId", "status"]
+                          }
+                        ]
+                      }
+                    },
+                    "required": ["kind", "rejection"]
                   }
                 ]
               }
@@ -1904,6 +2306,73 @@
                       }
                     },
                     "required": ["kind", "maximum", "retained"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["release_rejected"]
+                      },
+                      "rejection": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["BUDGET_NOT_FOUND"]
+                              }
+                            },
+                            "required": ["code"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["HOLD_NOT_FOUND"]
+                              },
+                              "holdId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["code", "holdId"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["HOLD_RETIRED"]
+                              },
+                              "holdId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["code", "holdId"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["HOLD_CLOSED"]
+                              },
+                              "holdId": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["settled", "released", "expired"]
+                              }
+                            },
+                            "required": ["code", "holdId", "status"]
+                          }
+                        ]
+                      }
+                    },
+                    "required": ["kind", "rejection"]
                   }
                 ]
               }
@@ -2171,6 +2640,73 @@
                       }
                     },
                     "required": ["kind", "maximum", "retained"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["release_rejected"]
+                      },
+                      "rejection": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["BUDGET_NOT_FOUND"]
+                              }
+                            },
+                            "required": ["code"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["HOLD_NOT_FOUND"]
+                              },
+                              "holdId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["code", "holdId"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["HOLD_RETIRED"]
+                              },
+                              "holdId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["code", "holdId"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["HOLD_CLOSED"]
+                              },
+                              "holdId": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["settled", "released", "expired"]
+                              }
+                            },
+                            "required": ["code", "holdId", "status"]
+                          }
+                        ]
+                      }
+                    },
+                    "required": ["kind", "rejection"]
                   }
                 ]
               }
@@ -2438,6 +2974,73 @@
                       }
                     },
                     "required": ["kind", "maximum", "retained"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["release_rejected"]
+                      },
+                      "rejection": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["BUDGET_NOT_FOUND"]
+                              }
+                            },
+                            "required": ["code"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["HOLD_NOT_FOUND"]
+                              },
+                              "holdId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["code", "holdId"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["HOLD_RETIRED"]
+                              },
+                              "holdId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["code", "holdId"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["HOLD_CLOSED"]
+                              },
+                              "holdId": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["settled", "released", "expired"]
+                              }
+                            },
+                            "required": ["code", "holdId", "status"]
+                          }
+                        ]
+                      }
+                    },
+                    "required": ["kind", "rejection"]
                   }
                 ]
               }
@@ -2705,6 +3308,73 @@
                       }
                     },
                     "required": ["kind", "maximum", "retained"]
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": ["release_rejected"]
+                      },
+                      "rejection": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["BUDGET_NOT_FOUND"]
+                              }
+                            },
+                            "required": ["code"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["HOLD_NOT_FOUND"]
+                              },
+                              "holdId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["code", "holdId"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["HOLD_RETIRED"]
+                              },
+                              "holdId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["code", "holdId"]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": ["HOLD_CLOSED"]
+                              },
+                              "holdId": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["settled", "released", "expired"]
+                              }
+                            },
+                            "required": ["code", "holdId", "status"]
+                          }
+                        ]
+                      }
+                    },
+                    "required": ["kind", "rejection"]
                   }
                 ]
               }
@@ -4186,7 +4856,7 @@
                     "type": "integer",
                     "nullable": true,
                     "minimum": 0,
-                    "description": "When the budget closes, in epoch milliseconds. From then on authorize and charge return 409, record is accepted for 1 day more, and settle and release keep working. 30 days after closesAt, once nothing is left to settle or replay, the budget is deleted: get returns 404 and an upsert creates it anew. An upsert replaces the whole definition, so omitting closesAt or sending null leaves the budget open and clears any close time it had. A runtime key cannot close a budget in the past: an earlier closesAt takes effect now.",
+                    "description": "When the budget closes, in epoch milliseconds. From then on authorize and charge return 409, record is accepted for 1 day more, and settle and release keep working. 7 days after closesAt, once nothing is left to settle or replay, the budget is deleted: get returns 404 and an upsert creates it anew. An upsert replaces the whole definition, so omitting closesAt or sending null leaves the budget open and clears any close time it had. A runtime key cannot close a budget in the past: an earlier closesAt takes effect now.",
                     "example": 1798761599000
                   },
                   "holds": {

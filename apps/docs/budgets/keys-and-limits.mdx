@@ -90,7 +90,7 @@ await unprice.budgets.upsert({
 ```
 
 From `closesAt`, `authorize` and `charge` return 409, `record` is accepted for one more day, and
-`settle` and `release` keep working. 30 days after it closes, once nothing is left to settle, the
+`settle` and `release` keep working. 7 days after it closes, once nothing is left to settle, the
 budget is deleted: `get` returns 404, and an upsert creates it again.
 
 ## Holds

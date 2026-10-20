@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   keyAuth: vi.fn(),
   execute: vi.fn(),
   log: vi.fn(),
+  recordCatalog: vi.fn(),
 }))
 
 vi.mock("~/auth/key", async (importOriginal) => ({
@@ -56,6 +57,7 @@ const balance = (remaining: bigint, held = BigInt(0)): BudgetBalance => ({
 
 beforeEach(() => {
   mocks.keyAuth.mockResolvedValue({ id: "key_1", projectId: "proj_123" })
+  mocks.recordCatalog.mockResolvedValue(undefined)
 })
 
 afterEach(() => {
@@ -65,6 +67,10 @@ afterEach(() => {
 /** The request logger, whose `set` fields become the request's wide event. */
 const withLogger: MiddlewareHandler<HonoEnv> = async (c, next) => {
   c.set("logger", { set: mocks.log } as unknown as HonoEnv["Variables"]["logger"])
+  c.set("services", {
+    budgetCatalog: { record: mocks.recordCatalog },
+  } as unknown as HonoEnv["Variables"]["services"])
+  c.set("waitUntil", (promise) => void promise)
   await next()
 }
 
@@ -878,6 +884,48 @@ describe("budgets API", () => {
         closesAt: Date.parse("2026-12-31T23:59:59.000Z"),
       },
     })
+  })
+
+  it("records a created budget in the catalog for the authenticated project", async () => {
+    mocks.execute.mockResolvedValue(
+      Ok({
+        type: "upsert",
+        changes: [{ change: "limit.added", limitId: "month" }],
+        budget: {
+          key: "customer:acme",
+          unit: "money:USD",
+          version: 1,
+          limits: [{ id: "month", amount: usd(50), window: "month", enforce: "soft" }],
+          holds: { defaultTtlMs: 900_000, maxTtlMs: 86_400_000 },
+          onUnavailable: "deny",
+          closesAt: null,
+          closed: false,
+          balance: balance(usd(50)),
+          operations: { upsert: 1, authorize: 0, settle: 0, release: 0, charge: 0, record: 0 },
+        },
+      })
+    )
+
+    const response = await call("/v1/budgets/upsert", {
+      key: "customer:acme",
+      unit: "USD",
+      limits: [{ amount: "50", window: "month", enforce: "soft" }],
+    })
+
+    expect(response.status).toBe(200)
+    expect(mocks.recordCatalog.mock.calls).toEqual([
+      [
+        "proj_123",
+        {
+          key: "customer:acme",
+          unit: "money:USD",
+          version: 1,
+          cap: "soft",
+          limits: [{ id: "month", window: "month", enforce: "soft", amount: "50" }],
+          closesAt: null,
+        },
+      ],
+    ])
   })
 
   it("returns 400 for a config the boundary rejects before reaching the budget", async () => {

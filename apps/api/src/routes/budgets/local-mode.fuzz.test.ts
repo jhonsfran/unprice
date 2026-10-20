@@ -218,6 +218,10 @@ function createApp() {
   app.use("*", async (c, next) => {
     c.set("requestId", "req_fuzz")
     c.set("logger", { set: () => undefined } as unknown as HonoEnv["Variables"]["logger"])
+    c.set("services", {
+      budgetCatalog: { record: async () => undefined },
+    } as unknown as HonoEnv["Variables"]["services"])
+    c.set("waitUntil", () => undefined)
     await next()
   })
   for (const register of [

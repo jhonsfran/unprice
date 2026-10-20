@@ -23,6 +23,12 @@ const faqs: FaqItem[] = [
       "A gateway cap usually covers your whole provider key, so one runaway agent blocks every customer. A budget caps any key you choose, before the call runs.",
   },
   {
+    question: "What is the estimate?",
+    answer:
+      "The most the call can cost, computed by your code. Unprice reserves it, runs the call, then settles the actual cost. If the cap cannot cover the estimate, the call never runs.",
+    link: { href: `${DOCS_DOMAIN}budgets/spend`, label: "Read about spend", external: true },
+  },
+  {
     question: "Can parallel calls overshoot the cap?",
     answer:
       "No. In the test suite, 100 parallel $0.75 calls against a $50 cap admit 66 and refuse 34.",

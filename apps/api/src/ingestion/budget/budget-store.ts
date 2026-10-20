@@ -3,6 +3,7 @@ import {
   type BudgetRecord,
   type ChargeOperation,
   type HoldOperation,
+  type InspectReader,
   type LeaseOperation,
   type Ledger,
   type Operation,
@@ -12,7 +13,20 @@ import {
   alarmAt,
   emptyLedger,
 } from "@unprice/services/budgets"
-import { type SQL, and, asc, desc, eq, inArray, lte, min, notInArray, sql } from "drizzle-orm"
+import {
+  type SQL,
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  gte,
+  inArray,
+  lte,
+  min,
+  notInArray,
+  sql,
+} from "drizzle-orm"
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite"
 import * as schema from "./db/schema"
 import type { BudgetStore, BudgetStoreTx, Sync } from "./ports"
@@ -88,11 +102,70 @@ export class BudgetSqliteStore implements BudgetStore {
   atomically<T>(fn: (tx: BudgetStoreTx) => Sync<T>): T {
     return this.db.transaction((tx) => fn(bind(tx)))
   }
+
+  inspecting<T>(fn: (tx: BudgetStoreTx & InspectReader) => Sync<T>): T {
+    return this.db.transaction((tx) => fn({ ...bind(tx), ...bindInspect(tx) }))
+  }
 }
 
-function bind(
-  db: SqliteHandle | Parameters<Parameters<SqliteHandle["transaction"]>[0]>[0]
-): BudgetStoreTx {
+type SqliteTx = SqliteHandle | Parameters<Parameters<SqliteHandle["transaction"]>[0]>[0]
+
+/** Ties on `due_at` break by `length(id)`, then `id`, so `h_<n>` sorts by its number. */
+function bindInspect(db: SqliteTx): InspectReader {
+  const operations = schema.budgetOperations
+  const idLength = sql`length(${operations.id})`
+  const columns = {
+    id: operations.id,
+    kind: operations.kind,
+    status: operations.status,
+    dueAt: operations.dueAt,
+    dataJson: operations.dataJson,
+  }
+
+  return {
+    walkReservations(after, limit) {
+      const examined = db
+        .select(columns)
+        .from(operations)
+        .where(
+          after === null
+            ? undefined
+            : and(
+                gte(operations.dueAt, after.dueAt),
+                sql`(${operations.dueAt}, ${idLength}, ${operations.id}) > (${after.dueAt}, ${after.id.length}, ${after.id})`
+              )
+        )
+        .orderBy(asc(operations.dueAt), asc(idLength), asc(operations.id))
+        .limit(limit)
+        .all()
+      const rows = examined.flatMap((row): ReservationOperation[] => {
+        if (row.status !== "open") return []
+        const operation = decodeOperation(row)
+        if (operation.kind === "hold" || operation.kind === "lease") return [operation]
+        throw new Error(`open row ${row.id} is not a hold or a lease`)
+      })
+      const last = examined.at(-1)
+      return {
+        rows,
+        examined: examined.length,
+        last: last ? { dueAt: last.dueAt, id: last.id } : null,
+      }
+    },
+
+    readDueBetween(from, to, limit) {
+      return db
+        .select(columns)
+        .from(operations)
+        .where(and(gt(operations.dueAt, from), lte(operations.dueAt, to)))
+        .orderBy(desc(operations.dueAt), desc(idLength), desc(operations.id))
+        .limit(limit)
+        .all()
+        .map(decodeOperation)
+    },
+  }
+}
+
+function bind(db: SqliteTx): BudgetStoreTx {
   const operations = schema.budgetOperations
   const terminal = sql`${operations.status} IN ('done', 'settled', 'released')`
   const readOperationWhere = (where: SQL) => {

@@ -1,2 +1,7 @@
 export * from "./budget-client"
 export * from "./execute-budget-command"
+export * from "./upsert-budget"
+export * from "./inspect-budget"
+export * from "./open-budget-by-key"
+export * from "./operator-gateway"
+export * from "./release-hold-as-operator"

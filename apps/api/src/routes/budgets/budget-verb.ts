@@ -1,8 +1,10 @@
 import type { ApiKeyExtended } from "@unprice/db/validators"
+import type { Result } from "@unprice/error"
 import { formatAmount } from "@unprice/money"
 import {
   type Blocked,
   type BudgetBalance,
+  type BudgetInspectQuery,
   type BudgetOutcome,
   type BudgetSnapshot,
   type OutcomeOf,
@@ -10,7 +12,9 @@ import {
   formatBudgetConfig,
 } from "@unprice/services/budgets"
 import {
+  type BudgetAddress,
   type BudgetVerbRequest,
+  type ExecuteBudgetCommandDeps,
   type ExecuteBudgetCommandInput,
   executeBudgetCommand,
 } from "@unprice/services/use-cases"
@@ -23,6 +27,12 @@ import { CloudflareBudgetClient } from "~/ingestion/budget/client"
 
 export const BUDGET_REMAINING_HEADER = "Unprice-Budget-Remaining"
 
+/** The use case that runs a verb; `executeBudgetCommand` unless the verb has its own. */
+export type BudgetVerbExecutor<R extends BudgetVerbRequest> = (
+  deps: ExecuteBudgetCommandDeps,
+  input: ExecuteBudgetCommandInput<R>
+) => Promise<Result<OutcomeOf<R["type"]>, UnPriceBudgetError>>
+
 /**
  * Runs one verb against the budget at `key` and sets the remaining header. Authenticates a runtime
  * key unless the route already authenticated `apiKey` itself. Returns the verb's outcome, or
@@ -32,41 +42,54 @@ export async function runBudgetVerb<R extends BudgetVerbRequest>(
   c: Context<HonoEnv>,
   key: string,
   request: R,
-  apiKey?: Pick<ApiKeyExtended, "projectId">
+  apiKey?: Pick<ApiKeyExtended, "projectId">,
+  execute: BudgetVerbExecutor<R> = executeBudgetCommand
 ) {
   const { projectId } = apiKey ?? (await keyAuth(c))
-  const result = await callBudget(c, { projectId, key, request })
+  const budgets = new CloudflareBudgetClient(c.env)
+  const result = await callBudget(c, request.type, () =>
+    execute({ budgets }, { projectId, key, request })
+  )
   if (result.err) throw budgetApiError(c, result.err)
   setRemaining(c, result.val)
   return result.val
 }
 
 /**
- * Runs the verb on the budget's Durable Object and reports the call on the request's wide event
+ * Inspects the budget at `address` for the dashboard and reports the call like a verb. Returns the
+ * inspection, or throws the HTTP error its rejection maps to.
+ */
+export async function inspectBudget(
+  c: Context<HonoEnv>,
+  address: BudgetAddress,
+  query: BudgetInspectQuery
+) {
+  const budgets = new CloudflareBudgetClient(c.env)
+  const result = await callBudget(c, "inspect", () => budgets.inspect(address, query))
+  if (result.err) throw budgetApiError(c, result.err)
+  return result.val
+}
+
+/**
+ * Runs one call on the budget's Durable Object and reports it on the request's wide event
  * (`budget_*` in Axiom) and on Server-Timing. Timed by hand, apart from key auth and the rest of
  * the Worker.
  */
-async function callBudget<R extends BudgetVerbRequest>(
+async function callBudget<T>(
   c: Context<HonoEnv>,
-  input: ExecuteBudgetCommandInput<R>
+  command: string,
+  call: () => Promise<Result<T, UnPriceBudgetError>>
 ) {
-  const budgets = new CloudflareBudgetClient(c.env)
   const startedAt = performance.now()
   let outcome = "error"
   try {
-    const result = await executeBudgetCommand({ budgets }, input)
+    const result = await call()
     outcome = result.err ? result.err.rejection.code : "ok"
     return result
   } finally {
     const doMs = performance.now() - startedAt
     setMetric(c, "budget", doMs)
-    c.get("logger").set({
-      budget: {
-        command: input.request.type,
-        outcome,
-        do_ms: doMs,
-      },
-    })
+    c.get("logger").set({ budget: { command, outcome, do_ms: doMs } })
   }
 }
 
@@ -133,18 +156,21 @@ function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): Unprice
       return new UnpriceApiError({
         code: "BUDGET_EXCEEDED",
         message,
+        cause: error,
         details: exceededDetails(rejection.blocked, rejection.balance),
       })
     case "BUDGET_CLOSED":
       return new UnpriceApiError({
         code: "CONFLICT",
         message,
+        cause: error,
         details: closedDetails(rejection.closedAt),
       })
     case "HOLD_AMOUNT_EXCEEDED":
       return new UnpriceApiError({
         code: "CONFLICT",
         message,
+        cause: error,
         details: {
           kind: "hold_amount_exceeded",
           holdId: rejection.holdId,
@@ -156,6 +182,7 @@ function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): Unprice
       return new UnpriceApiError({
         code: "CONFLICT",
         message,
+        cause: error,
         details: {
           kind: "limit_below_usage",
           limitId: rejection.limitId,
@@ -167,6 +194,7 @@ function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): Unprice
       return new UnpriceApiError({
         code: "CONFLICT",
         message,
+        cause: error,
         details: {
           kind: "window_capacity_exceeded",
           maximum: rejection.maximum,
@@ -177,6 +205,7 @@ function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): Unprice
       return new UnpriceApiError({
         code: "INSUFFICIENT_PERMISSIONS",
         message: `${message}. A runtime key can create or tighten a budget; raising or removing a hard limit, making it soft, or clearing or postponing closesAt needs a config key.`,
+        cause: error,
       })
     case "IDEMPOTENCY_CONFLICT":
     case "HOLD_CLOSED":
@@ -187,14 +216,14 @@ function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): Unprice
     case "LEASE_CLOSED":
     case "LEASE_SEQ_CONFLICT":
     case "LEASE_CAPTURE_OUT_OF_RANGE":
-      return new UnpriceApiError({ code: "CONFLICT", message })
+      return new UnpriceApiError({ code: "CONFLICT", message, cause: error })
     case "BUDGET_NOT_FOUND":
     case "HOLD_NOT_FOUND":
     case "LEASE_NOT_FOUND":
-      return new UnpriceApiError({ code: "NOT_FOUND", message })
+      return new UnpriceApiError({ code: "NOT_FOUND", message, cause: error })
     case "INVALID_TTL":
     case "INVALID_OCCURRED_AT":
-      return new UnpriceApiError({ code: "BAD_REQUEST", message })
+      return new UnpriceApiError({ code: "BAD_REQUEST", message, cause: error })
   }
 }
 

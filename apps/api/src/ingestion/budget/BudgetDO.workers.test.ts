@@ -786,7 +786,7 @@ describe("BudgetDO alarm", () => {
     })
   })
 
-  it("deletes a closed budget thirty days after it closes, once its last row is gone", async () => {
+  it("deletes a closed budget seven days after it closes, once its last row is gone", async () => {
     const key = "customer:closing"
     const stub = stubFor(key)
     const t0 = midMonthAhead()
@@ -801,7 +801,7 @@ describe("BudgetDO alarm", () => {
       await processor.execute(upsert(key, { ...fiftyPerMonth, closesAt }))
       await expect(state.storage.getAlarm()).resolves.toBe(deletable)
 
-      // A record still accepted after the close keeps its row for 25 hours, well inside the 30 days.
+      // A record still accepted after the close keeps its row for 25 hours, well inside the 7 days.
       now = closesAt + MINUTE
       const late = {
         type: "record",

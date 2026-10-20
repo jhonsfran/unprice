@@ -1,6 +1,7 @@
 import { AMOUNT_PATTERN, type Amount, formatAmount, parseAmount } from "@unprice/money"
 import { z } from "zod"
 import { extendZodWithOpenApi } from "zod-openapi"
+import { searchParamsSchemaDataTable } from "./utils"
 
 extendZodWithOpenApi(z)
 
@@ -53,7 +54,7 @@ export const WINDOW_HISTORY_PERIODS = 12
  * A budget with a `closesAt` deletes its storage this long after it closes, once no row is left to
  * settle, purge, or replay. Until then the closed budget stays readable.
  */
-export const CLOSED_BUDGET_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
+export const CLOSED_BUDGET_RETENTION_MS = 7 * 24 * 60 * 60 * 1000
 
 const DURATION_UNITS = [
   ["day", 24 * 60 * 60 * 1000],
@@ -503,25 +504,28 @@ export const recordBudgetResponseSchema = z.object({
   balance: budgetBalanceSchema,
 })
 
+/** The limit that blocked a request and what would let it through. */
+const budgetBlockedSchema = z
+  .object({
+    limitId: z.string(),
+    window: budgetWindowSchema,
+    remaining: budgetDecimalSchema,
+    held: budgetDecimalSchema,
+    resetsAt: budgetResetsAtSchema,
+    remedy: z.enum(["release_holds", "wait_for_reset", "raise_limit"]).openapi({
+      description:
+        "release_holds: releasing holds makes the request fit all failing limits. wait_for_reset: resetting the failing windows makes the request fit with holds unchanged. raise_limit: neither action alone is sufficient; one or more limits need a change.",
+    }),
+  })
+  .openapi({
+    description:
+      "A failing hard limit smaller than the request, or otherwise the one that resets last. Other limits can also block the request. The remedy considers all failing limits.",
+  })
+
 /** `details` on a 402: the limit that blocked the request and what would let it through. */
 export const budgetExceededDetailsSchema = z.object({
   kind: z.literal("budget_exceeded"),
-  blocked: z
-    .object({
-      limitId: z.string(),
-      window: budgetWindowSchema,
-      remaining: budgetDecimalSchema,
-      held: budgetDecimalSchema,
-      resetsAt: budgetResetsAtSchema,
-      remedy: z.enum(["release_holds", "wait_for_reset", "raise_limit"]).openapi({
-        description:
-          "release_holds: releasing holds makes the request fit all failing limits. wait_for_reset: resetting the failing windows makes the request fit with holds unchanged. raise_limit: neither action alone is sufficient; one or more limits need a change.",
-      }),
-    })
-    .openapi({
-      description:
-        "A failing hard limit smaller than the request, or otherwise the one that resets last. Other limits can also block the request. The remedy considers all failing limits.",
-    }),
+  blocked: budgetBlockedSchema,
   balance: budgetBalanceSchema,
 })
 
@@ -689,3 +693,293 @@ export const budgetWindowCapacityExceededDetailsSchema = z.object({
   maximum: z.number().int().nonnegative(),
   retained: z.number().int().nonnegative(),
 })
+
+// The dashboard catalog: one Postgres row per budget, written after each upsert. It holds
+// configuration facts only; a balance would be stale within milliseconds of a hot budget's writes.
+
+/** hard when any limit is hard, soft when every limit is soft, none without limits. */
+export const budgetCapSchema = z.enum(["hard", "soft", "none"])
+
+/** Derived from closesAt at read time: open without one, closing before it, closed from it. */
+export const budgetCatalogStatusSchema = z.enum(["open", "closing", "closed"])
+
+export const budgetCatalogLimitSchema = z.object({
+  id: z.string(),
+  window: budgetWindowSchema,
+  enforce: budgetEnforceSchema,
+  amount: budgetDecimalSchema,
+})
+
+export const budgetCatalogFactsSchema = z.object({
+  key: z.string(),
+  unit: z.string(),
+  version: z.number().int(),
+  cap: budgetCapSchema,
+  limits: z.array(budgetCatalogLimitSchema),
+  closesAt: budgetEpochMsSchema.nullable(),
+})
+
+export const budgetCatalogRowSchema = budgetCatalogFactsSchema.extend({
+  id: z.string(),
+  status: budgetCatalogStatusSchema,
+  createdAt: budgetEpochMsSchema,
+  updatedAt: budgetEpochMsSchema,
+})
+
+/** Keeps the values a filter knows, so a stale URL drops a value instead of failing the page. */
+function knownFilterValues<T extends z.ZodTypeAny>(schema: T) {
+  return z.array(z.unknown()).transform((values) =>
+    values.flatMap((value) => {
+      const parsed = schema.safeParse(value)
+      return parsed.success ? [parsed.data as z.output<T>] : []
+    })
+  )
+}
+
+/** The data-table search, where `search` is a key prefix. */
+export const listBudgetsInputSchema = searchParamsSchemaDataTable.extend({
+  filters: z
+    .object({
+      status: knownFilterValues(budgetCatalogStatusSchema).optional(),
+      unit: knownFilterValues(z.string()).optional(),
+      cap: knownFilterValues(budgetCapSchema).optional(),
+    })
+    .default({}),
+})
+
+export type BudgetCap = z.infer<typeof budgetCapSchema>
+export type BudgetCatalogStatus = z.infer<typeof budgetCatalogStatusSchema>
+export type BudgetCatalogLimit = z.infer<typeof budgetCatalogLimitSchema>
+export type BudgetCatalogFacts = z.infer<typeof budgetCatalogFactsSchema>
+export type BudgetCatalogRow = z.infer<typeof budgetCatalogRowSchema>
+export type ListBudgetsInput = z.infer<typeof listBudgetsInputSchema>
+
+// An operator's release of one hold from the dashboard. ADR-0006 B3: a release asserts that the
+// work used nothing, so the operator states a reason and the use case audits the call.
+
+export const budgetAuditActionSchema = z.enum(["release_hold"])
+
+/** requested before the call; applied or rejected once the budget answered. */
+export const budgetAuditStatusSchema = z.enum(["requested", "applied", "rejected"])
+
+/** What a release can be refused with, as the budget's own rejection. */
+export const budgetReleaseRejectionSchema = z.discriminatedUnion("code", [
+  z.object({ code: z.literal("BUDGET_NOT_FOUND") }),
+  z.object({ code: z.literal("HOLD_NOT_FOUND"), holdId: z.string() }),
+  z.object({ code: z.literal("HOLD_RETIRED"), holdId: z.string() }),
+  z.object({
+    code: z.literal("HOLD_CLOSED"),
+    holdId: z.string(),
+    status: z.enum(["settled", "released", "expired"]),
+  }),
+])
+
+export const budgetReleaseRejectionCodeSchema = z.enum([
+  "BUDGET_NOT_FOUND",
+  "HOLD_NOT_FOUND",
+  "HOLD_RETIRED",
+  "HOLD_CLOSED",
+])
+
+/**
+ * The internal release route's 404 and 409 detail. The public route answers only NOT_FOUND or
+ * CONFLICT, which cannot tell a missing hold from a missing budget or an expired hold from a
+ * retired one; the audit row records which.
+ */
+export const budgetReleaseRejectedDetailsSchema = z.object({
+  kind: z.literal("release_rejected"),
+  rejection: budgetReleaseRejectionSchema,
+})
+
+export const releaseBudgetInternalInputSchema = releaseBudgetInputSchema
+  .extend({ projectId: z.string().min(1) })
+  .strict()
+
+export const budgetOperatorReasonSchema = z.string().trim().min(10).max(500)
+
+/** The dashboard's release: the operator attests that the work stopped and used nothing. */
+export const releaseBudgetHoldInputSchema = z.object({
+  id: z.string(),
+  holdId: budgetHoldIdSchema,
+  holdCreatedAt: budgetEpochMsSchema,
+  reason: budgetOperatorReasonSchema,
+  confirm: z.literal(true),
+})
+
+const budgetAuditRowBaseSchema = z.object({
+  id: z.string(),
+  budgetId: z.string(),
+  action: budgetAuditActionSchema,
+  subject: z.string(),
+  subjectCreatedAt: budgetEpochMsSchema,
+  actorUserId: z.string(),
+  reason: z.string(),
+  createdAt: budgetEpochMsSchema,
+  updatedAt: budgetEpochMsSchema,
+})
+
+export const budgetAuditRowSchema = z.discriminatedUnion("status", [
+  budgetAuditRowBaseSchema.extend({ status: z.literal("requested") }),
+  budgetAuditRowBaseSchema.extend({ status: z.literal("applied"), released: budgetDecimalSchema }),
+  budgetAuditRowBaseSchema.extend({
+    status: z.literal("rejected"),
+    rejectionCode: budgetReleaseRejectionCodeSchema,
+  }),
+])
+
+export type BudgetAuditAction = z.infer<typeof budgetAuditActionSchema>
+export type BudgetAuditStatus = z.infer<typeof budgetAuditStatusSchema>
+export type BudgetReleaseRejection = z.infer<typeof budgetReleaseRejectionSchema>
+export type BudgetReleaseRejectionCode = z.infer<typeof budgetReleaseRejectionCodeSchema>
+export type BudgetAuditRow = z.infer<typeof budgetAuditRowSchema>
+export type ReleaseBudgetResponse = z.infer<typeof releaseBudgetResponseSchema>
+export type ReleaseBudgetInternalInput = z.input<typeof releaseBudgetInternalInputSchema>
+
+// The dashboard's inspection of one budget, through the internal inspect route. Operation rows
+// travel as the budget core keeps them, amounts as decimals.
+
+const budgetSettledHoldStateSchema = z.object({
+  status: z.literal("settled"),
+  closedAt: budgetEpochMsSchema,
+  actual: budgetDecimalSchema,
+  crossed: z.array(z.string()),
+  byExpiry: z.literal(true).optional(),
+})
+
+export const budgetHoldOperationSchema = z.object({
+  kind: z.literal("hold"),
+  id: z.string(),
+  idempotencyKey: z.string(),
+  amount: budgetDecimalSchema,
+  ttlMs: z.number().int().nullable(),
+  createdAt: budgetEpochMsSchema,
+  expiresAt: budgetEpochMsSchema,
+  state: z.discriminatedUnion("status", [
+    z.object({ status: z.literal("open") }),
+    budgetSettledHoldStateSchema,
+    z.object({ status: z.literal("released"), closedAt: budgetEpochMsSchema }),
+  ]),
+})
+
+export const budgetChargeOperationSchema = z.object({
+  kind: z.enum(["charge", "record"]),
+  id: z.string(),
+  idempotencyKey: z.string(),
+  amount: budgetDecimalSchema,
+  createdAt: budgetEpochMsSchema,
+  crossed: z.array(z.string()),
+})
+
+export const budgetLeaseOperationSchema = z.object({
+  kind: z.literal("lease"),
+  id: z.string(),
+  leaseKey: z.string(),
+  requested: budgetDecimalSchema,
+  ttlMs: z.number().int(),
+  createdAt: budgetEpochMsSchema,
+  granted: budgetDecimalSchema,
+  captured: budgetDecimalSchema,
+  last: z
+    .object({
+      seq: z.number().int(),
+      request: z.discriminatedUnion("final", [
+        z.object({
+          final: z.literal(false),
+          captured: budgetDecimalSchema,
+          extend: budgetDecimalSchema,
+        }),
+        z.object({ final: z.literal(true), captured: budgetDecimalSchema }),
+      ]),
+      extended: budgetDecimalSchema,
+      denied: z
+        .discriminatedUnion("code", [
+          z.object({ code: z.literal("LIMIT_EXCEEDED"), blocked: budgetBlockedSchema }),
+          z.object({ code: z.literal("BUDGET_CLOSED"), closedAt: budgetEpochMsSchema }),
+        ])
+        .nullable(),
+      crossed: z.array(z.string()),
+    })
+    .nullable(),
+  expiresAt: budgetEpochMsSchema,
+  state: z.discriminatedUnion("status", [
+    z.object({ status: z.literal("open") }),
+    z.object({ status: z.literal("closed"), closedAt: budgetEpochMsSchema }),
+    z.object({ status: z.literal("expired"), closedAt: budgetEpochMsSchema }),
+    z.object({
+      status: z.literal("refused"),
+      closedAt: budgetEpochMsSchema,
+      blocked: budgetBlockedSchema,
+    }),
+  ]),
+})
+
+export const budgetReservationSchema = z.union([
+  budgetHoldOperationSchema,
+  budgetLeaseOperationSchema,
+])
+
+export const budgetOperationSchema = z.union([
+  budgetHoldOperationSchema,
+  budgetChargeOperationSchema,
+  budgetLeaseOperationSchema,
+])
+
+/** A row's place in the budget's `due_at` order; opaque to callers, who pass it back. */
+export const budgetInspectCursorSchema = z.object({
+  dueAt: budgetEpochMsSchema,
+  id: z.string().min(1).max(80),
+})
+
+export const budgetInspectFindSchema = z.discriminatedUnion("by", [
+  z.object({ by: z.literal("hold"), holdId: budgetHoldIdSchema }),
+  z.object({ by: z.literal("idempotencyKey"), idempotencyKey: budgetIdempotencyKeySchema }),
+  z.object({ by: z.literal("lease"), leaseKey: budgetLeaseKeySchema }),
+])
+
+/** What a caller asks of a budget beside its snapshot. `probe` stays a decimal string here. */
+export const inspectBudgetQuerySchema = z.object({
+  after: budgetInspectCursorSchema.optional(),
+  find: budgetInspectFindSchema.optional(),
+  probe: budgetAmountInputSchema.optional(),
+})
+
+export const inspectBudgetRequestSchema = inspectBudgetQuerySchema
+  .extend({
+    projectId: z.string().min(1),
+    key: budgetKeyInputSchema,
+    probe: budgetAmountInputSchema.transform(toAmount).optional(),
+  })
+  .strict()
+
+export const inspectBudgetResponseSchema = z.object({
+  budget: budgetSchema,
+  history: z.array(budgetWindowPeriodSchema),
+  expiringNext: z.object({
+    rows: z.array(budgetReservationSchema).openapi({
+      description: "Open holds and leases, the earliest to expire first",
+    }),
+    examined: z.number().int().nonnegative().openapi({ description: "Rows the walk read" }),
+    next: budgetInspectCursorSchema.nullable().openapi({
+      description: "Pass as `after` to scan further; null once the walk reached the end",
+    }),
+  }),
+  listed: budgetDecimalSchema.openapi({
+    description: "What the listed reservations hold; equals balance.held when all are listed",
+  }),
+  closedRecently: z.array(budgetOperationSchema).openapi({
+    description: "Rows closed in the last hour, newest first",
+  }),
+  found: budgetOperationSchema.nullable().optional().openapi({
+    description: "Present when the request had `find`; null when no row matched",
+  }),
+  probe: z
+    .object({ amount: budgetDecimalSchema, blocked: budgetBlockedSchema.nullable() })
+    .optional()
+    .openapi({
+      description: "Present when the request had `probe`; blocked is null when it would pass now",
+    }),
+})
+
+export type InspectBudgetQuery = z.infer<typeof inspectBudgetQuerySchema>
+export type InspectBudgetRequest = z.input<typeof inspectBudgetRequestSchema>
+export type InspectBudgetResponse = z.infer<typeof inspectBudgetResponseSchema>

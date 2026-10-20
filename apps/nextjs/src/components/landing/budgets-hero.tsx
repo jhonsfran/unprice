@@ -30,8 +30,9 @@ export function BudgetsHero() {
             </Balancer>
           </h1>
           <p className="mt-6 max-w-xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-            Every paid call checks the budget first. A call that would go over the cap never reaches
-            the provider. Your billing stays the same.
+            A budget sits on any key you choose: a customer, a run, an agent, or an API key. Every
+            paid call checks it first, and a call that would go over the cap never reaches the
+            provider. Your billing stays the same.
           </p>
           <AcquisitionLink
             source="budgets_hero"

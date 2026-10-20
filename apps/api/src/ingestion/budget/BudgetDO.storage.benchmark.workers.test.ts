@@ -1,7 +1,7 @@
 import { reset, runInDurableObject } from "cloudflare:test"
 import { env } from "cloudflare:workers"
 import { RECORD_DEDUPE_MS, upsertBudgetInputSchema } from "@unprice/db/validators"
-import { isOutcomeOf } from "@unprice/services/budgets"
+import { type BudgetInspectReply, isOutcomeOf } from "@unprice/services/budgets"
 import type { BudgetReply, BudgetRequest } from "@unprice/services/use-cases"
 import { drizzle } from "drizzle-orm/durable-sqlite"
 import { afterEach, describe, expect, it } from "vitest"
@@ -49,7 +49,7 @@ function measure(sql: SqlStorage): Sample {
 function distribution(values: number[]) {
   const sorted = [...values].sort((a, b) => a - b)
   const at = (fraction: number) => sorted[Math.ceil(sorted.length * fraction) - 1] ?? 0
-  return { min: sorted[0], median: at(0.5), p95: at(0.95), max: sorted.at(-1) }
+  return { min: sorted[0], median: at(0.5), p95: at(0.95), p99: at(0.99), max: sorted.at(-1) }
 }
 
 function report(name: string, samples: Sample[], rpcMs: number[], details: object = {}) {
@@ -314,4 +314,93 @@ describe("BudgetDO storage work", () => {
       if (initialBacklog > 0) expect(backlog.at(-1)).toBe(0)
     }, 120_000)
   }
+
+  it("measures inspect on a budget with 1,000,000 operation rows", async () => {
+    const key = "storage:inspect"
+    const rows = 1_000_000
+    const stub = stubFor(key)
+    accepted(await stub.execute(upsert(key)))
+    const now = Date.now() + 1_000
+    // Every 1,000th row is an open hold; the rest are records closed in the last half hour, so
+    // the walk and the closed-recently scans all have rows to read.
+    const base = now + RECORD_DEDUPE_MS - 30 * 60 * 1000
+    const seedStart = performance.now()
+    await runInDurableObject(stub, (_instance: BudgetDO, state) => {
+      const chunk = 100_000
+      for (let from = 1; from <= rows; from += chunk) {
+        state.storage.sql.exec(
+          // JS numbers bind as REAL, so the seed binds them once as integers.
+          `WITH RECURSIVE
+             p(base, now, dedupe) AS (SELECT CAST(? AS INTEGER), CAST(? AS INTEGER), CAST(? AS INTEGER)),
+             seq(i) AS (SELECT CAST(? AS INTEGER) UNION ALL SELECT i + 1 FROM seq WHERE i < ?)
+           INSERT INTO budget_operations (id, kind, status, due_at, data_json)
+           SELECT
+             CASE WHEN i % 1000 = 0 THEN 'h_' || (i / 1000) ELSE 'o:' || printf('%064x', i) END,
+             CASE WHEN i % 1000 = 0 THEN 'hold' ELSE 'record' END,
+             CASE WHEN i % 1000 = 0 THEN 'open' ELSE 'done' END,
+             base + i,
+             CASE WHEN i % 1000 = 0
+               THEN json_object('idempotencyKey', 'hold_' || i, 'amount', json_object('$bigint', ?),
+                 'ttlMs', NULL, 'createdAt', now, 'expiresAt', base + i, 'state', json_object('status', 'open'))
+               ELSE json_object('idempotencyKey', 'evt_' || i, 'amount', json_object('$bigint', '1'),
+                 'createdAt', base + i - dedupe, 'crossed', json_array())
+             END
+           FROM seq, p`,
+          base,
+          now,
+          RECORD_DEDUPE_MS,
+          from,
+          Math.min(from + chunk - 1, rows),
+          UNIT.toString()
+        )
+      }
+      state.storage.sql.exec(
+        "UPDATE budget_ledger SET held = ?, hold_seq = ?",
+        (BigInt(rows / 1000) * UNIT).toString(),
+        rows / 1000
+      )
+      observe(state.storage.sql)
+      measure(state.storage.sql)
+    })
+    const seedMs = performance.now() - seedStart
+
+    const queries = {
+      first: {},
+      find: { find: { by: "idempotencyKey", idempotencyKey: "hold_500000" } },
+      probe: { probe: UNIT },
+    } as const
+    for (const [name, query] of Object.entries(queries)) {
+      const samples: Sample[] = []
+      const rpcMs: number[] = []
+      const objectMs: number[] = []
+      let last: BudgetInspectReply | null = null
+      for (let i = 0; i < 101; i++) {
+        const started = performance.now()
+        last = await stub.inspect(query)
+        rpcMs.push(performance.now() - started)
+        const inside = await runInDurableObject(stub, async (instance: BudgetDO, state) => {
+          measure(state.storage.sql)
+          const begun = performance.now()
+          await instance.inspect(query)
+          const ms = performance.now() - begun
+          return { ms, sql: measure(state.storage.sql) }
+        })
+        objectMs.push(inside.ms)
+        samples.push(inside.sql)
+      }
+      if (!last?.ok) throw new Error("inspect failed")
+      const { inspection } = last
+      expect(inspection.expiringNext.examined).toBe(1_000)
+      expect(inspection.closedRecently.length).toBeGreaterThan(0)
+      report(`inspect:${name}:rows=${rows}`, samples, rpcMs, {
+        objectMs: distribution(objectMs),
+        seedMs,
+        closedRecently: inspection.closedRecently.length,
+        listed: inspection.listed.toString(),
+        held: inspection.budget.balance.held.toString(),
+        found: inspection.found?.id ?? null,
+        transport: "rpcMs via the stub; objectMs and SQL inside the object",
+      })
+    }
+  }, 600_000)
 })

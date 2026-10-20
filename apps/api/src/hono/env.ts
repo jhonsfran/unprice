@@ -4,6 +4,7 @@ import type { Database } from "@unprice/db"
 import type { Logger } from "@unprice/logs"
 import type { ApiKeysService } from "@unprice/services/apikey"
 import type { BillingService } from "@unprice/services/billing"
+import type { BudgetCatalogService } from "@unprice/services/budget-catalog"
 import type { BudgetRunService } from "@unprice/services/budget-runs"
 import type { Cache } from "@unprice/services/cache"
 import type { CustomerService } from "@unprice/services/customers"
@@ -26,6 +27,7 @@ import type { IngestionService } from "~/ingestion/service"
  */
 export type DomainServiceContext = {
   budgetRuns: BudgetRunService
+  budgetCatalog: BudgetCatalogService
   customer: CustomerService
   subscription: SubscriptionService
   entitlement: EntitlementService

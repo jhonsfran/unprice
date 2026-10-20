@@ -1,4 +1,4 @@
-import type { BudgetReader, BudgetTransition } from "@unprice/services/budgets"
+import type { BudgetReader, BudgetTransition, InspectReader } from "@unprice/services/budgets"
 
 export type BudgetClock = { now(): number }
 
@@ -38,6 +38,8 @@ export type Sync<T> = T extends PromiseLike<unknown> ? never : T
  */
 export type BudgetStore = {
   atomically<T>(fn: (tx: BudgetStoreTx) => Sync<T>): T
+  /** `atomically` with the reads only inspect makes, so no verb's transaction binds them. */
+  inspecting<T>(fn: (tx: BudgetStoreTx & InspectReader) => Sync<T>): T
 }
 
 export type BudgetProcessorDeps = {

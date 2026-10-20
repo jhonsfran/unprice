@@ -1,6 +1,7 @@
 import { FEATURE_SLUGS } from "@unprice/config"
 import {
   Activity,
+  Gauge,
   Key,
   Layers3,
   LayoutDashboard,
@@ -22,6 +23,12 @@ export const PROJECT_NAV: DashboardRoute[] = [
     icon: Activity,
     href: "/events",
     featureSlug: FEATURE_SLUGS.EVENTS.SLUG,
+  },
+  {
+    name: "Budgets",
+    icon: Gauge,
+    href: "/budgets",
+    isNew: true,
   },
   {
     name: "Plans",

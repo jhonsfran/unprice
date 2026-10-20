@@ -2,6 +2,8 @@ import { resolve } from "node:path"
 import { defineConfig } from "vitest/config"
 
 export default defineConfig({
+  // tsconfig keeps JSX for Next to compile; component tests need the automatic runtime
+  esbuild: { jsx: "automatic" },
   resolve: {
     alias: {
       "~": resolve(__dirname, "src"),

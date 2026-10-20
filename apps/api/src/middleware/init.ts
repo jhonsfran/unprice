@@ -210,6 +210,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
 
     c.set("services", {
       budgetRuns: svcCtx.budgetRuns,
+      budgetCatalog: svcCtx.budgetCatalog,
       subscription: svcCtx.subscriptions,
       entitlement: svcCtx.entitlements,
       ingestion,
