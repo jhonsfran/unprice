@@ -1,8 +1,15 @@
 import { sql } from "drizzle-orm"
 import { index, integer, json, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
 import { pgTableProject } from "../utils/_table"
+import { cuid } from "../utils/fields"
 import { projectID } from "../utils/sql"
-import type { BudgetCap, BudgetCatalogLimit } from "../validators/budgets"
+import type {
+  BudgetAuditAction,
+  BudgetAuditStatus,
+  BudgetCap,
+  BudgetCatalogLimit,
+  BudgetReleaseRejectionCode,
+} from "../validators/budgets"
 
 /**
  * The budgets catalog: one row per budget key, written after each upsert that changed the
@@ -30,5 +37,40 @@ export const budgets = pgTableProject(
       table.key.op("text_pattern_ops")
     ),
     projectUpdatedIdx: index("budgets_project_updated_idx").on(table.projectId, table.updatedAt),
+  })
+)
+
+/**
+ * One row per operator action on a budget, written before the call and resolved after it. It
+ * names the budget by its catalog id and never copies the key.
+ */
+export const budgetAudit = pgTableProject(
+  "budget_audit",
+  {
+    ...projectID,
+    budgetId: cuid("budget_id").notNull(),
+    action: text("action").$type<BudgetAuditAction>().notNull(),
+    subject: text("subject").notNull(),
+    actorUserId: cuid("actor_user_id").notNull(),
+    reason: text("reason").notNull(),
+    status: text("status").$type<BudgetAuditStatus>().notNull(),
+    released: text("released"),
+    rejectionCode: text("rejection_code").$type<BudgetReleaseRejectionCode>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(sql`now()`),
+  },
+  (table) => ({
+    primary: primaryKey({ columns: [table.id, table.projectId], name: "budget_audit_pkey" }),
+    subjectIdx: uniqueIndex("budget_audit_subject_idx").on(
+      table.projectId,
+      table.budgetId,
+      table.action,
+      table.subject
+    ),
+    budgetCreatedIdx: index("budget_audit_budget_created_idx").on(
+      table.projectId,
+      table.budgetId,
+      table.createdAt
+    ),
   })
 )

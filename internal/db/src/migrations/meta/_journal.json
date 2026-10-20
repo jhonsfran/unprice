@@ -141,6 +141,13 @@
       "when": 1792451158950,
       "tag": "0019_strange_nomad",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1792462769592,
+      "tag": "0020_huge_wither",
+      "breakpoints": true
     }
   ]
 }

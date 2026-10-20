@@ -46,6 +46,7 @@ export const prefixes = {
   wallet_credit: "wcr",
   budget_run: "brun",
   budget: "bgt",
+  budget_audit: "bga",
 } as const
 
 // Thread-local counter for monotonicity within the same millisecond
