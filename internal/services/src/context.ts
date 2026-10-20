@@ -2,6 +2,7 @@ import { env } from "../env"
 import { AnalyticsService } from "./analytics/service"
 import { ApiKeysService } from "./apikey/service"
 import { BillingService } from "./billing/service"
+import { BudgetAuditService } from "./budget-audit/service"
 import { BudgetCatalogService } from "./budget-catalog/service"
 import { BudgetRunService } from "./budget-runs/service"
 import { CustomerService } from "./customers/service"
@@ -36,6 +37,7 @@ import { WorkspaceService } from "./workspaces/service"
 export interface ServiceContext {
   budgetRuns: BudgetRunService
   budgetCatalog: BudgetCatalogService
+  budgetAudit: BudgetAuditService
   /** The dashboard's operator calls on budgets, through the API's internal routes. */
   budgetOperator: BudgetOperatorGateway
   analytics: AnalyticsService
@@ -76,6 +78,11 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
   })
 
   const budgetCatalog = new BudgetCatalogService({
+    db: deps.db,
+    logger: deps.logger,
+  })
+
+  const budgetAudit = new BudgetAuditService({
     db: deps.db,
     logger: deps.logger,
   })
@@ -237,6 +244,7 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
   return {
     budgetRuns,
     budgetCatalog,
+    budgetAudit,
     budgetOperator,
     analytics,
     apikeys,

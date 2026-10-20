@@ -140,3 +140,63 @@ describe("HttpBudgetOperatorGateway.inspect", () => {
     expect(result.err?.retry).toBe(false)
   })
 })
+
+describe("HttpBudgetOperatorGateway.release", () => {
+  const release = { projectId: "proj_1", key: "customer:acme", holdId: "h_7" }
+  const rejected = (status: number, code: string, rejection: Record<string, unknown>) =>
+    json(
+      { error: { code, message: "refused", details: { kind: "release_rejected", rejection } } },
+      status
+    )
+  const rejectionOf = (result: { err?: unknown }) =>
+    result.err instanceof UnPriceBudgetError ? result.err.rejection : result.err
+
+  it("posts to the internal release route and parses the release", async () => {
+    const answer = {
+      holdId: "h_7",
+      released: "5",
+      replayed: false,
+      balance: inspection.budget.balance,
+    }
+    const { fetch, gateway: client } = gateway(json(answer))
+
+    const result = await client.release(release)
+
+    expect(result.val).toEqual(answer)
+    const request = fetch.mock.calls[0]?.[0]
+    expect([request?.method, request?.url]).toEqual([
+      "POST",
+      "https://api.example.test/v1/internal/budgets/release",
+    ])
+    await expect(request?.json()).resolves.toEqual(release)
+  })
+
+  it("reads a 409 as the budget's rejection", async () => {
+    const closed = { code: "HOLD_CLOSED", holdId: "h_7", status: "expired" }
+
+    const result = await gateway(rejected(409, "CONFLICT", closed)).gateway.release(release)
+
+    expect(rejectionOf(result)).toEqual(closed)
+    expect(result.err?.message).toBe("Hold h_7 expired and was settled at its full amount")
+  })
+
+  it("reads a 404 with the API's body as a missing hold", async () => {
+    const missing = { code: "HOLD_NOT_FOUND", holdId: "h_7" }
+
+    const result = await gateway(rejected(404, "NOT_FOUND", missing)).gateway.release(release)
+
+    expect(rejectionOf(result)).toEqual(missing)
+  })
+
+  it("reads a plain-text 404 as a transport failure", async () => {
+    const result = await gateway(new Response("404 Not Found", { status: 404 })).gateway.release(
+      release
+    )
+
+    expect(result.err).toBeInstanceOf(FetchError)
+    expect([result.err?.message, result.err?.retry]).toEqual([
+      "/v1/internal/budgets/release failed with status 404",
+      false,
+    ])
+  })
+})

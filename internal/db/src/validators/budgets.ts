@@ -830,6 +830,8 @@ export type BudgetAuditStatus = z.infer<typeof budgetAuditStatusSchema>
 export type BudgetReleaseRejection = z.infer<typeof budgetReleaseRejectionSchema>
 export type BudgetReleaseRejectionCode = z.infer<typeof budgetReleaseRejectionCodeSchema>
 export type BudgetAuditRow = z.infer<typeof budgetAuditRowSchema>
+export type ReleaseBudgetResponse = z.infer<typeof releaseBudgetResponseSchema>
+export type ReleaseBudgetInternalInput = z.input<typeof releaseBudgetInternalInputSchema>
 
 // The dashboard's inspection of one budget, through the internal inspect route. Operation rows
 // travel as the budget core keeps them, amounts as decimals.

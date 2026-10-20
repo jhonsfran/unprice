@@ -83,6 +83,7 @@ function harness(answer: Answer, catalogRow: BudgetCatalogRow | null = row) {
       calls.inspected.push(input)
       return answer
     },
+    release: () => Promise.reject(new Error("inspect never releases")),
   }
   const logger = { error: () => {} } as unknown as Logger
   return { calls, deps: { services: { budgetCatalog, budgetOperator }, logger } }
