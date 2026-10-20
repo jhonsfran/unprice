@@ -2,48 +2,24 @@
 
 import type { ColumnDef } from "@tanstack/react-table"
 import type { RouterOutputs } from "@unprice/trpc/routes"
-import { Badge } from "@unprice/ui/badge"
 import { formatDistanceToNowStrict } from "date-fns"
 import { CopyButton } from "~/components/copy-button"
 import { DataTableColumnHeader } from "~/components/data-table/data-table-column-header"
+import { SuperLink } from "~/components/super-link"
 import { formatDate } from "~/lib/dates"
+import { formatBudgetAmount, formatUnit } from "../budget-format"
+import { BudgetStatusBadge } from "../budget-status-badge"
 
 type BudgetRow = RouterOutputs["budgets"]["list"]["budgets"][number]
 
-/** Money `2000.5` reads `2,000.50`, units `2000` read `2,000`; every stored decimal is kept. */
-function formatLimitAmount(amount: string, money: boolean): string {
-  const [whole = "0", fraction = ""] = amount.split(".")
-  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",")
-  const decimals = money ? fraction.padEnd(2, "0") : fraction
-  return decimals ? `${grouped}.${decimals}` : grouped
-}
-
 function formatLimits({ limits, unit }: Pick<BudgetRow, "limits" | "unit">): string {
   if (limits.length === 0) return "uncapped"
-  const money = unit.startsWith("money:")
   return limits
     .map((limit) => {
       const window = limit.window === "never" ? "" : `/${limit.window}`
-      return `${formatLimitAmount(limit.amount, money)}${window} ${limit.enforce}`
+      return `${formatBudgetAmount(limit.amount, unit)}${window} ${limit.enforce}`
     })
     .join(" · ")
-}
-
-function formatUnit(unit: string): string {
-  return unit.startsWith("money:") ? unit.slice("money:".length) : unit
-}
-
-function StatusBadge({ status, closesAt }: Pick<BudgetRow, "status" | "closesAt">) {
-  if (status === "closing" && closesAt !== null) {
-    return (
-      <Badge variant="warning" title={formatDate(closesAt, "UTC", "yyyy-MM-dd HH:mm:ss 'UTC'")}>
-        <span suppressHydrationWarning>
-          closes {formatDistanceToNowStrict(closesAt, { addSuffix: true })}
-        </span>
-      </Badge>
-    )
-  }
-  return <Badge variant={status === "open" ? "success" : "secondary"}>{status}</Badge>
 }
 
 export const columns: ColumnDef<BudgetRow>[] = [
@@ -52,9 +28,13 @@ export const columns: ColumnDef<BudgetRow>[] = [
     header: ({ column }) => <DataTableColumnHeader column={column} title="Key" />,
     cell: ({ row }) => (
       <div className="flex min-w-0 items-center gap-1">
-        <span className="truncate font-mono text-sm" title={row.original.key}>
+        <SuperLink
+          href={`./budgets/${row.original.id}`}
+          className="truncate font-mono text-sm hover:underline"
+          title={row.original.key}
+        >
           {row.original.key}
-        </span>
+        </SuperLink>
         <CopyButton value={row.original.key} className="size-3.5 text-muted-foreground" />
       </div>
     ),
@@ -65,9 +45,12 @@ export const columns: ColumnDef<BudgetRow>[] = [
     accessorKey: "cap",
     header: ({ column }) => <DataTableColumnHeader column={column} title="Limits" />,
     cell: ({ row }) => (
-      <span className="whitespace-nowrap font-mono text-xs tabular-nums">
+      <SuperLink
+        href={`./budgets/${row.original.id}`}
+        className="whitespace-nowrap font-mono text-xs tabular-nums"
+      >
         {formatLimits(row.original)}
-      </span>
+      </SuperLink>
     ),
     size: 72,
   },
@@ -81,7 +64,7 @@ export const columns: ColumnDef<BudgetRow>[] = [
     accessorKey: "status",
     header: ({ column }) => <DataTableColumnHeader column={column} title="Status" />,
     cell: ({ row }) => (
-      <StatusBadge status={row.original.status} closesAt={row.original.closesAt} />
+      <BudgetStatusBadge status={row.original.status} closesAt={row.original.closesAt} />
     ),
     size: 28,
   },
