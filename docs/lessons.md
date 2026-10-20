@@ -409,6 +409,12 @@ patterns. Keep it cheap to load and useful.
 
 ## Next.js And Dashboard
 
+- 2026-10-19: tRPC `infiniteQueryOptions` exists only for inputs with a `cursor` field, and
+  `budgets.inspect` pages with `after`; `budget-live.tsx` uses `useInfiniteQuery` with
+  `useTRPCClient` under the key `[path, { input, type: "infinite" }]` so `pathFilter` still reaches it.
+- 2026-10-19: The pre-commit react-doctor fails on `const query = useQuery(...)`; destructure the
+  fields you read. Component tests in `apps/nextjs` render with `renderToString` (automatic JSX in
+  `vitest.config.ts`), seeding the query cache instead of mocking tRPC.
 - 2026-10-19: A signup intent routes past auth only through `next`: `INTENT_LANDING` in
   `lib/signup-funnel.ts` is the one table of intents, and `/new` must forward `intent` into the
   workspace signUp `successUrl` (the provider appends `workspace_id`) or it dies at workspace creation.
