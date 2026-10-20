@@ -4,6 +4,7 @@ import { formatAmount } from "@unprice/money"
 import {
   type Blocked,
   type BudgetBalance,
+  type BudgetInspectQuery,
   type BudgetOutcome,
   type BudgetSnapshot,
   type OutcomeOf,
@@ -11,6 +12,7 @@ import {
   formatBudgetConfig,
 } from "@unprice/services/budgets"
 import {
+  type BudgetAddress,
   type BudgetVerbRequest,
   type ExecuteBudgetCommandDeps,
   type ExecuteBudgetCommandInput,
@@ -44,39 +46,50 @@ export async function runBudgetVerb<R extends BudgetVerbRequest>(
   execute: BudgetVerbExecutor<R> = executeBudgetCommand
 ) {
   const { projectId } = apiKey ?? (await keyAuth(c))
-  const result = await callBudget(c, { projectId, key, request }, execute)
+  const budgets = new CloudflareBudgetClient(c.env)
+  const result = await callBudget(c, request.type, () =>
+    execute({ budgets }, { projectId, key, request })
+  )
   if (result.err) throw budgetApiError(c, result.err)
   setRemaining(c, result.val)
   return result.val
 }
 
 /**
- * Runs the verb on the budget's Durable Object and reports the call on the request's wide event
+ * Inspects the budget at `address` for the dashboard and reports the call like a verb. Returns the
+ * inspection, or throws the HTTP error its rejection maps to.
+ */
+export async function inspectBudget(
+  c: Context<HonoEnv>,
+  address: BudgetAddress,
+  query: BudgetInspectQuery
+) {
+  const budgets = new CloudflareBudgetClient(c.env)
+  const result = await callBudget(c, "inspect", () => budgets.inspect(address, query))
+  if (result.err) throw budgetApiError(c, result.err)
+  return result.val
+}
+
+/**
+ * Runs one call on the budget's Durable Object and reports it on the request's wide event
  * (`budget_*` in Axiom) and on Server-Timing. Timed by hand, apart from key auth and the rest of
  * the Worker.
  */
-async function callBudget<R extends BudgetVerbRequest>(
+async function callBudget<T>(
   c: Context<HonoEnv>,
-  input: ExecuteBudgetCommandInput<R>,
-  execute: BudgetVerbExecutor<R>
+  command: string,
+  call: () => Promise<Result<T, UnPriceBudgetError>>
 ) {
-  const budgets = new CloudflareBudgetClient(c.env)
   const startedAt = performance.now()
   let outcome = "error"
   try {
-    const result = await execute({ budgets }, input)
+    const result = await call()
     outcome = result.err ? result.err.rejection.code : "ok"
     return result
   } finally {
     const doMs = performance.now() - startedAt
     setMetric(c, "budget", doMs)
-    c.get("logger").set({
-      budget: {
-        command: input.request.type,
-        outcome,
-        do_ms: doMs,
-      },
-    })
+    c.get("logger").set({ budget: { command, outcome, do_ms: doMs } })
   }
 }
 
