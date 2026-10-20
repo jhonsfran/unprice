@@ -10,6 +10,7 @@ import { type BudgetAuditRequest, BudgetAuditService } from "./service"
 
 const db = createTestDatabaseConnection()
 const projectId = "proj_test"
+const HELD_AT = 1_796_083_140_000
 
 const audit = new BudgetAuditService({
   db,
@@ -20,6 +21,7 @@ const releaseOf = (subject: string, overrides: Partial<BudgetAuditRequest> = {})
   budgetId: "bgt_1",
   action: "release_hold" as const,
   subject,
+  subjectCreatedAt: HELD_AT,
   actorUserId: "usr_1",
   reason: "worker crashed before the call",
   ...overrides,
@@ -61,6 +63,30 @@ describe("BudgetAuditService", () => {
     expect(late).toEqual(applied)
     expect(again).toEqual(applied)
     expect(await value(audit.list(projectId, "bgt_1", 20))).toEqual([applied])
+  })
+
+  it("keeps a row per creation time of the same hold id, and one row per id and time", async () => {
+    const recreatedAt = HELD_AT + 7 * 86_400_000
+    const closed = await value(audit.request(projectId, releaseOf("h_1")))
+    await value(audit.resolve(projectId, closed.id, { status: "applied", released: "2" }))
+    const reborn = await value(
+      audit.request(projectId, releaseOf("h_1", { subjectCreatedAt: recreatedAt }))
+    )
+    const retry = await value(
+      audit.request(projectId, releaseOf("h_1", { subjectCreatedAt: recreatedAt }))
+    )
+
+    const listed = await value(audit.list(projectId, "bgt_1", 20))
+
+    expect([reborn.id === closed.id, retry.id === reborn.id]).toEqual([false, true])
+    expect(
+      listed
+        .sort((a, b) => a.subjectCreatedAt - b.subjectCreatedAt)
+        .map((row) => [row.subject, row.subjectCreatedAt, row.status])
+    ).toEqual([
+      ["h_1", HELD_AT, "applied"],
+      ["h_1", recreatedAt, "requested"],
+    ])
   })
 
   it("lists one budget's actions newest first, up to the limit", async () => {

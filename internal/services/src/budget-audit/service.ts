@@ -23,6 +23,8 @@ export type BudgetAuditRequest = {
   budgetId: string
   action: BudgetAuditAction
   subject: string
+  /** When the budget created the subject, in epoch ms. */
+  subjectCreatedAt: number
   actorUserId: string
   reason: string
 }
@@ -47,13 +49,20 @@ export class BudgetAuditService {
     return this.run(projectId, "error requesting a budget action", async () => {
       const [row] = await this.deps.db
         .insert(budgetAudit)
-        .values({ id: newId("budget_audit"), projectId, status: "requested", ...request })
+        .values({
+          id: newId("budget_audit"),
+          projectId,
+          status: "requested",
+          ...request,
+          subjectCreatedAt: new Date(request.subjectCreatedAt),
+        })
         .onConflictDoUpdate({
           target: [
             budgetAudit.projectId,
             budgetAudit.budgetId,
             budgetAudit.action,
             budgetAudit.subject,
+            budgetAudit.subjectCreatedAt,
           ],
           // a no-op update, so RETURNING yields the existing row
           set: { updatedAt: sql`${budgetAudit.updatedAt}` },
@@ -130,6 +139,7 @@ function toRow(row: typeof budgetAudit.$inferSelect): BudgetAuditRow {
     budgetId: row.budgetId,
     action: row.action,
     subject: row.subject,
+    subjectCreatedAt: row.subjectCreatedAt.getTime(),
     actorUserId: row.actorUserId,
     reason: row.reason,
     createdAt: row.createdAt.getTime(),

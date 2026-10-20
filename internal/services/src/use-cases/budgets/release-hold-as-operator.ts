@@ -15,6 +15,7 @@ export const releaseHoldAsOperatorInputSchema = z.object({
   projectId: z.string(),
   budgetId: z.string(),
   holdId: budgetHoldIdSchema,
+  holdCreatedAt: z.number().int(),
   actorUserId: z.string(),
   reason: budgetOperatorReasonSchema,
 })
@@ -41,7 +42,7 @@ export async function releaseHoldAsOperator(
   >
 > {
   const { budgetCatalog, budgetAudit, budgetOperator } = deps.services
-  const { projectId, budgetId, holdId, actorUserId, reason } = input
+  const { projectId, budgetId, holdId, holdCreatedAt, actorUserId, reason } = input
   const found = await budgetCatalog.get(projectId, { id: budgetId })
   if (found.err) return found
   if (!found.val) return Err(new UnPriceBudgetError({ code: "BUDGET_NOT_FOUND" }))
@@ -50,6 +51,7 @@ export async function releaseHoldAsOperator(
     budgetId,
     action: "release_hold",
     subject: holdId,
+    subjectCreatedAt: holdCreatedAt,
     actorUserId,
     reason,
   })

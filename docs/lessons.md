@@ -78,6 +78,9 @@ patterns. Keep it cheap to load and useful.
 - 2026-10-19: The internal release route gets the budget's rejection from `UnpriceApiError.cause`
   (`budgetApiError` sets it) and adds it as `details: { kind: "release_rejected" }`; the public
   route's answer is unchanged. The gateway reads a rejection only from those details.
+- 2026-10-19: A budget recreated at the same key keeps its catalog id but restarts hold ids at `h_1`,
+  so anything outside the budget that is keyed per hold uses the hold's id plus its `createdAt`
+  (`budget_audit.subject_created_at`); the id alone matches the closed budget's row.
 - 2026-10-19: A route test can run the real budget core behind the mocked `CloudflareBudgetClient`:
   `MemoryBudgetStore` from `@unprice/services/budgets/memory-store` (see `releaseBudgetInternalV1.test.ts`).
 - 2026-10-19: DO SQLite binds a JS number as REAL, so `'h_' || ?` gives `h_1.0` and `? % 1000` is

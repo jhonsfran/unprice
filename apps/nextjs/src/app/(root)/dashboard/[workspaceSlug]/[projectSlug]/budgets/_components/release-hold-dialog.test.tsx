@@ -1,9 +1,9 @@
 import { Dialog } from "@unprice/ui/dialog"
 import { renderToString } from "react-dom/server"
 import { describe, expect, it } from "vitest"
-import { ReleaseHoldForm } from "./release-hold-dialog"
+import { ReleaseHoldForm, releaseHoldInput } from "./release-hold-dialog"
 
-const hold = { id: "h_4812", amount: "5", idempotencyKey: "job-991" }
+const hold = { id: "h_4812", amount: "5", idempotencyKey: "job-991", createdAt: 1_796_083_140_000 }
 
 function render(reason: string, attested: boolean, problem: string | null = null): string {
   return renderToString(
@@ -55,5 +55,17 @@ describe("ReleaseHoldForm", () => {
         "h_4812 already closed.",
       ].filter((text) => !html.includes(text))
     ).toEqual([])
+  })
+})
+
+describe("releaseHoldInput", () => {
+  it("names the hold by its id and creation time and trims the reason", () => {
+    expect(releaseHoldInput("bgt_1", hold, "  worker crashed pre-call ")).toEqual({
+      id: "bgt_1",
+      holdId: "h_4812",
+      holdCreatedAt: 1_796_083_140_000,
+      reason: "worker crashed pre-call",
+      confirm: true,
+    })
   })
 })

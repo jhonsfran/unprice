@@ -9,11 +9,18 @@ export const releaseHold = protectedProjectProcedure
   .output(budgetAuditRowSchema)
   .mutation(async (opts) => {
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
-    const { id, holdId, reason } = opts.input
+    const { id, holdId, holdCreatedAt, reason } = opts.input
     const { budgetCatalog, budgetAudit, budgetOperator } = opts.ctx.services
     const result = await releaseHoldAsOperator(
       { services: { budgetCatalog, budgetAudit, budgetOperator } },
-      { projectId: opts.ctx.project.id, budgetId: id, holdId, actorUserId: opts.ctx.userId, reason }
+      {
+        projectId: opts.ctx.project.id,
+        budgetId: id,
+        holdId,
+        holdCreatedAt,
+        actorUserId: opts.ctx.userId,
+        reason,
+      }
     )
 
     if (result.err) throw budgetTrpcError(result.err)

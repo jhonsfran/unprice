@@ -148,6 +148,13 @@
       "when": 1792462769592,
       "tag": "0020_huge_wither",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1792465687157,
+      "tag": "0021_chubby_living_mummy",
+      "breakpoints": true
     }
   ]
 }

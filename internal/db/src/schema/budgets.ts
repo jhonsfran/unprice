@@ -42,7 +42,9 @@ export const budgets = pgTableProject(
 
 /**
  * One row per operator action on a budget, written before the call and resolved after it. It
- * names the budget by its catalog id and never copies the key.
+ * names the budget by its catalog id and never copies the key. A subject is its id plus the time
+ * the budget created it. A budget recreated at the same key keeps its catalog id but restarts its
+ * hold ids, so the id alone would match the closed budget's row.
  */
 export const budgetAudit = pgTableProject(
   "budget_audit",
@@ -51,6 +53,7 @@ export const budgetAudit = pgTableProject(
     budgetId: cuid("budget_id").notNull(),
     action: text("action").$type<BudgetAuditAction>().notNull(),
     subject: text("subject").notNull(),
+    subjectCreatedAt: timestamp("subject_created_at", { withTimezone: true }).notNull(),
     actorUserId: cuid("actor_user_id").notNull(),
     reason: text("reason").notNull(),
     status: text("status").$type<BudgetAuditStatus>().notNull(),
@@ -65,7 +68,8 @@ export const budgetAudit = pgTableProject(
       table.projectId,
       table.budgetId,
       table.action,
-      table.subject
+      table.subject,
+      table.subjectCreatedAt
     ),
     budgetCreatedIdx: index("budget_audit_budget_created_idx").on(
       table.projectId,

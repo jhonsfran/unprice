@@ -24,6 +24,7 @@ describe("releaseRejectedTrpcError", () => {
       budgetId: "bgt_1",
       action: "release_hold",
       subject: "h_7",
+      subjectCreatedAt: 1,
       actorUserId: "usr_1",
       reason: "worker crashed before the call",
       status: "rejected",

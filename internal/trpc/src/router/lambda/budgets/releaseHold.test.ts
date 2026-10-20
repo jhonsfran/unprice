@@ -13,6 +13,7 @@ vi.mock("#trpc", async () => {
 import { releaseHold } from "./releaseHold"
 
 const AT = 1_796_083_200_000
+const HELD_AT = AT - 60_000
 
 const catalogRow: BudgetCatalogRow = {
   id: "bgt_1",
@@ -27,14 +28,16 @@ const catalogRow: BudgetCatalogRow = {
   updatedAt: AT,
 }
 
-/** A caller with `role`, whose services record each release that reached the budget. */
+/** A caller with `role`, whose services record each audit request and each release. */
 function callerAs(role: WorkspaceRole) {
+  const requests: unknown[] = []
   const released: unknown[] = []
   const requested: BudgetAuditRow = {
     id: "bga_1",
     budgetId: "bgt_1",
     action: "release_hold",
     subject: "h_7",
+    subjectCreatedAt: HELD_AT,
     actorUserId: "usr_1",
     reason: "worker crashed before the call",
     status: "requested",
@@ -51,7 +54,10 @@ function callerAs(role: WorkspaceRole) {
     services: {
       budgetCatalog: { get: async () => Ok(catalogRow) },
       budgetAudit: {
-        request: async () => Ok(requested),
+        request: async (_projectId: string, request: unknown) => {
+          requests.push(request)
+          return Ok(requested)
+        },
         resolve: async (_projectId: string, _id: string, outcome: object) =>
           Ok({ ...requested, ...outcome }),
       },
@@ -64,12 +70,13 @@ function callerAs(role: WorkspaceRole) {
     },
   } as unknown as Context
   const router = initTRPC.context<Context>().create().router({ releaseHold })
-  return { caller: router.createCaller(ctx), released }
+  return { caller: router.createCaller(ctx), requests, released }
 }
 
 const input = {
   id: "bgt_1",
   holdId: "h_7",
+  holdCreatedAt: HELD_AT,
   reason: "worker crashed before the call",
   confirm: true as const,
 }
@@ -85,6 +92,16 @@ describe("budgets.releaseHold", () => {
     expect(member.released).toEqual([])
     expect([row.status, row.status === "applied" && row.released]).toEqual(["applied", "5"])
     expect(admin.released).toEqual([{ projectId: "proj_1", key: "customer:acme", holdId: "h_7" }])
+    expect(admin.requests).toEqual([
+      {
+        budgetId: "bgt_1",
+        action: "release_hold",
+        subject: "h_7",
+        subjectCreatedAt: HELD_AT,
+        actorUserId: "usr_1",
+        reason: "worker crashed before the call",
+      },
+    ])
   })
 
   it("fails input validation without the attestation or with a short reason", async () => {
@@ -95,6 +112,16 @@ describe("budgets.releaseHold", () => {
       code: "BAD_REQUEST",
     })
     await expect(caller.releaseHold({ ...input, reason: "crashed" })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    })
+    expect(released).toEqual([])
+  })
+
+  it("fails input validation without the hold's creation time", async () => {
+    const { caller, released } = callerAs("OWNER")
+    const { holdCreatedAt: _, ...unstamped } = input
+
+    await expect(caller.releaseHold(unstamped as unknown as typeof input)).rejects.toMatchObject({
       code: "BAD_REQUEST",
     })
     expect(released).toEqual([])

@@ -2,6 +2,7 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { budgetOperatorReasonSchema } from "@unprice/db/validators"
+import type { RouterInputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
 import { Checkbox } from "@unprice/ui/checkbox"
 import {
@@ -24,7 +25,27 @@ import { formatBudgetAmount, formatUnit } from "./budget-format"
 
 const REASON_MAX = 500
 
-export type ReleasableHold = { id: string; amount: string; idempotencyKey: string }
+export type ReleasableHold = {
+  id: string
+  amount: string
+  idempotencyKey: string
+  createdAt: number
+}
+
+/** The release names the hold by its id and creation time, as the audit row is keyed. */
+export function releaseHoldInput(
+  budgetId: string,
+  hold: ReleasableHold,
+  reason: string
+): RouterInputs["budgets"]["releaseHold"] {
+  return {
+    id: budgetId,
+    holdId: hold.id,
+    holdCreatedAt: hold.createdAt,
+    reason: reason.trim(),
+    confirm: true,
+  }
+}
 
 /** The trigger and dialog that release one open hold for an OWNER or ADMIN. */
 export function ReleaseHoldDialog({
@@ -95,7 +116,7 @@ export function ReleaseHoldDialog({
           onAttestedChange={setAttested}
           onSubmit={() => {
             setProblem(null)
-            mutate({ id: budgetId, holdId: hold.id, reason: reason.trim(), confirm: true })
+            mutate(releaseHoldInput(budgetId, hold, reason))
           }}
         />
       </DialogContent>

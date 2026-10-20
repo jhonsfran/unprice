@@ -801,6 +801,7 @@ export const budgetOperatorReasonSchema = z.string().trim().min(10).max(500)
 export const releaseBudgetHoldInputSchema = z.object({
   id: z.string(),
   holdId: budgetHoldIdSchema,
+  holdCreatedAt: budgetEpochMsSchema,
   reason: budgetOperatorReasonSchema,
   confirm: z.literal(true),
 })
@@ -810,6 +811,7 @@ const budgetAuditRowBaseSchema = z.object({
   budgetId: z.string(),
   action: budgetAuditActionSchema,
   subject: z.string(),
+  subjectCreatedAt: budgetEpochMsSchema,
   actorUserId: z.string(),
   reason: z.string(),
   createdAt: budgetEpochMsSchema,
