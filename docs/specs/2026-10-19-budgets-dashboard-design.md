@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposed on 2026-10-19. Not implemented.
+Proposed on 2026-10-19. Phases 1 to 3 are implemented; phase 4 is deferred and phase 5 is
+open (see Delivery).
 
 Three competing designs were written in parallel and scored against one rubric by a separate
 judge. This document is the chosen base plus the parts worth taking from the other two. The
@@ -144,8 +145,8 @@ transaction and returns:
   order from a `(due_at, id)` cursor, examining at most 1,000 rows. The result carries the
   cursor for **Scan further**.
 - `closedRecently`: rows whose retention ends in the next hour plus 24 h (closed holds and
-  charges) or 25 h (records), newest first. That is two bounded range scans on the existing
-  `due_at` index.
+  charges) or 25 h (records), newest first. That is three bounded range scans on the existing
+  `due_at` index, one per retention.
 - `listed` and `held`: the sum of the listed reservations' exposure, next to the ledger's exact
   `held`. `held` already includes unused lease amounts (`exposureOf`).
 - an optional `find` (point lookup by hold id, idempotency key, or lease key, through the
@@ -225,7 +226,7 @@ These are the decisions that carry the design:
 
 Upsert gains one Postgres upsert in `waitUntil` after the reply, skipped for replays. `get`
 gains nothing. `inspect` is new. It reads about 2 + 12 × limits rows for the snapshot, at most
-1,000 rows for `expiringNext`, and at most 2 × 50 rows for `closedRecently`, all serialized
+1,000 rows for `expiringNext`, and at most 3 × 50 rows for `closedRecently`, all serialized
 with the hot verbs on the same object. One open detail tab calls it once per 30 s. The target
 is p99 at or under 2 ms inside the object on a budget with 1,000,000 operation rows. This
 target is not measured yet. Phase 2 measures it.
