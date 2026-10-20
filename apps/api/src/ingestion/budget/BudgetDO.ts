@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers"
+import type { BudgetInspectQuery, BudgetInspectReply } from "@unprice/services/budgets"
 import type { BudgetReply, BudgetRequest } from "@unprice/services/use-cases"
 import { drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
@@ -52,6 +53,13 @@ export class BudgetDO extends DurableObject {
     }
     await this.ready
     return this.processor.execute(request)
+  }
+
+  /** The dashboard's read beside the verbs. Like a verb, it creates no storage for an unknown key. */
+  async inspect(query: BudgetInspectQuery): Promise<BudgetInspectReply> {
+    if (!this.ready) return { ok: false, rejection: { code: "BUDGET_NOT_FOUND" } }
+    await this.ready
+    return this.processor.inspect(query)
   }
 
   override async alarm(): Promise<void> {

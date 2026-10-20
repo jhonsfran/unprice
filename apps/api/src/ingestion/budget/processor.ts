@@ -1,7 +1,11 @@
 import {
   type BudgetCommand,
+  type BudgetInspectQuery,
+  type BudgetInspectReply,
   type BudgetReply,
   deletableAt,
+  inspect,
+  isOutcomeOf,
   loadView,
   transition,
 } from "@unprice/services/budgets"
@@ -48,6 +52,25 @@ export class BudgetProcessor {
   async execute(request: BudgetRequest): Promise<BudgetReply> {
     const clockMs = this.deps.clock.now()
     const { reply, wakeAt } = this.deps.store.atomically((tx) => commit(tx, request, clockMs))
+    await this.lowerAlarm(wakeAt)
+    return reply
+  }
+
+  /**
+   * Answers `get` through the same commit, so it writes only when a window rolled, then reads the
+   * inspection in that transaction at the clock the get clamped to.
+   */
+  async inspect(query: BudgetInspectQuery): Promise<BudgetInspectReply> {
+    const clockMs = this.deps.clock.now()
+    const { reply, wakeAt } = this.deps.store.inspecting(
+      (tx): { reply: BudgetInspectReply; wakeAt: number | null } => {
+        const got = commit(tx, { type: "get" }, clockMs)
+        if (!got.reply.ok) return { reply: got.reply, wakeAt: got.wakeAt }
+        if (!isOutcomeOf(got.reply.outcome, "get")) throw new Error("get answered another verb")
+        const inspection = inspect(tx, got.reply.outcome, query, got.now)
+        return { reply: { ok: true, inspection }, wakeAt: got.wakeAt }
+      }
+    )
     await this.lowerAlarm(wakeAt)
     return reply
   }

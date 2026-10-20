@@ -72,7 +72,8 @@ export function balanceOf(state: Funded, now: number): BudgetBalance {
   return { remaining, held: ledger.held, limits, asOf: at }
 }
 
-function blockingLimit(balance: BudgetBalance, amount: Amount): Blocked | null {
+/** What would deny a request for `amount` at this balance; null when it fits every hard limit. */
+export function blockingLimit(balance: BudgetBalance, amount: Amount): Blocked | null {
   const failing = balance.limits.filter(
     (limit) => limit.enforce === "hard" && limit.remaining < amount
   )
