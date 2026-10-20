@@ -71,6 +71,15 @@ patterns. Keep it cheap to load and useful.
 - 2026-10-19: The API's `c.get("services")` is its own `DomainServiceContext` (`hono/env.ts`), filled
   in `middleware/init.ts`; a service added to `createServiceContext` must be added there too, and to
   the route test harnesses (`budgets.test.ts`, `local-mode.fuzz.test.ts`) that set `services` by hand.
+  Exception: `budgetOperator` calls the API itself, so the API's bag leaves it out.
+- 2026-10-19: A gateway to an internal route reads "not found" only from the API's JSON error body
+  (`error.code === "NOT_FOUND"`); Hono's default 404 for a missing route is plain text, and
+  read-repair that trusted a bare 404 would forget catalog rows during a split deploy.
+- 2026-10-19: DO SQLite binds a JS number as REAL, so `'h_' || ?` gives `h_1.0` and `? % 1000` is
+  float math. Seed SQL with `CAST(? AS INTEGER)` (see the 1,000,000-row inspect bench).
+- 2026-10-19: `BudgetDO.inspect` reads through `BudgetSqliteStore.inspecting`, not `atomically`, so
+  no verb's transaction binds the inspect reads. Its walk and closed-row scans stay on the `due_at`
+  index: 2,108 rows read at 1,000,000 rows; check `rowsRead` in the storage bench after changing them.
 - 2026-10-19: Preview native logs/traces and BudgetDO placement diagnostics were temporary and are
   disabled. Keep sampled request events with the budget operation, outcome, and RPC duration;
   failed alarms remain error logs.
