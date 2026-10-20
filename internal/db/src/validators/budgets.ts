@@ -54,7 +54,7 @@ export const WINDOW_HISTORY_PERIODS = 12
  * A budget with a `closesAt` deletes its storage this long after it closes, once no row is left to
  * settle, purge, or replay. Until then the closed budget stays readable.
  */
-export const CLOSED_BUDGET_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
+export const CLOSED_BUDGET_RETENTION_MS = 7 * 24 * 60 * 60 * 1000
 
 const DURATION_UNITS = [
   ["day", 24 * 60 * 60 * 1000],

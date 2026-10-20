@@ -194,7 +194,7 @@ These are the decisions that carry the design:
    version check is required too.
 2. **The write is idempotent and only moves forward.**
    `INSERT … ON CONFLICT (project_id, key) DO UPDATE … WHERE budgets.version < excluded.version
-   OR budgets.closes_at < now() - interval '30 days'`. The second clause admits an object that
+   OR budgets.closes_at < now() - interval '7 days'`. The second clause admits an object that
    was deleted and created again at version 1.
 3. **Drift converges three ways.** The next upsert that changes config rewrites the row.
    Opening the detail page repairs the row from the live snapshot, or forgets it when the
@@ -277,8 +277,8 @@ tree lives only in the catalog behind tRPC and never in a public API field, as B
 
 | Place | New | Lifetime |
 | --- | --- | --- |
-| `BudgetDO` SQLite `budget.key` | no | until `closesAt` + 30 days |
-| Postgres `budgets.key` | yes | until the prune job (`closes_at` + 31 days) or project deletion |
+| `BudgetDO` SQLite `budget.key` | no | until `closesAt` + 7 days |
+| Postgres `budgets.key` | yes | until project deletion; a prune waits until volume calls for it |
 | Internal route request bodies | yes, in transit | not logged |
 | Dashboard payloads and the `keyPrefix` search parameter | yes | the browser session |
 | URLs, Axiom, Tinybird, `budget_audit` | no | the catalog id stands in |
@@ -305,8 +305,9 @@ Each phase ends in a check. Phase 1 alone ships a usable section.
 3. **Release and audit.** `budget_audit`, the internal release route, `releaseHoldAsOperator`,
    and the dialog. Check: a use-case test covers `requested` then `applied`, a retry that reuses
    the row, `HOLD_CLOSED` stored as `rejected`, and a MEMBER who gets `FORBIDDEN`.
-4. **Hygiene.** A daily prune of catalog rows past `closes_at` + 31 days. Check: the prune
-   removes only those rows.
+4. **Hygiene (deferred).** A daily prune of catalog rows past `closes_at` + 8 days, one day
+   after the object deletes itself. Deferred on 2026-10-20: closed rows stay until their volume
+   calls for it. The list already hides them. Check: the prune removes only those rows.
 5. **Runs as budgets, then parents.** These follow ADR-0006 step 6 and B6. Check: the old
    surface is deleted and its routes redirect.
 

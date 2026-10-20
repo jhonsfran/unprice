@@ -9,6 +9,9 @@ Hard limits cannot accept excess consumption. An unresolved hold is settled at i
 when it expires, never released. This amendment replaces the earlier overrun and timeout
 reclamation rules.
 
+Amended on 2026-10-20. A closed budget deletes its storage 7 days after `closesAt`, not 30. A
+closed budget never reopens or resets, so a month of retention kept nothing anyone needed.
+
 ## Date
 
 2026-10-16
@@ -123,7 +126,7 @@ Budget
   or postpone `closesAt`. A runtime key's loosening upsert returns 403 and changes nothing. Soft
   limits and hold TTLs never deny, so either key may change them. A runtime key also cannot close
   a budget in the past: an earlier `closesAt` takes effect now, and one earlier than a close the
-  budget already passed changes nothing. A past close would bring forward the deletion 30 days
+  budget already passed changes nothing. A past close would bring forward the deletion 7 days
   after it, and the same key could then recreate the budget without its caps.
 - Adding or lowering a hard limit, including a change from soft to hard, must preserve
   `consumed + held <= amount`. Otherwise upsert returns 409 `LIMIT_BELOW_USAGE` and keeps the
@@ -384,7 +387,7 @@ close: final capture, then source.release(key = "rel:{budget}:{epoch}")
    held until a later wake.
 10. A Durable Object gets its storage on its budget's first upsert. Any other verb on a key that
     was never upserted answers `BUDGET_NOT_FOUND` without writing. A closed budget's alarm wakes
-    30 days after `closesAt` and deletes the storage and the alarm once no row is due, so no
+    7 days after `closesAt` and deletes the storage and the alarm once no row is due, so no
     object stays billed forever.
 11. An operation row stores its payload without `kind` and `id`, which have their own columns.
     Exact key lookup uses the payload's idempotency key through an expression index, and one due
