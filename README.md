@@ -1,9 +1,9 @@
 # Unprice: open-source spend authorization for AI agents
 
-[![GitHub stars](https://img.shields.io/github/stars/jhonsfran1165/unprice?style=social)](https://github.com/jhonsfran1165/unprice)
-[![Core license: AGPL-3.0-only](https://img.shields.io/badge/core-AGPL--3.0--only-blue.svg)](LICENSE)
-[![Package license: MIT](https://img.shields.io/badge/packages-MIT-green.svg)](packages/api/LICENSE)
-[![Commercial license](https://img.shields.io/badge/core-commercial-gold.svg)](COMMERCIAL-LICENSING.md)
+[![GitHub stars](https://img.shields.io/github/stars/jhonsfran/unprice?style=social)](https://github.com/jhonsfran/unprice)
+[![Core license: AGPL-3.0-only](https://img.shields.io/badge/core-AGPL--3.0--only-blue.svg)](https://github.com/jhonsfran/unprice/blob/main/LICENSE)
+[![Package license: MIT](https://img.shields.io/badge/packages-MIT-green.svg)](https://github.com/jhonsfran/unprice/blob/main/packages/api/LICENSE)
+[![Commercial license](https://img.shields.io/badge/core-commercial-gold.svg)](https://github.com/jhonsfran/unprice/blob/main/COMMERCIAL-LICENSING.md)
 
 > "Your product is smart, but your pricing is hardcoded."
 >
@@ -49,12 +49,12 @@ platform engineers who own the path from customer authorization to invoice.
 
 This repository uses different licenses for the core and the client packages:
 
-- All project-owned files under [`packages/**`](packages) use the **MIT License**.
+- All project-owned files under [`packages/**`](https://github.com/jhonsfran/unprice/tree/main/packages) use the **MIT License**.
 - All other project-owned files use **AGPL-3.0-only**. A separate commercial license is available
   for the core.
 
 You can embed an MIT package such as **@unprice/api** in an application. Doing so does not apply the
-core AGPL license to that application. See [LICENSING.md](LICENSING.md) for the exact scope.
+core AGPL license to that application. See [LICENSING.md](https://github.com/jhonsfran/unprice/blob/main/LICENSING.md) for the exact scope.
 
 ### Why AGPL?
 
@@ -65,7 +65,7 @@ Money logic should be open to inspection.
   changes under the same license.
 - **Keep control.** Run the code in your account and keep your data there.
 
-Use the [commercial license](COMMERCIAL-LICENSING.md) if you need separate terms for the core.
+Use the [commercial license](https://github.com/jhonsfran/unprice/blob/main/COMMERCIAL-LICENSING.md) if you need separate terms for the core.
 
 ## Core capabilities
 

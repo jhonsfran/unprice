@@ -389,8 +389,22 @@ export class ApiKeysService {
     return hash
   }
 
-  private async getData(keyHash: string, projectId?: string): Promise<ApiKeyExtended | null> {
-    const data = await this.db.query.apikeys.findFirst({
+  /**
+   * The primary connection. In production `this.db` sends reads to the read replicas; a key lookup
+   * that has to be right (a cache miss, or a retry after a failed lookup) reads the primary, so a
+   * replica that is down or behind cannot turn an unknown key into a 500, or a new key into a 401.
+   */
+  private get primaryDb(): Database {
+    return "$primary" in this.db ? (this.db.$primary as Database) : this.db
+  }
+
+  private async getData(
+    keyHash: string,
+    projectId?: string,
+    opts?: { primary?: boolean }
+  ): Promise<ApiKeyExtended | null> {
+    const db = opts?.primary ? this.primaryDb : this.db
+    const data = await db.query.apikeys.findFirst({
       with: {
         project: {
           columns: {
@@ -473,7 +487,8 @@ export class ApiKeysService {
       skipCache: opts?.skipCache,
       cache: this.cache.apiKeyByHash,
       cacheKey: keyHash,
-      load: () => this.getData(keyHash),
+      // Bypassing the cache means the cached path already failed or is distrusted: read the primary.
+      load: () => this.getData(keyHash, undefined, { primary: opts?.skipCache === true }),
       wrapLoadError: (err) =>
         new FetchError({
           message: `unable to query db, ${err.message}`,
@@ -527,14 +542,7 @@ export class ApiKeysService {
       const { key } = req
       let retriedWithoutCache = false
 
-      const result = await this.getApiKey(
-        {
-          key,
-        },
-        {
-          skipCache: false,
-        }
-      ).catch(async (err) => {
+      const retryWithoutCache = async (err: Error) => {
         this.logger.error(err, {
           context: `verify error, retrying without cache, ${err.message}`,
         })
@@ -549,7 +557,14 @@ export class ApiKeysService {
             skipCache: true,
           }
         )
-      })
+      }
+
+      // A failed lookup comes back as a FetchError value (the SWR cache catches the loader's
+      // exception), not as a rejection, so retry on both. A missing key is NOT_FOUND and is not retried.
+      let result = await this.getApiKey({ key }, { skipCache: false }).catch(retryWithoutCache)
+      if (!retriedWithoutCache && result.err instanceof FetchError) {
+        result = await retryWithoutCache(result.err)
+      }
 
       if (result.err) {
         this.logger.error(result.err, {
