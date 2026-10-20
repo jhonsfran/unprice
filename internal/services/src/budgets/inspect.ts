@@ -95,7 +95,8 @@ export function inspect(
 ): BudgetInspection {
   const walk = reader.walkReservations(query.after ?? null, INSPECT_SCAN_LIMIT)
   const inspection: BudgetInspection = {
-    ...read,
+    budget: read.budget,
+    history: read.history,
     expiringNext: {
       rows: walk.rows,
       examined: walk.examined,

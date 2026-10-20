@@ -93,7 +93,13 @@ describe("BudgetDO.inspect", () => {
     expect(read.expiringNext.rows.map((row) => row.id).sort()).toEqual(["h_1", "h_3", "l:proc-1"])
     expect([read.expiringNext.examined, read.expiringNext.next]).toEqual([4, null])
     expect(read.history).toEqual([])
-    expect([read.found, read.probe]).toEqual([undefined, undefined])
+    expect(Object.keys(read).sort()).toEqual([
+      "budget",
+      "closedRecently",
+      "expiringNext",
+      "history",
+      "listed",
+    ])
   })
 
   it("pages a 5,000-row object so every open row is listed exactly once and the sum is held", async () => {
