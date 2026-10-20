@@ -287,6 +287,7 @@ export function prepareRequest(value: unknown, limits: RequestLimits): PreparedR
     body: JSON.stringify(generation),
     outputTokens,
     messages: messageCount,
+    tools: Array.isArray(payload.tools) && payload.tools.length > 0,
   }
 }
 

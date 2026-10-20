@@ -152,7 +152,8 @@ export type BudgetHandle = {
    * `fn` with a charge of `price.amount` in front. As an AI SDK tool's `execute`, the charge is
    * keyed by the call's `toolCallId`, so a tool call that runs again replays its charge instead of
    * paying twice; any other call charges under a fresh key. A denied charge throws and `fn` does
-   * not run.
+   * not run. A replayed charge still runs `fn`, and the charge stands when `fn` throws: the
+   * vendor may have billed the call either way.
    *
    * @throws BudgetExceededError when a limit denies the charge.
    * @throws BudgetUnavailableError when Unprice cannot be reached after the client's retries.

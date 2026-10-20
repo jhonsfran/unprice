@@ -79,7 +79,7 @@ function hold(
     ...rates.flatMap((rate) => [rate.input, rate.cacheRead, rate.cacheWrite])
   )
   const outputRate = Math.max(...rates.map((rate) => rate.output))
-  const bound = inputBound(text, messages)
+  const bound = inputBound(text, messages) + (Array.isArray(body.tools) ? 1024 : 0)
   return (
     Math.ceil(((bound * inputRate + outputTokens * outputRate) / 1_000_000) * 100_000_000) /
     100_000_000

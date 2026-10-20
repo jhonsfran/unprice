@@ -1117,7 +1117,7 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 
 - 2026-10-20: AI budget adapters share final serialized request policy in `packages/budgets-ai`; Pi and AI SDK wrappers only convert native calls and usage. Keep a hold per physical dispatch and preserve JSON versus SSE mode.
 - 2026-10-20: Public integration packages must be added to `tooling/scripts/assert-publishable-packages.mjs` and ship their own MIT license. Build workspace dependencies before standalone package tests or archive consumer tests.
-- 2026-10-20: Anthropic and Gemini preflight counts are estimates. Budget holds use trusted model input limits; refunds require final raw usage evidence because native SDKs can emit finish events from preliminary counters.
+- 2026-10-20: Anthropic and Gemini preflight counts are estimates. Budget holds use the byte bound of the final request body (`inputBound` in `packages/budgets-ai`) plus Anthropic's hidden tool-use prompt when tools are present; refunds require final raw usage evidence because native SDKs can emit finish events from preliminary counters.
 - 2026-10-20: Downstream packages test and typecheck against each other's built `dist`; after a change to
   `packages/budgets` or `packages/budgets-ai`, run `pnpm --filter @unprice/budgets build` then
   `pnpm --filter @unprice/budgets-ai build` before the ai-sdk and Pi suites, or they run the old code and
@@ -1128,7 +1128,11 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-10-20: `pnpm exec biome ...` under the rtk hook dies with "Linter process terminated abnormally";
   run it as `rtk proxy pnpm exec biome ...`.
 - 2026-10-20: A keyed budget verb with `ifMissing` creates its budget inside the same `decide` change
-  (`decideUpsert` then the verb, `configured` merged); outcomes carry `created`, and a denial creates
-  nothing because a rejection writes nothing. The DO prepares storage only for an upsert or a verb with
-  `ifMissing`.
+  (`decideUpsert` then the verb, `configured` merged); outcomes carry `created`, and a rejected first
+  call writes no budget row. The DO prepares storage only for an upsert or a verb with `ifMissing`, and
+  drops the schema again when that first call leaves no budget behind.
+- 2026-10-20: Anthropic adds a hidden tool-use system prompt to input tokens whenever `tools` is sent
+  (264 to 804 tokens by model and `tool_choice`, per its tool-use docs). Anything a provider bills
+  outside the request body needs a per-protocol reserve in `provider-request.ts`; a settle above the
+  hold is rejected, so the session settles the hold in full and records the excess.
 

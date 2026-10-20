@@ -37,7 +37,7 @@ const toolCall = (index: number) =>
   })
 
 /** The remaining balance each settle answers with, in order; the budget runs dry on the second. */
-function harness(remaining: readonly string[]) {
+function harness(remaining: readonly string[], maxOutputTokens = 16) {
   const authorized: string[] = []
   let settles = 0
   const balanceAt = (index: number) => ({
@@ -93,7 +93,7 @@ function harness(remaining: readonly string[]) {
     {
       unprice,
       budget: "customer:a",
-      maxOutputTokens: 16,
+      maxOutputTokens,
       models: { "openai/gpt-test": { rates, tiers: [], limits } },
     },
     { apiKey: "test", fetch: providerFetch }
@@ -129,6 +129,7 @@ describe("budgetSpent", () => {
       holdId: "h_1",
       actual: "0.000025",
       remaining: "0.5",
+      exceeded: false,
       exhausted: false,
     })
     expect(result.steps[1]?.providerMetadata?.unprice).toMatchObject({
@@ -154,6 +155,33 @@ describe("budgetSpent", () => {
       false,
       false,
     ])
+  })
+
+  it("measures the next step at the output cap, not at the smallest answer", async () => {
+    // With a 4096-token cap the next step reserves about 0.0164 (4096 × 4 per million plus the
+    // prompt bound), so 0.01 left is exhausted even though a 16-token answer would still fit.
+    const h = harness(["0.01"], 4096)
+    const result = await generateText({
+      model: h.openai("gpt-test"),
+      prompt: "hello",
+      tools: { lookup: h.lookup },
+      stopWhen: [stepCountIs(5), budgetSpent()],
+      maxRetries: 0,
+    })
+    expect(result.steps).toHaveLength(1)
+    expect(result.steps[0]?.providerMetadata?.unprice).toMatchObject({
+      remaining: "0.01",
+      exhausted: true,
+    })
+    const plenty = harness(["0.5"], 4096)
+    const more = await generateText({
+      model: plenty.openai("gpt-test"),
+      prompt: "hello",
+      tools: { lookup: plenty.lookup },
+      stopWhen: [stepCountIs(2), budgetSpent()],
+      maxRetries: 0,
+    })
+    expect(more.steps).toHaveLength(2)
   })
 
   it("reports the same metadata on a stream's finish part", async () => {

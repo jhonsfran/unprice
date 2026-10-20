@@ -81,10 +81,12 @@ credits. Two properties fix it: no new step starts when the budget is gone, and 
 a known maximum. The cent-exact cap is what neither Autumn nor Polar offers. The model-maximum
 fallback keeps it on most providers.
 
-A violated bound is safe. The server rejects a settle above the hold, the hold expires at its full
-amount, and spend is over-counted, never under-counted. What a wrong bound costs is accuracy.
+A violated bound is counted, not hidden. The server rejects a settle above the hold, so the adapter
+settles the hold in full and records the excess with `record`, which always counts, even past a
+hard limit. The overrun lands in the budget, the step reports `exceeded`, and the cap was passed
+by at most that one step. What a wrong bound costs is one step of overshoot.
 
-## D3. The budget's unit is a wrapper option. The server checks it. (Decided)
+## D3. The budget's unit is a wrapper option. The server checks it. (Decided, not built)
 
 Nothing checks units today. A budget's unit is `money:<code>`, `credits:<id>`, or `units:<slug>`
 (`internal/db/src/validators/budgets.ts:155`). `budgets-ai` and both adapters never read it, and
@@ -104,6 +106,9 @@ check is one string compare inside a call we already make, so it adds no round t
 
 A `units:tokens` budget is the simplest exact cap: it needs no price catalog and has no price
 drift. It is a good first release for free trials.
+
+Not built as of 2026-10-20: the adapters still reserve USD amounts against a budget of any unit,
+and the server does not compare units.
 
 ## D4. Prices are server data. The SDK prices with them. (Decided)
 
@@ -389,15 +394,17 @@ The policy is a table keyed by protocol, in `@unprice/budgets-ai`:
 | Input | Bound | Cost |
 |---|---|---|
 | Text, tool definitions, tool results | UTF-8 bytes of the serialized request body, plus a fixed overhead per message | none |
+| A provider's hidden tool-use prompt | a fixed reserve per protocol when the request carries tools: 1024 tokens for Anthropic, which documents 264 to 804 tokens by model and `tool_choice` (read 2026-10-20); 0 for OpenAI and Gemini, whose documentation lists none | none |
 | Images | the catalog row's per-provider formula (D5), later | none |
 | Anything the table cannot bound | refused on a hard budget | none |
 
 Why bytes. Every byte-level BPE tokenizer and every SentencePiece tokenizer with byte fallback
 emits at least one byte per token, so tokens never exceed bytes. Chat templates add a few tokens
-per message, which the per-message overhead covers. This is inferred from how those tokenizers
-work. It is not verified against Anthropic's or Gemini's tokenizer, which is the open question
-below. The failure mode is safe (D2). The cost is an over-hold of about three to four times the
-input cost for English text, which strands concurrency near the cap.
+per message, which the per-message overhead covers; the per-protocol reserve covers what a
+provider adds outside the body. This is inferred from how those tokenizers work. It is not
+verified against Anthropic's or Gemini's tokenizer, which is the open question below. A violated
+bound is counted (D2). The cost is an over-hold of about three to four times the input cost for
+English text, which strands concurrency near the cap.
 
 **Near the cap, count exactly.** When the byte-bound authorize is denied, the adapter asks the
 provider's count endpoint for the exact input count and retries once. OpenAI's
@@ -446,9 +453,11 @@ Tests come before code in every unit. Each unit lands on its own, verified, befo
    - Tests: the catalog route returns rows with tiers converted from models.dev and omits unknown
      ids. `unprice.model(id)` fetches once per id per TTL. For each protocol the hold equals the
      byte bound times the input rate plus `max_tokens` times the output rate. No count request is
-     sent. The byte bound holds against real Anthropic and Gemini counts (opt-in, needs keys).
+     sent. An opt-in test checks the byte bound against real Anthropic and Gemini counts; it needs
+     provider keys and has not run yet.
    - Code: the sync script and the generated rows, the route, the SDK cache, the bound table, and
-     the deletion of `getPricing`, `getModelLimits`, `TokenPricing`, and the OpenAI count.
+     the deletion of `getPricing`, `getModelLimits`, and the OpenAI count. `TokenPricing` stays as
+     the type of the pricing arithmetic.
 2. **One wrapper, the key per call, budgets created on first use (D8, D11).** Landed 2026-10-20 on `feat/sdks`.
    - Tests: a three-step tool loop through `generateText` opens one hold per step, each under the
      key from `providerOptions`. `budgeted` detects the protocol from the model for OpenAI,
@@ -470,7 +479,8 @@ the docs pages (D11), and media rate cards with job-length holds (D5).
 
 - Is `tokens ≤ UTF-8 bytes + overhead` a true bound for Anthropic and Gemini? The opt-in test in
   `@unprice/budgets-ai` answers it when provider keys are present. Without keys it is
-  unverified. D12 ships on the inference, and D2 names the failure mode.
+  unverified. D12 ships on the inference, and D2 names the failure mode. Anthropic's hidden
+  tool-use prompt was the first thing outside the body that the bound missed; it is reserved now.
 - Do Gemini thinking tokens count inside `maxOutputTokens`?
 - When authorize replays a hold that was already settled, does the response say it is closed?
   D9 depends on this.

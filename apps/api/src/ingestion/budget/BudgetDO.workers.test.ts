@@ -1052,5 +1052,11 @@ describe("BudgetDO creates a budget on first use", () => {
       )
     ).toMatchObject({ code: "LIMIT_EXCEEDED" })
     expect(rejection(await stub.execute({ type: "get" }))).toEqual({ code: "BUDGET_NOT_FOUND" })
+    await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
+      expect(
+        state.storage.sql.exec("SELECT name FROM sqlite_master WHERE type = 'table'").toArray()
+      ).toEqual([])
+      expect(await state.storage.getAlarm()).toBeNull()
+    })
   })
 })

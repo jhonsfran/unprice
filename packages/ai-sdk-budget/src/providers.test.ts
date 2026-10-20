@@ -275,7 +275,8 @@ async function fullHold(h: ReturnType<typeof harness>, outputTokens = 2048): Pro
   const messages = Array.isArray(native.messages)
     ? native.messages.length + (native.system === undefined ? 0 : 1)
     : (native.contents as unknown[]).length + (native.systemInstruction === undefined ? 0 : 1)
-  const cost = (inputBound(body, messages) * 1.25 + outputTokens * 4) / 1_000_000
+  const hidden = Array.isArray(native.messages) && Array.isArray(native.tools) ? 1024 : 0
+  const cost = ((inputBound(body, messages) + hidden) * 1.25 + outputTokens * 4) / 1_000_000
   return (Math.ceil(cost * 100_000_000) / 100_000_000).toFixed(8).replace(/\.?0+$/, "")
 }
 

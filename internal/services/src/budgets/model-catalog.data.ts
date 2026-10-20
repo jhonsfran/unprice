@@ -737,42 +737,6 @@ export const MODEL_CATALOG: readonly ModelRate[] = [
     },
   },
   {
-    id: "google/lyria-3-clip-preview",
-    provider: "google",
-    model: "lyria-3-clip-preview",
-    unit: "money:USD",
-    per: 1000000,
-    rates: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-    },
-    tiers: [],
-    limits: {
-      context: 1048576,
-      output: 65536,
-    },
-  },
-  {
-    id: "google/lyria-3-pro-preview",
-    provider: "google",
-    model: "lyria-3-pro-preview",
-    unit: "money:USD",
-    per: 1000000,
-    rates: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-    },
-    tiers: [],
-    limits: {
-      context: 1048576,
-      output: 65536,
-    },
-  },
-  {
     id: "openai/gpt-3.5-turbo",
     provider: "openai",
     model: "gpt-3.5-turbo",

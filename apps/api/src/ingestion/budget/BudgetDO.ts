@@ -29,15 +29,7 @@ export class BudgetDO extends DurableObject {
     this.processor = new BudgetProcessor({
       clock: { now: () => Date.now() },
       logger: createDoLogger(this.ctx.id.toString()),
-      runtime: {
-        // Nothing interleaves: the next request finds no schema, as for a key never upserted.
-        destroy: () =>
-          this.ctx.blockConcurrencyWhile(async () => {
-            await this.ctx.storage.deleteAlarm()
-            await this.ctx.storage.deleteAll()
-            this.ready = null
-          }),
-      },
+      runtime: { destroy: () => this.destroy() },
       scheduler: {
         getAlarm: () => this.ctx.storage.getAlarm(),
         setAlarm: (at) => this.ctx.storage.setAlarm(at),
@@ -48,13 +40,27 @@ export class BudgetDO extends DurableObject {
   }
 
   async execute(request: BudgetRequest): Promise<BudgetReply> {
-    if (!this.ready) {
+    const fresh = !this.ready
+    if (fresh) {
       const creates = request.type === "upsert" || ("ifMissing" in request && !!request.ifMissing)
       if (!creates) return { ok: false, rejection: { code: "BUDGET_NOT_FOUND" } }
       this.ready = this.prepare()
     }
     await this.ready
-    return this.processor.execute(request)
+    const reply = await this.processor.execute(request)
+    // A first call that was refused left a schema and no budget: the storage a mistyped key must
+    // not keep. Drop it, so the key reads as never upserted again.
+    if (fresh && !reply.ok && !this.processor.hasBudget()) await this.destroy()
+    return reply
+  }
+
+  /** Nothing interleaves: the next request finds no schema, as for a key never upserted. */
+  private destroy(): Promise<void> {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      await this.ctx.storage.deleteAlarm()
+      await this.ctx.storage.deleteAll()
+      this.ready = null
+    })
   }
 
   /** The dashboard's read beside the verbs. Like a verb, it creates no storage for an unknown key. */

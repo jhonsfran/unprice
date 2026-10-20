@@ -5,8 +5,20 @@ import * as openai from "./openai-request"
 import type { BudgetProtocol, PreparedRequest, RequestLimits } from "./request-policy"
 
 /**
+ * Input tokens a provider adds outside the request body when it carries tools. Anthropic's tool-use
+ * docs (read 2026-10-20) list a hidden tool-use system prompt of 264 to 804 tokens by model and
+ * `tool_choice`; OpenAI's and Google's docs list none.
+ */
+export const TOOL_PROMPT_TOKENS: Readonly<Record<BudgetProtocol, number>> = {
+  "openai-responses": 0,
+  "anthropic-messages": 1024,
+  "google-generative-ai": 0,
+}
+
+/**
  * Validates the final serialized request, clamps its output limit, and bounds its input tokens by
- * its bytes. No provider round trip: the bound is computed, not counted.
+ * its bytes plus what the provider adds for tools. No provider round trip: the bound is computed,
+ * not counted.
  */
 export async function prepareBudgetRequest(
   incoming: Request,
@@ -39,6 +51,8 @@ export async function prepareBudgetRequest(
   return {
     request,
     outputTokens: prepared.outputTokens,
-    inputTokens: inputBound(prepared.body, prepared.messages),
+    inputTokens:
+      inputBound(prepared.body, prepared.messages) +
+      (prepared.tools ? TOOL_PROMPT_TOKENS[protocol] : 0),
   }
 }

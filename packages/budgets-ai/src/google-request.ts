@@ -220,7 +220,13 @@ export function prepareRequest(value: unknown, limits: RequestLimits): PreparedR
     },
   }
   const messages = payload.contents.length + (payload.systemInstruction === undefined ? 0 : 1)
-  return { payload: generation, body: JSON.stringify(generation), outputTokens, messages }
+  return {
+    payload: generation,
+    body: JSON.stringify(generation),
+    outputTokens,
+    messages,
+    tools: Array.isArray(payload.tools) && payload.tools.length > 0,
+  }
 }
 
 export function validateRoute(

@@ -27,8 +27,19 @@ const document = {
       },
     },
   },
+  google_music: {},
   google: {
     models: {
+      "lyria-3-clip-preview": {
+        cost: { input: 0, output: 0 },
+        limit: { context: 8192, output: 1024 },
+        modalities: { input: ["text"], output: ["text", "audio"] },
+      },
+      "music-only": {
+        cost: { input: 1, output: 1 },
+        limit: { context: 8192, output: 1024 },
+        modalities: { input: ["text"], output: ["audio"] },
+      },
       "gemini-2.5-pro": {
         cost: {
           input: 1.25,

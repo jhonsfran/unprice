@@ -10,12 +10,12 @@ import {
   type BudgetDefinitionInput,
   type BudgetHandle,
   BudgetSettleError,
-  type BudgetSettlement,
   type ModelRate,
   type Unprice,
 } from "@unprice/budgets"
 import {
   type BudgetProtocol,
+  type BudgetStepSettlement,
   type ModelLimits,
   type TokenPricing,
   createBudgetSession,
@@ -28,8 +28,6 @@ import { type LanguageModelMiddleware, type StopCondition, type ToolSet, wrapPro
 const CALL_HEADER = "x-unprice-budget-call"
 const CALL_TIMEOUT_MS = 120_000
 const DEFAULT_MAX_OUTPUT_TOKENS = 4096
-/** The smallest output a step is worth starting for; the floor of "the next step would fit". */
-const MIN_OUTPUT_TOKENS = 16
 const ANTHROPIC_FINISH_REASONS = new Set(["stop", "length", "tool-calls", "content-filter"])
 
 type BudgetSession = ReturnType<typeof createBudgetSession>
@@ -202,7 +200,7 @@ export function createUnpriceBudgetMiddleware(options: UnpriceBudgetMiddlewareOp
     const lifetime = Promise.withResolvers<void>()
     options.waitUntil?.(lifetime.promise)
     sessions.set(token, session)
-    let settlement: Promise<BudgetSettlement | undefined> | undefined
+    let settlement: Promise<BudgetStepSettlement | undefined> | undefined
     return {
       signal,
       pricing,
@@ -219,21 +217,23 @@ export function createUnpriceBudgetMiddleware(options: UnpriceBudgetMiddlewareOp
       },
       /**
        * What the step cost and what is left, for `providerMetadata.unprice`. `exhausted` means a
-       * step with this step's prompt and the smallest output would no longer fit.
+       * step with this step's prompt and this step's output cap would no longer be granted; the
+       * next step's prompt is longer, so this is the earliest the loop can be told to stop.
        */
-      metadata(settled: BudgetSettlement | undefined) {
+      metadata(settled: BudgetStepSettlement | undefined) {
         const reserved = session.reserved
         const remaining = settled?.balance.remaining ?? null
         const exhausted =
           remaining !== null &&
           reserved !== undefined &&
-          Number(remaining) < maximumCost(pricing, reserved.inputTokens, MIN_OUTPUT_TOKENS)
+          Number(remaining) < maximumCost(pricing, reserved.inputTokens, reserved.outputTokens)
         return {
           budget: key,
           holdId: reserved?.hold.id ?? null,
           hold: reserved?.hold.amount ?? null,
           actual: settled?.actual ?? null,
           remaining,
+          exceeded: settled?.exceeded ?? false,
           exhausted,
         }
       },

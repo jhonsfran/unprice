@@ -10,15 +10,32 @@ const limits = { context: 1_000_000, output: 4096 }
  */
 const HOLD = 0.00028775
 
-function fixture(overrides: Partial<BudgetSessionOptions> = {}, denied = false) {
+function fixture(
+  overrides: Partial<BudgetSessionOptions> = {},
+  denied = false,
+  options: { rejectAboveHold?: boolean } = {}
+) {
   const order: string[] = []
   const amounts: number[] = []
   const payloads: Record<string, unknown>[] = []
+  const records: Record<string, unknown>[] = []
   const client = new Unprice({
     token: "test",
     retry: { attempts: 0 },
     fetch: async (request) => {
       const body = (await request.json()) as Record<string, unknown>
+      if (request.url.endsWith("/record")) {
+        order.push("record")
+        amounts.push(Number(body.amount))
+        records.push(body)
+        return Response.json({
+          amount: body.amount,
+          crossed: ["day"],
+          replayed: false,
+          created: false,
+          balance: { remaining: "-0.0007", held: "0", limits: [] },
+        })
+      }
       if (request.url.endsWith("/authorize")) {
         order.push("authorize")
         amounts.push(Number(body.amount))
@@ -56,7 +73,34 @@ function fixture(overrides: Partial<BudgetSessionOptions> = {}, denied = false) 
       }
       order.push("settle")
       amounts.push(Number(body.amount))
-      return Response.json({})
+      if (options.rejectAboveHold && Number(body.amount) > HOLD) {
+        return Response.json(
+          {
+            error: {
+              code: "CONFLICT",
+              message: "Hold h_1 permits less",
+              docs: "",
+              requestId: "test",
+              details: {
+                kind: "hold_amount_exceeded",
+                holdId: "h_1",
+                maximum: String(HOLD),
+                actual: body.amount,
+              },
+            },
+          },
+          { status: 409 }
+        )
+      }
+      return Response.json({
+        holdId: "h_1",
+        actual: body.amount,
+        released: "0",
+        expired: false,
+        crossed: [],
+        replayed: false,
+        balance: { remaining: "0.5", held: "0", limits: [] },
+      })
     },
   })
   const transport: typeof fetch = async (input, init) => {
@@ -79,7 +123,7 @@ function fixture(overrides: Partial<BudgetSessionOptions> = {}, denied = false) 
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ model: "model", input: "Hello", max_output_tokens: 32 }),
     })
-  return { session, dispatch, order, amounts, payloads }
+  return { session, dispatch, order, amounts, payloads, records }
 }
 
 describe("shared AI budget request", () => {
@@ -128,8 +172,39 @@ describe("shared AI budget request", () => {
   it("does not lower a known actual cost to fit its reservation", async () => {
     const test = fixture()
     await test.dispatch()
-    await test.session.settle(0.001)
+    const settled = await test.session.settle(0.001)
     expect(test.amounts).toEqual([HOLD, 0.001])
+    expect(settled).toEqual({
+      holdId: "h_1",
+      hold: String(HOLD),
+      actual: "0.001",
+      exceeded: false,
+      balance: { remaining: "0.5", held: "0", limits: [] },
+    })
+  })
+
+  it("settles the hold in full and records the excess when usage exceeds the reservation", async () => {
+    const test = fixture({}, false, { rejectAboveHold: true })
+    await test.dispatch()
+    const settled = await test.session.settle(0.001)
+    expect(test.order).toEqual(["authorize", "generate", "settle", "settle", "record"])
+    expect(test.amounts).toEqual([HOLD, 0.001, HOLD, 0.00071225])
+    expect(test.records).toEqual([
+      {
+        key: "customer",
+        amount: "0.00071225",
+        idempotencyKey: "h_1:excess",
+        occurredAt: expect.any(Number),
+      },
+    ])
+    expect(settled).toEqual({
+      holdId: "h_1",
+      hold: String(HOLD),
+      actual: "0.001",
+      exceeded: true,
+      balance: { remaining: "-0.0007", held: "0", limits: [] },
+    })
+    expect(test.session.reserved?.hold.id).toBe("h_1")
   })
 
   it("snapshots rates before dispatch", async () => {

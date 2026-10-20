@@ -104,7 +104,13 @@ export function prepareRequest(
     truncation: "disabled",
     stream: mode === "stream",
   }
-  return { payload: generation, body: JSON.stringify(generation), outputTokens, messages }
+  return {
+    payload: generation,
+    body: JSON.stringify(generation),
+    outputTokens,
+    messages,
+    tools: Array.isArray(payload.tools) && payload.tools.length > 0,
+  }
 }
 
 export function validateRoute(request: Request): void {

@@ -1,6 +1,6 @@
 import { Unprice } from "@unprice/budgets"
 import { describe, expect, it } from "vitest"
-import { type BudgetProtocol, createBudgetSession } from "./index"
+import { type BudgetProtocol, TOOL_PROMPT_TOKENS, createBudgetSession } from "./index"
 import { inputBound } from "./input-bound"
 
 const pricing = { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.25 }
@@ -26,8 +26,8 @@ const providers = [
  * input rate (cacheWrite, 1.25) plus the 256-token output limit at 2, rounded up at eight
  * decimals. Stated here on its own so the test does not borrow the adapter's arithmetic.
  */
-function hold(body: unknown, messages: number): number {
-  const bound = inputBound(JSON.stringify(body), messages)
+function hold(body: unknown, messages: number, hiddenTokens = 0): number {
+  const bound = inputBound(JSON.stringify(body), messages) + hiddenTokens
   return Math.ceil(((bound * 1.25 + 256 * 2) / 1_000_000) * 100_000_000) / 100_000_000
 }
 
@@ -148,6 +148,37 @@ for (const provider of providers)
       expect(test.order).toEqual([])
     })
   })
+
+describe("hidden tool prompt", () => {
+  it("reserves Anthropic's tool-use system prompt when the request carries tools", async () => {
+    const test = fixture("anthropic-messages")
+    const body = {
+      model: "model",
+      messages: [{ role: "user", content: "Hello" }],
+      max_tokens: 1024,
+      tools: [{ name: "lookup", input_schema: { type: "object" } }],
+    }
+    await test.session.fetch("https://provider.test/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    })
+    expect(TOOL_PROMPT_TOKENS["anthropic-messages"]).toBe(1024)
+    expect(TOOL_PROMPT_TOKENS["openai-responses"]).toBe(0)
+    expect(TOOL_PROMPT_TOKENS["google-generative-ai"]).toBe(0)
+    expect(test.amounts).toEqual([hold(test.bodies[0], 1, 1024)])
+  })
+
+  it("reserves nothing extra for an Anthropic request without tools", async () => {
+    const test = fixture("anthropic-messages")
+    await test.session.fetch("https://provider.test/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(providers[0].body),
+    })
+    expect(test.amounts).toEqual([hold(test.bodies[0], 1)])
+  })
+})
 
 describe("model limits", () => {
   it.each([0, 0.5, Number.POSITIVE_INFINITY])("rejects context limit %s", (context) => {

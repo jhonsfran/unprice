@@ -58,9 +58,10 @@ once the last step left less than the next step would need, instead of failing o
 
 Prices and limits come from the Unprice catalog, fetched once an hour per model and shared by
 every call in the process. You maintain no price table. The hold for a step is the byte bound of
-the request body at the model's highest input rate, plus the output limit at its output rate.
-Byte-level tokenizers never emit more tokens than bytes, so the step cannot cost more than the
-hold. Settlement returns the difference at once. No count request goes to the provider.
+the request body at the model's highest input rate, plus the output limit at its output rate, plus
+Anthropic's hidden tool-use prompt when the step carries tools. Byte-level tokenizers never emit
+more tokens than bytes, so the step cannot cost more than the hold. Settlement returns the
+difference at once. No count request goes to the provider.
 
 The protocol comes from the model itself: OpenAI Responses, Anthropic Messages, and Google
 Generative AI. A model the catalog does not know is refused before any hold; pass its row in
@@ -79,7 +80,10 @@ budgeted(createOpenAI, {
 ```
 
 Every step carries `providerMetadata.unprice` on its result and on a stream's finish part:
-`budget`, `holdId`, `hold`, `actual`, `remaining`, and `exhausted`.
+`budget`, `holdId`, `hold`, `actual`, `remaining`, `exceeded`, and `exhausted`. `exhausted` is
+true once what is left is less than a step with this step's prompt and the output cap would
+reserve; `budgetSpent()` reads it. `exceeded` is true when the step cost more than its hold: the
+hold was settled in full and the excess recorded against the budget, past the cap.
 
 ## Options
 
@@ -106,9 +110,10 @@ before any hold, so a request the bound does not cover never runs.
 ## When something fails
 
 Generation returns only after settlement; a stream's finish part waits for it. Cancellation, a
-missing usage report, or an incomplete stream settles the full hold. A failed settlement throws
-`BudgetSettleError` with the hold, so you can settle it later; the hold is never released, and an
-open hold expires at its full amount. Spend is over-counted, never under-counted.
+missing usage report, or an incomplete stream settles the full hold. A step that cost more than
+its hold settles the hold in full and records the excess, so the overrun counts. A failed
+settlement throws `BudgetSettleError` with the hold, so you can settle it later; the hold is never
+released, and an open hold expires at its full amount.
 
 Without `waitUntil` on a platform that stops the function at the response, settlement may not run
 and the hold expires at its full amount. The cap stays safe; accuracy and capacity suffer until it

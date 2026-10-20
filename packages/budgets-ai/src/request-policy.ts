@@ -18,4 +18,6 @@ export interface PreparedRequest {
   readonly outputTokens: number
   /** Messages and tool items in the request, for the per-message overhead of the input bound. */
   readonly messages: number
+  /** The request carries tool definitions, so the provider may add its own tool-use prompt. */
+  readonly tools: boolean
 }

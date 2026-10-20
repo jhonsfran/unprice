@@ -38,8 +38,8 @@ function toTiers(tiers: unknown) {
 
 /**
  * The catalog rows in a models.dev document (https://models.dev/api.json): the token-priced
- * language models of the supported providers, sorted by id. A model without a price or without
- * positive context and output limits is left out.
+ * language models of the supported providers, sorted by id. A model without a price, priced at
+ * zero, without text output, or without positive context and output limits is left out.
  */
 export function fromModelsDev(document: unknown): ModelRate[] {
   if (!isObject(document)) throw new Error("Invalid models.dev document")
@@ -51,7 +51,11 @@ export function fromModelsDev(document: unknown): ModelRate[] {
     for (const [modelId, model] of Object.entries(models)) {
       if (!isObject(model) || !isObject(model.cost) || !isObject(model.limit)) continue
       if (model.type !== undefined && model.type !== "language") continue
+      const output = isObject(model.modalities) ? model.modalities.output : undefined
+      if (!Array.isArray(output) || !output.includes("text")) continue
       if (!isFiniteNumber(model.cost.input) || !isFiniteNumber(model.cost.output)) continue
+      // A model with no token price cannot be budgeted; serving it at $0 would read as free.
+      if (model.cost.input === 0 && model.cost.output === 0) continue
       if (!isPositiveInt(model.limit.context) || !isPositiveInt(model.limit.output)) continue
       rows.push(
         modelRateSchema.parse({
