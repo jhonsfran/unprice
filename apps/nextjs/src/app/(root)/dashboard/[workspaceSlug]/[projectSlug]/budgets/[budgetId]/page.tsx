@@ -5,6 +5,7 @@ import type { ReactNode } from "react"
 import { CopyButton } from "~/components/copy-button"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import { api } from "~/trpc/server"
+import { BudgetDebugSheet } from "../_components/budget-debug-sheet"
 import { formatUnit } from "../_components/budget-format"
 import { BudgetLive } from "../_components/budget-live"
 import { BudgetNotFound } from "../_components/budget-not-found"
@@ -31,7 +32,14 @@ export default async function BudgetPage(props: {
   }
 
   return (
-    <DashboardShell header={<BudgetHeader budget={budget} />}>
+    <DashboardShell
+      header={
+        <BudgetHeader
+          budget={budget}
+          action={<BudgetDebugSheet id={budget.id} budgetKey={budget.key} />}
+        />
+      }
+    >
       <BudgetLive id={budget.id} listHref={listHref} />
     </DashboardShell>
   )
