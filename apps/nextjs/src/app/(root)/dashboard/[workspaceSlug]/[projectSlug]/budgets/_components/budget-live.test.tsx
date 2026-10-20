@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { createTRPCClient, httpLink } from "@trpc/client"
-import type { AppRouter } from "@unprice/trpc/routes"
+import type { AppRouter, RouterOutputs } from "@unprice/trpc/routes"
 import { transformer } from "@unprice/trpc/transformer"
 import { renderToString } from "react-dom/server"
 import { describe, expect, it } from "vitest"
@@ -83,7 +83,12 @@ const page: BudgetInspection = {
   },
 }
 
-function render(pages: BudgetInspection[]): string {
+type AuditRow = RouterOutputs["budgets"]["audit"][number]
+
+function render(
+  pages: BudgetInspection[],
+  { canRelease = false, audit = [] }: { canRelease?: boolean; audit?: AuditRow[] } = {}
+): string {
   const queryClient = new QueryClient()
   const trpcClient = createTRPCClient<AppRouter>({
     links: [httpLink({ url: "http://localhost/unused", transformer })],
@@ -92,11 +97,12 @@ function render(pages: BudgetInspection[]): string {
     pages,
     pageParams: pages.map((_, index) => (index === 0 ? null : pages[index - 1]?.expiringNext.next)),
   })
+  queryClient.setQueryData([["budgets", "audit"], { input: { id: "bgt_1" }, type: "query" }], audit)
 
   return renderToString(
     <QueryClientProvider client={queryClient}>
       <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
-        <BudgetLive id="bgt_1" listHref="/ws/proj/budgets" />
+        <BudgetLive id="bgt_1" listHref="/ws/proj/budgets" canRelease={canRelease} />
       </TRPCProvider>
     </QueryClientProvider>
   ).replace(/<!-- -->/g, "")
@@ -115,6 +121,7 @@ describe("BudgetLive", () => {
         "job-991",
         "Scan further",
         "Nothing closed in the last hour.",
+        "No operator actions.",
       ].filter((text) => !html.includes(text))
     ).toEqual([])
   })
@@ -127,5 +134,56 @@ describe("BudgetLive", () => {
       true,
       false,
     ])
+  })
+
+  it("offers Release on an open hold only to a member who may release", () => {
+    expect([
+      render([page]).includes("Release…"),
+      render([page], { canRelease: true }).includes("Release…"),
+    ]).toEqual([false, true])
+  })
+
+  it("lists operator actions with the released amount, status, and reason", () => {
+    const html = render([page], {
+      audit: [
+        {
+          id: "bga_2",
+          budgetId: "bgt_1",
+          action: "release_hold",
+          subject: "h_4790",
+          actorUserId: "usr_1",
+          reason: "worker crashed pre-call",
+          status: "applied",
+          released: "3",
+          createdAt: now,
+          updatedAt: now,
+        },
+        {
+          id: "bga_1",
+          budgetId: "bgt_1",
+          action: "release_hold",
+          subject: "h_4700",
+          actorUserId: "usr_2",
+          reason: "job cancelled before start",
+          status: "rejected",
+          rejectionCode: "HOLD_CLOSED",
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    })
+
+    expect(
+      [
+        "h_4790",
+        "3.00",
+        "applied",
+        "worker crashed pre-call",
+        "usr_1",
+        "h_4700",
+        "rejected (HOLD_CLOSED)",
+      ].filter((text) => !html.includes(text))
+    ).toEqual([])
+    expect(html.includes("No operator actions.")).toBe(false)
   })
 })

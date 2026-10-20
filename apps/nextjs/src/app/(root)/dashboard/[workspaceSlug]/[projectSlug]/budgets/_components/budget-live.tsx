@@ -1,7 +1,8 @@
 "use client"
 
-import { useInfiniteQuery } from "@tanstack/react-query"
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
 import { TRPCClientError } from "@trpc/client"
+import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Badge } from "@unprice/ui/badge"
 import { Button } from "@unprice/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
@@ -22,11 +23,13 @@ import {
 } from "./budget-format"
 import { BudgetNotFound } from "./budget-not-found"
 import { type BudgetInspection, describeOperation } from "./budget-operations"
+import { ReleaseHoldDialog } from "./release-hold-dialog"
 
 type Limit = BudgetInspection["budget"]["balance"]["limits"][number]
 type Reservation = BudgetInspection["expiringNext"]["rows"][number]
 type Period = BudgetInspection["history"][number]
 type Cursor = NonNullable<BudgetInspection["expiringNext"]["next"]>
+type AuditRow = RouterOutputs["budgets"]["audit"][number]
 
 const REFRESH_MS = 30_000
 
@@ -38,7 +41,16 @@ const CURRENT_PERIOD: Record<Limit["window"], string> = {
   never: "in total",
 }
 
-export function BudgetLive({ id, listHref }: { id: string; listHref: string }) {
+export function BudgetLive({
+  id,
+  listHref,
+  canRelease,
+}: {
+  id: string
+  listHref: string
+  /** OWNER and ADMIN may release a stuck hold; the server checks again. */
+  canRelease: boolean
+}) {
   const trpc = useTRPC()
   const client = useTRPCClient()
   const now = useNow(1000)
@@ -145,7 +157,17 @@ export function BudgetLive({ id, listHref }: { id: string; listHref: string }) {
             </TableHeader>
             <TableBody>
               {reservations.map((row) => (
-                <ReservationRow key={`${row.kind}:${row.id}`} row={row} unit={unit} now={now} />
+                <ReservationRow
+                  key={`${row.kind}:${row.id}`}
+                  row={row}
+                  unit={unit}
+                  now={now}
+                  release={
+                    canRelease && row.kind === "hold" ? (
+                      <ReleaseHoldDialog budgetId={id} hold={row} unit={unit} />
+                    ) : null
+                  }
+                />
               ))}
             </TableBody>
           </Table>
@@ -205,11 +227,89 @@ export function BudgetLive({ id, listHref }: { id: string; listHref: string }) {
           </Table>
         )}
       </Section>
+
+      <OperatorActions id={id} unit={unit} />
     </div>
   )
 }
 
-function ReservationRow({ row, unit, now }: { row: Reservation; unit: string; now: number }) {
+function OperatorActions({ id, unit }: { id: string; unit: string }) {
+  const trpc = useTRPC()
+  const { data: rows } = useQuery(trpc.budgets.audit.queryOptions({ id }))
+  const { data: members } = useQuery(trpc.workspaces.listMembersByActiveWorkspace.queryOptions())
+  const actorOf = (userId: string) => {
+    const user = members?.members.find((member) => member.userId === userId)?.user
+    return user?.name ?? user?.email ?? userId
+  }
+
+  return (
+    <Section title="Operator actions">
+      {!rows ? (
+        <Skeleton className="h-12" />
+      ) : rows.length === 0 ? (
+        <Muted>No operator actions.</Muted>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Time</TableHead>
+              <TableHead>Actor</TableHead>
+              <TableHead>Action</TableHead>
+              <TableHead>Hold</TableHead>
+              <TableHead className="text-right">Amount</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Reason</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => (
+              <TableRow key={row.id}>
+                <TableCell className="whitespace-nowrap font-mono text-xs tabular-nums">
+                  {formatDate(row.createdAt, undefined, "MMM d, HH:mm")}
+                </TableCell>
+                <TableCell className="max-w-40 truncate text-xs">
+                  {actorOf(row.actorUserId)}
+                </TableCell>
+                <TableCell className="whitespace-nowrap text-xs">release hold</TableCell>
+                <TableCell className="font-mono text-xs">{row.subject}</TableCell>
+                <TableCell className="whitespace-nowrap text-right font-mono text-xs tabular-nums">
+                  {row.status === "applied" ? formatBudgetAmount(row.released, unit) : "-"}
+                </TableCell>
+                <TableCell className="text-xs">{auditStatus(row)}</TableCell>
+                <TableCell className="max-w-72 truncate text-xs" title={row.reason}>
+                  {row.reason}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+    </Section>
+  )
+}
+
+function auditStatus(row: AuditRow): string {
+  switch (row.status) {
+    case "applied":
+      return "applied"
+    case "requested":
+      return "requested, no answer yet"
+    case "rejected":
+      return `rejected (${row.rejectionCode})`
+  }
+}
+
+function ReservationRow({
+  row,
+  unit,
+  now,
+  release,
+}: {
+  row: Reservation
+  unit: string
+  now: number
+  release: ReactNode
+}) {
   const amount = (value: string) => formatBudgetAmount(value, unit)
   const isHold = row.kind === "hold"
 
@@ -242,8 +342,8 @@ function ReservationRow({ row, unit, now }: { row: Reservation; unit: string; no
           {row.expiresAt > now ? `in ${formatCountdown(row.expiresAt - now)}` : "expiring"}
         </span>
       </TableCell>
-      <TableCell className="text-muted-foreground text-xs">
-        {isHold ? null : "only its holder can return it"}
+      <TableCell className="text-right text-muted-foreground text-xs">
+        {isHold ? release : "only its holder can return it"}
       </TableCell>
     </TableRow>
   )

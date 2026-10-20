@@ -1,4 +1,5 @@
 import { TRPCError } from "@trpc/server"
+import { getSession } from "@unprice/auth/server-rsc"
 import type { BudgetCatalogRow } from "@unprice/db/validators"
 import { Typography } from "@unprice/ui/typography"
 import type { ReactNode } from "react"
@@ -18,10 +19,14 @@ export default async function BudgetPage(props: {
 }) {
   const { workspaceSlug, projectSlug, budgetId } = await props.params
   const listHref = `/${workspaceSlug}/${projectSlug}/budgets`
-  const budget = await api.budgets.get({ id: budgetId }).catch((error: unknown) => {
-    if (error instanceof TRPCError && error.code === "NOT_FOUND") return null
-    throw error
-  })
+  const [budget, session] = await Promise.all([
+    api.budgets.get({ id: budgetId }).catch((error: unknown) => {
+      if (error instanceof TRPCError && error.code === "NOT_FOUND") return null
+      throw error
+    }),
+    getSession(),
+  ])
+  const role = session?.user.workspaces.find((workspace) => workspace.slug === workspaceSlug)?.role
 
   if (!budget) {
     return (
@@ -40,7 +45,11 @@ export default async function BudgetPage(props: {
         />
       }
     >
-      <BudgetLive id={budget.id} listHref={listHref} />
+      <BudgetLive
+        id={budget.id}
+        listHref={listHref}
+        canRelease={role === "OWNER" || role === "ADMIN"}
+      />
     </DashboardShell>
   )
 }
