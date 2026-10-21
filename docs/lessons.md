@@ -1031,6 +1031,7 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   screenshots (IO never fires in stitched captures) and very tall fullPage shots can duplicate
   the first viewport at the bottom; verify with stepped real scrolling + per-section viewport
   shots instead.
+- 2026-10-21: The main landing animation comes from `~/repos/tutorials/unprice-spend-authorization`. Export 720p H.264 with `preload="none"`; files under `public/videos/spend-authorization/` have immutable caching, so regenerate content hashes and update `demo-video.ts` when replacing them.
 - 2026-07-13: A `curl --max-time 5` timeout against :3000 does not mean the port is free — the
   user's dev server may be cold-compiling. If `next dev` reports "Port 3000 in use, trying
   3001", the :3000 owner is another server; verify against the one serving the working tree.

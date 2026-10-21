@@ -2,7 +2,6 @@ import { buttonVariants } from "@unprice/ui/button"
 import { cn } from "@unprice/ui/utils"
 import Balancer from "react-wrap-balancer"
 import { AcquisitionLink } from "./acquisition-link"
-import { hasDemoVideo } from "./demo-video"
 import { MoneyPath } from "./money-path"
 import { ProofLink } from "./proof-link"
 
@@ -46,15 +45,12 @@ export default function Hero() {
             >
               Start with one agent action
             </AcquisitionLink>
-            {/* Label follows the artifact. Offering to play a recording that
-                does not exist yet is the fastest way to read as a shell — and
-                it was, to every reader who clicked it. */}
             <ProofLink
               source="hero_demo"
               href="#demo"
               className={cn(buttonVariants({ variant: "outline" }))}
             >
-              {hasDemoVideo ? "Watch it deny a request" : "Check the proof"}
+              Watch how it works
             </ProofLink>
           </div>
           <p className="mt-3.5 font-mono text-[11px] text-background-text">

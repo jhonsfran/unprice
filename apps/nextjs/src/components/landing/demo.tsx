@@ -1,21 +1,10 @@
 import { cn, focusRing } from "@unprice/ui/utils"
-import { ArrowRight, Play } from "lucide-react"
+import { ArrowRight } from "lucide-react"
 import { siteConfig } from "~/constants/layout"
 import { DEMO_VIDEO } from "./demo-video"
 import { ProofLink } from "./proof-link"
 import { LedgerRow, SectionShell } from "./station"
 import { StationHeader } from "./station-header"
-
-// Station 03 exists because every other artifact on this page is drawn by us.
-// The diagram above is a claim about what the runtime does; this station is
-// where that claim gets checked by someone who does not trust us yet.
-//
-// The recording is the eventual centrepiece, but it is not the only proof and
-// it must not be the only thing here — a station whose entire content is a
-// "coming soon" frame reads as a shell, and the one reader who dug into the
-// repo trusted a concurrency test more than anything on the page. So the
-// receipts that are true and clickable *today* lead, and the video slots in
-// above them when it lands. Configuration lives in demo-video.ts.
 
 const REPO_URL = siteConfig.links.github
 const DO_TEST_PATH = "apps/api/src/ingestion/entitlements/EntitlementWindowDO.workers.test.ts"
@@ -58,67 +47,50 @@ const receipts = [
   },
 ]
 
-// What the recording shows, in order — the same five moments the reader just
-// watched as a diagram, done once, unedited, against a real Sandbox project.
 const shotList = [
-  { label: "01", fact: "one plan version · created in the dashboard" },
-  { label: "02", fact: "reservations.reserve · $0.10 held" },
-  { label: "03", fact: "generateText · only after the allow" },
-  { label: "04", fact: "reservation.settle · actual tokens" },
-  { label: "05", fact: "unused budget released · record kept" },
+  { label: "01", fact: "one customer · a $1.00 budget" },
+  { label: "02", fact: "$0.60 reserved before the provider call" },
+  { label: "03", fact: "$0.40 settled as actual spend" },
+  { label: "04", fact: "$0.20 released · $0.60 available again" },
+  { label: "05", fact: "$0.80 request denied · no provider call" },
 ]
 
 function VideoBlock() {
-  if (DEMO_VIDEO) {
-    return (
-      <figure className="w-full max-w-3xl rounded-lg border border-background-border bg-surface-raised p-4 shadow-ambient sm:p-5">
-        <figcaption className="mb-4 flex items-baseline justify-between gap-4 border-background-border border-b pb-3">
-          <span className="font-mono text-background-text text-xs uppercase tracking-widest">
-            One agent action · one afternoon
-          </span>
-          <span className="whitespace-nowrap font-mono text-[10px] text-background-text">
-            sandbox · no processor
-          </span>
-        </figcaption>
-        <video
-          aria-label="Unprice reservation and settlement demo"
-          controls
-          preload="none"
-          poster={DEMO_VIDEO.poster}
-          src={DEMO_VIDEO.src}
-          className="aspect-video w-full rounded-sm bg-background-bg"
-        >
-          <track kind="captions" src={DEMO_VIDEO.captions} srcLang="en" label="English" default />
-        </video>
-        <div className="mt-4 flex flex-col border-background-border border-t pt-2">
-          {shotList.map((row) => (
-            <LedgerRow
-              key={row.fact}
-              label={row.label}
-              variant="ghost"
-              fact={row.fact}
-              labelClassName="font-mono text-xs"
-            />
-          ))}
-        </div>
-      </figure>
-    )
-  }
-
-  // No recording yet: say so in one quiet line rather than building a station
-  // around an empty player. The receipts below are the proof until it lands.
   return (
-    <div className="flex w-full max-w-3xl items-baseline gap-3 rounded-lg border border-background-border border-dashed px-4 py-3">
-      <span
-        aria-hidden
-        className="flex size-5 shrink-0 items-center justify-center self-center rounded-full border border-background-borderHover"
+    <figure className="w-full max-w-3xl rounded-lg border border-background-border bg-surface-raised p-4 shadow-ambient sm:p-5">
+      <figcaption className="mb-4 flex flex-wrap items-baseline justify-between gap-2 border-background-border border-b pb-3">
+        <span className="font-mono text-background-text text-xs uppercase tracking-widest">
+          How spend authorization works
+        </span>
+        <span className="whitespace-nowrap font-mono text-[10px] text-background-text">
+          34 seconds · animated example
+        </span>
+      </figcaption>
+      <video
+        aria-label="How Unprice spend authorization works, an animated example"
+        controls
+        playsInline
+        preload="none"
+        width={1280}
+        height={720}
+        poster={DEMO_VIDEO.poster}
+        src={DEMO_VIDEO.src}
+        className="aspect-video w-full rounded-sm bg-background-bg"
       >
-        <Play className="size-2.5 translate-x-px text-background-text" />
-      </span>
-      <p className="text-background-text text-sm leading-6">
-        There&apos;s no walkthrough video yet. You can check everything below without an account.
-      </p>
-    </div>
+        <track kind="captions" src={DEMO_VIDEO.captions} srcLang="en" label="English" default />
+      </video>
+      <div className="mt-4 flex flex-col border-background-border border-t pt-2">
+        {shotList.map((row) => (
+          <LedgerRow
+            key={row.fact}
+            label={row.label}
+            variant="ghost"
+            fact={row.fact}
+            labelClassName="font-mono text-xs"
+          />
+        ))}
+      </div>
+    </figure>
   )
 }
 
@@ -131,11 +103,11 @@ export function DemoSection() {
           id="demo-title"
           className="mt-6 max-w-2xl font-primary text-background-textContrast text-display-3"
         >
-          Read the proof.
+          Watch the explanation. Read the proof.
         </h2>
         <p className="mt-5 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-          Don&apos;t take our diagram on trust. Read the tests, run the benchmark, and read the
-          source.
+          The animation explains reservation, settlement, and denial. Check the implementation with
+          the tests, benchmark, and source below.
         </p>
       </div>
 
