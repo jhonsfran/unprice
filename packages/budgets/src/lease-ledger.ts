@@ -162,6 +162,11 @@ export class LeaseLedger {
     return this.granted - this.held - this.consumed
   }
 
+  spendable(now: number): Units {
+    this.expire(now)
+    return this.admit(ZERO, now) === null ? this.available() : ZERO
+  }
+
   /** Consumption the server has not acknowledged yet. */
   dirty(): boolean {
     return this.consumed !== this.acked.captured

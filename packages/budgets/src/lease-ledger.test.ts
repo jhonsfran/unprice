@@ -66,6 +66,29 @@ describe("LeaseLedger holds", () => {
     return decision.value.hold
   }
 
+  it("reports only capacity usable by the current lease", () => {
+    const ledger = new LeaseLedger(grant(), 0)
+    expect(fromUnits(ledger.spendable(0))).toBe("1")
+    authorized(ledger, "0.4", "held")
+    expect(fromUnits(ledger.spendable(1))).toBe("0.6")
+    expect(fromUnits(ledger.spendable(DEFAULT_HOLD_TTL_MS))).toBe("0.6")
+    expect(ledger.totals().held).toBe(ZERO)
+    expect(fromUnits(ledger.totals().consumed)).toBe("0.4")
+    expect(fromUnits(ledger.spendable(LEASE_TTL_MS))).toBe("0")
+  })
+
+  it("reports no usable capacity after budget closure or lease retirement", () => {
+    const ledger = new LeaseLedger(grant({ terms: { ...terms, closesAt: 100 } }), 0)
+    expect(fromUnits(ledger.spendable(99))).toBe("1")
+    expect(fromUnits(ledger.spendable(100))).toBe("0")
+    const closing = new LeaseLedger(grant(), 0)
+    closing.freeze({ final: true, extend: ZERO }, 1)
+    expect(fromUnits(closing.spendable(1))).toBe("0")
+    const retired = new LeaseLedger(grant(), 0)
+    retired.retire()
+    expect(fromUnits(retired.spendable(1))).toBe("0")
+  })
+
   it("settles at most the authorized amount and returns the rest", () => {
     const ledger = new LeaseLedger(grant(), 0)
     const hold = authorized(ledger, "0.4", "a")

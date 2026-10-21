@@ -107,7 +107,10 @@ type LeaseSettings = Readonly<{
   idleMs: number
 }>
 
-type Shell = Pick<LocalBudgetHandle, "authorize" | "charge" | "flush" | "close"> & {
+type Shell = Pick<
+  LocalBudgetHandle,
+  "authorize" | "charge" | "flush" | "close" | "spendableAmount"
+> & {
   readonly settings: LeaseSettings
 }
 
@@ -182,6 +185,9 @@ export const createLocalLeases = ({
     return {
       key,
       mode: "local",
+      get spendableAmount() {
+        return shells.get(key)?.spendableAmount
+      },
       authorize,
       charge,
       record: remote.record,
@@ -521,6 +527,9 @@ const createShell = ({
 
   return {
     settings,
+    get spendableAmount() {
+      return epoch.phase === "open" ? fromUnits(epoch.lease.ledger.spendable(now())) : undefined
+    },
     authorize: tracked(authorize),
     charge: tracked(charge),
     flush,

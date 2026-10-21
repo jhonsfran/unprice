@@ -126,6 +126,8 @@ export type SpendBudgetInput = {
 
 export type BudgetHandle = {
   readonly key: string
+  /** Immediate usable capacity of a local lease. Authorization remains authoritative. */
+  readonly spendableAmount?: string | undefined
   /** A limit denial is `{ allowed: false }`. When Unprice cannot be reached, the denial is `degraded`. */
   authorize(input: AuthorizeBudgetInput): Promise<ApiResult<BudgetAuthorization>>
   charge(input: ChargeBudgetInput): Promise<ApiResult<BudgetCharge>>
