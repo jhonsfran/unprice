@@ -13,7 +13,7 @@ import type { Cache } from "@unprice/services/cache"
 import type { Metrics } from "@unprice/services/metrics"
 import { fromZonedTime, toZonedTime } from "date-fns-tz"
 
-import type { Database } from "@unprice/db"
+import type { Database, HttpDatabase } from "@unprice/db"
 import { and, count, eq, getTableColumns, ilike, inArray, isNull } from "@unprice/db"
 import { apikeys } from "@unprice/db/schema"
 import { withDateFilters, withPagination } from "@unprice/db/utils"
@@ -49,12 +49,18 @@ export class ApiKeysService {
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private readonly waitUntil: (promise: Promise<any>) => void
   private readonly db: Database
+  private readonly httpDb: HttpDatabase | null
   constructor(opts: {
     cache: Cache
     metrics: Metrics
     analytics: Analytics
     logger: Logger
     db: Database
+    /**
+     * Optional Neon HTTP client on the primary database. When set, the uncached key lookup and
+     * the lastUsed update use it, so verifying a key does not open a WebSocket connection.
+     */
+    httpDb?: HttpDatabase | null
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
     waitUntil: (promise: Promise<any>) => void
     hashCache: Map<string, string>
@@ -64,6 +70,7 @@ export class ApiKeysService {
     this.analytics = opts.analytics
     this.logger = opts.logger
     this.db = opts.db
+    this.httpDb = opts.httpDb ?? null
     this.waitUntil = opts.waitUntil
     this.hashCache = opts.hashCache
   }
@@ -398,12 +405,24 @@ export class ApiKeysService {
     return "$primary" in this.db ? (this.db.$primary as Database) : this.db
   }
 
+  /**
+   * The connection for the key lookup. The HTTP client (when configured) always reads the primary
+   * with one HTTPS request and no connection handshake, so it serves both the regular cache miss
+   * and the primary read.
+   */
+  private keyLookupDb(opts?: { primary?: boolean }): Database | HttpDatabase {
+    if (this.httpDb) {
+      return this.httpDb
+    }
+    return opts?.primary ? this.primaryDb : this.db
+  }
+
   private async getData(
     keyHash: string,
     projectId?: string,
     opts?: { primary?: boolean }
   ): Promise<ApiKeyExtended | null> {
-    const db = opts?.primary ? this.primaryDb : this.db
+    const db = this.keyLookupDb(opts)
     const data = await db.query.apikeys.findFirst({
       with: {
         project: {
@@ -454,13 +473,12 @@ export class ApiKeysService {
     // update last used at
     // this is not awaited to avoid blocking the request
     // also this is updated only when the apikey is fetched from the db
+    const lastUsedWhere = and(eq(apikeys.id, data.id), eq(apikeys.projectId, data.projectId))
+    const lastUsed = Date.now()
     this.waitUntil(
-      this.db
-        .update(apikeys)
-        .set({
-          lastUsed: Date.now(),
-        })
-        .where(and(eq(apikeys.id, data.id), eq(apikeys.projectId, data.projectId)))
+      this.httpDb
+        ? this.httpDb.update(apikeys).set({ lastUsed }).where(lastUsedWhere)
+        : this.db.update(apikeys).set({ lastUsed }).where(lastUsedWhere)
     )
 
     return data
@@ -523,7 +541,9 @@ export class ApiKeysService {
       // A missing key is not stable enough to cache. The key can be created after
       // this lookup, and a prior database failure may have left a negative entry
       // in a shared cache.
-      await this.cache.apiKeyByHash.remove(keyHash)
+      // Not awaited: the answer is NOT_FOUND either way, and the Cloudflare store's remove is a
+      // cache delete plus a purge API call that should not add latency to the response.
+      this.waitUntil(this.cache.apiKeyByHash.remove(keyHash))
       return Err(
         new UnPriceApiKeyError({
           code: "NOT_FOUND",
@@ -548,7 +568,10 @@ export class ApiKeysService {
         })
 
         retriedWithoutCache = true
-        await this.cache.apiKeyByHash.remove(await this.hash(req.key))
+        // The retry below reads with skipCache, which neither reads nor writes the cache, so it
+        // does not need to wait for the eviction. Evict in the background so the next request
+        // does not hit the bad entry.
+        this.waitUntil(this.cache.apiKeyByHash.remove(await this.hash(req.key)))
         return await this.getApiKey(
           {
             key,
