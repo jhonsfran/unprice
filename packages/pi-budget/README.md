@@ -1,7 +1,8 @@
 # Unprice budgets for Pi
 
-This package provides `withUnpriceBudget`. It wraps a Pi AI
-provider before registration with `createModels`. The same provider handles Pi
+This package provides `withUnpriceBudget` and `withUnpriceTool`.
+`withUnpriceBudget` wraps a Pi AI provider before registration with `createModels`.
+The same provider handles Pi
 Durable generation, tool loops, child conversations, and compaction.
 
 Install `@unprice/pi-budget` with Pi AI 1.3.0 or later. Before publication, build and pack it from the Unprice workspace and install its local archive. The shared `@unprice/budgets-ai` package must also be installed from its archive during local testing.
@@ -37,15 +38,53 @@ can omit this callback and await the returned provider stream or harness work.
 | ----------------- | ------------------------------------------------------------------------------------------------------ |
 | `getBudget`       | Returns the budget handle for each model call, directly or asynchronously.                             |
 | `waitUntil`       | Optional host callback that keeps the call lifecycle alive.                                            |
-| `maxOutputTokens` | Maximum output allowance. Defaults to 4096 and must be an integer of at least 16.                      |
-| `budgetTimeoutMs` | Deadline for budget resolution and authorization, and separately for settlement. Defaults to 10000 ms. |
+| `maxOutputTokens` | Requested output ceiling. Defaults to 4096. Model limits and available funds can reduce it.            |
+| `budgetTimeoutMs` | Shared admission deadline and separate settlement deadline. Defaults to 10000 ms.                       |
 | `onSettleError`   | Receives `BudgetSettleError` for recovery. The terminal stream event waits for an asynchronous callback. |
+
+## Priced tools
+
+Install Pi Durable 1.3.0 or later to wrap a tool registration. Declare its fixed
+price once. The wrapper charges before execution and records that fee in Pi's
+native tool usage.
+
+```ts
+import { withUnpriceTool } from "@unprice/pi-budget/tools";
+
+const weather = withUnpriceTool(weatherTool, {
+  amount: 0.01,
+  getBudget: () => unprice.budget(customerBudgetKey),
+  sessionId: stableSessionId,
+});
+```
+
+Register `weather` in the Harness registry and the agent's tools. Return a remote
+budget handle from `getBudget`. Local handles are rejected because their charge
+deduplication ends with the lease. The provider wrapper can still use local handles
+for the same budget key. Amounts are in USD and accept numbers or
+decimal strings. No token counters or usage object are needed in application code.
+
+`sessionId` identifies the Harness storage. Keep it stable across restarts and
+distinct across sessions that share a budget. The charge key combines it with
+Pi's task ID. Replaying a task reuses its charge; a new task pays the fee again.
+The wrapper preserves the tool's schema, replay policy, output, and details.
+It adds the fee to any existing `usage.cost.total` without changing token counts.
+It charges only the fixed fee, not costs already reported by the tool.
+
+A denied or failed charge blocks execution. The fee pays for an execution attempt
+and is not refunded if the tool fails. A returned error result includes the fee
+in its usage. Thrown errors propagate; they do not return a tool usage result.
+Budget clients should set their own HTTP timeout, as in the provider example.
 
 ## Supported requests
 
 This version supports OpenAI Responses, Anthropic Messages, and Gemini Developer API with explicit text transcripts and local function tools. Wrap `openaiProvider()`, `anthropicProvider()`, or `googleProvider()` with the same decorator. Unsupported APIs, media, hosted operations, model fallback, explicit Gemini caches, and one-hour Anthropic cache writes fail before generation.
 
-Every protocol reserves the byte bound of the final request body at the model's highest input rate, plus the output cap at its output rate; no count request goes to the provider. Byte-level tokenizers never emit more tokens than bytes, so the hold covers the step. Model limits and prices come from Pi's own model definitions (`model.cost`, `model.contextWindow`, `model.maxTokens`), including context tiers and cache writes, and must match the endpoint. The output cap includes thinking tokens. Anthropic error or cancellation uses the full hold because Pi can report input usage before final output usage is available.
+Model limits and prices come from Pi's own model definitions (`model.cost`, `model.contextWindow`, `model.maxTokens`), including context tiers and cache writes, and must match the endpoint. The shared SDK prices the final request's byte bound at the highest reachable rates. A context tier above the input bound cannot inflate the hold. The output allowance includes thinking tokens.
+
+A funded call sends no provider count request. After a definite limit denial, OpenAI Responses can refine its input with one accurate provider count. Count failures retain the byte bound. Anthropic and Gemini keep their byte bounds because their count endpoints provide estimates. The SDK selects the largest legal output allowance that fits and authorizes the final amount before generation. Every call still sends at most one generation request.
+
+Applications provide the model and budget handle. They do not supply token counts or per-call cost estimates. `maxOutputTokens` is a ceiling, so low funds can produce a shorter or truncated answer. Native Pi usage and finish reasons describe the result. Anthropic enabled thinking retains its minimum allowance. Anthropic error or cancellation uses the full hold because Pi can report input usage before final output usage is available.
 
 Recent Pi Anthropic models can enable fallback models or inline tool changes by default. These requests are rejected. For a single-model request with ordinary local tools, configure the model with `compat: { ...model.compat, allowedFallbackModels: [], supportsMidConvoToolChanges: false }` before calling it. This keeps those provider features off explicitly.
 
@@ -53,7 +92,7 @@ Pi 1.3 rejects a custom Google fetch transport. The adapter therefore uses Pi's 
 provider retries, a two-minute deadline, and a five-minute budget hold.
 Policy runs after the caller's payload transform so Pi selects the correct stream parser. The shared request boundary then verifies the final serialized body. Both stages preserve smaller output allowances from Pi or the caller. The bound is computed on the same final request body that is sent.
 
-Budget resolution and authorization share a ten-second deadline and stop waiting
+Budget resolution, count refinement, and authorization share a ten-second deadline and stop waiting
 when the caller cancels. Settlement has its own ten-second deadline and continues
 after caller cancellation. Set `budgetTimeoutMs` to change these operation limits.
 The example's Unprice client also aborts each HTTP attempt after ten seconds.
@@ -93,9 +132,10 @@ callback failure rejects the lifecycle promise passed to `waitUntil`; the Pi
 stream still ends with its settlement error. Without `waitUntil`, that terminal
 error completes the call and the callback rejection is handled by the adapter.
 
-The adapter has no Cloudflare or Pi Durable dependency. Its implementation uses
-Pi AI's public provider contract. It is a provider decorator, not a Pi Durable
-extension hook or a built-in middleware registrar.
+The provider wrapper uses Pi AI's public provider contract. The tool wrapper uses
+Pi Durable's public tool contract through a type-only import in `@unprice/pi-budget/tools`.
+Pi Durable is an optional peer dependency. The root export does not require its
+type declarations. Neither wrapper imports Cloudflare runtime code.
 
 The shared request policy and budget lifecycle live in `@unprice/budgets-ai`. This adapter only converts Pi requests, stream events, and reported USD cost.
 
