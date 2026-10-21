@@ -45,7 +45,7 @@ packageExtensionsChecksum: sha256-BILu7VNxhpZi2koRCs8jyj4Cgug2OcdcDyIE65vaQw0=
 
 patchedDependencies:
   '@unkey/cache@1.5.0':
-    hash: 68046bdd0587c556d17790f6c9240318e7cb0fe72aa6ead8669a36860584bb1a
+    hash: 79e6e5284a92d0140ee67a7c7cfbb93439931fd35a712c60c28db531b26255c5
     path: patches/@unkey__cache@1.5.0.patch
 
 importers:
@@ -108,7 +108,7 @@ importers:
         version: 0.12.0(typescript@5.9.3)(zod@3.25.76)
       '@unkey/cache':
         specifier: ^1.5.0
-        version: 1.5.0(patch_hash=68046bdd0587c556d17790f6c9240318e7cb0fe72aa6ead8669a36860584bb1a)
+        version: 1.5.0(patch_hash=79e6e5284a92d0140ee67a7c7cfbb93439931fd35a712c60c28db531b26255c5)
       '@unprice/analytics':
         specifier: workspace:^
         version: link:../../internal/analytics
@@ -848,7 +848,7 @@ importers:
         version: 0.12.0(typescript@5.9.3)(zod@3.25.76)
       '@unkey/cache':
         specifier: ^1.5.0
-        version: 1.5.0(patch_hash=68046bdd0587c556d17790f6c9240318e7cb0fe72aa6ead8669a36860584bb1a)
+        version: 1.5.0(patch_hash=79e6e5284a92d0140ee67a7c7cfbb93439931fd35a712c60c28db531b26255c5)
       '@unprice/analytics':
         specifier: workspace:^
         version: link:../analytics
@@ -943,7 +943,7 @@ importers:
         version: 11.5.0(typescript@5.9.3)
       '@unkey/cache':
         specifier: ^1.5.0
-        version: 1.5.0(patch_hash=68046bdd0587c556d17790f6c9240318e7cb0fe72aa6ead8669a36860584bb1a)
+        version: 1.5.0(patch_hash=79e6e5284a92d0140ee67a7c7cfbb93439931fd35a712c60c28db531b26255c5)
       '@unprice/analytics':
         specifier: workspace:^
         version: link:../analytics
@@ -17856,7 +17856,7 @@ snapshots:
       hookable: 5.5.3
       zhead: 2.2.4
 
-  '@unkey/cache@1.5.0(patch_hash=68046bdd0587c556d17790f6c9240318e7cb0fe72aa6ead8669a36860584bb1a)':
+  '@unkey/cache@1.5.0(patch_hash=79e6e5284a92d0140ee67a7c7cfbb93439931fd35a712c60c28db531b26255c5)':
     dependencies:
       '@opentelemetry/api': 1.8.0
       '@unkey/error': 0.2.0

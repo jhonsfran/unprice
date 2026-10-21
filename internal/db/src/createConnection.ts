@@ -1,9 +1,10 @@
-import { Pool, neonConfig } from "@neondatabase/serverless"
+import { Pool, neon, neonConfig } from "@neondatabase/serverless"
 import type { Logger } from "drizzle-orm"
+import { drizzle as drizzleNeonHttp } from "drizzle-orm/neon-http"
 import { drizzle as drizzleNeon } from "drizzle-orm/neon-serverless"
 import { withReplicas } from "drizzle-orm/pg-core"
 import ws from "ws"
-import type { Database } from "."
+import type { Database, HttpDatabase } from "."
 import * as schema from "./schema"
 
 export type ConnectionDatabaseOptions = {
@@ -112,9 +113,18 @@ export function createConnection(opts: ConnectionDatabaseOptions): Database {
     // Only create read replicas if URLs are provided and in production
     // This avoids creating unnecessary Pool connections with undefined connectionStrings
     if (opts.env === "production" && opts.read1DatabaseUrl && opts.read2DatabaseUrl) {
+      // Fail fast when a replica cannot be reached, and log idle client errors instead of
+      // letting them surface as unhandled errors.
+      const replicaPoolConfig = {
+        connectionTimeoutMillis: 5000,
+      }
+
       const read1 = drizzleNeon(
         new Pool({
+          ...replicaPoolConfig,
           connectionString: opts.read1DatabaseUrl,
+        }).on("error", (err: unknown) => {
+          console.error("Database read1 replica error:", err)
         }),
         {
           schema: schema,
@@ -123,7 +133,10 @@ export function createConnection(opts: ConnectionDatabaseOptions): Database {
 
       const read2 = drizzleNeon(
         new Pool({
+          ...replicaPoolConfig,
           connectionString: opts.read2DatabaseUrl,
+        }).on("error", (err: unknown) => {
+          console.error("Database read2 replica error:", err)
         }),
         {
           schema: schema,
@@ -191,4 +204,49 @@ export function createConnection(opts: ConnectionDatabaseOptions): Database {
   }
 
   return proxy as Database
+}
+
+// Module-level cache for HTTP connections, keyed by connection string and logger flag.
+// Building a drizzle instance walks the whole schema to extract relations, so reuse it across
+// requests in the same isolate. The HTTP client itself holds no open connection.
+const httpConnections = new Map<string, HttpDatabase>()
+
+export type HttpConnectionOptions = Pick<
+  ConnectionDatabaseOptions,
+  "env" | "primaryDatabaseUrl" | "logger"
+>
+
+/**
+ * Creates a Drizzle client over the Neon HTTP driver (`neon()` + `drizzle-orm/neon-http`).
+ *
+ * Every query is a single HTTPS request, so there is no WebSocket upgrade or Postgres
+ * startup/auth handshake per request. Use it for short, latency sensitive, single statement
+ * work on hot paths (for example the uncached API key lookup). It does not support interactive
+ * transactions; keep transactions on `createConnection`.
+ *
+ * It always targets the primary database, so a row written just before (for example a newly
+ * created API key) is visible.
+ *
+ * Returns `null` in development: the local docker setup only runs the Neon WebSocket proxy, which
+ * has no HTTP `/sql` endpoint. Callers should fall back to `createConnection` in that case.
+ */
+export function createHttpConnection(opts: HttpConnectionOptions): HttpDatabase | null {
+  if (opts.env === "development" || !opts.primaryDatabaseUrl) {
+    return null
+  }
+
+  const cacheKey = `${opts.logger ? "1" : "0"}:${opts.primaryDatabaseUrl}`
+  const cached = httpConnections.get(cacheKey)
+  if (cached) {
+    return cached
+  }
+
+  const httpDb = drizzleNeonHttp(neon(opts.primaryDatabaseUrl), {
+    schema: schema,
+    logger: opts.logger ? new MyLogger() : undefined,
+  })
+
+  httpConnections.set(cacheKey, httpDb)
+
+  return httpDb
 }
