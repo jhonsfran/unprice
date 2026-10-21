@@ -75,7 +75,12 @@ function responseStream(reply: Reply, sequence: number): Response {
   })
 }
 
-async function fixture(replies: Reply[], tools: ToolRegistration[] = [], missingOwner = false) {
+async function fixture(
+  replies: Reply[],
+  tools: ToolRegistration[] = [],
+  missingOwner = false,
+  capacity?: string
+) {
   const order: string[] = []
   const budgetRequests: BudgetRequest[] = []
   const providerPayloads: Record<string, unknown>[] = []
@@ -91,7 +96,7 @@ async function fixture(replies: Reply[], tools: ToolRegistration[] = [], missing
       budgetRequests.push({ path, body })
       if (path.endsWith("/authorize")) {
         order.push("authorize")
-        if (deny)
+        if (deny || (capacity !== undefined && Number(body.amount) > Number(capacity)))
           return Response.json(
             {
               error: {
@@ -104,12 +109,12 @@ async function fixture(replies: Reply[], tools: ToolRegistration[] = [], missing
                   blocked: {
                     limitId: "day",
                     window: "day",
-                    remaining: "0",
+                    remaining: capacity ?? "0",
                     held: "0",
                     resetsAt: Date.now() + 1000,
                     remedy: "wait_for_reset",
                   },
-                  balance: { remaining: "0", held: "0", limits: [] },
+                  balance: { remaining: capacity ?? "0", held: "0", limits: [] },
                 },
               },
             },
@@ -206,6 +211,35 @@ async function ask(conversation: ConversationHandle, content: string) {
 }
 
 describe("Unprice budget through Pi AI and Pi Durable", () => {
+  it("counts and shrinks a denied request through the native provider", async () => {
+    const test = await fixture([{ text: "Affordable reply" }], [], false, "0.001")
+    try {
+      const message = await test.models.complete(model, {
+        messages: [{ role: "user", content: "Hello", timestamp: 0 }],
+      })
+      expect(message).toMatchObject({
+        stopReason: "stop",
+        content: [{ type: "text", text: "Affordable reply" }],
+      })
+      expect(test.order).toEqual(["authorize", "count", "authorize", "generate", "settle"])
+      expect(test.providerPayloads).toHaveLength(1)
+      expect(test.providerPayloads[0]).toMatchObject({
+        model: "budget-harness",
+        max_output_tokens: 487,
+        stream: true,
+      })
+      expect(
+        test.budgetRequests.filter((request) => request.path.endsWith("/authorize")).at(-1)?.body
+          .amount
+      ).toBe("0.000999")
+      expect(
+        test.budgetRequests.filter((request) => request.path.endsWith("/settle"))
+      ).toHaveLength(1)
+    } finally {
+      await test.harness.close(context)
+    }
+  })
+
   it.each(["stream", "streamSimple", "complete", "completeSimple"] as const)(
     "gates Models.%s through the actual OpenAI adapter",
     async (method) => {

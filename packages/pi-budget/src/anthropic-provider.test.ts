@@ -80,10 +80,7 @@ function hold(
   )
   const outputRate = Math.max(...rates.map((rate) => rate.output))
   const bound = inputBound(text, messages) + (Array.isArray(body.tools) ? 1024 : 0)
-  return (
-    Math.ceil(((bound * inputRate + outputTokens * outputRate) / 1_000_000) * 100_000_000) /
-    100_000_000
-  )
+  return Math.ceil((bound * inputRate + outputTokens * outputRate) * 100) / 100_000_000
 }
 
 function fixture(

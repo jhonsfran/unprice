@@ -1,6 +1,6 @@
 import { BudgetSettleError, Unprice } from "@unprice/budgets"
 import { describe, expect, it, vi } from "vitest"
-import { type BudgetSessionOptions, createBudgetSession, usageCost } from "./index"
+import { type BudgetSessionOptions, createBudgetSession, maximumCost, usageCost } from "./index"
 
 const pricing = { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.25 }
 const limits = { context: 1_000_000, output: 4096 }
@@ -456,4 +456,37 @@ describe("pricing tier configuration", () => {
       ).toThrow("threshold")
     }
   )
+})
+
+describe("reachable reservation prices", () => {
+  const rates = { input: 0.125, output: 0.5, cacheRead: 0.0125, cacheWrite: 0.125 }
+  const tiered = {
+    ...rates,
+    tiers: [
+      { inputTokensAbove: 272_000, input: 0.25, output: 0.75, cacheRead: 0.025, cacheWrite: 0.25 },
+    ],
+  }
+  it("reserves the screenshot request at reachable prices", () => {
+    expect(maximumCost(tiered, 21_831, 4096)).toBe(0.00477688)
+  })
+  it("uses strict tier thresholds", () => {
+    expect(maximumCost(tiered, 272_000, 16)).toBe(0.034008)
+    expect(maximumCost(tiered, 272_001, 16)).toBe(0.06801225)
+  })
+  it("keeps all reachable rates when tiers are unordered or decrease", () => {
+    expect(
+      maximumCost(
+        {
+          ...rates,
+          tiers: [
+            { ...rates, inputTokensAbove: 1000, output: 100 },
+            { ...rates, inputTokensAbove: 100, input: 2, output: 3 },
+            { ...rates, inputTokensAbove: 200, input: 1, output: 1 },
+          ],
+        },
+        300,
+        16
+      )
+    ).toBe(0.000648)
+  })
 })

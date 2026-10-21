@@ -108,6 +108,9 @@ export function prepareRequest(
     payload: generation,
     body: JSON.stringify(generation),
     outputTokens,
+    minimumOutputTokens: 16,
+    outputBytes: (tokens) => String(tokens).length,
+    withOutputTokens: (tokens) => ({ ...generation, max_output_tokens: tokens }),
     messages,
     tools: Array.isArray(payload.tools) && payload.tools.length > 0,
   }

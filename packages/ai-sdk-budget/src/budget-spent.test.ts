@@ -37,9 +37,11 @@ const toolCall = (index: number) =>
   })
 
 /** The remaining balance each settle answers with, in order; the budget runs dry on the second. */
-function harness(remaining: readonly string[], maxOutputTokens = 16) {
+function harness(remaining: readonly string[], maxOutputTokens = 16, enforceAdmission = false) {
   const authorized: string[] = []
   let settles = 0
+  const dispatchedCaps: number[] = []
+  let counts = 0
   const balanceAt = (index: number) => ({
     remaining: remaining[Math.min(index, remaining.length - 1)] ?? "0",
     held: "0",
@@ -56,6 +58,31 @@ function harness(remaining: readonly string[], maxOutputTokens = 16) {
       const body = (await request.json()) as Record<string, string>
       if (url.pathname === "/v1/budgets/authorize") {
         authorized.push(body.idempotencyKey ?? "")
+        if (enforceAdmission && Number(body.amount) > Number(balanceAt(settles).remaining)) {
+          return json(
+            {
+              error: {
+                code: "BUDGET_EXCEEDED",
+                message: "limit",
+                docs: "",
+                requestId: "test",
+                details: {
+                  kind: "budget_exceeded",
+                  balance: balanceAt(settles),
+                  blocked: {
+                    limitId: "day",
+                    window: "day",
+                    remaining: balanceAt(settles).remaining,
+                    held: "0",
+                    resetsAt: 1,
+                    remedy: "wait_for_reset",
+                  },
+                },
+              },
+            },
+            409
+          )
+        }
         return json({
           allowed: true,
           holdId: `h_${authorized.length}`,
@@ -84,8 +111,13 @@ function harness(remaining: readonly string[], maxOutputTokens = 16) {
   let generation = 0
   const providerFetch: typeof fetch = async (input, init) => {
     const request = new Request(input, init)
+    if (request.url.includes("input_tokens")) {
+      counts++
+      return json({ object: "response.input_tokens", input_tokens: 10 })
+    }
+    const body = await request.json()
+    dispatchedCaps.push(body.max_output_tokens)
     generation++
-    if (request.url.includes("input_tokens")) throw new Error("no count request expected")
     return toolCall(generation)
   }
   const openai = budgeted(
@@ -106,13 +138,18 @@ function harness(remaining: readonly string[], maxOutputTokens = 16) {
     }),
     execute: async ({ q }) => `found ${q}`,
   })
-  return { openai, lookup, authorized, generations: () => generation }
+  return {
+    openai,
+    lookup,
+    authorized,
+    dispatchedCaps,
+    counts: () => counts,
+    generations: () => generation,
+  }
 }
 
 describe("budgetSpent", () => {
   it("stops the loop after the step whose settlement leaves less than the next step needs", async () => {
-    // Step 1 settles with plenty left; step 2 leaves less than one minimal step (bound × 1 + 16 × 4
-    // per million), so the loop ends there instead of running five tool steps.
     const h = harness(["0.5", "0.5", "0.00001"])
     const result = await generateText({
       model: h.openai("gpt-test"),
@@ -157,10 +194,8 @@ describe("budgetSpent", () => {
     ])
   })
 
-  it("measures the next step at the output cap, not at the smallest answer", async () => {
-    // With a 4096-token cap the next step reserves about 0.0164 (4096 × 4 per million plus the
-    // prompt bound), so 0.01 left is exhausted even though a 16-token answer would still fit.
-    const h = harness(["0.01"], 4096)
+  it("continues with an affordable output allowance after a denied full reservation", async () => {
+    const h = harness(["0.01"], 4096, true)
     const result = await generateText({
       model: h.openai("gpt-test"),
       prompt: "hello",
@@ -168,10 +203,15 @@ describe("budgetSpent", () => {
       stopWhen: [stepCountIs(5), budgetSpent()],
       maxRetries: 0,
     })
-    expect(result.steps).toHaveLength(1)
+    expect(result.steps).toHaveLength(5)
+    expect(h.dispatchedCaps).toEqual([2497, 2497, 2497, 2497, 2497])
+    expect(h.counts()).toBe(5)
     expect(result.steps[0]?.providerMetadata?.unprice).toMatchObject({
       remaining: "0.01",
-      exhausted: true,
+      requestedOutputTokens: 4096,
+      outputTokens: 2497,
+      inputSource: "provider-count",
+      exhausted: false,
     })
     const plenty = harness(["0.5"], 4096)
     const more = await generateText({

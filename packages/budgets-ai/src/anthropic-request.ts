@@ -269,6 +269,9 @@ export function prepareRequest(value: unknown, limits: RequestLimits): PreparedR
     fields(metadata, ["user_id"])
     if (metadata.user_id !== undefined && metadata.user_id !== null) string(metadata.user_id)
   }
+  const thinking =
+    payload.thinking === undefined ? undefined : boundThinking(payload.thinking, outputTokens)
+  const thinkingBudget = thinking?.budget_tokens
   const generation = {
     ...payload,
     max_tokens: outputTokens,
@@ -276,9 +279,7 @@ export function prepareRequest(value: unknown, limits: RequestLimits): PreparedR
     stream: limits.mode === "stream",
     ...(payload.speed === undefined ? {} : { speed: "standard" }),
     ...(payload.inference_geo === undefined ? {} : { inference_geo: "global" }),
-    ...(payload.thinking === undefined
-      ? {}
-      : { thinking: boundThinking(payload.thinking, outputTokens) }),
+    ...(thinking === undefined ? {} : { thinking }),
   }
   const messageCount =
     (payload.messages as unknown[]).length + (payload.system === undefined ? 0 : 1)
@@ -286,6 +287,19 @@ export function prepareRequest(value: unknown, limits: RequestLimits): PreparedR
     payload: generation,
     body: JSON.stringify(generation),
     outputTokens,
+    minimumOutputTokens: typeof thinkingBudget === "number" ? 1025 : 16,
+    outputBytes: (tokens) =>
+      String(tokens).length +
+      (typeof thinkingBudget === "number"
+        ? String(Math.min(thinkingBudget, tokens - 1)).length
+        : 0),
+    withOutputTokens: (tokens) => ({
+      ...generation,
+      max_tokens: tokens,
+      ...(typeof thinkingBudget === "number"
+        ? { thinking: { ...thinking, budget_tokens: Math.min(thinkingBudget, tokens - 1) } }
+        : {}),
+    }),
     messages: messageCount,
     tools: Array.isArray(payload.tools) && payload.tools.length > 0,
   }

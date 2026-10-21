@@ -8,7 +8,13 @@ import {
 import { DEFAULT_BUDGET_TIMEOUT_MS, withDeadline } from "./deadline"
 export { DEFAULT_BUDGET_TIMEOUT_MS, withDeadline } from "./deadline"
 export { MESSAGE_OVERHEAD_TOKENS, REQUEST_OVERHEAD_TOKENS, inputBound } from "./input-bound"
-import { prepareBudgetRequest } from "./provider-request"
+import {
+  type PreparedBudgetRequest,
+  countOpenAIInput,
+  inputTokensForOutput,
+  prepareBudgetRequest,
+  resizeBudgetRequest,
+} from "./provider-request"
 import { type BudgetStepSettlement, createSettlement } from "./settlement"
 export type { BudgetStepSettlement } from "./settlement"
 export { TOOL_PROMPT_TOKENS } from "./provider-request"
@@ -86,14 +92,18 @@ export function maximumCost(
   inputTokens: number,
   outputTokens: number
 ): number {
-  const rates = [pricing, ...(pricing.tiers ?? [])]
+  const rates = [
+    pricing,
+    ...(pricing.tiers ?? []).filter((tier) => tier.inputTokensAbove < inputTokens),
+  ]
   const inputRate = Math.max(
     ...rates.flatMap((rate) => [rate.input, rate.cacheRead, rate.cacheWrite])
   )
   const outputRate = Math.max(...rates.map((rate) => rate.output))
-  const cost = (inputTokens * inputRate + outputTokens * outputRate) / 1_000_000
-  if (!Number.isFinite(cost) || cost <= 0) throw new Error("Model has no valid budget pricing")
-  return Math.ceil(cost * 100_000_000) / 100_000_000
+  const scaledCost = (inputTokens * inputRate + outputTokens * outputRate) * 100
+  if (!Number.isFinite(scaledCost) || scaledCost <= 0)
+    throw new Error("Model has no valid budget pricing")
+  return Math.ceil(scaledCost) / 100_000_000
 }
 
 /** Input excludes cache tokens. Output includes reasoning tokens. */
@@ -120,6 +130,36 @@ export function usageCost(pricing: TokenPricing, usage: TokenUsage): number {
   return cost
 }
 
+function outputCannotFit(pricing: TokenPricing, remaining: string | null): boolean {
+  if (remaining === null) return false
+  const available = Number(remaining)
+  if (!Number.isFinite(available)) return false
+  const cheapest = Math.min(pricing.output, ...(pricing.tiers ?? []).map((tier) => tier.output))
+  const minimum = Math.ceil(16 * cheapest * 100) / 100_000_000
+  return minimum > 0 && available < minimum
+}
+
+function affordableRequest(
+  prepared: PreparedBudgetRequest,
+  available: string | null,
+  pricing: TokenPricing
+): PreparedBudgetRequest | undefined {
+  if (available === null || !Number.isFinite(Number(available))) return undefined
+  let low = prepared.minimumOutputTokens
+  let high = prepared.outputTokens
+  let best: number | undefined
+  while (low <= high) {
+    const middle = low + Math.floor((high - low) / 2)
+    if (maximumCost(pricing, inputTokensForOutput(prepared, middle), middle) <= Number(available)) {
+      best = middle
+      low = middle + 1
+    } else {
+      high = middle - 1
+    }
+  }
+  return best === undefined ? undefined : resizeBudgetRequest(prepared, best)
+}
+
 export interface BudgetSessionOptions {
   getBudget: () => BudgetHandle | Promise<BudgetHandle>
   /** The provider wire protocol of the request. Defaults to OpenAI Responses. */
@@ -137,6 +177,8 @@ export interface BudgetReservation {
   readonly hold: BudgetHold
   readonly inputTokens: number
   readonly outputTokens: number
+  readonly requestedOutputTokens: number
+  readonly inputSource: PreparedBudgetRequest["input"]["source"]
   readonly maximumCost: number
 }
 
@@ -145,6 +187,8 @@ export interface BudgetSession {
   readonly authorized: boolean
   readonly error: unknown
   readonly reserved: BudgetReservation | undefined
+  /** A conservative proof that even the minimum output cannot fit an unknown next prompt. */
+  exhausted(remaining: string | null): boolean
   /** Keeps the first accounting intent. Failed attempts can be retried; success is retained. */
   settle(actualCost?: number): Promise<BudgetStepSettlement>
 }
@@ -185,6 +229,13 @@ export function createBudgetSession(options: BudgetSessionOptions): BudgetSessio
     get reserved() {
       return state.status === "authorized" ? state.reserved : undefined
     },
+    exhausted(remaining) {
+      return (
+        state.status === "authorized" &&
+        !("spendableAmount" in state.budget) &&
+        outputCannotFit(pricing, remaining)
+      )
+    },
     fetch: async (input, init) => {
       if (state.status !== "ready") {
         failure = new Error("A budget session permits one generation request")
@@ -205,41 +256,73 @@ export function createBudgetSession(options: BudgetSessionOptions): BudgetSessio
             ),
           { timeoutMs: 120_000, signal }
         )
-        generation = bounded.request
-        const maximum = maximumCost(pricing, bounded.inputTokens, bounded.outputTokens)
-        const key = crypto.randomUUID()
-        const { budget, authorized } = await withDeadline(
+        const admission = await withDeadline(
           async (budgetSignal) => {
             const budget = await options.getBudget()
             budgetSignal.throwIfAborted()
-            return {
-              budget,
-              authorized: await budget.authorize({
+            let prepared = bounded
+            let counted = false
+            for (let attempt = 0; attempt < 3; attempt++) {
+              budgetSignal.throwIfAborted()
+              const maximum = maximumCost(pricing, prepared.input.tokens, prepared.outputTokens)
+              const key = crypto.randomUUID()
+              const authorized = await budget.authorize({
                 amount: maximum,
                 ttlMs: 300_000,
                 idempotencyKey: key,
-              }),
+              })
+              budgetSignal.throwIfAborted()
+              if (authorized.error) throw new BudgetRequestError(authorized.error, key)
+              if (authorized.result.allowed) {
+                if (authorized.result.replayed) throw new Error("Budget authorization was replayed")
+                return { prepared, maximum, key, budget, hold: authorized.result.hold }
+              }
+              if (authorized.result.degraded)
+                throw new BudgetUnavailableError(authorized.result.blocked.error, key)
+              const denial = new BudgetExceededError(authorized.result, key)
+              if (attempt === 2) throw denial
+              const available = budget.spendableAmount ?? authorized.result.balance.remaining
+              if (outputCannotFit(pricing, available)) throw denial
+              if (!counted && protocol === "openai-responses") {
+                counted = true
+                try {
+                  prepared = await withDeadline(
+                    (countSignal) => countOpenAIInput(prepared, transport, countSignal),
+                    {
+                      timeoutMs: Math.min(1000, Math.max(1, Math.floor(timeoutMs / 4))),
+                      signal: budgetSignal,
+                    }
+                  )
+                } catch {
+                  budgetSignal.throwIfAborted()
+                }
+              }
+              const candidate = affordableRequest(prepared, available, pricing)
+              budgetSignal.throwIfAborted()
+              if (
+                !candidate ||
+                maximumCost(pricing, candidate.input.tokens, candidate.outputTokens) === maximum
+              )
+                throw denial
+              prepared = candidate
             }
+            throw new Error("Budget admission attempts exhausted")
           },
           { timeoutMs, signal }
         )
-        if (authorized.error) throw new BudgetRequestError(authorized.error, key)
-        if (!authorized.result.allowed) {
-          if (authorized.result.degraded)
-            throw new BudgetUnavailableError(authorized.result.blocked.error, key)
-          throw new BudgetExceededError(authorized.result, key)
-        }
-        if (authorized.result.replayed) throw new Error("Budget authorization was replayed")
+        generation = admission.prepared.request
         state = {
           status: "authorized",
           reserved: {
-            hold: authorized.result.hold,
-            inputTokens: bounded.inputTokens,
-            outputTokens: bounded.outputTokens,
-            maximumCost: maximum,
+            hold: admission.hold,
+            inputTokens: admission.prepared.input.tokens,
+            outputTokens: admission.prepared.outputTokens,
+            requestedOutputTokens: admission.prepared.requestedOutputTokens,
+            inputSource: admission.prepared.input.source,
+            maximumCost: admission.maximum,
           },
-          key,
-          budget,
+          key: admission.key,
+          budget: admission.budget,
         }
         signal.throwIfAborted()
         if (failure !== undefined) throw failure

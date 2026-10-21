@@ -52,16 +52,23 @@ one from that definition; an existing budget is never changed. Keys are your own
 
 `wrap({ amount }, fn)` charges a fixed price before a tool runs, keyed by the AI SDK's
 `toolCallId`, so a tool call that runs again does not pay twice. `budgetSpent()` ends the loop
-once the last step left less than the next step would need, instead of failing on a denied hold.
+when the remaining budget cannot cover even the minimum output allowance. Each next request
+still needs authorization for its own input and output.
 
 ## What a step costs
 
 Prices and limits come from the Unprice catalog, fetched once an hour per model and shared by
-every call in the process. You maintain no price table. The hold for a step is the byte bound of
-the request body at the model's highest input rate, plus the output limit at its output rate, plus
-Anthropic's hidden tool-use prompt when the step carries tools. Byte-level tokenizers never emit
-more tokens than bytes, so the step cannot cost more than the hold. Settlement returns the
-difference at once. No count request goes to the provider.
+every call in the process. You maintain no price table or per-call cost estimate. The initial
+hold prices the final request's byte bound and output allowance at the highest rates the input
+can reach. Context tiers above that bound do not inflate the reservation. Anthropic requests
+with tools also reserve its hidden tool-use prompt. Settlement returns unused capacity at once.
+
+If the requested allowance does not fit, the SDK selects a smaller affordable allowance and
+authorizes its final cost before generation. OpenAI Responses first attempts one accurate input
+count after denial. A count failure retains the byte bound. Funded calls send no count request.
+Anthropic and Gemini retain byte bounds because their count endpoints provide estimates.
+The SDK preserves input and thinking settings. Low funds can produce a shorter or truncated
+answer, which the provider reports through its normal finish reason.
 
 The protocol comes from the model itself: OpenAI Responses, Anthropic Messages, and Google
 Generative AI. A model the catalog does not know is refused before any hold; pass its row in
@@ -80,9 +87,13 @@ budgeted(createOpenAI, {
 ```
 
 Every step carries `providerMetadata.unprice` on its result and on a stream's finish part:
-`budget`, `holdId`, `hold`, `actual`, `remaining`, `exceeded`, and `exhausted`. `exhausted` is
-true once what is left is less than a step with this step's prompt and the output cap would
-reserve; `budgetSpent()` reads it. `exceeded` is true when the step cost more than its hold: the
+`budget`, `holdId`, `hold`, `actual`, `remaining`, `exceeded`, and `exhausted`. `requestedOutputTokens`
+and `outputTokens` expose the requested and effective allowances. `inputSource` is `byte-bound`
+or `provider-count`. `exhausted` is a conservative early stop based on the current model's minimum
+output cost. It does not predict the next prompt's
+input cost. `budgetSpent()` therefore permits another admission attempt when smaller output or
+accurate counting could fit. Local leases do not report exhaustion solely from an empty lease
+or the remote balance, because the lease can refill. `exceeded` is true when the step cost more than its hold: the
 hold was settled in full and the excess recorded against the budget, past the cap.
 
 ## Options
@@ -94,8 +105,8 @@ hold was settled in full and the excess recorded against the budget, past the ca
 | `defaults`        | The budget to create on first use: `unit`, `limits`, and the other upsert fields.            |
 | `budgets`         | `(key) => handle`, for local mode: `(key) => unprice.budget(key, { mode: "local", lease })`. |
 | `models`          | Rates and limits by `provider/model` id, replacing or adding catalog rows.                   |
-| `maxOutputTokens` | The output cap of every step. Defaults to 4096; the model's own limit clamps it.             |
-| `budgetTimeoutMs` | The deadline of each budget call. Defaults to 10 seconds.                                    |
+| `maxOutputTokens` | Requested output ceiling. Defaults to 4096. Model limits and available funds can reduce it. |
+| `budgetTimeoutMs` | Shared admission deadline and separate settlement deadline. Defaults to 10 seconds.         |
 | `waitUntil`       | Keeps settlement alive after the response: `(work) => ctx.waitUntil(work)` on Workers.       |
 
 Set `maxRetries: 0` on `generateText` and `streamText` unless you want paid retries: each attempt

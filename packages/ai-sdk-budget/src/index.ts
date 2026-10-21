@@ -20,7 +20,6 @@ import {
   type TokenPricing,
   createBudgetSession,
   createStreamUsageEvidence,
-  maximumCost,
   usageCost,
 } from "@unprice/budgets-ai"
 import { type LanguageModelMiddleware, type StopCondition, type ToolSet, wrapProvider } from "ai"
@@ -215,18 +214,9 @@ export function createUnpriceBudgetMiddleware(options: UnpriceBudgetMiddlewareOp
         settlement ??= session.settle(amount)
         return settlement
       },
-      /**
-       * What the step cost and what is left, for `providerMetadata.unprice`. `exhausted` means a
-       * step with this step's prompt and this step's output cap would no longer be granted; the
-       * next step's prompt is longer, so this is the earliest the loop can be told to stop.
-       */
       metadata(settled: BudgetStepSettlement | undefined) {
         const reserved = session.reserved
         const remaining = settled?.balance.remaining ?? null
-        const exhausted =
-          remaining !== null &&
-          reserved !== undefined &&
-          Number(remaining) < maximumCost(pricing, reserved.inputTokens, reserved.outputTokens)
         return {
           budget: key,
           holdId: reserved?.hold.id ?? null,
@@ -234,7 +224,10 @@ export function createUnpriceBudgetMiddleware(options: UnpriceBudgetMiddlewareOp
           actual: settled?.actual ?? null,
           remaining,
           exceeded: settled?.exceeded ?? false,
-          exhausted,
+          requestedOutputTokens: reserved?.requestedOutputTokens ?? null,
+          outputTokens: reserved?.outputTokens ?? null,
+          inputSource: reserved?.inputSource ?? null,
+          exhausted: session.exhausted(remaining),
         }
       },
       dispose() {

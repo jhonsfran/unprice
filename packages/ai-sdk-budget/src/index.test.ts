@@ -72,7 +72,7 @@ function harness(
                 docs: "https://docs.unprice.dev",
                 details: {
                   kind: "budget_exceeded",
-                  balance,
+                  balance: { ...balance, remaining: "0" },
                   blocked: {
                     limitId: "month",
                     window: "month",
