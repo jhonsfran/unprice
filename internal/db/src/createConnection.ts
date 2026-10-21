@@ -32,6 +32,48 @@ class MyLogger implements Logger {
 // only for development when using node 20
 neonConfig.webSocketConstructor = typeof WebSocket !== "undefined" ? WebSocket : ws
 
+/**
+ * Upper bound for a single Neon HTTP query (`neon()` / `createHttpConnection`). The WebSocket
+ * `Pool` has its own connection and query timeouts, but the HTTP driver has none, so a stalled
+ * request would otherwise hang the caller (for example the API key verification hot path).
+ */
+export const HTTP_QUERY_TIMEOUT_MS = 5_000
+
+type FetchFn = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+
+const FETCH_TIMEOUT_MARKER = Symbol.for("unprice.db.neonHttpFetchTimeout")
+
+/**
+ * Wraps a fetch implementation so every request is aborted after `timeoutMs`. A caller supplied
+ * `init.signal` is still honoured: whichever aborts first wins.
+ */
+export function withFetchTimeout(baseFetch: FetchFn, timeoutMs: number): FetchFn {
+  const wrapped: FetchFn = (input, init) => {
+    const timeout = AbortSignal.timeout(timeoutMs)
+    const signal = init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout
+    return baseFetch(input, { ...init, signal })
+  }
+  Object.defineProperty(wrapped, FETCH_TIMEOUT_MARKER, { value: true })
+  return wrapped
+}
+
+/**
+ * Installs the timeout on `neonConfig.fetchFunction`, which is global to the Neon driver. It is
+ * idempotent: calling it again never wraps the wrapper. `poolQueryViaFetch` stays off, so only
+ * HTTP clients go through this fetch; `Pool` queries keep using WebSockets.
+ */
+export function installHttpQueryTimeout(): void {
+  const current = neonConfig.fetchFunction as FetchFn | undefined
+  if (current && (current as unknown as Record<symbol, unknown>)[FETCH_TIMEOUT_MARKER]) {
+    return
+  }
+
+  // Resolve the global fetch lazily so runtime or test replacements are picked up.
+  const baseFetch: FetchFn = current ?? ((input, init) => fetch(input, init))
+  neonConfig.fetchFunction = withFetchTimeout(baseFetch, HTTP_QUERY_TIMEOUT_MS)
+  neonConfig.poolQueryViaFetch = false
+}
+
 // Module-level singleton cache for the database connection proxy
 // Used when opts.singleton is true to avoid creating multiple connection instances
 let db: Database | null = null
@@ -240,6 +282,8 @@ export function createHttpConnection(opts: HttpConnectionOptions): HttpDatabase 
   if (cached) {
     return cached
   }
+
+  installHttpQueryTimeout()
 
   const httpDb = drizzleNeonHttp(neon(opts.primaryDatabaseUrl), {
     schema: schema,
