@@ -1,6 +1,6 @@
 import { CloudflareStore } from "@unkey/cache/stores"
 import { Analytics } from "@unprice/analytics"
-import { createConnection } from "@unprice/db"
+import { createConnection, createHttpConnection } from "@unprice/db"
 import { newId } from "@unprice/db/utils"
 import { shouldEmitMetrics } from "@unprice/observability/env"
 import { ApiKeysService } from "@unprice/services/apikey"
@@ -155,6 +155,15 @@ export function init(): MiddlewareHandler<HonoEnv> {
       singleton: false,
     })
 
+    // Neon HTTP client on the primary, for the uncached API key lookup. One HTTPS request per
+    // query, so key verification does not pay a WebSocket + Postgres auth handshake. Null in
+    // development, where the service falls back to `db`.
+    const httpDb = createHttpConnection({
+      env: c.env.APP_ENV,
+      primaryDatabaseUrl: c.env.DATABASE_URL,
+      logger: c.env.DRIZZLE_LOG.toString() === "true",
+    })
+
     const analytics = new Analytics({
       emit: true,
       tinybirdToken: c.env.TINYBIRD_TOKEN,
@@ -181,6 +190,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
       logger,
       metrics,
       db,
+      httpDb,
       waitUntil,
       hashCache,
     })

@@ -1,4 +1,5 @@
-import type { Database } from "@unprice/db"
+import { CacheError } from "@unkey/cache"
+import type { Database, HttpDatabase } from "@unprice/db"
 import { Err, FetchError, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -489,6 +490,155 @@ describe("ApiKeysService customer binding", () => {
 
     expect(result.err?.message).toBe("apikey not found")
     expect(cache.apiKeyByHash.remove).toHaveBeenCalledOnce()
+  })
+
+  it("does not wait for the cache eviction before answering an unknown key", async () => {
+    vi.mocked(cache.apiKeyByHash.swr).mockResolvedValueOnce({ val: null })
+    // a remove that never settles would hang the request if it were awaited
+    vi.mocked(cache.apiKeyByHash.remove).mockReturnValueOnce(new Promise(() => {}))
+    const service = new ApiKeysService({
+      cache,
+      metrics,
+      analytics,
+      logger,
+      db: {} as Database,
+      waitUntil,
+      hashCache,
+    })
+
+    const result = await service.verifyApiKey({ key: "unprice_live_123" })
+
+    expect(result.err?.message).toBe("apikey not found")
+    expect(cache.apiKeyByHash.remove).toHaveBeenCalledOnce()
+    expect(waitUntil).toHaveBeenCalledWith(
+      vi.mocked(cache.apiKeyByHash.remove).mock.results[0]?.value
+    )
+  })
+
+  it("evicts the cache entry in the background when retrying a failed lookup", async () => {
+    vi.mocked(cache.apiKeyByHash.swr).mockResolvedValueOnce({
+      err: new CacheError({ tier: "cloudflare", key: "hash_123", message: "cache read failed" }),
+    })
+    vi.mocked(cache.apiKeyByHash.remove).mockReturnValueOnce(new Promise(() => {}))
+    const findFirst = vi.fn().mockResolvedValue({
+      id: "api_123",
+      projectId: "proj_123",
+      expiresAt: null,
+      revokedAt: null,
+      hash: "hash_123",
+      defaultCustomerId: null,
+      type: "runtime",
+      project: { id: "proj_123", enabled: true, workspace: { enabled: true } },
+    })
+    const service = new ApiKeysService({
+      cache,
+      metrics,
+      analytics,
+      logger,
+      db: {
+        query: { apikeys: { findFirst } },
+        update: vi.fn().mockReturnValue({
+          set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) }),
+        }),
+      } as unknown as Database,
+      waitUntil,
+      hashCache,
+    })
+
+    const result = await service.verifyApiKey({ key: "unprice_live_123" })
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.id).toBe("api_123")
+    expect(findFirst).toHaveBeenCalledOnce()
+    expect(cache.apiKeyByHash.remove).toHaveBeenCalledOnce()
+    expect(waitUntil).toHaveBeenCalledWith(
+      vi.mocked(cache.apiKeyByHash.remove).mock.results[0]?.value
+    )
+  })
+
+  it("uses the HTTP client for the uncached key lookup and the lastUsed update", async () => {
+    vi.mocked(cache.apiKeyByHash.swr).mockImplementationOnce(async (_key, load) => ({
+      val: await load("hash_123"),
+    }))
+    const httpFindFirst = vi.fn().mockResolvedValue({
+      id: "api_123",
+      projectId: "proj_123",
+      expiresAt: null,
+      revokedAt: null,
+      hash: "hash_123",
+      defaultCustomerId: null,
+      type: "runtime",
+      project: { id: "proj_123", enabled: true, workspace: { enabled: true } },
+    })
+    const httpSet = vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) })
+    const httpDb = {
+      query: { apikeys: { findFirst: httpFindFirst } },
+      update: vi.fn().mockReturnValue({ set: httpSet }),
+    } as unknown as HttpDatabase
+    const poolFindFirst = vi.fn()
+    const poolUpdate = vi.fn()
+    const service = new ApiKeysService({
+      cache,
+      metrics,
+      analytics,
+      logger,
+      db: {
+        query: { apikeys: { findFirst: poolFindFirst } },
+        $primary: { query: { apikeys: { findFirst: poolFindFirst } } },
+        update: poolUpdate,
+      } as unknown as Database,
+      httpDb,
+      waitUntil,
+      hashCache,
+    })
+
+    const result = await service.verifyApiKey({ key: "unprice_live_123" })
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.id).toBe("api_123")
+    expect(httpFindFirst).toHaveBeenCalledOnce()
+    expect(httpSet).toHaveBeenCalledWith({ lastUsed: expect.any(Number) })
+    expect(poolFindFirst).not.toHaveBeenCalled()
+    expect(poolUpdate).not.toHaveBeenCalled()
+  })
+
+  it("reads the primary through the HTTP client when retrying without cache", async () => {
+    const httpFindFirst = vi.fn().mockResolvedValue({
+      id: "api_123",
+      projectId: "proj_123",
+      expiresAt: null,
+      revokedAt: null,
+      hash: "hash_123",
+      defaultCustomerId: null,
+      type: "runtime",
+      project: { id: "proj_123", enabled: true, workspace: { enabled: true } },
+    })
+    const httpDb = {
+      query: { apikeys: { findFirst: httpFindFirst } },
+      update: vi.fn().mockReturnValue({
+        set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) }),
+      }),
+    } as unknown as HttpDatabase
+    const primaryFindFirst = vi.fn()
+    const service = new ApiKeysService({
+      cache,
+      metrics,
+      analytics,
+      logger,
+      db: {
+        query: { apikeys: { findFirst: vi.fn() } },
+        $primary: { query: { apikeys: { findFirst: primaryFindFirst } } },
+      } as unknown as Database,
+      httpDb,
+      waitUntil,
+      hashCache,
+    })
+
+    const result = await service.getApiKey({ key: "unprice_live_123" }, { skipCache: true })
+
+    expect(result.err).toBeUndefined()
+    expect(httpFindFirst).toHaveBeenCalledOnce()
+    expect(primaryFindFirst).not.toHaveBeenCalled()
   })
 
   it("createOrRollApiKey rolls the active key with the same project and name", async () => {

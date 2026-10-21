@@ -24,3 +24,29 @@ index 386b7fbf054cb4a5e3e35e0c0ddb4760de9acbde..ad7dce90ce0abae62d8088582e4f2306
            ).catch((err) => {
              return Err(
                new CacheError({
+diff --git a/dist/stores.js b/dist/stores.js
+index 10ccf1406862887c8b13441707780e8267f5ea41..fccaabd03b5eb2a10753693343c17ee8900529f4 100644
+--- a/dist/stores.js
++++ b/dist/stores.js
+@@ -92,7 +92,7 @@ var CloudflareStore = class {
+     );
+     await Promise.all(cacheKeys.map((key) => caches.default.delete(key)));
+     return await fetch(
+-      `https://api.cloudflare.com/client/v4zones/${this.config.zoneId}/purge_cache`,
++      `https://api.cloudflare.com/client/v4/zones/${this.config.zoneId}/purge_cache`,
+       {
+         method: "POST",
+         headers: {
+diff --git a/dist/stores.mjs b/dist/stores.mjs
+index b5eecd828da4febed1699f715c6bbf3d11c9f9c4..d8e3a722015415a440f11ef65cc2f71a94d0ce56 100644
+--- a/dist/stores.mjs
++++ b/dist/stores.mjs
+@@ -86,7 +86,7 @@ var CloudflareStore = class {
+     );
+     await Promise.all(cacheKeys.map((key) => caches.default.delete(key)));
+     return await fetch(
+-      `https://api.cloudflare.com/client/v4zones/${this.config.zoneId}/purge_cache`,
++      `https://api.cloudflare.com/client/v4/zones/${this.config.zoneId}/purge_cache`,
+       {
+         method: "POST",
+         headers: {
