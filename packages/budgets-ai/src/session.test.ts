@@ -1,5 +1,5 @@
-import { Unprice } from "@unprice/budgets"
-import { describe, expect, it } from "vitest"
+import { BudgetSettleError, Unprice } from "@unprice/budgets"
+import { describe, expect, it, vi } from "vitest"
 import { type BudgetSessionOptions, createBudgetSession, usageCost } from "./index"
 
 const pricing = { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.25 }
@@ -13,30 +13,95 @@ const HOLD = 0.00028775
 function fixture(
   overrides: Partial<BudgetSessionOptions> = {},
   denied = false,
-  options: { rejectAboveHold?: boolean } = {}
+  options: {
+    rejectAboveHold?: boolean
+    recordFailures?: number
+    settleFailures?: number
+    lostRecordResponses?: number
+    local?: boolean
+  } = {}
 ) {
   const order: string[] = []
   const amounts: number[] = []
   const payloads: Record<string, unknown>[] = []
   const records: Record<string, unknown>[] = []
+  const reports: Record<string, unknown>[] = []
+  const committedRecords = new Map<string, number>()
+  let budgetCalls = 0
+  let authorizationKey = ""
   const client = new Unprice({
     token: "test",
     retry: { attempts: 0 },
     fetch: async (request) => {
+      if (request.method === "GET") {
+        order.push("get")
+        return Response.json({
+          budget: {
+            balance: { remaining: "-0.0007", held: options.local ? "1" : "0", limits: [] },
+          },
+        })
+      }
       const body = (await request.json()) as Record<string, unknown>
+      if (request.url.endsWith("/lease")) {
+        order.push("lease")
+        return Response.json({
+          lease: {
+            leaseKey: body.leaseKey,
+            seq: 0,
+            granted: body.amount,
+            captured: "0",
+            expiresAt: Date.now() + Number(body.ttlMs),
+            status: "open",
+          },
+          terms: { holds: { defaultTtlMs: 300_000, maxTtlMs: 86_400_000 }, closesAt: null },
+          replayed: false,
+          created: false,
+          balance: { remaining: "1", held: body.amount, limits: [], asOf: Date.now() },
+        })
+      }
+      if (request.url.endsWith("/report")) {
+        order.push("report")
+        reports.push(body)
+        return Response.json({
+          lease: {
+            leaseKey: body.leaseKey,
+            seq: body.seq,
+            granted: "1",
+            captured: body.captured,
+            expiresAt: Date.now() + 600_000,
+            status: body.final ? "closed" : "open",
+          },
+          terms: { holds: { defaultTtlMs: 300_000, maxTtlMs: 86_400_000 }, closesAt: null },
+          extension: { requested: "0", granted: "0" },
+          released: "0",
+          crossed: [],
+          replayed: false,
+          balance: { remaining: "1", held: "0", limits: [], asOf: Date.now() },
+        })
+      }
       if (request.url.endsWith("/record")) {
         order.push("record")
         amounts.push(Number(body.amount))
         records.push(body)
+        if (options.recordFailures) {
+          options.recordFailures--
+          throw new Error("record unavailable")
+        }
+        committedRecords.set(String(body.idempotencyKey), Number(body.amount))
+        if (options.lostRecordResponses) {
+          options.lostRecordResponses--
+          throw new Error("record response lost")
+        }
         return Response.json({
           amount: body.amount,
           crossed: ["day"],
           replayed: false,
           created: false,
-          balance: { remaining: "-0.0007", held: "0", limits: [] },
+          balance: { remaining: "-0.0007", held: options.local ? "1" : String(HOLD), limits: [] },
         })
       }
       if (request.url.endsWith("/authorize")) {
+        authorizationKey = String(body.idempotencyKey)
         order.push("authorize")
         amounts.push(Number(body.amount))
         if (denied)
@@ -73,6 +138,10 @@ function fixture(
       }
       order.push("settle")
       amounts.push(Number(body.amount))
+      if (options.settleFailures) {
+        options.settleFailures--
+        throw new Error("settle unavailable")
+      }
       if (options.rejectAboveHold && Number(body.amount) > HOLD) {
         return Response.json(
           {
@@ -110,7 +179,21 @@ function fixture(
     return Response.json({})
   }
   const session = createBudgetSession({
-    getBudget: () => client.budget("customer"),
+    getBudget: () => {
+      budgetCalls++
+      return options.local
+        ? client.budget("customer", {
+            mode: "local",
+            lease: {
+              amount: "1",
+              lowWater: "0",
+              ttlMs: 600_000,
+              flushIntervalMs: 60_000,
+              idleMs: Number.POSITIVE_INFINITY,
+            },
+          })
+        : client.budget("customer")
+    },
     model: { id: "model", pricing, limits },
     maxOutputTokens: 4096,
     mode: "generate",
@@ -123,10 +206,104 @@ function fixture(
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ model: "model", input: "Hello", max_output_tokens: 32 }),
     })
-  return { session, dispatch, order, amounts, payloads, records }
+  return {
+    session,
+    dispatch,
+    order,
+    amounts,
+    payloads,
+    records,
+    reports,
+    committedRecords,
+    budgetCalls: () => budgetCalls,
+    authorizationKey: () => authorizationKey,
+    close: () => client.close(),
+  }
 }
 
 describe("shared AI budget request", () => {
+  it("recovers an overrun on a real local handle and reports the reserve once", async () => {
+    const test = fixture({}, false, { local: true, lostRecordResponses: 1 })
+    try {
+      await test.dispatch()
+      await expect(test.session.settle(0.001)).rejects.toBeInstanceOf(BudgetSettleError)
+      const result = await test.session.settle()
+      expect(result).toMatchObject({ actual: "0.001", hold: String(HOLD), exceeded: true })
+      expect(test.records[1]).toEqual(test.records[0])
+      expect([...test.committedRecords.values()]).toEqual([0.00071225])
+    } finally {
+      await test.close()
+    }
+    expect(test.reports.map((report) => report.captured)).toEqual([String(HOLD)])
+    expect(test.order).toEqual(["lease", "generate", "record", "record", "get", "report"])
+  })
+  it("keeps the hold open when recording an overrun fails and exposes a retryable intent", async () => {
+    const test = fixture({}, false, { recordFailures: 1, rejectAboveHold: true })
+    await test.dispatch()
+
+    const error = await test.session.settle(0.001).catch((failure: unknown) => failure)
+
+    expect(error).toBeInstanceOf(BudgetSettleError)
+    if (!(error instanceof BudgetSettleError)) throw new Error("Expected settlement failure")
+    expect(test.order).toEqual(["authorize", "generate", "record"])
+    expect(error.recovery).toEqual({
+      amount: String(HOLD),
+      record: {
+        amount: "0.00071225",
+        idempotencyKey: expect.any(String),
+        occurredAt: expect.any(Number),
+      },
+    })
+    expect(typeof error.retry).toBe("function")
+    await error.retry?.()
+    expect(test.order).toEqual(["authorize", "generate", "record", "record", "settle", "get"])
+    expect(test.records[1]).toEqual(test.records[0])
+    expect(test.budgetCalls()).toBe(1)
+  })
+
+  it("replays a lost excess-record response without counting the excess twice", async () => {
+    const test = fixture({}, false, { lostRecordResponses: 1, rejectAboveHold: true })
+    await test.dispatch()
+    await expect(test.session.settle(0.001)).rejects.toBeInstanceOf(BudgetSettleError)
+
+    const result = await test.session.settle(0.002)
+
+    expect(result.actual).toBe("0.001")
+    expect(test.records[1]).toEqual(test.records[0])
+    expect([...test.committedRecords.values()]).toEqual([0.00071225])
+    expect(test.amounts.at(-1)).toBe(HOLD)
+    expect(result.balance).toEqual({ remaining: "-0.0007", held: "0", limits: [] })
+  })
+
+  it("retains the record's timestamp and amount when full settlement must be retried", async () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_792_497_600_000)
+    const test = fixture({}, false, { settleFailures: 1, rejectAboveHold: true })
+    try {
+      await test.dispatch()
+      await expect(test.session.settle(0.001)).rejects.toBeInstanceOf(BudgetSettleError)
+      clock.mockReturnValue(1_792_497_660_000)
+
+      const result = await test.session.settle()
+
+      expect(test.records.map((record) => record.occurredAt)).toEqual([
+        1_792_497_600_000, 1_792_497_600_000,
+      ])
+      expect(test.records[1]).toEqual(test.records[0])
+      expect(result).toMatchObject({ actual: "0.001", hold: String(HOLD), exceeded: true })
+      expect([...test.committedRecords.values()]).toEqual([0.00071225])
+      expect(test.order).toEqual([
+        "authorize",
+        "generate",
+        "record",
+        "settle",
+        "record",
+        "settle",
+        "get",
+      ])
+    } finally {
+      clock.mockRestore()
+    }
+  })
   it("bounds the input by its bytes, preserves the smaller cap and JSON mode, and settles once", async () => {
     const test = fixture()
     await test.dispatch()
@@ -169,15 +346,15 @@ describe("shared AI budget request", () => {
     expect(test.order).toEqual(["authorize", "generate"])
   })
 
-  it("does not lower a known actual cost to fit its reservation", async () => {
+  it("settles measured usage below the reservation", async () => {
     const test = fixture()
     await test.dispatch()
-    const settled = await test.session.settle(0.001)
-    expect(test.amounts).toEqual([HOLD, 0.001])
+    const settled = await test.session.settle(0.0001)
+    expect(test.amounts).toEqual([HOLD, 0.0001])
     expect(settled).toEqual({
       holdId: "h_1",
       hold: String(HOLD),
-      actual: "0.001",
+      actual: "0.0001",
       exceeded: false,
       balance: { remaining: "0.5", held: "0", limits: [] },
     })
@@ -187,13 +364,13 @@ describe("shared AI budget request", () => {
     const test = fixture({}, false, { rejectAboveHold: true })
     await test.dispatch()
     const settled = await test.session.settle(0.001)
-    expect(test.order).toEqual(["authorize", "generate", "settle", "settle", "record"])
-    expect(test.amounts).toEqual([HOLD, 0.001, HOLD, 0.00071225])
+    expect(test.order).toEqual(["authorize", "generate", "record", "settle", "get"])
+    expect(test.amounts).toEqual([HOLD, 0.00071225, HOLD])
     expect(test.records).toEqual([
       {
         key: "customer",
         amount: "0.00071225",
-        idempotencyKey: "h_1:excess",
+        idempotencyKey: `${test.authorizationKey()}:excess`,
         occurredAt: expect.any(Number),
       },
     ])

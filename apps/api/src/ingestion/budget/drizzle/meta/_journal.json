@@ -36,6 +36,20 @@
       "when": 1792342647170,
       "tag": "0004_ledger_operations_hold_key_index",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1792545907917,
+      "tag": "0005_burly_blazing_skull",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1792546690551,
+      "tag": "0006_youthful_yellowjacket",
+      "breakpoints": true
     }
   ]
 }

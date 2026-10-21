@@ -111,9 +111,11 @@ before any hold, so a request the bound does not cover never runs.
 
 Generation returns only after settlement; a stream's finish part waits for it. Cancellation, a
 missing usage report, or an incomplete stream settles the full hold. A step that cost more than
-its hold settles the hold in full and records the excess, so the overrun counts. A failed
-settlement throws `BudgetSettleError` with the hold, so you can settle it later; the hold is never
-released, and an open hold expires at its full amount.
+its hold records the excess first, then settles the hold in full. A failed settlement throws
+`BudgetSettleError` with the hold, `recovery` data, and a `retry()` function. Retry completes the
+original accounting without running the model again. Persist the hold identity and recovery data
+if recovery must survive process loss. The hold is never released, and an open hold expires at
+its full amount.
 
 Without `waitUntil` on a platform that stops the function at the response, settlement may not run
 and the hold expires at its full amount. The cap stays safe; accuracy and capacity suffer until it

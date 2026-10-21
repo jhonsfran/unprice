@@ -6,10 +6,9 @@ import { projectID } from "../utils/sql"
 import type {
   BudgetAuditAction,
   BudgetAuditStatus,
-  BudgetCap,
-  BudgetCatalogLimit,
   BudgetReleaseRejectionCode,
-} from "../validators/budgets"
+} from "../validators/budget-audit"
+import type { BudgetCap, BudgetCatalogLimit } from "../validators/budget-catalog"
 
 /**
  * The budgets catalog: one row per budget key, written after each upsert that changed the

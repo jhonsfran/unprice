@@ -14,11 +14,7 @@ import {
 import {
   type BudgetAddress,
   type BudgetVerbRequest,
-  type CreatingVerbRequest,
-  type ExecuteBudgetCommandDeps,
-  type ExecuteBudgetCommandInput,
   executeBudgetCommand,
-  executeCreatingVerb,
 } from "@unprice/services/use-cases"
 import type { Context } from "hono"
 import { setMetric } from "hono/timing"
@@ -29,12 +25,6 @@ import { CloudflareBudgetClient } from "~/ingestion/budget/client"
 
 export const BUDGET_REMAINING_HEADER = "Unprice-Budget-Remaining"
 
-/** The use case that runs a verb; `executeBudgetCommand` unless the verb has its own. */
-export type BudgetVerbExecutor<R extends BudgetVerbRequest> = (
-  deps: ExecuteBudgetCommandDeps,
-  input: ExecuteBudgetCommandInput<R>
-) => Promise<Result<OutcomeOf<R["type"]>, UnPriceBudgetError>>
-
 /**
  * Runs one verb against the budget at `key` and sets the remaining header. Authenticates a runtime
  * key unless the route already authenticated `apiKey` itself. Returns the verb's outcome, or
@@ -44,37 +34,25 @@ export async function runBudgetVerb<R extends BudgetVerbRequest>(
   c: Context<HonoEnv>,
   key: string,
   request: R,
-  apiKey?: Pick<ApiKeyExtended, "projectId">,
-  execute: BudgetVerbExecutor<R> = executeBudgetCommand
+  apiKey?: Pick<ApiKeyExtended, "projectId">
 ) {
   const { projectId } = apiKey ?? (await keyAuth(c))
   const budgets = new CloudflareBudgetClient(c.env)
+  const { budgetCatalog } = c.get("services")
   const result = await callBudget(c, request.type, () =>
-    execute({ budgets }, { projectId, key, request })
+    executeBudgetCommand(
+      {
+        budgets,
+        services: { budgetCatalog },
+        logger: c.get("logger"),
+        waitUntil: c.get("waitUntil"),
+      },
+      { projectId, key, request }
+    )
   )
   if (result.err) throw budgetApiError(c, result.err)
   setRemaining(c, result.val)
   return result.val
-}
-
-/**
- * The executor of a verb that may create its budget from `ifMissing`: it records a budget it
- * created in the dashboard catalog, as an upsert does.
- */
-export function creatingVerb<R extends CreatingVerbRequest>(
-  c: Context<HonoEnv>
-): BudgetVerbExecutor<R> {
-  const { budgetCatalog } = c.get("services")
-  return (deps, input) =>
-    executeCreatingVerb(
-      {
-        ...deps,
-        services: { budgetCatalog },
-        waitUntil: c.get("waitUntil"),
-        logger: c.get("logger"),
-      },
-      input
-    )
 }
 
 /**

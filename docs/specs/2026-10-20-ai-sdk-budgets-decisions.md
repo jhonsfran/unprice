@@ -82,9 +82,10 @@ a known maximum. The cent-exact cap is what neither Autumn nor Polar offers. The
 fallback keeps it on most providers.
 
 A violated bound is counted, not hidden. The server rejects a settle above the hold, so the adapter
-settles the hold in full and records the excess with `record`, which always counts, even past a
-hard limit. The overrun lands in the budget, the step reports `exceeded`, and the cap was passed
-by at most that one step. What a wrong bound costs is one step of overshoot.
+records the excess first with `record`, then settles the hold in full. Both operations keep fixed
+inputs for replay. Settlement errors expose the recovery intent and a retry function. The adapter
+reads the balance after both writes. The overrun lands in the budget, the step reports `exceeded`,
+and the cap was passed by at most that one step. What a wrong bound costs is one step of overshoot.
 
 ## D3. The budget's unit is a wrapper option. The server checks it. (Decided, not built)
 

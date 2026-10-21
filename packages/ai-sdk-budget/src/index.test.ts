@@ -604,6 +604,8 @@ describe("AI SDK budget middleware", () => {
     expect(error.actual).toBe(0.000025)
     expect(error.hold.id).toBe("h_1")
     expect(error.idempotencyKey).toBe(h.authorized[0]?.idempotencyKey)
+    expect(error.recovery).toEqual({ amount: "0.000025" })
+    expect(typeof error.retry).toBe("function")
     expect(h.generationCount()).toBe(1)
     expect(h.settled).toHaveLength(1)
   })

@@ -1,10 +1,13 @@
 import { Ok, type Result } from "@unprice/error"
+import type { Logger } from "@unprice/logs"
 import {
   type BudgetDefinition,
   type OutcomeOf,
   type UnPriceBudgetError,
+  catalogFactsOf,
   isOutcomeOf,
 } from "../../budgets"
+import type { ServiceContext } from "../../context"
 import type { BudgetClient, BudgetRequest } from "./budget-client"
 
 /** The budget a verb creates when its key has none, before the address is added to it. */
@@ -23,7 +26,12 @@ export type BudgetVerbRequest =
   | Omit<Extract<BudgetRequest, { type: "upsert" }>, "key" | "projectId">
   | Addressed<Exclude<BudgetRequest, { type: "upsert" }>>
 
-export type ExecuteBudgetCommandDeps = { budgets: BudgetClient }
+export type ExecuteBudgetCommandDeps = {
+  budgets: BudgetClient
+  services: Pick<ServiceContext, "budgetCatalog">
+  logger: Logger
+  waitUntil: (promise: Promise<unknown>) => void
+}
 
 export type ExecuteBudgetCommandInput<R extends BudgetVerbRequest = BudgetVerbRequest> = {
   projectId: string
@@ -42,7 +50,7 @@ function toCommand(request: BudgetVerbRequest, projectId: string, key: string): 
 /**
  * The one owner of every budget verb: the API routes call it now, ingestion `record` and
  * subscription-created budgets later. An upsert always configures the budget at the address it
- * is sent to.
+ * is sent to. Configured or newly created budget facts reach the catalog through `waitUntil`.
  */
 export async function executeBudgetCommand<R extends BudgetVerbRequest>(
   deps: ExecuteBudgetCommandDeps,
@@ -56,5 +64,27 @@ export async function executeBudgetCommand<R extends BudgetVerbRequest>(
   if (!isOutcomeOf(result.val, input.request.type)) {
     throw new Error(`budget ${input.request.type} returned a ${result.val.type} outcome`)
   }
-  return Ok(result.val)
+  const outcome = result.val
+  const budget =
+    outcome.type === "upsert"
+      ? outcome.changes.length > 0 || outcome.budget.version === 1
+        ? outcome.budget
+        : null
+      : "created" in outcome
+        ? outcome.created
+        : null
+  if (budget) {
+    deps.waitUntil(
+      deps.services.budgetCatalog
+        .record(projectId, catalogFactsOf(budget))
+        .catch((error: unknown) => {
+          deps.logger.error(error instanceof Error ? error : new Error(String(error)), {
+            context: "budget catalog write failed",
+            projectId,
+            version: budget.version,
+          })
+        })
+    )
+  }
+  return Ok(outcome)
 }

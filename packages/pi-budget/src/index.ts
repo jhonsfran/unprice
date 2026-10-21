@@ -2,7 +2,7 @@ import type { Api, AssistantMessage, Model, StreamOptions } from "@earendil-work
 import type { GoogleOptions } from "@earendil-works/pi-ai/api/google-generative-ai"
 import { type Provider, hasApi } from "@earendil-works/pi-ai/models"
 import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream"
-import { BudgetExceededError, type BudgetHandle } from "@unprice/budgets"
+import { BudgetExceededError, type BudgetHandle, BudgetSettleError } from "@unprice/budgets"
 import {
   type BudgetProtocol,
   type BudgetSession,
@@ -18,6 +18,8 @@ export interface UnpriceBudgetOptions {
   waitUntil?: (promise: Promise<unknown>) => void
   maxOutputTokens?: number
   budgetTimeoutMs?: number
+  /** Receives the settlement intent and retry method before the call lifecycle ends. */
+  onSettleError?: (error: BudgetSettleError) => void | Promise<void>
 }
 
 function budgetProtocol(api: Api): BudgetProtocol {
@@ -178,19 +180,26 @@ export function withUnpriceBudget(provider: Provider, config: UnpriceBudgetOptio
         else throw new Error("Model returned no terminal state")
       } catch (error) {
         const failure = failedMessage(model, error)
-        output.push({
-          type: "error",
-          reason: "error",
-          error:
-            message && session?.authorized
-              ? { ...message, stopReason: "error", errorMessage: failure.errorMessage }
-              : failure,
-        })
+        try {
+          if (error instanceof BudgetSettleError) await config.onSettleError?.(error)
+        } finally {
+          output.push({
+            type: "error",
+            reason: "error",
+            error:
+              message && session?.authorized
+                ? { ...message, stopReason: "error", errorMessage: failure.errorMessage }
+                : failure,
+          })
+        }
+      } finally {
+        output.end()
       }
-      output.end()
     }
     const work = run()
-    config.waitUntil?.(work)
+    if (config.waitUntil) config.waitUntil(work)
+    // Without a host lifecycle, the caller observes failure through the terminal stream event.
+    else void work.catch(() => undefined)
     return output
   }
   const wrapped: Provider = {

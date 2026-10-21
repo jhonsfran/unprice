@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { explainDenial } from "./explain-denial"
+import { explainDenial, explainRejection } from "./explain-denial"
 
 describe("explainDenial", () => {
+  it("explains a closed budget without claiming authorization would pass", () => {
+    expect(
+      explainRejection({ code: "BUDGET_CLOSED", closedAt: Date.UTC(2026, 9, 20) }, "money:USD")
+    ).toBe("Denied: the budget closed Oct 20, 00:00 UTC.")
+  })
   it("names the limit, its room and holds, the reset, and the advice for the remedy", () => {
     const daily = {
       limitId: "daily",

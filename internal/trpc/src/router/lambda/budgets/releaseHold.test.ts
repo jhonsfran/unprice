@@ -91,7 +91,9 @@ describe("budgets.releaseHold", () => {
 
     expect(member.released).toEqual([])
     expect([row.status, row.status === "applied" && row.released]).toEqual(["applied", "5"])
-    expect(admin.released).toEqual([{ projectId: "proj_1", key: "customer:acme", holdId: "h_7" }])
+    expect(admin.released).toEqual([
+      { projectId: "proj_1", key: "customer:acme", holdId: "h_7", holdCreatedAt: HELD_AT },
+    ])
     expect(admin.requests).toEqual([
       {
         budgetId: "bgt_1",

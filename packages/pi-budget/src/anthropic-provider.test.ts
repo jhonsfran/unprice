@@ -1,11 +1,11 @@
 import { type Context, type Model, Type } from "@earendil-works/pi-ai"
 import { createModels } from "@earendil-works/pi-ai/models"
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic"
-import { Unprice } from "@unprice/budgets"
+import { BudgetSettleError, Unprice } from "@unprice/budgets"
 import { inputBound } from "@unprice/budgets-ai"
 import { describe, expect, it } from "vitest"
 import { z } from "zod"
-import { withUnpriceBudget } from "./index"
+import { type UnpriceBudgetOptions, withUnpriceBudget } from "./index"
 
 const jsonObject = z.record(z.unknown())
 const input: Context = {
@@ -89,7 +89,8 @@ function hold(
 function fixture(
   modelId = "claude-sonnet-4-6",
   auth: "apiKey" | "bearer" = "apiKey",
-  partial = false
+  partial = false,
+  config: Pick<UnpriceBudgetOptions, "onSettleError" | "waitUntil"> = {}
 ) {
   const native = anthropicProvider()
   const model = native.getModels().find((entry) => entry.id === modelId)
@@ -103,6 +104,7 @@ function fixture(
     text: string
   }[] = []
   let deny = false
+  let failSettlement = false
   const client = new Unprice({
     token: "budget-test",
     retry: { attempts: 0 },
@@ -146,6 +148,20 @@ function fixture(
       if (!request.url.endsWith("/settle")) throw new Error("Unexpected budget request")
       order.push("settle")
       amounts.push(Number(body.amount))
+      if (failSettlement) {
+        failSettlement = false
+        return Response.json(
+          {
+            error: {
+              code: "INTERNAL_SERVER_ERROR",
+              message: "Settlement unavailable",
+              docs: "",
+              requestId: "test",
+            },
+          },
+          { status: 500 }
+        )
+      }
       return Response.json({})
     },
   })
@@ -164,6 +180,7 @@ function fixture(
   const wrapped = withUnpriceBudget(native, {
     getBudget: () => client.budget("anthropic-customer"),
     maxOutputTokens: 2048,
+    ...config,
   })
   const models = createModels({
     authContext: {
@@ -187,6 +204,9 @@ function fixture(
     requests,
     deny() {
       deny = true
+    },
+    failSettlement() {
+      failSettlement = true
     },
   }
 }
@@ -447,7 +467,12 @@ describe("native Pi Anthropic budget transport", () => {
   })
 
   it("denies generation without a provider request", async () => {
-    const test = fixture()
+    const failures: BudgetSettleError[] = []
+    const test = fixture("claude-sonnet-4-6", "apiKey", false, {
+      onSettleError: (error) => {
+        failures.push(error)
+      },
+    })
     test.deny()
     const message = await test.models.complete(test.model, input, { fetch: test.fetch })
     expect(message).toMatchObject({
@@ -456,5 +481,63 @@ describe("native Pi Anthropic budget transport", () => {
     })
     expect(test.order).toEqual(["authorize"])
     expect(test.requests).toEqual([])
+    expect(failures).toEqual([])
   })
+
+  it("exposes settlement recovery while preserving the native error and measured usage", async () => {
+    const failures: BudgetSettleError[] = []
+    const test = fixture("claude-sonnet-4-6", "apiKey", false, {
+      onSettleError: (error) => {
+        failures.push(error)
+      },
+    })
+    test.failSettlement()
+    const message = await test.models.complete(test.model, input, { fetch: test.fetch })
+    expect(message).toMatchObject({
+      stopReason: "error",
+      errorMessage: "The budget check or settlement failed. This model call was blocked.",
+      content: [{ type: "text", text: "Native reply" }],
+      usage: { input: 8, cacheRead: 2, cacheWrite: 3, output: 4, totalTokens: 17 },
+    })
+    expect(message.usage.cost.total).toBeCloseTo(0.00009585, 12)
+    expect(failures).toHaveLength(1)
+    const failure = failures[0]
+    expect(failure).toBeInstanceOf(BudgetSettleError)
+    expect(failure?.hold).toMatchObject({ key: "anthropic-customer", id: "h_1" })
+    expect(failure?.recovery).toEqual({ amount: "0.00009585" })
+    expect(failure?.retry).toBeTypeOf("function")
+    await failure?.retry?.()
+    expect(test.order).toEqual(["authorize", "generate", "settle", "settle"])
+    expect(test.amounts.slice(1)).toEqual([0.00009585, 0.00009585])
+  })
+
+  it.each([false, true])(
+    "ends the native stream when recovery rejects (waitUntil: %s)",
+    async (keepAlive) => {
+      const callbackFailure = new Error("Recovery storage unavailable")
+      const lifecycles: Promise<unknown>[] = []
+      const test = fixture("claude-sonnet-4-6", "apiKey", false, {
+        onSettleError: async () => {
+          throw callbackFailure
+        },
+        ...(keepAlive
+          ? {
+              waitUntil: (work: Promise<unknown>) => {
+                lifecycles.push(work.catch((error: unknown) => error))
+              },
+            }
+          : {}),
+      })
+      test.failSettlement()
+      const stream = test.models.stream(test.model, input, { fetch: test.fetch })
+      const events: string[] = []
+      for await (const event of stream) events.push(event.type)
+      expect((await stream.result()).stopReason).toBe("error")
+      expect(events.at(-1)).toBe("error")
+      expect(lifecycles).toHaveLength(keepAlive ? 1 : 0)
+      if (keepAlive) await expect(lifecycles[0]).resolves.toBe(callbackFailure)
+      // Let the host report any unhandled rejection after the stream's result resolves.
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+  )
 })

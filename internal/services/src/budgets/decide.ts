@@ -6,6 +6,7 @@
 import { Ok, type Result } from "@unprice/error"
 import type { Amount, SignedAmount } from "@unprice/money"
 import {
+  type BudgetConfig,
   type BudgetRecord,
   type ConfigChange,
   MAX_RETAINED_ANCHORED_WINDOWS,
@@ -24,6 +25,7 @@ import {
   type BlockedRemedy,
   type BudgetBalance,
   type BudgetCommand,
+  type BudgetRejection,
   type BudgetView,
   type ChargeOperation,
   type ExtensionDenial,
@@ -100,6 +102,20 @@ export function blockingLimit(balance: BudgetBalance, amount: Amount): Blocked |
     resetsAt: blocking.resetsAt,
     remedy,
   }
+}
+
+/** Admission for new work. Probes use the same closure and hard-limit policy as authorization. */
+export function admissionRejection(
+  config: Pick<BudgetConfig, "closesAt">,
+  balance: BudgetBalance,
+  amount: Amount,
+  now: number
+): Extract<BudgetRejection, { code: "BUDGET_CLOSED" | "LIMIT_EXCEEDED" }> | null {
+  if (config.closesAt !== null && isClosed(config, now)) {
+    return { code: "BUDGET_CLOSED", closedAt: config.closesAt }
+  }
+  const blocked = blockingLimit(balance, amount)
+  return blocked ? { code: "LIMIT_EXCEEDED", blocked, balance } : null
 }
 
 /** What fits under every hard limit at this balance, never negative; null with no hard limit. */
@@ -348,15 +364,19 @@ function decideKeyed(
     if (occurredAt < oldestAccepted) return reject({ code: "TOO_LATE", occurredAt, oldestAccepted })
   }
   const { config } = state.budget
-  const grace = command.type === "record" ? OPERATION_RETENTION_MS : 0
-  if (config.closesAt !== null && isClosed(config, now, grace)) {
+  if (
+    command.type === "record" &&
+    config.closesAt !== null &&
+    isClosed(config, now, OPERATION_RETENTION_MS)
+  ) {
     return reject({ code: "BUDGET_CLOSED", closedAt: config.closesAt })
   }
 
   const balance = balanceOf(state, now)
   // Recorded work already ran: refusing it would lose the count, not the spend.
-  const blocked = command.type === "record" ? null : blockingLimit(balance, amount)
-  if (blocked) return reject({ code: "LIMIT_EXCEEDED", blocked, balance })
+  const rejection =
+    command.type === "record" ? null : admissionRejection(config, balance, amount, now)
+  if (rejection) return reject(rejection)
 
   if (command.type === "authorize") {
     const expiresAt = now + ttlMs
@@ -572,6 +592,9 @@ function decideRelease(
 ): Result<Change, UnPriceBudgetError> {
   const hold = holdOf(target, command.holdId, ledger)
   if (hold.err) return hold
+  if (command.holdCreatedAt !== undefined && hold.val.createdAt !== command.holdCreatedAt) {
+    return reject({ code: "HOLD_NOT_FOUND", holdId: command.holdId })
+  }
   switch (hold.val.state.status) {
     case "released":
       return Ok(unchanged(hold.val))

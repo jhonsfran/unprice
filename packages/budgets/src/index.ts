@@ -7,6 +7,7 @@ export {
   BudgetSettleError,
   BudgetUnavailableError,
   createBudgetHandle,
+  toDecimal,
 } from "./budgets"
 export type {
   AmountInput,

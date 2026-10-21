@@ -295,6 +295,8 @@ export function createUnpriceBudgetMiddleware(options: UnpriceBudgetMiddlewareOp
               actual: failure.actual,
               hold: failure.hold,
               idempotencyKey: failure.idempotencyKey,
+              recovery: failure.recovery,
+              retry: failure.retry,
             }
             throw new BudgetSettleError(
               failure.error

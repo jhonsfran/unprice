@@ -1134,5 +1134,9 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-10-20: Anthropic adds a hidden tool-use system prompt to input tokens whenever `tools` is sent
   (264 to 804 tokens by model and `tool_choice`, per its tool-use docs). Anything a provider bills
   outside the request body needs a per-protocol reserve in `provider-request.ts`; a settle above the
-  hold is rejected, so the session settles the hold in full and records the excess.
+  hold is rejected, so the session records the excess before settling the hold in full. Capture one budget handle and immutable recovery inputs; retry with the same event time and idempotency key.
 
+
+- 2026-10-20: Operator release must carry `holdCreatedAt` into the budget core transaction; audit-row dedupe alone does not protect a replacement `h_1` after storage deletion.
+- 2026-10-20: Budget inspection cursors use the indexed `(due_at, id)` order. Verify SQLite query plans and `rowsRead` on tied expiries; `LIMIT` alone does not bound query work.
+- 2026-10-20: Replace the budget `due_at` index with `(due_at, id)` rather than keeping both. Local workerd measured identical operation-row write counts for either index; creating the replacement still writes approximately one index row per existing operation.

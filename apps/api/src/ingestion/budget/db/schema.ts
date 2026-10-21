@@ -55,7 +55,7 @@ export const budgetOperations = sqliteTable(
     dataJson: text("data_json").notNull(),
   },
   (table) => ({
-    due: index("budget_operations_due_idx").on(table.dueAt),
+    inspection: index("budget_operations_inspection_idx").on(table.dueAt, table.id),
     // Only holds: a charge or record is found by its id, the key's hash, so indexing its key too
     // would cost a row write on every one.
     holdKey: uniqueIndex("budget_operations_hold_key_idx")

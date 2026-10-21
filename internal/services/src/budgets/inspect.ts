@@ -6,10 +6,9 @@
 
 import type { Amount } from "@unprice/money"
 import { LEASE_REFUSAL_RETENTION_MS, OPERATION_RETENTION_MS, RECORD_DEDUPE_MS } from "./config"
-import { blockingLimit } from "./decide"
+import { admissionRejection } from "./decide"
 import { exposureOf } from "./ledger"
 import type {
-  Blocked,
   BudgetRejection,
   BudgetSnapshot,
   Operation,
@@ -57,8 +56,8 @@ export type BudgetInspection = Readonly<{
   closedRecently: readonly Operation[]
   /** Present only when the query had `find`; null = not found (denied, never sent, or purged). */
   found?: Operation | null
-  /** Present only when the query had `probe`; blocked null = it would pass now. */
-  probe?: Readonly<{ amount: Amount; blocked: Blocked | null }>
+  /** Present only when the query had `probe`; no rejection means new work would pass now. */
+  probe?: Readonly<{ amount: Amount; rejection: ReturnType<typeof admissionRejection> }>
 }>
 
 export type BudgetInspectReply =
@@ -68,7 +67,7 @@ export type BudgetInspectReply =
 /** The reads only inspect makes. Both walk the `due_at` index and read at most `limit` rows. */
 export type InspectReader = {
   /**
-   * Rows after `after` (exclusive, from the start when null) in `(due_at, length(id), id)` order, at
+   * Rows after `after` (exclusive, from the start when null) in `(due_at, id)` order, at
    * most `limit` of any status. Returns the open holds and leases among them, how many rows it
    * read, and the cursor of the last one.
    */
@@ -110,7 +109,10 @@ export function inspect(
     ...inspection,
     ...(find && { found: findOperation(reader, find) }),
     ...(probe !== undefined && {
-      probe: { amount: probe, blocked: blockingLimit(read.budget.balance, probe) },
+      probe: {
+        amount: probe,
+        rejection: admissionRejection(read.budget, read.budget.balance, probe, now),
+      },
     }),
   }
 }

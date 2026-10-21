@@ -39,6 +39,7 @@ can omit this callback and await the returned provider stream or harness work.
 | `waitUntil`       | Optional host callback that keeps the call lifecycle alive.                                            |
 | `maxOutputTokens` | Maximum output allowance. Defaults to 4096 and must be an integer of at least 16.                      |
 | `budgetTimeoutMs` | Deadline for budget resolution and authorization, and separately for settlement. Defaults to 10000 ms. |
+| `onSettleError`   | Receives `BudgetSettleError` for recovery. The terminal stream event waits for an asynchronous callback. |
 
 ## Supported requests
 
@@ -63,7 +64,34 @@ The adapter settles Pi's reported `usage.cost.total` before it emits the termina
 stream event. Settlement failure returns an error while retaining measured usage
 and response content. A timed-out request may still complete remotely. Unknown usage consumes the reservation conservatively.
 After process loss, unresolved holds can expire at their full reserved amount.
-This preserves the spending cap but can count more than the actual provider cost.
+This can count more than the actual provider cost.
+
+Use `onSettleError` to retain the settlement intent. The error exposes `hold`,
+`recovery`, and `retry()`. The Pi result still reports an error and retains its
+measured usage and response content.
+
+```ts
+withUnpriceBudget(openaiProvider(), {
+  getBudget: () => unprice.budget(customerBudgetKey),
+  onSettleError: async (error) => {
+    await recoveryStore.put(error.idempotencyKey, {
+      budgetKey: error.hold.key,
+      holdId: error.hold.id,
+      actual: error.actual,
+      recovery: error.recovery,
+    });
+    // A live process can also call await error.retry() to finish this intent.
+  },
+});
+```
+
+`recoveryStore` is application-owned durable storage. An excess record keeps its
+original amount, event key, and `occurredAt` on every retry. The retry function
+exists only in the live process. Process loss before the intent is stored can
+lose unrecorded excess usage; hold expiry covers only reserved capacity. A
+callback failure rejects the lifecycle promise passed to `waitUntil`; the Pi
+stream still ends with its settlement error. Without `waitUntil`, that terminal
+error completes the call and the callback rejection is handled by the adapter.
 
 The adapter has no Cloudflare or Pi Durable dependency. Its implementation uses
 Pi AI's public provider contract. It is a provider decorator, not a Pi Durable

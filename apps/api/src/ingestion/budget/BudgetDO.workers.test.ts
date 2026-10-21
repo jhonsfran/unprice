@@ -207,7 +207,9 @@ describe("BudgetDO runtime assumptions", () => {
         .orderBy(asc(operations.dueAt), asc(sql`length(${operations.id})`), asc(operations.id))
         .limit(256)
       for (const query of [due, next, expired]) {
-        expect(plan(query.toSQL())).toMatch(/USING (COVERING )?INDEX budget_operations_due_idx/)
+        expect(plan(query.toSQL())).toMatch(
+          /USING (COVERING )?INDEX budget_operations_inspection_idx/
+        )
       }
     })
   })

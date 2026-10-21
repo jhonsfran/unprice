@@ -237,8 +237,9 @@ export class BudgetRecoveryError extends Error {
 /**
  * The work produced `value`, but settlement failed. After a transport failure, retry the same
  * hold and actual amount. An amount above the hold requires reconciliation, not a smaller claim.
- * Do not release or record separately. The first settle may have committed, and excess usage
- * must not be hidden. A closed hold retains its replay result for 24 hours.
+ * When `retry` is present, use it to complete the fixed `recovery` intent, including any excess
+ * usage record before settlement. Persist that intent if recovery must survive process loss.
+ * A closed hold retains its replay result for 24 hours.
  */
 export class BudgetSettleError extends Error {
   readonly value: unknown
@@ -246,6 +247,8 @@ export class BudgetSettleError extends Error {
   readonly hold: BudgetHold
   readonly error: ApiError | undefined
   readonly idempotencyKey: string
+  readonly recovery: Readonly<{ amount: string; record?: Readonly<RecordBudgetInput> }> | undefined
+  readonly retry: (() => Promise<void>) | undefined
 
   constructor(
     input: {
@@ -253,6 +256,8 @@ export class BudgetSettleError extends Error {
       actual: AmountInput
       hold: BudgetHold
       idempotencyKey: string
+      recovery?: BudgetSettleError["recovery"]
+      retry?: BudgetSettleError["retry"]
     } & ({ error: ApiError } | { cause: unknown })
   ) {
     super(
@@ -267,6 +272,8 @@ export class BudgetSettleError extends Error {
     this.hold = input.hold
     this.error = "error" in input ? input.error : undefined
     this.idempotencyKey = input.idempotencyKey
+    this.recovery = input.recovery
+    this.retry = input.retry
   }
 }
 

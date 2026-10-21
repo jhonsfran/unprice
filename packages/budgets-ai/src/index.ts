@@ -1,16 +1,16 @@
 import {
-  type BudgetBalance,
   BudgetExceededError,
   type BudgetHandle,
   type BudgetHold,
   BudgetRequestError,
-  BudgetSettleError,
   BudgetUnavailableError,
 } from "@unprice/budgets"
 import { DEFAULT_BUDGET_TIMEOUT_MS, withDeadline } from "./deadline"
 export { DEFAULT_BUDGET_TIMEOUT_MS, withDeadline } from "./deadline"
 export { MESSAGE_OVERHEAD_TOKENS, REQUEST_OVERHEAD_TOKENS, inputBound } from "./input-bound"
 import { prepareBudgetRequest } from "./provider-request"
+import { type BudgetStepSettlement, createSettlement } from "./settlement"
+export type { BudgetStepSettlement } from "./settlement"
 export { TOOL_PROMPT_TOKENS } from "./provider-request"
 import type { BudgetProtocol, ModelLimits } from "./request-policy"
 export type { BudgetProtocol, ModelLimits } from "./request-policy"
@@ -140,38 +140,19 @@ export interface BudgetReservation {
   readonly maximumCost: number
 }
 
-/** How the step settled: what was held, what it cost, and what the budget has left. */
-export interface BudgetStepSettlement {
-  readonly holdId: string
-  readonly hold: string
-  readonly actual: string
-  readonly balance: BudgetBalance
-  /** The step cost more than its hold; the hold settled in full and the excess was recorded. */
-  readonly exceeded: boolean
-}
-
 export interface BudgetSession {
   readonly fetch: typeof globalThis.fetch
   readonly authorized: boolean
   readonly error: unknown
   readonly reserved: BudgetReservation | undefined
-  /** Settles once and resolves with the settlement; later calls return the same promise. */
+  /** Keeps the first accounting intent. Failed attempts can be retried; success is retained. */
   settle(actualCost?: number): Promise<BudgetStepSettlement>
 }
-
-const decimal = (amount: number): string =>
-  (Math.round(amount * 100_000_000) / 100_000_000).toFixed(8).replace(/\.?0+$/, "")
-
-const holdExceeded = (error: { code: string; details?: unknown }): boolean =>
-  error.code === "CONFLICT" &&
-  typeof error.details === "object" &&
-  error.details !== null &&
-  (error.details as { kind?: unknown }).kind === "hold_amount_exceeded"
 
 type RequestState =
   | { status: "ready" | "preparing" }
   | { status: "blocked"; error: unknown }
-  | { status: "authorized"; reserved: BudgetReservation; key: string }
+  | { status: "authorized"; reserved: BudgetReservation; key: string; budget: BudgetHandle }
 
 /** One physical model dispatch and its settlement, independent of any model SDK. */
 export function createBudgetSession(options: BudgetSessionOptions): BudgetSession {
@@ -191,7 +172,7 @@ export function createBudgetSession(options: BudgetSessionOptions): BudgetSessio
     ? AbortSignal.any([options.signal, AbortSignal.timeout(120_000)])
     : AbortSignal.timeout(120_000)
   let state: RequestState = { status: "ready" }
-  let settlement: Promise<BudgetStepSettlement> | undefined
+  let settlement: (() => Promise<BudgetStepSettlement>) | undefined
   let failure: unknown
 
   return {
@@ -227,11 +208,18 @@ export function createBudgetSession(options: BudgetSessionOptions): BudgetSessio
         generation = bounded.request
         const maximum = maximumCost(pricing, bounded.inputTokens, bounded.outputTokens)
         const key = crypto.randomUUID()
-        const authorized = await withDeadline(
+        const { budget, authorized } = await withDeadline(
           async (budgetSignal) => {
             const budget = await options.getBudget()
             budgetSignal.throwIfAborted()
-            return budget.authorize({ amount: maximum, ttlMs: 300_000, idempotencyKey: key })
+            return {
+              budget,
+              authorized: await budget.authorize({
+                amount: maximum,
+                ttlMs: 300_000,
+                idempotencyKey: key,
+              }),
+            }
           },
           { timeoutMs, signal }
         )
@@ -251,6 +239,7 @@ export function createBudgetSession(options: BudgetSessionOptions): BudgetSessio
             maximumCost: maximum,
           },
           key,
+          budget,
         }
         signal.throwIfAborted()
         if (failure !== undefined) throw failure
@@ -262,82 +251,26 @@ export function createBudgetSession(options: BudgetSessionOptions): BudgetSessio
       return transport(generation)
     },
     settle(actualCost) {
-      if (settlement) return settlement
-      const authorized = state
-      settlement = (async () => {
-        if (authorized.status === "blocked") throw authorized.error
-        if (authorized.status !== "authorized") throw new Error("Model request was not budgeted")
-        const { hold, maximumCost: reserved } = authorized.reserved
-        const amount =
+      if (!settlement) {
+        if (state.status === "blocked") return Promise.reject(state.error)
+        if (state.status !== "authorized")
+          return Promise.reject(new Error("Model request was not budgeted"))
+        const actual =
           typeof actualCost === "number" && Number.isFinite(actualCost) && actualCost >= 0
             ? actualCost
-            : reserved
-        const failed = (cause: unknown) =>
-          new BudgetSettleError({
-            value: undefined,
-            actual: amount,
-            hold,
-            idempotencyKey: authorized.key,
-            cause,
-          })
-        const rejected = (error: NonNullable<Awaited<ReturnType<BudgetHold["settle"]>>["error"]>) =>
-          new BudgetSettleError({
-            value: undefined,
-            actual: amount,
-            hold,
-            idempotencyKey: authorized.key,
-            error,
-          })
-        let settled: Awaited<ReturnType<BudgetHold["settle"]>>
-        try {
-          settled = await withDeadline(() => hold.settle({ amount }), { timeoutMs })
-        } catch (cause) {
-          throw failed(cause)
-        }
-        let outcome: BudgetStepSettlement
-        if (settled.error && holdExceeded(settled.error)) {
-          // The step cost more than its bound. The server refuses a settle above the hold, so the
-          // hold settles in full and the excess is recorded: an overrun counts, past the cap.
-          try {
-            const full = await withDeadline(() => hold.settle({ amount: hold.amount }), {
-              timeoutMs,
-            })
-            if (full.error) throw rejected(full.error)
-            const budget = await options.getBudget()
-            const recorded = await withDeadline(
-              () =>
-                budget.record({
-                  amount: decimal(amount - Number(hold.amount)),
-                  idempotencyKey: `${hold.id}:excess`,
-                  occurredAt: Date.now(),
-                }),
-              { timeoutMs }
-            )
-            if (recorded.error) throw rejected(recorded.error)
-            outcome = {
-              holdId: hold.id,
-              hold: hold.amount,
-              actual: decimal(amount),
-              balance: recorded.result.balance,
-              exceeded: true,
-            }
-          } catch (cause) {
-            throw cause instanceof BudgetSettleError ? cause : failed(cause)
-          }
-        } else {
-          if (settled.error) throw rejected(settled.error)
-          outcome = {
-            holdId: hold.id,
-            hold: hold.amount,
-            actual: settled.result.actual,
-            balance: settled.result.balance,
-            exceeded: false,
-          }
-        }
+            : state.reserved.maximumCost
+        settlement = createSettlement({
+          budget: state.budget,
+          hold: state.reserved.hold,
+          actual,
+          idempotencyKey: state.key,
+          timeoutMs,
+        })
+      }
+      return settlement().then((outcome) => {
         if (failure !== undefined) throw failure
         return outcome
-      })()
-      return settlement
+      })
     },
   }
 }

@@ -243,7 +243,7 @@ export type BudgetCommand =
       ifMissing?: BudgetDefinition
     }>
   | Readonly<{ type: "settle"; holdId: string; amount: Amount }>
-  | Readonly<{ type: "release"; holdId: string }>
+  | Readonly<{ type: "release"; holdId: string; holdCreatedAt?: number }>
   | Readonly<{
       type: "charge"
       idempotencyKey: string

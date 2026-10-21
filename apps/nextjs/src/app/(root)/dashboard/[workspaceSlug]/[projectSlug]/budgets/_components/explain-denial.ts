@@ -2,7 +2,15 @@ import { formatDate } from "~/lib/dates"
 import { formatBudgetAmount } from "./budget-format"
 import type { BudgetInspection } from "./budget-operations"
 
-export type BudgetBlocked = NonNullable<NonNullable<BudgetInspection["probe"]>["blocked"]>
+type ProbeRejection = NonNullable<NonNullable<BudgetInspection["probe"]>["rejection"]>
+export type BudgetBlocked = Extract<ProbeRejection, { code: "LIMIT_EXCEEDED" }>["blocked"]
+
+export function explainRejection(rejection: ProbeRejection, unit: string): string {
+  if (rejection.code === "BUDGET_CLOSED") {
+    return `Denied: the budget closed ${formatDate(rejection.closedAt, "UTC", "MMM d, HH:mm")} UTC.`
+  }
+  return explainDenial(rejection.blocked, unit)
+}
 
 const ADVICE: Record<BudgetBlocked["remedy"], string> = {
   release_holds: "Release stuck holds or raise the limit.",

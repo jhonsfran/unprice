@@ -19,7 +19,7 @@ import { formatDate } from "~/lib/dates"
 import { useTRPC } from "~/trpc/client"
 import { formatBudgetAmount } from "./budget-format"
 import { describeOperation } from "./budget-operations"
-import { explainDenial } from "./explain-denial"
+import { explainRejection } from "./explain-denial"
 
 type Find = NonNullable<InspectBudgetQuery["find"]>
 
@@ -183,8 +183,8 @@ export function BudgetDebugSheet({ id, budgetKey }: { id: string; budgetKey: str
               <Muted>{probeError.message}</Muted>
             ) : probed?.probe ? (
               <Muted>
-                {probed.probe.blocked
-                  ? explainDenial(probed.probe.blocked, probed.budget.unit)
+                {probed.probe.rejection
+                  ? explainRejection(probed.probe.rejection, probed.budget.unit)
                   : `Passes now. Authorizing ${formatBudgetAmount(probed.probe.amount, probed.budget.unit)} would succeed.`}
               </Muted>
             ) : null}
