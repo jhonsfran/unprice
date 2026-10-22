@@ -6,6 +6,7 @@
 import { Ok, type Result } from "@unprice/error"
 import type { Amount, SignedAmount } from "@unprice/money"
 import {
+  type BudgetConfig,
   type BudgetRecord,
   type ConfigChange,
   MAX_RETAINED_ANCHORED_WINDOWS,
@@ -24,6 +25,7 @@ import {
   type BlockedRemedy,
   type BudgetBalance,
   type BudgetCommand,
+  type BudgetRejection,
   type BudgetView,
   type ChargeOperation,
   type ExtensionDenial,
@@ -102,6 +104,20 @@ export function blockingLimit(balance: BudgetBalance, amount: Amount): Blocked |
   }
 }
 
+/** Admission for new work. Probes use the same closure and hard-limit policy as authorization. */
+export function admissionRejection(
+  config: Pick<BudgetConfig, "closesAt">,
+  balance: BudgetBalance,
+  amount: Amount,
+  now: number
+): Extract<BudgetRejection, { code: "BUDGET_CLOSED" | "LIMIT_EXCEEDED" }> | null {
+  if (config.closesAt !== null && isClosed(config, now)) {
+    return { code: "BUDGET_CLOSED", closedAt: config.closesAt }
+  }
+  const blocked = blockingLimit(balance, amount)
+  return blocked ? { code: "LIMIT_EXCEEDED", blocked, balance } : null
+}
+
 /** What fits under every hard limit at this balance, never negative; null with no hard limit. */
 function roomOf(balance: BudgetBalance): Amount | null {
   if (balance.remaining === null) return null
@@ -159,24 +175,52 @@ export function decide(
       budget ? decideSweep({ budget, ledger: view.ledger }, view.expired, now) : unchanged(null)
     )
   }
-  if (!budget) return reject({ code: "BUDGET_NOT_FOUND" })
-  const state = { budget, ledger: view.ledger }
+  if (budget) return decideVerb(command, { budget, ledger: view.ledger }, view.target, now)
 
+  // A keyed verb may carry the budget to create when its key has none (ADR-0006 D8). The verb
+  // then runs against the new budget in the same change, so a denial creates nothing.
+  const definition = "ifMissing" in command ? command.ifMissing : undefined
+  if (!definition) return reject({ code: "BUDGET_NOT_FOUND" })
+  const created = decideUpsert(
+    { type: "upsert", ...definition, mayLoosen: false },
+    null,
+    view.ledger,
+    now
+  )
+  if (created.err) return created
+  const { configured } = created.val
+  if (!configured) throw new Error(`creating ${definition.key} configured nothing`)
+  const decided = decideVerb(
+    command,
+    { budget: configured.budget, ledger: view.ledger },
+    view.target,
+    now
+  )
+  if (decided.err) return decided
+  return Ok({ ...decided.val, configured })
+}
+
+function decideVerb(
+  command: Exclude<BudgetCommand, { type: "upsert" | "sweep" }>,
+  state: Funded,
+  target: Operation | null,
+  now: number
+): Result<Change, UnPriceBudgetError> {
   switch (command.type) {
     case "get":
       return Ok(unchanged(null))
     case "authorize":
     case "charge":
     case "record":
-      return decideKeyed(command, state, view.target, now)
+      return decideKeyed(command, state, target, now)
     case "settle":
-      return decideSettle(command, state, view.target, now)
+      return decideSettle(command, state, target, now)
     case "release":
-      return decideRelease(command, state.ledger, view.target, now)
+      return decideRelease(command, state.ledger, target, now)
     case "lease":
-      return decideLease(command, state, view.target, now)
+      return decideLease(command, state, target, now)
     case "report":
-      return decideReport(command, state, view.target, now)
+      return decideReport(command, state, target, now)
   }
 }
 
@@ -320,15 +364,19 @@ function decideKeyed(
     if (occurredAt < oldestAccepted) return reject({ code: "TOO_LATE", occurredAt, oldestAccepted })
   }
   const { config } = state.budget
-  const grace = command.type === "record" ? OPERATION_RETENTION_MS : 0
-  if (config.closesAt !== null && isClosed(config, now, grace)) {
+  if (
+    command.type === "record" &&
+    config.closesAt !== null &&
+    isClosed(config, now, OPERATION_RETENTION_MS)
+  ) {
     return reject({ code: "BUDGET_CLOSED", closedAt: config.closesAt })
   }
 
   const balance = balanceOf(state, now)
   // Recorded work already ran: refusing it would lose the count, not the spend.
-  const blocked = command.type === "record" ? null : blockingLimit(balance, amount)
-  if (blocked) return reject({ code: "LIMIT_EXCEEDED", blocked, balance })
+  const rejection =
+    command.type === "record" ? null : admissionRejection(config, balance, amount, now)
+  if (rejection) return reject(rejection)
 
   if (command.type === "authorize") {
     const expiresAt = now + ttlMs
@@ -544,6 +592,9 @@ function decideRelease(
 ): Result<Change, UnPriceBudgetError> {
   const hold = holdOf(target, command.holdId, ledger)
   if (hold.err) return hold
+  if (command.holdCreatedAt !== undefined && hold.val.createdAt !== command.holdCreatedAt) {
+    return reject({ code: "HOLD_NOT_FOUND", holdId: command.holdId })
+  }
   switch (hold.val.state.status) {
     case "released":
       return Ok(unchanged(hold.val))

@@ -44,11 +44,11 @@ export const route = createRoute(
 export const registerReleaseBudgetInternalV1 = (app: App) =>
   app.openapi(route, async (c) => {
     // `internalKeyAuth` admits only main and internal keys, so the project comes from the body.
-    const { projectId, key, holdId } = c.req.valid("json")
+    const { projectId, key, holdId, holdCreatedAt } = c.req.valid("json")
     const { type: _, ...released } = await runBudgetVerb(
       c,
       key,
-      { type: "release", holdId },
+      { type: "release", holdId, holdCreatedAt },
       { projectId }
     ).catch(withRejection)
     return c.json(toWire(released), HttpStatusCodes.OK)

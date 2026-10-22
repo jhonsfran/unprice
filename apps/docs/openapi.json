@@ -5283,6 +5283,95 @@
                     "maxLength": 256,
                     "description": "Up to 256 characters. A retry with the same key and the same request replays the first answer; the same key with a different request returns 409.",
                     "example": "run_8f2c:step_3"
+                  },
+                  "ifMissing": {
+                    "type": "object",
+                    "properties": {
+                      "unit": {
+                        "type": "string",
+                        "pattern": "^([A-Z]{3}|money:[A-Z]{3}|credits:[a-z0-9_-]{1,64}|units:[a-z0-9_-]{1,64})$",
+                        "description": "A currency code (shorthand for money:<code>), credits:<id>, or units:<slug>",
+                        "example": "USD"
+                      },
+                      "limits": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$",
+                              "description": "Unique within the budget. Defaults to the window name. The id fixes the limit's recurring schedule. Equivalent UTC anchors share usage. A different schedule under the same id returns 409, so use a new id for a different schedule.",
+                              "example": "month"
+                            },
+                            "amount": {
+                              "type": "string",
+                              "pattern": "^\\d{1,19}(\\.\\d{1,8})?$",
+                              "description": "A non-negative decimal string in the budget's unit, with at most 8 decimal places. Strings keep amounts exact.",
+                              "example": "0.05"
+                            },
+                            "window": {
+                              "type": "string",
+                              "enum": ["hour", "day", "week", "month", "never"],
+                              "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                              "example": "month"
+                            },
+                            "anchor": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Anchors a day, week, or month window, in epoch milliseconds: periods start at this instant and repeat every window. A month anchored on the 31st starts on the last day of shorter months. Equivalent UTC anchors share one counter. Usage counts from the moment the schedule is first tracked. Removed schedules retain current usage until their period ends. A budget retains at most 32 distinct anchored schedules.",
+                              "example": 1792022400000
+                            },
+                            "enforce": {
+                              "type": "string",
+                              "enum": ["hard", "soft"],
+                              "description": "Defaults to hard",
+                              "example": "hard"
+                            }
+                          },
+                          "required": ["amount", "window"]
+                        },
+                        "maxItems": 16,
+                        "description": "Up to 16 limits. Every hard limit must have room for a hold or charge. An empty list makes a budget that only counts."
+                      },
+                      "closesAt": {
+                        "type": "integer",
+                        "nullable": true,
+                        "minimum": 0,
+                        "description": "When the budget closes, in epoch milliseconds. From then on authorize and charge return 409, record is accepted for 1 day more, and settle and release keep working. 7 days after closesAt, once nothing is left to settle or replay, the budget is deleted: get returns 404 and an upsert creates it anew. An upsert replaces the whole definition, so omitting closesAt or sending null leaves the budget open and clears any close time it had. A runtime key cannot close a budget in the past: an earlier closesAt takes effect now.",
+                        "example": 1798761599000
+                      },
+                      "holds": {
+                        "type": "object",
+                        "properties": {
+                          "defaultTtlMs": {
+                            "type": "integer",
+                            "minimum": 1000,
+                            "maximum": 86400000,
+                            "description": "TTL for an authorize that sends no ttlMs, in milliseconds. Defaults to 900000 (15 minutes).",
+                            "example": 900000
+                          },
+                          "maxTtlMs": {
+                            "type": "integer",
+                            "minimum": 1000,
+                            "maximum": 86400000,
+                            "description": "The largest ttlMs an authorize may ask for, in milliseconds. Defaults to 86400000 (1 day).",
+                            "example": 86400000
+                          }
+                        },
+                        "additionalProperties": false,
+                        "description": "Hold timing. Both TTLs must be between 1000 and 86400000 ms, and the default must not exceed the max. An omitted TTL takes its default on every upsert."
+                      },
+                      "onUnavailable": {
+                        "type": "string",
+                        "enum": ["deny"],
+                        "description": "Deny new work when Unprice cannot be reached. Defaults to deny.",
+                        "example": "deny"
+                      }
+                    },
+                    "required": ["unit", "limits"],
+                    "additionalProperties": false,
+                    "description": "The budget to create when the key has none: an upsert body without the key, created as a runtime key would. An existing budget ignores it and is never changed by it. The reply says created: true when this call created the budget."
                   }
                 },
                 "required": ["key", "amount", "idempotencyKey"],
@@ -5393,9 +5482,22 @@
                         }
                       },
                       "required": ["remaining", "held", "limits", "asOf"]
+                    },
+                    "created": {
+                      "type": "boolean",
+                      "description": "Whether this call created the budget from its ifMissing",
+                      "example": false
                     }
                   },
-                  "required": ["allowed", "holdId", "amount", "expiresAt", "replayed", "balance"]
+                  "required": [
+                    "allowed",
+                    "holdId",
+                    "amount",
+                    "expiresAt",
+                    "replayed",
+                    "balance",
+                    "created"
+                  ]
                 }
               }
             }
@@ -6048,6 +6150,95 @@
                     "maxLength": 256,
                     "description": "Up to 256 characters. A retry with the same key and the same request replays the first answer; the same key with a different request returns 409.",
                     "example": "run_8f2c:step_3"
+                  },
+                  "ifMissing": {
+                    "type": "object",
+                    "properties": {
+                      "unit": {
+                        "type": "string",
+                        "pattern": "^([A-Z]{3}|money:[A-Z]{3}|credits:[a-z0-9_-]{1,64}|units:[a-z0-9_-]{1,64})$",
+                        "description": "A currency code (shorthand for money:<code>), credits:<id>, or units:<slug>",
+                        "example": "USD"
+                      },
+                      "limits": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$",
+                              "description": "Unique within the budget. Defaults to the window name. The id fixes the limit's recurring schedule. Equivalent UTC anchors share usage. A different schedule under the same id returns 409, so use a new id for a different schedule.",
+                              "example": "month"
+                            },
+                            "amount": {
+                              "type": "string",
+                              "pattern": "^\\d{1,19}(\\.\\d{1,8})?$",
+                              "description": "A non-negative decimal string in the budget's unit, with at most 8 decimal places. Strings keep amounts exact.",
+                              "example": "0.05"
+                            },
+                            "window": {
+                              "type": "string",
+                              "enum": ["hour", "day", "week", "month", "never"],
+                              "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                              "example": "month"
+                            },
+                            "anchor": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Anchors a day, week, or month window, in epoch milliseconds: periods start at this instant and repeat every window. A month anchored on the 31st starts on the last day of shorter months. Equivalent UTC anchors share one counter. Usage counts from the moment the schedule is first tracked. Removed schedules retain current usage until their period ends. A budget retains at most 32 distinct anchored schedules.",
+                              "example": 1792022400000
+                            },
+                            "enforce": {
+                              "type": "string",
+                              "enum": ["hard", "soft"],
+                              "description": "Defaults to hard",
+                              "example": "hard"
+                            }
+                          },
+                          "required": ["amount", "window"]
+                        },
+                        "maxItems": 16,
+                        "description": "Up to 16 limits. Every hard limit must have room for a hold or charge. An empty list makes a budget that only counts."
+                      },
+                      "closesAt": {
+                        "type": "integer",
+                        "nullable": true,
+                        "minimum": 0,
+                        "description": "When the budget closes, in epoch milliseconds. From then on authorize and charge return 409, record is accepted for 1 day more, and settle and release keep working. 7 days after closesAt, once nothing is left to settle or replay, the budget is deleted: get returns 404 and an upsert creates it anew. An upsert replaces the whole definition, so omitting closesAt or sending null leaves the budget open and clears any close time it had. A runtime key cannot close a budget in the past: an earlier closesAt takes effect now.",
+                        "example": 1798761599000
+                      },
+                      "holds": {
+                        "type": "object",
+                        "properties": {
+                          "defaultTtlMs": {
+                            "type": "integer",
+                            "minimum": 1000,
+                            "maximum": 86400000,
+                            "description": "TTL for an authorize that sends no ttlMs, in milliseconds. Defaults to 900000 (15 minutes).",
+                            "example": 900000
+                          },
+                          "maxTtlMs": {
+                            "type": "integer",
+                            "minimum": 1000,
+                            "maximum": 86400000,
+                            "description": "The largest ttlMs an authorize may ask for, in milliseconds. Defaults to 86400000 (1 day).",
+                            "example": 86400000
+                          }
+                        },
+                        "additionalProperties": false,
+                        "description": "Hold timing. Both TTLs must be between 1000 and 86400000 ms, and the default must not exceed the max. An omitted TTL takes its default on every upsert."
+                      },
+                      "onUnavailable": {
+                        "type": "string",
+                        "enum": ["deny"],
+                        "description": "Deny new work when Unprice cannot be reached. Defaults to deny.",
+                        "example": "deny"
+                      }
+                    },
+                    "required": ["unit", "limits"],
+                    "additionalProperties": false,
+                    "description": "The budget to create when the key has none: an upsert body without the key, created as a runtime key would. An existing budget ignores it and is never changed by it. The reply says created: true when this call created the budget."
                   }
                 },
                 "required": ["key", "amount", "idempotencyKey"],
@@ -6155,9 +6346,14 @@
                         }
                       },
                       "required": ["remaining", "held", "limits", "asOf"]
+                    },
+                    "created": {
+                      "type": "boolean",
+                      "description": "Whether this call created the budget from its ifMissing",
+                      "example": false
                     }
                   },
-                  "required": ["allowed", "amount", "crossed", "replayed", "balance"]
+                  "required": ["allowed", "amount", "crossed", "replayed", "balance", "created"]
                 }
               }
             }
@@ -6934,6 +7130,95 @@
                     "exclusiveMinimum": true,
                     "description": "How long the lease lives without a report, in milliseconds: at least 1000 and at most the budget's holds.maxTtlMs. A report renews it once less than half remains. A lease still open at expiry counts its whole grant as used until the window resets.",
                     "example": 60000
+                  },
+                  "ifMissing": {
+                    "type": "object",
+                    "properties": {
+                      "unit": {
+                        "type": "string",
+                        "pattern": "^([A-Z]{3}|money:[A-Z]{3}|credits:[a-z0-9_-]{1,64}|units:[a-z0-9_-]{1,64})$",
+                        "description": "A currency code (shorthand for money:<code>), credits:<id>, or units:<slug>",
+                        "example": "USD"
+                      },
+                      "limits": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$",
+                              "description": "Unique within the budget. Defaults to the window name. The id fixes the limit's recurring schedule. Equivalent UTC anchors share usage. A different schedule under the same id returns 409, so use a new id for a different schedule.",
+                              "example": "month"
+                            },
+                            "amount": {
+                              "type": "string",
+                              "pattern": "^\\d{1,19}(\\.\\d{1,8})?$",
+                              "description": "A non-negative decimal string in the budget's unit, with at most 8 decimal places. Strings keep amounts exact.",
+                              "example": "0.05"
+                            },
+                            "window": {
+                              "type": "string",
+                              "enum": ["hour", "day", "week", "month", "never"],
+                              "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                              "example": "month"
+                            },
+                            "anchor": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Anchors a day, week, or month window, in epoch milliseconds: periods start at this instant and repeat every window. A month anchored on the 31st starts on the last day of shorter months. Equivalent UTC anchors share one counter. Usage counts from the moment the schedule is first tracked. Removed schedules retain current usage until their period ends. A budget retains at most 32 distinct anchored schedules.",
+                              "example": 1792022400000
+                            },
+                            "enforce": {
+                              "type": "string",
+                              "enum": ["hard", "soft"],
+                              "description": "Defaults to hard",
+                              "example": "hard"
+                            }
+                          },
+                          "required": ["amount", "window"]
+                        },
+                        "maxItems": 16,
+                        "description": "Up to 16 limits. Every hard limit must have room for a hold or charge. An empty list makes a budget that only counts."
+                      },
+                      "closesAt": {
+                        "type": "integer",
+                        "nullable": true,
+                        "minimum": 0,
+                        "description": "When the budget closes, in epoch milliseconds. From then on authorize and charge return 409, record is accepted for 1 day more, and settle and release keep working. 7 days after closesAt, once nothing is left to settle or replay, the budget is deleted: get returns 404 and an upsert creates it anew. An upsert replaces the whole definition, so omitting closesAt or sending null leaves the budget open and clears any close time it had. A runtime key cannot close a budget in the past: an earlier closesAt takes effect now.",
+                        "example": 1798761599000
+                      },
+                      "holds": {
+                        "type": "object",
+                        "properties": {
+                          "defaultTtlMs": {
+                            "type": "integer",
+                            "minimum": 1000,
+                            "maximum": 86400000,
+                            "description": "TTL for an authorize that sends no ttlMs, in milliseconds. Defaults to 900000 (15 minutes).",
+                            "example": 900000
+                          },
+                          "maxTtlMs": {
+                            "type": "integer",
+                            "minimum": 1000,
+                            "maximum": 86400000,
+                            "description": "The largest ttlMs an authorize may ask for, in milliseconds. Defaults to 86400000 (1 day).",
+                            "example": 86400000
+                          }
+                        },
+                        "additionalProperties": false,
+                        "description": "Hold timing. Both TTLs must be between 1000 and 86400000 ms, and the default must not exceed the max. An omitted TTL takes its default on every upsert."
+                      },
+                      "onUnavailable": {
+                        "type": "string",
+                        "enum": ["deny"],
+                        "description": "Deny new work when Unprice cannot be reached. Defaults to deny.",
+                        "example": "deny"
+                      }
+                    },
+                    "required": ["unit", "limits"],
+                    "additionalProperties": false,
+                    "description": "The budget to create when the key has none: an upsert body without the key, created as a runtime key would. An existing budget ignores it and is never changed by it. The reply says created: true when this call created the budget."
                   }
                 },
                 "required": ["key", "leaseKey", "amount", "ttlMs"],
@@ -7079,9 +7364,14 @@
                         }
                       },
                       "required": ["remaining", "held", "limits", "asOf"]
+                    },
+                    "created": {
+                      "type": "boolean",
+                      "description": "Whether this call created the budget from its ifMissing",
+                      "example": false
                     }
                   },
-                  "required": ["lease", "terms", "replayed", "balance"]
+                  "required": ["lease", "terms", "replayed", "balance", "created"]
                 }
               }
             }
@@ -7614,6 +7904,292 @@
                     "replayed",
                     "balance"
                   ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrBadRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Although the HTTP standard specifies \"unauthorized\", semantically this response means \"unauthenticated\". That is, the client must authenticate itself to get the requested response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrUnauthorized"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrForbidden"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrNotFound"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "This response is sent when a request conflicts with the current state of the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrConflict"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrPreconditionFailed"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request payload is larger than the server is willing to process.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrPayloadTooLarge"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The user has sent too many requests in a given amount of time (\"rate limiting\")",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrTooManyRequests"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server has encountered a situation it does not know how to handle.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrInternalServerError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/budgets/models": {
+      "get": {
+        "operationId": "budgets.models",
+        "summary": "token rates and limits of models",
+        "description": "The catalog Unprice prices model steps with: token rates in USD per million tokens and the context and output limits of each model, by provider/model id. Unknown ids are omitted from the answer.",
+        "tags": ["budgets"],
+        "x-unprice": {
+          "audience": "public",
+          "category": "runtime",
+          "docs": {
+            "expose": true
+          },
+          "sdk": {
+            "path": ["budgets", "models"]
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Comma-separated provider/model ids, for example openai/gpt-5",
+              "example": "openai/gpt-5,anthropic/claude-sonnet-4-5"
+            },
+            "required": true,
+            "name": "ids",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The rows of the known ids",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "version": {
+                      "type": "string",
+                      "description": "The UTC date the catalog was synced from models.dev, as YYYY-MM-DD",
+                      "example": "2026-10-20"
+                    },
+                    "models": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "description": "provider/model",
+                            "example": "openai/gpt-5"
+                          },
+                          "provider": {
+                            "type": "string",
+                            "enum": ["openai", "anthropic", "google"],
+                            "example": "openai"
+                          },
+                          "model": {
+                            "type": "string",
+                            "description": "The model's id at its provider",
+                            "example": "gpt-5"
+                          },
+                          "unit": {
+                            "type": "string",
+                            "enum": ["money:USD"],
+                            "description": "Rates are in US dollars"
+                          },
+                          "per": {
+                            "type": "number",
+                            "enum": [1000000],
+                            "description": "Rates are per this many tokens"
+                          },
+                          "rates": {
+                            "type": "object",
+                            "properties": {
+                              "input": {
+                                "type": "number",
+                                "minimum": 0,
+                                "description": "USD per million input tokens",
+                                "example": 1.25
+                              },
+                              "output": {
+                                "type": "number",
+                                "minimum": 0,
+                                "description": "USD per million output tokens",
+                                "example": 10
+                              },
+                              "cacheRead": {
+                                "type": "number",
+                                "minimum": 0,
+                                "description": "USD per million input tokens read from the prompt cache",
+                                "example": 0.125
+                              },
+                              "cacheWrite": {
+                                "type": "number",
+                                "minimum": 0,
+                                "description": "USD per million input tokens written to the prompt cache",
+                                "example": 1.25
+                              }
+                            },
+                            "required": ["input", "output", "cacheRead", "cacheWrite"],
+                            "additionalProperties": false,
+                            "description": "The rates below the first tier, or for every call when there is no tier"
+                          },
+                          "tiers": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "input": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "description": "USD per million input tokens",
+                                  "example": 1.25
+                                },
+                                "output": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "description": "USD per million output tokens",
+                                  "example": 10
+                                },
+                                "cacheRead": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "description": "USD per million input tokens read from the prompt cache",
+                                  "example": 0.125
+                                },
+                                "cacheWrite": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "description": "USD per million input tokens written to the prompt cache",
+                                  "example": 1.25
+                                },
+                                "inputTokensAbove": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "description": "The tier's rates apply to a call whose input exceeds this many tokens",
+                                  "example": 200000
+                                }
+                              },
+                              "required": [
+                                "input",
+                                "output",
+                                "cacheRead",
+                                "cacheWrite",
+                                "inputTokensAbove"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "description": "Rates that replace `rates` for a call with more input tokens than `inputTokensAbove`, ascending; empty for a flat price"
+                          },
+                          "limits": {
+                            "type": "object",
+                            "properties": {
+                              "context": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "exclusiveMinimum": true,
+                                "description": "The context window, in tokens",
+                                "example": 400000
+                              },
+                              "output": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "exclusiveMinimum": true,
+                                "description": "The most output tokens one call returns",
+                                "example": 128000
+                              }
+                            },
+                            "required": ["context", "output"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "provider",
+                          "model",
+                          "unit",
+                          "per",
+                          "rates",
+                          "tiers",
+                          "limits"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "The rows of the known ids, in request order, each once; unknown ids are omitted"
+                    }
+                  },
+                  "required": ["version", "models"]
                 }
               }
             }

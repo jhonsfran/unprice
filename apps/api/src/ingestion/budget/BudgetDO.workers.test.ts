@@ -207,7 +207,9 @@ describe("BudgetDO runtime assumptions", () => {
         .orderBy(asc(operations.dueAt), asc(sql`length(${operations.id})`), asc(operations.id))
         .limit(256)
       for (const query of [due, next, expired]) {
-        expect(plan(query.toSQL())).toMatch(/USING (COVERING )?INDEX budget_operations_due_idx/)
+        expect(plan(query.toSQL())).toMatch(
+          /USING (COVERING )?INDEX budget_operations_inspection_idx/
+        )
       }
     })
   })
@@ -995,6 +997,68 @@ describe("BudgetDO alarm", () => {
 
       expect(errors).toEqual(["budget alarm failed: storage unavailable"])
       await expect(state.storage.getAlarm()).resolves.toBe(t0 + 30_000)
+    })
+  })
+})
+
+describe("BudgetDO creates a budget on first use", () => {
+  function definitionOf(key: string, config: BudgetConfigInput) {
+    const { key: _, ...definition } = upsertBudgetInputSchema.parse({ key, unit: "USD", ...config })
+    return { ...definition, key, projectId: "proj_1" }
+  }
+
+  it("creates the budget from ifMissing and runs the verb in the same call", async () => {
+    const key = `customer:${crypto.randomUUID()}`
+    const stub = stubFor(key)
+    const held = outcome(
+      await stub.execute({
+        type: "authorize",
+        idempotencyKey: "a1",
+        amount: units(10),
+        ifMissing: definitionOf(key, fiftyPerMonth),
+      }),
+      "authorize"
+    )
+    expect(held.created).toMatchObject({ key, version: 1 })
+    expect(held.balance.remaining).toBe(units(40))
+
+    const looser = definitionOf(key, { limits: [{ id: "month", amount: "500", window: "month" }] })
+    const again = outcome(
+      await stub.execute({
+        type: "authorize",
+        idempotencyKey: "a2",
+        amount: units(5),
+        ifMissing: looser,
+      }),
+      "authorize"
+    )
+    expect(again.created).toBeNull()
+    expect(again.balance.remaining).toBe(units(35))
+    expect(outcome(await stub.execute({ type: "get" }), "get").budget).toMatchObject({
+      version: 1,
+      limits: [{ id: "month", amount: units(50) }],
+    })
+  })
+
+  it("leaves the key without a budget when the first call is denied", async () => {
+    const key = `customer:${crypto.randomUUID()}`
+    const stub = stubFor(key)
+    expect(
+      rejection(
+        await stub.execute({
+          type: "authorize",
+          idempotencyKey: "a1",
+          amount: units(100),
+          ifMissing: definitionOf(key, fiftyPerMonth),
+        })
+      )
+    ).toMatchObject({ code: "LIMIT_EXCEEDED" })
+    expect(rejection(await stub.execute({ type: "get" }))).toEqual({ code: "BUDGET_NOT_FOUND" })
+    await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
+      expect(
+        state.storage.sql.exec("SELECT name FROM sqlite_master WHERE type = 'table'").toArray()
+      ).toEqual([])
+      expect(await state.storage.getAlarm()).toBeNull()
     })
   })
 })

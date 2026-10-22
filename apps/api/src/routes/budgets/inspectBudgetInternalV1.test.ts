@@ -92,7 +92,7 @@ const inspection: BudgetInspection = {
     },
   ],
   found: hold,
-  probe: { amount: usd(2), blocked: null },
+  probe: { amount: usd(2), rejection: null },
 }
 
 afterEach(() => {
@@ -192,7 +192,7 @@ describe("POST /v1/internal/budgets/inspect", () => {
         },
       ],
       found: wireHold,
-      probe: { amount: "2", blocked: null },
+      probe: { amount: "2", rejection: null },
     })
     expect(mocks.log).toHaveBeenCalledWith({
       budget: { command: "inspect", outcome: "ok", do_ms: expect.any(Number) },

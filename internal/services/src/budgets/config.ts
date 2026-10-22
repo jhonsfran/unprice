@@ -27,7 +27,11 @@ export type BudgetLimit = BudgetConfig["limits"][number]
  * True from `closesAt + graceMs` on. Authorize and charge are refused from `closesAt`, `record`
  * from `closesAt + OPERATION_RETENTION_MS`.
  */
-export function isClosed(config: BudgetConfig, now: number, graceMs = 0): boolean {
+export function isClosed(
+  config: Pick<BudgetConfig, "closesAt">,
+  now: number,
+  graceMs = 0
+): boolean {
   return config.closesAt !== null && now >= config.closesAt + graceMs
 }
 

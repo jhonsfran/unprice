@@ -5,9 +5,15 @@ import {
   type LocalLeases,
   createLocalLeases,
 } from "./budget-local"
-import { type BudgetHandle, type SpendSettlement, createBudgetHandle } from "./budgets"
+import {
+  type BudgetDefinitionInput,
+  type BudgetHandle,
+  type SpendSettlement,
+  createBudgetHandle,
+} from "./budgets"
 import type { ApiError } from "./errors"
 import { type GeneratedSdkResources, createGeneratedSdkResources } from "./generated/sdk-resources"
+import { type ModelCatalog, type ModelRate, createModelCatalog } from "./model-catalog"
 import type { paths } from "./openapi"
 import type { ApiResult, Result } from "./result"
 import { type Transport, type UnpriceOptions, createTransport } from "./transport"
@@ -23,6 +29,7 @@ export type { ApiResult, Result, UnpriceOptions }
 export class Unprice implements GeneratedSdkResources {
   private readonly settlement: SpendSettlement
   private readonly local: LocalLeases
+  private readonly catalog: ModelCatalog
   public readonly budgets: GeneratedSdkResources["budgets"]
   public readonly retry: Transport<paths>["retry"]
 
@@ -35,21 +42,41 @@ export class Unprice implements GeneratedSdkResources {
 
     this.budgets = resources.budgets
     this.local = createLocalLeases({ transport: this.budgets, settlement: this.settlement })
+    this.catalog = createModelCatalog({
+      transport: (ids) => this.budgets.models({ ids: ids.join(",") }),
+    })
   }
 
   /**
-   * A handle bound to one budget key. It never creates or changes the budget. With
-   * `{ mode: "local" }`, a long-lived process spends from a lease held in its memory, one lease
-   * per key however many handles it takes.
+   * A model's token rates and limits from the Unprice catalog, by `provider/model` id. Fetched
+   * once an hour per process; every adapter in the process shares the row.
+   */
+  model(id: string): Promise<ApiResult<ModelRate>> {
+    return this.catalog.get(id)
+  }
+
+  /**
+   * A handle bound to one budget key. It never changes an existing budget. With `ifMissing`, its
+   * first authorize, charge, or lease creates the budget from that definition when the key has
+   * none (ADR-0006 D8). With `{ mode: "local" }`, a long-lived process spends from a lease held in
+   * its memory, one lease per key however many handles it takes.
    *
    * @throws RangeError when the key has an open local lease with other lease options.
    */
-  budget(key: string): BudgetHandle
-  budget(key: string, options: LocalBudgetOptions): LocalBudgetHandle
-  budget(key: string, options?: LocalBudgetOptions): BudgetHandle | LocalBudgetHandle {
-    const remote = createBudgetHandle(this.budgets, key, this.settlement)
-    if (!options) return remote
-    return this.local.budget(remote, key, options.lease)
+  budget(key: string, options?: { ifMissing?: BudgetDefinitionInput }): BudgetHandle
+  budget(
+    key: string,
+    options: LocalBudgetOptions & { ifMissing?: BudgetDefinitionInput }
+  ): LocalBudgetHandle
+  budget(
+    key: string,
+    options?:
+      | { ifMissing?: BudgetDefinitionInput }
+      | (LocalBudgetOptions & { ifMissing?: BudgetDefinitionInput })
+  ): BudgetHandle | LocalBudgetHandle {
+    const remote = createBudgetHandle(this.budgets, key, this.settlement, options?.ifMissing)
+    if (!options || !("mode" in options)) return remote
+    return this.local.budget(remote, key, options.lease, options.ifMissing)
   }
 
   /**

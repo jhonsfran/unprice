@@ -13,20 +13,7 @@ import {
   alarmAt,
   emptyLedger,
 } from "@unprice/services/budgets"
-import {
-  type SQL,
-  and,
-  asc,
-  desc,
-  eq,
-  gt,
-  gte,
-  inArray,
-  lte,
-  min,
-  notInArray,
-  sql,
-} from "drizzle-orm"
+import { type SQL, and, asc, desc, eq, gt, inArray, lte, min, notInArray, sql } from "drizzle-orm"
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite"
 import * as schema from "./db/schema"
 import type { BudgetStore, BudgetStoreTx, Sync } from "./ports"
@@ -110,10 +97,9 @@ export class BudgetSqliteStore implements BudgetStore {
 
 type SqliteTx = SqliteHandle | Parameters<Parameters<SqliteHandle["transaction"]>[0]>[0]
 
-/** Ties on `due_at` break by `length(id)`, then `id`, so `h_<n>` sorts by its number. */
+/** Inspection walks the composite `(due_at, id)` index in both directions. */
 function bindInspect(db: SqliteTx): InspectReader {
   const operations = schema.budgetOperations
-  const idLength = sql`length(${operations.id})`
   const columns = {
     id: operations.id,
     kind: operations.kind,
@@ -130,12 +116,9 @@ function bindInspect(db: SqliteTx): InspectReader {
         .where(
           after === null
             ? undefined
-            : and(
-                gte(operations.dueAt, after.dueAt),
-                sql`(${operations.dueAt}, ${idLength}, ${operations.id}) > (${after.dueAt}, ${after.id.length}, ${after.id})`
-              )
+            : sql`(${operations.dueAt}, ${operations.id}) > (${after.dueAt}, ${after.id})`
         )
-        .orderBy(asc(operations.dueAt), asc(idLength), asc(operations.id))
+        .orderBy(asc(operations.dueAt), asc(operations.id))
         .limit(limit)
         .all()
       const rows = examined.flatMap((row): ReservationOperation[] => {
@@ -157,7 +140,7 @@ function bindInspect(db: SqliteTx): InspectReader {
         .select(columns)
         .from(operations)
         .where(and(gt(operations.dueAt, from), lte(operations.dueAt, to)))
-        .orderBy(desc(operations.dueAt), desc(idLength), desc(operations.id))
+        .orderBy(desc(operations.dueAt), desc(operations.id))
         .limit(limit)
         .all()
         .map(decodeOperation)

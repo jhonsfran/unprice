@@ -138,6 +138,7 @@ function createServer(room: string) {
           lease: view(request.leaseKey, lease),
           terms,
           replayed: false,
+          created: false,
           balance: balance(),
         }
         return { result: lease.grant }
@@ -266,6 +267,28 @@ describe("local budget handle", () => {
   })
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  it("exposes current local capacity after a denied extension without changing global balances", async () => {
+    const server = createServer("1")
+    const local = createHandle(server, {
+      amount: "1",
+      lowWater: "0",
+      idleMs: Number.POSITIVE_INFINITY,
+    })
+    expect(local.spendableAmount).toBeUndefined()
+    const hold = await allowedHold(local, "0.8", "warm")
+    expect(local.spendableAmount).toBe("0.2")
+    await hold.settle({ amount: "0.6" })
+    expect(local.spendableAmount).toBe("0.4")
+    const denied = await local.authorize({ amount: "0.5", idempotencyKey: "large" })
+    expect(denied.result?.allowed).toBe(false)
+    expect(denied.result?.balance?.remaining).toBe("-0.6")
+    expect(local.spendableAmount).toBe("0.4")
+    expect((await allowedHold(local, "0.3", "small")).amount).toBe("0.3")
+    expect(local.spendableAmount).toBe("0.1")
+    await local.close()
+    expect(local.spendableAmount).toBeUndefined()
   })
 
   it("authorizes and settles from memory once the lease is granted", async () => {
@@ -704,7 +727,13 @@ describe("Unprice.budget local mode", () => {
         const body = (await request.json()) as { leaseKey: string; captured?: string }
         bodies.push([request.url, body])
         const answer: LeaseResponse | LeaseReportResponse = request.url.endsWith("/lease")
-          ? { lease: view(body.leaseKey, "0", "open"), terms, replayed: false, balance }
+          ? {
+              lease: view(body.leaseKey, "0", "open"),
+              terms,
+              replayed: false,
+              created: false,
+              balance,
+            }
           : {
               lease: view(body.leaseKey, body.captured ?? "0", "closed"),
               terms,

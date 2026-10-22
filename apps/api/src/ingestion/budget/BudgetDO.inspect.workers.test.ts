@@ -66,6 +66,64 @@ const roomy: BudgetConfigInput = {
 }
 
 describe("BudgetDO.inspect", () => {
+  it("bounds inspection SQL reads even when every row has the same due time", async () => {
+    const stub = stubFor("customer:indexed-inspection")
+    await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
+      await migrate(drizzle(state.storage), migrations)
+      const sql = state.storage.sql
+      const dueAt = midMonthAhead()
+      sql.exec(
+        `WITH RECURSIVE seq(i) AS (
+          SELECT 1 UNION ALL SELECT i + 1 FROM seq WHERE i < 10000
+        ) INSERT INTO budget_operations (id, kind, status, due_at, data_json)
+          SELECT printf('o:event-%06d', i), 'record', 'done', ?,
+            json_object('idempotencyKey', printf('event-%06d', i),
+              'amount', json_object('$bigint', '1'), 'createdAt', ?, 'crossed', json_array())
+          FROM seq`,
+        dueAt,
+        dueAt - DAY
+      )
+      const queries: {
+        query: string
+        bindings: unknown[]
+        cursor: SqlStorageCursor<Record<string, SqlStorageValue>>
+      }[] = []
+      const exec = sql.exec.bind(sql)
+      Object.defineProperty(sql, "exec", {
+        configurable: true,
+        value: <T extends Record<string, SqlStorageValue>>(
+          query: string,
+          ...bindings: unknown[]
+        ) => {
+          const cursor = exec<T>(query, ...bindings)
+          if (query.startsWith("select") && query.includes("budget_operations")) {
+            queries.push({ query, bindings, cursor })
+          }
+          return cursor
+        },
+      })
+      try {
+        const store = new BudgetSqliteStore(drizzle(state.storage, { schema }))
+        store.inspecting((tx) => {
+          const first = tx.walkReservations(null, 1000)
+          expect(first.examined).toBe(1000)
+          expect(first.last).not.toBeNull()
+          expect(tx.walkReservations(first.last, 1000).examined).toBe(1000)
+          expect(tx.walkReservations({ dueAt, id: "o:event-009000" }, 1000).examined).toBe(1000)
+          expect(tx.readDueBetween(dueAt - 1, dueAt, 50)).toHaveLength(50)
+        })
+      } finally {
+        Object.defineProperty(sql, "exec", { configurable: true, value: exec })
+      }
+      expect(queries).toHaveLength(4)
+      for (const { query, bindings, cursor } of queries) {
+        const plan = exec(`EXPLAIN QUERY PLAN ${query}`, ...bindings).toArray()
+        expect(plan.map((row) => row.detail).join(" ")).not.toContain("TEMP B-TREE")
+        expect(cursor.rowsRead).toBeLessThanOrEqual(3000)
+      }
+    })
+  })
+
   it("lists every open hold and lease and their sum equals held when one scan covers them", async () => {
     const key = "customer:listed"
     const stub = stubFor(key)
@@ -199,11 +257,17 @@ describe("BudgetDO.inspect", () => {
     const real = await stub.execute({ type: "authorize", idempotencyKey: "a2", amount: units(8) })
 
     if (real.ok || real.rejection.code !== "LIMIT_EXCEEDED") throw new Error("expected a 402")
-    expect(probed).toEqual({ amount: units(8), blocked: real.rejection.blocked })
-    expect(probed?.blocked).toMatchObject({ limitId: "daily", remedy: "release_holds" })
+    expect(probed).toMatchObject({
+      amount: units(8),
+      rejection: { code: "LIMIT_EXCEEDED", blocked: real.rejection.blocked },
+    })
+    expect(probed?.rejection?.code === "LIMIT_EXCEEDED" && probed.rejection.blocked).toMatchObject({
+      limitId: "daily",
+      remedy: "release_holds",
+    })
     expect(inspection(await stub.inspect({ probe: units(5) })).probe).toEqual({
       amount: units(5),
-      blocked: null,
+      rejection: null,
     })
   })
 

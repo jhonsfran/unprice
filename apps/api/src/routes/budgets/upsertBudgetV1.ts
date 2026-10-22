@@ -1,6 +1,5 @@
 import { createRoute } from "@hono/zod-openapi"
 import { upsertBudgetInputSchema, upsertBudgetResponseSchema } from "@unprice/db/validators"
-import { upsertBudget } from "@unprice/services/use-cases"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { keyAuth } from "~/auth/key"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
@@ -44,22 +43,11 @@ export const registerUpsertBudgetV1 = (app: App) =>
     const { key, ...request } = c.req.valid("json")
     const apiKey = await keyAuth(c, { requireType: ["runtime", "config"] })
     const mayLoosen = apiKey.type === "config"
-    const { budgetCatalog } = c.get("services")
     const { changes, budget } = await runBudgetVerb(
       c,
       key,
       { type: "upsert", ...request, mayLoosen },
-      apiKey,
-      (deps, input) =>
-        upsertBudget(
-          {
-            ...deps,
-            services: { budgetCatalog },
-            waitUntil: c.get("waitUntil"),
-            logger: c.get("logger"),
-          },
-          input
-        )
+      apiKey
     )
     return c.json({ changes: toWire(changes), budget: budgetToWire(budget) }, HttpStatusCodes.OK)
   })

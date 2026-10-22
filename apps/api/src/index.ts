@@ -25,6 +25,7 @@ import { registerChargeBudgetV1 } from "./routes/budgets/chargeBudgetV1"
 import { registerGetBudgetV1 } from "./routes/budgets/getBudgetV1"
 import { registerInspectBudgetInternalV1 } from "./routes/budgets/inspectBudgetInternalV1"
 import { registerLeaseBudgetV1 } from "./routes/budgets/leaseBudgetV1"
+import { registerModelsBudgetV1 } from "./routes/budgets/modelsBudgetV1"
 import { registerRecordBudgetV1 } from "./routes/budgets/recordBudgetV1"
 import { registerReleaseBudgetInternalV1 } from "./routes/budgets/releaseBudgetInternalV1"
 import { registerReleaseBudgetV1 } from "./routes/budgets/releaseBudgetV1"
@@ -201,6 +202,7 @@ registerRecordBudgetV1(app)
 registerGetBudgetV1(app)
 registerLeaseBudgetV1(app)
 registerReportBudgetV1(app)
+registerModelsBudgetV1(app)
 
 // Billing routes
 registerFlushReservationsForInvoicingV1(app)

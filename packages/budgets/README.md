@@ -47,6 +47,35 @@ try {
 estimate. `maximumCost` and `costOf` come from your code. If the cap cannot cover the estimate,
 `spend` throws `BudgetExceededError` and your function does not run.
 
+For the Vercel AI SDK, [`@unprice/ai-sdk-budget`](https://github.com/jhonsfran/unprice/tree/main/packages/ai-sdk-budget)
+does the bound, the hold, and the settlement for every model step, with prices from the Unprice
+catalog. For Pi, see `@unprice/pi-budget`.
+
+## Create on first use
+
+A handle can carry the budget to create when its key has none. The first authorize, charge, or
+lease creates it; an existing budget is never changed.
+
+```ts
+const budget = unprice.budget(`customer:${user.id}`, {
+  ifMissing: { unit: "USD", limits: [{ amount: "5", window: "month" }] },
+})
+```
+
+## Priced tools
+
+`wrap` puts a fixed charge in front of a function. As an AI SDK tool's `execute`, the charge is
+keyed by the call's `toolCallId`, so a tool call that runs again does not pay twice.
+
+```ts
+const search = budget.wrap({ amount: 0.01 }, searchApi)
+```
+
+## Model prices
+
+`unprice.model("openai/gpt-5")` answers a model's token rates and limits from the Unprice
+catalog, fetched once an hour per process.
+
 ## Documentation
 
 - [Overview](https://docs.unprice.dev/budgets/overview)

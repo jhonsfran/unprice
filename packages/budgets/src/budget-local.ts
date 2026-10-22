@@ -4,11 +4,13 @@ import {
   type BudgetAuthorization,
   type BudgetBalance,
   type BudgetCharge,
+  type BudgetDefinitionInput,
   type BudgetDenial,
   type BudgetHandle,
   type BudgetHold,
   type SpendSettlement,
   createSpend,
+  createWrap,
   retryable,
   toDenial,
 } from "./budgets"
@@ -87,7 +89,12 @@ export type LocalBudgetHandle = BudgetHandle & {
 
 /** The client's local leases: at most one per key, and nothing kept for a key without one. */
 export type LocalLeases = {
-  budget(remote: BudgetHandle, key: string, options: LocalLeaseOptions): LocalBudgetHandle
+  budget(
+    remote: BudgetHandle,
+    key: string,
+    options: LocalLeaseOptions,
+    ifMissing?: BudgetDefinitionInput
+  ): LocalBudgetHandle
   /** Final-reports every open lease. Resolves with the keys whose lease was not returned. */
   close(): Promise<Array<{ key: string; error: ApiError }>>
 }
@@ -100,7 +107,10 @@ type LeaseSettings = Readonly<{
   idleMs: number
 }>
 
-type Shell = Pick<LocalBudgetHandle, "authorize" | "charge" | "flush" | "close"> & {
+type Shell = Pick<
+  LocalBudgetHandle,
+  "authorize" | "charge" | "flush" | "close" | "spendableAmount"
+> & {
   readonly settings: LeaseSettings
 }
 
@@ -148,7 +158,7 @@ export const createLocalLeases = ({
     return shell
   }
 
-  const budget: LocalLeases["budget"] = (remote, key, options) => {
+  const budget: LocalLeases["budget"] = (remote, key, options, ifMissing) => {
     const settings = leaseSettings(options)
     live(key, settings)
     // Resolved per call, so a handle kept past its lease's end shares the key's next lease.
@@ -160,6 +170,7 @@ export const createLocalLeases = ({
         key,
         settings,
         onError: options.onError,
+        ifMissing,
         now,
         forget: () => {
           if (shells.get(key) === created) shells.delete(key)
@@ -169,15 +180,20 @@ export const createLocalLeases = ({
       return created
     }
     const authorize: BudgetHandle["authorize"] = async (input) => shell().authorize(input)
+    const charge: BudgetHandle["charge"] = async (input) => shell().charge(input)
 
     return {
       key,
       mode: "local",
+      get spendableAmount() {
+        return shells.get(key)?.spendableAmount
+      },
       authorize,
-      charge: async (input) => shell().charge(input),
+      charge,
       record: remote.record,
       get: remote.get,
       spend: createSpend(authorize, settlement),
+      wrap: createWrap(charge),
       flush: async () => shells.get(key)?.flush() ?? { result: null },
       close: async () => shells.get(key)?.close() ?? { result: null },
     }
@@ -198,6 +214,7 @@ const createShell = ({
   key,
   settings,
   onError,
+  ifMissing,
   now,
   forget,
 }: {
@@ -205,6 +222,8 @@ const createShell = ({
   key: string
   settings: LeaseSettings
   onError: LocalLeaseOptions["onError"]
+  /** Sent with every lease request, so the first lease creates the budget when the key has none. */
+  ifMissing: BudgetDefinitionInput | undefined
   now: () => number
   /** Drops this shell from the registry. */
   forget: () => void
@@ -268,6 +287,7 @@ const createShell = ({
       leaseKey: globalThis.crypto.randomUUID(),
       amount: fromUnits(need > amount ? need : amount),
       ttlMs,
+      ...(ifMissing ? { ifMissing } : {}),
     }
     const sentAt = now()
     const granted = transport.lease(request).then((response): ApiResult<Lease> => {
@@ -445,6 +465,7 @@ const createShell = ({
         hold: localHold(lease, value.hold),
         balance: lease.balance,
         replayed: value.replayed,
+        created: false,
       },
     }
   }
@@ -464,6 +485,7 @@ const createShell = ({
       crossed: [],
       replayed: value.replayed,
       balance: lease.balance,
+      created: false,
     }
     return { result: charged }
   }
@@ -505,6 +527,9 @@ const createShell = ({
 
   return {
     settings,
+    get spendableAmount() {
+      return epoch.phase === "open" ? fromUnits(epoch.lease.ledger.spendable(now())) : undefined
+    },
     authorize: tracked(authorize),
     charge: tracked(charge),
     flush,
@@ -558,7 +583,11 @@ function serverUnits(text: string): Units {
   return units
 }
 
-const toGrant = ({ lease, terms, balance }: LeaseResponse): LeaseGrant => ({
+const toGrant = ({
+  lease,
+  terms,
+  balance,
+}: Pick<LeaseResponse, "lease" | "terms" | "balance">): LeaseGrant => ({
   leaseKey: lease.leaseKey,
   seq: lease.seq,
   granted: serverUnits(lease.granted),

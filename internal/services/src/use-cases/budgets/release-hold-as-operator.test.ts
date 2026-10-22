@@ -129,7 +129,9 @@ describe("releaseHoldAsOperator", () => {
 
     expect(result.val).toEqual(audit({ status: "applied", released: "5" }))
     expect(rows()).toEqual([audit({ status: "applied", released: "5" })])
-    expect(released).toEqual([{ projectId: "proj_1", key: "customer:acme", holdId: "h_7" }])
+    expect(released).toEqual([
+      { projectId: "proj_1", key: "customer:acme", holdId: "h_7", holdCreatedAt: HELD_AT },
+    ])
   })
 
   it("leaves the row requested on a transport failure and reuses it on the retry", async () => {
@@ -184,8 +186,8 @@ describe("releaseHoldAsOperator", () => {
       ["bga_2", HELD_AT, "applied"],
     ])
     expect(released).toEqual([
-      { projectId: "proj_1", key: "customer:acme", holdId: "h_1" },
-      { projectId: "proj_1", key: "customer:acme", holdId: "h_1" },
+      { projectId: "proj_1", key: "customer:acme", holdId: "h_1", holdCreatedAt: earlier },
+      { projectId: "proj_1", key: "customer:acme", holdId: "h_1", holdCreatedAt: HELD_AT },
     ])
   })
 

@@ -294,6 +294,9 @@ patterns. Keep it cheap to load and useful.
 - 2026-10-18: tsx cannot import `packages/api/src` (its CommonJS `export *`); budget tooling scripts
   import the built `@unprice/budgets`, so run `pnpm --filter @unprice/budgets build` first. Run tooling probes
   with explicit env vars rather than `--env-file`, which loads the operator's credentials.
+- 2026-10-20: A tsx script that reaches `@unprice/db/validators` must be a `.cts` entry (see
+  `internal/services/scripts/sync-model-catalog.cts`): `@unprice/error` is untyped CommonJS whose
+  `export *` barrel hides `BaseError` from Node's ESM loader, so an ESM `.ts` entry fails to import it.
 - 2026-10-18: `apps/api/src/routes/budgets/local-mode.fuzz.test.ts` runs the built SDK's local mode
   through the real budget routes and processor on fake timers; rebuild `@unprice/budgets` before it.
   Keep `setImmediate` real and step with `vi.advanceTimersToNextTimer()`: the async advance waits a
@@ -1028,6 +1031,7 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   screenshots (IO never fires in stitched captures) and very tall fullPage shots can duplicate
   the first viewport at the bottom; verify with stepped real scrolling + per-section viewport
   shots instead.
+- 2026-10-21: The main landing animation comes from `~/repos/tutorials/unprice-spend-authorization`. Export 720p H.264 with `preload="none"`; files under `public/videos/spend-authorization/` have immutable caching, so regenerate content hashes and update `demo-video.ts` when replacing them.
 - 2026-07-13: A `curl --max-time 5` timeout against :3000 does not mean the port is free — the
   user's dev server may be cold-compiling. If `next dev` reports "Port 3000 in use, trying
   3001", the :3000 owner is another server; verify against the one serving the working tree.
@@ -1109,3 +1113,39 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-10-17: A Durable Object that deletes its own storage must also reset any "schema ready"
   latch inside the same `blockConcurrencyWhile` (`BudgetDO` sets `ready = null`), or the next
   request on the live instance runs against dropped tables.
+
+## AI budget integrations
+
+- 2026-10-21: AI reservations include only price tiers whose strict threshold is below the input bound. Keep every reachable rate, including lower tiers, so unordered or decreasing catalog prices remain safe.
+- 2026-10-21: Adaptive AI admission belongs in `packages/budgets-ai`: count OpenAI input only after definite denial, then reauthorize the final output allowance. A local lease remainder cannot prove exhaustion because the lease can refill.
+- 2026-10-20: AI budget adapters share final serialized request policy in `packages/budgets-ai`; Pi and AI SDK wrappers only convert native calls and usage. Keep a hold per physical dispatch and preserve JSON versus SSE mode.
+- 2026-10-20: Public integration packages must be added to `tooling/scripts/assert-publishable-packages.mjs` and ship their own MIT license. Build workspace dependencies before standalone package tests or archive consumer tests.
+- 2026-10-20: Anthropic and Gemini preflight counts are estimates. Budget holds use the byte bound of the final request body (`inputBound` in `packages/budgets-ai`) plus Anthropic's hidden tool-use prompt when tools are present; refunds require final raw usage evidence because native SDKs can emit finish events from preliminary counters.
+- 2026-10-20: Downstream packages test and typecheck against each other's built `dist`; after a change to
+  `packages/budgets` or `packages/budgets-ai`, run `pnpm --filter @unprice/budgets build` then
+  `pnpm --filter @unprice/budgets-ai build` before the ai-sdk and Pi suites, or they run the old code and
+  typecheck reports missing declarations.
+- 2026-10-20: `pnpm --filter @unprice/api generate:openapi` curls a running dev server on port 8787
+  (`pnpm --filter api start`); then `pnpm --filter @unprice/budgets generate` and the api `generate:*`
+  scripts, then rebuild `@unprice/budgets` and `@unprice/api` so `internal/services` typechecks.
+- 2026-10-20: `pnpm exec biome ...` under the rtk hook dies with "Linter process terminated abnormally";
+  run it as `rtk proxy pnpm exec biome ...`.
+- 2026-10-20: A keyed budget verb with `ifMissing` creates its budget inside the same `decide` change
+  (`decideUpsert` then the verb, `configured` merged); outcomes carry `created`, and a rejected first
+  call writes no budget row. The DO prepares storage only for an upsert or a verb with `ifMissing`, and
+  drops the schema again when that first call leaves no budget behind.
+- 2026-10-20: Anthropic adds a hidden tool-use system prompt to input tokens whenever `tools` is sent
+  (264 to 804 tokens by model and `tool_choice`, per its tool-use docs). Anything a provider bills
+  outside the request body needs a per-protocol reserve in `provider-request.ts`; a settle above the
+  hold is rejected, so the session records the excess before settling the hold in full. Capture one budget handle and immutable recovery inputs; retry with the same event time and idempotency key.
+
+
+- 2026-10-20: Operator release must carry `holdCreatedAt` into the budget core transaction; audit-row dedupe alone does not protect a replacement `h_1` after storage deletion.
+- 2026-10-20: Budget inspection cursors use the indexed `(due_at, id)` order. Verify SQLite query plans and `rowsRead` on tied expiries; `LIMIT` alone does not bound query work.
+- 2026-10-20: Replace the budget `due_at` index with `(due_at, id)` rather than keeping both. Local workerd measured identical operation-row write counts for either index; creating the replacement still writes approximately one index row per existing operation.
+- 2026-10-21: Use `withUnpriceTool` for fixed-fee Pi Durable tools. It adapts the session/task ID to `budget.wrap` charge replay and records the fee in native Pi tool usage.
+- 2026-10-21: Replacing local SDK archives at the same version can leave Vite's worker dependency cache on old code. Confirm the optimized module, refresh that generated cache, and reload the existing dev server before live verification.
+- 2026-10-21: Put large Pi diagnostic prompts in a fork. Their text persists in the transcript and inflates later byte bounds, which can reduce the affordable output cap even when cached actual usage costs much less.
+- 2026-10-21: Local budget charges deduplicate only within one lease. `withUnpriceTool` requires a remote handle and rejects local handles before charging or executing a durable tool.
+- 2026-10-21: Export Pi Durable tools from `@unprice/pi-budget/tools`. The root declaration must compile without the optional Pi Durable peer installed.
+- 2026-10-21: AI output search changes only numeric output settings. Check its byte bound against the serialized request across digit boundaries, including Anthropic's enabled thinking budget.

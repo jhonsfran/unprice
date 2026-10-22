@@ -142,7 +142,12 @@ describe("HttpBudgetOperatorGateway.inspect", () => {
 })
 
 describe("HttpBudgetOperatorGateway.release", () => {
-  const release = { projectId: "proj_1", key: "customer:acme", holdId: "h_7" }
+  const release = {
+    projectId: "proj_1",
+    key: "customer:acme",
+    holdId: "h_7",
+    holdCreatedAt: 1_796_000_000_000,
+  }
   const rejected = (status: number, code: string, rejection: Record<string, unknown>) =>
     json(
       { error: { code, message: "refused", details: { kind: "release_rejected", rejection } } },

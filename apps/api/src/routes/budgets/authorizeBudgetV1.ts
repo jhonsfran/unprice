@@ -37,6 +37,13 @@ export const route = createRoute(
 export const registerAuthorizeBudgetV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { key, ...request } = c.req.valid("json")
-    const { type: _, ...held } = await runBudgetVerb(c, key, { type: "authorize", ...request })
-    return c.json({ allowed: true as const, ...toWire(held) }, HttpStatusCodes.OK)
+    const {
+      type: _,
+      created,
+      ...held
+    } = await runBudgetVerb(c, key, { type: "authorize", ...request })
+    return c.json(
+      { allowed: true as const, ...toWire(held), created: created !== null },
+      HttpStatusCodes.OK
+    )
   })

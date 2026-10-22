@@ -304,6 +304,26 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/v1/budgets/models": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * token rates and limits of models
+     * @description The catalog Unprice prices model steps with: token rates in USD per million tokens and the context and output limits of each model, by provider/model id. Unknown ids are omitted from the answer.
+     */
+    get: operations["budgets.models"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/v1/customers/sign-up": {
     parameters: {
       query?: never
@@ -3486,6 +3506,68 @@ export interface operations {
            * @example run_8f2c:step_3
            */
           idempotencyKey: string
+          /** @description The budget to create when the key has none: an upsert body without the key, created as a runtime key would. An existing budget ignores it and is never changed by it. The reply says created: true when this call created the budget. */
+          ifMissing?: {
+            /**
+             * @description A currency code (shorthand for money:<code>), credits:<id>, or units:<slug>
+             * @example USD
+             */
+            unit: string
+            /** @description Up to 16 limits. Every hard limit must have room for a hold or charge. An empty list makes a budget that only counts. */
+            limits: {
+              /**
+               * @description Unique within the budget. Defaults to the window name. The id fixes the limit's recurring schedule. Equivalent UTC anchors share usage. A different schedule under the same id returns 409, so use a new id for a different schedule.
+               * @example month
+               */
+              id?: string
+              /**
+               * @description A non-negative decimal string in the budget's unit, with at most 8 decimal places. Strings keep amounts exact.
+               * @example 0.05
+               */
+              amount: string
+              /**
+               * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+               * @example month
+               * @enum {string}
+               */
+              window: "hour" | "day" | "week" | "month" | "never"
+              /**
+               * @description Anchors a day, week, or month window, in epoch milliseconds: periods start at this instant and repeat every window. A month anchored on the 31st starts on the last day of shorter months. Equivalent UTC anchors share one counter. Usage counts from the moment the schedule is first tracked. Removed schedules retain current usage until their period ends. A budget retains at most 32 distinct anchored schedules.
+               * @example 1792022400000
+               */
+              anchor?: number
+              /**
+               * @description Defaults to hard
+               * @example hard
+               * @enum {string}
+               */
+              enforce?: "hard" | "soft"
+            }[]
+            /**
+             * @description When the budget closes, in epoch milliseconds. From then on authorize and charge return 409, record is accepted for 1 day more, and settle and release keep working. 7 days after closesAt, once nothing is left to settle or replay, the budget is deleted: get returns 404 and an upsert creates it anew. An upsert replaces the whole definition, so omitting closesAt or sending null leaves the budget open and clears any close time it had. A runtime key cannot close a budget in the past: an earlier closesAt takes effect now.
+             * @example 1798761599000
+             */
+            closesAt?: number | null
+            /** @description Hold timing. Both TTLs must be between 1000 and 86400000 ms, and the default must not exceed the max. An omitted TTL takes its default on every upsert. */
+            holds?: {
+              /**
+               * @description TTL for an authorize that sends no ttlMs, in milliseconds. Defaults to 900000 (15 minutes).
+               * @example 900000
+               */
+              defaultTtlMs?: number
+              /**
+               * @description The largest ttlMs an authorize may ask for, in milliseconds. Defaults to 86400000 (1 day).
+               * @example 86400000
+               */
+              maxTtlMs?: number
+            }
+            /**
+             * @description Deny new work when Unprice cannot be reached. Defaults to deny.
+             * @example deny
+             * @enum {string}
+             */
+            onUnavailable?: "deny"
+          }
         }
       }
     }
@@ -3543,6 +3625,11 @@ export interface operations {
               /** @description When this balance was computed, in epoch milliseconds */
               asOf: number
             }
+            /**
+             * @description Whether this call created the budget from its ifMissing
+             * @example false
+             */
+            created: boolean
           }
         }
       }
@@ -3995,6 +4082,68 @@ export interface operations {
            * @example run_8f2c:step_3
            */
           idempotencyKey: string
+          /** @description The budget to create when the key has none: an upsert body without the key, created as a runtime key would. An existing budget ignores it and is never changed by it. The reply says created: true when this call created the budget. */
+          ifMissing?: {
+            /**
+             * @description A currency code (shorthand for money:<code>), credits:<id>, or units:<slug>
+             * @example USD
+             */
+            unit: string
+            /** @description Up to 16 limits. Every hard limit must have room for a hold or charge. An empty list makes a budget that only counts. */
+            limits: {
+              /**
+               * @description Unique within the budget. Defaults to the window name. The id fixes the limit's recurring schedule. Equivalent UTC anchors share usage. A different schedule under the same id returns 409, so use a new id for a different schedule.
+               * @example month
+               */
+              id?: string
+              /**
+               * @description A non-negative decimal string in the budget's unit, with at most 8 decimal places. Strings keep amounts exact.
+               * @example 0.05
+               */
+              amount: string
+              /**
+               * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+               * @example month
+               * @enum {string}
+               */
+              window: "hour" | "day" | "week" | "month" | "never"
+              /**
+               * @description Anchors a day, week, or month window, in epoch milliseconds: periods start at this instant and repeat every window. A month anchored on the 31st starts on the last day of shorter months. Equivalent UTC anchors share one counter. Usage counts from the moment the schedule is first tracked. Removed schedules retain current usage until their period ends. A budget retains at most 32 distinct anchored schedules.
+               * @example 1792022400000
+               */
+              anchor?: number
+              /**
+               * @description Defaults to hard
+               * @example hard
+               * @enum {string}
+               */
+              enforce?: "hard" | "soft"
+            }[]
+            /**
+             * @description When the budget closes, in epoch milliseconds. From then on authorize and charge return 409, record is accepted for 1 day more, and settle and release keep working. 7 days after closesAt, once nothing is left to settle or replay, the budget is deleted: get returns 404 and an upsert creates it anew. An upsert replaces the whole definition, so omitting closesAt or sending null leaves the budget open and clears any close time it had. A runtime key cannot close a budget in the past: an earlier closesAt takes effect now.
+             * @example 1798761599000
+             */
+            closesAt?: number | null
+            /** @description Hold timing. Both TTLs must be between 1000 and 86400000 ms, and the default must not exceed the max. An omitted TTL takes its default on every upsert. */
+            holds?: {
+              /**
+               * @description TTL for an authorize that sends no ttlMs, in milliseconds. Defaults to 900000 (15 minutes).
+               * @example 900000
+               */
+              defaultTtlMs?: number
+              /**
+               * @description The largest ttlMs an authorize may ask for, in milliseconds. Defaults to 86400000 (1 day).
+               * @example 86400000
+               */
+              maxTtlMs?: number
+            }
+            /**
+             * @description Deny new work when Unprice cannot be reached. Defaults to deny.
+             * @example deny
+             * @enum {string}
+             */
+            onUnavailable?: "deny"
+          }
         }
       }
     }
@@ -4047,6 +4196,11 @@ export interface operations {
               /** @description When this balance was computed, in epoch milliseconds */
               asOf: number
             }
+            /**
+             * @description Whether this call created the budget from its ifMissing
+             * @example false
+             */
+            created: boolean
           }
         }
       }
@@ -4538,6 +4692,68 @@ export interface operations {
            * @example 60000
            */
           ttlMs: number
+          /** @description The budget to create when the key has none: an upsert body without the key, created as a runtime key would. An existing budget ignores it and is never changed by it. The reply says created: true when this call created the budget. */
+          ifMissing?: {
+            /**
+             * @description A currency code (shorthand for money:<code>), credits:<id>, or units:<slug>
+             * @example USD
+             */
+            unit: string
+            /** @description Up to 16 limits. Every hard limit must have room for a hold or charge. An empty list makes a budget that only counts. */
+            limits: {
+              /**
+               * @description Unique within the budget. Defaults to the window name. The id fixes the limit's recurring schedule. Equivalent UTC anchors share usage. A different schedule under the same id returns 409, so use a new id for a different schedule.
+               * @example month
+               */
+              id?: string
+              /**
+               * @description A non-negative decimal string in the budget's unit, with at most 8 decimal places. Strings keep amounts exact.
+               * @example 0.05
+               */
+              amount: string
+              /**
+               * @description The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.
+               * @example month
+               * @enum {string}
+               */
+              window: "hour" | "day" | "week" | "month" | "never"
+              /**
+               * @description Anchors a day, week, or month window, in epoch milliseconds: periods start at this instant and repeat every window. A month anchored on the 31st starts on the last day of shorter months. Equivalent UTC anchors share one counter. Usage counts from the moment the schedule is first tracked. Removed schedules retain current usage until their period ends. A budget retains at most 32 distinct anchored schedules.
+               * @example 1792022400000
+               */
+              anchor?: number
+              /**
+               * @description Defaults to hard
+               * @example hard
+               * @enum {string}
+               */
+              enforce?: "hard" | "soft"
+            }[]
+            /**
+             * @description When the budget closes, in epoch milliseconds. From then on authorize and charge return 409, record is accepted for 1 day more, and settle and release keep working. 7 days after closesAt, once nothing is left to settle or replay, the budget is deleted: get returns 404 and an upsert creates it anew. An upsert replaces the whole definition, so omitting closesAt or sending null leaves the budget open and clears any close time it had. A runtime key cannot close a budget in the past: an earlier closesAt takes effect now.
+             * @example 1798761599000
+             */
+            closesAt?: number | null
+            /** @description Hold timing. Both TTLs must be between 1000 and 86400000 ms, and the default must not exceed the max. An omitted TTL takes its default on every upsert. */
+            holds?: {
+              /**
+               * @description TTL for an authorize that sends no ttlMs, in milliseconds. Defaults to 900000 (15 minutes).
+               * @example 900000
+               */
+              defaultTtlMs?: number
+              /**
+               * @description The largest ttlMs an authorize may ask for, in milliseconds. Defaults to 86400000 (1 day).
+               * @example 86400000
+               */
+              maxTtlMs?: number
+            }
+            /**
+             * @description Deny new work when Unprice cannot be reached. Defaults to deny.
+             * @example deny
+             * @enum {string}
+             */
+            onUnavailable?: "deny"
+          }
         }
       }
     }
@@ -4605,6 +4821,11 @@ export interface operations {
               /** @description When this balance was computed, in epoch milliseconds */
               asOf: number
             }
+            /**
+             * @description Whether this call created the budget from its ifMissing
+             * @example false
+             */
+            created: boolean
           }
         }
       }
@@ -4909,6 +5130,206 @@ export interface operations {
               /** @description When this balance was computed, in epoch milliseconds */
               asOf: number
             }
+          }
+        }
+      }
+      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrBadRequest"]
+        }
+      }
+      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+      401: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrUnauthorized"]
+        }
+      }
+      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+      403: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrForbidden"]
+        }
+      }
+      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrNotFound"]
+        }
+      }
+      /** @description This response is sent when a request conflicts with the current state of the server. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrConflict"]
+        }
+      }
+      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+      412: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The request payload is larger than the server is willing to process. */
+      413: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPayloadTooLarge"]
+        }
+      }
+      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+      429: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrTooManyRequests"]
+        }
+      }
+      /** @description The server has encountered a situation it does not know how to handle. */
+      500: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrInternalServerError"]
+        }
+      }
+    }
+  }
+  "budgets.models": {
+    parameters: {
+      query: {
+        ids: string
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description The rows of the known ids */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": {
+            /**
+             * @description The UTC date the catalog was synced from models.dev, as YYYY-MM-DD
+             * @example 2026-10-20
+             */
+            version: string
+            /** @description The rows of the known ids, in request order, each once; unknown ids are omitted */
+            models: {
+              /**
+               * @description provider/model
+               * @example openai/gpt-5
+               */
+              id: string
+              /**
+               * @example openai
+               * @enum {string}
+               */
+              provider: "openai" | "anthropic" | "google"
+              /**
+               * @description The model's id at its provider
+               * @example gpt-5
+               */
+              model: string
+              /**
+               * @description Rates are in US dollars
+               * @enum {string}
+               */
+              unit: "money:USD"
+              /**
+               * @description Rates are per this many tokens
+               * @enum {number}
+               */
+              per: 1000000
+              /** @description The rates below the first tier, or for every call when there is no tier */
+              rates: {
+                /**
+                 * @description USD per million input tokens
+                 * @example 1.25
+                 */
+                input: number
+                /**
+                 * @description USD per million output tokens
+                 * @example 10
+                 */
+                output: number
+                /**
+                 * @description USD per million input tokens read from the prompt cache
+                 * @example 0.125
+                 */
+                cacheRead: number
+                /**
+                 * @description USD per million input tokens written to the prompt cache
+                 * @example 1.25
+                 */
+                cacheWrite: number
+              }
+              /** @description Rates that replace `rates` for a call with more input tokens than `inputTokensAbove`, ascending; empty for a flat price */
+              tiers: {
+                /**
+                 * @description USD per million input tokens
+                 * @example 1.25
+                 */
+                input: number
+                /**
+                 * @description USD per million output tokens
+                 * @example 10
+                 */
+                output: number
+                /**
+                 * @description USD per million input tokens read from the prompt cache
+                 * @example 0.125
+                 */
+                cacheRead: number
+                /**
+                 * @description USD per million input tokens written to the prompt cache
+                 * @example 1.25
+                 */
+                cacheWrite: number
+                /**
+                 * @description The tier's rates apply to a call whose input exceeds this many tokens
+                 * @example 200000
+                 */
+                inputTokensAbove: number
+              }[]
+              limits: {
+                /**
+                 * @description The context window, in tokens
+                 * @example 400000
+                 */
+                context: number
+                /**
+                 * @description The most output tokens one call returns
+                 * @example 128000
+                 */
+                output: number
+              }
+            }[]
           }
         }
       }

@@ -1,0 +1,54 @@
+{
+  "name": "@unprice/ai-sdk-budget",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Unprice budget middleware for the Vercel AI SDK.",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "license": "MIT",
+  "files": ["dist", "README.md"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jhonsfran/unprice.git",
+    "directory": "packages/ai-sdk-budget"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@unprice/budgets": "workspace:^",
+    "@unprice/budgets-ai": "workspace:^"
+  },
+  "devDependencies": {
+    "@ai-sdk/anthropic": "4.0.84",
+    "@ai-sdk/google": "4.0.101",
+    "@ai-sdk/openai": "4.0.98",
+    "@ai-sdk/provider": "4.0.18",
+    "@types/node": "24.13.2",
+    "ai": "7.0.118",
+    "tsup": "^8.4.0",
+    "typescript": "^5.3.3",
+    "vitest": "^4.1.10"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "peerDependencies": {
+    "@ai-sdk/provider": "^4.0.18",
+    "ai": "^7.0.118"
+  }
+}

@@ -1,226 +1,143 @@
-import { AMOUNT_PATTERN, type Amount, formatAmount, parseAmount } from "@unprice/money"
+import { formatAmount } from "@unprice/money"
 import { z } from "zod"
-import { extendZodWithOpenApi } from "zod-openapi"
-import { searchParamsSchemaDataTable } from "./utils"
+import {
+  BUDGET_ANCHORED_WINDOWS,
+  CLOSED_BUDGET_RETENTION_MS,
+  DEFAULT_HOLD_TTL_MS,
+  MAX_BUDGET_LIMITS,
+  MAX_HOLD_TTL_MS,
+  MIN_HOLD_TTL_MS,
+  OPERATION_RETENTION_MS,
+  RECORD_ACCEPT_WINDOW_MS,
+  RECORD_DEDUPE_MS,
+  RECORD_FUTURE_SKEW_MS,
+  WINDOW_HISTORY_PERIODS,
+  budgetAmountInputSchema,
+  budgetBlockedSchema,
+  budgetCrossedSchema,
+  budgetDecimalSchema,
+  budgetEnforceSchema,
+  budgetEpochMsSchema,
+  budgetHoldIdSchema,
+  budgetIdempotencyKeySchema,
+  budgetInstantInputSchema,
+  budgetKeyInputSchema,
+  budgetLeaseKeySchema,
+  budgetReplayedSchema,
+  budgetResetsAtSchema,
+  budgetTtlInputSchema,
+  budgetWindowSchema,
+  describeDuration,
+  toAmount,
+} from "./budget-shared"
 
-extendZodWithOpenApi(z)
+export {
+  BUDGET_WINDOWS,
+  BUDGET_ANCHORED_WINDOWS,
+  MAX_BUDGET_LIMITS,
+  MAX_RETAINED_ANCHORED_WINDOWS,
+  MIN_HOLD_TTL_MS,
+  DEFAULT_HOLD_TTL_MS,
+  MAX_HOLD_TTL_MS,
+  OPERATION_RETENTION_MS,
+  LEASE_REFUSAL_RETENTION_MS,
+  RECORD_ACCEPT_WINDOW_MS,
+  RECORD_FUTURE_SKEW_MS,
+  RECORD_DEDUPE_MS,
+  WINDOW_HISTORY_PERIODS,
+  CLOSED_BUDGET_RETENTION_MS,
+  describeDuration,
+  budgetKeyInputSchema,
+  budgetAmountInputSchema,
+  budgetHoldIdSchema,
+  budgetWindowSchema,
+} from "./budget-shared"
 
 // The one definition of the budget wire contract. Input schemas parse straight into the core's
 // types (amounts in base units, instants in epoch ms), and `@unprice/services/budgets` imports the
 // window lists, the limit cap, and the timing constants from here, so the descriptions below
 // always state the values the core enforces. Everything is trusted after this boundary.
 
-export const BUDGET_WINDOWS = ["hour", "day", "week", "month", "never"] as const
-
-/** Windows that take an `anchor`: periods of that length starting at the anchor instead of UTC. */
-export const BUDGET_ANCHORED_WINDOWS = ["day", "week", "month"] as const
-
-export const MAX_BUDGET_LIMITS = 16
-export const MAX_RETAINED_ANCHORED_WINDOWS = 32
-
-export const MIN_HOLD_TTL_MS = 1_000
-export const DEFAULT_HOLD_TTL_MS = 15 * 60 * 1000
-export const MAX_HOLD_TTL_MS = 24 * 60 * 60 * 1000
-/**
- * Settled and released holds and charge rows answer this long after they close; an open hold has
- * no retention until it closes, by its caller or by expiry. They are the idempotency record and the
- * tombstone that answers replays; after it, a hold is retired and can no longer be settled or
- * released. A budget accepts `record` this long past its `closesAt`.
- */
-export const OPERATION_RETENTION_MS = 24 * 60 * 60 * 1000
-/**
- * A refused lease answers this long, so a late copy of the request (an HTTP retry sent while the
- * first attempt was still in flight) replays the 402 instead of taking capacity no process holds.
- * Far longer than a copy stays in flight, and far shorter than OPERATION_RETENTION_MS, because a
- * process facing a full budget is refused again every flush interval.
- */
-export const LEASE_REFUSAL_RETENTION_MS = 10 * 60 * 1000
-/**
- * `record` accepts usage that occurred at most this long ago (`TOO_LATE` beyond it): as long as
- * every other retry stays safe, and short enough that a hot budget's receipts fit its object.
- */
-export const RECORD_ACCEPT_WINDOW_MS = 24 * 60 * 60 * 1000
-/** `record` rejects `occurredAt` further than this ahead of the budget's clock. */
-export const RECORD_FUTURE_SKEW_MS = 5 * 60 * 1000
-/**
- * A record's row answers this long: within it a replay never counts again and a changed request
- * under the same key is a conflict. It must exceed the accept window plus the skew, so a replay
- * the row no longer catches is already `TOO_LATE`.
- */
-export const RECORD_DEDUPE_MS = 25 * 60 * 60 * 1000
-/** `get` returns this many ended periods per limited window, newest first; no more are kept. */
-export const WINDOW_HISTORY_PERIODS = 12
-/**
- * A budget with a `closesAt` deletes its storage this long after it closes, once no row is left to
- * settle, purge, or replay. Until then the closed budget stays readable.
- */
-export const CLOSED_BUDGET_RETENTION_MS = 7 * 24 * 60 * 60 * 1000
-
-const DURATION_UNITS = [
-  ["day", 24 * 60 * 60 * 1000],
-  ["hour", 60 * 60 * 1000],
-  ["minute", 60 * 1000],
-  ["second", 1000],
-] as const
-
-/** The largest whole unit, for descriptions: 900000 is "15 minutes". */
-export function describeDuration(ms: number): string {
-  for (const [unit, size] of DURATION_UNITS) {
-    if (ms % size === 0) {
-      const count = ms / size
-      return `${count} ${unit}${count === 1 ? "" : "s"}`
-    }
-  }
-  return `${ms} ms`
-}
-
-export const budgetKeyInputSchema = z
-  .string()
-  .regex(/^[A-Za-z0-9][A-Za-z0-9:/_.@-]{0,127}$/, "letters, digits and : / _ . @ -")
-  .openapi({
-    description:
-      "The budget's key, chosen by you and unique within the project. Up to 128 letters, digits, and `: / _ . @ -`, starting with a letter or digit.",
-    example: "customer:acme",
-  })
-
-export const budgetAmountInputSchema = z
-  .string()
-  .regex(AMOUNT_PATTERN, "a non-negative decimal string with at most 8 decimal places")
-  .openapi({
-    description:
-      "A non-negative decimal string in the budget's unit, with at most 8 decimal places. Strings keep amounts exact.",
-    example: "0.05",
-  })
-
-/** The pattern bounds an amount's shape; this bounds its size and turns it into base units. */
-function toAmount(text: string, ctx: z.RefinementCtx): Amount {
-  const parsed = parseAmount(text)
-  if (parsed.ok) return parsed.amount
-  ctx.addIssue({ code: z.ZodIssueCode.custom, message: `invalid amount: ${parsed.reason}` })
-  return z.NEVER
-}
-
-const budgetDecimalSchema = z
-  .string()
-  .openapi({ description: "A decimal amount in the budget's unit" })
-
-export const budgetHoldIdSchema = z
-  .string()
-  .regex(/^h_[1-9][0-9]{0,15}$/, "hold ids look like h_<n>")
-  .openapi({ description: "The hold, as returned by authorize", example: "h_42" })
-
-export const budgetWindowSchema = z.enum(BUDGET_WINDOWS).openapi({
-  description:
-    "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
-  example: "month",
-})
-
-const budgetEnforceSchema = z.enum(["hard", "soft"]).openapi({
-  description:
-    "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
-  example: "hard",
-})
-
-const budgetIdempotencyKeySchema = z.string().min(1).max(256).openapi({
-  description:
-    "Up to 256 characters. A retry with the same key and the same request replays the first answer; the same key with a different request returns 409.",
-  example: "run_8f2c:step_3",
-})
-
-/** Every instant on the wire is epoch milliseconds, like the rest of the API. */
-const budgetEpochMsSchema = z.number().int()
-
-const budgetInstantInputSchema = budgetEpochMsSchema.nonnegative()
-
-const budgetTtlInputSchema = z.number().int().min(MIN_HOLD_TTL_MS).max(MAX_HOLD_TTL_MS)
-
-const budgetResetsAtSchema = budgetEpochMsSchema.nullable().openapi({
-  description: "When the limit's current period ends, in epoch milliseconds; null for never",
-})
-
-const budgetReplayedSchema = z.boolean().openapi({
-  description: "True when this answer replays an earlier request instead of applying it again",
-})
-
-const budgetCrossedSchema = z.array(z.string()).openapi({
-  description:
-    "Limit ids whose consumed amount first exceeded the limit's amount. A hard limit crosses only after recorded usage took its room. Reservations do not trigger crossings. Replays preserve the original result.",
-})
-
-export const upsertBudgetInputSchema = z
-  .object({
-    key: budgetKeyInputSchema,
-    unit: z
-      .string()
-      .regex(/^([A-Z]{3}|money:[A-Z]{3}|credits:[a-z0-9_-]{1,64}|units:[a-z0-9_-]{1,64})$/)
-      .openapi({
-        description: "A currency code (shorthand for money:<code>), credits:<id>, or units:<slug>",
-        example: "USD",
-      }),
-    limits: z
-      .array(
-        z
-          .object({
-            id: z
-              .string()
-              .regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/, "letters, digits and _ . : -")
-              .optional()
-              .openapi({
-                description:
-                  "Unique within the budget. Defaults to the window name. The id fixes the limit's recurring schedule. Equivalent UTC anchors share usage. A different schedule under the same id returns 409, so use a new id for a different schedule.",
-                example: "month",
-              }),
-            amount: budgetAmountInputSchema.transform(toAmount),
-            window: budgetWindowSchema,
-            anchor: budgetInstantInputSchema.optional().openapi({
-              description:
-                "Anchors a day, week, or month window, in epoch milliseconds: periods start at this instant and repeat every window. A month anchored on the 31st starts on the last day of shorter months. Equivalent UTC anchors share one counter. Usage counts from the moment the schedule is first tracked. Removed schedules retain current usage until their period ends. A budget retains at most 32 distinct anchored schedules.",
-              example: 1_792_022_400_000,
-            }),
-            enforce: budgetEnforceSchema.optional().openapi({ description: "Defaults to hard" }),
-          })
-          .refine(
-            (limit) =>
-              limit.anchor === undefined ||
-              (BUDGET_ANCHORED_WINDOWS as readonly string[]).includes(limit.window),
-            { path: ["anchor"], message: "only day, week, and month windows take an anchor" }
-          )
-      )
-      .max(MAX_BUDGET_LIMITS)
-      .openapi({
-        description: `Up to ${MAX_BUDGET_LIMITS} limits. Every hard limit must have room for a hold or charge. An empty list makes a budget that only counts.`,
-      }),
-    closesAt: budgetInstantInputSchema
-      .nullable()
-      .optional()
-      .openapi({
-        description: `When the budget closes, in epoch milliseconds. From then on authorize and charge return 409, record is accepted for ${describeDuration(OPERATION_RETENTION_MS)} more, and settle and release keep working. ${describeDuration(CLOSED_BUDGET_RETENTION_MS)} after closesAt, once nothing is left to settle or replay, the budget is deleted: get returns 404 and an upsert creates it anew. An upsert replaces the whole definition, so omitting closesAt or sending null leaves the budget open and clears any close time it had. A runtime key cannot close a budget in the past: an earlier closesAt takes effect now.`,
-        example: 1_798_761_599_000,
-      }),
-    holds: z
-      .object({
-        defaultTtlMs: budgetTtlInputSchema.optional().openapi({
-          description: `TTL for an authorize that sends no ttlMs, in milliseconds. Defaults to ${DEFAULT_HOLD_TTL_MS} (${describeDuration(DEFAULT_HOLD_TTL_MS)}).`,
-          example: DEFAULT_HOLD_TTL_MS,
-        }),
-        maxTtlMs: budgetTtlInputSchema.optional().openapi({
-          description: `The largest ttlMs an authorize may ask for, in milliseconds. Defaults to ${MAX_HOLD_TTL_MS} (${describeDuration(MAX_HOLD_TTL_MS)}).`,
-          example: MAX_HOLD_TTL_MS,
-        }),
-      })
-      .strict()
-      .optional()
-      .openapi({
-        description: `Hold timing. Both TTLs must be between ${MIN_HOLD_TTL_MS} and ${MAX_HOLD_TTL_MS} ms, and the default must not exceed the max. An omitted TTL takes its default on every upsert.`,
-      }),
-    onUnavailable: z.literal("deny").optional().openapi({
-      description: "Deny new work when Unprice cannot be reached. Defaults to deny.",
-      example: "deny",
+const budgetDefinitionFields = {
+  unit: z
+    .string()
+    .regex(/^([A-Z]{3}|money:[A-Z]{3}|credits:[a-z0-9_-]{1,64}|units:[a-z0-9_-]{1,64})$/)
+    .openapi({
+      description: "A currency code (shorthand for money:<code>), credits:<id>, or units:<slug>",
+      example: "USD",
     }),
-  })
-  .strict()
-  .transform(({ key, unit, limits, holds, onUnavailable, closesAt }) => ({
-    key,
+  limits: z
+    .array(
+      z
+        .object({
+          id: z
+            .string()
+            .regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/, "letters, digits and _ . : -")
+            .optional()
+            .openapi({
+              description:
+                "Unique within the budget. Defaults to the window name. The id fixes the limit's recurring schedule. Equivalent UTC anchors share usage. A different schedule under the same id returns 409, so use a new id for a different schedule.",
+              example: "month",
+            }),
+          amount: budgetAmountInputSchema.transform(toAmount),
+          window: budgetWindowSchema,
+          anchor: budgetInstantInputSchema.optional().openapi({
+            description:
+              "Anchors a day, week, or month window, in epoch milliseconds: periods start at this instant and repeat every window. A month anchored on the 31st starts on the last day of shorter months. Equivalent UTC anchors share one counter. Usage counts from the moment the schedule is first tracked. Removed schedules retain current usage until their period ends. A budget retains at most 32 distinct anchored schedules.",
+            example: 1_792_022_400_000,
+          }),
+          enforce: budgetEnforceSchema.optional().openapi({ description: "Defaults to hard" }),
+        })
+        .refine(
+          (limit) =>
+            limit.anchor === undefined ||
+            (BUDGET_ANCHORED_WINDOWS as readonly string[]).includes(limit.window),
+          { path: ["anchor"], message: "only day, week, and month windows take an anchor" }
+        )
+    )
+    .max(MAX_BUDGET_LIMITS)
+    .openapi({
+      description: `Up to ${MAX_BUDGET_LIMITS} limits. Every hard limit must have room for a hold or charge. An empty list makes a budget that only counts.`,
+    }),
+  closesAt: budgetInstantInputSchema
+    .nullable()
+    .optional()
+    .openapi({
+      description: `When the budget closes, in epoch milliseconds. From then on authorize and charge return 409, record is accepted for ${describeDuration(OPERATION_RETENTION_MS)} more, and settle and release keep working. ${describeDuration(CLOSED_BUDGET_RETENTION_MS)} after closesAt, once nothing is left to settle or replay, the budget is deleted: get returns 404 and an upsert creates it anew. An upsert replaces the whole definition, so omitting closesAt or sending null leaves the budget open and clears any close time it had. A runtime key cannot close a budget in the past: an earlier closesAt takes effect now.`,
+      example: 1_798_761_599_000,
+    }),
+  holds: z
+    .object({
+      defaultTtlMs: budgetTtlInputSchema.optional().openapi({
+        description: `TTL for an authorize that sends no ttlMs, in milliseconds. Defaults to ${DEFAULT_HOLD_TTL_MS} (${describeDuration(DEFAULT_HOLD_TTL_MS)}).`,
+        example: DEFAULT_HOLD_TTL_MS,
+      }),
+      maxTtlMs: budgetTtlInputSchema.optional().openapi({
+        description: `The largest ttlMs an authorize may ask for, in milliseconds. Defaults to ${MAX_HOLD_TTL_MS} (${describeDuration(MAX_HOLD_TTL_MS)}).`,
+        example: MAX_HOLD_TTL_MS,
+      }),
+    })
+    .strict()
+    .optional()
+    .openapi({
+      description: `Hold timing. Both TTLs must be between ${MIN_HOLD_TTL_MS} and ${MAX_HOLD_TTL_MS} ms, and the default must not exceed the max. An omitted TTL takes its default on every upsert.`,
+    }),
+  onUnavailable: z.literal("deny").optional().openapi({
+    description: "Deny new work when Unprice cannot be reached. Defaults to deny.",
+    example: "deny",
+  }),
+}
+
+const budgetDefinitionObject = z.object(budgetDefinitionFields).strict()
+
+function toBudgetDefinition({
+  unit,
+  limits,
+  holds,
+  onUnavailable,
+  closesAt,
+}: z.output<typeof budgetDefinitionObject>) {
+  return {
     unit: /^[A-Z]{3}$/.test(unit) ? `money:${unit}` : unit,
     config: {
       limits: limits.map(({ id, enforce, ...limit }) => ({
@@ -235,27 +152,48 @@ export const upsertBudgetInputSchema = z
       onUnavailable: onUnavailable ?? "deny",
       closesAt: closesAt ?? null,
     },
-  }))
-  .superRefine(({ config }, ctx) => {
-    const seen = new Set<string>()
-    config.limits.forEach((limit, index) => {
-      if (seen.has(limit.id)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["limits", index, "id"],
-          message: `duplicate limit id ${limit.id}`,
-        })
-      }
-      seen.add(limit.id)
-    })
-    if (config.holds.defaultTtlMs > config.holds.maxTtlMs) {
+  }
+}
+
+function withValidLimits(
+  { config }: ReturnType<typeof toBudgetDefinition>,
+  ctx: z.RefinementCtx
+): void {
+  const seen = new Set<string>()
+  config.limits.forEach((limit, index) => {
+    if (seen.has(limit.id)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["holds", "defaultTtlMs"],
-        message: "defaultTtlMs must not exceed maxTtlMs",
+        path: ["limits", index, "id"],
+        message: `duplicate limit id ${limit.id}`,
       })
     }
+    seen.add(limit.id)
   })
+  if (config.holds.defaultTtlMs > config.holds.maxTtlMs) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["holds", "defaultTtlMs"],
+      message: "defaultTtlMs must not exceed maxTtlMs",
+    })
+  }
+}
+
+/** A budget without its key: what an upsert sends, and what `ifMissing` creates. */
+export const budgetDefinitionInputSchema = budgetDefinitionObject
+  .transform(toBudgetDefinition)
+  .superRefine(withValidLimits)
+
+export const upsertBudgetInputSchema = z
+  .object({ key: budgetKeyInputSchema, ...budgetDefinitionFields })
+  .strict()
+  .transform(({ key, ...definition }) => ({ key, ...toBudgetDefinition(definition) }))
+  .superRefine(withValidLimits)
+
+const ifMissingSchema = budgetDefinitionInputSchema.optional().openapi({
+  description:
+    "The budget to create when the key has none: an upsert body without the key, created as a runtime key would. An existing budget ignores it and is never changed by it. The reply says created: true when this call created the budget.",
+})
 
 /**
  * A budget's config as the core holds it: amounts in base units, instants in epoch ms, every
@@ -290,6 +228,7 @@ export const authorizeBudgetInputSchema = z
       example: 60_000,
     }),
     idempotencyKey: budgetIdempotencyKeySchema,
+    ifMissing: ifMissingSchema,
   })
   .strict()
 
@@ -311,18 +250,21 @@ export const releaseBudgetInputSchema = z
   .object({ key: budgetKeyInputSchema, holdId: budgetHoldIdSchema })
   .strict()
 
+const chargeFields = {
+  key: budgetKeyInputSchema,
+  amount: budgetAmountInputSchema
+    .openapi({ description: "The amount to consume now, checked against every hard limit" })
+    .transform(toAmount),
+  idempotencyKey: budgetIdempotencyKeySchema,
+}
+
 export const chargeBudgetInputSchema = z
-  .object({
-    key: budgetKeyInputSchema,
-    amount: budgetAmountInputSchema
-      .openapi({ description: "The amount to consume now, checked against every hard limit" })
-      .transform(toAmount),
-    idempotencyKey: budgetIdempotencyKeySchema,
-  })
+  .object({ ...chargeFields, ifMissing: ifMissingSchema })
   .strict()
 
 /** Record accepts usage within RECORD_ACCEPT_WINDOW_MS, and dedupes its key for RECORD_DEDUPE_MS. */
-export const recordBudgetInputSchema = chargeBudgetInputSchema
+export const recordBudgetInputSchema = z
+  .object(chargeFields)
   .extend({
     amount: budgetAmountInputSchema
       .openapi({
@@ -458,6 +400,11 @@ export const getBudgetResponseSchema = z.object({
   }),
 })
 
+const budgetCreatedSchema = z.boolean().openapi({
+  description: "Whether this call created the budget from its ifMissing",
+  example: false,
+})
+
 export const authorizeBudgetResponseSchema = z.object({
   allowed: z.literal(true),
   holdId: budgetHoldIdSchema,
@@ -468,6 +415,7 @@ export const authorizeBudgetResponseSchema = z.object({
   }),
   replayed: budgetReplayedSchema,
   balance: budgetBalanceSchema,
+  created: budgetCreatedSchema,
 })
 
 export const settleBudgetResponseSchema = z.object({
@@ -495,6 +443,7 @@ export const chargeBudgetResponseSchema = z.object({
   crossed: budgetCrossedSchema,
   replayed: budgetReplayedSchema,
   balance: budgetBalanceSchema,
+  created: budgetCreatedSchema,
 })
 
 export const recordBudgetResponseSchema = z.object({
@@ -504,25 +453,6 @@ export const recordBudgetResponseSchema = z.object({
   balance: budgetBalanceSchema,
 })
 
-/** The limit that blocked a request and what would let it through. */
-const budgetBlockedSchema = z
-  .object({
-    limitId: z.string(),
-    window: budgetWindowSchema,
-    remaining: budgetDecimalSchema,
-    held: budgetDecimalSchema,
-    resetsAt: budgetResetsAtSchema,
-    remedy: z.enum(["release_holds", "wait_for_reset", "raise_limit"]).openapi({
-      description:
-        "release_holds: releasing holds makes the request fit all failing limits. wait_for_reset: resetting the failing windows makes the request fit with holds unchanged. raise_limit: neither action alone is sufficient; one or more limits need a change.",
-    }),
-  })
-  .openapi({
-    description:
-      "A failing hard limit smaller than the request, or otherwise the one that resets last. Other limits can also block the request. The remedy considers all failing limits.",
-  })
-
-/** `details` on a 402: the limit that blocked the request and what would let it through. */
 export const budgetExceededDetailsSchema = z.object({
   kind: z.literal("budget_exceeded"),
   blocked: budgetBlockedSchema,
@@ -536,15 +466,6 @@ export const budgetClosedDetailsSchema = z.object({
     description: "When the budget closed, in epoch milliseconds",
   }),
 })
-
-const budgetLeaseKeySchema = z
-  .string()
-  .min(1)
-  .max(256)
-  .openapi({
-    description: `Up to 256 characters, one per lease, chosen by the client. Retrying a grant with the same key, amount, and ttlMs replays it, and replays a 402 for ${describeDuration(LEASE_REFUSAL_RETENTION_MS)}; another amount or ttlMs returns 409. Lease keys and idempotency keys are separate.`,
-    example: "lease_01J9Z3",
-  })
 
 export const leaseBudgetInputSchema = z
   .object({
@@ -564,6 +485,7 @@ export const leaseBudgetInputSchema = z
         description: `How long the lease lives without a report, in milliseconds: at least ${MIN_HOLD_TTL_MS} and at most the budget's holds.maxTtlMs. A report renews it once less than half remains. A lease still open at expiry counts its whole grant as used until the window resets.`,
         example: 60_000,
       }),
+    ifMissing: ifMissingSchema,
   })
   .strict()
 
@@ -639,6 +561,7 @@ export const leaseBudgetResponseSchema = z.object({
   terms: budgetLeaseTermsSchema,
   replayed: budgetReplayedSchema,
   balance: budgetBalanceSchema,
+  created: budgetCreatedSchema,
 })
 
 export const reportBudgetResponseSchema = z.object({
@@ -694,292 +617,4 @@ export const budgetWindowCapacityExceededDetailsSchema = z.object({
   retained: z.number().int().nonnegative(),
 })
 
-// The dashboard catalog: one Postgres row per budget, written after each upsert. It holds
-// configuration facts only; a balance would be stale within milliseconds of a hot budget's writes.
-
-/** hard when any limit is hard, soft when every limit is soft, none without limits. */
-export const budgetCapSchema = z.enum(["hard", "soft", "none"])
-
-/** Derived from closesAt at read time: open without one, closing before it, closed from it. */
-export const budgetCatalogStatusSchema = z.enum(["open", "closing", "closed"])
-
-export const budgetCatalogLimitSchema = z.object({
-  id: z.string(),
-  window: budgetWindowSchema,
-  enforce: budgetEnforceSchema,
-  amount: budgetDecimalSchema,
-})
-
-export const budgetCatalogFactsSchema = z.object({
-  key: z.string(),
-  unit: z.string(),
-  version: z.number().int(),
-  cap: budgetCapSchema,
-  limits: z.array(budgetCatalogLimitSchema),
-  closesAt: budgetEpochMsSchema.nullable(),
-})
-
-export const budgetCatalogRowSchema = budgetCatalogFactsSchema.extend({
-  id: z.string(),
-  status: budgetCatalogStatusSchema,
-  createdAt: budgetEpochMsSchema,
-  updatedAt: budgetEpochMsSchema,
-})
-
-/** Keeps the values a filter knows, so a stale URL drops a value instead of failing the page. */
-function knownFilterValues<T extends z.ZodTypeAny>(schema: T) {
-  return z.array(z.unknown()).transform((values) =>
-    values.flatMap((value) => {
-      const parsed = schema.safeParse(value)
-      return parsed.success ? [parsed.data as z.output<T>] : []
-    })
-  )
-}
-
-/** The data-table search, where `search` is a key prefix. */
-export const listBudgetsInputSchema = searchParamsSchemaDataTable.extend({
-  filters: z
-    .object({
-      status: knownFilterValues(budgetCatalogStatusSchema).optional(),
-      unit: knownFilterValues(z.string()).optional(),
-      cap: knownFilterValues(budgetCapSchema).optional(),
-    })
-    .default({}),
-})
-
-export type BudgetCap = z.infer<typeof budgetCapSchema>
-export type BudgetCatalogStatus = z.infer<typeof budgetCatalogStatusSchema>
-export type BudgetCatalogLimit = z.infer<typeof budgetCatalogLimitSchema>
-export type BudgetCatalogFacts = z.infer<typeof budgetCatalogFactsSchema>
-export type BudgetCatalogRow = z.infer<typeof budgetCatalogRowSchema>
-export type ListBudgetsInput = z.infer<typeof listBudgetsInputSchema>
-
-// An operator's release of one hold from the dashboard. ADR-0006 B3: a release asserts that the
-// work used nothing, so the operator states a reason and the use case audits the call.
-
-export const budgetAuditActionSchema = z.enum(["release_hold"])
-
-/** requested before the call; applied or rejected once the budget answered. */
-export const budgetAuditStatusSchema = z.enum(["requested", "applied", "rejected"])
-
-/** What a release can be refused with, as the budget's own rejection. */
-export const budgetReleaseRejectionSchema = z.discriminatedUnion("code", [
-  z.object({ code: z.literal("BUDGET_NOT_FOUND") }),
-  z.object({ code: z.literal("HOLD_NOT_FOUND"), holdId: z.string() }),
-  z.object({ code: z.literal("HOLD_RETIRED"), holdId: z.string() }),
-  z.object({
-    code: z.literal("HOLD_CLOSED"),
-    holdId: z.string(),
-    status: z.enum(["settled", "released", "expired"]),
-  }),
-])
-
-export const budgetReleaseRejectionCodeSchema = z.enum([
-  "BUDGET_NOT_FOUND",
-  "HOLD_NOT_FOUND",
-  "HOLD_RETIRED",
-  "HOLD_CLOSED",
-])
-
-/**
- * The internal release route's 404 and 409 detail. The public route answers only NOT_FOUND or
- * CONFLICT, which cannot tell a missing hold from a missing budget or an expired hold from a
- * retired one; the audit row records which.
- */
-export const budgetReleaseRejectedDetailsSchema = z.object({
-  kind: z.literal("release_rejected"),
-  rejection: budgetReleaseRejectionSchema,
-})
-
-export const releaseBudgetInternalInputSchema = releaseBudgetInputSchema
-  .extend({ projectId: z.string().min(1) })
-  .strict()
-
-export const budgetOperatorReasonSchema = z.string().trim().min(10).max(500)
-
-/** The dashboard's release: the operator attests that the work stopped and used nothing. */
-export const releaseBudgetHoldInputSchema = z.object({
-  id: z.string(),
-  holdId: budgetHoldIdSchema,
-  holdCreatedAt: budgetEpochMsSchema,
-  reason: budgetOperatorReasonSchema,
-  confirm: z.literal(true),
-})
-
-const budgetAuditRowBaseSchema = z.object({
-  id: z.string(),
-  budgetId: z.string(),
-  action: budgetAuditActionSchema,
-  subject: z.string(),
-  subjectCreatedAt: budgetEpochMsSchema,
-  actorUserId: z.string(),
-  reason: z.string(),
-  createdAt: budgetEpochMsSchema,
-  updatedAt: budgetEpochMsSchema,
-})
-
-export const budgetAuditRowSchema = z.discriminatedUnion("status", [
-  budgetAuditRowBaseSchema.extend({ status: z.literal("requested") }),
-  budgetAuditRowBaseSchema.extend({ status: z.literal("applied"), released: budgetDecimalSchema }),
-  budgetAuditRowBaseSchema.extend({
-    status: z.literal("rejected"),
-    rejectionCode: budgetReleaseRejectionCodeSchema,
-  }),
-])
-
-export type BudgetAuditAction = z.infer<typeof budgetAuditActionSchema>
-export type BudgetAuditStatus = z.infer<typeof budgetAuditStatusSchema>
-export type BudgetReleaseRejection = z.infer<typeof budgetReleaseRejectionSchema>
-export type BudgetReleaseRejectionCode = z.infer<typeof budgetReleaseRejectionCodeSchema>
-export type BudgetAuditRow = z.infer<typeof budgetAuditRowSchema>
 export type ReleaseBudgetResponse = z.infer<typeof releaseBudgetResponseSchema>
-export type ReleaseBudgetInternalInput = z.input<typeof releaseBudgetInternalInputSchema>
-
-// The dashboard's inspection of one budget, through the internal inspect route. Operation rows
-// travel as the budget core keeps them, amounts as decimals.
-
-const budgetSettledHoldStateSchema = z.object({
-  status: z.literal("settled"),
-  closedAt: budgetEpochMsSchema,
-  actual: budgetDecimalSchema,
-  crossed: z.array(z.string()),
-  byExpiry: z.literal(true).optional(),
-})
-
-export const budgetHoldOperationSchema = z.object({
-  kind: z.literal("hold"),
-  id: z.string(),
-  idempotencyKey: z.string(),
-  amount: budgetDecimalSchema,
-  ttlMs: z.number().int().nullable(),
-  createdAt: budgetEpochMsSchema,
-  expiresAt: budgetEpochMsSchema,
-  state: z.discriminatedUnion("status", [
-    z.object({ status: z.literal("open") }),
-    budgetSettledHoldStateSchema,
-    z.object({ status: z.literal("released"), closedAt: budgetEpochMsSchema }),
-  ]),
-})
-
-export const budgetChargeOperationSchema = z.object({
-  kind: z.enum(["charge", "record"]),
-  id: z.string(),
-  idempotencyKey: z.string(),
-  amount: budgetDecimalSchema,
-  createdAt: budgetEpochMsSchema,
-  crossed: z.array(z.string()),
-})
-
-export const budgetLeaseOperationSchema = z.object({
-  kind: z.literal("lease"),
-  id: z.string(),
-  leaseKey: z.string(),
-  requested: budgetDecimalSchema,
-  ttlMs: z.number().int(),
-  createdAt: budgetEpochMsSchema,
-  granted: budgetDecimalSchema,
-  captured: budgetDecimalSchema,
-  last: z
-    .object({
-      seq: z.number().int(),
-      request: z.discriminatedUnion("final", [
-        z.object({
-          final: z.literal(false),
-          captured: budgetDecimalSchema,
-          extend: budgetDecimalSchema,
-        }),
-        z.object({ final: z.literal(true), captured: budgetDecimalSchema }),
-      ]),
-      extended: budgetDecimalSchema,
-      denied: z
-        .discriminatedUnion("code", [
-          z.object({ code: z.literal("LIMIT_EXCEEDED"), blocked: budgetBlockedSchema }),
-          z.object({ code: z.literal("BUDGET_CLOSED"), closedAt: budgetEpochMsSchema }),
-        ])
-        .nullable(),
-      crossed: z.array(z.string()),
-    })
-    .nullable(),
-  expiresAt: budgetEpochMsSchema,
-  state: z.discriminatedUnion("status", [
-    z.object({ status: z.literal("open") }),
-    z.object({ status: z.literal("closed"), closedAt: budgetEpochMsSchema }),
-    z.object({ status: z.literal("expired"), closedAt: budgetEpochMsSchema }),
-    z.object({
-      status: z.literal("refused"),
-      closedAt: budgetEpochMsSchema,
-      blocked: budgetBlockedSchema,
-    }),
-  ]),
-})
-
-export const budgetReservationSchema = z.union([
-  budgetHoldOperationSchema,
-  budgetLeaseOperationSchema,
-])
-
-export const budgetOperationSchema = z.union([
-  budgetHoldOperationSchema,
-  budgetChargeOperationSchema,
-  budgetLeaseOperationSchema,
-])
-
-/** A row's place in the budget's `due_at` order; opaque to callers, who pass it back. */
-export const budgetInspectCursorSchema = z.object({
-  dueAt: budgetEpochMsSchema,
-  id: z.string().min(1).max(80),
-})
-
-export const budgetInspectFindSchema = z.discriminatedUnion("by", [
-  z.object({ by: z.literal("hold"), holdId: budgetHoldIdSchema }),
-  z.object({ by: z.literal("idempotencyKey"), idempotencyKey: budgetIdempotencyKeySchema }),
-  z.object({ by: z.literal("lease"), leaseKey: budgetLeaseKeySchema }),
-])
-
-/** What a caller asks of a budget beside its snapshot. `probe` stays a decimal string here. */
-export const inspectBudgetQuerySchema = z.object({
-  after: budgetInspectCursorSchema.optional(),
-  find: budgetInspectFindSchema.optional(),
-  probe: budgetAmountInputSchema.optional(),
-})
-
-export const inspectBudgetRequestSchema = inspectBudgetQuerySchema
-  .extend({
-    projectId: z.string().min(1),
-    key: budgetKeyInputSchema,
-    probe: budgetAmountInputSchema.transform(toAmount).optional(),
-  })
-  .strict()
-
-export const inspectBudgetResponseSchema = z.object({
-  budget: budgetSchema,
-  history: z.array(budgetWindowPeriodSchema),
-  expiringNext: z.object({
-    rows: z.array(budgetReservationSchema).openapi({
-      description: "Open holds and leases, the earliest to expire first",
-    }),
-    examined: z.number().int().nonnegative().openapi({ description: "Rows the walk read" }),
-    next: budgetInspectCursorSchema.nullable().openapi({
-      description: "Pass as `after` to scan further; null once the walk reached the end",
-    }),
-  }),
-  listed: budgetDecimalSchema.openapi({
-    description: "What the listed reservations hold; equals balance.held when all are listed",
-  }),
-  closedRecently: z.array(budgetOperationSchema).openapi({
-    description: "Rows closed in the last hour, newest first",
-  }),
-  found: budgetOperationSchema.nullable().optional().openapi({
-    description: "Present when the request had `find`; null when no row matched",
-  }),
-  probe: z
-    .object({ amount: budgetDecimalSchema, blocked: budgetBlockedSchema.nullable() })
-    .optional()
-    .openapi({
-      description: "Present when the request had `probe`; blocked is null when it would pass now",
-    }),
-})
-
-export type InspectBudgetQuery = z.infer<typeof inspectBudgetQuerySchema>
-export type InspectBudgetRequest = z.input<typeof inspectBudgetRequestSchema>
-export type InspectBudgetResponse = z.infer<typeof inspectBudgetResponseSchema>

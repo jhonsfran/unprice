@@ -32,9 +32,10 @@ const keyOf = (project: { isMain: boolean; isInternal: boolean }) => ({
 /** The budget core over an in-memory store, standing in for the budget's Durable Object. */
 let store: MemoryBudgetStore
 const addresses: unknown[] = []
+const AT = Date.parse("2026-10-20T12:00:00Z")
 
 function run(request: BudgetRequest) {
-  const result = store.run(request, Date.now())
+  const result = store.run(request, AT)
   if (result.err) throw result.err
   if (!result.val.ok) throw new Error(`refused: ${result.val.rejection.code}`)
   return result.val.outcome
@@ -45,7 +46,7 @@ beforeEach(() => {
   addresses.length = 0
   mocks.execute.mockImplementation(async (address: unknown, request: BudgetRequest) => {
     addresses.push(address)
-    const result = store.run(request, Date.now())
+    const result = store.run(request, AT)
     if (result.err) return result
     return result.val.ok ? Ok(result.val.outcome) : result.val
   })
@@ -54,7 +55,7 @@ beforeEach(() => {
     unit: "USD",
     limits: [{ id: "month", amount: "50", window: "month" }],
   })
-  run({ type: "upsert", ...config, mayLoosen: true })
+  run({ type: "upsert", ...config, projectId: "proj_tenant", mayLoosen: true })
 })
 
 afterEach(() => {
@@ -73,6 +74,10 @@ function call(body: unknown) {
   app.use("*", async (c, next) => {
     c.set("requestId", "req_test")
     c.set("logger", { set: mocks.log } as unknown as HonoEnv["Variables"]["logger"])
+    c.set("services", {
+      budgetCatalog: { record: async () => {} },
+    } as unknown as HonoEnv["Variables"]["services"])
+    c.set("waitUntil", (promise) => void promise)
     await next()
   })
   app.use("/v1/internal/*", internalKeyAuth())
@@ -92,11 +97,45 @@ const errorOf = async (response: Response) =>
   ((await response.json()) as { error: { code: string; message: string; details?: unknown } }).error
 
 describe("POST /v1/internal/budgets/release", () => {
+  it("requires the hold creation time before dispatch", async () => {
+    mocks.keyAuth.mockResolvedValue(keyOf({ isMain: true, isInternal: false }))
+    const holdId = authorize("job-1")
+
+    const response = await call({ projectId: "proj_tenant", key: "customer:acme", holdId })
+
+    expect(response.status).toBe(400)
+    expect(addresses).toEqual([])
+  })
+
+  it("rejects a stale hold identity and preserves the replacement reservation", async () => {
+    mocks.keyAuth.mockResolvedValue(keyOf({ isMain: true, isInternal: false }))
+    const holdId = authorize("replacement-work")
+
+    const response = await call({
+      projectId: "proj_tenant",
+      key: "customer:acme",
+      holdId,
+      holdCreatedAt: AT - 8 * 86_400_000,
+    })
+
+    expect(response.status).toBe(404)
+    expect((await errorOf(response)).details).toEqual({
+      kind: "release_rejected",
+      rejection: { code: "HOLD_NOT_FOUND", holdId },
+    })
+    const hold = store.rows.get(holdId)
+    expect(hold?.kind === "hold" && hold.state).toEqual({ status: "open" })
+  })
   it("rejects a tenant key with 403 before reaching the budget", async () => {
     mocks.keyAuth.mockResolvedValue(keyOf({ isMain: false, isInternal: false }))
     const holdId = authorize("job-1")
 
-    const response = await call({ projectId: "proj_tenant", key: "customer:acme", holdId })
+    const response = await call({
+      projectId: "proj_tenant",
+      key: "customer:acme",
+      holdId,
+      holdCreatedAt: AT,
+    })
 
     expect([response.status, (await errorOf(response)).code, addresses]).toEqual([
       403,
@@ -108,7 +147,7 @@ describe("POST /v1/internal/budgets/release", () => {
   it("releases the body's project's hold with a main key and replays a second call", async () => {
     mocks.keyAuth.mockResolvedValue(keyOf({ isMain: true, isInternal: false }))
     const holdId = authorize("job-1")
-    const body = { projectId: "proj_tenant", key: "customer:acme", holdId }
+    const body = { projectId: "proj_tenant", key: "customer:acme", holdId, holdCreatedAt: AT }
 
     const first = await call(body)
     const second = await call(body)
@@ -130,7 +169,12 @@ describe("POST /v1/internal/budgets/release", () => {
     const holdId = authorize("job-1")
     run({ type: "settle", holdId, amount: BigInt(100_000_000) })
 
-    const response = await call({ projectId: "proj_tenant", key: "customer:acme", holdId })
+    const response = await call({
+      projectId: "proj_tenant",
+      key: "customer:acme",
+      holdId,
+      holdCreatedAt: AT,
+    })
 
     expect(response.status).toBe(409)
     expect(await errorOf(response)).toMatchObject({
@@ -146,9 +190,19 @@ describe("POST /v1/internal/budgets/release", () => {
   it("answers 404 telling a missing hold from a missing budget", async () => {
     mocks.keyAuth.mockResolvedValue(keyOf({ isMain: false, isInternal: true }))
 
-    const hold = await call({ projectId: "proj_tenant", key: "customer:acme", holdId: "h_9" })
+    const hold = await call({
+      projectId: "proj_tenant",
+      key: "customer:acme",
+      holdId: "h_9",
+      holdCreatedAt: AT,
+    })
     store = new MemoryBudgetStore()
-    const budget = await call({ projectId: "proj_tenant", key: "customer:gone", holdId: "h_1" })
+    const budget = await call({
+      projectId: "proj_tenant",
+      key: "customer:gone",
+      holdId: "h_1",
+      holdCreatedAt: AT,
+    })
 
     expect([hold.status, (await errorOf(hold)).details]).toEqual([
       404,

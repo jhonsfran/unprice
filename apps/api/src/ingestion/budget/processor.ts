@@ -56,6 +56,11 @@ export class BudgetProcessor {
     return reply
   }
 
+  /** Whether the storage holds a budget, as opposed to a schema a refused first call left. */
+  hasBudget(): boolean {
+    return this.deps.store.atomically((tx) => tx.readBudget() !== null)
+  }
+
   /**
    * Answers `get` through the same commit, so it writes only when a window rolled, then reads the
    * inspection in that transaction at the clock the get clamped to.

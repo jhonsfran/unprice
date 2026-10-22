@@ -11,6 +11,7 @@ export const sdkOperationIds = [
   "budgets.charge",
   "budgets.get",
   "budgets.lease",
+  "budgets.models",
   "budgets.record",
   "budgets.release",
   "budgets.report",
@@ -46,6 +47,9 @@ export type GeneratedSdkResources = {
     lease: (
       req: OperationInput<"budgets.lease">
     ) => Promise<ApiResult<OperationResponse<"budgets.lease">>>
+    models: (
+      req: OperationInput<"budgets.models">
+    ) => Promise<ApiResult<OperationResponse<"budgets.models">>>
     record: (
       req: OperationInput<"budgets.record">
     ) => Promise<ApiResult<OperationResponse<"budgets.record">>>
@@ -74,6 +78,7 @@ export function createGeneratedSdkResources(
       charge: (body) => toResult(openapi.POST("/v1/budgets/charge", { body })),
       get: (query) => toResult(openapi.GET("/v1/budgets/get", { params: { query } })),
       lease: (body) => toResult(openapi.POST("/v1/budgets/lease", { body })),
+      models: (query) => toResult(openapi.GET("/v1/budgets/models", { params: { query } })),
       record: (body) => toResult(openapi.POST("/v1/budgets/record", { body })),
       release: (body) => toResult(openapi.POST("/v1/budgets/release", { body })),
       report: (body) => toResult(openapi.POST("/v1/budgets/report", { body })),

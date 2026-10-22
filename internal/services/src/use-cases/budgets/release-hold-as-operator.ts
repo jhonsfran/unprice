@@ -58,7 +58,12 @@ export async function releaseHoldAsOperator(
   if (requested.err || requested.val.status !== "requested") return requested
   const { id } = requested.val
 
-  const released = await budgetOperator.release({ projectId, key: found.val.key, holdId })
+  const released = await budgetOperator.release({
+    projectId,
+    key: found.val.key,
+    holdId,
+    holdCreatedAt,
+  })
   if (!released.err) {
     return budgetAudit.resolve(projectId, id, {
       status: "applied",

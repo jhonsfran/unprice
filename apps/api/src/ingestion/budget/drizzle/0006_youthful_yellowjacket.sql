@@ -1,0 +1,1 @@
+DROP INDEX `budget_operations_due_idx`;

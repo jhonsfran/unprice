@@ -31,6 +31,14 @@ const nextConfig = {
     domains: ["images.unsplash.com"],
   },
   allowedDevOrigins: ["localhost", "app.localhost", "*.localhost"],
+  async headers() {
+    return [
+      {
+        source: "/videos/spend-authorization/:path*",
+        headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
+      },
+    ]
+  },
   turbopack: {},
   // Optimize CSS loading
   compiler: {

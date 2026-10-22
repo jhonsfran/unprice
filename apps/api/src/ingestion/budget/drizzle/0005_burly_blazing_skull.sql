@@ -1,0 +1,1 @@
+CREATE INDEX `budget_operations_inspection_idx` ON `budget_operations` (`due_at`,`id`);
