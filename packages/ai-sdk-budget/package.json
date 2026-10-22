@@ -1,6 +1,6 @@
 {
   "name": "@unprice/ai-sdk-budget",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": false,
   "description": "Unprice budget middleware for the Vercel AI SDK.",
   "type": "module",
