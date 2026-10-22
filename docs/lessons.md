@@ -36,6 +36,8 @@ patterns. Keep it cheap to load and useful.
 
 ## CI And GitHub Actions
 
+- 2026-10-22: Next.js security patches must update both `apps/nextjs` and `internal/auth`. Keep the sharp 0.35.5 override; it mitigates the image RCE but does not fix Server Actions advisories.
+- 2026-10-22: For a dependency PR that must not deploy, include `renovate/` in the head branch name. `Test Renovate` runs the Build checks, and every `Deploy Preview` job skips that branch.
 - 2026-10-21: Vite security updates must change both the root dependency and workspace override. After pnpm resolves override changes, retain unrelated lockfile resolutions and verify with a frozen install.
 - 2026-08-27: Database-backed property tests that reseed for each generated case can exceed the
   shared 10s integration timeout under full-suite CI load; set a scoped per-test timeout instead
