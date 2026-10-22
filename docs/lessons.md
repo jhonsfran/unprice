@@ -36,6 +36,7 @@ patterns. Keep it cheap to load and useful.
 
 ## CI And GitHub Actions
 
+- 2026-10-21: Vite security updates must change both the root dependency and workspace override. After pnpm resolves override changes, retain unrelated lockfile resolutions and verify with a frozen install.
 - 2026-08-27: Database-backed property tests that reseed for each generated case can exceed the
   shared 10s integration timeout under full-suite CI load; set a scoped per-test timeout instead
   of raising the limit for every integration test or reducing property coverage.
@@ -1031,6 +1032,7 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   screenshots (IO never fires in stitched captures) and very tall fullPage shots can duplicate
   the first viewport at the bottom; verify with stepped real scrolling + per-section viewport
   shots instead.
+- 2026-10-21: The budgets landing video comes from `~/repos/tutorials/budgets-launch`. When its copy changes, update the scene and narration, regenerate timing and the mix, then replace `apps/nextjs/public/videos/budgets-launch.mp4` with a web export of the new render.
 - 2026-10-21: The main landing animation comes from `~/repos/tutorials/unprice-spend-authorization`. Export 720p H.264 with `preload="none"`; files under `public/videos/spend-authorization/` have immutable caching, so regenerate content hashes and update `demo-video.ts` when replacing them.
 - 2026-07-13: A `curl --max-time 5` timeout against :3000 does not mean the port is free — the
   user's dev server may be cold-compiling. If `next dev` reports "Port 3000 in use, trying
