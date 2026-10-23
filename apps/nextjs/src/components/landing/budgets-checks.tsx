@@ -59,7 +59,7 @@ export function BudgetsChecks() {
           id="budgets-checks-title"
           className="mt-6 max-w-2xl font-primary text-background-textContrast text-display-3"
         >
-          Zero-millisecond checks. Or one hop away.
+          Checks in memory, or one round trip. Same cap.
         </h2>
         <p className="mt-5 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
           Local mode spends from a lease, a slice of the budget held in memory, so a check makes no
