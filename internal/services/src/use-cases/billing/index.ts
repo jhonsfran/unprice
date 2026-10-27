@@ -51,10 +51,7 @@ export {
   billingUsageOperationOutputSchema,
   processBillingUsageSnapshots,
 } from "./usage-snapshots"
-export {
-  createNoopBillingReservationFlushGateway,
-  HttpBillingReservationFlushGateway,
-} from "./reservation-flush-gateway"
+export { HttpBillingReservationFlushGateway } from "./reservation-flush-gateway"
 export type { BillingReservationFlushGateway } from "./reservation-flush-gateway"
 export {
   FlushReservationsForInvoicingError,

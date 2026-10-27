@@ -12,6 +12,7 @@ import type { Logger } from "@unprice/logs"
 import { type Dinero, dinero, toSnapshot } from "dinero.js"
 import * as dineroCurrencies from "dinero.js/currencies"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { createBillingGatewayStub } from "../test-fixtures/billing-gateway"
 
 import type { BillingService } from "../billing/service"
 import type { CustomerService } from "../customers/service"
@@ -658,6 +659,7 @@ describe("SubscriptionMachine - comprehensive", () => {
     billingService?: Pick<BillingService, "generateBillingPeriods">
   }) =>
     SubscriptionMachine.create({
+      reservationFlushGateway: createBillingGatewayStub(),
       subscriptionId: input.subscriptionId,
       projectId: input.projectId,
       analytics: mockAnalytics,

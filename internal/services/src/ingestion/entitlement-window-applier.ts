@@ -139,7 +139,7 @@ export type EntitlementWindowController = {
   }) => Promise<{ results: EntitlementWindowApplyBatchResult[] }>
   getEnforcementState: (input: EntitlementWindowStateInput) => Promise<EntitlementWindowState>
   getStatus?: () => Promise<EntitlementWindowStatus>
-  flushReservationForInvoicing?: (
+  flushReservationForInvoicing: (
     input: FlushReservationForInvoicingInput
   ) => Promise<FlushReservationForInvoicingResult>
 }

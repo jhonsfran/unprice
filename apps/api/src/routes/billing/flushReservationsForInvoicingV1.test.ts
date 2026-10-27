@@ -161,11 +161,70 @@ describe("flushReservationsForInvoicingV1 route", () => {
     )
 
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ ok: true, flushed: 1, skipped: 0 })
+    expect(await response.json()).toEqual({ ok: true, flushed: 1, skipped: 0, snapshots: [] })
     expect(flushSpy).toHaveBeenCalledWith({
       statementKey: "stmt_123",
       billingPeriodIds: ["bp_123"],
     })
+  })
+
+  it("returns sealed usage and flush counts from one request", async () => {
+    const snapshot = {
+      projectId: "proj_123",
+      customerId: "cus_123",
+      subscriptionId: "sub_123",
+      subscriptionPhaseId: "phase_123",
+      subscriptionItemId: "item_123",
+      customerEntitlementId: "ce_123",
+      billingPeriodId: "bp_123",
+      statementKey: "stmt_123",
+      featureSlug: "access",
+      cycleStartAt: 0,
+      cycleEndAt: 86_400_000,
+      currency: "USD",
+      amountScale: 8,
+      amount: 1_000_000_000,
+      quantity: 10,
+      origin: "period_generation_v1",
+      registeredAt: 0,
+      lastEventAt: 1000,
+      state: "sealed",
+      sealedAt: 86_400_000,
+      completedAt: null,
+    }
+    const sealSpy = vi.fn().mockResolvedValue([snapshot])
+    const flushSpy = vi.fn().mockResolvedValue({ ok: true, outcome: "flushed" })
+    windowMocks.getEntitlementWindowStub.mockReturnValue({
+      sealBillingPeriods: sealSpy,
+      flushReservationForInvoicing: flushSpy,
+    })
+    const { app, env, executionCtx } = createTestApp({
+      billingPeriods: [{ id: "bp_123", featureType: "usage" }],
+      entitlements: [{ id: "ce_123", subscriptionId: "sub_123", subscriptionPhaseId: "phase_123" }],
+    })
+
+    const response = await app.fetch(
+      buildRequest({
+        projectId: "proj_123",
+        customerId: "cus_123",
+        subscriptionId: "sub_123",
+        subscriptionPhaseId: "phase_123",
+        statementKey: "stmt_123",
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      ok: true,
+      flushed: 1,
+      skipped: 0,
+      snapshots: [snapshot],
+    })
+    expect(sealSpy.mock.invocationCallOrder[0]).toBeLessThan(
+      flushSpy.mock.invocationCallOrder[0] ?? 0
+    )
   })
 
   it("returns 200 with skipped count when no entitlements match", async () => {
@@ -187,7 +246,7 @@ describe("flushReservationsForInvoicingV1 route", () => {
     )
 
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ ok: true, flushed: 0, skipped: 0 })
+    expect(await response.json()).toEqual({ ok: true, flushed: 0, skipped: 0, snapshots: [] })
   })
 
   it("throws 409 when flush is deferred", async () => {
@@ -246,32 +305,6 @@ describe("flushReservationsForInvoicingV1 route", () => {
     expect(response.status).toBe(500)
   })
 
-  it("skips entitlements whose DO does not expose the flush RPC", async () => {
-    windowMocks.getEntitlementWindowStub.mockReturnValue({
-      // No flushReservationForInvoicing method
-    })
-
-    const { app, env, executionCtx } = createTestApp({
-      billingPeriods: [{ id: "bp_123" }],
-      entitlements: [{ id: "ce_123", subscriptionId: "sub_123", subscriptionPhaseId: "phase_123" }],
-    })
-
-    const response = await app.fetch(
-      buildRequest({
-        projectId: "proj_123",
-        customerId: "cus_123",
-        subscriptionId: "sub_123",
-        subscriptionPhaseId: "phase_123",
-        statementKey: "stmt_123",
-      }),
-      env,
-      executionCtx
-    )
-
-    expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ ok: true, flushed: 0, skipped: 1 })
-  })
-
   it("flushes matching run-budget captures before invoice materialization", async () => {
     const flushCapturesForInvoicing = vi
       .fn()
@@ -302,7 +335,7 @@ describe("flushReservationsForInvoicingV1 route", () => {
     )
 
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ ok: true, flushed: 2, skipped: 0 })
+    expect(await response.json()).toEqual({ ok: true, flushed: 2, skipped: 0, snapshots: [] })
     // Placement itself is asserted in ingestion/do-placement.test.ts. This env
     // is APP_ENV=development, which deliberately skips the jurisdiction.
     expect(runBudgetMocks.getByName).toHaveBeenCalledWith("development:proj_123:cus_123:brun_123", {
@@ -316,7 +349,7 @@ describe("flushReservationsForInvoicingV1 route", () => {
 })
 
 function createTestApp(options: {
-  billingPeriods: Array<{ cycleStartAt?: number; id: string }>
+  billingPeriods: Array<{ cycleStartAt?: number; id: string; featureType?: "flat" | "usage" }>
   budgetRuns?: Array<{ id: string }>
   entitlements: Array<{ id: string; subscriptionId: string; subscriptionPhaseId: string }>
 }) {
@@ -352,6 +385,13 @@ function createTestApp(options: {
               cycleStartAt: 0,
               cycleEndAt: (period.cycleStartAt ?? 0) + 86_400_000,
               subscriptionItemId: "item_123",
+              subscriptionItem: {
+                featurePlanVersion: {
+                  featureType: period.featureType ?? "flat",
+                  feature: { slug: "access" },
+                },
+              },
+              subscriptionPhase: { planVersion: { currency: "USD" } },
               ...period,
             }))
           ),

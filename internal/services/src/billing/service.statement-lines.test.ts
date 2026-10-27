@@ -13,6 +13,7 @@ import { UnPriceLedgerError } from "../ledger/errors"
 import type { Metrics } from "../metrics"
 import type { RatingService } from "../rating/service"
 import type { SubscriptionMachine } from "../subscriptions/machine"
+import { createBillingGatewayStub } from "../test-fixtures/billing-gateway"
 import type { WalletService } from "../wallet"
 import { BillingService } from "./service"
 
@@ -59,6 +60,7 @@ function makeDbWithPeriods(periods: unknown[] = []) {
 
 function makeBillingService(db: Database) {
   return new BillingService({
+    reservationFlushGateway: createBillingGatewayStub(),
     db,
     logger: makeLogger(),
     analytics: {} as Analytics,

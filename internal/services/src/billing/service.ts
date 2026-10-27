@@ -351,7 +351,7 @@ export class BillingService {
   private readonly ratingService: RatingService
   private readonly ledgerService: LedgerGateway
   private readonly walletService: WalletService
-  private readonly reservationFlushGateway: BillingReservationFlushGateway | undefined
+  private readonly reservationFlushGateway: BillingReservationFlushGateway
 
   constructor({
     db,
@@ -379,7 +379,7 @@ export class BillingService {
     ratingService: RatingService
     ledgerService: LedgerGateway
     walletService: WalletService
-    reservationFlushGateway?: BillingReservationFlushGateway
+    reservationFlushGateway: BillingReservationFlushGateway
   }) {
     this.db = db
     this.logger = logger
@@ -2088,8 +2088,6 @@ export class BillingService {
             if (billingPeriodValues.length > 0) {
               if (!dryRun) {
                 if (item.featurePlanVersion.featureType === "usage") {
-                  if (!this.reservationFlushGateway)
-                    throw new Error("Authoritative billing usage gateway is required")
                   const entitlements = await tx.query.customerEntitlements.findMany({
                     where: (table, { and, eq }) =>
                       and(

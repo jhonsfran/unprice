@@ -2,6 +2,7 @@ import type { Database } from "@unprice/db"
 import { Ok } from "@unprice/error"
 import { describe, expect, it, vi } from "vitest"
 import { DEFAULT_GRANT_PRIORITY } from "../entitlements/grants"
+import { createBillingGatewayStub } from "../test-fixtures/billing-gateway"
 import { SubscriptionService } from "./service"
 
 describe("SubscriptionService entitlement grant provisioning contract", () => {
@@ -11,6 +12,7 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
 
   it("rejects phase updates with an end date before the start date", async () => {
     const service = new SubscriptionService({
+      reservationFlushGateway: createBillingGatewayStub(),
       db: {} as Database,
       repo: {} as never,
       logger: {
@@ -127,6 +129,7 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
       ),
     }
     const service = new SubscriptionService({
+      reservationFlushGateway: createBillingGatewayStub(),
       db,
       repo: repo as never,
       logger: logger as never,
@@ -327,6 +330,7 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
       debug: vi.fn(),
     }
     const service = new SubscriptionService({
+      reservationFlushGateway: createBillingGatewayStub(),
       db,
       repo: repo as never,
       logger: logger as never,
@@ -536,6 +540,7 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
       debug: vi.fn(),
     }
     const service = new SubscriptionService({
+      reservationFlushGateway: createBillingGatewayStub(),
       db,
       repo: repo as never,
       logger: logger as never,
@@ -659,6 +664,7 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
       debug: vi.fn(),
     }
     const service = new SubscriptionService({
+      reservationFlushGateway: createBillingGatewayStub(),
       db,
       repo: repo as never,
       logger: logger as never,
@@ -764,6 +770,7 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
       debug: vi.fn(),
     }
     const service = new SubscriptionService({
+      reservationFlushGateway: createBillingGatewayStub(),
       db,
       repo: repo as never,
       logger: logger as never,
@@ -890,6 +897,7 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
     }
     const getPhaseOwnedEntitlements = vi.fn().mockResolvedValue(Ok([]))
     const service = new SubscriptionService({
+      reservationFlushGateway: createBillingGatewayStub(),
       db,
       repo: repo as never,
       logger: {
@@ -1065,6 +1073,7 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
       debug: vi.fn(),
     }
     const service = new SubscriptionService({
+      reservationFlushGateway: createBillingGatewayStub(),
       db,
       repo: repo as never,
       logger: logger as never,

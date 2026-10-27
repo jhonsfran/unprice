@@ -1,7 +1,12 @@
 import type { Database } from "@unprice/db"
 import { BaseError, Err, Ok, type Result } from "@unprice/error"
 import { z } from "zod"
-import { ownsBillingUsagePeriod } from "../../billing/usage-snapshot"
+import {
+  type BillingUsageSnapshot,
+  billingUsageIdentitySchema,
+  billingUsageSnapshotSchema,
+  ownsBillingUsagePeriod,
+} from "../../billing/usage-snapshot"
 import type { ServiceContext } from "../../context"
 import type { EntitlementWindowController } from "../../ingestion"
 import type { RunBudgetClient } from "../runs"
@@ -17,6 +22,7 @@ export const flushReservationsForInvoicingInputSchema = z.object({
 export const flushReservationsForInvoicingOutputSchema = z.object({
   flushed: z.number().int().min(0),
   skipped: z.number().int().min(0),
+  snapshots: z.array(billingUsageSnapshotSchema),
 })
 
 export const flushReservationsForInvoicingErrorReasonSchema = z.enum([
@@ -40,7 +46,7 @@ export type InvoicingEntitlementWindowClient = {
     customerEntitlementId: string
     customerId: string
     projectId: string
-  }): Pick<EntitlementWindowController, "flushReservationForInvoicing">
+  }): Pick<EntitlementWindowController, "flushReservationForInvoicing" | "sealBillingPeriods">
 }
 
 export type FlushReservationsForInvoicingDeps = {
@@ -88,19 +94,19 @@ export async function flushReservationsForInvoicing(
         eqOp(table.subscriptionPhaseId, input.subscriptionPhaseId),
         eqOp(table.statementKey, input.statementKey)
       ),
-    columns: { cycleStartAt: true, cycleEndAt: true, subscriptionItemId: true, id: true },
+    with: {
+      subscriptionItem: { with: { featurePlanVersion: { with: { feature: true } } } },
+      subscriptionPhase: { with: { planVersion: true } },
+    },
   })
-  if (billingPeriodRows.length === 0) return Ok({ flushed: 0, skipped: 0 })
+  if (billingPeriodRows.length === 0) return Ok({ flushed: 0, skipped: 0, snapshots: [] })
   const billingPeriodIds = billingPeriodRows.map((row) => row.id)
-  const earliestCycleStartAt =
-    billingPeriodRows.length === 0
-      ? null
-      : Math.min(...billingPeriodRows.map((period) => period.cycleStartAt))
+  const earliestCycleStartAt = Math.min(...billingPeriodRows.map((period) => period.cycleStartAt))
 
   const entitlementsResult = await deps.services.entitlements.getCustomerEntitlementsForCustomer({
     customerId: input.customerId,
     projectId: input.projectId,
-    startAt: Math.min(...billingPeriodRows.map((period) => period.cycleStartAt)),
+    startAt: earliestCycleStartAt,
     endAt: Math.max(...billingPeriodRows.map((period) => period.cycleEndAt)),
     db: deps.db,
   })
@@ -126,6 +132,46 @@ export async function flushReservationsForInvoicing(
       )
   )
 
+  const snapshots: BillingUsageSnapshot[] = []
+  try {
+    for (const period of billingPeriodRows) {
+      const featurePlanVersion = period.subscriptionItem.featurePlanVersion
+      if (featurePlanVersion.featureType !== "usage") continue
+      const owners = phaseEntitlements.filter(
+        (entitlement) =>
+          entitlement.subscriptionItemId === period.subscriptionItemId &&
+          ownsBillingUsagePeriod(entitlement, period)
+      )
+      if (owners.length === 0) throw new Error(`No entitlement owns billing period ${period.id}`)
+      for (const entitlement of owners) {
+        const stub = deps.entitlementWindowClient.getEntitlementWindowStub({
+          customerEntitlementId: entitlement.id,
+          customerId: input.customerId,
+          projectId: input.projectId,
+        })
+        const identity = billingUsageIdentitySchema.parse({
+          ...input,
+          customerEntitlementId: entitlement.id,
+          subscriptionItemId: period.subscriptionItemId,
+          billingPeriodId: period.id,
+          featureSlug: featurePlanVersion.feature.slug,
+          cycleStartAt: period.cycleStartAt,
+          cycleEndAt: period.cycleEndAt,
+          currency: period.subscriptionPhase.planVersion.currency,
+          amountScale: 8,
+        })
+        snapshots.push(...(await stub.sealBillingPeriods([identity])))
+      }
+    }
+  } catch (error) {
+    return Err(
+      new FlushReservationsForInvoicingError({
+        reason: "deferred",
+        message: error instanceof Error ? error.message : "Failed to seal billing usage",
+      })
+    )
+  }
+
   let flushed = 0
   let skipped = 0
 
@@ -135,11 +181,6 @@ export async function flushReservationsForInvoicing(
       customerId: input.customerId,
       projectId: input.projectId,
     })
-
-    if (!stub.flushReservationForInvoicing) {
-      skipped++
-      continue
-    }
 
     const result = await stub.flushReservationForInvoicing({
       statementKey: input.statementKey,
@@ -183,20 +224,17 @@ export async function flushReservationsForInvoicing(
     }
   }
 
-  const budgetRunRows =
-    earliestCycleStartAt === null
-      ? []
-      : await deps.db.query.budgetRuns.findMany({
-          where: (table, { and: andOp, eq: eqOp, gt: gtOp, gte: gteOp, ne: neOp }) =>
-            andOp(
-              eqOp(table.projectId, input.projectId),
-              eqOp(table.customerId, input.customerId),
-              neOp(table.status, "failed"),
-              gtOp(table.consumedAmount, 0),
-              gteOp(table.updatedAt, new Date(earliestCycleStartAt))
-            ),
-          columns: { id: true },
-        })
+  const budgetRunRows = await deps.db.query.budgetRuns.findMany({
+    where: (table, { and: andOp, eq: eqOp, gt: gtOp, gte: gteOp, ne: neOp }) =>
+      andOp(
+        eqOp(table.projectId, input.projectId),
+        eqOp(table.customerId, input.customerId),
+        neOp(table.status, "failed"),
+        gtOp(table.consumedAmount, 0),
+        gteOp(table.updatedAt, new Date(earliestCycleStartAt))
+      ),
+    columns: { id: true },
+  })
 
   for (const run of budgetRunRows) {
     const result = await deps.runBudgetClient.flushCapturesForInvoicing({
@@ -221,7 +259,7 @@ export async function flushReservationsForInvoicing(
     skipped += result.val.skipped
   }
 
-  return Ok(flushReservationsForInvoicingOutputSchema.parse({ flushed, skipped }))
+  return Ok(flushReservationsForInvoicingOutputSchema.parse({ flushed, skipped, snapshots }))
 }
 
 function inconsistentSuccessfulFlushResult(

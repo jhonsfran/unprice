@@ -201,7 +201,7 @@ function makeBillingService(opts: { phases?: unknown[]; walletService?: WalletSe
   const ledgerService = makeLedgerService()
   const reservationFlushGateway = {
     registerPeriods: vi.fn().mockResolvedValue(Ok(undefined)),
-    flushForInvoicing: vi.fn().mockResolvedValue(Ok({ snapshots: [] })),
+    flushForInvoicing: vi.fn().mockResolvedValue(Ok({ snapshots: [], flushed: 0, skipped: 0 })),
     completeForInvoicing: vi.fn().mockResolvedValue(Ok(undefined)),
   }
 

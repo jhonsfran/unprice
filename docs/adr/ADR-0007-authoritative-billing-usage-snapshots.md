@@ -39,10 +39,13 @@ New billing period IDs derive from the stable period identity and registration v
 If registration succeeds but the database transaction fails, a retry uses the same ID and adopts the existing snapshot.
 A registration that never receives a database commit can retain an unused zero snapshot. It must not be deleted after an ambiguous commit failure.
 
-The internal billing gateway seals all snapshots before it flushes wallet reservations.
+The canonical `flush-reservations-for-invoicing` use case seals all snapshots before it flushes wallet reservations.
+The HTTP gateway sends one request to that use case. Billing and subscription services require this capability.
+Only test fixtures can supply a no-op gateway.
 The final event commit checks the seal after asynchronous wallet calls.
 This prevents accepted usage from entering a snapshot after its corresponding wallet flush.
 Billing uses the sealed amounts with its existing deterministic ledger transfer identity.
+The billing use case resolves usage snapshots and fixed-price ratings into one period charge before it posts ledger entries.
 Periods with wallet captures continue to use those captures and do not receive a second charge.
 For capped phases, captured money must equal the sealed period charge before closure.
 For uncapped phases, run captures can fund part of the period; billing posts only the remaining amount as a receivable.

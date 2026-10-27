@@ -3,7 +3,6 @@ import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import { z } from "zod"
 import {
   type BillingUsageSnapshot,
-  billingUsageIdentitySchema,
   billingUsageRegistrationSchema,
   billingUsageSnapshotSchema,
   ownsBillingUsagePeriod,
@@ -19,15 +18,9 @@ const registerSchema = scopeSchema.extend({
   operation: z.literal("register"),
   registrations: z.array(billingUsageRegistrationSchema),
 })
-const sealSchema = scopeSchema.extend({
-  operation: z.literal("seal"),
-  statementKey: z.string(),
-  subscriptionPhaseId: z.string(),
-})
 const completeSchema = scopeSchema.extend({ operation: z.literal("complete") })
 export const billingUsageOperationSchema = z.discriminatedUnion("operation", [
   registerSchema,
-  sealSchema,
   completeSchema,
 ])
 export const billingUsageOperationOutputSchema = z.object({
@@ -63,16 +56,10 @@ export async function processBillingUsageSnapshots(
           eq(table.projectId, input.projectId),
           eq(table.customerId, input.customerId),
           eq(table.subscriptionId, input.subscriptionId),
-          input.operation === "seal"
-            ? and(
-                eq(table.statementKey, input.statementKey),
-                eq(table.subscriptionPhaseId, input.subscriptionPhaseId)
-              )
-            : eq(table.status, "invoiced")
+          eq(table.status, "invoiced")
         ),
       with: {
-        subscriptionItem: { with: { featurePlanVersion: { with: { feature: true } } } },
-        subscriptionPhase: { with: { planVersion: true } },
+        subscriptionItem: { with: { featurePlanVersion: { columns: { featureType: true } } } },
       },
     })
     const entitlements = await deps.db.query.customerEntitlements.findMany({
@@ -99,26 +86,7 @@ export async function processBillingUsageSnapshots(
           customerId: input.customerId,
           projectId: input.projectId,
         })
-        if (input.operation === "complete") {
-          await stub.completeBillingPeriods([period.id])
-          continue
-        }
-        const identity = billingUsageIdentitySchema.parse({
-          projectId: input.projectId,
-          customerId: input.customerId,
-          customerEntitlementId: entitlement.id,
-          subscriptionId: period.subscriptionId,
-          subscriptionPhaseId: period.subscriptionPhaseId,
-          subscriptionItemId: period.subscriptionItemId,
-          billingPeriodId: period.id,
-          statementKey: period.statementKey,
-          featureSlug: item.featurePlanVersion.feature.slug,
-          cycleStartAt: period.cycleStartAt,
-          cycleEndAt: period.cycleEndAt,
-          currency: period.subscriptionPhase.planVersion.currency,
-          amountScale: 8,
-        })
-        snapshots.push(...(await stub.sealBillingPeriods([identity])))
+        await stub.completeBillingPeriods([period.id])
       }
     }
     return Ok({ snapshots })
