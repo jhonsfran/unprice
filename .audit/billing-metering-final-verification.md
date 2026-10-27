@@ -2,6 +2,8 @@
 
 Date: 2026-10-27.
 
+This report records verification at `a37f26265`. The later code-quality review and its final verification are recorded in [billing-metering-quality-review.md](billing-metering-quality-review.md). Its normal integration harness replaces the historical readiness driver below.
+
 The user requested PostgreSQL and ClickHouse checks on the final branch, using the running localhost Compose services.
 
 Production code is unchanged from `7f55e2bf5`. This follow-up changes only test tooling, two property-test clocks and timeouts, and evidence files.
@@ -54,7 +56,6 @@ Run from the repository root with Node 24.17.0 and pnpm 10.28.0.
 
 ```sh
 rtk proxy env BILLING_TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/unprice_billing_final_ed6f_20261027 pnpm --filter @unprice/services test:integration
-rtk proxy env BILLING_PROOF_POSTGRES_CONTAINER=unprice-db-1 BILLING_PROOF_POSTGRES_DATABASE=unprice_billing_final_ed6f_20261027 pnpm --filter @unprice/services exec vitest run --config vitest.readiness-proof.config.ts
 rtk proxy env BILLING_PROOF_CONTAINER=tinybird-local python3 .audit/sql/prove-sql.py
 ```
 

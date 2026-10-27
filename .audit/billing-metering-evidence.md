@@ -110,7 +110,7 @@ Before: `Tests 2 failed | 7 skipped (9)`. Advance usage was eligible too early, 
 
 After: `pnpm --filter @unprice/services test:integration:complex-pricing` passes all nine tests. The generation unit suite also passes all thirteen tests. Neon transport was restricted to the approved test proxy by `/private/tmp/unprice-billing-review/isolated-postgres.mjs`; no application database was used.
 
-An additional reproducible PostgreSQL proof is available with `pnpm --filter @unprice/services exec vitest run --config vitest.readiness-proof.config.ts`. It requires the isolated `codex-billing-proof-postgres` container. It runs the generated repository queries against temporary tables inside a rollback transaction.
+The PostgreSQL readiness proofs now run through the normal integration harness with the full migrated schema. Run `pnpm --filter @unprice/services test:integration` with `BILLING_TEST_DATABASE_URL` set to a dedicated test database. The complex-pricing suite proves readiness boundaries; `repository.readiness.integration.test.ts` proves that capping preserves invoiced rows and other phases. The earlier temporary-table driver was removed during the branch quality review.
 
 Independent review: PASS. The reviewer reran the PostgreSQL proof and checked the scheduler, exports, all migrated callers, and comments. No material findings.
 

@@ -1,0 +1,289 @@
+Terminal excerpts retain the reported values. Trailing whitespace is removed.
+
+=== Initial BILL split mock import failure, recovered exactly from active workspace transcript4368 ===
+Source log: quality-root-initial-mock-failure.log
+Recovered exact tool output from active workspace transcript line4368.
+     77|       )
+     78|       .groupBy(
+       |        ^
+     79|         billingPeriods.projectId,
+     80|         billingPeriods.subscriptionId,
+ ❯ billPeriod src/use-cases/billing/bill-period.ts:55:47
+ ❯ src/use-cases/billing/bill-period.accepted-usage.test.ts:279:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/8]⎯
+
+ FAIL  src/use-cases/billing/bill-period.accepted-usage.test.ts > billing accepted durable usage > refuses captured money above the accepted amount
+AssertionError: expected [Function] to throw error including 'wallet captures do not match its seal…' but got 'this.db.select(...).from(...).where(.…'
+
+Expected: "wallet captures do not match its sealed usage amount"
+Received: "this.db.select(...).from(...).where(...).groupBy is not a function"
+
+ ❯ src/use-cases/billing/bill-period.accepted-usage.test.ts:289:42
+    287|   it("refuses captured money above the accepted amount", async () => {
+    288|     const fixture = await createCase({ funding: { policy: "uncapped", …
+    289|     await expect(billPeriod(fixture.args)).rejects.toThrow("wallet cap…
+       |                                          ^
+    290|     expect(fixture.state.invoiced).toBe(false)
+    291|     expect(fixture.state.postedAmount).toBe(0)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/8]⎯
+
+
+ Test Files  1 failed | 3 passed (4)
+      Tests  8 failed | 25 passed (33)
+   Start at  17:25:16
+   Duration  1.19s (transform 1.16s, setup 0ms, import 3.88s, tests 57ms, environment 0ms)
+
+/Users/jhonsfran/.codex/worktrees/ed6f/unprice/internal/services:
+ ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @unprice/services@0.1.0 test: `vitest run src/use-cases/billing/bill-period.test.ts src/use-cases/billing/bill-period.accepted-usage.test.ts src/test-fixtures/recorded-usage.test.ts src/tests/workflow.test.ts`
+Exit status 1
+
+=== BILL mock import correction, focused cases ===
+Source log: quality-root-focused.log
+
+> @unprice/services@0.1.0 test /Users/jhonsfran/.codex/worktrees/ed6f/unprice/internal/services
+> vitest run src/use-cases/billing/bill-period.test.ts src/use-cases/billing/bill-period.accepted-usage.test.ts src/test-fixtures/recorded-usage.test.ts src/tests/workflow.test.ts
+
+
+ RUN  v4.1.10 /Users/jhonsfran/.codex/worktrees/ed6f/unprice/internal/services
+
+ ✓ src/test-fixtures/recorded-usage.test.ts (1 test) 2ms
+ ✓ src/use-cases/billing/bill-period.test.ts (16 tests) 13ms
+ ✓ src/tests/workflow.test.ts (8 tests) 15ms
+ ✓ src/use-cases/billing/bill-period.accepted-usage.test.ts (8 tests) 24ms
+
+ Test Files  4 passed (4)
+      Tests  33 passed (33)
+   Start at  17:25:44
+   Duration  1.20s (transform 1.27s, setup 0ms, import 3.95s, tests 54ms, environment 0ms)
+
+=== Post-format constructibility failure ===
+Source log: quality-services-after-format-failed.log
+Failed Tests 24 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/use-cases/billing/bill-period.accepted-usage.test.ts > billing accepted durable usage > invoices a normal period despite delayed reporting
+ FAIL  src/use-cases/billing/bill-period.accepted-usage.test.ts > billing accepted durable usage > invoices a trial period despite delayed reporting
+TypeError: (db) => db.billingRepository is not a constructor
+ ❯ Module.billPeriod src/use-cases/billing/bill-period.ts:44:23
+     42| > {
+     43|   const { subscription, now } = context
+     44|   const billingRepo = new DrizzleBillingRepository(db)
+       |                       ^
+     45|   const completeUsage = async () => {
+     46|     const completed = await reservationFlushGateway.completeForInvoici…
+ ❯ src/use-cases/billing/bill-period.accepted-usage.test.ts:281:13
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/24]⎯
+
+ FAIL  src/use-cases/billing/bill-period.accepted-usage.test.ts > billing accepted durable usage > retries completion after the invoice commits without posting again
+AssertionError: expected [Function] to throw error including 'completion acknowledgement unavailable' but got '(db) => db.billingRepository is not a…'
+[Repeated failures omitted; exact final summary follows.]
+ Test Files  2 failed | 122 passed (124)
+      Tests  24 failed | 1029 passed (1053)
+   Start at  17:32:57
+   Duration  32.35s (transform 22.02s, setup 0ms, import 371.38s, tests 4.81s, environment 9ms)
+
+/Users/jhonsfran/.codex/worktrees/ed6f/unprice/internal/services:
+ ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @unprice/services@0.1.0 test: `vitest run`
+Exit status 1
+
+=== Persisted retry regression before correction ===
+Source log: thermo-api-persisted-retry-red.log
+
+ RUN  v4.1.10 /Users/jhonsfran/.codex/worktrees/ed6f/unprice/apps/api
+
+ ❯ src/ingestion/entitlements/batch-correction-flush.test.ts (5 tests | 2 failed | 3 skipped) 19ms
+   × keeps persisted flush intent unchanged when new usage follows a failed capture 15ms
+   × keeps persisted flush intent unchanged when new usage follows a failed extend 3ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/ingestion/entitlements/batch-correction-flush.test.ts > keeps persisted flush intent unchanged when new usage follows a failed capture
+ FAIL  src/ingestion/entitlements/batch-correction-flush.test.ts > keeps persisted flush intent unchanged when new usage follows a failed extend
+AssertionError: expected [ Array(2) ] to deeply equal [ [ 800000000, 8 ], [ 800000000, 8 ] ]
+
+- Expected
++ Received
+
+@@ -2,9 +2,9 @@
+    [
+      800000000,
+      8,
+    ],
+    [
+-     800000000,
+-     8,
++     1000000000,
++     10,
+    ],
+  ]
+
+ ❯ src/ingestion/entitlements/batch-correction-flush.test.ts:114:7
+    112|     expect(
+    113|       wallet.captureReservationUsage.mock.calls.map(([input]) => [inpu…
+    114|     ).toEqual([[800_000_000, 8], [800_000_000, 8]])
+       |       ^
+    115|     expect(wallet.extendReservation.mock.calls.map(([input]) => input.…
+    116|       failure === "capture" ? [2_800_000_000] : [2_800_000_000, 2_800_…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 3 skipped (5)
+   Start at  17:30:36
+   Duration  1.26s (transform 593ms, setup 0ms, import 1.16s, tests 19ms, environment 0ms)
+
+=== Persisted retry regression after correction ===
+Source log: thermo-api-persisted-retry-green.log
+
+ RUN  v4.1.10 /Users/jhonsfran/.codex/worktrees/ed6f/unprice/apps/api
+
+ ↓ src/ingestion/entitlements/batch-correction-flush.test.ts > commits and flushes net accepted batch usage 6
+ ↓ src/ingestion/entitlements/batch-correction-flush.test.ts > commits and flushes net accepted batch usage 10
+ ↓ src/ingestion/entitlements/batch-correction-flush.test.ts > commits and flushes net accepted batch usage +0
+ ✓ src/ingestion/entitlements/batch-correction-flush.test.ts > keeps persisted flush intent unchanged when new usage follows a failed capture 12ms
+ ✓ src/ingestion/entitlements/batch-correction-flush.test.ts > keeps persisted flush intent unchanged when new usage follows a failed extend 3ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed | 3 skipped (5)
+   Start at  17:32:08
+   Duration  1.15s (transform 523ms, setup 0ms, import 1.07s, tests 15ms, environment 0ms)
+
+=== Final entitlement suite ===
+Source log: thermo-api-entitlements.log
+
+ RUN  v4.1.10 /Users/jhonsfran/.codex/worktrees/ed6f/unprice/apps/api
+
+
+ Test Files  15 passed (15)
+      Tests  169 passed (169)
+   Start at  17:31:52
+   Duration  3.15s (transform 6.69s, setup 0ms, import 35.24s, tests 383ms, environment 1ms)
+
+=== Final services suite ===
+Source log: quality-services.log
+ Test Files  124 passed (124)
+      Tests  1053 passed (1053)
+   Start at  17:35:00
+   Duration  8.52s (transform 8.79s, setup 0ms, import 93.76s, tests 2.03s, environment 6ms)
+
+=== Final API suite ===
+Source log: quality-api.log
+
+> api@ test /Users/jhonsfran/.codex/worktrees/ed6f/unprice/apps/api
+> vitest run
+
+
+ RUN  v4.1.10 /Users/jhonsfran/.codex/worktrees/ed6f/unprice/apps/api
+
+
+ Test Files  63 passed (63)
+      Tests  574 passed (574)
+   Start at  17:33:00
+   Duration  31.01s (transform 45.84s, setup 0ms, import 331.21s, tests 27.08s, environment 3ms)
+
+=== Final SQLite worker suite ===
+Source log: quality-workers.log
+ Test Files  8 passed (8)
+      Tests  63 passed (63)
+   Start at  17:33:11
+   Duration  26.54s (transform 36.89s, setup 0ms, import 105.43s, tests 9.43s, environment 0ms)
+
+=== Final jobs suite ===
+Source log: quality-jobs.log
+
+> @unprice/jobs@0.1.0 test /Users/jhonsfran/.codex/worktrees/ed6f/unprice/internal/jobs
+> vitest run
+
+
+ RUN  v4.1.10 /Users/jhonsfran/.codex/worktrees/ed6f/unprice/internal/jobs
+
+
+ Test Files  3 passed (3)
+      Tests  13 passed (13)
+   Start at  17:28:39
+   Duration  1.06s (transform 491ms, setup 0ms, import 123ms, tests 963ms, environment 0ms)
+
+=== Final full PostgreSQL integration suite, serial after final code and formatting ===
+Source log: quality-postgres.log
+ Test Files  28 passed (28)
+      Tests  78 passed (78)
+   Start at  17:35:21
+   Duration  81.12s (transform 756ms, setup 0ms, import 12.85s, tests 65.83s, environment 1ms)
+
+=== Actual ClickHouse repository endpoint SQL ===
+Source log: quality-clickhouse.log
+PASS deduplicates_usage expected=[{"project_id": "p1", "customer_id": "c1", "feature_slug": "f1", "latest": 10}] actual=[{"project_id": "p1", "customer_id": "c1", "feature_slug": "f1", "latest": 10}]
+PASS keeps_latest_value_after_when_feature_is_updated expected=[{"project_id": "p1", "customer_id": "c1", "feature_slug": "f4", "latest": 3}] actual=[{"project_id": "p1", "customer_id": "c1", "feature_slug": "f4", "latest": 3}]
+PASS uses_idempotency_order_for_equal_timestamp_batch_rows expected=[{"project_id": "p1", "customer_id": "c1", "feature_slug": "f_tie", "latest": 15}] actual=[{"project_id": "p1", "customer_id": "c1", "feature_slug": "f_tie", "latest": 15}]
+PASS sums_latest_allocations_for_same_visible_feature expected=[{"project_id": "p1", "customer_id": "c1", "feature_slug": "f_multi", "latest": 15}] actual=[{"project_id": "p1", "customer_id": "c1", "feature_slug": "f_multi", "latest": 15}]
+PASS late_sum_with_duplicate_delivery expected=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "late_sum", "latest": 2}] actual=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "late_sum", "latest": 2}]
+PASS late_count_with_duplicate_delivery expected=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "late_count", "latest": 2}] actual=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "late_count", "latest": 2}]
+PASS same_ms_with_duplicate_delivery expected=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "same_ms", "latest": 2}] actual=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "same_ms", "latest": 2}]
+PASS late_max_with_duplicate_delivery expected=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "late_max", "latest": 7}] actual=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "late_max", "latest": 7}]
+PASS latest_correction_with_duplicate_delivery expected=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "latest_correction", "latest": 6}] actual=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "latest_correction", "latest": 6}]
+PASS late_sum_allocation expected=[{"customer_entitlement_id": "ce_late_sum", "grant_id": "grant_late_sum", "period_key": "day:4070908800000", "feature_slug": "late_sum", "period_start_at": 4070908800000, "usage": 2, "amount": 200000000, "currency": "USD", "amount_scale": 8}] actual=[{"customer_entitlement_id": "ce_late_sum", "grant_id": "grant_late_sum", "period_key": "day:4070908800000", "feature_slug": "late_sum", "period_start_at": 4070908800000, "usage": 2, "amount": 200000000, "currency": "USD", "amount_scale": 8}]
+PASS late_count_allocation expected=[{"customer_entitlement_id": "ce_late_count", "grant_id": "grant_late_count", "period_key": "day:4070908800000", "feature_slug": "late_count", "period_start_at": 4070908800000, "usage": 2, "amount": 200000000, "currency": "USD", "amount_scale": 8}] actual=[{"customer_entitlement_id": "ce_late_count", "grant_id": "grant_late_count", "period_key": "day:4070908800000", "feature_slug": "late_count", "period_start_at": 4070908800000, "usage": 2, "amount": 200000000, "currency": "USD", "amount_scale": 8}]
+PASS same_ms_allocation expected=[{"customer_entitlement_id": "ce_same_ms", "grant_id": "grant_same_ms", "period_key": "day:4070908800000", "feature_slug": "same_ms", "period_start_at": 4070908800000, "usage": 2, "amount": 200000000, "currency": "USD", "amount_scale": 8}] actual=[{"customer_entitlement_id": "ce_same_ms", "grant_id": "grant_same_ms", "period_key": "day:4070908800000", "feature_slug": "same_ms", "period_start_at": 4070908800000, "usage": 2, "amount": 200000000, "currency": "USD", "amount_scale": 8}]
+PASS late_max_allocation expected=[{"customer_entitlement_id": "ce_late_max", "grant_id": "grant_late_max", "period_key": "day:4070908800000", "feature_slug": "late_max", "period_start_at": 4070908800000, "usage": 7, "amount": 700000000, "currency": "USD", "amount_scale": 8}] actual=[{"customer_entitlement_id": "ce_late_max", "grant_id": "grant_late_max", "period_key": "day:4070908800000", "feature_slug": "late_max", "period_start_at": 4070908800000, "usage": 7, "amount": 700000000, "currency": "USD", "amount_scale": 8}]
+PASS latest_correction_allocation expected=[{"customer_entitlement_id": "ce_latest_correction", "grant_id": "grant_latest_correction", "period_key": "day:4070908800000", "feature_slug": "latest_correction", "period_start_at": 4070908800000, "usage": 6, "amount": 600000000, "currency": "USD", "amount_scale": 8}] actual=[{"customer_entitlement_id": "ce_latest_correction", "grant_id": "grant_latest_correction", "period_key": "day:4070908800000", "feature_slug": "latest_correction", "period_start_at": 4070908800000, "usage": 6, "amount": 600000000, "currency": "USD", "amount_scale": 8}]
+PASS partial_reset_money expected=[{"customer_entitlement_id": "ce_partial", "grant_id": "grant_partial", "period_key": "month:1767225600000", "feature_slug": "partial", "period_start_at": 1767225600000, "usage": 5, "amount": 500000000, "currency": "USD", "amount_scale": 8}] actual=[{"customer_entitlement_id": "ce_partial", "grant_id": "grant_partial", "period_key": "month:1767225600000", "feature_slug": "partial", "period_start_at": 1767225600000, "usage": 5, "amount": 500000000, "currency": "USD", "amount_scale": 8}]
+PASS single_reset_money expected=[{"customer_entitlement_id": "ce_partial", "grant_id": "grant_partial", "period_key": "month:1767225600000", "feature_slug": "partial", "period_start_at": 1767225600000, "usage": 5, "amount": 500000000, "currency": "USD", "amount_scale": 8}] actual=[{"customer_entitlement_id": "ce_partial", "grant_id": "grant_partial", "period_key": "month:1767225600000", "feature_slug": "partial", "period_start_at": 1767225600000, "usage": 5, "amount": 500000000, "currency": "USD", "amount_scale": 8}]
+PASS actual_processor_late_events_and_replay expected=[{"project_id": "proj_123", "customer_id": "cus_123", "feature_slug": "api_calls", "latest": 2}] actual=[{"project_id": "proj_123", "customer_id": "cus_123", "feature_slug": "api_calls", "latest": 2}]
+PASS unsafe_money_does_not_wrap_to_zero actual=[{"customer_entitlement_id": "ce_overflow", "grant_id": "grant_overflow", "period_key": "day:4070908800000", "feature_slug": "overflow", "period_start_at": 4070908800000, "usage": 2049, "amount": 18446744073709552000, "currency": "USD", "amount_scale": 8}]
+Failed checks 0
+
+=== Final pnpm validate, no formatter changes ===
+Source log: quality-validate.log
+ Tasks:    29 successful, 29 total
+Cached:    3 cached, 29 total
+  Time:    20.237s
+
+☔️ success workspaces valid!
+
+
+ Tasks:    29 successful, 29 total
+Cached:    3 cached, 29 total
+  Time:    20.237s
+
+☔️ success workspaces valid!
+
+> unprice@ fmt:fix /Users/jhonsfran/.codex/worktrees/ed6f/unprice
+> pnpm biome format . --write && pnpm biome check .  --write --unsafe
+
+./.claude/skills/cloudflare-doctor internalError/fs ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Dereferenced symlink
+
+  i Biome encountered a file system entry that is a broken symbolic link: ./.claude/skills/cloudflare-doctor
+
+
+Formatted 1768 files in 204ms. No fixes applied.
+Found 1 warning.
+./.claude/skills/cloudflare-doctor internalError/fs ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Dereferenced symlink
+
+  i Biome encountered a file system entry that is a broken symbolic link: ./.claude/skills/cloudflare-doctor
+
+
+Checked 1768 files in 480ms. No fixes applied.
+Found 1 warning.
+
+=== Final API typecheck, process exit0 ===
+Source log: quality-api-typecheck.log
+
+> api@ type-check /Users/jhonsfran/.codex/worktrees/ed6f/unprice/apps/api
+> pnpm exec tsc --noEmit
+
+=== Test database cleanup ===
+Dedicated database: unprice_billing_quality_ed6f_20261027
+Open connections before cleanup:0
+Scoped dropdb exit:0
+Matching pg_database rows after cleanup:0
+Existing containers observed running: unprice-db-1, unprice-pg_proxy-1, tinybird-local
+
+=== Evidence limit ===
+The initial API split missing-import failure is agent-reported. Its red log was overwritten. The restored import and final169 entitlement cases are directly verified above.

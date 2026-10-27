@@ -1163,3 +1163,7 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-10-21: Local budget charges deduplicate only within one lease. `withUnpriceTool` requires a remote handle and rejects local handles before charging or executing a durable tool.
 - 2026-10-21: Export Pi Durable tools from `@unprice/pi-budget/tools`. The root declaration must compile without the optional Pi Durable peer installed.
 - 2026-10-21: AI output search changes only numeric output settings. Check its byte bound against the serialized request across digit boundaries, including Anthropic's enabled thinking budget.
+
+- 2026-10-27: Metering batches must preserve a persisted pending flush payload under its sequence. Coalesce only new draft flush intent.
+- 2026-10-27: Billing integration fixtures must declare accepted usage independently from wallet captures and pass their gateway explicitly.
+- 2026-10-27: Use classes for Vitest constructor mocks. `pnpm validate` can convert anonymous function mocks to non-constructible arrows.
