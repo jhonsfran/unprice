@@ -8,6 +8,8 @@ Sanitized original failure excerpts and passing summaries are committed in `bill
 
 The subsequent clean-rollout simplification follows the user's instruction that backward compatibility is not required. It removes legacy raw-meter recovery and entitlement genesis metadata. Historical test counts below describe the original proof runs. Current follow-up results are recorded in `billing-metering-clean-rollout.md`.
 
+The final branch's PostgreSQL, ClickHouse, and complete affected-suite reruns are recorded in `billing-metering-final-verification.md`.
+
 ## TLDR
 
 All nine claims have a behavioral counterexample and a passing regression after the fix. The tests prove the stated cases. They do not prove the absence of every other billing defect.

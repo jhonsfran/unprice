@@ -169,7 +169,7 @@ export async function proveBillingReadiness() {
           "-i",
           "-e",
           "PGPASSWORD=postgres",
-          "codex-billing-proof-postgres",
+          process.env.BILLING_PROOF_POSTGRES_CONTAINER ?? "codex-billing-proof-postgres",
           "psql",
           "-X",
           "-q",
@@ -182,7 +182,7 @@ export async function proveBillingReadiness() {
           "-U",
           "postgres",
           "-d",
-          "unprice_billing_proof",
+          process.env.BILLING_PROOF_POSTGRES_DATABASE ?? "unprice_billing_proof",
         ],
         {
           input: `BEGIN; ${setup} ${mutations.join("\n")} ${prepared} ROLLBACK;`,

@@ -43,3 +43,11 @@ The user clarified that backward compatibility is not required.
 - [x] Keep explicit registration, reset isolation, receipt replay, sealing, retention, and capture guards.
 - [x] Verify the simplified implementation and independent review.
 - [x] Commit this follow-up once on the same branch.
+
+## Final storage verification
+
+- [x] Select the running Compose services and a dedicated PostgreSQL test database.
+- [x] Run the actual ClickHouse billing SQL and PostgreSQL readiness probe.
+- [x] Align database setup and the two advance property-test clocks with the tested contract.
+- [x] Complete the full PostgreSQL integration suite on the final code.
+- [x] Review and commit the final verification evidence.

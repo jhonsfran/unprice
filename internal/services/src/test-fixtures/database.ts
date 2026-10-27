@@ -23,7 +23,11 @@ type PgTableRow = {
   tablename: string
 }
 
-function getDatabaseUrl(databaseUrl = process.env.DATABASE_URL ?? defaultTestDatabaseUrl) {
+function getDatabaseUrl(
+  databaseUrl = process.env.BILLING_TEST_DATABASE_URL ??
+    process.env.DATABASE_URL ??
+    defaultTestDatabaseUrl
+) {
   return databaseUrl
 }
 

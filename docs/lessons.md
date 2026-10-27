@@ -884,6 +884,9 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 
 ## Tests, Tooling, And Docs
 
+- 2026-10-27: Select integration databases through `BILLING_TEST_DATABASE_URL` in the shared test
+  helper; Vitest worker `env` alone does not select the database used by global setup.
+
 - 2026-10-19: Every API error's `docs` field links to
   `docs.unprice.dev/api-reference/errors/code/<CODE>`; give each code the API returns a page there
   and list it in `docs.json` (`BUDGET_EXCEEDED` and `INSUFFICIENT_PERMISSIONS` were missing).

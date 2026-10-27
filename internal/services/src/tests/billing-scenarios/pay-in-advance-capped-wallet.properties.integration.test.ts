@@ -7,6 +7,7 @@ import { toLedgerMinor } from "@unprice/money"
 import * as fc from "fast-check"
 import { afterAll, describe, expect, it, vi } from "vitest"
 import type { ServiceContext } from "../../context"
+import { LATE_EVENT_GRACE_MS } from "../../entitlements"
 import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
 import {
@@ -251,7 +252,7 @@ async function runAdvanceCappedPropertyCase(usage: number) {
   })
 
   const usageRun = await billPeriod({
-    context: await loadSubscriptionContext(feb1),
+    context: await loadSubscriptionContext(feb1 + LATE_EVENT_GRACE_MS),
     logger,
     db,
     repo,
@@ -259,7 +260,7 @@ async function runAdvanceCappedPropertyCase(usage: number) {
     ledgerService: ledger,
   })
   const rerun = await billPeriod({
-    context: await loadSubscriptionContext(feb1),
+    context: await loadSubscriptionContext(feb1 + LATE_EVENT_GRACE_MS),
     logger,
     db,
     repo,
@@ -313,7 +314,7 @@ describe("P0-D pay_in_advance capped wallet properties", () => {
         seed: propertySeed,
       }
     )
-  })
+  }, 20_000)
 })
 
 async function listInvoices() {

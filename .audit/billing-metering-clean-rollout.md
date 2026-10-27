@@ -2,6 +2,8 @@
 
 Date: 2026-10-27.
 
+The subsequent `billing-metering-final-verification.md` report records the PostgreSQL and ClickHouse reruns requested after this cleanup.
+
 The user clarified that backward compatibility is not required. This follow-up simplifies the original nine fixes on the same branch. It does not change their correctness requirements.
 
 ## Removed
