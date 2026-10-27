@@ -85,9 +85,7 @@ export function newApp() {
       theme: "deepSpace",
       url: "/openapi.json",
       authentication: {
-        type: "http",
-        scheme: "bearer",
-        bearerFormat: "root key",
+        preferredSecurityScheme: "bearerAuth",
       },
     })
   )

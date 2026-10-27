@@ -32,7 +32,7 @@
     "evlog": "2.4.1",
     "next": "15.5.28",
     "next-auth": "5.0.0-beta.32",
-    "zod": "^3.24.2"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/react": "^18.3.1",

@@ -42,7 +42,7 @@ export const testUsageEventSchema = z.object({
   eventSlug: z.string().min(1),
   quantity: z.number(),
   occurredAt: z.number().int(),
-  properties: z.record(z.unknown()).default({}),
+  properties: z.record(z.string(), z.unknown()).default({}),
 })
 
 export type TestUsageEvent = z.infer<typeof testUsageEventSchema>

@@ -54,22 +54,22 @@ const subdomainSchema = z.coerce
   }, "restricted subdomain")
 
 export const pageSelectBaseSchema = createSelectSchema(pages, {
-  customDomain: domainSchema.optional(),
-  subdomain: subdomainSchema,
-  colorPalette: colorPaletteSchema,
-  faqs: faqSchema.array(),
-  selectedPlans: planSchema.array(),
+  customDomain: () => domainSchema.optional(),
+  subdomain: () => subdomainSchema,
+  colorPalette: () => colorPaletteSchema,
+  faqs: () => faqSchema.array(),
+  selectedPlans: () => planSchema.array(),
 })
 
 export const pageInsertBaseSchema = createInsertSchema(pages, {
-  customDomain: domainSchema.optional(),
-  subdomain: subdomainSchema,
-  name: z.string().min(3).max(50),
-  title: z.string().min(3).max(50),
-  colorPalette: colorPaletteSchema,
-  faqs: faqSchema.array(),
-  selectedPlans: planSchema.array(),
-  ctaLink: z.string().url(),
+  customDomain: () => domainSchema.optional(),
+  subdomain: () => subdomainSchema,
+  name: () => z.string().min(3).max(50).optional(),
+  title: () => z.string().min(3).max(50).optional(),
+  colorPalette: () => colorPaletteSchema,
+  faqs: () => faqSchema.array(),
+  selectedPlans: () => planSchema.array(),
+  ctaLink: () => z.string().url().optional(),
 })
   .omit({
     createdAtM: true,

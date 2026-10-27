@@ -79,17 +79,16 @@ export const apiErrorDetailsSchema = z.discriminatedUnion("kind", [
 
 export type ApiErrorDetails = z.infer<typeof apiErrorDetailsSchema>
 
-// biome-ignore lint/suspicious/noExplicitAny: <explanation>
-export function errorSchemaFactory(code: z.ZodEnum<any>) {
+export function errorSchemaFactory<T extends Record<string, string>>(code: z.ZodEnum<T>) {
   return z.object({
     error: z.object({
       code: code.openapi({
         description: "A machine readable error code.",
-        example: code._def.values.at(0),
+        example: code.options.at(0),
       }),
       docs: z.string().openapi({
         description: "A link to our documentation with more details about this error code",
-        example: `https://docs.unprice.dev/api-reference/errors/code/${code._def.values.at(0)}`,
+        example: `https://docs.unprice.dev/api-reference/errors/code/${code.options.at(0)}`,
       }),
       message: z
         .string()

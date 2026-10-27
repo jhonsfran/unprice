@@ -5,53 +5,58 @@ import * as schema from "../schema"
 import { deniedReasonSchema, meterConfigSchema, typeFeatureSchema } from "./shared"
 
 export const featureSelectBaseSchema = createSelectSchema(schema.features, {
-  meterConfig: meterConfigSchema
-    .nullable()
-    .optional()
-    .describe(
-      "Default meter template for usage-style features. When present, new plan version feature snapshots can copy this event-native measurement configuration"
-    ),
+  meterConfig: () =>
+    meterConfigSchema
+      .nullable()
+      .optional()
+      .describe(
+        "Default meter template for usage-style features. When present, new plan version feature snapshots can copy this event-native measurement configuration"
+      ),
 })
 
 export const featureInsertBaseSchema = createInsertSchema(schema.features, {
-  title: z
-    .string()
-    .min(1)
-    .max(50)
-    .refine((title) => /^[a-zA-Z0-9\s]+$/.test(title), {
-      message: "Title must contain only letters, numbers, and spaces",
-    })
-    .describe(
-      "Human-readable name for the feature displayed to users. Must contain only letters, numbers, and spaces. Example: 'API Calls', 'Storage GB', 'Team Members'"
-    ),
-  slug: z
-    .string()
-    .min(1)
-    .refine((slug) => /^[a-z0-9-]+$/.test(slug), {
-      message: "Slug must be a valid slug",
-    })
-    .describe(
-      "URL-friendly unique identifier for the feature. Must be lowercase with hyphens only. Used for API lookups and references. Example: 'api-calls', 'storage-gb', 'team-members'"
-    ),
-  unitOfMeasure: z
-    .string()
-    .default("units")
-    .optional()
-    .describe(
-      "Unit of measurement for the feature. Describes what is being counted or measured. Examples: 'calls', 'GB', 'seats', 'tokens', 'requests', 'minutes'. Defaults to 'units' if not specified"
-    ),
-  description: z
-    .string()
-    .optional()
-    .describe(
-      "Detailed explanation of what the feature provides or enables. Helps users understand the feature's purpose and value. Example: 'Number of API requests allowed per billing period'"
-    ),
-  meterConfig: meterConfigSchema
-    .nullable()
-    .optional()
-    .describe(
-      "Optional default meter configuration template. This is snapshotted into plan version features when a metered feature is attached to a draft version"
-    ),
+  title: () =>
+    z
+      .string()
+      .min(1)
+      .max(50)
+      .refine((title) => /^[a-zA-Z0-9\s]+$/.test(title), {
+        message: "Title must contain only letters, numbers, and spaces",
+      })
+      .describe(
+        "Human-readable name for the feature displayed to users. Must contain only letters, numbers, and spaces. Example: 'API Calls', 'Storage GB', 'Team Members'"
+      ),
+  slug: () =>
+    z
+      .string()
+      .min(1)
+      .refine((slug) => /^[a-z0-9-]+$/.test(slug), {
+        message: "Slug must be a valid slug",
+      })
+      .describe(
+        "URL-friendly unique identifier for the feature. Must be lowercase with hyphens only. Used for API lookups and references. Example: 'api-calls', 'storage-gb', 'team-members'"
+      ),
+  unitOfMeasure: () =>
+    z
+      .string()
+      .optional()
+      .describe(
+        "Unit of measurement for the feature. Describes what is being counted or measured. Examples: 'calls', 'GB', 'seats', 'tokens', 'requests', 'minutes'. Defaults to 'units' if not specified"
+      ),
+  description: () =>
+    z
+      .string()
+      .optional()
+      .describe(
+        "Detailed explanation of what the feature provides or enables. Helps users understand the feature's purpose and value. Example: 'Number of API requests allowed per billing period'"
+      ),
+  meterConfig: () =>
+    meterConfigSchema
+      .nullable()
+      .optional()
+      .describe(
+        "Optional default meter configuration template. This is snapshotted into plan version features when a metered feature is attached to a draft version"
+      ),
 })
   .omit({
     createdAtM: true,

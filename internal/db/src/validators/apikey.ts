@@ -9,7 +9,7 @@ export const apiKeyTypeSchema = z.enum(schema.API_KEY_TYPES)
 export const DEFAULT_API_KEY_TYPE = schema.DEFAULT_API_KEY_TYPE
 
 export const insertApiKeySchema = createInsertSchema(schema.apikeys, {
-  name: z.string().min(1),
+  name: () => z.string().min(1),
 })
 export const selectApiKeySchema = createSelectSchema(schema.apikeys)
 

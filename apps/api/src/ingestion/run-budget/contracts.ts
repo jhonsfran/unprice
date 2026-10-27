@@ -39,7 +39,7 @@ const eventSchema = z.object({
   id: z.string().min(1),
   slug: z.string().min(1),
   timestamp: z.number().finite(),
-  properties: z.record(z.unknown()),
+  properties: z.record(z.string(), z.unknown()),
 })
 
 /**
@@ -63,7 +63,7 @@ export const startRunInputSchema = z.object({
   workloadId: z.string().min(1).nullable().optional(),
   traceId: z.string().min(1).nullable().optional(),
   parentRunId: z.string().min(1).nullable().optional(),
-  metadata: z.record(z.unknown()).default({}),
+  metadata: z.record(z.string(), z.unknown()).default({}),
   expiresAt: z.number().finite().nullable().optional(),
   now: z.number().finite(),
 })

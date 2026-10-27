@@ -47,8 +47,8 @@
     "dinero.js": "2.0.0-alpha.14",
     "server-only": "^0.0.1",
     "superjson": "2.2.1",
-    "zod": "^3.24.2",
-    "zod-validation-error": "^3.3.1"
+    "zod": "^4.6.7",
+    "zod-validation-error": "^5.0.0"
   },
   "devDependencies": {
     "@unprice/error": "workspace:^",

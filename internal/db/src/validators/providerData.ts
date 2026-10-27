@@ -14,15 +14,15 @@ export const customerProviderMetadataSchema = z
   .passthrough()
 
 export const customerProviderIdSelectSchema = createSelectSchema(schema.customerProviderIds, {
-  provider: paymentProviderSchema,
-  providerCustomerId: z.string().min(1),
-  metadata: customerProviderMetadataSchema.nullable().optional(),
+  provider: () => paymentProviderSchema,
+  providerCustomerId: () => z.string().min(1),
+  metadata: () => customerProviderMetadataSchema.nullable().optional(),
 })
 
 export const customerProviderIdInsertSchema = createInsertSchema(schema.customerProviderIds, {
-  provider: paymentProviderSchema,
-  providerCustomerId: z.string().min(1),
-  metadata: customerProviderMetadataSchema.nullable().optional(),
+  provider: () => paymentProviderSchema,
+  providerCustomerId: () => z.string().min(1),
+  metadata: () => customerProviderMetadataSchema.nullable().optional(),
 })
   .omit({
     createdAtM: true,
@@ -55,21 +55,21 @@ export const webhookEventErrorSchema = z
   .passthrough()
 
 export const webhookEventSelectSchema = createSelectSchema(schema.webhookEvents, {
-  provider: paymentProviderSchema,
-  providerEventId: z.string().min(1),
-  rawPayload: z.string().min(1),
-  status: webhookEventStatusSchema,
-  headers: webhookEventHeadersSchema.nullable().optional(),
-  errorPayload: webhookEventErrorSchema.nullable().optional(),
+  provider: () => paymentProviderSchema,
+  providerEventId: () => z.string().min(1),
+  rawPayload: () => z.string().min(1),
+  status: () => webhookEventStatusSchema,
+  headers: () => webhookEventHeadersSchema.nullable().optional(),
+  errorPayload: () => webhookEventErrorSchema.nullable().optional(),
 })
 
 export const webhookEventInsertSchema = createInsertSchema(schema.webhookEvents, {
-  provider: paymentProviderSchema,
-  providerEventId: z.string().min(1),
-  rawPayload: z.string().min(1),
-  status: webhookEventStatusSchema.default("pending"),
-  headers: webhookEventHeadersSchema.nullable().optional(),
-  errorPayload: webhookEventErrorSchema.nullable().optional(),
+  provider: () => paymentProviderSchema,
+  providerEventId: () => z.string().min(1),
+  rawPayload: () => z.string().min(1),
+  status: () => webhookEventStatusSchema.optional(),
+  headers: () => webhookEventHeadersSchema.nullable().optional(),
+  errorPayload: () => webhookEventErrorSchema.nullable().optional(),
 })
   .omit({
     createdAtM: true,
