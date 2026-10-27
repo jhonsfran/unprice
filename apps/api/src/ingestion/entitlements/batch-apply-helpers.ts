@@ -549,25 +549,3 @@ export function assertSupportedWalletCorrection(params: {
     )
   }
 }
-
-export function resolveBatchWalletSpendWindow(params: {
-  draft: WalletReservationSnapshot
-  persisted: WalletReservationSnapshot
-}): WalletReservationSnapshot {
-  const { draft, persisted } = params
-  if (!draft || draft.pendingFlushSeq === null) return draft
-  if (
-    persisted?.reservationId === draft.reservationId &&
-    persisted.pendingFlushSeq === draft.pendingFlushSeq
-  )
-    return draft
-  return {
-    ...draft,
-    pendingFlushSeq: null,
-    pendingFlushAmount: null,
-    pendingFlushQuantity: null,
-    pendingFlushFinal: false,
-    pendingRefillAmount: 0,
-    refillInFlight: false,
-  }
-}

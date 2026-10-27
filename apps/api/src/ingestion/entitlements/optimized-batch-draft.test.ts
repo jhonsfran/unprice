@@ -36,13 +36,13 @@ describe("optimized batch draft", () => {
       wallet: null,
     })
 
-    draft.stageIdempotencyEntry(entry("evt_1"))
-    draft.stageIdempotencyEntry(entry("evt_2", false))
+    draft.stageEvent(entry("evt_1"), 1)
+    draft.stageEvent(entry("evt_2", false), 2)
 
     expect(draft.lookupStagedResult("evt_1")).toMatchObject({ eventId: "evt_1" })
     expect(draft.lookupStagedResult("evt_2")).toMatchObject({ allowed: false })
     expect(draft.hasDurableMutations()).toBe(true)
-    expect(draft.toCommitPayload().idempotencyEntries).toHaveLength(2)
+    expect(draft.toCommitPayload().events).toHaveLength(2)
   })
 
   it("keeps retry-required wallet work outside the durable draft", () => {
@@ -99,10 +99,10 @@ describe("optimized batch draft", () => {
     })
 
     draft.walletDirty = true
-    draft.stageIdempotencyEntry(entry("evt_before_retry"))
+    draft.stageEvent(entry("evt_before_retry"), 1)
 
     expect(draft.hasDurableMutations()).toBe(true)
-    expect(draft.toCommitPayload().idempotencyEntries).toHaveLength(1)
+    expect(draft.toCommitPayload().events).toHaveLength(1)
   })
 
   it("computes compact write metrics from the final draft shape", () => {

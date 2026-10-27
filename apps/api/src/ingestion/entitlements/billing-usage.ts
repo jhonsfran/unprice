@@ -14,6 +14,10 @@ import { findBillingPeriodAt } from "@unprice/services/ingestion"
 import type { ApplyInput, BatchIdempotencyEntry } from "./contracts"
 import type { EntitlementWindowStateOps } from "./ports"
 
+type BillingEventInput = Pick<ApplyInput, "entitlement" | "projectId" | "customerId"> & {
+  event: Pick<ApplyInput["event"], "timestamp">
+}
+
 export function hasRetainedBillingUsage(store: EntitlementWindowStateOps, now: number): boolean {
   return store
     .listBillingUsageSnapshots()
@@ -52,7 +56,7 @@ export function registerBillingPeriods(
 
 export function planBillingEventSnapshot(
   store: EntitlementWindowStateOps,
-  input: Pick<ApplyInput, "entitlement" | "event" | "projectId" | "customerId">,
+  input: BillingEventInput,
   facts: BatchIdempotencyEntry["meterFacts"],
   staged?: ReadonlyMap<string, BillingUsageSnapshot>
 ): BillingUsageSnapshot | null {
@@ -98,7 +102,7 @@ export function planBillingEventSnapshot(
 
 export function recordBillingEvent(
   store: EntitlementWindowStateOps,
-  input: Pick<ApplyInput, "entitlement" | "event" | "projectId" | "customerId">,
+  input: BillingEventInput,
   facts: BatchIdempotencyEntry["meterFacts"]
 ): void {
   const snapshot = planBillingEventSnapshot(store, input, facts)

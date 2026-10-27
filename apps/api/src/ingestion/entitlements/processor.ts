@@ -40,7 +40,6 @@ import {
   createCachedBatchResult,
   createDeniedBatchOutcome,
   planWalletReservationSpend,
-  resolveBatchWalletSpendWindow,
 } from "./batch-apply-helpers"
 import {
   completeBillingPeriods,
@@ -94,6 +93,7 @@ import { InMemoryMeterStorageAdapter, type MeterStateDraft } from "./meter-state
 import {
   type OptimizedBatchDraft,
   type OptimizedBatchWriteMetrics,
+  type StagedBatchEvent,
   createOptimizedBatchDraft,
 } from "./optimized-batch-draft"
 import type {
@@ -465,7 +465,7 @@ export class EntitlementWindowProcessor {
       this.commitCompactBatchDraft({
         input,
         createdAt,
-        idempotencyEntries: commit.idempotencyEntries,
+        events: commit.events,
         meterStates: commit.meterStates,
         touchedGrantStates: commit.touchedGrantStates,
         wallet: commit.wallet,
@@ -585,7 +585,7 @@ export class EntitlementWindowProcessor {
       return
     }
 
-    const pricedFacts = this.stageMeterAndPriceFactsIntoDraft({
+    const prepared = this.stageMeterAndPriceFactsIntoDraft({
       activeGrants,
       createdAt,
       event,
@@ -595,14 +595,14 @@ export class EntitlementWindowProcessor {
       state,
       usesWalletReservation,
     })
-    if (!pricedFacts) {
+    if (!prepared) {
       return
     }
 
     this.applyOptimizedBatchWalletSpend({
       createdAt,
       event,
-      pricedFacts,
+      pricedFacts: prepared.pricedFacts,
       setup,
       state,
       usesWalletReservation,
@@ -610,9 +610,7 @@ export class EntitlementWindowProcessor {
     this.stageOptimizedBatchAllowedResult({
       createdAt,
       event,
-      eventInput,
-      pricedFacts,
-      setup,
+      meterFacts: prepared.meterFacts,
       state,
     })
   }
@@ -626,7 +624,10 @@ export class EntitlementWindowProcessor {
     setup: OptimizedBatchSetup
     state: OptimizedBatchDraft
     usesWalletReservation: boolean
-  }): PricedFact[] | null {
+  }): {
+    pricedFacts: readonly PricedFact[]
+    meterFacts: BatchIdempotencyEntry["meterFacts"]
+  } | null {
     const {
       activeGrants,
       createdAt,
@@ -679,21 +680,22 @@ export class EntitlementWindowProcessor {
       facts,
       grantStates: state.grantStates,
     })
+    const meterFacts = pricedFacts.map((pricedFact) =>
+      buildMeterFactPayload({ createdAt, input: eventInput, meter: setup.meter, pricedFact })
+    )
     let billingSnapshot: BillingUsageSnapshot | null
     try {
       billingSnapshot = planBillingEventSnapshot(
         this.store,
         eventInput,
-        pricedFacts.map((pricedFact) =>
-          buildMeterFactPayload({ createdAt, input: eventInput, meter: setup.meter, pricedFact })
-        ),
+        meterFacts,
         state.billingUsageSnapshots
       )
       if (usesWalletReservation && state.wallet) {
         assertSupportedWalletCorrection({
           totalCost: pricedFacts.reduce((total, fact) => total + fact.amountMinor, 0),
           totalUnits: this.sumPricedFactUnits(pricedFacts),
-          window: resolveBatchWalletSpendWindow({ draft: state.wallet, persisted: setup.wallet }),
+          window: state.wallet,
         })
       }
     } catch (error) {
@@ -718,26 +720,16 @@ export class EntitlementWindowProcessor {
       state.touchedGrantStates.set(bucketKey, grantState)
     }
 
-    return [...pricedFacts]
+    return { pricedFacts, meterFacts }
   }
 
   private stageOptimizedBatchAllowedResult(params: {
     createdAt: number
     event: ApplyBatchInput["events"][number]
-    eventInput: ApplyInput
-    pricedFacts: PricedFact[]
-    setup: OptimizedBatchSetup
+    meterFacts: BatchIdempotencyEntry["meterFacts"]
     state: OptimizedBatchDraft
   }): void {
-    const { createdAt, event, eventInput, pricedFacts, setup, state } = params
-    const meterFacts = pricedFacts.map((pricedFact) =>
-      buildMeterFactPayload({
-        createdAt,
-        input: eventInput,
-        meter: setup.meter,
-        pricedFact,
-      })
-    )
+    const { createdAt, event, meterFacts, state } = params
 
     const allowed = createAllowedBatchOutcome({
       correlationKey: event.correlationKey,
@@ -745,7 +737,7 @@ export class EntitlementWindowProcessor {
       idempotencyKey: event.idempotencyKey,
       meterFacts,
     })
-    state.stageIdempotencyEntry(allowed.entry)
+    state.stageEvent(allowed.entry, event.timestamp)
     state.results.push(allowed.result)
   }
 
@@ -949,17 +941,13 @@ export class EntitlementWindowProcessor {
   private applyOptimizedBatchWalletSpend(params: {
     createdAt: number
     event: ApplyBatchInput["events"][number]
-    pricedFacts: PricedFact[]
+    pricedFacts: readonly PricedFact[]
     setup: OptimizedBatchSetup
     state: OptimizedBatchDraft
     usesWalletReservation: boolean
   }): void {
     const { createdAt, event, pricedFacts, setup, state, usesWalletReservation } = params
-    const wallet = resolveBatchWalletSpendWindow({ draft: state.wallet, persisted: setup.wallet })
-    const resetsDraftFlush =
-      wallet !== null &&
-      state.wallet !== null &&
-      wallet.pendingFlushSeq !== state.wallet.pendingFlushSeq
+    const wallet = state.wallet
 
     if (usesWalletReservation && wallet?.reservationId && pricedFacts.length > 0) {
       const totalCost = pricedFacts.reduce((sum, { amountMinor }) => sum + amountMinor, 0)
@@ -990,52 +978,30 @@ export class EntitlementWindowProcessor {
         })
       }
 
-      if (spendPlan.refillStateUpdate) {
-        requireReservationInvoiceContext(wallet)
-      }
-
-      let nextWallet: NonNullable<WalletReservationSnapshot> = {
+      state.wallet = {
         ...wallet,
         ...spendPlan.walletStateUpdate,
       }
       state.walletDirty = true
 
-      const cancelsDraftFlush =
-        resetsDraftFlush && spendPlan.flushAmount === 0 && spendPlan.flushQuantity === 0
-      if (resetsDraftFlush) {
+      if (wallet.pendingFlushSeq !== null && wallet.pendingFlushSeq > wallet.flushSeq) {
+        state.refillTrigger ??= spendPlan.refillTrigger
+      } else if (
+        state.refillTrigger &&
+        spendPlan.flushAmount === 0 &&
+        spendPlan.flushQuantity === 0
+      ) {
         state.refillTrigger = null
-        const flushAmount = Math.max(0, nextWallet.consumedAmount - nextWallet.flushedAmount)
-        const flushQuantity = Math.max(0, nextWallet.consumedQuantity - nextWallet.flushedQuantity)
-        if (!spendPlan.refillStateUpdate && (flushAmount > 0 || flushQuantity > 0)) {
-          requireReservationInvoiceContext(wallet)
-          const flushSeq = wallet.flushSeq + 1
-          nextWallet = {
-            ...nextWallet,
-            pendingFlushSeq: flushSeq,
-            pendingFlushAmount: flushAmount,
-            pendingFlushQuantity: flushQuantity,
-            pendingFlushFinal: false,
-            pendingRefillAmount: spendPlan.refillAmount,
-            refillInFlight: true,
-          }
-          state.refillTrigger = {
-            flushSeq,
-            flushAmount,
-            flushQuantity,
-            refillAmount: spendPlan.refillAmount,
-            effectiveAt: event.timestamp,
-          }
+      } else if (state.refillTrigger || spendPlan.refillTrigger) {
+        requireReservationInvoiceContext(wallet)
+        state.refillTrigger = {
+          flushSeq: wallet.flushSeq + 1,
+          flushAmount: spendPlan.flushAmount,
+          flushQuantity: spendPlan.flushQuantity,
+          refillAmount: spendPlan.refillAmount,
+          effectiveAt: event.timestamp,
         }
       }
-      if (spendPlan.refillStateUpdate && !cancelsDraftFlush) {
-        nextWallet = {
-          ...nextWallet,
-          ...spendPlan.refillStateUpdate,
-        }
-        state.refillTrigger = spendPlan.refillTrigger
-      }
-
-      state.wallet = nextWallet
       return
     }
 
@@ -1060,7 +1026,7 @@ export class EntitlementWindowProcessor {
       idempotencyKey: event.idempotencyKey,
       message,
     })
-    state.stageIdempotencyEntry(denied.entry)
+    state.stageEvent(denied.entry, event.timestamp)
     state.results.push(denied.result)
     return denied.result
   }
@@ -1068,12 +1034,13 @@ export class EntitlementWindowProcessor {
   private commitCompactBatchDraft(params: {
     input: ApplyBatchInput
     createdAt: number
-    idempotencyEntries: BatchIdempotencyEntry[]
+    events: StagedBatchEvent[]
     meterStates: Map<string, MeterStateDraft>
     touchedGrantStates: Map<string, GrantConsumptionState>
     wallet: WalletReservationSnapshot
     walletDirty: boolean
   }): OptimizedBatchWriteMetrics {
+    const idempotencyEntries = params.events.map(({ entry }) => entry)
     const dirtyMeterStates = [...params.meterStates.values()].filter((state) => state.dirty)
     const writeMetrics: OptimizedBatchWriteMetrics = {
       meter_state_write_count: dirtyMeterStates.reduce(
@@ -1086,14 +1053,14 @@ export class EntitlementWindowProcessor {
       wallet_reservation_write_count: params.walletDirty && params.wallet ? 1 : 0,
       outbox_insert_count: 0,
       outbox_fact_count: 0,
-      idempotency_insert_count: params.idempotencyEntries.length > 0 ? 1 : 0,
-      idempotency_event_count: params.idempotencyEntries.length,
+      idempotency_insert_count: idempotencyEntries.length > 0 ? 1 : 0,
+      idempotency_event_count: idempotencyEntries.length,
     }
 
     if (
       dirtyMeterStates.length === 0 &&
       params.touchedGrantStates.size === 0 &&
-      params.idempotencyEntries.length === 0 &&
+      idempotencyEntries.length === 0 &&
       !params.walletDirty
     ) {
       return writeMetrics
@@ -1113,19 +1080,11 @@ export class EntitlementWindowProcessor {
 
       tx.writeGrantConsumptions(params.touchedGrantStates.values())
 
-      for (const entry of params.idempotencyEntries) {
+      for (const { entry, timestamp } of params.events) {
         if (!entry.allowed) continue
-        const event = params.input.events.find(
-          (candidate) => candidate.idempotencyKey === entry.eventId
-        )
-        if (!event) throw new Error("Missing accepted billing event in batch")
-        recordBillingEvent(
-          tx,
-          { ...params.input, event: { ...event, source: event.source } },
-          entry.meterFacts
-        )
+        recordBillingEvent(tx, { ...params.input, event: { timestamp } }, entry.meterFacts)
       }
-      tx.writeBatchIdempotencyResults(params.idempotencyEntries)
+      tx.writeBatchIdempotencyResults(idempotencyEntries)
 
       if (params.walletDirty && params.wallet) {
         tx.updateWalletReservation({
@@ -1146,7 +1105,7 @@ export class EntitlementWindowProcessor {
       }
     })
 
-    this.store.recordBatchIdempotencyResults(params.idempotencyEntries)
+    this.store.recordBatchIdempotencyResults(idempotencyEntries)
     this.invalidateEnforcementStateCache()
     this.alarms.schedulePostCommitAlarm()
 
