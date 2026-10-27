@@ -1,18 +1,15 @@
-import type { Analytics } from "@unprice/analytics"
 import { sql } from "@unprice/db"
 import type { Customer, Subscription } from "@unprice/db/validators"
-import { Err, Ok } from "@unprice/error"
+import { Err } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { toLedgerMinor } from "@unprice/money"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
 import { UnPriceLedgerError } from "../../ledger/errors"
-import {
-  RecordedFixtureRatingService as RatingService,
-  billPeriodWithRecordedUsage as billPeriod,
-  withRecordedUsageAnalytics,
-} from "../../test-fixtures/recorded-usage"
+import { RatingService } from "../../rating/service"
+import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
+import { billPeriod } from "../../use-cases/billing/bill-period"
 
 import { DrizzleSubscriptionRepository } from "../../subscriptions/repository.drizzle"
 import type { SubscriptionContext } from "../../subscriptions/types"
@@ -78,24 +75,6 @@ function createLogger(): Logger {
   } as unknown as Logger
 }
 
-function createAnalytics(usageByFeature: Record<string, number>): Analytics {
-  return withRecordedUsageAnalytics(db, {
-    getUsageBillingFeatures: vi.fn(
-      async ({
-        features,
-      }: {
-        features: Array<{ featureSlug: string }>
-      }) =>
-        Ok(
-          features.map((feature) => ({
-            featureSlug: feature.featureSlug,
-            usage: usageByFeature[feature.featureSlug] ?? 0,
-          }))
-        )
-    ),
-  } as unknown as Analytics)
-}
-
 async function loadSubscriptionContext(): Promise<SubscriptionContext> {
   const subscription = (await db.query.subscriptions.findFirst({
     where: (table, ops) =>
@@ -122,14 +101,6 @@ async function loadSubscriptionContext(): Promise<SubscriptionContext> {
   }
 }
 
-function createRatingService(logger: Logger) {
-  return new RatingService({
-    logger,
-    analytics: createAnalytics({ events: 1200 }),
-    grantsManager: new GrantsManager({ db, logger }),
-  })
-}
-
 describe("P0-A pay_in_arrear metered billing failure injection", () => {
   afterAll(async () => {
     await closeTestDatabaseConnection(db)
@@ -142,6 +113,14 @@ describe("P0-A pay_in_arrear metered billing failure injection", () => {
 
   it("rolls back invoice and ledger state when a mid-transaction ledger write fails", async () => {
     const logger = createLogger()
+    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+      events: { quantity: 1200, amount: 12_000_000_000 },
+    })
+    const ratingService = new RatingService({
+      logger,
+      analytics,
+      grantsManager: new GrantsManager({ db, logger }),
+    })
     const failingLedger = new FailingLedgerGateway({ db, logger }, 2)
     const repo = new DrizzleSubscriptionRepository(db)
     const ensureAccounts = await failingLedger.ensureCustomerAccounts(customerId, "EUR")
@@ -149,11 +128,12 @@ describe("P0-A pay_in_arrear metered billing failure injection", () => {
 
     await expect(
       billPeriod({
+        reservationFlushGateway,
         context: await loadSubscriptionContext(),
         logger,
         db,
         repo,
-        ratingService: createRatingService(logger),
+        ratingService,
         ledgerService: failingLedger,
       })
     ).rejects.toThrow("LEDGER_TRANSFER_FAILED")
@@ -162,19 +142,21 @@ describe("P0-A pay_in_arrear metered billing failure injection", () => {
 
     const ledger = new LedgerGateway({ db, logger })
     const retry = await billPeriod({
+      reservationFlushGateway,
       context: await loadSubscriptionContext(),
       logger,
       db,
       repo,
-      ratingService: createRatingService(logger),
+      ratingService,
       ledgerService: ledger,
     })
     const rerun = await billPeriod({
+      reservationFlushGateway,
       context: await loadSubscriptionContext(),
       logger,
       db,
       repo,
-      ratingService: createRatingService(logger),
+      ratingService,
       ledgerService: ledger,
     })
 

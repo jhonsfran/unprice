@@ -5,6 +5,7 @@ import type { Logger } from "@unprice/logs"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Cache } from "../../cache"
 import type { ServiceContext } from "../../context"
+import { createServiceContext } from "../../context"
 import type { Metrics } from "../../metrics"
 import { DrizzleSubscriptionRepository } from "../../subscriptions/repository.drizzle"
 import { SubscriptionService } from "../../subscriptions/service"
@@ -13,10 +14,7 @@ import {
   createTestDatabaseConnection,
   truncateTestDatabase,
 } from "../../test-fixtures/database"
-import {
-  createRecordedServiceContext as createServiceContext,
-  withRecordedUsageAnalytics,
-} from "../../test-fixtures/recorded-usage"
+import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
 import { seedTestDb } from "../../test-fixtures/seed-db"
 import { UnPriceWalletError, type WalletService } from "../../wallet"
 
@@ -48,13 +46,6 @@ function createLogger(): Logger {
   } as unknown as Logger
 }
 
-function createAnalytics(): Analytics {
-  return withRecordedUsageAnalytics(db, {
-    getUsageBillingFeatures: vi.fn(async () => Ok([])),
-    ingestEvents: vi.fn(),
-  } as unknown as Analytics)
-}
-
 function createCache(): Cache {
   const acl = new Map<string, unknown>()
   return {
@@ -72,11 +63,12 @@ function createCache(): Cache {
 
 function createServices() {
   const logger = createLogger()
-  const analytics = createAnalytics()
+  const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {})
   const cache = createCache()
   const metrics = {} as Metrics
   const waitUntil = vi.fn()
   const services = createServiceContext({
+    reservationFlushGateway,
     db,
     logger,
     analytics,
@@ -85,19 +77,21 @@ function createServices() {
     metrics,
   })
 
-  return { analytics, cache, logger, metrics, services, waitUntil }
+  return { analytics, reservationFlushGateway, cache, logger, metrics, services, waitUntil }
 }
 
 function createSubscriptionServiceWithWallet(input: {
   base: ServiceContext
   logger: Logger
   analytics: Analytics
+  reservationFlushGateway: ReturnType<typeof createRecordedUsageFixture>["reservationFlushGateway"]
   cache: Cache
   metrics: Metrics
   waitUntil: (promise: Promise<unknown>) => void
   wallet: WalletService
 }) {
   return new SubscriptionService({
+    reservationFlushGateway: input.reservationFlushGateway,
     db,
     repo: new DrizzleSubscriptionRepository(db),
     logger: input.logger,
@@ -278,9 +272,11 @@ describe("subscription renewal and wallet activation DB lifecycle", () => {
   })
 
   it("parks failed wallet activation in pending_activation and retries without duplicate credits", async () => {
-    const { analytics, cache, logger, metrics, services, waitUntil } = createServices()
+    const { analytics, reservationFlushGateway, cache, logger, metrics, services, waitUntil } =
+      createServices()
     const failingWallet = walletWithFirstAdjustFailure(services.wallet)
     const subscriptions = createSubscriptionServiceWithWallet({
+      reservationFlushGateway,
       base: services,
       logger,
       analytics,

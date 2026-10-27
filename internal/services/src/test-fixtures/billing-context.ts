@@ -1,10 +1,7 @@
-import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
-import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { vi } from "vitest"
 import type { SubscriptionContext } from "../subscriptions/types"
-import { withRecordedUsageAnalytics } from "./recorded-usage"
 
 export function createBillingLogger(errors: unknown[] = []): Logger {
   return {
@@ -17,28 +14,6 @@ export function createBillingLogger(errors: unknown[] = []): Logger {
     }),
     flush: vi.fn(),
   } as unknown as Logger
-}
-
-export function createBillingAnalytics(
-  db: Database,
-  usageByFeature: Record<string, number>
-): Analytics {
-  return withRecordedUsageAnalytics(db, {
-    getUsageBillingFeatures: vi.fn(
-      async ({
-        features,
-      }: {
-        features: Array<{ featureSlug: string }>
-      }) =>
-        Ok(
-          features.map((feature) => ({
-            featureSlug: feature.featureSlug,
-            usage: usageByFeature[feature.featureSlug] ?? 0,
-          }))
-        )
-    ),
-    ingestEvents: vi.fn(),
-  } as unknown as Analytics)
 }
 
 export async function loadBillingSubscriptionContext({

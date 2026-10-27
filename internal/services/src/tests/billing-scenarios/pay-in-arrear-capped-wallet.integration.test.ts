@@ -1,7 +1,5 @@
-import type { Analytics } from "@unprice/analytics"
 import { sql } from "@unprice/db"
 import type { Customer, Subscription } from "@unprice/db/validators"
-import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { toLedgerMinor } from "@unprice/money"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
@@ -9,12 +7,9 @@ import { classifyInvoiceLineSettlement } from "../../billing/invoice-settlement"
 import type { ServiceContext } from "../../context"
 import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
-import {
-  RecordedFixtureRatingService as RatingService,
-  billPeriodWithRecordedUsage as billPeriod,
-  recordedUsageGateway,
-  withRecordedUsageAnalytics,
-} from "../../test-fixtures/recorded-usage"
+import { RatingService } from "../../rating/service"
+import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
+import { billPeriod } from "../../use-cases/billing/bill-period"
 
 import { DrizzleSubscriptionRepository } from "../../subscriptions/repository.drizzle"
 import type { SubscriptionContext } from "../../subscriptions/types"
@@ -64,24 +59,6 @@ function createLogger(): Logger {
   } as unknown as Logger
 }
 
-function createAnalytics(usageByFeature: Record<string, number>): Analytics {
-  return withRecordedUsageAnalytics(db, {
-    getUsageBillingFeatures: vi.fn(
-      async ({
-        features,
-      }: {
-        features: Array<{ featureSlug: string }>
-      }) =>
-        Ok(
-          features.map((feature) => ({
-            featureSlug: feature.featureSlug,
-            usage: usageByFeature[feature.featureSlug] ?? 0,
-          }))
-        )
-    ),
-  } as unknown as Analytics)
-}
-
 async function loadSubscriptionContext(): Promise<SubscriptionContext> {
   const subscription = (await db.query.subscriptions.findFirst({
     where: (table, ops) =>
@@ -122,7 +99,9 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
     const logger = createLogger()
     const ledger = new LedgerGateway({ db, logger })
     const wallet = new WalletService({ db, logger, ledgerGateway: ledger })
-    const analytics = createAnalytics({ events: 1200 })
+    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+      events: { quantity: 1200, amount: 12_000_000_000 },
+    })
     const rating = new RatingService({
       logger,
       analytics,
@@ -259,6 +238,7 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
 
     const context = await loadSubscriptionContext()
     const firstRun = await billPeriod({
+      reservationFlushGateway,
       context,
       logger,
       db,
@@ -267,6 +247,7 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
       ledgerService: ledger,
     })
     const secondRun = await billPeriod({
+      reservationFlushGateway,
       context,
       logger,
       db,
@@ -292,7 +273,9 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
     const logger = createLogger()
     const ledger = new LedgerGateway({ db, logger })
     const wallet = new WalletService({ db, logger, ledgerGateway: ledger })
-    const analytics = createAnalytics({ events: 1200 })
+    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+      events: { quantity: 1200, amount: 12_000_000_000 },
+    })
     const rating = new RatingService({
       logger,
       analytics,
@@ -382,6 +365,7 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
 
     const context = await loadSubscriptionContext()
     const firstRun = await billPeriod({
+      reservationFlushGateway,
       context,
       logger,
       db,
@@ -390,6 +374,7 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
       ledgerService: ledger,
     })
     const secondRun = await billPeriod({
+      reservationFlushGateway,
       context,
       logger,
       db,
@@ -426,7 +411,9 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
     const logger = createLogger()
     const ledger = new LedgerGateway({ db, logger })
     const wallet = new WalletService({ db, logger, ledgerGateway: ledger })
-    const analytics = createAnalytics({ events: 1200 })
+    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+      events: { quantity: 1200, amount: 12_000_000_000 },
+    })
     const rating = new RatingService({
       logger,
       analytics,
@@ -541,6 +528,7 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
 
     const context = await loadSubscriptionContext()
     const firstRun = await billPeriod({
+      reservationFlushGateway,
       context,
       logger,
       db,
@@ -620,7 +608,9 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
     const logger = createLogger()
     const ledger = new LedgerGateway({ db, logger })
     const wallet = new WalletService({ db, logger, ledgerGateway: ledger })
-    const analytics = createAnalytics({ events: 1200 })
+    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+      events: { quantity: 1200, amount: 12_000_000_000 },
+    })
     const rating = new RatingService({
       logger,
       analytics,
@@ -686,21 +676,17 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
     })
 
     // Use a fake gateway that confirms it was called
-    const gateway = recordedUsageGateway(analytics)
-    const reservationFlushGateway = {
-      ...gateway,
-      flushForInvoicing: vi.fn(gateway.flushForInvoicing),
-    }
+    vi.spyOn(reservationFlushGateway, "flushForInvoicing")
 
     const context = await loadSubscriptionContext()
     const result = await billPeriod({
+      reservationFlushGateway,
       context,
       logger,
       db,
       repo,
       ratingService: rating,
       ledgerService: ledger,
-      reservationFlushGateway,
     })
 
     expect(result.phasesProcessed).toBe(1)

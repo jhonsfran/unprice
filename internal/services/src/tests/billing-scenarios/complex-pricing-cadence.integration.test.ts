@@ -18,7 +18,6 @@ import type {
   ResetConfig,
   Subscription,
 } from "@unprice/db/validators"
-import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { toLedgerMinor } from "@unprice/money"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
@@ -26,11 +25,9 @@ import { DrizzleBillingRepository } from "../../billing/repository.drizzle"
 import { LATE_EVENT_GRACE_MS } from "../../entitlements"
 import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
-import {
-  RecordedFixtureRatingService as RatingService,
-  billPeriodWithRecordedUsage as billPeriod,
-  withRecordedUsageAnalytics,
-} from "../../test-fixtures/recorded-usage"
+import { RatingService } from "../../rating/service"
+import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
+import { billPeriod } from "../../use-cases/billing/bill-period"
 
 import { DrizzleSubscriptionRepository } from "../../subscriptions/repository.drizzle"
 import type { SubscriptionContext } from "../../subscriptions/types"
@@ -91,24 +88,6 @@ function createLogger(): Logger {
     error: vi.fn(),
     flush: vi.fn(),
   } as unknown as Logger
-}
-
-function createAnalytics(usageByFeature: Record<string, number>): Analytics {
-  return withRecordedUsageAnalytics(db, {
-    getUsageBillingFeatures: vi.fn(
-      async ({
-        features,
-      }: {
-        features: Array<{ featureSlug: string }>
-      }) =>
-        Ok(
-          features.map((feature) => ({
-            featureSlug: feature.featureSlug,
-            usage: usageByFeature[feature.featureSlug] ?? 0,
-          }))
-        )
-    ),
-  } as unknown as Analytics)
 }
 
 function billingConfig(
@@ -941,9 +920,11 @@ async function addAdvanceFixedWithPriorArrearUsageConfiguration() {
 
 async function runBilling({
   analytics,
+  reservationFlushGateway,
   now = billableNow,
 }: {
   analytics: Analytics
+  reservationFlushGateway: ReturnType<typeof createRecordedUsageFixture>["reservationFlushGateway"]
   now?: number
 }) {
   const logger = createLogger()
@@ -952,6 +933,7 @@ async function runBilling({
   expect(ensureAccounts.err).toBeUndefined()
 
   const result = await billPeriod({
+    reservationFlushGateway,
     context: await loadSubscriptionContext(now),
     logger,
     db,
@@ -1030,13 +1012,13 @@ describe("DB-backed complex pricing and mixed meter cadence billing", () => {
   it("bills a plan mixing every price mode while usage meters use different billing/reset cadences", async () => {
     await addComplexPricingConfiguration()
 
-    const analytics = createAnalytics({
-      events: 120,
-      jobs: 51,
-      tokens: 40,
+    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+      events: { quantity: 120, amount: 112_000_000 },
+      jobs: { quantity: 51, amount: 1_200_000_000 },
+      tokens: { quantity: 40, amount: 1_000_000_000 },
     })
 
-    const { result, ledger } = await runBilling({ analytics })
+    const { result, ledger } = await runBilling({ analytics, reservationFlushGateway })
 
     expect(result.phasesProcessed).toBe(3)
     expect(await listInvoices()).toEqual(
@@ -1088,13 +1070,14 @@ describe("DB-backed complex pricing and mixed meter cadence billing", () => {
   it("co-bills annual, monthly, daily, and hourly periods into one invoice when they share the same statement end", async () => {
     await addCoBilledCadenceConfiguration()
 
-    const analytics = createAnalytics({
-      "daily-units": 30,
-      "hourly-jobs": 23,
+    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+      "daily-units": { quantity: 30, amount: 300_000_000 },
+      "hourly-jobs": { quantity: 23, amount: 150_000_000 },
     })
 
     const { result, ledger } = await runBilling({
       analytics,
+      reservationFlushGateway,
       now: coBilledNow,
     })
 
@@ -1151,13 +1134,14 @@ describe("DB-backed complex pricing and mixed meter cadence billing", () => {
   it("keeps a mixed-cadence co-billed statement idempotent across reruns", async () => {
     await addCoBilledCadenceConfiguration()
 
-    const analytics = createAnalytics({
-      "daily-units": 30,
-      "hourly-jobs": 23,
+    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+      "daily-units": { quantity: 30, amount: 300_000_000 },
+      "hourly-jobs": { quantity: 23, amount: 150_000_000 },
     })
 
     const firstRun = await runBilling({
       analytics,
+      reservationFlushGateway,
       now: coBilledNow,
     })
     expect(firstRun.result.phasesProcessed).toBe(1)
@@ -1172,6 +1156,7 @@ describe("DB-backed complex pricing and mixed meter cadence billing", () => {
 
     const secondRun = await runBilling({
       analytics,
+      reservationFlushGateway,
       now: coBilledNow,
     })
 
@@ -1199,13 +1184,14 @@ describe("DB-backed complex pricing and mixed meter cadence billing", () => {
         )
       )
 
-    const analytics = createAnalytics({
-      "daily-units": 30,
-      "hourly-jobs": 23,
+    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+      "daily-units": { quantity: 30, amount: 300_000_000 },
+      "hourly-jobs": { quantity: 23, amount: 150_000_000 },
     })
 
     const { result, ledger } = await runBilling({
       analytics,
+      reservationFlushGateway,
       now: coBilledNow,
     })
 
@@ -1420,12 +1406,13 @@ describe("DB-backed complex pricing and mixed meter cadence billing", () => {
   it("co-bills pay-in-advance fixed charges with prior arrears usage on the same statement", async () => {
     await addAdvanceFixedWithPriorArrearUsageConfiguration()
 
-    const analytics = createAnalytics({
-      events: 120,
+    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+      events: { quantity: 120, amount: 112_000_000 },
     })
 
     const { result, ledger } = await runBilling({
       analytics,
+      reservationFlushGateway,
       now: feb1 + LATE_EVENT_GRACE_MS,
     })
 

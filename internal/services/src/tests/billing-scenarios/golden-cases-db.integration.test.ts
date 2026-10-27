@@ -2,11 +2,10 @@ import { sql } from "@unprice/db"
 import { toLedgerMinor } from "@unprice/money"
 import { afterAll, beforeEach, describe, expect, it } from "vitest"
 import type { Cache } from "../../cache"
-import {
-  RecordedFixtureRatingService as RatingService,
-  billPeriodWithRecordedUsage as billPeriod,
-  createRecordedServiceContext as createServiceContext,
-} from "../../test-fixtures/recorded-usage"
+import { createServiceContext } from "../../context"
+import { RatingService } from "../../rating/service"
+import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
+import { billPeriod } from "../../use-cases/billing/bill-period"
 
 import { LATE_EVENT_GRACE_MS } from "../../entitlements"
 import { GrantsManager } from "../../entitlements/grants"
@@ -15,7 +14,6 @@ import type { Metrics } from "../../metrics"
 
 import { DrizzleSubscriptionRepository } from "../../subscriptions/repository.drizzle"
 import {
-  createBillingAnalytics as createAnalytics,
   createBillingLogger as createLogger,
   loadBillingSubscriptionContext,
 } from "../../test-fixtures/billing-context"
@@ -187,8 +185,11 @@ describe("DB-backed billing golden cases", () => {
   it("cancellation at the renewal boundary bills the earned period and creates no future charge", async () => {
     const loggerErrors: unknown[] = []
     const logger = createLogger(loggerErrors)
-    const analytics = createAnalytics(db, { events: 1200 })
+    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+      events: { quantity: 1200, amount: 12_000_000_000 },
+    })
     const services = createServiceContext({
+      reservationFlushGateway,
       db,
       logger,
       analytics,
@@ -229,6 +230,7 @@ describe("DB-backed billing golden cases", () => {
     const ensureAccounts = await ledger.ensureCustomerAccounts(customerId, "EUR")
     expect(ensureAccounts.err).toBeUndefined()
     const billed = await billPeriod({
+      reservationFlushGateway,
       context: await loadSubscriptionContext(),
       logger,
       db,
@@ -343,7 +345,9 @@ describe("DB-backed billing golden cases", () => {
 
   it("waits for the late-event grace window before invoicing an arrears statement", async () => {
     const logger = createLogger()
-    const analytics = createAnalytics(db, { events: 1200 })
+    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+      events: { quantity: 1200, amount: 12_000_000_000 },
+    })
     const ledger = new LedgerGateway({ db, logger })
     const ensureAccounts = await ledger.ensureCustomerAccounts(customerId, "EUR")
     expect(ensureAccounts.err).toBeUndefined()
@@ -361,6 +365,7 @@ describe("DB-backed billing golden cases", () => {
     }
 
     const tooEarly = await billPeriod({
+      reservationFlushGateway,
       ...common,
       context: await loadSubscriptionContext(feb1 + LATE_EVENT_GRACE_MS - 1),
     })
@@ -380,6 +385,7 @@ describe("DB-backed billing golden cases", () => {
     expect(analytics.getUsageBillingFeatures).not.toHaveBeenCalled()
 
     const ready = await billPeriod({
+      reservationFlushGateway,
       ...common,
       context: await loadSubscriptionContext(feb1 + LATE_EVENT_GRACE_MS),
     })
@@ -397,12 +403,14 @@ describe("DB-backed billing golden cases", () => {
       expect.objectContaining({ status: "invoiced" }),
       expect.objectContaining({ status: "invoiced" }),
     ])
-    expect(analytics.getUsageBillingFeatures).toHaveBeenCalledTimes(1)
+    expect(analytics.getUsageBillingFeatures).not.toHaveBeenCalled()
   })
 
   it("bills an annual DB statement as one yearly invoice with ledger-backed lines", async () => {
     const logger = createLogger()
-    const analytics = createAnalytics(db, { events: 1200 })
+    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+      events: { quantity: 1200, amount: 12_000_000_000 },
+    })
     const ledger = new LedgerGateway({ db, logger })
     const ensureAccounts = await ledger.ensureCustomerAccounts(customerId, "EUR")
     expect(ensureAccounts.err).toBeUndefined()
@@ -410,6 +418,7 @@ describe("DB-backed billing golden cases", () => {
     await makeArrearSubscriptionAnnual()
 
     const billed = await billPeriod({
+      reservationFlushGateway,
       context: await loadSubscriptionContext(nextYear + LATE_EVENT_GRACE_MS),
       logger,
       db,
@@ -491,6 +500,6 @@ describe("DB-backed billing golden cases", () => {
       ?.map((line) => toLedgerMinor(line.amount))
       .sort((left, right) => left - right)
     expect(lineAmounts).toEqual([9_900_000_000, 12_000_000_000])
-    expect(analytics.getUsageBillingFeatures).toHaveBeenCalledTimes(1)
+    expect(analytics.getUsageBillingFeatures).not.toHaveBeenCalled()
   })
 })

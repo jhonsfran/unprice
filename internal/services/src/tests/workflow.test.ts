@@ -280,6 +280,11 @@ describe("Workflow - Billing and Subscriptions", () => {
     } as unknown as Database
 
     const serviceDeps = {
+      reservationFlushGateway: {
+        registerPeriods: vi.fn().mockResolvedValue(Ok(undefined)),
+        flushForInvoicing: vi.fn().mockResolvedValue(Ok({ flushed: 0, skipped: 0, snapshots: [] })),
+        completeForInvoicing: vi.fn().mockResolvedValue(Ok(undefined)),
+      },
       db: mockDb,
       logger: mockLogger,
       analytics: mockAnalytics,
@@ -312,11 +317,6 @@ describe("Workflow - Billing and Subscriptions", () => {
       ratingService,
       ledgerService,
       walletService,
-      reservationFlushGateway: {
-        registerPeriods: vi.fn().mockResolvedValue(Ok(undefined)),
-        flushForInvoicing: vi.fn().mockResolvedValue(Ok({ snapshots: [] })),
-        completeForInvoicing: vi.fn().mockResolvedValue(Ok(undefined)),
-      },
     })
     const phaseEntitlements: CustomerEntitlement[] = []
     vi.spyOn(EntitlementService.prototype, "getPhaseOwnedEntitlements").mockImplementation(

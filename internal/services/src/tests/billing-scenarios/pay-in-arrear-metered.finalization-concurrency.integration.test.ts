@@ -1,4 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
 import { type Database, sql } from "@unprice/db"
 import type { Customer, Subscription } from "@unprice/db/validators"
 import { Ok } from "@unprice/error"
@@ -11,12 +10,9 @@ import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
 import type { Metrics } from "../../metrics"
 import type { PaymentProviderService } from "../../payment-provider/service"
-import {
-  RecordedFixtureRatingService as RatingService,
-  billPeriodWithRecordedUsage as billPeriod,
-  recordedUsageGateway,
-  withRecordedUsageAnalytics,
-} from "../../test-fixtures/recorded-usage"
+import { RatingService } from "../../rating/service"
+import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
+import { billPeriod } from "../../use-cases/billing/bill-period"
 
 import { DrizzleSubscriptionRepository } from "../../subscriptions/repository.drizzle"
 import type { SubscriptionContext } from "../../subscriptions/types"
@@ -61,24 +57,6 @@ function createLogger(errors: unknown[] = []): Logger {
     }),
     flush: vi.fn(),
   } as unknown as Logger
-}
-
-function createAnalytics(usageByFeature: Record<string, number>): Analytics {
-  return withRecordedUsageAnalytics(db, {
-    getUsageBillingFeatures: vi.fn(
-      async ({
-        features,
-      }: {
-        features: Array<{ featureSlug: string }>
-      }) =>
-        Ok(
-          features.map((feature) => ({
-            featureSlug: feature.featureSlug,
-            usage: usageByFeature[feature.featureSlug] ?? 0,
-          }))
-        )
-    ),
-  } as unknown as Analytics)
 }
 
 class ConcurrentPaymentProvider {
@@ -166,19 +144,23 @@ async function loadSubscriptionContext(dbForContext: Database): Promise<Subscrip
 }
 
 async function createDraftInvoice() {
+  const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+    events: { quantity: 1200, amount: 12_000_000_000 },
+  })
   const logger = createLogger()
   const ledger = new LedgerGateway({ db, logger })
   const ensureAccounts = await ledger.ensureCustomerAccounts(customerId, "EUR")
   expect(ensureAccounts.err).toBeUndefined()
 
   await billPeriod({
+    reservationFlushGateway,
     context: await loadSubscriptionContext(db),
     logger,
     db,
     repo: new DrizzleSubscriptionRepository(db),
     ratingService: new RatingService({
       logger,
-      analytics: createAnalytics({ events: 1200 }),
+      analytics,
       grantsManager: new GrantsManager({ db, logger }),
     }),
     ledgerService: ledger,
@@ -207,11 +189,13 @@ function createBillingService(
   errors: unknown[]
 ) {
   const logger = createLogger(errors)
-  const analytics = createAnalytics({ events: 1200 })
+  const { analytics, reservationFlushGateway } = createRecordedUsageFixture(dbForWorker, {
+    events: { quantity: 1200, amount: 12_000_000_000 },
+  })
   const ledger = new LedgerGateway({ db: dbForWorker, logger })
 
   return new BillingService({
-    reservationFlushGateway: recordedUsageGateway(analytics),
+    reservationFlushGateway,
     db: dbForWorker,
     logger,
     analytics,
