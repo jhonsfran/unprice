@@ -4,11 +4,12 @@ import {
   EventTimestampTooFarInFutureError,
   LATE_EVENT_GRACE_MS,
   MAX_FUTURE_EVENT_SKEW_MS,
+  deriveMeterKey,
 } from "@unprice/services/entitlements"
 import { describe, expect, it, vi } from "vitest"
 import { createDeferred } from "../test-fixtures/race"
 import { FLUSH_INTERVAL_MS } from "./constants"
-import type { ApplyInput } from "./contracts"
+import type { ApplyInput, ApplyResult } from "./contracts"
 import type { WalletReservationSnapshot } from "./contracts"
 import {
   createApplyInput as createFixtureApplyInput,
@@ -1772,3 +1773,358 @@ describeEntitlementWindowProcessorContract(
   "EntitlementWindowProcessor (in-memory store contract)",
   createEntitlementWindowStoreContractHostFactory(() => new InMemoryEntitlementWindowStore())
 )
+
+describe("reset-scoped aggregation correctness", () => {
+  it.each([
+    ["max", "single"],
+    ["max", "batch"],
+    ["latest", "single"],
+    ["latest", "batch"],
+  ] as const)(
+    "isolates %s state across daily resets through %s apply",
+    async (aggregationMethod, mode) => {
+      const dayStart = Date.UTC(2026, 9, 27)
+      const now = dayStart + 100
+      vi.useFakeTimers()
+      vi.setSystemTime(now)
+      try {
+        const harness = createHarness({ now })
+        await harness.processor.initialize()
+        const base = createApplyInput({
+          now,
+          periodStartAt: dayStart - 86_400_000,
+          periodEndAt: dayStart + 86_400_000,
+          resetConfig: { resetInterval: "day", resetIntervalCount: 1, resetAnchor: 0 },
+          meterConfig: {
+            aggregationField: "amount",
+            aggregationMethod,
+            eventId: "daily-meter",
+            eventSlug: "tokens_used",
+          },
+        })
+        const events = [
+          { amount: 10, timestamp: dayStart - 100 },
+          { amount: 6, timestamp: dayStart + 1 },
+          { amount: 12, timestamp: dayStart - 1 },
+          { amount: 8, timestamp: dayStart + 2 },
+        ].map(({ amount, timestamp }, index) => ({
+          ...base.event,
+          properties: { amount },
+          timestamp,
+          id: `reset-event-${index}`,
+          idempotencyKey: `reset-key-${index}`,
+          correlationKey: `reset-${index}`,
+          now,
+        }))
+        const results: ApplyResult[] = []
+        if (mode === "batch") {
+          results.push(
+            ...(
+              await harness.processor.applyBatch({
+                customerId: base.customerId,
+                projectId: base.projectId,
+                entitlement: base.entitlement,
+                enforceLimit: base.enforceLimit,
+                grants: base.grants,
+                events,
+              })
+            ).results
+          )
+        } else {
+          for (const event of events) {
+            results.push(
+              await harness.processor.apply({
+                ...base,
+                idempotencyKey: event.idempotencyKey,
+                event,
+              })
+            )
+          }
+        }
+        expect(
+          results.map((result) =>
+            result.meterFacts?.map((fact) => ({
+              delta: fact.delta,
+              valueAfter: fact.value_after,
+              amount: fact.amount,
+              periodKey: fact.period_key,
+            }))
+          )
+        ).toEqual([
+          [
+            {
+              delta: 10,
+              valueAfter: 10,
+              amount: 1_000_000_000,
+              periodKey: `day:${dayStart - 86_400_000}`,
+            },
+          ],
+          [{ delta: 6, valueAfter: 6, amount: 600_000_000, periodKey: `day:${dayStart}` }],
+          [
+            {
+              delta: 2,
+              valueAfter: 12,
+              amount: 200_000_000,
+              periodKey: `day:${dayStart - 86_400_000}`,
+            },
+          ],
+          [{ delta: 2, valueAfter: 8, amount: 200_000_000, periodKey: `day:${dayStart}` }],
+        ])
+        await expect(
+          harness.processor.getEnforcementState({
+            entitlement: base.entitlement,
+            grants: base.grants,
+            now,
+          })
+        ).resolves.toMatchObject({ usage: 8 })
+        const lateEvent = events[2]
+        if (!lateEvent) throw new Error("Expected a late prior-period event")
+        const replay = await harness.processor.apply({
+          ...base,
+          event: lateEvent,
+          idempotencyKey: lateEvent.idempotencyKey,
+        })
+        expect(replay).toMatchObject({ allowed: true, idempotencyStatus: "already_reported" })
+        expect(
+          [...harness.store.grantStates.values()]
+            .map((state) => state.consumedInCurrentWindow)
+            .sort((a, b) => a - b)
+        ).toEqual([8, 12])
+      } finally {
+        vi.useRealTimers()
+      }
+    }
+  )
+})
+
+describe("legacy reset meter migration", () => {
+  it.each([
+    ["sum", -4, 4, "single"],
+    ["sum", -4, 4, "batch"],
+    ["max", 10, 6, "single"],
+    ["max", 10, 6, "batch"],
+    ["latest", 10, 6, "single"],
+    ["latest", 10, 6, "batch"],
+  ] as const)(
+    "rejects unknown legacy %s state %s before applying %s through %s",
+    async (aggregationMethod, legacyUsage, amount, mode) => {
+      const now = Date.UTC(2026, 9, 27, 12)
+      vi.useFakeTimers()
+      vi.setSystemTime(now)
+      try {
+        const harness = createHarness({ now })
+        await harness.processor.initialize()
+        const base = createApplyInput({
+          now,
+          periodStartAt: now - 86_400_000,
+          periodEndAt: now + 86_400_000,
+          resetConfig: { resetInterval: "day", resetIntervalCount: 1, resetAnchor: 0 },
+          meterConfig: {
+            aggregationField: "amount",
+            aggregationMethod,
+            eventId: "legacy-meter",
+            eventSlug: "tokens_used",
+          },
+          event: { timestamp: now, properties: { amount } },
+        })
+        harness.store.meterStates.set(deriveMeterKey(base.entitlement.meterConfig), {
+          usage: legacyUsage,
+          updatedAt: now - 1,
+          createdAt: now - 86_400_000,
+        })
+        const metersBefore = structuredClone(harness.store.meterStates)
+        const command =
+          mode === "single"
+            ? harness.processor.apply(base)
+            : harness.processor.applyBatch(createBatchInput(base, [amount], "legacy-unknown"))
+        await expect(command).rejects.toThrow(
+          "Legacy meter state overlaps this reset period. Reconcile historical usage before recording new events in this period."
+        )
+        expect(harness.store.meterStates).toEqual(metersBefore)
+        expect(harness.store.grantStates.size).toBe(0)
+        expect(harness.store.idempotency.size).toBe(0)
+        expect(harness.store.walletRow).toBeNull()
+      } finally {
+        vi.useRealTimers()
+      }
+    }
+  )
+
+  it.each(["max", "latest"] as const)(
+    "starts a new %s period after the legacy watermark at zero",
+    async (aggregationMethod) => {
+      const dayStart = Date.UTC(2026, 9, 27)
+      const now = dayStart + 10
+      vi.useFakeTimers()
+      vi.setSystemTime(now)
+      try {
+        const harness = createHarness({ now })
+        await harness.processor.initialize()
+        const base = createApplyInput({
+          now,
+          periodStartAt: dayStart - 86_400_000,
+          periodEndAt: dayStart + 86_400_000,
+          resetConfig: { resetInterval: "day", resetIntervalCount: 1, resetAnchor: 0 },
+          meterConfig: {
+            aggregationField: "amount",
+            aggregationMethod,
+            eventId: "legacy-meter",
+            eventSlug: "tokens_used",
+          },
+          event: { timestamp: now, properties: { amount: 6 } },
+        })
+        harness.store.meterStates.set(deriveMeterKey(base.entitlement.meterConfig), {
+          usage: 10,
+          updatedAt: dayStart - 1,
+          createdAt: dayStart - 86_400_000,
+        })
+        const result = await harness.processor.apply(base)
+        expect(
+          result.meterFacts?.map((fact) => [fact.delta, fact.value_after, fact.amount])
+        ).toEqual([[6, 6, 600_000_000]])
+      } finally {
+        vi.useRealTimers()
+      }
+    }
+  )
+
+  it.each(["single", "batch"] as const)(
+    "replays a sealed legacy receipt through %s without initializing reset state",
+    async (mode) => {
+      const now = Date.UTC(2026, 9, 27, 12)
+      vi.useFakeTimers()
+      vi.setSystemTime(now)
+      try {
+        const harness = createHarness({ now })
+        await harness.processor.initialize()
+        const base = createApplyInput({
+          now,
+          periodStartAt: now - 86_400_000,
+          periodEndAt: now + 86_400_000,
+          resetConfig: { resetInterval: "day", resetIntervalCount: 1, resetAnchor: 0 },
+          event: { timestamp: now, properties: { amount: 3 } },
+        })
+        const accepted = await harness.processor.apply(base)
+        harness.store.meterStates.clear()
+        harness.store.meterStates.set(deriveMeterKey(base.entitlement.meterConfig), {
+          usage: 3,
+          updatedAt: now,
+          createdAt: now - 86_400_000,
+        })
+        const input = createBatchInput(base, [3], "legacy-replay")
+        const event = input.events[0]
+        if (!event) throw new Error("Expected replay event")
+        const replay =
+          mode === "single"
+            ? await harness.processor.apply(base)
+            : (
+                await harness.processor.applyBatch({
+                  ...input,
+                  events: [
+                    { ...event, idempotencyKey: base.idempotencyKey },
+                    { ...event, idempotencyKey: base.idempotencyKey },
+                  ],
+                })
+              ).results[1]
+        expect(replay).toMatchObject({
+          allowed: true,
+          idempotencyStatus: "already_reported",
+          meterFacts: accepted.meterFacts,
+        })
+        expect([...harness.store.meterStates.keys()]).toEqual([
+          deriveMeterKey(base.entitlement.meterConfig),
+        ])
+        expect(
+          [...harness.store.grantStates.values()].map((state) => state.consumedInCurrentWindow)
+        ).toEqual([3])
+      } finally {
+        vi.useRealTimers()
+      }
+    }
+  )
+
+  it("replays a staged duplicate before reading its legacy period", async () => {
+    const dayStart = Date.UTC(2026, 9, 27)
+    const now = dayStart + 10
+    vi.useFakeTimers()
+    vi.setSystemTime(now)
+    try {
+      const harness = createHarness({ now })
+      await harness.processor.initialize()
+      const base = createApplyInput({
+        now,
+        periodStartAt: dayStart - 86_400_000,
+        periodEndAt: dayStart + 86_400_000,
+        resetConfig: { resetInterval: "day", resetIntervalCount: 1, resetAnchor: 0 },
+        event: { timestamp: now },
+      })
+      harness.store.meterStates.set(deriveMeterKey(base.entitlement.meterConfig), {
+        usage: 10,
+        updatedAt: dayStart - 1,
+        createdAt: dayStart - 86_400_000,
+      })
+      const input = createBatchInput(base, [6], "staged-legacy-replay")
+      const first = input.events[0]
+      if (!first) throw new Error("Expected new-period event")
+      const result = await harness.processor.applyBatch({
+        ...input,
+        events: [first, { ...first, timestamp: dayStart - 1 }],
+      })
+      expect(
+        result.results[0]?.meterFacts?.map((fact) => [fact.delta, fact.value_after, fact.amount])
+      ).toEqual([[6, 6, 600_000_000]])
+      expect(result.results[1]).toMatchObject({
+        allowed: true,
+        idempotencyStatus: "already_reported",
+        meterFacts: result.results[0]?.meterFacts,
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe("legacy closed-period batch handling", () => {
+  it("accepts the new period and denies a closed legacy event before reading its raw state", async () => {
+    const dayStart = Date.UTC(2026, 9, 27)
+    const now = dayStart + LATE_EVENT_GRACE_MS + 1
+    vi.useFakeTimers()
+    vi.setSystemTime(now)
+    try {
+      const harness = createHarness({ now })
+      await harness.processor.initialize()
+      const base = createApplyInput({
+        now,
+        periodStartAt: dayStart - 86_400_000,
+        periodEndAt: dayStart + 86_400_000,
+        resetConfig: { resetInterval: "day", resetIntervalCount: 1, resetAnchor: 0 },
+        event: { timestamp: now },
+      })
+      harness.store.meterStates.set(deriveMeterKey(base.entitlement.meterConfig), {
+        usage: -4,
+        updatedAt: dayStart - 1,
+        createdAt: dayStart - 86_400_000,
+      })
+      const input = createBatchInput(base, [4, 1], "closed-legacy")
+      const fresh = input.events[0]
+      const closed = input.events[1]
+      if (!fresh || !closed) throw new Error("Expected fresh and closed events")
+      const result = await harness.processor.applyBatch({
+        ...input,
+        events: [fresh, { ...closed, timestamp: dayStart - 1 }],
+      })
+      expect(
+        result.results[0]?.meterFacts?.map((fact) => [fact.delta, fact.value_after, fact.amount])
+      ).toEqual([[4, 4, 400_000_000]])
+      expect(result.results[1]).toMatchObject({
+        allowed: false,
+        deniedReason: "LATE_EVENT_CLOSED_PERIOD",
+      })
+      expect(
+        [...harness.store.grantStates.values()].map((state) => state.consumedInCurrentWindow)
+      ).toEqual([4])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})

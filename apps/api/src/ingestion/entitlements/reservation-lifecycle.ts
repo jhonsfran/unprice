@@ -36,6 +36,7 @@ import type {
   ReservationGrowthResult,
   WalletReservationSnapshot,
 } from "./contracts"
+import { readEventMeterState } from "./meter-helpers"
 import type { MeterStateDraft } from "./meter-state-adapter"
 import type {
   EntitlementWindowClock,
@@ -1505,7 +1506,12 @@ export class ReservationLifecycle {
       [...activeGrants],
       input.event.timestamp
     )
-    const meterState = this.store.readMeterStateDraft(meter.key, now)
+    const meterState = readEventMeterState({
+      createdAt: now,
+      entitlement: input.entitlement,
+      store: this.store,
+      timestamp: input.event.timestamp,
+    })
 
     return projectEventCostMinor({
       activeGrants,

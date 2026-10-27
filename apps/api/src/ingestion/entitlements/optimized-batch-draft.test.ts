@@ -20,14 +20,19 @@ describe("optimized batch draft", () => {
   it("stages many event outcomes as one commit payload", () => {
     const draft = createOptimizedBatchDraft({
       grantStates: [],
-      meterState: {
-        createdAt: 1_717_000_000_000,
-        dirty: false,
-        exists: true,
-        meterKey: "meter:tokens",
-        updatedAt: null,
-        usage: 0,
-      },
+      meterStates: new Map([
+        [
+          "meter:tokens",
+          {
+            createdAt: 1_717_000_000_000,
+            dirty: false,
+            exists: true,
+            meterKey: "meter:tokens",
+            updatedAt: null,
+            usage: 0,
+          },
+        ],
+      ]),
       wallet: null,
     })
 
@@ -43,14 +48,19 @@ describe("optimized batch draft", () => {
   it("keeps retry-required wallet work outside the durable draft", () => {
     const draft = createOptimizedBatchDraft({
       grantStates: [],
-      meterState: {
-        createdAt: 1_717_000_000_000,
-        dirty: false,
-        exists: true,
-        meterKey: "meter:tokens",
-        updatedAt: null,
-        usage: 0,
-      },
+      meterStates: new Map([
+        [
+          "meter:tokens",
+          {
+            createdAt: 1_717_000_000_000,
+            dirty: false,
+            exists: true,
+            meterKey: "meter:tokens",
+            updatedAt: null,
+            usage: 0,
+          },
+        ],
+      ]),
       wallet: {
         allocationAmount: 100,
         billingPeriodId: "bp_123",

@@ -69,7 +69,12 @@ import {
   enforcementStateInputSchema,
 } from "./contracts"
 import { selectGrantStatesForActiveGrants } from "./entitlement-window-store"
-import { extractCurrencyCodeFromFeatureConfig, resolveMeterIdentity } from "./meter-helpers"
+import {
+  extractCurrencyCodeFromFeatureConfig,
+  readEventMeterState,
+  resolveMeterIdentity,
+  resolveMeterStateKey,
+} from "./meter-helpers"
 import { InMemoryMeterStorageAdapter, type MeterStateDraft } from "./meter-state-adapter"
 import {
   type OptimizedBatchDraft,
@@ -102,7 +107,7 @@ type OptimizedBatchSetup = {
   grants: ActiveGrantInput[]
   grantStates: GrantConsumptionState[]
   meter: MeterIdentity
-  meterState: MeterStateDraft
+  meterStates: Map<string, MeterStateDraft>
   wallet: WalletReservationSnapshot
 }
 
@@ -390,7 +395,6 @@ export class EntitlementWindowProcessor {
 
   private prepareOptimizedBatch(
     input: ApplyBatchInput,
-    createdAt: number,
     idempotencyKeys: string[]
   ): OptimizedBatchSetup {
     const entitlement = input.entitlement
@@ -398,8 +402,10 @@ export class EntitlementWindowProcessor {
     const meter = resolveMeterIdentity(entitlement)
 
     return this.store.atomically((tx) => {
+      const cachedResults = tx.lookupCachedIdempotencyResults(idempotencyKeys)
+      const meterStates = new Map<string, MeterStateDraft>()
       return {
-        cachedResults: tx.lookupCachedIdempotencyResults(idempotencyKeys),
+        cachedResults,
         entitlement,
         grantStates: tx.readGrantStatesForBatch(
           grants,
@@ -407,7 +413,7 @@ export class EntitlementWindowProcessor {
         ),
         grants,
         meter,
-        meterState: tx.readMeterStateDraft(meter.key, createdAt),
+        meterStates,
         wallet: tx.readWalletReservation(),
       }
     })
@@ -419,10 +425,10 @@ export class EntitlementWindowProcessor {
   ): Promise<ApplyBatchInternalResult> {
     const createdAt = this.clock.now()
     const idempotencyKeys = unique(input.events.map((event) => event.idempotencyKey))
-    const setup = this.prepareOptimizedBatch(input, createdAt, idempotencyKeys)
+    const setup = this.prepareOptimizedBatch(input, idempotencyKeys)
     const state = createOptimizedBatchDraft({
       grantStates: setup.grantStates,
-      meterState: setup.meterState,
+      meterStates: setup.meterStates,
       wallet: setup.wallet,
     })
 
@@ -443,8 +449,7 @@ export class EntitlementWindowProcessor {
       this.commitCompactBatchDraft({
         createdAt,
         idempotencyEntries: commit.idempotencyEntries,
-        meter: setup.meter,
-        meterState: commit.meterState,
+        meterStates: commit.meterStates,
         touchedGrantStates: commit.touchedGrantStates,
         wallet: commit.wallet,
         walletDirty: commit.walletDirty,
@@ -507,6 +512,22 @@ export class EntitlementWindowProcessor {
         state,
       })
       return
+    }
+
+    const meterStateKey = resolveMeterStateKey({
+      entitlement: setup.entitlement,
+      timestamp: event.timestamp,
+    })
+    if (!state.meterStates.has(meterStateKey)) {
+      state.meterStates.set(
+        meterStateKey,
+        readEventMeterState({
+          createdAt,
+          entitlement: setup.entitlement,
+          store: this.store,
+          timestamp: event.timestamp,
+        })
+      )
     }
 
     const eventInput = buildBatchEventApplyInput(input, event)
@@ -699,7 +720,9 @@ export class EntitlementWindowProcessor {
       eventTimestamp: event.timestamp,
       grantStates: state.grantStates,
       meter: setup.meter,
-      meterState: state.meterState,
+      meterState: state.readMeterState(
+        resolveMeterStateKey({ entitlement: setup.entitlement, timestamp: event.timestamp })
+      ),
     })
 
     if (projectedCost <= 0) {
@@ -774,7 +797,9 @@ export class EntitlementWindowProcessor {
       eventTimestamp: event.timestamp,
       grantStates: state.grantStates,
       meter: setup.meter,
-      meterState: state.meterState,
+      meterState: state.readMeterState(
+        resolveMeterStateKey({ entitlement: setup.entitlement, timestamp: event.timestamp })
+      ),
     })
     if (projectedCost <= 0) {
       return false
@@ -813,7 +838,11 @@ export class EntitlementWindowProcessor {
     state: OptimizedBatchDraft
   }): Fact[] {
     const { activeGrants, event, eventInput, input, setup, state } = params
-    const adapter = new InMemoryMeterStorageAdapter(state.meterState)
+    const adapter = new InMemoryMeterStorageAdapter(
+      state.readMeterState(
+        resolveMeterStateKey({ entitlement: setup.entitlement, timestamp: event.timestamp })
+      )
+    )
     const engine = new AsyncMeterAggregationEngine([setup.meter.config], adapter, event.now)
     return engine.applyEventSync(eventInput.event, {
       beforePersist: (pendingFacts) => {
@@ -936,14 +965,17 @@ export class EntitlementWindowProcessor {
   private commitCompactBatchDraft(params: {
     createdAt: number
     idempotencyEntries: BatchIdempotencyEntry[]
-    meter: MeterIdentity
-    meterState: MeterStateDraft
+    meterStates: Map<string, MeterStateDraft>
     touchedGrantStates: Map<string, GrantConsumptionState>
     wallet: WalletReservationSnapshot
     walletDirty: boolean
   }): OptimizedBatchWriteMetrics {
+    const dirtyMeterStates = [...params.meterStates.values()].filter((state) => state.dirty)
     const writeMetrics: OptimizedBatchWriteMetrics = {
-      meter_state_write_count: params.meterState.dirty ? (params.meterState.exists ? 1 : 2) : 0,
+      meter_state_write_count: dirtyMeterStates.reduce(
+        (count, state) => count + (state.exists ? 1 : 2),
+        0
+      ),
       grant_window_write_count: unique(
         [...params.touchedGrantStates.values()].map((state) => state.periodKey)
       ).length,
@@ -955,7 +987,7 @@ export class EntitlementWindowProcessor {
     }
 
     if (
-      !params.meterState.dirty &&
+      dirtyMeterStates.length === 0 &&
       params.touchedGrantStates.size === 0 &&
       params.idempotencyEntries.length === 0 &&
       !params.walletDirty
@@ -966,12 +998,12 @@ export class EntitlementWindowProcessor {
     // Keep replay seals, priced fact publish intent, and local accounting in one
     // synchronous store transaction. No await belongs inside this block.
     this.store.atomically((tx) => {
-      if (params.meterState.dirty) {
+      for (const meterState of dirtyMeterStates) {
         tx.writeMeterState({
-          meterKey: params.meter.key,
-          createdAt: params.meterState.createdAt,
-          usage: params.meterState.usage,
-          updatedAt: params.meterState.updatedAt,
+          meterKey: meterState.meterKey,
+          createdAt: meterState.createdAt,
+          usage: meterState.usage,
+          updatedAt: meterState.updatedAt,
         })
       }
 
@@ -1757,7 +1789,7 @@ export class EntitlementWindowProcessor {
       tx,
     })
 
-    this.persistMeterStateDraft(tx, { meter, meterState, metrics })
+    this.persistMeterStateDraft(tx, { meterState, metrics })
 
     const grantStates = facts.some((fact) => fact.delta > 0)
       ? tx.readGrantStatesForActiveGrants(activeGrants, input.event.timestamp)
@@ -1861,7 +1893,12 @@ export class EntitlementWindowProcessor {
   }): { facts: Fact[]; meterState: MeterStateDraft } {
     const { activeGrants, createdAt, entitlement, input, meter, metrics, overageStrategy, tx } =
       params
-    const meterState = tx.readMeterStateDraft(meter.key, createdAt)
+    const meterState = readEventMeterState({
+      createdAt,
+      entitlement,
+      store: tx,
+      timestamp: input.event.timestamp,
+    })
     const adapter = new InMemoryMeterStorageAdapter(meterState)
     // The engine persists only raw aggregation state through its adapter.
     // Entitlement usage is written below into compact period state.
@@ -1902,12 +1939,11 @@ export class EntitlementWindowProcessor {
   private persistMeterStateDraft(
     tx: EntitlementWindowStateOps,
     params: {
-      meter: MeterIdentity
       meterState: MeterStateDraft
       metrics: Pick<SingleApplyExecutionMetrics, "meterStateWriteCount">
     }
   ): void {
-    const { meter, meterState, metrics } = params
+    const { meterState, metrics } = params
 
     if (!meterState.dirty) {
       return
@@ -1915,7 +1951,7 @@ export class EntitlementWindowProcessor {
 
     metrics.meterStateWriteCount = meterState.exists ? 1 : 2
     tx.writeMeterState({
-      meterKey: meter.key,
+      meterKey: meterState.meterKey,
       createdAt: meterState.createdAt,
       usage: meterState.usage,
       updatedAt: meterState.updatedAt,

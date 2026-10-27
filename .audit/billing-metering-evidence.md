@@ -56,9 +56,11 @@ Two daily buckets contain 15 and 25 units. Each day includes ten free units and 
 
 Before: `Tests 2 failed | 9 passed (11)`. Production rating returned 15 units and only `5.00`. The second regression also shows mixed daily and weekly grant attribution.
 
-After: `pnpm --filter @unprice/services test src/rating` passes 16 tests. Analytics and services type checks pass. The new allocation SQL was also executed in ClickHouse, and its actual two rows produced the expected charges through RatingService.
+The first revision passed sixteen rating tests. Independent review then proved another valid configuration. Billing on the 15th with resets on the 1st can start after the free tier is already consumed. Ten earlier free units plus five accepted paid units must yield five units and `5.00` in the partial billing window. Repricing those five units from zero returned `0.00`.
 
-Independent review: PASS. Deploy the new `v1_get_billing_usage_allocations` endpoint before the application reader.
+The final recorded-usage path sums accepted signed amounts and units from the same deduplicated fact tuple for every window, including a window wholly inside one reset bucket. Explicit usage overrides retain synthetic pricing. Currency and ledger scale must match the grant. Seven new rating/schema cases fail before this correction and all twenty-three rating cases pass after it. The actual ClickHouse row for the partial window contains five units and `500000000` at scale eight.
+
+Deploy the new `v1_get_billing_usage_allocations` endpoint before the application reader. The final independent review is recorded below.
 
 ## Issue 2: Preserve out-of-order usage in billing SQL
 
@@ -70,7 +72,7 @@ Verdict: VERIFIED.
 
 Before: `Failed checks 7`. The original SQL returns one unit for the actual processor output and for late sum/count and same-millisecond ordering cases.
 
-After: `python3 .audit/sql/prove-sql.py` reports fifteen passing checks and `Failed checks 0`. The checks cover both billing endpoints, exact transport duplicates, max, latest, and signed corrections. The processor regression also passes.
+After: `python3 .audit/sql/prove-sql.py` reports seventeen passing checks and `Failed checks 0`. The checks cover both billing endpoints, exact transport duplicates, max, latest, signed corrections, and accepted money for partial reset windows. The processor regression also passes.
 
 Independent review reran the same SQL proof and passed it. The archived synthetic processor output is `.audit/sql/processor-facts.ndjson`.
 
@@ -87,3 +89,17 @@ After: `pnpm --filter @unprice/services test:integration:complex-pricing` passes
 An additional reproducible PostgreSQL proof is available with `pnpm --filter @unprice/services exec vitest run --config vitest.readiness-proof.config.ts`. It requires the isolated `codex-billing-proof-postgres` container. It runs the generated repository queries against temporary tables inside a rollback transaction.
 
 Independent review: PASS. The reviewer reran the PostgreSQL proof and checked the scheduler, exports, all migrated callers, and comments. No material findings.
+
+## Issue 3: Isolate raw aggregates by reset period
+
+Verdict: VERIFIED.
+
+`reset-scoped aggregation correctness` in `apps/api/src/ingestion/entitlements/processor.test.ts` sends 10 before midnight, 6 after midnight, a late 12 before midnight, and 8 after midnight. The literal expected deltas are 10, 6, 2, 2, with day totals 12 and 8. The cases exercise both max and latest through single and batch APIs, then replay a late event.
+
+Before: `Tests 12 failed | 3 passed | 66 skipped (81)`. The first next-day max event adds zero, and the first next-day latest event produces a negative charge. The additional legacy-state regressions also fail.
+
+After: `pnpm --filter api test src/ingestion/entitlements` passes all 129 tests. These tests run the real processor, aggregation engine, grant allocator, pricing, and replay logic with the transactional in-memory storage port.
+
+The fix keys raw state and batch drafts by reset period. Existing unscoped history cannot prove the raw value for an overlapping period. Such a period rejects new events without state changes and requires reconciliation. Periods after the legacy watermark start at zero. Cached and staged replay receipts continue to work without reconstructing raw state.
+
+Independent review: PASS after one additional batch defect was reproduced and fixed. Raw state now loads only after replay, active-grant, and closed-period checks. A valid new-period event succeeds beside a closed legacy event, which receives its normal denial. The reviewer ran twenty focused and independent cases. API type checking also passes.

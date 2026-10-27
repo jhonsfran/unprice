@@ -24,7 +24,7 @@ export type OptimizedBatchWriteMetrics = Pick<
 
 export type OptimizedBatchCommitPayload = {
   idempotencyEntries: BatchIdempotencyEntry[]
-  meterState: MeterStateDraft
+  meterStates: Map<string, MeterStateDraft>
   refillTrigger: RefillTrigger | null
   reservationCloseReason: ReservationCloseReason | null
   touchedGrantStates: Map<string, GrantConsumptionState>
@@ -34,7 +34,8 @@ export type OptimizedBatchCommitPayload = {
 
 export type OptimizedBatchDraft = {
   grantStates: GrantConsumptionState[]
-  meterState: MeterStateDraft
+  meterStates: Map<string, MeterStateDraft>
+  readMeterState(meterKey: string): MeterStateDraft
   metrics: ApplyBatchMetrics
   results: ApplyBatchResultRow[]
   touchedGrantStates: Map<string, GrantConsumptionState>
@@ -50,14 +51,19 @@ export type OptimizedBatchDraft = {
 
 export function createOptimizedBatchDraft(params: {
   grantStates: GrantConsumptionState[]
-  meterState: MeterStateDraft
+  meterStates: Map<string, MeterStateDraft>
   wallet: WalletReservationSnapshot
 }): OptimizedBatchDraft {
   const stagedResultsByKey = new Map<string, BatchIdempotencyEntry>()
   const idempotencyEntries: BatchIdempotencyEntry[] = []
   const draft: OptimizedBatchDraft = {
     grantStates: params.grantStates.map((state) => ({ ...state })),
-    meterState: { ...params.meterState },
+    meterStates: new Map([...params.meterStates].map(([key, state]) => [key, { ...state }])),
+    readMeterState(meterKey) {
+      const state = draft.meterStates.get(meterKey)
+      if (!state) throw new Error(`Missing staged meter state for ${meterKey}`)
+      return state
+    },
     metrics: createApplyBatchMetrics(),
     results: [],
     touchedGrantStates: new Map<string, GrantConsumptionState>(),
@@ -75,7 +81,7 @@ export function createOptimizedBatchDraft(params: {
     hasDurableMutations() {
       return (
         idempotencyEntries.length > 0 ||
-        draft.meterState.dirty ||
+        [...draft.meterStates.values()].some((state) => state.dirty) ||
         draft.touchedGrantStates.size > 0 ||
         draft.walletDirty
       )
@@ -83,7 +89,7 @@ export function createOptimizedBatchDraft(params: {
     toCommitPayload() {
       return {
         idempotencyEntries,
-        meterState: draft.meterState,
+        meterStates: draft.meterStates,
         refillTrigger: draft.refillTrigger,
         reservationCloseReason: draft.reservationCloseReason,
         touchedGrantStates: draft.touchedGrantStates,

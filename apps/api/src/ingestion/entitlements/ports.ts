@@ -25,7 +25,7 @@ import type { MeterStateDraft } from "./meter-state-adapter"
 // customerId, customerEntitlementId)`. All state below belongs exclusively to
 // that window; no other window may read or write it:
 //
-//   - meter state: raw aggregation value per meterKey (usage, updatedAt)
+//   - meter state: raw aggregation value per meter/reset period (usage, updatedAt)
 //   - entitlement period usage: compact grant consumption states per periodKey
 //   - idempotency entries: apply results keyed by event idempotency key
 //   - wallet reservation: a SINGLETON row mirroring the open ledger
@@ -130,7 +130,7 @@ export type EntitlementWindowRetentionState = {
  * per-op round trips.
  */
 export type EntitlementWindowStateOps = {
-  // ----- meter aggregation state (per meterKey, no cadence reset) -----
+  // ----- meter aggregation state (per meter identity and reset period) -----
   /** Insert-if-absent so a later usage update always has a row to hit. */
   ensureMeterState(params: { meterKey: string; createdAt: number }): void
   readMeterStateDraft(meterKey: string, createdAt: number): MeterStateDraft
