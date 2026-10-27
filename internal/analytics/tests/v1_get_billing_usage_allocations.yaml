@@ -1,0 +1,42 @@
+- name: late_sum_allocation
+  description: Preserves accepted signed usage within the grant reset bucket
+  parameters: project_id=p_out_of_order&customer_id=c_out_of_order&customer_entitlement_ids=ce_late_sum&feature_slugs=late_sum&start=4070908800000&end=4070995200000
+  expected_result: |
+    {"customer_entitlement_id":"ce_late_sum","grant_id":"grant_late_sum","period_key":"day:4070908800000","feature_slug":"late_sum","period_start_at":4070908800000,"usage":2,"amount":200000000,"currency":"USD","amount_scale":8}
+
+- name: late_count_allocation
+  description: Preserves accepted signed usage within the grant reset bucket
+  parameters: project_id=p_out_of_order&customer_id=c_out_of_order&customer_entitlement_ids=ce_late_count&feature_slugs=late_count&start=4070908800000&end=4070995200000
+  expected_result: |
+    {"customer_entitlement_id":"ce_late_count","grant_id":"grant_late_count","period_key":"day:4070908800000","feature_slug":"late_count","period_start_at":4070908800000,"usage":2,"amount":200000000,"currency":"USD","amount_scale":8}
+
+- name: same_ms_allocation
+  description: Preserves accepted signed usage within the grant reset bucket
+  parameters: project_id=p_out_of_order&customer_id=c_out_of_order&customer_entitlement_ids=ce_same_ms&feature_slugs=same_ms&start=4070908800000&end=4070995200000
+  expected_result: |
+    {"customer_entitlement_id":"ce_same_ms","grant_id":"grant_same_ms","period_key":"day:4070908800000","feature_slug":"same_ms","period_start_at":4070908800000,"usage":2,"amount":200000000,"currency":"USD","amount_scale":8}
+
+- name: late_max_allocation
+  description: Preserves accepted signed usage within the grant reset bucket
+  parameters: project_id=p_out_of_order&customer_id=c_out_of_order&customer_entitlement_ids=ce_late_max&feature_slugs=late_max&start=4070908800000&end=4070995200000
+  expected_result: |
+    {"customer_entitlement_id":"ce_late_max","grant_id":"grant_late_max","period_key":"day:4070908800000","feature_slug":"late_max","period_start_at":4070908800000,"usage":7,"amount":700000000,"currency":"USD","amount_scale":8}
+
+- name: latest_correction_allocation
+  description: Preserves accepted signed usage within the grant reset bucket
+  parameters: project_id=p_out_of_order&customer_id=c_out_of_order&customer_entitlement_ids=ce_latest_correction&feature_slugs=latest_correction&start=4070908800000&end=4070995200000
+  expected_result: |
+    {"customer_entitlement_id":"ce_latest_correction","grant_id":"grant_latest_correction","period_key":"day:4070908800000","feature_slug":"latest_correction","period_start_at":4070908800000,"usage":6,"amount":600000000,"currency":"USD","amount_scale":8}
+
+
+- name: partial_reset_money
+  description: Preserves accepted money when billing begins after a reset free tier was consumed
+  parameters: project_id=p_partial&customer_id=c_partial&customer_entitlement_ids=ce_partial&feature_slugs=partial&start=1768435200000&end=1771113600000
+  expected_result: |
+    {"customer_entitlement_id":"ce_partial","grant_id":"grant_partial","period_key":"month:1767225600000","feature_slug":"partial","period_start_at":1767225600000,"usage":5,"amount":500000000,"currency":"USD","amount_scale":8}
+
+- name: single_reset_money
+  description: Preserves accepted money when billing begins after a reset free tier was consumed
+  parameters: project_id=p_partial&customer_id=c_partial&customer_entitlement_ids=ce_partial&feature_slugs=partial&start=1768435200000&end=1769299200000
+  expected_result: |
+    {"customer_entitlement_id":"ce_partial","grant_id":"grant_partial","period_key":"month:1767225600000","feature_slug":"partial","period_start_at":1767225600000,"usage":5,"amount":500000000,"currency":"USD","amount_scale":8}

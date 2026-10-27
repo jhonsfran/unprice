@@ -59,3 +59,17 @@ Before: `Tests 2 failed | 9 passed (11)`. Production rating returned 15 units an
 After: `pnpm --filter @unprice/services test src/rating` passes 16 tests. Analytics and services type checks pass. The new allocation SQL was also executed in ClickHouse, and its actual two rows produced the expected charges through RatingService.
 
 Independent review: PASS. Deploy the new `v1_get_billing_usage_allocations` endpoint before the application reader.
+
+## Issue 2: Preserve out-of-order usage in billing SQL
+
+Verdict: VERIFIED.
+
+`apps/api/src/ingestion/entitlements/billing-snapshot-proof.test.ts` runs the real processor. Two accepted events arrive in reverse timestamp order. Their snapshots contain one and two units. Replay returns the same fact.
+
+`.audit/sql/prove-sql.py` renders the actual repository endpoint SQL and executes it in ClickHouse with the datasource's column types. It requires Python with Jinja2 and PyYAML, RTK, and a running Tinybird container. Set `BILLING_PROOF_CONTAINER` to its Docker name.
+
+Before: `Failed checks 7`. The original SQL returns one unit for the actual processor output and for late sum/count and same-millisecond ordering cases.
+
+After: `python3 .audit/sql/prove-sql.py` reports fifteen passing checks and `Failed checks 0`. The checks cover both billing endpoints, exact transport duplicates, max, latest, and signed corrections. The processor regression also passes.
+
+Independent review reran the same SQL proof and passed it. The archived synthetic processor output is `.audit/sql/processor-facts.ndjson`.
