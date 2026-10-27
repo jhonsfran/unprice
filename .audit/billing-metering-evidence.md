@@ -73,3 +73,17 @@ Before: `Failed checks 7`. The original SQL returns one unit for the actual proc
 After: `python3 .audit/sql/prove-sql.py` reports fifteen passing checks and `Failed checks 0`. The checks cover both billing endpoints, exact transport duplicates, max, latest, and signed corrections. The processor regression also passes.
 
 Independent review reran the same SQL proof and passed it. The archived synthetic processor output is `.audit/sql/processor-facts.ndjson`.
+
+## Issue 7: Apply grace to period-end advance usage
+
+Verdict: VERIFIED.
+
+The two new regressions in `complex-pricing-cadence.integration.test.ts` execute the actual Drizzle repository against isolated PostgreSQL. They assert that advance-plan usage waits through the exact grace boundary and that shortening a phase also shortens its usage invoice time. Period-start fixed charges retain their invoice time.
+
+Before: `Tests 2 failed | 7 skipped (9)`. Advance usage was eligible too early, and its capped invoice time stayed at the old cycle end.
+
+After: `pnpm --filter @unprice/services test:integration:complex-pricing` passes all nine tests. The generation unit suite also passes all thirteen tests. Neon transport was restricted to the approved test proxy by `/private/tmp/unprice-billing-review/isolated-postgres.mjs`; no application database was used.
+
+An additional reproducible PostgreSQL proof is available with `pnpm --filter @unprice/services exec vitest run --config vitest.readiness-proof.config.ts`. It requires the isolated `codex-billing-proof-postgres` container. It runs the generated repository queries against temporary tables inside a rollback transaction.
+
+Independent review: PASS. The reviewer reran the PostgreSQL proof and checked the scheduler, exports, all migrated callers, and comments. No material findings.

@@ -288,7 +288,6 @@ describe("BillingService._generateBillingPeriods", () => {
     expect(capPendingPeriodsAtPhaseEndMock).toHaveBeenCalledWith({
       phaseId: "phase_1",
       phaseEndAt: PHASE_END,
-      whenToBill: "pay_in_advance",
     })
   })
 

@@ -1938,7 +1938,6 @@ export class BillingService {
               await txBillingRepo.capPendingPeriodsAtPhaseEnd({
                 phaseId: phase.id,
                 phaseEndAt: phase.endAt,
-                whenToBill: phase.planVersion.whenToBill,
               })
             }
 

@@ -8,6 +8,7 @@ import {
   invoices,
   planVersionFeatures,
   subscriptionItems,
+  subscriptionPhases,
   versions,
 } from "@unprice/db/schema"
 import type {
@@ -1358,6 +1359,132 @@ describe("DB-backed complex pricing and mixed meter cadence billing", () => {
     ])
   })
 
+  it("holds advance-plan usage and co-billed fixed charges until usage clears late-event grace", async () => {
+    await addAdvanceFixedWithPriorArrearUsageConfiguration()
+    await db
+      .update(billingPeriods)
+      .set({ whenToBill: "pay_in_advance" })
+      .where(
+        and(
+          eq(billingPeriods.projectId, projectId),
+          eq(billingPeriods.subscriptionId, subscriptionId)
+        )
+      )
+    const repo = new DrizzleBillingRepository(db)
+    const atEnd = await repo.listPendingPeriodGroups({
+      projectId,
+      subscriptionId,
+      lateEventGraceMs: LATE_EVENT_GRACE_MS,
+      now: feb1,
+    })
+    const beforeGraceEnd = await repo.listPendingPeriodGroups({
+      projectId,
+      subscriptionId,
+      lateEventGraceMs: LATE_EVENT_GRACE_MS,
+      now: feb1 + LATE_EVENT_GRACE_MS - 1,
+    })
+    const atGraceEnd = await repo.listPendingPeriodGroups({
+      projectId,
+      subscriptionId,
+      lateEventGraceMs: LATE_EVENT_GRACE_MS,
+      now: feb1 + LATE_EVENT_GRACE_MS,
+    })
+    expect({ atEnd, beforeGraceEnd, atGraceEnd }).toEqual({
+      atEnd: [],
+      beforeGraceEnd: [],
+      atGraceEnd: [
+        {
+          projectId: "proj_test",
+          subscriptionId: "sub_test_monthly_arrear",
+          subscriptionPhaseId: "phase_test_monthly_arrear",
+          statementKey: "stmt_complex_advance_fixed_with_prior_arrear_usage",
+          invoiceAt: 1769904000000,
+        },
+      ],
+    })
+  })
+
+  it("holds every phase sharing a statement until its usage clears late-event grace", async () => {
+    await addAdvanceFixedWithPriorArrearUsageConfiguration()
+    const nextPhaseId = "phase_test_advance_next"
+    const nextItemId = "item_test_advance_next_access"
+    const phase = await db.query.subscriptionPhases.findFirst({
+      where: (table, { and, eq }) => and(eq(table.projectId, projectId), eq(table.id, phaseId)),
+    })
+    const item = await db.query.subscriptionItems.findFirst({
+      where: (table, { and, eq }) =>
+        and(eq(table.projectId, projectId), eq(table.id, "item_test_arrear_access")),
+    })
+    if (!phase || !item) throw new Error("Missing seeded subscription phase or item")
+    await db
+      .update(subscriptionPhases)
+      .set({ endAt: feb1 })
+      .where(eq(subscriptionPhases.id, phaseId))
+    await db
+      .insert(subscriptionPhases)
+      .values({ ...phase, id: nextPhaseId, startAt: feb1, endAt: null })
+    await db
+      .insert(subscriptionItems)
+      .values({ ...item, id: nextItemId, subscriptionPhaseId: nextPhaseId })
+    await db
+      .update(billingPeriods)
+      .set({
+        subscriptionPhaseId: nextPhaseId,
+        subscriptionItemId: nextItemId,
+      })
+      .where(eq(billingPeriods.id, "bp_test_advance_access_feb"))
+    const repository = new DrizzleBillingRepository(db)
+    const read = (now: number) =>
+      repository.listPendingPeriodGroups({
+        projectId,
+        subscriptionId,
+        now,
+        lateEventGraceMs: LATE_EVENT_GRACE_MS,
+      })
+    expect(await read(feb1)).toEqual([])
+    expect(await read(feb1 + LATE_EVENT_GRACE_MS - 1)).toEqual([])
+    expect(
+      (await read(feb1 + LATE_EVENT_GRACE_MS))
+        .map((group) => ({
+          phaseId: group.subscriptionPhaseId,
+          statementKey: group.statementKey,
+          invoiceAt: group.invoiceAt,
+        }))
+        .sort((left, right) => left.phaseId.localeCompare(right.phaseId))
+    ).toEqual([
+      { phaseId: nextPhaseId, statementKey: advanceWithPriorUsageStatementKey, invoiceAt: feb1 },
+      { phaseId, statementKey: advanceWithPriorUsageStatementKey, invoiceAt: feb1 },
+    ])
+  })
+
+  it("caps advance usage at the shortened phase end while preserving fixed period-start invoicing", async () => {
+    await addAdvanceFixedWithPriorArrearUsageConfiguration()
+    await db
+      .update(billingPeriods)
+      .set({ whenToBill: "pay_in_advance" })
+      .where(
+        and(
+          eq(billingPeriods.projectId, projectId),
+          eq(billingPeriods.subscriptionId, subscriptionId)
+        )
+      )
+    await db
+      .update(billingPeriods)
+      .set({ cycleStartAt: jan1, cycleEndAt: feb1, invoiceAt: jan1 })
+      .where(eq(billingPeriods.id, "bp_test_advance_access_feb"))
+    await new DrizzleBillingRepository(db).capPendingPeriodsAtPhaseEnd({
+      phaseId,
+      phaseEndAt: 1768435200000,
+    })
+    const periods = await listPeriods()
+    expect(periods.map(({ id, cycleEndAt, invoiceAt }) => ({ id, cycleEndAt, invoiceAt }))).toEqual(
+      [
+        { id: "bp_adv_prior_events_jan", cycleEndAt: 1768435200000, invoiceAt: 1768435200000 },
+        { id: "bp_test_advance_access_feb", cycleEndAt: 1768435200000, invoiceAt: 1767225600000 },
+      ]
+    )
+  })
+
   it("co-bills pay-in-advance fixed charges with prior arrears usage on the same statement", async () => {
     await addAdvanceFixedWithPriorArrearUsageConfiguration()
 
@@ -1417,7 +1544,6 @@ describe("DB-backed complex pricing and mixed meter cadence billing", () => {
     await new DrizzleBillingRepository(db).capPendingPeriodsAtPhaseEnd({
       phaseId,
       phaseEndAt,
-      whenToBill: "pay_in_arrear",
     })
 
     expect(await listPeriods()).toEqual([
