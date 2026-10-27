@@ -534,8 +534,8 @@ patterns. Keep it cheap to load and useful.
 
 ## Billing, Wallets, And Invoices
 
-- 2026-10-27: When invoicing subscription usage, seal its processor snapshot before wallet flush;
-  missing legacy coverage is unknown, even when reporting or recreated DO storage is empty.
+- 2026-10-27: Billing snapshot rollout uses fresh entitlement IDs, DO state, and billing periods;
+  register before acceptance and seal before wallet flush. Do not add legacy marker or recovery paths.
 - 2026-10-27: When collection succeeds, settle the receivable before saving `paid`; keep failed
   settlement eligible for retry with the existing invoice idempotency key.
 - 2026-10-27: When checking invoice readiness, include all pending rows for the statement across

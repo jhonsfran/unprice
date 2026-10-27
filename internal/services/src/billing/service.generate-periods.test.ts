@@ -153,7 +153,6 @@ function makeDb(phases: unknown[] = []): MockDb {
               id: "ent_1",
               effectiveAt: 0,
               expiresAt: null,
-              metadata: { billing_usage_genesis_v1: "ent_1" },
             },
           ]),
         },
@@ -715,34 +714,6 @@ describe("BillingService._generateBillingPeriods", () => {
     expect(createdPeriods()[0]?.cycleStartAt).toBe(PHASE_START)
   })
 
-  it("refuses zero genesis for an unmarked legacy entitlement even when its period is new", async () => {
-    const phase = makePhase({ items: [makeItem("item_usage", { featureType: "usage" })] })
-    const { billing, db, reservationFlushGateway } = makeBillingService({ phases: [phase] })
-    db.transaction.mockImplementation(async (cb: (tx: unknown) => Promise<unknown>) =>
-      cb({
-        query: {
-          customerEntitlements: {
-            findMany: vi
-              .fn()
-              .mockResolvedValue([
-                { id: "ent_legacy", effectiveAt: PHASE_START, expiresAt: null, metadata: null },
-              ]),
-          },
-        },
-      })
-    )
-
-    const result = await generateBillingPeriods(billing, {
-      subscriptionId: "sub_1",
-      projectId: "proj_1",
-      now: NOW,
-    })
-
-    expect(result.err?.message).toContain("unknown legacy billing usage coverage")
-    expect(reservationFlushGateway.registerPeriods).not.toHaveBeenCalled()
-    expect(createdPeriods()).toEqual([])
-  })
-
   it("registers only entitlement windows that overlap the new period", async () => {
     const phase = makePhase({ items: [makeItem("item_usage", { featureType: "usage" })] })
     const { billing, db, reservationFlushGateway } = makeBillingService({ phases: [phase] })
@@ -755,7 +726,6 @@ describe("BillingService._generateBillingPeriods", () => {
                 id: "ent_current",
                 effectiveAt: PHASE_START,
                 expiresAt: null,
-                metadata: { billing_usage_genesis_v1: "ent_current" },
               },
               { id: "ent_expired", effectiveAt: 0, expiresAt: PHASE_START },
               {
@@ -797,7 +767,6 @@ describe("BillingService._generateBillingPeriods", () => {
                 id: "ent_1",
                 effectiveAt: 0,
                 expiresAt: null,
-                metadata: { billing_usage_genesis_v1: "ent_1" },
               },
             ]),
           },

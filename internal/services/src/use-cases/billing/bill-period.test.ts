@@ -412,7 +412,6 @@ describe("billPeriod", () => {
         currency: "USD" as const,
         amountScale: 8 as const,
         origin: "period_generation_v1" as const,
-        genesis: { version: 1 as const, customerEntitlementId: "ent_1" },
         registeredAt: eventAt,
       }
       if (typeof harness.processor.registerBillingPeriods === "function") {

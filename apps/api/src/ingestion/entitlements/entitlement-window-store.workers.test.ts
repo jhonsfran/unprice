@@ -133,7 +133,6 @@ describe("EntitlementWindowStore SQLite reads", () => {
         currency: "USD",
         amountScale: 8,
         origin: "period_generation_v1",
-        genesis: { version: 1, customerEntitlementId: "ce_test" },
         registeredAt: now,
       })
       store.writeBillingUsageSnapshot(snapshot)
@@ -222,7 +221,6 @@ describe("EntitlementWindowStore SQLite reads", () => {
           amountScale: 8,
           origin: "period_generation_v1",
           registeredAt: now,
-          genesis: { version: 1, customerEntitlementId: input.entitlement.customerEntitlementId },
         },
       ])
       await Promise.all(harness.waitUntilPromises)
@@ -300,10 +298,6 @@ describe("EntitlementWindowStore SQLite reads", () => {
         currency: "USD" as const,
         amountScale: 8 as const,
         origin: "period_generation_v1" as const,
-        genesis: {
-          version: 1 as const,
-          customerEntitlementId: input.entitlement.customerEntitlementId,
-        },
         registeredAt: now,
       }
       await instance.registerBillingPeriods([registration])

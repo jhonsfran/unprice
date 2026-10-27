@@ -6,6 +6,8 @@ Each regression asserts the intended behavior. The before and after results belo
 
 Sanitized original failure excerpts and passing summaries are committed in `billing-metering-proof-excerpts.txt`. They preserve the observed assertions after temporary test logs are removed.
 
+The subsequent clean-rollout simplification follows the user's instruction that backward compatibility is not required. It removes legacy raw-meter recovery and entitlement genesis metadata. Historical test counts below describe the original proof runs. Current follow-up results are recorded in `billing-metering-clean-rollout.md`.
+
 ## TLDR
 
 All nine claims have a behavioral counterexample and a passing regression after the fix. The tests prove the stated cases. They do not prove the absence of every other billing defect.
@@ -122,7 +124,7 @@ Before: `Tests 12 failed | 3 passed | 66 skipped (81)`. The first next-day max e
 
 After: `pnpm --filter api test src/ingestion/entitlements` passes all 129 tests. These tests run the real processor, aggregation engine, grant allocator, pricing, and replay logic with the transactional in-memory storage port.
 
-The fix keys raw state and batch drafts by reset period. Existing unscoped history cannot prove the raw value for an overlapping period. Such a period rejects new events without state changes and requires reconciliation. Periods after the legacy watermark start at zero. Cached and staged replay receipts continue to work without reconstructing raw state.
+The fix keys raw state and batch drafts by reset period. The clean-rollout version reads that scoped state directly. It does not inspect, recover, or migrate unscoped historical state. Cached and staged replay receipts continue to work without reconstructing raw state.
 
 Independent review: PASS after one additional batch defect was reproduced and fixed. Raw state now loads only after replay, active-grant, and closed-period checks. A valid new-period event succeeds beside a closed legacy event, which receives its normal denial. The reviewer ran twenty focused and independent cases. API type checking also passes.
 
@@ -162,18 +164,18 @@ Five real Durable Object SQLite tests prove receipt/snapshot rollback, persisten
 
 Additional review counterexamples fail before their fixes and pass after them. An expired entitlement owner still flushes its billed service window. A capped ten-dollar snapshot refuses closure with only six dollars captured, then succeeds after the remaining four dollars are captured. An uncapped period with six captured dollars and four ordinary dollars posts only four new receivable dollars. Paid, included, and credit-line captures reduce the remainder once. An eleven-dollar capture against a ten-dollar snapshot blocks closure. Capture reconciliation checks money; repeated quantity metadata across funding legs cannot independently prove a capture quantity total.
 
-Period generation registers coverage before activation. Deterministic period IDs preserve registration across remote acknowledgement followed by database failure. Only a canonical new entitlement insert can write the server-owned genesis marker. Existing IDs, conflicting inserts, caller metadata, and recreated empty Durable Objects cannot infer legacy zero coverage. Open and sealed snapshots prevent object deletion. Completed snapshots remain through receipt replay retention.
+Period generation registers coverage before activation. Deterministic period IDs preserve registration across remote acknowledgement followed by database failure. The clean-rollout version has no entitlement genesis metadata or old-state classification. It requires fresh entitlement IDs, Durable Object state, and matching billing periods. Missing snapshots still block acceptance and invoice closure. Open and sealed snapshots prevent object deletion. Completed snapshots remain through receipt replay retention.
 
 The SQLite migration was generated with `bin/migrate.dev entitlements --name billing_usage_snapshots`. ADR-0007 records the ownership, retry, retention, and deployment contracts. Independent source review passed the final storage, processor, billing, owner selection, and capture changes.
 
 ## Operating limits
 
-- Deploy the API worker, generated SQLite migration, and internal snapshot RPCs before services write genesis markers. Deploy the new analytics allocation endpoint before its reader.
-- Existing unmarked entitlements and unknown legacy reset aggregates require explicit reconciliation. Missing data blocks new acceptance or invoice closure instead of becoming an inferred zero.
+- Deploy the API worker, generated SQLite migration, and internal snapshot RPCs before enabling the new billing flow. Deploy the new analytics allocation endpoint before its reader.
+- The rollout uses fresh entitlement IDs, Durable Object state, and matching billing periods. Existing state is not migrated. Disable old accepting code during cutover. Missing registered snapshots still block acceptance or invoice closure.
 - Corrections cannot reverse captured or persisted pending money. Those reversals require a separate funded credit workflow.
 - No deployment, push, production database write, or live Stripe operation was performed. Provider behavior is verified with fakes. The refund regression proves transactional control flow, not a live PostgreSQL rollback.
 
-## Final verification
+## Original nine-fix verification
 
 Node `24.17.0`, pinned pnpm `10.28.0`.
 
@@ -197,7 +199,7 @@ The PostgreSQL checks used a dedicated container and a Neon proxy on `127.0.0.1:
 
 ## Commit index
 
-All nine task commits are on `codex/billing-metering-correctness`.
+All nine original task commits are on `codex/billing-metering-correctness`. The clean-rollout simplification is a separate follow-up commit on the same branch.
 
 | Issue | Commit |
 | --- | --- |
@@ -206,12 +208,12 @@ All nine task commits are on `codex/billing-metering-correctness`.
 | 3 | `1c911fc41` |
 | 4 | `535427304` |
 | 5 | `111546bba` |
-| 6 | Branch HEAD, `fix(billing): invoice sealed authoritative usage totals` |
+| 6 | `f1aaa4e4f` |
 | 7 | `3e388f4cd` |
 | 8 | `087dfc6b4` |
 | 9 | `20cdbffd2` |
 
-The final autosquash changed only commit history. The tree before and after was `e63d9e66388ad509233529effa4953c8fb97f550`. Subsequent edits complete this evidence report and the decision trail.
+The original nine-fix autosquash changed only commit history. The tree before and after was `e63d9e66388ad509233529effa4953c8fb97f550`. This hash precedes the clean-rollout follow-up.
 
 ## Independent trail review
 

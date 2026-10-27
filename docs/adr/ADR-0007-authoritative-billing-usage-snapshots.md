@@ -29,14 +29,11 @@ Its lifecycle has three states.
 
 Billing period generation registers a zero snapshot before its database transaction commits and before activation can permit usage.
 Only this explicit `period_generation_v1` registration establishes zero usage.
-A missing snapshot has unknown coverage and blocks billing. Existing periods do not receive inferred zero totals.
+A missing snapshot has unknown coverage and blocks billing.
 
-Registration also requires server-owned `billing_usage_genesis_v1` metadata bound to the entitlement ID.
-The entitlement service writes this marker only when it inserts a new subscription entitlement.
-Creation retries return existing rows without changing their marker. Caller metadata cannot mark an existing legacy ID.
-The new processor requires a registered snapshot before that new ID can accept subscription usage.
-Generation refuses every unmarked entitlement, including an old ID whose Durable Object is empty or was deleted.
-Legacy entitlement IDs require explicit reconciliation before billing can continue.
+The rollout starts with fresh entitlement IDs, Durable Object state, and matching billing periods.
+Existing entitlement state is outside the supported contract. There is no legacy migration or marker metadata.
+The processor requires a registered snapshot before subscription usage can be accepted.
 
 New billing period IDs derive from the stable period identity and registration version.
 If registration succeeds but the database transaction fails, a retry uses the same ID and adopts the existing snapshot.
@@ -67,7 +64,7 @@ Trial billing periods produce zero charges even when their accepted facts have a
 
 A durable accepted-fact count could block billing until Tinybird contains every accepted fact.
 That design preserves the old rating source but still depends on reporting availability and the 90-day fact lifetime.
-It also requires explicit legacy coverage and a seal before the count can be stable.
+It also requires a seal before the count can be stable.
 
 Reading current grant totals cannot recover usage for a billing window that cuts through a grant reset window.
 Per-billing-period state is required in either design.
@@ -76,12 +73,12 @@ Per-billing-period state is required in either design.
 
 Accepted usage no longer depends on reporting delivery before invoice closure.
 The processor retains a small durable snapshot for each unfinished billing period.
-Legacy periods without complete snapshots require an explicit reconciliation procedure before billing can continue.
+The change does not support existing entitlement or billing state.
 Registration adds an internal API call during period generation. An unavailable API blocks activation and leaves generation retryable.
 
-Deploy the API worker, Durable Object migration, and internal snapshot RPCs before deploying services that write genesis markers.
-The marker proves zero coverage only after every accepting processor requires registered snapshots.
-An old processor can accept unregistered usage for a marked entitlement during the reverse deployment order.
+Deploy the API worker, Durable Object migration, and internal snapshot RPCs before enabling the new billing flow.
+Disable old accepting code during cutover. Use fresh entitlement IDs and matching billing state together.
+Deleting only Durable Object state while retaining pending historical usage is not a supported reset.
 No deployment is part of this change.
 
 ## Related decisions

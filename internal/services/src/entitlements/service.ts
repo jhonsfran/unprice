@@ -14,7 +14,6 @@ import type { CacheNamespaces } from "../cache/namespaces"
 import type { Cache } from "../cache/service"
 import type { CustomerService } from "../customers/service"
 import type { Metrics } from "../metrics"
-import { metadataForNewEntitlement } from "./billing-usage-genesis"
 import { UnPriceEntitlementError } from "./errors"
 import type { GrantsManager } from "./grants"
 
@@ -224,7 +223,7 @@ export class EntitlementService {
 
       const inserted = await trx
         .insert(customerEntitlements)
-        .values({ ...entitlement, metadata: metadataForNewEntitlement(entitlement) })
+        .values(entitlement)
         .onConflictDoNothing({
           target: [
             customerEntitlements.projectId,

@@ -33,7 +33,6 @@ function createBillingHarness() {
     currency: "USD" as const,
     amountScale: 8 as const,
     origin: "period_generation_v1" as const,
-    genesis: { version: 1 as const, customerEntitlementId: entitlement.customerEntitlementId },
     registeredAt: now,
   }
   return {
@@ -50,19 +49,6 @@ function createBillingHarness() {
 afterEach(() => vi.restoreAllMocks())
 
 describe("authoritative billing usage", () => {
-  it("refuses genesis proof for another entitlement on an empty object", async () => {
-    const { processor, registration, store } = createBillingHarness()
-    await expect(
-      processor.registerBillingPeriods([
-        {
-          ...registration,
-          genesis: { version: 1, customerEntitlementId: "ent_other" },
-        },
-      ])
-    ).rejects.toThrow("genesis belongs to another entitlement")
-    expect(store.listBillingUsageSnapshots()).toEqual([])
-  })
-
   it("stores accepted amounts with their receipt and replays without adding them twice", async () => {
     const { processor, input, registration, store } = createBillingHarness()
     await processor.registerBillingPeriods([registration])
@@ -141,7 +127,7 @@ describe("authoritative billing usage", () => {
     expect(store.idempotency.size).toBe(1)
   })
 
-  it("refuses missing legacy coverage instead of assuming zero usage", async () => {
+  it("refuses missing billing coverage instead of assuming zero usage", async () => {
     const { processor, input, registration, store } = createBillingHarness()
     await expect(processor.apply(input)).rejects.toThrow("no complete usage registration")
     await expect(processor.sealBillingPeriods([registration])).rejects.toThrow(

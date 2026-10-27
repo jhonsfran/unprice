@@ -206,7 +206,7 @@ describe("subscription renewal and wallet activation DB lifecycle", () => {
     await seedTestDb({ db, fixtures })
     await db.execute(sql`
       UPDATE unprice_customer_entitlements
-      SET expires_at = NULL, metadata = json_build_object('billing_usage_genesis_v1', id)
+      SET expires_at = NULL
       WHERE project_id = ${projectId} AND subscription_id = ${subscriptionId}
     `)
     await db.execute(sql`

@@ -183,7 +183,6 @@ export function withRecordedUsageAnalytics(db: Database, analytics: Analytics): 
             currency: period.subscriptionPhase.planVersion.currency,
             amountScale: 8,
             origin: "period_generation_v1",
-            genesis: { version: 1, customerEntitlementId: entitlement.id },
             registeredAt: period.cycleStartAt,
             amount:
               period.subscriptionPhase.creditLinePolicy === "capped"

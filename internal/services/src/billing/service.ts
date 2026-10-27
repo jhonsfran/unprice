@@ -17,7 +17,7 @@ import { fromLedgerMinor, toCurrencyMinor, toLedgerMinor } from "@unprice/money"
 import { addDays } from "date-fns/addDays"
 import type { Cache } from "../cache"
 import type { CustomerService } from "../customers/service"
-import { type GrantsManager, readBillingUsageGenesis } from "../entitlements"
+import type { GrantsManager } from "../entitlements"
 import type { InvoiceLine, LedgerGateway } from "../ledger"
 import type { Metrics } from "../metrics"
 import type { UnPricePaymentProviderError } from "../payment-provider/errors"
@@ -2108,13 +2108,7 @@ export class BillingService {
                     if (owners.length === 0)
                       throw new Error(`No entitlement owns new billing period ${period.id}`)
                     return owners.map((entitlement) => {
-                      const genesis = readBillingUsageGenesis(entitlement)
-                      if (!genesis)
-                        throw new Error(
-                          `Entitlement ${entitlement.id} has unknown legacy billing usage coverage`
-                        )
                       return billingUsageRegistrationSchema.parse({
-                        genesis,
                         projectId: period.projectId,
                         customerId: period.customerId,
                         customerEntitlementId: entitlement.id,

@@ -88,23 +88,5 @@ export function readEventMeterState(params: {
 }) {
   const { createdAt, entitlement, store, timestamp } = params
   const key = resolveMeterStateKey({ entitlement, timestamp })
-  const scoped = store.readMeterStateDraft(key, createdAt)
-  if (scoped.exists || !entitlement.resetConfig) return scoped
-  const legacy = store.readMeterStateDraft(deriveMeterKey(entitlement.meterConfig), createdAt)
-  if (!legacy.exists) return scoped
-  const period = computeGrantPeriodBucket(
-    {
-      grantId: entitlement.customerEntitlementId,
-      effectiveAt: entitlement.effectiveAt,
-      expiresAt: entitlement.expiresAt,
-      resetConfig: entitlement.resetConfig,
-    },
-    timestamp
-  )
-  if (!period || legacy.updatedAt === null || period.start <= legacy.updatedAt) {
-    throw new Error(
-      "Legacy meter state overlaps this reset period. Reconcile historical usage before recording new events in this period."
-    )
-  }
-  return scoped
+  return store.readMeterStateDraft(key, createdAt)
 }

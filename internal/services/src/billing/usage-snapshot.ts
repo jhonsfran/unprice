@@ -1,6 +1,5 @@
 import { type CustomerEntitlement, currencySchema } from "@unprice/db/validators"
 import { z } from "zod"
-import { billingUsageGenesisSchema } from "../entitlements/billing-usage-genesis"
 import { UnsupportedUsageCorrectionError } from "../entitlements/errors"
 
 export const billingUsageIdentitySchema = z.object({
@@ -20,7 +19,6 @@ export const billingUsageIdentitySchema = z.object({
 })
 
 export const billingUsageRegistrationSchema = billingUsageIdentitySchema.extend({
-  genesis: billingUsageGenesisSchema,
   origin: z.literal("period_generation_v1"),
   registeredAt: z.number().int().safe(),
 })
@@ -61,9 +59,6 @@ export function ownsBillingUsagePeriod(
 
 export function registerBillingUsage(input: BillingUsageRegistration): BillingUsageSnapshot {
   const registration = billingUsageRegistrationSchema.parse(input)
-  if (registration.genesis.customerEntitlementId !== registration.customerEntitlementId) {
-    throw new Error("Billing usage genesis belongs to another entitlement")
-  }
   if (registration.cycleEndAt <= registration.cycleStartAt) {
     throw new Error("Billing usage period must have a positive duration")
   }

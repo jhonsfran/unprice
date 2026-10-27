@@ -34,3 +34,12 @@ At the throughput checkpoint, compare confirmed issues, completed proofs, valida
 ## Validation
 
 Use Node 24.17.0 and pinned pnpm 10.28.0. Restore dependencies offline first. Run focused Vitest tests, then package type checks and the complete repository validation. Keep evidence in `.audit/billing-metering-evidence.md` and decisions in `.audit/billing-metering-decisions.tsv`.
+
+## Clean-rollout follow-up
+
+The user clarified that backward compatibility is not required.
+
+- [x] Remove legacy meter-state recovery and entitlement genesis metadata.
+- [x] Keep explicit registration, reset isolation, receipt replay, sealing, retention, and capture guards.
+- [x] Verify the simplified implementation and independent review.
+- [x] Commit this follow-up once on the same branch.

@@ -205,7 +205,6 @@ describe("Workflow - Billing and Subscriptions", () => {
               id: "workflow_owner",
               effectiveAt: initialNow,
               expiresAt: null,
-              metadata: { billing_usage_genesis_v1: "workflow_owner" },
             },
           ]),
         },
