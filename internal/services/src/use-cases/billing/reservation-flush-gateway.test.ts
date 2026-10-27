@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 import { HttpBillingReservationFlushGateway } from "./reservation-flush-gateway"
 
 const input = {
+  projectId: "proj_123",
   customerId: "cus_123",
   subscriptionId: "sub_123",
   subscriptionPhaseId: "phase_123",
@@ -11,7 +12,9 @@ const input = {
 
 describe("HttpBillingReservationFlushGateway", () => {
   it("posts billing reservation flushes to the internal API with bearer auth", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true })))
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ ok: true, snapshots: [] })))
     const gateway = new HttpBillingReservationFlushGateway({
       baseUrl: "https://api.example.test/",
       token: "secret_token",
@@ -21,9 +24,10 @@ describe("HttpBillingReservationFlushGateway", () => {
     const result = await gateway.flushForInvoicing(input)
 
     expect(result.err).toBeUndefined()
-    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(result.val).toEqual({ snapshots: [] })
 
-    const request = fetchMock.mock.calls[0]?.[0]
+    const request = fetchMock.mock.calls[1]?.[0]
     expect(request).toBeInstanceOf(Request)
     expect(request?.url).toBe(
       "https://api.example.test/v1/internal/billing-reservations/flush-for-invoicing"
@@ -32,6 +36,9 @@ describe("HttpBillingReservationFlushGateway", () => {
     expect(request?.headers.get("authorization")).toBe("Bearer secret_token")
     expect(request?.headers.get("content-type")).toBe("application/json")
     await expect(request?.json()).resolves.toEqual(input)
+    const sealRequest = fetchMock.mock.calls[0]?.[0]
+    expect(sealRequest.url).toBe("https://api.example.test/v1/internal/billing-usage/snapshots")
+    await expect(sealRequest.json()).resolves.toEqual({ operation: "seal", ...input })
   })
 
   it("maps non-2xx responses to FetchError", async () => {
@@ -53,7 +60,7 @@ describe("HttpBillingReservationFlushGateway", () => {
     expect(result.err?.message).toBe("flush unavailable")
     expect(result.err?.retry).toBe(true)
     expect(result.err?.context).toEqual({
-      url: "/v1/internal/billing-reservations/flush-for-invoicing",
+      url: "/v1/internal/billing-usage/snapshots",
       method: "POST",
       status: 503,
     })
@@ -78,7 +85,7 @@ describe("HttpBillingReservationFlushGateway", () => {
     expect(result.err?.message).toBe("retry later")
     expect(result.err?.retry).toBe(true)
     expect(result.err?.context).toEqual({
-      url: "/v1/internal/billing-reservations/flush-for-invoicing",
+      url: "/v1/internal/billing-usage/snapshots",
       method: "POST",
       status: 409,
     })
@@ -99,7 +106,7 @@ describe("HttpBillingReservationFlushGateway", () => {
     expect(result.err?.message).toBe("network down")
     expect(result.err?.retry).toBe(true)
     expect(result.err?.context).toEqual({
-      url: "/v1/internal/billing-reservations/flush-for-invoicing",
+      url: "/v1/internal/billing-usage/snapshots",
       method: "POST",
     })
   })

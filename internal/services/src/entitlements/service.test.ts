@@ -40,7 +40,7 @@ describe("EntitlementService customer entitlement invariants", () => {
         effectiveAt: 1000,
         expiresAt: null,
         overageStrategy: "none",
-        metadata: null,
+        metadata: { billing_usage_genesis_v1: "forged_other_id", tenant: "kept" },
       },
     })
 
@@ -50,54 +50,94 @@ describe("EntitlementService customer entitlement invariants", () => {
     expect(insert).not.toHaveBeenCalled()
   })
 
-  it("allows an adjacent entitlement for the same customer feature", async () => {
-    const returning = vi.fn().mockResolvedValue([
-      {
-        id: "ce_new",
-        projectId: "proj_123",
-        customerId: "cus_123",
-      },
-    ])
-    const onConflictDoNothing = vi.fn().mockReturnValue({ returning })
-    const values = vi.fn().mockReturnValue({ onConflictDoNothing })
-    const insert = vi.fn().mockReturnValue({ values })
-    const db = {
-      query: {
-        customerEntitlements: {
-          findFirst: vi.fn().mockResolvedValue(null),
-          findMany: vi.fn().mockResolvedValue([]),
+  it.each([true, false])(
+    "sets genesis only for a new subscription entitlement (%s)",
+    async (isSubscription) => {
+      const returning = vi.fn().mockResolvedValue([
+        {
+          id: "ce_new",
+          projectId: "proj_123",
+          customerId: "cus_123",
         },
-        planVersionFeatures: {
-          findFirst: vi.fn().mockResolvedValue({
-            id: "fpv_new",
-            featureId: "feature_api_calls",
-          }),
+      ])
+      const onConflictDoNothing = vi.fn().mockReturnValue({ returning })
+      const values = vi.fn().mockReturnValue({ onConflictDoNothing })
+      const insert = vi.fn().mockReturnValue({ values })
+      const db = {
+        query: {
+          customerEntitlements: {
+            findFirst: vi.fn().mockResolvedValue(null),
+            findMany: vi.fn().mockResolvedValue([]),
+          },
+          planVersionFeatures: {
+            findFirst: vi.fn().mockResolvedValue({
+              id: "fpv_new",
+              featureId: "feature_api_calls",
+            }),
+          },
         },
-      },
-      insert,
+        insert,
+      }
+      const service = createEntitlementService(db)
+
+      const result = await service.createCustomerEntitlement({
+        entitlement: {
+          id: "ce_new",
+          projectId: "proj_123",
+          customerId: "cus_123",
+          featurePlanVersionId: "fpv_new",
+          subscriptionId: isSubscription ? "sub_123" : null,
+          subscriptionPhaseId: isSubscription ? "phase_123" : null,
+          subscriptionItemId: isSubscription ? "item_123" : null,
+          effectiveAt: 2000,
+          expiresAt: 3000,
+          overageStrategy: "none",
+          metadata: { billing_usage_genesis_v1: "forged_other_id", tenant: "kept" },
+        },
+      })
+
+      expect(result.err).toBeUndefined()
+      expect(result.val?.id).toBe("ce_new")
+      expect(insert).toHaveBeenCalledTimes(1)
+      expect(values.mock.calls[0]?.[0].metadata).toEqual(
+        isSubscription ? { billing_usage_genesis_v1: "ce_new", tenant: "kept" } : { tenant: "kept" }
+      )
     }
-    const service = createEntitlementService(db)
+  )
 
-    const result = await service.createCustomerEntitlement({
-      entitlement: {
-        id: "ce_new",
-        projectId: "proj_123",
-        customerId: "cus_123",
-        featurePlanVersionId: "fpv_new",
-        subscriptionId: "sub_123",
-        subscriptionPhaseId: "phase_123",
-        subscriptionItemId: "item_123",
-        effectiveAt: 2000,
-        expiresAt: 3000,
-        overageStrategy: "none",
-        metadata: null,
-      },
-    })
+  it.each([null, { billing_usage_genesis_v1: "ce_existing" }])(
+    "preserves existing genesis when creation retries with caller metadata %j",
+    async (metadata) => {
+      const existing = { id: "ce_existing", metadata }
+      const insert = vi.fn()
+      const service = createEntitlementService({
+        query: {
+          customerEntitlements: {
+            findFirst: vi.fn().mockResolvedValue(existing),
+          },
+        },
+        insert,
+      })
 
-    expect(result.err).toBeUndefined()
-    expect(result.val?.id).toBe("ce_new")
-    expect(insert).toHaveBeenCalledTimes(1)
-  })
+      const result = await service.createCustomerEntitlement({
+        entitlement: {
+          id: "ce_existing",
+          projectId: "proj_123",
+          customerId: "cus_123",
+          featurePlanVersionId: "fpv_123",
+          subscriptionId: "sub_123",
+          subscriptionPhaseId: "phase_123",
+          subscriptionItemId: "item_123",
+          effectiveAt: 1000,
+          metadata: { billing_usage_genesis_v1: "ce_existing", tenant: "updated" },
+        },
+      })
+
+      expect(result.val).toEqual(existing)
+      expect(result.val?.metadata).toEqual(metadata)
+      expect(insert).not.toHaveBeenCalled()
+    }
+  )
 })
 
 function createEntitlementService(db: unknown): EntitlementService {

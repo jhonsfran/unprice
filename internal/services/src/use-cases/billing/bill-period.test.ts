@@ -5,6 +5,10 @@ import type { Logger } from "@unprice/logs"
 import { dinero } from "dinero.js"
 import * as dineroCurrencies from "dinero.js/currencies"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { applyInputSchema } from "../../../../../apps/api/src/ingestion/entitlements/contracts"
+import { createApplyInput } from "../../../../../apps/api/src/ingestion/entitlements/entitlement-window-test-fixtures"
+import { InMemoryEntitlementWindowStore } from "../../../../../apps/api/src/ingestion/entitlements/testing/in-memory-store"
+import { createEntitlementWindowProcessorHarness } from "../../../../../apps/api/src/ingestion/entitlements/testing/processor-contract"
 import type { LedgerGateway } from "../../ledger"
 import { UnPriceLedgerError } from "../../ledger/errors"
 import { UnPriceRatingError } from "../../rating/errors"
@@ -120,12 +124,16 @@ function makeBillingPeriod(overrides: Record<string, unknown> = {}) {
 
 function makeDb(
   opts: {
-    entitlementRows?: Array<{ id: string }>
+    entitlementRows?: Array<{ id: string; effectiveAt?: number; expiresAt?: number | null }>
     invoicedPeriod?: Array<{ id: string }>
     nextPendingPeriod?: Array<{ invoiceAt: number }>
   } = {}
 ): MockBillPeriodDb {
-  const entitlementRows = opts.entitlementRows ?? [{ id: "ent_1" }]
+  const entitlementRows = (opts.entitlementRows ?? [{ id: "ent_1" }]).map((row) => ({
+    effectiveAt: 0,
+    expiresAt: null,
+    ...row,
+  }))
   const invoicedPeriod = opts.invoicedPeriod ?? []
   const nextPendingPeriod = opts.nextPendingPeriod ?? []
   const txExecute = vi.fn().mockResolvedValue(undefined)
@@ -279,6 +287,293 @@ describe("billPeriod", () => {
       expect.objectContaining({ periodIds: ["bp_1"], invoiceId: "inv_1" })
     )
   })
+
+  it.each([
+    ["normal", false, "uncapped", null, 0],
+    ["trial", false, "uncapped", null, 0],
+    ["normal", true, "uncapped", null, 0],
+    ["normal", false, "capped", "due", 600_000_000],
+    ["normal", false, "uncapped", "paid", 600_000_000],
+    ["normal", false, "uncapped", "due", 600_000_000],
+    ["normal", false, "uncapped", "included", 600_000_000],
+    ["normal", false, "uncapped", "due", 1_100_000_000],
+  ] as const)(
+    "invoices accepted durable usage with delayed reporting for a %s period (completion fails: %s, policy: %s, capture: %s amount: %s)",
+    async (periodType, failCompletion, phasePolicy, captureStatus, initialCapture) => {
+      const period = makeBillingPeriod({
+        type: periodType,
+        subscriptionItem: {
+          id: "item_1",
+          units: null,
+          featurePlanVersion: {
+            id: "fpv_1",
+            featureType: "usage",
+            feature: { slug: "api-calls", title: "API Calls" },
+          },
+        },
+      })
+      txRepoInstance.listPendingPeriodsForStatement.mockResolvedValue([period])
+      let invoiced = false
+      let completionFailed = false
+      let postedAmount = 0
+      let capturedAmount: number = initialCapture
+      outerRepoInstance.listPendingPeriodGroups.mockImplementation(async () =>
+        invoiced ? [] : [makePeriodGroup()]
+      )
+      txRepoInstance.listPendingPeriodGroups = outerRepoInstance.listPendingPeriodGroups
+      txRepoInstance.markPeriodsInvoiced.mockImplementation(async () => {
+        invoiced = true
+      })
+      const ratingService = makeRatingService(Ok([]))
+      const ledgerService = makeLedgerService({
+        createTransfer: vi.fn(async (input) => {
+          postedAmount += input.amount.toJSON().amount
+          return Ok({ transferId: "xfer_1" })
+        }),
+        getInvoiceLines: vi.fn(async () =>
+          Ok(
+            [
+              ...(capturedAmount === 0
+                ? []
+                : [{ amount: capturedAmount, flow: "capture", status: captureStatus }]),
+              ...(postedAmount === 0
+                ? []
+                : [{ amount: postedAmount, flow: "subscription", status: "due" }]),
+            ].map((line, index) => ({
+              entryId: `entry_${index}`,
+              statementKey: "stmt_2026_04",
+              kind: "usage",
+              description: "API Calls",
+              quantity: line.amount / 100_000_000,
+              amount: dinero({ amount: line.amount, currency: usd, scale: 8 }),
+              currency: "USD",
+              createdAt: new Date(),
+              metadata: {
+                billing_period_id: "bp_1",
+                feature_plan_version_item_id: "item_1",
+                subscription_id: "sub_1",
+                subscription_item_id: "item_1",
+                flow: line.flow,
+                settlement_status: line.status,
+                settlement_source:
+                  line.flow !== "capture"
+                    ? "provider"
+                    : line.status === "paid"
+                      ? "cash_wallet"
+                      : line.status === "included"
+                        ? "plan_included"
+                        : "credit_line",
+              },
+            }))
+          )
+        ),
+      } as unknown as Partial<LedgerGateway>)
+      const eventAt = period.cycleStartAt + 1_000
+      const input = createApplyInput({
+        projectId: "proj_1",
+        customerId: "cust_1",
+        customerEntitlementId: "ent_1",
+        subscriptionItemId: "item_1",
+        periodStartAt: period.cycleStartAt,
+        periodEndAt: period.cycleEndAt,
+        featureSlug: "api-calls",
+        now: eventAt,
+        event: { timestamp: eventAt, properties: { amount: 10 } },
+      })
+      input.entitlement.billingPeriods[0] = {
+        billingPeriodId: "bp_1",
+        statementKey: "stmt_2026_04",
+        featurePlanVersionItemId: "item_1",
+        cycleStartAt: period.cycleStartAt,
+        cycleEndAt: period.cycleEndAt,
+      }
+      const entitlement = {
+        ...input.entitlement,
+        creditLinePolicy: "uncapped" as const,
+        overageStrategy: "none" as const,
+        subscriptionId: "sub_1",
+      }
+      const harness = createEntitlementWindowProcessorHarness({
+        now: eventAt,
+        store: new InMemoryEntitlementWindowStore(),
+      })
+      const registration = {
+        projectId: "proj_1",
+        customerId: "cust_1",
+        customerEntitlementId: "ent_1",
+        subscriptionId: "sub_1",
+        subscriptionPhaseId: "phase_1",
+        subscriptionItemId: "item_1",
+        billingPeriodId: "bp_1",
+        statementKey: "stmt_2026_04",
+        featureSlug: "api-calls",
+        cycleStartAt: period.cycleStartAt,
+        cycleEndAt: period.cycleEndAt,
+        currency: "USD" as const,
+        amountScale: 8 as const,
+        origin: "period_generation_v1" as const,
+        genesis: { version: 1 as const, customerEntitlementId: "ent_1" },
+        registeredAt: eventAt,
+      }
+      if (typeof harness.processor.registerBillingPeriods === "function") {
+        await harness.processor.registerBillingPeriods([registration])
+      }
+      const wallClock = vi.spyOn(Date, "now").mockReturnValue(eventAt)
+      const acceptedFacts = []
+      const events =
+        captureStatus === null
+          ? [applyInputSchema.parse({ ...input, entitlement })]
+          : [
+              applyInputSchema.parse({
+                ...input,
+                entitlement,
+                wallet: { mode: "external_reservation", remainingAmount: 1_000_000_000 },
+                event: { ...input.event, properties: { amount: 6 } },
+              }),
+              applyInputSchema.parse({
+                ...input,
+                entitlement,
+                idempotencyKey: "ordinary_4",
+                event: { ...input.event, id: "ordinary_4", properties: { amount: 4 } },
+              }),
+            ]
+      try {
+        for (const event of events) {
+          const accepted = await harness.processor.apply(event)
+          expect(accepted.allowed).toBe(true)
+          acceptedFacts.push(...(accepted.meterFacts ?? []))
+        }
+      } finally {
+        wallClock.mockRestore()
+      }
+      expect(acceptedFacts.map((fact) => [fact.amount, fact.delta])).toEqual(
+        captureStatus === null
+          ? [[1_000_000_000, 10]]
+          : [
+              [600_000_000, 6],
+              [400_000_000, 4],
+            ]
+      )
+      const reservationFlushGateway = {
+        registerPeriods: vi.fn().mockResolvedValue(Ok(undefined)),
+        flushForInvoicing: vi.fn(async () =>
+          Ok({
+            snapshots:
+              typeof harness.processor.sealBillingPeriods === "function"
+                ? await harness.processor.sealBillingPeriods([registration])
+                : [
+                    {
+                      ...registration,
+                      amount: 1_000_000_000,
+                      quantity: 10,
+                      lastEventAt: eventAt,
+                      state: "sealed" as const,
+                      sealedAt: eventAt,
+                      completedAt: null,
+                    },
+                  ],
+          })
+        ),
+        completeForInvoicing: vi.fn(async () => {
+          if (invoiced && typeof harness.processor.completeBillingPeriods === "function") {
+            if (failCompletion && !completionFailed) {
+              completionFailed = true
+              return Err(
+                new FetchError({ message: "completion acknowledgement unavailable", retry: true })
+              )
+            }
+            await harness.processor.completeBillingPeriods(["bp_1"])
+          }
+          return Ok(undefined)
+        }),
+      }
+      const args = {
+        context: makeContext(),
+        logger: makeLogger(),
+        db: makeDb({
+          invoicedPeriod: [{ id: "bp_1" }],
+          entitlementRows: [
+            { id: "ent_1" },
+            { id: "ent_expired", expiresAt: period.cycleStartAt },
+            { id: "ent_future", effectiveAt: period.cycleEndAt },
+          ],
+        }),
+        repo: makeRepo(makePhase({ creditLinePolicy: phasePolicy })),
+        ratingService,
+        ledgerService,
+        reservationFlushGateway,
+      }
+
+      if (initialCapture > 1_000_000_000) {
+        await expect(billPeriod(args)).rejects.toThrow(
+          "wallet captures do not match its sealed usage amount"
+        )
+        expect(invoiced).toBe(false)
+        expect(postedAmount).toBe(0)
+        expect(harness.store.readBillingUsageSnapshot("bp_1")).toMatchObject({
+          state: "sealed",
+          amount: 1_000_000_000,
+        })
+        return
+      }
+      if (phasePolicy === "capped") {
+        await expect(billPeriod(args)).rejects.toThrow(
+          "wallet captures do not match its sealed usage amount"
+        )
+        expect(invoiced).toBe(false)
+        expect(postedAmount).toBe(0)
+        capturedAmount = 1_000_000_000
+      }
+      if (failCompletion) {
+        await expect(billPeriod(args)).rejects.toThrow("completion acknowledgement unavailable")
+        expect(invoiced).toBe(true)
+        expect(harness.store.readBillingUsageSnapshot("bp_1")?.state).toBe("sealed")
+      } else {
+        await billPeriod(args)
+      }
+      vi.mocked(ratingService.rateBillingPeriod).mockResolvedValue(
+        Ok([
+          {
+            price: {
+              totalPrice: {
+                dinero: dinero({ amount: 1_000_000_000, currency: usd, scale: 8 }),
+                displayAmount: "10",
+              },
+              subtotalPrice: {
+                dinero: dinero({ amount: 1_000_000_000, currency: usd, scale: 8 }),
+                displayAmount: "10",
+              },
+              unitPrice: {
+                dinero: dinero({ amount: 100_000_000, currency: usd, scale: 8 }),
+                displayAmount: "1",
+              },
+            },
+            usage: 10,
+            prorate: 1,
+            cycleStartAt: period.cycleStartAt,
+            cycleEndAt: period.cycleEndAt,
+            included: 0,
+            limit: Number.POSITIVE_INFINITY,
+            isTrial: false,
+          },
+        ])
+      )
+      await billPeriod(args)
+
+      const expectedAmount = periodType === "trial" ? 0 : 1_000_000_000
+      expect(postedAmount + capturedAmount).toBe(expectedAmount)
+      const invoiceData = txRepoInstance.updateInvoice.mock.calls[0]?.[0].data
+      expect(invoiceData.grossAmount).toBe(expectedAmount)
+      if (captureStatus !== null && phasePolicy === "uncapped") {
+        expect(postedAmount).toBe(400_000_000)
+        expect(invoiceData.amountDue).toBe(captureStatus === "due" ? 1_000_000_000 : 400_000_000)
+        expect(invoiceData.amountPaid).toBe(captureStatus === "paid" ? 600_000_000 : 0)
+        expect(invoiceData.amountIncluded).toBe(captureStatus === "included" ? 600_000_000 : 0)
+      }
+      expect(invoiced).toBe(true)
+      expect(harness.store.readBillingUsageSnapshot("bp_1")?.state).toBe("completed")
+    }
+  )
 
   it("two periods in same statement — both rated and posted, one invoice, total is sum", async () => {
     const period1 = makeBillingPeriod({ id: "bp_1", subscriptionItemId: "item_1" })
@@ -699,6 +994,8 @@ describe("billPeriod", () => {
     const repo = makeRepo()
     const logger = makeLogger()
     const reservationFlushGateway = {
+      registerPeriods: vi.fn().mockResolvedValue(Ok(undefined)),
+      completeForInvoicing: vi.fn().mockResolvedValue(Ok(undefined)),
       flushForInvoicing: vi.fn().mockResolvedValue(
         Err(
           new FetchError({
@@ -737,7 +1034,9 @@ describe("billPeriod", () => {
     const repo = makeRepo()
     const logger = makeLogger()
     const reservationFlushGateway = {
-      flushForInvoicing: vi.fn().mockResolvedValue(Ok(undefined)),
+      registerPeriods: vi.fn().mockResolvedValue(Ok(undefined)),
+      completeForInvoicing: vi.fn().mockResolvedValue(Ok(undefined)),
+      flushForInvoicing: vi.fn().mockResolvedValue(Ok({ snapshots: [] })),
     }
 
     const result = await billPeriod({
@@ -752,6 +1051,7 @@ describe("billPeriod", () => {
 
     expect(result.phasesProcessed).toBe(1)
     expect(reservationFlushGateway.flushForInvoicing).toHaveBeenCalledWith({
+      projectId: "proj_1",
       customerId: "cust_1",
       subscriptionId: "sub_1",
       subscriptionPhaseId: "phase_1",

@@ -6,11 +6,17 @@ import type { Logger } from "@unprice/logs"
 import { toLedgerMinor } from "@unprice/money"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Cache } from "../../cache"
-import { type ServiceContext, createServiceContext } from "../../context"
+import type { ServiceContext } from "../../context"
 import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
 import type { Metrics } from "../../metrics"
-import { RatingService } from "../../rating/service"
+import {
+  RecordedFixtureRatingService as RatingService,
+  billPeriodWithRecordedUsage as billPeriod,
+  createRecordedServiceContext as createServiceContext,
+  withRecordedUsageAnalytics,
+} from "../../test-fixtures/recorded-usage"
+
 import { DrizzleSubscriptionRepository } from "../../subscriptions/repository.drizzle"
 import type { SubscriptionContext } from "../../subscriptions/types"
 import {
@@ -19,7 +25,6 @@ import {
   truncateTestDatabase,
 } from "../../test-fixtures/database"
 import { seedTestDb } from "../../test-fixtures/seed-db"
-import { billPeriod } from "../../use-cases/billing/bill-period"
 
 const db = createTestDatabaseConnection()
 
@@ -55,7 +60,7 @@ function createLogger(): Logger {
 }
 
 function createAnalytics(usageByFeature: Record<string, number> = {}): Analytics {
-  return {
+  return withRecordedUsageAnalytics(db, {
     getUsageBillingFeatures: vi.fn(
       async ({
         features,
@@ -70,7 +75,7 @@ function createAnalytics(usageByFeature: Record<string, number> = {}): Analytics
         )
     ),
     ingestEvents: vi.fn(),
-  } as unknown as Analytics
+  } as unknown as Analytics)
 }
 
 function createCache(): Cache {

@@ -1,6 +1,11 @@
 import type { OverageStrategy } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logs"
 import { LEDGER_SCALE } from "@unprice/money"
+import type {
+  BillingUsageIdentity,
+  BillingUsageRegistration,
+  BillingUsageSnapshot,
+} from "@unprice/services/billing"
 import {
   AsyncMeterAggregationEngine,
   EventTimestampTooFarInFutureError,
@@ -37,6 +42,13 @@ import {
   planWalletReservationSpend,
   resolveBatchWalletSpendWindow,
 } from "./batch-apply-helpers"
+import {
+  completeBillingPeriods,
+  planBillingEventSnapshot,
+  recordBillingEvent,
+  registerBillingPeriods,
+  sealBillingPeriods,
+} from "./billing-usage"
 import {
   type ActiveGrantInput,
   type ApplyBatchInput,
@@ -451,6 +463,7 @@ export class EntitlementWindowProcessor {
     Object.assign(
       state.metrics,
       this.commitCompactBatchDraft({
+        input,
         createdAt,
         idempotencyEntries: commit.idempotencyEntries,
         meterStates: commit.meterStates,
@@ -666,25 +679,36 @@ export class EntitlementWindowProcessor {
       facts,
       grantStates: state.grantStates,
     })
-    if (usesWalletReservation && state.wallet) {
-      try {
+    let billingSnapshot: BillingUsageSnapshot | null
+    try {
+      billingSnapshot = planBillingEventSnapshot(
+        this.store,
+        eventInput,
+        pricedFacts.map((pricedFact) =>
+          buildMeterFactPayload({ createdAt, input: eventInput, meter: setup.meter, pricedFact })
+        ),
+        state.billingUsageSnapshots
+      )
+      if (usesWalletReservation && state.wallet) {
         assertSupportedWalletCorrection({
           totalCost: pricedFacts.reduce((total, fact) => total + fact.amountMinor, 0),
           totalUnits: this.sumPricedFactUnits(pricedFacts),
           window: resolveBatchWalletSpendWindow({ draft: state.wallet, persisted: setup.wallet }),
         })
-      } catch (error) {
-        if (!(error instanceof UnsupportedUsageCorrectionError)) throw error
-        this.stageOptimizedBatchDeniedResult({
-          createdAt,
-          deniedReason: "INVALID_AGGREGATION_PROPERTIES",
-          message: error.message,
-          event,
-          state,
-        })
-        return null
       }
+    } catch (error) {
+      if (!(error instanceof UnsupportedUsageCorrectionError)) throw error
+      this.stageOptimizedBatchDeniedResult({
+        createdAt,
+        deniedReason: "INVALID_AGGREGATION_PROPERTIES",
+        message: error.message,
+        event,
+        state,
+      })
+      return null
     }
+    if (billingSnapshot)
+      state.billingUsageSnapshots.set(billingSnapshot.billingPeriodId, billingSnapshot)
     state.meterStates.set(meterStateKey, eventMeterState)
     state.metrics.priced_fact_count += pricedFacts.length
     state.metrics.grant_allocation_count += touchedStates.size
@@ -1042,6 +1066,7 @@ export class EntitlementWindowProcessor {
   }
 
   private commitCompactBatchDraft(params: {
+    input: ApplyBatchInput
     createdAt: number
     idempotencyEntries: BatchIdempotencyEntry[]
     meterStates: Map<string, MeterStateDraft>
@@ -1088,6 +1113,18 @@ export class EntitlementWindowProcessor {
 
       tx.writeGrantConsumptions(params.touchedGrantStates.values())
 
+      for (const entry of params.idempotencyEntries) {
+        if (!entry.allowed) continue
+        const event = params.input.events.find(
+          (candidate) => candidate.idempotencyKey === entry.eventId
+        )
+        if (!event) throw new Error("Missing accepted billing event in batch")
+        recordBillingEvent(
+          tx,
+          { ...params.input, event: { ...event, source: event.source } },
+          entry.meterFacts
+        )
+      }
       tx.writeBatchIdempotencyResults(params.idempotencyEntries)
 
       if (params.walletDirty && params.wallet) {
@@ -1259,42 +1296,24 @@ export class EntitlementWindowProcessor {
     } = params
 
     try {
-      return this.store.atomically((tx) => {
+      const outcome = this.store.atomically((tx) => {
         // Double-check idempotency inside the transaction
         const cachedResult = tx.lookupCachedIdempotencyResult(idempotencyKey)
         if (cachedResult) {
           metrics.duplicateCount = 1
-          return cachedResult
+          return { result: cachedResult, entry: null }
         }
 
         // Apply the meter event and price it (same as standard mode)
-        let pricedFacts: PricedFact[]
-        try {
-          pricedFacts = this.applyAndPriceSingleApplyEvent(tx, {
-            activeGrants,
-            createdAt,
-            entitlement,
-            input,
-            meter,
-            metrics,
-            overageStrategy,
-          })
-        } catch (error) {
-          if (error instanceof EntitlementWindowLimitExceededError) {
-            const deniedResult = this.persistDeniedApplyResult(
-              {
-                idempotencyKey,
-                createdAt,
-                deniedReason: "LIMIT_EXCEEDED",
-                message: error.message,
-              },
-              tx
-            )
-            metrics.idempotencyInsertCount = 1
-            return deniedResult
-          }
-          throw error
-        }
+        const pricedFacts = this.applyAndPriceSingleApplyEvent(tx, {
+          activeGrants,
+          createdAt,
+          entitlement,
+          input,
+          meter,
+          metrics,
+          overageStrategy,
+        })
 
         // Compare priced cost against external reservation remaining amount
         const totalCost = pricedFacts.reduce((sum, { amountMinor }) => sum + amountMinor, 0)
@@ -1317,15 +1336,28 @@ export class EntitlementWindowProcessor {
           createdAt,
           idempotencyKey,
           meterFacts,
+          input,
           metrics,
         })
 
-        this.store.recordBatchIdempotencyResults([idempotencyEntry])
-        this.alarms.schedulePostCommitAlarm()
-
-        return { allowed: true, meterFacts } as ApplyResult
+        return { result: { allowed: true, meterFacts } as ApplyResult, entry: idempotencyEntry }
       })
+      if (outcome.entry) {
+        this.store.recordBatchIdempotencyResults([outcome.entry])
+        this.alarms.schedulePostCommitAlarm()
+      }
+      return outcome.result
     } catch (error) {
+      if (error instanceof EntitlementWindowLimitExceededError) {
+        const deniedResult = this.persistDeniedApplyResult({
+          idempotencyKey,
+          createdAt,
+          deniedReason: "LIMIT_EXCEEDED",
+          message: error.message,
+        })
+        metrics.idempotencyInsertCount = 1
+        return deniedResult
+      }
       if (error instanceof UnsupportedUsageCorrectionError) {
         const deniedResult = this.persistDeniedApplyResult({
           idempotencyKey,
@@ -1856,6 +1888,7 @@ export class EntitlementWindowProcessor {
         createdAt,
         idempotencyKey,
         meterFacts,
+        input,
         metrics,
       })
 
@@ -2077,6 +2110,7 @@ export class EntitlementWindowProcessor {
       createdAt: number
       idempotencyKey: string
       meterFacts: BatchIdempotencyEntry["meterFacts"]
+      input: ApplyInput
       metrics: Pick<SingleApplyExecutionMetrics, "idempotencyInsertCount">
     }
   ): BatchIdempotencyEntry {
@@ -2089,6 +2123,7 @@ export class EntitlementWindowProcessor {
       denyMessage: null,
       meterFacts,
     }
+    recordBillingEvent(tx, params.input, meterFacts)
     tx.writeBatchIdempotencyResults([idempotencyEntry])
     metrics.idempotencyInsertCount = 1
     return idempotencyEntry
@@ -2287,6 +2322,23 @@ export class EntitlementWindowProcessor {
 
   public async requestDeletion(): Promise<void> {
     return this.alarms.requestDeletion()
+  }
+
+  public async registerBillingPeriods(
+    input: BillingUsageRegistration[]
+  ): Promise<BillingUsageSnapshot[]> {
+    const snapshots = this.store.atomically((tx) => registerBillingPeriods(tx, input))
+    this.alarms.schedulePostCommitAlarm()
+    return snapshots
+  }
+
+  public async sealBillingPeriods(input: BillingUsageIdentity[]): Promise<BillingUsageSnapshot[]> {
+    return this.store.atomically((tx) => sealBillingPeriods(tx, input, this.clock.now()))
+  }
+
+  public async completeBillingPeriods(input: string[]): Promise<void> {
+    this.store.atomically((tx) => completeBillingPeriods(tx, input, this.clock.now()))
+    this.alarms.schedulePostCommitAlarm()
   }
 
   public async flushReservationForInvoicing(

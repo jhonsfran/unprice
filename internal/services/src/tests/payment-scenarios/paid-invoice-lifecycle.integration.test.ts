@@ -6,7 +6,7 @@ import type { Logger } from "@unprice/logs"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { BillingService } from "../../billing/service"
 import type { Cache } from "../../cache"
-import { type ServiceContext, createServiceContext } from "../../context"
+import type { ServiceContext } from "../../context"
 import type { CustomerService } from "../../customers/service"
 import { GrantsManager } from "../../entitlements/grants"
 import { type LedgerGateway, customerAccountKeys, platformAccountKey } from "../../ledger"
@@ -19,7 +19,14 @@ import type {
   VerifiedProviderWebhook,
 } from "../../payment-provider/interface"
 import type { PaymentProviderService } from "../../payment-provider/service"
-import { RatingService } from "../../rating/service"
+import {
+  RecordedFixtureRatingService as RatingService,
+  billPeriodWithRecordedUsage as billPeriod,
+  createRecordedServiceContext as createServiceContext,
+  recordedUsageGateway,
+  withRecordedUsageAnalytics,
+} from "../../test-fixtures/recorded-usage"
+
 import { DrizzleSubscriptionRepository } from "../../subscriptions/repository.drizzle"
 import type { SubscriptionContext } from "../../subscriptions/types"
 import {
@@ -28,7 +35,7 @@ import {
   truncateTestDatabase,
 } from "../../test-fixtures/database"
 import { seedTestDb } from "../../test-fixtures/seed-db"
-import { billPeriod } from "../../use-cases/billing/bill-period"
+
 import { processWebhookEvent } from "../../use-cases/payment-provider/process-webhook-event"
 import { UnPriceWalletError, type WalletService } from "../../wallet"
 
@@ -77,7 +84,7 @@ function createLogger(errors: unknown[] = []): Logger {
 }
 
 function createAnalytics(usageByFeature: Record<string, number>): Analytics {
-  return {
+  return withRecordedUsageAnalytics(db, {
     getUsageBillingFeatures: vi.fn(
       async ({
         features,
@@ -92,7 +99,7 @@ function createAnalytics(usageByFeature: Record<string, number>): Analytics {
         )
     ),
     ingestEvents: vi.fn(),
-  } as unknown as Analytics
+  } as unknown as Analytics)
 }
 
 function delay(ms: number) {
@@ -418,6 +425,7 @@ function createBillingService({
   wallet: WalletService
 }) {
   return new BillingService({
+    reservationFlushGateway: recordedUsageGateway(analytics),
     db,
     logger,
     analytics,

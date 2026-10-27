@@ -8,7 +8,12 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
 import { UnPriceLedgerError } from "../../ledger/errors"
-import { RatingService } from "../../rating/service"
+import {
+  RecordedFixtureRatingService as RatingService,
+  billPeriodWithRecordedUsage as billPeriod,
+  withRecordedUsageAnalytics,
+} from "../../test-fixtures/recorded-usage"
+
 import { DrizzleSubscriptionRepository } from "../../subscriptions/repository.drizzle"
 import type { SubscriptionContext } from "../../subscriptions/types"
 import {
@@ -17,7 +22,6 @@ import {
   truncateTestDatabase,
 } from "../../test-fixtures/database"
 import { seedTestDb } from "../../test-fixtures/seed-db"
-import { billPeriod } from "../../use-cases/billing/bill-period"
 
 const db = createTestDatabaseConnection()
 
@@ -75,7 +79,7 @@ function createLogger(): Logger {
 }
 
 function createAnalytics(usageByFeature: Record<string, number>): Analytics {
-  return {
+  return withRecordedUsageAnalytics(db, {
     getUsageBillingFeatures: vi.fn(
       async ({
         features,
@@ -89,7 +93,7 @@ function createAnalytics(usageByFeature: Record<string, number>): Analytics {
           }))
         )
     ),
-  } as unknown as Analytics
+  } as unknown as Analytics)
 }
 
 async function loadSubscriptionContext(): Promise<SubscriptionContext> {

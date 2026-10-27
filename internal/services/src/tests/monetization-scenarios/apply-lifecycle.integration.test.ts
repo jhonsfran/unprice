@@ -26,13 +26,17 @@ import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Cache } from "../../cache"
-import { type ServiceContext, createServiceContext } from "../../context"
+import type { ServiceContext } from "../../context"
 import type { Metrics } from "../../metrics"
 import {
   closeTestDatabaseConnection,
   createTestDatabaseConnection,
   truncateTestDatabase,
 } from "../../test-fixtures/database"
+import {
+  createRecordedServiceContext as createServiceContext,
+  withRecordedUsageAnalytics,
+} from "../../test-fixtures/recorded-usage"
 import { seedTestDb } from "../../test-fixtures/seed-db"
 import { applyMonetizationConfig } from "../../use-cases/monetization/apply"
 import { publishPlanVersion } from "../../use-cases/plan-version/publish"
@@ -62,10 +66,10 @@ function createLogger(): Logger {
 }
 
 function createAnalytics(): Analytics {
-  return {
+  return withRecordedUsageAnalytics(db, {
     getUsageBillingFeatures: vi.fn(async () => Ok([])),
     ingestEvents: vi.fn(),
-  } as unknown as Analytics
+  } as unknown as Analytics)
 }
 
 function createCache(): Cache {

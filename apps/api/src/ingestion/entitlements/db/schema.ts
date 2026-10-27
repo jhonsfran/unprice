@@ -36,6 +36,17 @@ export const meterStateTable = sqliteTable("meter_state", {
   createdAt: integer("created_at").notNull(),
 })
 
+export const billingUsageSnapshotsTable = sqliteTable(
+  "billing_usage_snapshots",
+  {
+    billingPeriodId: text("billing_period_id").primaryKey(),
+    state: text("state").notNull(),
+    snapshotJson: text("snapshot_json").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => ({ stateIdx: index("idx_billing_usage_snapshots_state").on(table.state) })
+)
+
 // Singleton reservation state for this DO. This mirrors the allocation that
 // WalletService.createReservation plus capture/extend/release have moved into
 // customer.{cid}.reserved so the hot path can answer "can this event be
@@ -83,6 +94,7 @@ export const schema = {
   idempotencyKeyBatchesTable,
   entitlementPeriodUsageTable,
   meterStateTable,
+  billingUsageSnapshotsTable,
   walletReservationTable,
 }
 

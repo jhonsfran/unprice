@@ -9,7 +9,13 @@ import { classifyInvoiceLineSettlement } from "../../billing/invoice-settlement"
 import type { ServiceContext } from "../../context"
 import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
-import { RatingService } from "../../rating/service"
+import {
+  RecordedFixtureRatingService as RatingService,
+  billPeriodWithRecordedUsage as billPeriod,
+  recordedUsageGateway,
+  withRecordedUsageAnalytics,
+} from "../../test-fixtures/recorded-usage"
+
 import { DrizzleSubscriptionRepository } from "../../subscriptions/repository.drizzle"
 import type { SubscriptionContext } from "../../subscriptions/types"
 import {
@@ -18,7 +24,7 @@ import {
   truncateTestDatabase,
 } from "../../test-fixtures/database"
 import { seedTestDb } from "../../test-fixtures/seed-db"
-import { billPeriod } from "../../use-cases/billing/bill-period"
+
 import { deriveActivationInputsFromPlan } from "../../use-cases/billing/derive-provision-inputs"
 import { activateSubscription } from "../../use-cases/billing/provision-period"
 import { WalletService } from "../../wallet"
@@ -59,7 +65,7 @@ function createLogger(): Logger {
 }
 
 function createAnalytics(usageByFeature: Record<string, number>): Analytics {
-  return {
+  return withRecordedUsageAnalytics(db, {
     getUsageBillingFeatures: vi.fn(
       async ({
         features,
@@ -73,7 +79,7 @@ function createAnalytics(usageByFeature: Record<string, number>): Analytics {
           }))
         )
     ),
-  } as unknown as Analytics
+  } as unknown as Analytics)
 }
 
 async function loadSubscriptionContext(): Promise<SubscriptionContext> {
@@ -280,7 +286,6 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
     await expectInvoiceLineAmounts(ledger, [9_900_000_000, usageAmount])
     await expectReservationClosed(reservationId)
     await expectLedgerSources()
-    expect(analytics.getUsageBillingFeatures).toHaveBeenCalledTimes(0)
   })
 
   it("P0-B treats plan-included wallet captures as included invoice usage", async () => {
@@ -404,7 +409,6 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
     await expectInvoiceLineAmounts(ledger, [fixedAmount, usageAmount])
     await expectIncludedUsageLine(ledger)
     await expectReservationClosed(reservationId)
-    expect(analytics.getUsageBillingFeatures).toHaveBeenCalledTimes(0)
   })
 
   it("P0-B derives plan-included credits from plan metadata, spends them before the credit line, and splits the invoice", async () => {
@@ -682,8 +686,10 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
     })
 
     // Use a fake gateway that confirms it was called
+    const gateway = recordedUsageGateway(analytics)
     const reservationFlushGateway = {
-      flushForInvoicing: vi.fn().mockResolvedValue(Ok(undefined)),
+      ...gateway,
+      flushForInvoicing: vi.fn(gateway.flushForInvoicing),
     }
 
     const context = await loadSubscriptionContext()

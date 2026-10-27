@@ -1,6 +1,6 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
-import { hashStringSHA256, newId } from "@unprice/db/utils"
+import { hashStringSHA256 } from "@unprice/db/utils"
 import {
   type CollectionMethod,
   type Currency,
@@ -17,7 +17,7 @@ import { fromLedgerMinor, toCurrencyMinor, toLedgerMinor } from "@unprice/money"
 import { addDays } from "date-fns/addDays"
 import type { Cache } from "../cache"
 import type { CustomerService } from "../customers/service"
-import type { GrantsManager } from "../entitlements"
+import { type GrantsManager, readBillingUsageGenesis } from "../entitlements"
 import type { InvoiceLine, LedgerGateway } from "../ledger"
 import type { Metrics } from "../metrics"
 import type { UnPricePaymentProviderError } from "../payment-provider/errors"
@@ -32,11 +32,13 @@ import type { RatedCharge, RatingInput } from "../rating/types"
 import type { SubscriptionMachine } from "../subscriptions/machine"
 import { DrizzleSubscriptionRepository } from "../subscriptions/repository.drizzle"
 import { LockLostError, withLockedMachine } from "../subscriptions/withLockedMachine"
+import type { BillingReservationFlushGateway } from "../use-cases/billing/reservation-flush-gateway"
 import { settlePrepaidInvoiceToWallet } from "../use-cases/billing/settle-invoice"
 import type { WalletService } from "../wallet"
 import { UnPriceBillingError } from "./errors"
 import { DrizzleBillingRepository } from "./repository.drizzle"
 import { billingStrategyFor } from "./strategy"
+import { billingUsageRegistrationSchema, ownsBillingUsagePeriod } from "./usage-snapshot"
 
 type ComputeCurrentUsageResult = RatedCharge
 
@@ -349,6 +351,7 @@ export class BillingService {
   private readonly ratingService: RatingService
   private readonly ledgerService: LedgerGateway
   private readonly walletService: WalletService
+  private readonly reservationFlushGateway: BillingReservationFlushGateway | undefined
 
   constructor({
     db,
@@ -362,6 +365,7 @@ export class BillingService {
     ratingService,
     ledgerService,
     walletService,
+    reservationFlushGateway,
   }: {
     db: Database
     logger: Logger
@@ -375,6 +379,7 @@ export class BillingService {
     ratingService: RatingService
     ledgerService: LedgerGateway
     walletService: WalletService
+    reservationFlushGateway?: BillingReservationFlushGateway
   }) {
     this.db = db
     this.logger = logger
@@ -387,6 +392,7 @@ export class BillingService {
     this.ratingService = ratingService
     this.ledgerService = ledgerService
     this.walletService = walletService
+    this.reservationFlushGateway = reservationFlushGateway
   }
 
   private setLockContext(context: {
@@ -423,6 +429,7 @@ export class BillingService {
         ledgerService: this.ledgerService,
         walletService: this.walletService,
         billingService: this,
+        reservationFlushGateway: this.reservationFlushGateway,
         setLockContext: (ctx: Parameters<typeof this.setLockContext>[0]) =>
           this.setLockContext(ctx),
       })
@@ -1905,7 +1912,7 @@ export class BillingService {
         subscription: true,
         items: {
           with: {
-            featurePlanVersion: true,
+            featurePlanVersion: { with: { feature: true } },
           },
         },
       },
@@ -2057,7 +2064,7 @@ export class BillingService {
                 })
 
                 return {
-                  id: newId("billing_period"),
+                  id: `bp_bs1_${(await hashStringSHA256([phase.projectId, phase.subscriptionId, phase.id, item.id, w.start, w.end, "billing_usage_v1"].join("|"))).slice(0, 28)}`,
                   projectId: phase.projectId,
                   subscriptionId: phase.subscriptionId,
                   customerId: phase.subscription.customerId,
@@ -2080,6 +2087,60 @@ export class BillingService {
             // 4. Batch insert billing periods for this item
             if (billingPeriodValues.length > 0) {
               if (!dryRun) {
+                if (item.featurePlanVersion.featureType === "usage") {
+                  if (!this.reservationFlushGateway)
+                    throw new Error("Authoritative billing usage gateway is required")
+                  const entitlements = await tx.query.customerEntitlements.findMany({
+                    where: (table, { and, eq }) =>
+                      and(
+                        eq(table.projectId, phase.projectId),
+                        eq(table.subscriptionId, phase.subscriptionId),
+                        eq(table.subscriptionPhaseId, phase.id),
+                        eq(table.subscriptionItemId, item.id)
+                      ),
+                  })
+                  if (entitlements.length === 0)
+                    throw new Error(`No entitlement owns new billing periods for item ${item.id}`)
+                  const registrations = billingPeriodValues.flatMap((period) => {
+                    const owners = entitlements.filter((entitlement) =>
+                      ownsBillingUsagePeriod(entitlement, period)
+                    )
+                    if (owners.length === 0)
+                      throw new Error(`No entitlement owns new billing period ${period.id}`)
+                    return owners.map((entitlement) => {
+                      const genesis = readBillingUsageGenesis(entitlement)
+                      if (!genesis)
+                        throw new Error(
+                          `Entitlement ${entitlement.id} has unknown legacy billing usage coverage`
+                        )
+                      return billingUsageRegistrationSchema.parse({
+                        genesis,
+                        projectId: period.projectId,
+                        customerId: period.customerId,
+                        customerEntitlementId: entitlement.id,
+                        subscriptionId: period.subscriptionId,
+                        subscriptionPhaseId: period.subscriptionPhaseId,
+                        subscriptionItemId: item.id,
+                        billingPeriodId: period.id,
+                        statementKey: period.statementKey,
+                        featureSlug: item.featurePlanVersion.feature.slug,
+                        cycleStartAt: period.cycleStartAt,
+                        cycleEndAt: period.cycleEndAt,
+                        currency: phase.planVersion.currency,
+                        amountScale: 8,
+                        origin: "period_generation_v1",
+                        registeredAt: now,
+                      })
+                    })
+                  })
+                  const registered = await this.reservationFlushGateway.registerPeriods({
+                    projectId: phase.projectId,
+                    customerId: phase.subscription.customerId,
+                    subscriptionId: phase.subscriptionId,
+                    registrations,
+                  })
+                  if (registered.err) throw registered.err
+                }
                 await txBillingRepo.createPeriodsBatch({
                   periods: billingPeriodValues,
                 })

@@ -6,7 +6,6 @@ import {
 } from "@unprice/services/use-cases"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
-import { keyAuth } from "~/auth/key"
 import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
@@ -17,7 +16,7 @@ import * as HttpStatusCodes from "~/util/http-status-codes"
 
 const tags = ["billingReservations"]
 
-const requestSchema = flushReservationsForInvoicingInputSchema.omit({ projectId: true }).extend({
+const requestSchema = flushReservationsForInvoicingInputSchema.extend({
   customerId: flushReservationsForInvoicingInputSchema.shape.customerId.openapi({
     description: "Customer id",
     example: "cus_123",
@@ -74,9 +73,8 @@ export const route = createRoute(
 
 export const registerFlushReservationsForInvoicingV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { customerId, subscriptionId, subscriptionPhaseId, statementKey } = c.req.valid("json")
-    const key = await keyAuth(c)
-    const projectId = key.projectId
+    const { projectId, customerId, subscriptionId, subscriptionPhaseId, statementKey } =
+      c.req.valid("json")
 
     const { entitlement } = c.get("services")
     const db = c.get("db")

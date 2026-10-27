@@ -1,0 +1,721 @@
+Billing and metering runtime proof excerpts
+
+Original audit baseline f97570af4. Tests were applied and executed in the task order recorded in billing-metering-decisions.tsv. Each BEFORE block is an actual behavioral failure captured before its owning fix. AFTER blocks are actual passing run summaries. Test names and full commands are in billing-metering-evidence.md. External dependency fakes and real database checks are identified there. These excerpts do not claim live Stripe execution.
+
+ISSUE 1
+BEFORE (issue-1-before.log)
+The daily assertion below proves the defect. A separate mixed-cadence fixture lacked the old analytics fake method; that harness failure is excluded from the proof.
+ FAIL  src/rating/service.extended.test.ts > billing across meter resets > rates every daily reset with its own graduated free tier
+AssertionError: expected { usage: 15, amounts: [ '5.00' ] } to deeply equal { Object (usage, amounts) }
+
+- Expected
++ Received
+
+  {
+    "amounts": [
+      "5.00",
+-     "15.00",
+    ],
+-   "usage": 40,
++   "usage": 15,
+  }
+
+ ❯ src/rating/service.extended.test.ts:698:8
+    696|       usage: result.val.reduce((total, charge) => total + charge.usage…
+    697|       amounts: result.val.map((charge) => toDecimal(charge.price.total…
+    698|     }).toEqual({ usage: 40, amounts: ["5.00", "15.00"] })
+       |        ^
+    699|   })
+    700| })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 9 passed (11)
+   Start at  12:47:35
+   Duration  902ms (transform 283ms, setup 0ms, import 810ms, tests 16ms, environment 0ms)
+
+$REPO/internal/services:
+ ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @unprice/services@0.1.0 test: `vitest run src/rating/service.extended.test.ts`
+Exit status 1
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  1 failed (1)
+      Tests  2 failed | 9 passed (11)
+AFTER (issue-1-correction-root-after.log)
+
+
+ RUN  v4.1.10 $REPO/internal/services
+
+ ✓ src/rating/service.test.ts (5 tests) 8ms
+ ✓ src/rating/service.extended.test.ts (18 tests) 14ms
+
+ Test Files  2 passed (2)
+      Tests  23 passed (23)
+   Start at  13:06:52
+   Duration  907ms (transform 511ms, setup 0ms, import 1.61s, tests 22ms, environment 0ms)
+
+
+ISSUE 2
+BEFORE (issue-2-before.log)
+FAIL late_sum_with_duplicate_delivery expected=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "late_sum", "latest": 2}] actual=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "late_sum", "latest": 1}]
+FAIL late_count_with_duplicate_delivery expected=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "late_count", "latest": 2}] actual=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "late_count", "latest": 1}]
+FAIL same_ms_with_duplicate_delivery expected=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "same_ms", "latest": 2}] actual=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "same_ms", "latest": 1}]
+PASS late_max_with_duplicate_delivery expected=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "late_max", "latest": 7}] actual=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "late_max", "latest": 7}]
+PASS latest_correction_with_duplicate_delivery expected=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "latest_correction", "latest": 6}] actual=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "latest_correction", "latest": 6}]
+FAIL late_sum_allocation expected=[{"customer_entitlement_id": "ce_late_sum", "grant_id": "grant_late_sum", "period_key": "day:4070908800000", "feature_slug": "late_sum", "period_start_at": 4070908800000, "usage": 2}] actual=[{"customer_entitlement_id": "ce_late_sum", "grant_id": "grant_late_sum", "period_key": "day:4070908800000", "feature_slug": "late_sum", "period_start_at": 4070908800000, "usage": 1}]
+FAIL late_count_allocation expected=[{"customer_entitlement_id": "ce_late_count", "grant_id": "grant_late_count", "period_key": "day:4070908800000", "feature_slug": "late_count", "period_start_at": 4070908800000, "usage": 2}] actual=[{"customer_entitlement_id": "ce_late_count", "grant_id": "grant_late_count", "period_key": "day:4070908800000", "feature_slug": "late_count", "period_start_at": 4070908800000, "usage": 1}]
+FAIL same_ms_allocation expected=[{"customer_entitlement_id": "ce_same_ms", "grant_id": "grant_same_ms", "period_key": "day:4070908800000", "feature_slug": "same_ms", "period_start_at": 4070908800000, "usage": 2}] actual=[{"customer_entitlement_id": "ce_same_ms", "grant_id": "grant_same_ms", "period_key": "day:4070908800000", "feature_slug": "same_ms", "period_start_at": 4070908800000, "usage": 1}]
+PASS late_max_allocation expected=[{"customer_entitlement_id": "ce_late_max", "grant_id": "grant_late_max", "period_key": "day:4070908800000", "feature_slug": "late_max", "period_start_at": 4070908800000, "usage": 7}] actual=[{"customer_entitlement_id": "ce_late_max", "grant_id": "grant_late_max", "period_key": "day:4070908800000", "feature_slug": "late_max", "period_start_at": 4070908800000, "usage": 7}]
+PASS latest_correction_allocation expected=[{"customer_entitlement_id": "ce_latest_correction", "grant_id": "grant_latest_correction", "period_key": "day:4070908800000", "feature_slug": "latest_correction", "period_start_at": 4070908800000, "usage": 6}] actual=[{"customer_entitlement_id": "ce_latest_correction", "grant_id": "grant_latest_correction", "period_key": "day:4070908800000", "feature_slug": "latest_correction", "period_start_at": 4070908800000, "usage": 6}]
+FAIL actual_processor_late_events_and_replay expected=[{"project_id": "proj_123", "customer_id": "cus_123", "feature_slug": "api_calls", "latest": 2}] actual=[{"project_id": "proj_123", "customer_id": "cus_123", "feature_slug": "api_calls", "latest": 1}]
+Failed checks 7
+Failed checks 7
+AFTER (issue-1-correction-root-sql-after.log)
+PASS late_max_with_duplicate_delivery expected=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "late_max", "latest": 7}] actual=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "late_max", "latest": 7}]
+PASS latest_correction_with_duplicate_delivery expected=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "latest_correction", "latest": 6}] actual=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "latest_correction", "latest": 6}]
+PASS late_sum_allocation expected=[{"customer_entitlement_id": "ce_late_sum", "grant_id": "grant_late_sum", "period_key": "day:4070908800000", "feature_slug": "late_sum", "period_start_at": 4070908800000, "usage": 2, "amount": 200000000, "currency": "USD", "amount_scale": 8}] actual=[{"customer_entitlement_id": "ce_late_sum", "grant_id": "grant_late_sum", "period_key": "day:4070908800000", "feature_slug": "late_sum", "period_start_at": 4070908800000, "usage": 2, "amount": 200000000, "currency": "USD", "amount_scale": 8}]
+PASS late_count_allocation expected=[{"customer_entitlement_id": "ce_late_count", "grant_id": "grant_late_count", "period_key": "day:4070908800000", "feature_slug": "late_count", "period_start_at": 4070908800000, "usage": 2, "amount": 200000000, "currency": "USD", "amount_scale": 8}] actual=[{"customer_entitlement_id": "ce_late_count", "grant_id": "grant_late_count", "period_key": "day:4070908800000", "feature_slug": "late_count", "period_start_at": 4070908800000, "usage": 2, "amount": 200000000, "currency": "USD", "amount_scale": 8}]
+PASS same_ms_allocation expected=[{"customer_entitlement_id": "ce_same_ms", "grant_id": "grant_same_ms", "period_key": "day:4070908800000", "feature_slug": "same_ms", "period_start_at": 4070908800000, "usage": 2, "amount": 200000000, "currency": "USD", "amount_scale": 8}] actual=[{"customer_entitlement_id": "ce_same_ms", "grant_id": "grant_same_ms", "period_key": "day:4070908800000", "feature_slug": "same_ms", "period_start_at": 4070908800000, "usage": 2, "amount": 200000000, "currency": "USD", "amount_scale": 8}]
+PASS late_max_allocation expected=[{"customer_entitlement_id": "ce_late_max", "grant_id": "grant_late_max", "period_key": "day:4070908800000", "feature_slug": "late_max", "period_start_at": 4070908800000, "usage": 7, "amount": 700000000, "currency": "USD", "amount_scale": 8}] actual=[{"customer_entitlement_id": "ce_late_max", "grant_id": "grant_late_max", "period_key": "day:4070908800000", "feature_slug": "late_max", "period_start_at": 4070908800000, "usage": 7, "amount": 700000000, "currency": "USD", "amount_scale": 8}]
+PASS latest_correction_allocation expected=[{"customer_entitlement_id": "ce_latest_correction", "grant_id": "grant_latest_correction", "period_key": "day:4070908800000", "feature_slug": "latest_correction", "period_start_at": 4070908800000, "usage": 6, "amount": 600000000, "currency": "USD", "amount_scale": 8}] actual=[{"customer_entitlement_id": "ce_latest_correction", "grant_id": "grant_latest_correction", "period_key": "day:4070908800000", "feature_slug": "latest_correction", "period_start_at": 4070908800000, "usage": 6, "amount": 600000000, "currency": "USD", "amount_scale": 8}]
+PASS partial_reset_money expected=[{"customer_entitlement_id": "ce_partial", "grant_id": "grant_partial", "period_key": "month:1767225600000", "feature_slug": "partial", "period_start_at": 1767225600000, "usage": 5, "amount": 500000000, "currency": "USD", "amount_scale": 8}] actual=[{"customer_entitlement_id": "ce_partial", "grant_id": "grant_partial", "period_key": "month:1767225600000", "feature_slug": "partial", "period_start_at": 1767225600000, "usage": 5, "amount": 500000000, "currency": "USD", "amount_scale": 8}]
+PASS single_reset_money expected=[{"customer_entitlement_id": "ce_partial", "grant_id": "grant_partial", "period_key": "month:1767225600000", "feature_slug": "partial", "period_start_at": 1767225600000, "usage": 5, "amount": 500000000, "currency": "USD", "amount_scale": 8}] actual=[{"customer_entitlement_id": "ce_partial", "grant_id": "grant_partial", "period_key": "month:1767225600000", "feature_slug": "partial", "period_start_at": 1767225600000, "usage": 5, "amount": 500000000, "currency": "USD", "amount_scale": 8}]
+PASS actual_processor_late_events_and_replay expected=[{"project_id": "proj_123", "customer_id": "cus_123", "feature_slug": "api_calls", "latest": 2}] actual=[{"project_id": "proj_123", "customer_id": "cus_123", "feature_slug": "api_calls", "latest": 2}]
+PASS unsafe_money_does_not_wrap_to_zero actual=[{"customer_entitlement_id": "ce_overflow", "grant_id": "grant_overflow", "period_key": "day:4070908800000", "feature_slug": "overflow", "period_start_at": 4070908800000, "usage": 2049, "amount": 18446744073709552000, "currency": "USD", "amount_scale": 8}]
+Failed checks 0
+
+ISSUE 3
+BEFORE (issue-3-root-before.log)
+ FAIL  src/ingestion/entitlements/processor.test.ts > reset-scoped aggregation correctness > isolates max state across daily resets through single apply
+ FAIL  src/ingestion/entitlements/processor.test.ts > reset-scoped aggregation correctness > isolates max state across daily resets through batch apply
+AssertionError: expected [ [ { delta: 10, …(3) } ], …(3) ] to deeply equal [ [ { delta: 10, …(3) } ], …(3) ]
+
+- Expected
++ Received
+
+@@ -7,14 +7,14 @@
+        "valueAfter": 10,
+      },
+    ],
+    [
+      {
+-       "amount": 600000000,
+-       "delta": 6,
++       "amount": 0,
++       "delta": 0,
+        "periodKey": "day:1793059200000",
+-       "valueAfter": 6,
++       "valueAfter": 10,
+      },
+    ],
+    [
+      {
+        "amount": 200000000,
+@@ -23,12 +23,12 @@
+        "valueAfter": 12,
+      },
+    ],
+    [
+      {
+-       "amount": 200000000,
+-       "delta": 2,
++       "amount": 0,
++       "delta": 0,
+        "periodKey": "day:1793059200000",
+-       "valueAfter": 8,
++       "valueAfter": 12,
+      },
+    ],
+  ]
+
+ ❯ src/ingestion/entitlements/processor.test.ts:1853:11
+    1851|             }))
+    1852|           )
+    1853|         ).toEqual([
+       |           ^
+    1854|           [
+    1855|             {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/12]⎯
+
+ FAIL  src/ingestion/entitlements/processor.test.ts > reset-scoped aggregation correctness > isolates latest state across daily resets through single apply
+ FAIL  src/ingestion/entitlements/processor.test.ts > reset-scoped aggregation correctness > isolates latest state across daily resets through batch apply
+AssertionError: expected [ [ { delta: 10, …(3) } ], …(3) ] to deeply equal [ [ { delta: 10, …(3) } ], …(3) ]
+
+- Expected
++ Received
+
+@@ -7,28 +7,28 @@
+        "valueAfter": 10,
+      },
+    ],
+    [
+      {
+⎯⎯⎯⎯⎯⎯ Failed Tests 12 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  1 failed (1)
+      Tests  12 failed | 3 passed | 66 skipped (81)
+AFTER (issue-3-root-after.log)
+> api@ test $REPO/apps/api
+> vitest run src/ingestion/entitlements
+
+
+ RUN  v4.1.10 $REPO/apps/api
+
+
+ Test Files  9 passed (9)
+      Tests  129 passed (129)
+   Start at  13:10:08
+   Duration  4.73s (transform 9.76s, setup 0ms, import 33.77s, tests 188ms, environment 0ms)
+
+
+ISSUE 4
+BEFORE (issue-4-root-before.log)
+ FAIL  src/ingestion/entitlements/processor.test.ts > EntitlementWindowProcessor wallet behavior > rejects corrections that require reversing captured wallet consumption
+AssertionError: expected { allowed: true, …(1) } to match object { allowed: false, …(1) }
+(1 matching property omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "allowed": false,
+-   "deniedReason": "INVALID_AGGREGATION_PROPERTIES",
++   "allowed": true,
+  }
+
+ ❯ src/ingestion/entitlements/processor.test.ts:1079:22
+    1077|     )
+    1078|
+    1079|     expect(rejected).toMatchObject({
+       |                      ^
+    1080|       allowed: false,
+    1081|       deniedReason: "INVALID_AGGREGATION_PROPERTIES",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/32]⎯
+
+ FAIL  src/ingestion/entitlements/processor.test.ts > grant correction correctness > restores grant capacity for sum through single with enforcement false
+ FAIL  src/ingestion/entitlements/processor.test.ts > grant correction correctness > restores grant capacity for sum through batch with enforcement false
+ FAIL  src/ingestion/entitlements/processor.test.ts > grant correction correctness > restores grant capacity for latest through single with enforcement false
+ FAIL  src/ingestion/entitlements/processor.test.ts > grant correction correctness > restores grant capacity for latest through batch with enforcement false
+AssertionError: expected [ …(3) ] to deeply equal [ …(3) ]
+
+- Expected
++ Received
+
+@@ -15,9 +15,9 @@
+    ],
+    [
+      {
+        "amount": 400000000,
+        "delta": 4,
+-       "value": 10,
++       "value": 14,
+      },
+    ],
+  ]
+
+ ❯ src/ingestion/entitlements/processor.test.ts:2213:9
+    2211|           }))
+    2212|         )
+    2213|       ).toEqual([
+       |         ^
+    2214|         [{ delta: 10, value: 10, amount: 1_000_000_000 }],
+    2215|         [{ delta: -4, value: 6, amount: -400_000_000 }],
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/32]⎯
+
+ FAIL  src/ingestion/entitlements/processor.test.ts > grant correction correctness > restores grant capacity for sum through single with enforcement true
+ FAIL  src/ingestion/entitlements/processor.test.ts > grant correction correctness > restores grant capacity for sum through batch with enforcement true
+ FAIL  src/ingestion/entitlements/processor.test.ts > grant correction correctness > restores grant capacity for latest through single with enforcement true
+ FAIL  src/ingestion/entitlements/processor.test.ts > grant correction correctness > restores grant capacity for latest through batch with enforcement true
+AssertionError: expected [ true, true, false ] to deeply equal [ true, true, true ]
+
+- Expected
++ Received
+
+  [
+    true,
+⎯⎯⎯⎯⎯⎯ Failed Tests 32 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  1 failed (1)
+      Tests  32 failed | 81 skipped (113)
+AFTER (issue-4-final-root.log)
+> api@ test $REPO/apps/api
+> vitest run src/ingestion/entitlements
+
+
+ RUN  v4.1.10 $REPO/apps/api
+
+
+ Test Files  11 passed (11)
+      Tests  165 passed (165)
+   Start at  13:30:30
+   Duration  1.82s (transform 3.41s, setup 0ms, import 14.61s, tests 229ms, environment 0ms)
+
+
+ISSUE 5
+BEFORE (issue-5-before.log)
+ FAIL  src/billing/service.collect.test.ts > BillingService._collectInvoicePayment > retries settlement after failure for waiting invoice using send_invoice with provider paid
+AssertionError: expected 'paid' to be 'waiting' // Object.is equality
+
+Expected: "waiting"
+Received: "paid"
+
+ ❯ src/billing/service.collect.test.ts:309:34
+    307|
+    308|       const retried = await collectInvoicePayment(billing, payload)
+    309|       expect(statusAfterFailure).toBe(status)
+       |                                  ^
+    310|       expect(retried.val?.status).toBe("paid")
+    311|       expect(findInvoiceByIdResult?.status).toBe("paid")
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/billing/service.collect.test.ts > BillingService._collectInvoicePayment > retries settlement after failure for unpaid invoice using charge_automatically with provider paid
+ FAIL  src/billing/service.collect.test.ts > BillingService._collectInvoicePayment > retries settlement after failure for unpaid invoice using charge_automatically with provider open
+AssertionError: expected 'paid' to be 'unpaid' // Object.is equality
+
+Expected: "unpaid"
+Received: "paid"
+
+ ❯ src/billing/service.collect.test.ts:309:34
+    307|
+    308|       const retried = await collectInvoicePayment(billing, payload)
+    309|       expect(statusAfterFailure).toBe(status)
+       |                                  ^
+    310|       expect(retried.val?.status).toBe("paid")
+    311|       expect(findInvoiceByIdResult?.status).toBe("paid")
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  3 failed | 14 passed (17)
+   Start at  12:32:56
+   Duration  1.05s (transform 410ms, setup 0ms, import 965ms, tests 9ms, environment 0ms)
+
+$REPO/internal/services:
+ ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @unprice/services@0.1.0 test: `vitest run src/billing/service.collect.test.ts`
+Exit status 1
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  1 failed (1)
+      Tests  3 failed | 14 passed (17)
+AFTER (issue-5-after.log)
+
+ RUN  v4.1.10 $REPO/internal/services
+
+ ✓ src/use-cases/billing/settle-invoice.test.ts (6 tests) 4ms
+ ✓ src/billing/invoice-settlement.test.ts (5 tests) 3ms
+ ✓ src/billing/service.collect.test.ts (17 tests) 8ms
+
+ Test Files  3 passed (3)
+      Tests  28 passed (28)
+   Start at  12:33:59
+   Duration  1.02s (transform 625ms, setup 0ms, import 1.86s, tests 14ms, environment 0ms)
+
+
+ISSUE 6
+BEFORE (issue-6-root-before.log)
+ FAIL  src/use-cases/billing/bill-period.test.ts > billPeriod > invoices accepted durable usage with delayed reporting for a normal period (completion fails: false)
+AssertionError: expected +0 to be 1000000000 // Object.is equality
+
+- Expected
++ Received
+
+- 1000000000
++ 0
+
+ ❯ src/use-cases/billing/bill-period.test.ts:498:28
+    496|
+    497|       const expectedAmount = periodType === "trial" ? 0 : 1_000_000_000
+    498|       expect(postedAmount).toBe(expectedAmount)
+       |                            ^
+    499|       expect(txRepoInstance.updateInvoice.mock.calls[0]?.[0].data.gros…
+    500|       expect(invoiced).toBe(true)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 18 skipped (19)
+   Start at  13:33:32
+   Duration  1.03s (transform 453ms, setup 0ms, import 958ms, tests 13ms, environment 0ms)
+
+$REPO/internal/services:
+ ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @unprice/services@0.1.0 test: `vitest run src/use-cases/billing/bill-period.test.ts -t 'delayed reporting.*normal.*false'`
+Exit status 1
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  1 failed (1)
+      Tests  1 failed | 18 skipped (19)
+AFTER, root focused regression run
+> @unprice/services@0.1.0 test /Users/jhonsfran/.codex/worktrees/ed6f/unprice/internal/services
+> vitest run src/use-cases/billing/bill-period.test.ts -t 'delayed reporting'
+
+
+ RUN  v4.1.10 /Users/jhonsfran/.codex/worktrees/ed6f/unprice/internal/services
+
+ ✓ src/use-cases/billing/bill-period.test.ts (19 tests | 16 skipped) 15ms
+
+ Test Files  1 passed (1)
+      Tests  3 passed | 16 skipped (19)
+   Start at  13:45:08
+   Duration  1.14s (transform 528ms, setup 0ms, import 1.06s, tests 15ms, environment 0ms)
+
+ISSUE 7
+BEFORE (issue-7-root-before.log)
+ FAIL  src/tests/billing-scenarios/complex-pricing-cadence.integration.test.ts > DB-backed complex pricing and mixed meter cadence billing > holds advance-plan usage and co-billed fixed charges until usage clears late-event grace
+AssertionError: expected { atEnd: [ { …(5) } ], …(2) } to deeply equal { atEnd: [], beforeGraceEnd: [], …(1) }
+
+- Expected
++ Received
+
+  {
+-   "atEnd": [],
++   "atEnd": [
++     {
++       "invoiceAt": 1769904000000,
++       "projectId": "proj_test",
++       "statementKey": "stmt_complex_advance_fixed_with_prior_arrear_usage",
++       "subscriptionId": "sub_test_monthly_arrear",
++       "subscriptionPhaseId": "phase_test_monthly_arrear",
++     },
++   ],
+    "atGraceEnd": [
++     {
++       "invoiceAt": 1769904000000,
++       "projectId": "proj_test",
++       "statementKey": "stmt_complex_advance_fixed_with_prior_arrear_usage",
++       "subscriptionId": "sub_test_monthly_arrear",
++       "subscriptionPhaseId": "phase_test_monthly_arrear",
++     },
++   ],
++   "beforeGraceEnd": [
+      {
+        "invoiceAt": 1769904000000,
+        "projectId": "proj_test",
+        "statementKey": "stmt_complex_advance_fixed_with_prior_arrear_usage",
+        "subscriptionId": "sub_test_monthly_arrear",
+        "subscriptionPhaseId": "phase_test_monthly_arrear",
+      },
+    ],
+-   "beforeGraceEnd": [],
+  }
+
+ ❯ src/tests/billing-scenarios/complex-pricing-cadence.integration.test.ts:1391:51
+    1389|       now: feb1 + LATE_EVENT_GRACE_MS,
+    1390|     })
+    1391|     expect({ atEnd, beforeGraceEnd, atGraceEnd }).toEqual({
+       |                                                   ^
+    1392|       atEnd: [],
+    1393|       beforeGraceEnd: [],
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/tests/billing-scenarios/complex-pricing-cadence.integration.test.ts > DB-backed complex pricing and mixed meter cadence billing > caps advance usage at the shortened phase end while preserving fixed period-start invoicing
+AssertionError: expected [ { …(3) }, { …(3) } ] to deeply equal [ { …(3) }, { …(3) } ]
+
+- Expected
++ Received
+
+@@ -1,10 +1,10 @@
+  [
+    {
+      "cycleEndAt": 1768435200000,
+      "id": "bp_adv_prior_events_jan",
+-     "invoiceAt": 1768435200000,
++     "invoiceAt": 1769904000000,
+    },
+    {
+      "cycleEndAt": 1768435200000,
+      "id": "bp_test_advance_access_feb",
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  1 failed (1)
+      Tests  2 failed | 7 skipped (9)
+AFTER (issue-7-root-after.log)
+     ✓ splits same-end periods into separate invoices when statement keys differ  645ms
+     ✓ holds a mixed-cadence arrears statement until the last period clears late-event grace  396ms
+     ✓ holds advance-plan usage and co-billed fixed charges until usage clears late-event grace  342ms
+     ✓ caps advance usage at the shortened phase end while preserving fixed period-start invoicing  756ms
+     ✓ co-bills pay-in-advance fixed charges with prior arrears usage on the same statement  428ms
+     ✓ caps pending annual, monthly, daily, and hourly periods when a phase is shortened  396ms
+
+ Test Files  1 passed (1)
+      Tests  9 passed (9)
+   Start at  12:57:48
+   Duration  6.79s (transform 344ms, setup 0ms, import 915ms, tests 5.27s, environment 0ms)
+
+
+ISSUE 8
+BEFORE (issue-8-before.log)
+ FAIL  src/billing/service.generate-periods.test.ts > BillingService._generateBillingPeriods > keeps a shortened paid period retryable when its ledger lookup fails
+AssertionError: expected { cycleEndAt: 1773662400000, …(1) } to deeply equal { cycleEndAt: 1775001600000, …(1) }
+
+- Expected
++ Received
+
+  {
+-   "cycleEndAt": 1775001600000,
++   "cycleEndAt": 1773662400000,
+    "refundedAmount": 0,
+  }
+
+ ❯ src/billing/service.generate-periods.test.ts:407:31
+    405|     const retried = await generateBillingPeriods(billing, payload)
+    406|
+    407|     expect(stateAfterFailure).toEqual({ cycleEndAt: PHASE_END, refunde…
+       |                               ^
+    408|     expect(failed.err?.message).toContain("LEDGER_GET_ENTRIES_FAILED")
+    409|     expect(retried.val).toEqual({ phasesProcessed: 1, cyclesCreated: 0…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 12 passed (13)
+   Start at  12:42:02
+   Duration  929ms (transform 335ms, setup 0ms, import 851ms, tests 11ms, environment 0ms)
+
+$REPO/internal/services:
+ ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @unprice/services@0.1.0 test: `vitest run src/billing/service.generate-periods.test.ts`
+Exit status 1
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  1 failed (1)
+      Tests  1 failed | 12 passed (13)
+AFTER (issue-8-after.log)
+
+
+ RUN  v4.1.10 $REPO/internal/services
+
+ ✓ src/billing/service.proration.test.ts (8 tests) 3ms
+ ✓ src/billing/service.generate-periods.test.ts (13 tests) 8ms
+
+ Test Files  2 passed (2)
+      Tests  21 passed (21)
+   Start at  12:43:07
+   Duration  1.23s (transform 726ms, setup 0ms, import 2.17s, tests 11ms, environment 0ms)
+
+
+ISSUE 9
+BEFORE (issue-9-before.log)
+ FAIL  src/billing/service.collect.test.ts > BillingService._collectInvoicePayment > sends a manual invoice without a saved payment method null
+ FAIL  src/billing/service.collect.test.ts > BillingService._collectInvoicePayment > sends a manual invoice without a saved payment method
+AssertionError: expected undefined to be 'waiting' // Object.is equality
+
+- Expected:
+"waiting"
+
++ Received:
+undefined
+
+ ❯ src/billing/service.collect.test.ts:346:34
+    344|       })
+    345|
+    346|       expect(result.val?.status).toBe("waiting")
+       |                                  ^
+    347|       expect(findInvoiceByIdResult?.status).toBe("waiting")
+    348|       expect(provider.sendInvoice).toHaveBeenCalledWith({ invoiceId: "…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  src/billing/service.collect.test.ts > BillingService._collectInvoicePayment > reconciles a paid provider invoice without a saved payment method from waiting
+ FAIL  src/billing/service.collect.test.ts > BillingService._collectInvoicePayment > reconciles a paid provider invoice without a saved payment method from unpaid
+AssertionError: expected undefined to be 'paid' // Object.is equality
+
+- Expected:
+"paid"
+
++ Received:
+undefined
+
+ ❯ src/billing/service.collect.test.ts:373:34
+    371|       })
+    372|
+    373|       expect(result.val?.status).toBe("paid")
+       |                                  ^
+    374|       expect(findInvoiceByIdResult?.status).toBe("paid")
+    375|       expect(provider.collectPayment).not.toHaveBeenCalled()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 17 passed (21)
+   Start at  12:43:55
+   Duration  910ms (transform 269ms, setup 0ms, import 823ms, tests 9ms, environment 0ms)
+
+$REPO/internal/services:
+ ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @unprice/services@0.1.0 test: `vitest run src/billing/service.collect.test.ts`
+Exit status 1
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  1 failed (1)
+      Tests  4 failed | 17 passed (21)
+AFTER (issue-9-after.log)
+> vitest run src/billing/service.collect.test.ts
+
+
+ RUN  v4.1.10 $REPO/internal/services
+
+ ✓ src/billing/service.collect.test.ts (21 tests) 7ms
+
+ Test Files  1 passed (1)
+      Tests  21 passed (21)
+   Start at  12:45:19
+   Duration  1.15s (transform 390ms, setup 0ms, import 1.06s, tests 7ms, environment 0ms)
+
+
+
+ISSUE 6 REVIEW: receipt cache rollback
+BEFORE
+ FAIL  src/ingestion/entitlements/entitlement-window-store.workers.test.ts > EntitlementWindowStore SQLite reads > retries external-run usage after SQLite rolls back an already cached receipt
+AssertionError: expected { allowed: true, …(1) } to be null
+
+- Expected:
+null
+
++ Received:
+{
+  "allowed": true,
+  "idempotencyStatus": "already_reported",
+}
+
+ ❯ src/ingestion/entitlements/entitlement-window-store.workers.test.ts:254:73
+    252|         })
+    253|       ).toThrow("abort before accepted transaction commits")
+    254|       expect(store.lookupCachedIdempotencyResult(input.idempotencyKey)…
+       |                                                                         ^
+    255|       expect(store.readBillingUsageSnapshot(period.billingPeriodId)).t…
+    256|         amount: 0,
+ ❯ maybeHandleRunRequest Users/jhonsfran/.codex/worktrees/ed6f/unprice/node_modules/.pnpm/@cloudflare+vitest-pool-workers@0.20.1_@cloudflare+workers-types@5.20260731.1_@types+no_9bccb7aa5126fc686ec45cbf17fb10ee/node_modules/@cloudflare/vitest-pool-workers/dist/worker/lib/cloudflare/test-internal.mjs:164:18
+ ❯ DurableObject.Wrapper.fetch Users/jhonsfran/.codex/worktrees/ed6f/unprice/node_modules/.pnpm/@cloudflare+vitest-pool-workers@0.20.1_@cloudflare+workers-types@5.20260731.1_@types+no_9bccb7aa5126fc686ec45cbf17fb10ee/node_modules/@cloudflare/vitest-pool-workers/dist/worker/lib/cloudflare/test-internal.mjs:555:20
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+AFTER
+RUN  v4.1.10 /private/tmp/unprice-billing-review/invoices/apps/api
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 4 skipped (5)
+   Start at  13:46:27
+   Duration  2.66s (transform 905ms, setup 0ms, import 2.19s, tests 234ms, environment 0ms)
+
+ISSUE 6 REVIEW: expired billing owner
+BEFORE
+ FAIL  src/use-cases/billing/flush-reservations-for-invoicing.test.ts > flushReservationsForInvoicing > flushes an owner that expired at the billed service window end
+AssertionError: expected { flushed: +0, skipped: +0 } to deeply equal { flushed: 1, skipped: +0 }
+
+- Expected
++ Received
+
+  {
+-   "flushed": 1,
++   "flushed": 0,
+    "skipped": 0,
+  }
+
+ ❯ src/use-cases/billing/flush-reservations-for-invoicing.test.ts:251:24
+    249|     const result = await flushReservationsForInvoicing(deps, defaultIn…
+    250|
+    251|     expect(result.val).toEqual({ flushed: 1, skipped: 0 })
+       |                        ^
+    252|     expect(flush).toHaveBeenCalledWith({ statementKey: "stmt_1", billi…
+    253|   })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+AFTER
+RUN  v4.1.10 /private/tmp/unprice-billing-review/invoices/internal/services
+
+ ✓ src/use-cases/billing/flush-reservations-for-invoicing.test.ts (14 tests | 13 skipped) 3ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 13 skipped (14)
+   Start at  13:46:19
+   Duration  1.01s (transform 414ms, setup 0ms, import 933ms, tests 3ms, environment 0ms)
+
+
+ISSUE 6 REVIEW: capture completeness
+BEFORE
+ FAIL  src/use-cases/billing/bill-period.test.ts > billPeriod > invoices accepted durable usage with delayed reporting for a normal period (completion fails: false, policy: capped, capture: due amount: 600000000)
+AssertionError: promise resolved "{ phasesProcessed: 1, …(1) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "phasesProcessed": 1,
++   "subscription": {
++     "id": "sub_1",
++     "projectId": "proj_1",
++   },
+  }
+
+ ❯ src/use-cases/billing/bill-period.test.ts:520:38
+    518|       }
+    519|       if (phasePolicy === "capped") {
+    520|         await expect(billPeriod(args)).rejects.toThrow(
+       |                                      ^
+    521|           "wallet captures do not match its sealed usage amount"
+    522|         )
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/use-cases/billing/bill-period.test.ts > billPeriod > invoices accepted durable usage with delayed reporting for a normal period (completion fails: false, policy: uncapped, capture: due amount: 600000000)
+AssertionError: expected 600000000 to be 1000000000 // Object.is equality
+
+- Expected
++ Received
+
+- 1000000000
++ 600000000
+
+ ❯ src/use-cases/billing/bill-period.test.ts:564:45
+    562|
+    563|       const expectedAmount = periodType === "trial" ? 0 : 1_000_000_000
+    564|       expect(postedAmount + capturedAmount).toBe(expectedAmount)
+       |                                             ^
+    565|       const invoiceData = txRepoInstance.updateInvoice.mock.calls[0]?.…
+    566|       expect(invoiceData.grossAmount).toBe(expectedAmount)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+AFTER
+RUN  v4.1.10 /private/tmp/unprice-billing-review/invoices/internal/services
+
+ ✓ src/use-cases/billing/bill-period.test.ts (24 tests | 22 skipped) 21ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed | 22 skipped (24)
+   Start at  13:46:08
+   Duration  7.38s (transform 4.21s, setup 0ms, import 7.22s, tests 21ms, environment 0ms)
+
+
+FINAL ROOT VALIDATION
+
+services-final.log
+ Test Files  122 passed (122)
+      Tests  1048 passed (1048)
+
+api-final-green.log
+ Test Files  60 passed (60)
+      Tests  581 passed (581)
+
+workers-final.log
+ Test Files  8 passed (8)
+      Tests  63 passed (63)
+
+integration-final-green.log
+ Test Files  13 passed (13)
+      Tests  33 passed (33)
+
+api-typecheck-final.log
+> api@ type-check /Users/jhonsfran/.codex/worktrees/ed6f/unprice/apps/api
+
+validate-final.log
+ Tasks:    29 successful, 29 total
+Formatted 1762 files in 151ms. No fixes applied.
+Found 1 warning.
+Checked 1762 files in 440ms. No fixes applied.
+Found 1 warning.

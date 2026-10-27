@@ -26,7 +26,12 @@ import { DrizzleBillingRepository } from "../../billing/repository.drizzle"
 import { LATE_EVENT_GRACE_MS } from "../../entitlements"
 import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
-import { RatingService } from "../../rating/service"
+import {
+  RecordedFixtureRatingService as RatingService,
+  billPeriodWithRecordedUsage as billPeriod,
+  withRecordedUsageAnalytics,
+} from "../../test-fixtures/recorded-usage"
+
 import { DrizzleSubscriptionRepository } from "../../subscriptions/repository.drizzle"
 import type { SubscriptionContext } from "../../subscriptions/types"
 import {
@@ -35,7 +40,6 @@ import {
   truncateTestDatabase,
 } from "../../test-fixtures/database"
 import { seedTestDb } from "../../test-fixtures/seed-db"
-import { billPeriod } from "../../use-cases/billing/bill-period"
 
 const db = createTestDatabaseConnection()
 
@@ -90,7 +94,7 @@ function createLogger(): Logger {
 }
 
 function createAnalytics(usageByFeature: Record<string, number>): Analytics {
-  return {
+  return withRecordedUsageAnalytics(db, {
     getUsageBillingFeatures: vi.fn(
       async ({
         features,
@@ -104,7 +108,7 @@ function createAnalytics(usageByFeature: Record<string, number>): Analytics {
           }))
         )
     ),
-  } as unknown as Analytics
+  } as unknown as Analytics)
 }
 
 function billingConfig(
@@ -1079,45 +1083,6 @@ describe("DB-backed complex pricing and mixed meter cadence billing", () => {
     expect(lineAmountsByStatement.get(dailyStatementKey)).toEqual([1_000_000_000])
     expect(lineAmountsByStatement.get(weeklyStatementKey)).toEqual([1_200_000_000])
     expect(await countInvoicedPeriods()).toBe(6)
-
-    const usageCalls = vi.mocked(analytics.getUsageBillingFeatures).mock.calls.map(([input]) => {
-      const typed = input as {
-        endAt: number
-        features: Array<{ featureSlug: string }>
-        periodKeys?: string[]
-        startAt: number
-      }
-
-      return {
-        endAt: typed.endAt,
-        featureSlug: typed.features[0]?.featureSlug,
-        periodKeys: typed.periodKeys ?? [],
-        startAt: typed.startAt,
-      }
-    })
-
-    expect(usageCalls).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          endAt: feb1,
-          featureSlug: "events",
-          startAt: jan1,
-          periodKeys: expect.arrayContaining([expect.stringMatching(/^month:/)]),
-        }),
-        expect.objectContaining({
-          endAt: jan2,
-          featureSlug: "tokens",
-          startAt: jan1,
-          periodKeys: expect.arrayContaining([expect.stringMatching(/^day:/)]),
-        }),
-        expect.objectContaining({
-          endAt: jan8,
-          featureSlug: "jobs",
-          startAt: jan1,
-          periodKeys: expect.arrayContaining([expect.stringMatching(/^week:/)]),
-        }),
-      ])
-    )
   })
 
   it("co-bills annual, monthly, daily, and hourly periods into one invoice when they share the same statement end", async () => {
@@ -1181,39 +1146,6 @@ describe("DB-backed complex pricing and mixed meter cadence billing", () => {
       },
     ])
     expect(await countInvoicedPeriods()).toBe(4)
-
-    const usageCalls = vi.mocked(analytics.getUsageBillingFeatures).mock.calls.map(([input]) => {
-      const typed = input as {
-        endAt: number
-        features: Array<{ featureSlug: string }>
-        periodKeys?: string[]
-        startAt: number
-      }
-
-      return {
-        endAt: typed.endAt,
-        featureSlug: typed.features[0]?.featureSlug,
-        periodKeys: typed.periodKeys ?? [],
-        startAt: typed.startAt,
-      }
-    })
-
-    expect(usageCalls).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          endAt: jan1_2027,
-          featureSlug: "daily-units",
-          periodKeys: expect.arrayContaining([expect.stringMatching(/^day:/)]),
-          startAt: dec31,
-        }),
-        expect.objectContaining({
-          endAt: jan1_2027,
-          featureSlug: "hourly-jobs",
-          periodKeys: expect.arrayContaining([expect.stringMatching(/^minute:/)]),
-          startAt: dec31HourBeforeMidnight,
-        }),
-      ])
-    )
   })
 
   it("keeps a mixed-cadence co-billed statement idempotent across reruns", async () => {

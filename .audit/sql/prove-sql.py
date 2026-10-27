@@ -48,7 +48,7 @@ if __name__ == "__main__":
             passed = actual == expected
             print(("PASS " if passed else "FAIL ") + test["name"] + " expected=" + json.dumps(expected) + " actual=" + json.dumps(actual))
             failed += not passed
-    
+
     facts_path = Path(__file__).with_name("processor-facts.ndjson")
     if facts_path.exists():
         actual = run("v1_get_feature_usage_no_duplicates", {"project_id": "proj_123", "customer_id": "cus_123", "start": "1793102340000", "end": "1793102460000"}, facts_path.read_text())

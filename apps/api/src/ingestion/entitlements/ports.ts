@@ -1,4 +1,5 @@
 import type { Logger } from "@unprice/logs"
+import type { BillingUsageSnapshot } from "@unprice/services/billing"
 import type { GrantConsumptionState } from "@unprice/services/entitlements"
 import type { WalletService } from "@unprice/services/wallet"
 import type {
@@ -130,6 +131,9 @@ export type EntitlementWindowRetentionState = {
  * per-op round trips.
  */
 export type EntitlementWindowStateOps = {
+  readBillingUsageSnapshot(periodId: string): BillingUsageSnapshot | null
+  writeBillingUsageSnapshot(snapshot: BillingUsageSnapshot): void
+  listBillingUsageSnapshots(): BillingUsageSnapshot[]
   // ----- meter aggregation state (per meter identity and reset period) -----
   /** Insert-if-absent so a later usage update always has a row to hit. */
   ensureMeterState(params: { meterKey: string; createdAt: number }): void

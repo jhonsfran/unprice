@@ -92,6 +92,7 @@ describe("flushReservationsForInvoicingV1 route", () => {
 
     const response = await app.fetch(
       buildRequest({
+        projectId: "proj_123",
         customerId: "cus_123",
         subscriptionId: "sub_123",
         subscriptionPhaseId: "phase_123",
@@ -117,6 +118,7 @@ describe("flushReservationsForInvoicingV1 route", () => {
 
     const response = await app.fetch(
       buildRequest({
+        projectId: "proj_123",
         customerId: "cus_123",
         subscriptionId: "sub_123",
         subscriptionPhaseId: "phase_123",
@@ -148,6 +150,7 @@ describe("flushReservationsForInvoicingV1 route", () => {
 
     const response = await app.fetch(
       buildRequest({
+        projectId: "proj_123",
         customerId: "cus_123",
         subscriptionId: "sub_123",
         subscriptionPhaseId: "phase_123",
@@ -173,6 +176,7 @@ describe("flushReservationsForInvoicingV1 route", () => {
 
     const response = await app.fetch(
       buildRequest({
+        projectId: "proj_123",
         customerId: "cus_123",
         subscriptionId: "sub_123",
         subscriptionPhaseId: "phase_123",
@@ -201,6 +205,7 @@ describe("flushReservationsForInvoicingV1 route", () => {
 
     const response = await app.fetch(
       buildRequest({
+        projectId: "proj_123",
         customerId: "cus_123",
         subscriptionId: "sub_123",
         subscriptionPhaseId: "phase_123",
@@ -228,6 +233,7 @@ describe("flushReservationsForInvoicingV1 route", () => {
 
     const response = await app.fetch(
       buildRequest({
+        projectId: "proj_123",
         customerId: "cus_123",
         subscriptionId: "sub_123",
         subscriptionPhaseId: "phase_123",
@@ -252,6 +258,7 @@ describe("flushReservationsForInvoicingV1 route", () => {
 
     const response = await app.fetch(
       buildRequest({
+        projectId: "proj_123",
         customerId: "cus_123",
         subscriptionId: "sub_123",
         subscriptionPhaseId: "phase_123",
@@ -284,6 +291,7 @@ describe("flushReservationsForInvoicingV1 route", () => {
 
     const response = await app.fetch(
       buildRequest({
+        projectId: "proj_123",
         customerId: "cus_123",
         subscriptionId: "sub_123",
         subscriptionPhaseId: "phase_123",
@@ -339,11 +347,14 @@ function createTestApp(options: {
     c.set("db", {
       query: {
         billingPeriods: {
-          findMany: vi
-            .fn()
-            .mockResolvedValue(
-              options.billingPeriods.map((period) => ({ cycleStartAt: 0, ...period }))
-            ),
+          findMany: vi.fn().mockResolvedValue(
+            options.billingPeriods.map((period) => ({
+              cycleStartAt: 0,
+              cycleEndAt: (period.cycleStartAt ?? 0) + 86_400_000,
+              subscriptionItemId: "item_123",
+              ...period,
+            }))
+          ),
         },
         budgetRuns: {
           findMany: vi.fn().mockResolvedValue(options.budgetRuns ?? []),
@@ -354,7 +365,12 @@ function createTestApp(options: {
       entitlement: {
         getCustomerEntitlementsForCustomer: vi.fn().mockResolvedValue({
           err: null,
-          val: options.entitlements,
+          val: options.entitlements.map((entitlement) => ({
+            subscriptionItemId: "item_123",
+            effectiveAt: 0,
+            expiresAt: null,
+            ...entitlement,
+          })),
         }),
       },
     })

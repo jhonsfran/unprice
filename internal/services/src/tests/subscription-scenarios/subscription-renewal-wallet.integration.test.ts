@@ -4,7 +4,7 @@ import { Err, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Cache } from "../../cache"
-import { type ServiceContext, createServiceContext } from "../../context"
+import type { ServiceContext } from "../../context"
 import type { Metrics } from "../../metrics"
 import { DrizzleSubscriptionRepository } from "../../subscriptions/repository.drizzle"
 import { SubscriptionService } from "../../subscriptions/service"
@@ -13,6 +13,10 @@ import {
   createTestDatabaseConnection,
   truncateTestDatabase,
 } from "../../test-fixtures/database"
+import {
+  createRecordedServiceContext as createServiceContext,
+  withRecordedUsageAnalytics,
+} from "../../test-fixtures/recorded-usage"
 import { seedTestDb } from "../../test-fixtures/seed-db"
 import { UnPriceWalletError, type WalletService } from "../../wallet"
 
@@ -45,10 +49,10 @@ function createLogger(): Logger {
 }
 
 function createAnalytics(): Analytics {
-  return {
+  return withRecordedUsageAnalytics(db, {
     getUsageBillingFeatures: vi.fn(async () => Ok([])),
     ingestEvents: vi.fn(),
-  } as unknown as Analytics
+  } as unknown as Analytics)
 }
 
 function createCache(): Cache {
@@ -200,6 +204,20 @@ describe("subscription renewal and wallet activation DB lifecycle", () => {
   beforeEach(async () => {
     await truncateTestDatabase(db)
     await seedTestDb({ db, fixtures })
+    await db.execute(sql`
+      UPDATE unprice_customer_entitlements
+      SET expires_at = NULL, metadata = json_build_object('billing_usage_genesis_v1', id)
+      WHERE project_id = ${projectId} AND subscription_id = ${subscriptionId}
+    `)
+    await db.execute(sql`
+      UPDATE unprice_grants
+      SET expires_at = NULL
+      WHERE project_id = ${projectId}
+        AND customer_entitlement_id IN (
+          SELECT id FROM unprice_customer_entitlements
+          WHERE project_id = ${projectId} AND subscription_id = ${subscriptionId}
+        )
+    `)
   })
 
   it("renews the subscription cycle and issues the next period wallet credit line once", async () => {

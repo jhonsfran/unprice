@@ -11,7 +11,13 @@ import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
 import type { Metrics } from "../../metrics"
 import type { PaymentProviderService } from "../../payment-provider/service"
-import { RatingService } from "../../rating/service"
+import {
+  RecordedFixtureRatingService as RatingService,
+  billPeriodWithRecordedUsage as billPeriod,
+  recordedUsageGateway,
+  withRecordedUsageAnalytics,
+} from "../../test-fixtures/recorded-usage"
+
 import { DrizzleSubscriptionRepository } from "../../subscriptions/repository.drizzle"
 import type { SubscriptionContext } from "../../subscriptions/types"
 import {
@@ -20,7 +26,7 @@ import {
   truncateTestDatabase,
 } from "../../test-fixtures/database"
 import { seedTestDb } from "../../test-fixtures/seed-db"
-import { billPeriod } from "../../use-cases/billing/bill-period"
+
 import type { WalletService } from "../../wallet"
 
 const db = createTestDatabaseConnection()
@@ -58,7 +64,7 @@ function createLogger(errors: unknown[] = []): Logger {
 }
 
 function createAnalytics(usageByFeature: Record<string, number>): Analytics {
-  return {
+  return withRecordedUsageAnalytics(db, {
     getUsageBillingFeatures: vi.fn(
       async ({
         features,
@@ -72,7 +78,7 @@ function createAnalytics(usageByFeature: Record<string, number>): Analytics {
           }))
         )
     ),
-  } as unknown as Analytics
+  } as unknown as Analytics)
 }
 
 class ConcurrentPaymentProvider {
@@ -205,6 +211,7 @@ function createBillingService(
   const ledger = new LedgerGateway({ db: dbForWorker, logger })
 
   return new BillingService({
+    reservationFlushGateway: recordedUsageGateway(analytics),
     db: dbForWorker,
     logger,
     analytics,

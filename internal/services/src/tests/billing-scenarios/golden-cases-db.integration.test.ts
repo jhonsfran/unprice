@@ -2,12 +2,17 @@ import { sql } from "@unprice/db"
 import { toLedgerMinor } from "@unprice/money"
 import { afterAll, beforeEach, describe, expect, it } from "vitest"
 import type { Cache } from "../../cache"
-import { createServiceContext } from "../../context"
+import {
+  RecordedFixtureRatingService as RatingService,
+  billPeriodWithRecordedUsage as billPeriod,
+  createRecordedServiceContext as createServiceContext,
+} from "../../test-fixtures/recorded-usage"
+
 import { LATE_EVENT_GRACE_MS } from "../../entitlements"
 import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
 import type { Metrics } from "../../metrics"
-import { RatingService } from "../../rating/service"
+
 import { DrizzleSubscriptionRepository } from "../../subscriptions/repository.drizzle"
 import {
   createBillingAnalytics as createAnalytics,
@@ -20,7 +25,6 @@ import {
   truncateTestDatabase,
 } from "../../test-fixtures/database"
 import { seedTestDb } from "../../test-fixtures/seed-db"
-import { billPeriod } from "../../use-cases/billing/bill-period"
 
 const db = createTestDatabaseConnection()
 
@@ -183,7 +187,7 @@ describe("DB-backed billing golden cases", () => {
   it("cancellation at the renewal boundary bills the earned period and creates no future charge", async () => {
     const loggerErrors: unknown[] = []
     const logger = createLogger(loggerErrors)
-    const analytics = createAnalytics({ events: 1200 })
+    const analytics = createAnalytics(db, { events: 1200 })
     const services = createServiceContext({
       db,
       logger,
@@ -339,7 +343,7 @@ describe("DB-backed billing golden cases", () => {
 
   it("waits for the late-event grace window before invoicing an arrears statement", async () => {
     const logger = createLogger()
-    const analytics = createAnalytics({ events: 1200 })
+    const analytics = createAnalytics(db, { events: 1200 })
     const ledger = new LedgerGateway({ db, logger })
     const ensureAccounts = await ledger.ensureCustomerAccounts(customerId, "EUR")
     expect(ensureAccounts.err).toBeUndefined()
@@ -398,7 +402,7 @@ describe("DB-backed billing golden cases", () => {
 
   it("bills an annual DB statement as one yearly invoice with ledger-backed lines", async () => {
     const logger = createLogger()
-    const analytics = createAnalytics({ events: 1200 })
+    const analytics = createAnalytics(db, { events: 1200 })
     const ledger = new LedgerGateway({ db, logger })
     const ensureAccounts = await ledger.ensureCustomerAccounts(customerId, "EUR")
     expect(ensureAccounts.err).toBeUndefined()

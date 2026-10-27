@@ -15,6 +15,13 @@
       "when": 1781893522847,
       "tag": "0001_drop_config_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793123187403,
+      "tag": "0002_billing_usage_snapshots",
+      "breakpoints": true
     }
   ]
 }

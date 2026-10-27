@@ -47,6 +47,11 @@ export type { ExplainChargeDeps, ExplainChargeInput, ExplainChargeOutput } from 
 export { renewPeriod } from "./renew-period"
 export { settlePrepaidInvoiceToWallet } from "./settle-invoice"
 export {
+  billingUsageOperationSchema,
+  billingUsageOperationOutputSchema,
+  processBillingUsageSnapshots,
+} from "./usage-snapshots"
+export {
   createNoopBillingReservationFlushGateway,
   HttpBillingReservationFlushGateway,
 } from "./reservation-flush-gateway"

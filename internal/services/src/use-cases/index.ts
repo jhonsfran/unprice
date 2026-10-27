@@ -111,6 +111,11 @@ export type {
 export { deriveActivationInputsFromPlan } from "./billing/derive-provision-inputs"
 export { settlePrepaidInvoiceToWallet } from "./billing/settle-invoice"
 export {
+  billingUsageOperationSchema,
+  billingUsageOperationOutputSchema,
+  processBillingUsageSnapshots,
+} from "./billing/usage-snapshots"
+export {
   FlushReservationsForInvoicingError,
   flushReservationsForInvoicing,
   flushReservationsForInvoicingErrorReasonSchema,

@@ -1,16 +1,32 @@
 import { Err, Ok, type Result } from "@unprice/error"
 import { FetchError } from "@unprice/error"
+import type { z } from "zod"
+import type { BillingUsageRegistration } from "../../billing/usage-snapshot"
+import { billingUsageOperationOutputSchema, billingUsageOperationSchema } from "./usage-snapshots"
 
+const INTERNAL_USAGE_PATH = "/v1/internal/billing-usage/snapshots"
 const INTERNAL_FLUSH_PATH = "/v1/internal/billing-reservations/flush-for-invoicing"
 const DEFAULT_API_BASE_URL = "https://api.unprice.dev"
 
 export interface BillingReservationFlushGateway {
+  registerPeriods(input: {
+    projectId: string
+    customerId: string
+    subscriptionId: string
+    registrations: BillingUsageRegistration[]
+  }): Promise<Result<void, FetchError>>
+  completeForInvoicing(input: {
+    projectId: string
+    customerId: string
+    subscriptionId: string
+  }): Promise<Result<void, FetchError>>
   flushForInvoicing(input: {
+    projectId: string
     customerId: string
     subscriptionId: string
     subscriptionPhaseId: string
     statementKey: string
-  }): Promise<Result<void, FetchError>>
+  }): Promise<Result<z.infer<typeof billingUsageOperationOutputSchema>, FetchError>>
 }
 
 type BillingReservationFlushGatewayFetch = (request: Request) => Promise<Response>
@@ -33,11 +49,14 @@ export class HttpBillingReservationFlushGateway implements BillingReservationFlu
   }
 
   async flushForInvoicing(input: {
+    projectId: string
     customerId: string
     subscriptionId: string
     subscriptionPhaseId: string
     statementKey: string
-  }): Promise<Result<void, FetchError>> {
+  }): Promise<Result<z.infer<typeof billingUsageOperationOutputSchema>, FetchError>> {
+    const sealed = await this.requestUsageOperation({ operation: "seal", ...input })
+    if (sealed.err) return Err(sealed.err)
     const request = new Request(buildInternalFlushUrl(this.baseUrl), {
       method: "POST",
       headers: {
@@ -77,7 +96,62 @@ export class HttpBillingReservationFlushGateway implements BillingReservationFlu
       )
     }
 
-    return Ok(undefined)
+    return Ok(sealed.val)
+  }
+
+  async registerPeriods(input: {
+    projectId: string
+    customerId: string
+    subscriptionId: string
+    registrations: BillingUsageRegistration[]
+  }): Promise<Result<void, FetchError>> {
+    const result = await this.requestUsageOperation({ operation: "register", ...input })
+    return result.err ? Err(result.err) : Ok(undefined)
+  }
+
+  async completeForInvoicing(input: {
+    projectId: string
+    customerId: string
+    subscriptionId: string
+  }): Promise<Result<void, FetchError>> {
+    const result = await this.requestUsageOperation({ operation: "complete", ...input })
+    return result.err ? Err(result.err) : Ok(undefined)
+  }
+
+  private async requestUsageOperation(
+    input: z.infer<typeof billingUsageOperationSchema>
+  ): Promise<Result<z.infer<typeof billingUsageOperationOutputSchema>, FetchError>> {
+    try {
+      const response = await this.fetch(
+        new Request(`${this.baseUrl.replace(/\/+$/, "")}${INTERNAL_USAGE_PATH}`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${this.token}`, "content-type": "application/json" },
+          body: JSON.stringify(billingUsageOperationSchema.parse(input)),
+        })
+      )
+      if (!response.ok)
+        return Err(
+          new FetchError({
+            message: await readErrorMessage(response),
+            retry: shouldRetryFlushResponse(response.status),
+            context: { url: INTERNAL_USAGE_PATH, method: "POST", status: response.status },
+          })
+        )
+      const parsed = billingUsageOperationOutputSchema.safeParse(await response.json())
+      if (!parsed.success)
+        return Err(
+          new FetchError({ message: "Invalid authoritative billing usage response", retry: true })
+        )
+      return Ok(parsed.data)
+    } catch (error) {
+      return Err(
+        new FetchError({
+          message: error instanceof Error ? error.message : String(error),
+          retry: true,
+          context: { url: INTERNAL_USAGE_PATH, method: "POST" },
+        })
+      )
+    }
   }
 }
 
@@ -120,6 +194,8 @@ async function readErrorMessage(response: Response): Promise<string> {
 
 export function createNoopBillingReservationFlushGateway(): BillingReservationFlushGateway {
   return {
-    flushForInvoicing: async () => Ok(undefined),
+    flushForInvoicing: async () => Ok({ snapshots: [] }),
+    registerPeriods: async () => Ok(undefined),
+    completeForInvoicing: async () => Ok(undefined),
   }
 }

@@ -534,6 +534,13 @@ patterns. Keep it cheap to load and useful.
 
 ## Billing, Wallets, And Invoices
 
+- 2026-10-27: When invoicing subscription usage, seal its processor snapshot before wallet flush;
+  missing legacy coverage is unknown, even when reporting or recreated DO storage is empty.
+- 2026-10-27: When collection succeeds, settle the receivable before saving `paid`; keep failed
+  settlement eligible for retry with the existing invoice idempotency key.
+- 2026-10-27: When checking invoice readiness, include all pending rows for the statement across
+  phases; advance-plan usage still needs grace because its stored invoice time is at cycle end.
+
 - 2026-09-20: Customer ledger statements must use `COALESCE(event_at, created_at)` for both date
   filters and pagination order; ordering by insert time moves late or backfilled transfers to the
   wrong visible date and page.

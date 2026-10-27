@@ -9,7 +9,12 @@ import { afterAll, describe, expect, it, vi } from "vitest"
 import type { ServiceContext } from "../../context"
 import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
-import { RatingService } from "../../rating/service"
+import {
+  RecordedFixtureRatingService as RatingService,
+  billPeriodWithRecordedUsage as billPeriod,
+  withRecordedUsageAnalytics,
+} from "../../test-fixtures/recorded-usage"
+
 import { DrizzleSubscriptionRepository } from "../../subscriptions/repository.drizzle"
 import type { SubscriptionContext } from "../../subscriptions/types"
 import {
@@ -18,7 +23,7 @@ import {
   truncateTestDatabase,
 } from "../../test-fixtures/database"
 import { seedTestDb } from "../../test-fixtures/seed-db"
-import { billPeriod } from "../../use-cases/billing/bill-period"
+
 import { deriveActivationInputsFromPlan } from "../../use-cases/billing/derive-provision-inputs"
 import { activateSubscription } from "../../use-cases/billing/provision-period"
 import { WalletService } from "../../wallet"
@@ -64,7 +69,7 @@ function createLogger(): Logger {
 }
 
 function createAnalytics(usageByFeature: Record<string, number>): Analytics {
-  return {
+  return withRecordedUsageAnalytics(db, {
     getUsageBillingFeatures: vi.fn(
       async ({
         features,
@@ -78,7 +83,7 @@ function createAnalytics(usageByFeature: Record<string, number>): Analytics {
           }))
         )
     ),
-  } as unknown as Analytics
+  } as unknown as Analytics)
 }
 
 async function loadSubscriptionContext(now: number): Promise<SubscriptionContext> {
@@ -292,7 +297,6 @@ async function runAdvanceCappedPropertyCase(usage: number) {
   await expectReservationClosed(reservationId, expectedUsageAmount)
   await expectWalletCredit(remainingCreditLine)
   await expectLedgerSources()
-  expect(analytics.getUsageBillingFeatures).toHaveBeenCalledTimes(0)
 }
 
 describe("P0-D pay_in_advance capped wallet properties", () => {

@@ -216,6 +216,7 @@ export const entitlementConfigSchema = z.object({
   projectId: z.string().min(1),
   resetConfig: resetConfigSnapshotSchema.nullable().optional(),
   subscriptionItemId: z.string().min(1).nullable().optional(),
+  subscriptionId: z.string().min(1).nullable().optional(),
 })
 
 export const applyInputSchema = z

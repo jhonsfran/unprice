@@ -7,3 +7,8 @@ export * from "./engine"
 export * from "./entitlement-limit"
 export * from "./grant-consumption"
 export * from "./policy"
+export {
+  BILLING_USAGE_GENESIS_KEY,
+  billingUsageGenesisSchema,
+  readBillingUsageGenesis,
+} from "./billing-usage-genesis"

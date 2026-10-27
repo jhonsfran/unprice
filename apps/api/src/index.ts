@@ -20,6 +20,7 @@ import { registerGetCurrentBillingPeriodUsageV1 } from "./routes/analytics/getCu
 import { registerGetIngestionStatusV1 } from "./routes/analytics/getIngestionStatusV1"
 import { registerGetAnalyticsUsageV1 } from "./routes/analytics/getUsageV1"
 import { registerFlushReservationsForInvoicingV1 } from "./routes/billing/flushReservationsForInvoicingV1"
+import { registerUsageSnapshotsV1 } from "./routes/billing/usageSnapshotsV1"
 import { registerAuthorizeBudgetV1 } from "./routes/budgets/authorizeBudgetV1"
 import { registerChargeBudgetV1 } from "./routes/budgets/chargeBudgetV1"
 import { registerGetBudgetV1 } from "./routes/budgets/getBudgetV1"
@@ -206,6 +207,7 @@ registerModelsBudgetV1(app)
 
 // Billing routes
 registerFlushReservationsForInvoicingV1(app)
+registerUsageSnapshotsV1(app)
 
 // Dashboard routes
 registerInspectBudgetInternalV1(app)

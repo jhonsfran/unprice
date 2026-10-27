@@ -2,7 +2,25 @@
 
 Baseline commit: `f97570af4`.
 
-Each regression asserts the intended behavior. Apply its test changes to the parent of its fix commit to reproduce the failure. Run the same command at the fix commit to observe the passing result. Dependency fakes isolate external I/O. SQL checks use an isolated ClickHouse container.
+Each regression asserts the intended behavior. The before and after results below were executed from isolated source copies. Some regression files also use contracts introduced by the fix. Do not treat an import failure from applying a complete final test file to old code as evidence of the billing defect. Dependency fakes isolate external I/O. SQL checks use isolated PostgreSQL and ClickHouse containers.
+
+Sanitized original failure excerpts and passing summaries are committed in `billing-metering-proof-excerpts.txt`. They preserve the observed assertions after temporary test logs are removed.
+
+## TLDR
+
+All nine claims have a behavioral counterexample and a passing regression after the fix. The tests prove the stated cases. They do not prove the absence of every other billing defect.
+
+| Issue | Observed incorrect result | Correct result |
+| --- | --- | --- |
+| 1 | Two daily buckets return 15 units and $5 | 40 units and $20 |
+| 2 | Reverse event-time arrival bills one accepted unit | Both accepted units remain billable |
+| 3 | Next-day max adds zero after a prior-day value of ten | Each reset period has its own raw aggregate |
+| 4 | Negative corrections leave grant and wallet state inconsistent | Signed allocation, pricing, quantity, and capture state agree |
+| 5 | Failed receivable settlement leaves the invoice paid | Retry can complete settlement without another charge |
+| 6 | Ten accepted dollars become a permanent zero invoice | Sealed accepted totals produce one ten-dollar invoice |
+| 7 | Advance usage is eligible before its late-event grace ends | Every row in the statement waits through grace |
+| 8 | Failed refund lookup still shortens the paid period | The original period remains eligible for refund retry |
+| 9 | Manual invoice sending requires a saved card | Only a new automatic charge requires that card |
 
 ## Issue 5: Preserve settlement retries
 
@@ -54,13 +72,15 @@ Test: `billing across meter resets` in `internal/services/src/rating/service.ext
 
 Two daily buckets contain 15 and 25 units. Each day includes ten free units and charges one dollar per later unit. The expected statement contains 40 units and charges of `5.00` and `15.00`.
 
-Before: `Tests 2 failed | 9 passed (11)`. Production rating returned 15 units and only `5.00`. The second regression also shows mixed daily and weekly grant attribution.
+Before: `Tests 2 failed | 9 passed (11)`. The daily assertion is the defect proof. Production rating returned 15 units and only `5.00`. The mixed-cadence fixture also lacked the old analytics method; that fixture error is not evidence of a second production defect. The final mixed-cadence regression passes with the corrected recorded-usage contract.
 
 The first revision passed sixteen rating tests. Independent review then proved another valid configuration. Billing on the 15th with resets on the 1st can start after the free tier is already consumed. Ten earlier free units plus five accepted paid units must yield five units and `5.00` in the partial billing window. Repricing those five units from zero returned `0.00`.
 
 The final recorded-usage path sums accepted signed amounts and units from the same deduplicated fact tuple for every window, including a window wholly inside one reset bucket. Explicit usage overrides retain synthetic pricing. Currency and ledger scale must match the grant. Seven new rating/schema cases fail before this correction and all twenty-three rating cases pass after it. The actual ClickHouse row for the partial window contains five units and `500000000` at scale eight.
 
 Deploy the new `v1_get_billing_usage_allocations` endpoint before the application reader. The final independent review is recorded below.
+
+Final independent review: PASS. The reviewer reran both partial-window queries against ClickHouse and fed their actual rows to production RatingService. Both returned `5.00`. The complete eighteen-check SQL proof also passed independently.
 
 ## Issue 2: Preserve out-of-order usage in billing SQL
 
@@ -90,6 +110,8 @@ An additional reproducible PostgreSQL proof is available with `pnpm --filter @un
 
 Independent review: PASS. The reviewer reran the PostgreSQL proof and checked the scheduler, exports, all migrated callers, and comments. No material findings.
 
+The review then added a cross-phase statement case. The old phase has arrears usage and the next phase has a fixed advance charge with the same statement key. The per-phase predicate admitted the fixed phase before the usage grace ended. The actual PostgreSQL probe fails before this follow-up and passes after it. Readiness now checks every pending row under the same project, subscription, and statement key, regardless of phase. A future invoice time also blocks statement closure. Repository and scheduler use the same correlated predicate. Six scheduler tests pass. The permanent complex-pricing integration test also covers two sequential phases.
+
 ## Issue 3: Isolate raw aggregates by reset period
 
 Verdict: VERIFIED.
@@ -117,3 +139,90 @@ After: all 160 entitlement tests pass. The adjacent aggregation and grant-alloca
 Unflushed `+10, -4, +4` finishes at ten units and ten dollars. A four-unit correction against ten units with seven already captured rejects the whole correction. Raw state, grants, and wallet remain unchanged. A three-unit correction remains valid. The same rule protects pending capture intents and retained closed-reservation totals. Zero-price cases verify that quantity watermarks receive the same protection. Rejected requests keep a stable `INVALID_AGGREGATION_PROPERTIES` receipt and a clear credit-workflow message. Reversing captured money requires a separate funded credit operation.
 
 Independent review: PASS. The reviewer independently reran all thirty-two correction cases under the explicit Node 24.17.0 binary. API and services type checks also pass. No added comments or suppressions.
+
+Two further review cases fail before their correction and pass after it. `wallet-correction-preflight.test.ts` runs a valid volume plan through real processor and alarm calls. Eleven units cost `1.10`; reversing to ten units would cost `8.90` more. The denied correction must preserve the closed wallet row and must not create a new hold. Both single and batch cases now do so.
+
+`batch-correction-flush.test.ts` uses the default ten-dollar allocation. Uncommitted draft capture intent remains reversible. `+10, -4` captures exactly six dollars and six units. `+10, -4, +4` captures ten dollars and ten units. `+10, -10` makes no capture or refill call. All three cases fail before this follow-up and pass after it. Persisted capture intents retain their original sequence and payload. The final entitlement suite passes all 165 tests. Independent review reran eleven draft and persisted-intent cases under Node 24 and passed them.
+
+## Issue 6: Close invoices from authoritative accepted totals
+
+Verdict: VERIFIED.
+
+Test: `billing accepted usage despite delayed reporting` in `internal/services/src/use-cases/billing/bill-period.test.ts`.
+
+The regression runs the real entitlement processor and accepts ten units priced at ten dollars. Reporting is empty during the first billing attempt. Reporting contains the accepted usage before retry. The stateful invoice repository retains the period status across both attempts.
+
+Before: `Tests 1 failed | 18 skipped (19)`. BILL saves zero and marks the period invoiced. Retry does not revisit that period. The literal monetary assertion expects `1_000_000_000` ledger minor units and receives `0`.
+
+After: the same regression passes. The processor commits signed billing amounts and quantities in the same transaction as the accepted receipt. BILL reads a sealed durable snapshot, invoices ten dollars once, and acknowledges completion after the database commit. Trial periods explicitly invoice zero. Completion acknowledgement remains retryable after the invoice has committed.
+
+Focused command: `pnpm --filter @unprice/services exec vitest run src/use-cases/billing/bill-period.test.ts -t 'delayed reporting.*normal.*false.*capture: null'`.
+
+Five real Durable Object SQLite tests prove receipt/snapshot rollback, persistence across store reopen, seal enforcement, and receipt-cache invalidation after rollback followed by a real external-run retry. Single, batch, and external-run processor tests cover replay, missing coverage, signed corrections, and a seal that occurs during asynchronous wallet I/O. The commit checks the seal again after that I/O.
+
+Additional review counterexamples fail before their fixes and pass after them. An expired entitlement owner still flushes its billed service window. A capped ten-dollar snapshot refuses closure with only six dollars captured, then succeeds after the remaining four dollars are captured. An uncapped period with six captured dollars and four ordinary dollars posts only four new receivable dollars. Paid, included, and credit-line captures reduce the remainder once. An eleven-dollar capture against a ten-dollar snapshot blocks closure. Capture reconciliation checks money; repeated quantity metadata across funding legs cannot independently prove a capture quantity total.
+
+Period generation registers coverage before activation. Deterministic period IDs preserve registration across remote acknowledgement followed by database failure. Only a canonical new entitlement insert can write the server-owned genesis marker. Existing IDs, conflicting inserts, caller metadata, and recreated empty Durable Objects cannot infer legacy zero coverage. Open and sealed snapshots prevent object deletion. Completed snapshots remain through receipt replay retention.
+
+The SQLite migration was generated with `bin/migrate.dev entitlements --name billing_usage_snapshots`. ADR-0007 records the ownership, retry, retention, and deployment contracts. Independent source review passed the final storage, processor, billing, owner selection, and capture changes.
+
+## Operating limits
+
+- Deploy the API worker, generated SQLite migration, and internal snapshot RPCs before services write genesis markers. Deploy the new analytics allocation endpoint before its reader.
+- Existing unmarked entitlements and unknown legacy reset aggregates require explicit reconciliation. Missing data blocks new acceptance or invoice closure instead of becoming an inferred zero.
+- Corrections cannot reverse captured or persisted pending money. Those reversals require a separate funded credit workflow.
+- No deployment, push, production database write, or live Stripe operation was performed. Provider behavior is verified with fakes. The refund regression proves transactional control flow, not a live PostgreSQL rollback.
+
+## Final verification
+
+Node `24.17.0`, pinned pnpm `10.28.0`.
+
+| Check | Result |
+| --- | --- |
+| Services unit suite | 122 files, 1,048 tests passed |
+| API unit suite | 60 files, 581 tests passed |
+| Worker suite, including real SQLite | 8 files, 63 tests passed |
+| Isolated PostgreSQL financial matrix | 13 files, 33 tests passed |
+| Actual ClickHouse endpoint SQL | 18 checks passed |
+| Scheduler unit suite | 6 tests passed |
+| Repository `pnpm validate` | Passed |
+| API `pnpm --filter api type-check` | Passed |
+| `git diff --check` | Passed |
+
+The PostgreSQL matrix includes complex pricing cadence, advance and arrears metered/capped billing, concurrent billing, failure rollback, concurrent finalization, golden cases, phase proration, renewal wallets, paid invoice lifecycle, and monetization lifecycle. Existing financial assertions remain. Advance tests run after the grace boundary. Test-only recorded-usage builders replace the old analytics-only fixtures; production has no reporting fallback.
+
+Validation reports an existing broken `.claude/skills/cloudflare-doctor` symlink. It exits successfully. No unrelated symlink change is included.
+
+The PostgreSQL checks used a dedicated container and a Neon proxy on `127.0.0.1:15433`. An immutable `neonConfig.wsProxy` override pointed every test connection to `127.0.0.1:15433/v1?address=db:5432`. This is necessary because the normal integration configuration hardcodes a different database address. Do not run the database matrix against an application database.
+
+## Commit index
+
+All nine task commits are on `codex/billing-metering-correctness`.
+
+| Issue | Commit |
+| --- | --- |
+| 1 | `e8d863b19` |
+| 2 | `8e822c024` |
+| 3 | `1c911fc41` |
+| 4 | `535427304` |
+| 5 | `111546bba` |
+| 6 | Branch HEAD, `fix(billing): invoice sealed authoritative usage totals` |
+| 7 | `3e388f4cd` |
+| 8 | `087dfc6b4` |
+| 9 | `20cdbffd2` |
+
+The final autosquash changed only commit history. The tree before and after was `e63d9e66388ad509233529effa4953c8fb97f550`. Subsequent edits complete this evidence report and the decision trail.
+
+## Independent trail review
+
+GPT-6 Astra checked the decision trail against this workspace's active transcript, actual failure assertions, passing logs, and Git history. Final verdict: PASS. No evidence-integrity flags remain. The operating limits above remain relevant to rollout and captured-money reversals. The review used a distinct GPT model, not a different model family.
+
+The three temporary test containers and their dedicated Docker network were removed after verification. Existing application containers were not changed.
+
+## Principles that changed the implementation
+
+- Model the Domain and Type System Discipline put billing identity and open/sealed/completed states in validated schemas.
+- Fix Root Causes and Laziness Protocol put each fix in its owning service, processor, query, or storage boundary.
+- Test Behavior, Not Implementation and Prove It Works required literal before/after outcomes and real PostgreSQL, ClickHouse, and Durable Object SQLite checks.
+- Sequence Work into Verifiable Units kept one issue per commit. Separate Before Serializing Shared State kept reviewer snapshots separate and the root agent as the only Git writer.
+- Build the Lever produced rerunnable SQL probes. Guard the Context Window assigned source partitions to independent reviewers and retained compact evidence in this report.

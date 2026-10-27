@@ -65,6 +65,7 @@ describe("flushReservationsForInvoicing", () => {
       predicate("eq", "projectId", "proj_1"),
       predicate("eq", "customerId", "cus_1"),
       predicate("eq", "subscriptionId", "sub_1"),
+      predicate("eq", "subscriptionPhaseId", "phase_1"),
       predicate("eq", "statementKey", "stmt_1"),
     ])
     expect(onBudgetWhere).toHaveBeenCalledWith([
@@ -228,12 +229,37 @@ describe("flushReservationsForInvoicing", () => {
     expect(result.val).toEqual({ flushed: 0, skipped: 0 })
     expect(deps.db.query.budgetRuns.findMany).not.toHaveBeenCalled()
   })
+
+  it("flushes an owner that expired at the billed service window end", async () => {
+    const start = 1_700_000_000_000
+    const end = start + 86_400_000
+    const expiredOwner = entitlement({ effectiveAt: start, expiresAt: end })
+    const flush = vi.fn().mockResolvedValue({ ok: true, outcome: "flushed" })
+    const deps = makeDeps({
+      billingPeriods: [{ id: "bp_1", cycleStartAt: start, cycleEndAt: end }],
+      flushReservationForInvoicing: flush,
+    })
+    vi.mocked(deps.services.entitlements.getCustomerEntitlementsForCustomer).mockImplementation(
+      async (query) =>
+        Ok(query.startAt === start && query.endAt === end ? [expiredOwner] : []) as Awaited<
+          ReturnType<typeof deps.services.entitlements.getCustomerEntitlementsForCustomer>
+        >
+    )
+
+    const result = await flushReservationsForInvoicing(deps, defaultInput)
+
+    expect(result.val).toEqual({ flushed: 1, skipped: 0 })
+    expect(flush).toHaveBeenCalledWith({ statementKey: "stmt_1", billingPeriodIds: ["bp_1"] })
+  })
 })
 
 type Entitlement = {
   id: string
   subscriptionId: string
   subscriptionPhaseId: string
+  subscriptionItemId: string
+  effectiveAt: number
+  expiresAt: number | null
 }
 
 type CapturedPredicate = {
@@ -259,13 +285,16 @@ function entitlement(overrides: Partial<Entitlement> = {}): Entitlement {
     id: "ce_1",
     subscriptionId: "sub_1",
     subscriptionPhaseId: "phase_1",
+    subscriptionItemId: "item_1",
+    effectiveAt: 0,
+    expiresAt: null,
     ...overrides,
   }
 }
 
 function makeDeps(
   options: {
-    billingPeriods?: Array<{ id: string; cycleStartAt: number }>
+    billingPeriods?: Array<{ id: string; cycleStartAt: number; cycleEndAt?: number }>
     budgetRuns?: Array<{ id: string }>
     entitlements?: Entitlement[]
     entitlementsResult?: Result<Entitlement[], FetchError>
@@ -282,12 +311,19 @@ function makeDeps(
           projectId: "projectId",
           customerId: "customerId",
           subscriptionId: "subscriptionId",
+          subscriptionPhaseId: "subscriptionPhaseId",
           statementKey: "statementKey",
         },
         predicateOperators
       )
     )
-    return options.billingPeriods ?? []
+    return (options.billingPeriods ?? [{ id: "bp_1", cycleStartAt: 1_700_000_000_000 }]).map(
+      (period) => ({
+        subscriptionItemId: "item_1",
+        cycleEndAt: period.cycleStartAt + 86_400_000,
+        ...period,
+      })
+    )
   })
   const budgetRunsFindMany = vi.fn(async (query: CapturedQuery) => {
     options.onBudgetWhere?.(

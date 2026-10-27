@@ -1,6 +1,7 @@
 import type { Database } from "@unprice/db"
 import { BaseError, Err, Ok, type Result } from "@unprice/error"
 import { z } from "zod"
+import { ownsBillingUsagePeriod } from "../../billing/usage-snapshot"
 import type { ServiceContext } from "../../context"
 import type { EntitlementWindowController } from "../../ingestion"
 import type { RunBudgetClient } from "../runs"
@@ -84,10 +85,12 @@ export async function flushReservationsForInvoicing(
         eqOp(table.projectId, input.projectId),
         eqOp(table.customerId, input.customerId),
         eqOp(table.subscriptionId, input.subscriptionId),
+        eqOp(table.subscriptionPhaseId, input.subscriptionPhaseId),
         eqOp(table.statementKey, input.statementKey)
       ),
-    columns: { cycleStartAt: true, id: true },
+    columns: { cycleStartAt: true, cycleEndAt: true, subscriptionItemId: true, id: true },
   })
+  if (billingPeriodRows.length === 0) return Ok({ flushed: 0, skipped: 0 })
   const billingPeriodIds = billingPeriodRows.map((row) => row.id)
   const earliestCycleStartAt =
     billingPeriodRows.length === 0
@@ -97,7 +100,8 @@ export async function flushReservationsForInvoicing(
   const entitlementsResult = await deps.services.entitlements.getCustomerEntitlementsForCustomer({
     customerId: input.customerId,
     projectId: input.projectId,
-    now: Date.now(),
+    startAt: Math.min(...billingPeriodRows.map((period) => period.cycleStartAt)),
+    endAt: Math.max(...billingPeriodRows.map((period) => period.cycleEndAt)),
     db: deps.db,
   })
 
@@ -114,7 +118,12 @@ export async function flushReservationsForInvoicing(
   const phaseEntitlements = entitlementsResult.val.filter(
     (entitlement) =>
       entitlement.subscriptionId === input.subscriptionId &&
-      entitlement.subscriptionPhaseId === input.subscriptionPhaseId
+      entitlement.subscriptionPhaseId === input.subscriptionPhaseId &&
+      billingPeriodRows.some(
+        (period) =>
+          entitlement.subscriptionItemId === period.subscriptionItemId &&
+          ownsBillingUsagePeriod(entitlement, period)
+      )
   )
 
   let flushed = 0
