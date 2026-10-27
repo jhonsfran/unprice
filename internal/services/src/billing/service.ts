@@ -1041,6 +1041,21 @@ export class BillingService {
 
       // if the invoice is paid or void, we update the invoice status
       if (["paid", "void"].includes(statusPaymentProviderInvoice.val.status)) {
+        if (statusPaymentProviderInvoice.val.status === "paid") {
+          const settled = await settlePrepaidInvoiceToWallet({
+            walletService: this.walletService,
+            invoice,
+          })
+          if (settled.err) {
+            return Err(
+              new UnPriceBillingError({
+                code: "PAYMENT_SETTLEMENT_FAILED",
+                message: `Failed to settle prepaid invoice ${invoice.id} to wallet: ${settled.err.message}`,
+              })
+            )
+          }
+        }
+
         // update the invoice status
         const updatedInvoice = await billingRepo.updateInvoice({
           invoiceId: invoice.id,
@@ -1067,21 +1082,6 @@ export class BillingService {
               message: "Error updating invoice",
             })
           )
-        }
-
-        if (statusPaymentProviderInvoice.val.status === "paid") {
-          const settled = await settlePrepaidInvoiceToWallet({
-            walletService: this.walletService,
-            invoice: updatedInvoice,
-          })
-          if (settled.err) {
-            return Err(
-              new UnPriceBillingError({
-                code: "PAYMENT_SETTLEMENT_FAILED",
-                message: `Failed to settle prepaid invoice ${updatedInvoice.id} to wallet: ${settled.err.message}`,
-              })
-            )
-          }
         }
 
         return Ok(updatedInvoice)
@@ -1136,6 +1136,21 @@ export class BillingService {
 
       // this happen when there are many invoices and stripe merge them into one invoice
       if (["paid", "void"].includes(statusInvoice.val.status)) {
+        if (statusInvoice.val.status === "paid") {
+          const settled = await settlePrepaidInvoiceToWallet({
+            walletService: this.walletService,
+            invoice,
+          })
+          if (settled.err) {
+            return Err(
+              new UnPriceBillingError({
+                code: "PAYMENT_SETTLEMENT_FAILED",
+                message: `Failed to settle prepaid invoice ${invoice.id} to wallet: ${settled.err.message}`,
+              })
+            )
+          }
+        }
+
         // update the invoice status if the payment is successful
         // if not add the failed attempt
         const updatedInvoice = await billingRepo.updateInvoice({
@@ -1157,21 +1172,6 @@ export class BillingService {
               message: "Error updating invoice",
             })
           )
-        }
-
-        if (statusInvoice.val.status === "paid") {
-          const settled = await settlePrepaidInvoiceToWallet({
-            walletService: this.walletService,
-            invoice: updatedInvoice,
-          })
-          if (settled.err) {
-            return Err(
-              new UnPriceBillingError({
-                code: "PAYMENT_SETTLEMENT_FAILED",
-                message: `Failed to settle prepaid invoice ${updatedInvoice.id} to wallet: ${settled.err.message}`,
-              })
-            )
-          }
         }
 
         return Ok(updatedInvoice)
@@ -1207,6 +1207,21 @@ export class BillingService {
       const paymentStatus = providerPaymentInvoice.val.status
       const isPaid = ["paid", "void"].includes(paymentStatus)
 
+      if (paymentStatus === "paid") {
+        const settled = await settlePrepaidInvoiceToWallet({
+          walletService: this.walletService,
+          invoice,
+        })
+        if (settled.err) {
+          return Err(
+            new UnPriceBillingError({
+              code: "PAYMENT_SETTLEMENT_FAILED",
+              message: `Failed to settle prepaid invoice ${invoice.id} to wallet: ${settled.err.message}`,
+            })
+          )
+        }
+      }
+
       // update the invoice status if the payment is successful
       // if not add the failed attempt
       const updatedInvoice = await billingRepo.updateInvoice({
@@ -1231,25 +1246,6 @@ export class BillingService {
             message: "Error updating invoice",
           })
         )
-      }
-
-      // Synchronous providers (Sandbox today) confirm payment inline rather
-      // than via webhook, so the wallet settlement that the webhook handler
-      // does for Stripe must happen here too — otherwise the receivable IOU
-      // opened at invoice creation never gets cleared.
-      if (paymentStatus === "paid") {
-        const settled = await settlePrepaidInvoiceToWallet({
-          walletService: this.walletService,
-          invoice: updatedInvoice,
-        })
-        if (settled.err) {
-          return Err(
-            new UnPriceBillingError({
-              code: "PAYMENT_SETTLEMENT_FAILED",
-              message: `Failed to settle prepaid invoice ${updatedInvoice.id} to wallet: ${settled.err.message}`,
-            })
-          )
-        }
       }
 
       return Ok(updatedInvoice)
