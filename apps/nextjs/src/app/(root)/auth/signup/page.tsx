@@ -10,8 +10,8 @@ import {
   PRIVACY_URL,
   type SignupIntent,
   TERMS_URL,
+  authNextPath,
   buildAuthHref,
-  getSafeNextPath,
   getSignupIntent,
   getSingleSearchParam,
 } from "~/lib/signup-funnel"
@@ -49,7 +49,7 @@ export default async function AuthenticationPage(props: {
   const { sessionId, intent, next } = await props.searchParams
   const singleSessionId = getSingleSearchParam(sessionId)
   const signupIntent = getSignupIntent(intent)
-  const safeNext = getSafeNextPath(getSingleSearchParam(next))
+  const safeNext = authNextPath(getSingleSearchParam(next), signupIntent)
   const session = await getSession()
   const copy = signupIntent ? INTENT_COPY[signupIntent] : null
 

@@ -7,6 +7,7 @@ import {
   PRIVACY_URL,
   type SignupIntent,
   TERMS_URL,
+  authNextPath,
   buildAuthHref,
   createFunnelPageEventClaimer,
   getSafeNextPath,
@@ -100,6 +101,14 @@ describe("signup funnel URLs", () => {
     expect(newWorkspacePath("budgets")).toBe("/new?intent=budgets")
     expect(intentLanding("acme", "budgets")).toBe("/acme/onboarding/budgets")
     expect(workspaceLanding("acme", "budgets")).toBe("/acme/onboarding/budgets")
+  })
+
+  it("routes a bare budgets intent through /new when the link carries no next", () => {
+    expect(authNextPath(undefined, "budgets")).toBe("/new?intent=budgets")
+    expect(authNextPath("/acme/settings", "budgets")).toBe("/acme/settings")
+    expect(authNextPath("https://evil.example", "budgets")).toBe("/new?intent=budgets")
+    expect(authNextPath(undefined, "paid-action")).toBeNull()
+    expect(authNextPath(undefined)).toBeNull()
   })
 
   it("lands the paid-action intent, and no intent, on the workspace itself", () => {

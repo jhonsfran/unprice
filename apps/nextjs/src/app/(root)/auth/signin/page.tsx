@@ -9,8 +9,8 @@ import { env } from "~/env"
 import {
   PRIVACY_URL,
   TERMS_URL,
+  authNextPath,
   buildAuthHref,
-  getSafeNextPath,
   getSignupIntent,
   getSingleSearchParam,
 } from "~/lib/signup-funnel"
@@ -32,7 +32,7 @@ export default async function AuthenticationPage(props: {
   const { sessionId, intent, next } = await props.searchParams
   const singleSessionId = getSingleSearchParam(sessionId)
   const signupIntent = getSignupIntent(intent)
-  const safeNext = getSafeNextPath(getSingleSearchParam(next))
+  const safeNext = authNextPath(getSingleSearchParam(next), signupIntent)
   const [session, cookieStore] = await Promise.all([getSession(), cookies()])
   const lastUsedMethod = cookieStore.get("last-login-method")?.value
 

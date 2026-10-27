@@ -65,6 +65,14 @@ export function getSafeNextPath(next: string | null | undefined): string | null 
   return next
 }
 
+/** Where auth continues: a safe `next` from the link, else the intent's own route through `/new`. */
+export function authNextPath(
+  next: string | null | undefined,
+  intent?: SignupIntent
+): string | null {
+  return getSafeNextPath(next) ?? (intent ? (nextAfterAuth(intent) ?? null) : null)
+}
+
 export function buildAuthHref(
   route: AuthRoute,
   { sessionId, intent, next }: { sessionId?: string; intent?: SignupIntent; next?: string | null }
