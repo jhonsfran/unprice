@@ -1,12 +1,13 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
-import { Ok, type Result } from "@unprice/error"
+import { Err, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Cache } from "../cache"
 import type { CustomerService } from "../customers/service"
 import type { GrantsManager } from "../entitlements"
 import type { LedgerGateway } from "../ledger"
+import { UnPriceLedgerError } from "../ledger/errors"
 import type { Metrics } from "../metrics"
 import type { RatingService } from "../rating/service"
 import type { WalletService } from "../wallet"
@@ -226,6 +227,8 @@ function createdPeriods() {
 describe("BillingService._generateBillingPeriods", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    listInvoicedPeriodsExceedingPhaseEndMock.mockReset().mockResolvedValue([])
+    shortenBillingPeriodMock.mockReset().mockResolvedValue(undefined)
   })
 
   it("returns phasesProcessed=0 and cyclesCreated=0 when no phases found", async () => {
@@ -335,6 +338,76 @@ describe("BillingService._generateBillingPeriods", () => {
       periodId: "bp_1",
       cycleEndAt: PHASE_END,
     })
+  })
+
+  it("keeps a shortened paid period retryable when its ledger lookup fails", async () => {
+    const phaseEndAt = new Date("2026-03-16T12:00:00Z").getTime()
+    const phase = makePhase({
+      endAt: phaseEndAt,
+      items: [],
+      planVersion: {
+        ...makePhase().planVersion,
+        billingConfig: makeBillingConfig("month", "monthly", 1, "dayOfCreation"),
+      },
+    })
+    const { billing, db, walletService, ledgerService } = makeBillingService({ phases: [phase] })
+    const persisted = { cycleEndAt: PHASE_END, refundedAmount: 0 }
+    let transactionState = { ...persisted }
+    let transactionExecutor: Database | undefined
+    const period = {
+      id: "bp_1",
+      projectId: "proj_1",
+      invoiceId: "inv_1",
+      cycleStartAt: PHASE_START,
+    }
+    db.transaction.mockImplementation(async (run: (tx: Database) => Promise<unknown>) => {
+      transactionState = { ...persisted }
+      const tx = {
+        query: {
+          invoices: {
+            findFirst: vi.fn().mockResolvedValue({ status: "paid", statementKey: "stmt_1" }),
+          },
+        },
+      } as unknown as Database
+      transactionExecutor = tx
+      const value = await run(tx)
+      Object.assign(persisted, transactionState)
+      return value
+    })
+    listInvoicedPeriodsExceedingPhaseEndMock.mockImplementation(async () =>
+      transactionState.cycleEndAt > phaseEndAt
+        ? [{ ...period, cycleEndAt: transactionState.cycleEndAt }]
+        : []
+    )
+    shortenBillingPeriodMock.mockImplementation(async (input: { cycleEndAt: number }) => {
+      transactionState.cycleEndAt = input.cycleEndAt
+    })
+    vi.mocked(walletService.adjust).mockImplementation(async (input, executor) => {
+      if (executor !== transactionExecutor)
+        throw new Error("Refund requires the billing transaction")
+      transactionState.refundedAmount += input.signedAmount
+      return Ok({ clampedAmount: input.signedAmount, unclampedRemainder: 0 })
+    })
+    ledgerService.getInvoiceLines
+      .mockResolvedValueOnce(Err(new UnPriceLedgerError({ message: "LEDGER_GET_ENTRIES_FAILED" })))
+      .mockResolvedValue(
+        Ok([
+          {
+            amount: { toJSON: () => ({ amount: 100_000_000 }) },
+            metadata: { billing_period_id: period.id },
+          },
+        ])
+      )
+    const payload = { subscriptionId: "sub_1", projectId: "proj_1", now: NOW }
+
+    const failed = await generateBillingPeriods(billing, payload)
+    const stateAfterFailure = { ...persisted }
+    const retried = await generateBillingPeriods(billing, payload)
+
+    expect(stateAfterFailure).toEqual({ cycleEndAt: PHASE_END, refundedAmount: 0 })
+    expect(failed.err?.message).toContain("LEDGER_GET_ENTRIES_FAILED")
+    expect(retried.val).toEqual({ phasesProcessed: 1, cyclesCreated: 0 })
+    expect(persisted).toEqual({ cycleEndAt: phaseEndAt, refundedAmount: 50_000_000 })
   })
 
   it("dryRun=true skips DB writes but still counts cycles", async () => {

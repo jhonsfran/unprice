@@ -1,7 +1,7 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import type { BillingConfig } from "@unprice/db/validators"
-import { Err, Ok } from "@unprice/error"
+import { Err, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Cache } from "../cache"
@@ -13,6 +13,7 @@ import type { Metrics } from "../metrics"
 import type { RatingService } from "../rating/service"
 import type { SubscriptionMachine } from "../subscriptions/machine"
 import type { WalletService } from "../wallet"
+import type { UnPriceBillingError } from "./errors"
 import { BillingService } from "./service"
 
 const machineMocks = vi.hoisted(() => ({
@@ -126,7 +127,10 @@ type ComputeProratedRefundInput = {
 }
 
 type BillingServiceProrationAccess = {
-  computeProratedRefundAmount: (tx: Database, input: ComputeProratedRefundInput) => Promise<number>
+  computeProratedRefundAmount: (
+    tx: Database,
+    input: ComputeProratedRefundInput
+  ) => Promise<Result<number, UnPriceBillingError>>
 }
 
 function computeProratedRefundAmount(
@@ -162,7 +166,7 @@ describe("BillingService.computeProratedRefundAmount", () => {
       ...BASE_INPUT_EXTRAS,
     })
 
-    expect(result).toBe(0)
+    expect(result.val).toBe(0)
     // Should not even query the DB
     expect(tx.query.invoices.findFirst).not.toHaveBeenCalled()
   })
@@ -177,7 +181,7 @@ describe("BillingService.computeProratedRefundAmount", () => {
       ...BASE_INPUT_EXTRAS,
     })
 
-    expect(result).toBe(0)
+    expect(result.val).toBe(0)
   })
 
   it("returns 0 when invoice is not paid (draft)", async () => {
@@ -190,7 +194,7 @@ describe("BillingService.computeProratedRefundAmount", () => {
       ...BASE_INPUT_EXTRAS,
     })
 
-    expect(result).toBe(0)
+    expect(result.val).toBe(0)
   })
 
   it("returns 0 when invoice is unpaid", async () => {
@@ -203,7 +207,7 @@ describe("BillingService.computeProratedRefundAmount", () => {
       ...BASE_INPUT_EXTRAS,
     })
 
-    expect(result).toBe(0)
+    expect(result.val).toBe(0)
   })
 
   it("returns 0 when newFactor >= oldFactor (no shortening)", async () => {
@@ -219,7 +223,7 @@ describe("BillingService.computeProratedRefundAmount", () => {
       ...BASE_INPUT_EXTRAS,
     })
 
-    expect(result).toBe(0)
+    expect(result.val).toBe(0)
   })
 
   it("computes ~50% refund for half-period cancellation", async () => {
@@ -244,10 +248,10 @@ describe("BillingService.computeProratedRefundAmount", () => {
 
     // unearnedFraction = 1 - 0.5/1.0 = 0.5
     // refund = floor(100_000_000 * 0.5) = 50_000_000
-    expect(result).toBe(50_000_000)
+    expect(result.val).toBe(50_000_000)
   })
 
-  it("returns 0 when ledger lines return an error (graceful fallback)", async () => {
+  it("returns an error when the ledger lookup fails", async () => {
     const { billing } = makeBillingService()
     const tx = makeTxMock({ status: "paid", statementKey: "stmt_1" })
 
@@ -265,7 +269,8 @@ describe("BillingService.computeProratedRefundAmount", () => {
       ...BASE_INPUT_EXTRAS,
     })
 
-    expect(result).toBe(0)
+    expect(result.err?.code).toBe("BILLING_OPERATION_FAILED")
+    expect(result.err?.message).toContain("LEDGER_GET_ENTRIES_FAILED")
   })
 
   it("returns 0 when paid amount sums to zero", async () => {
@@ -286,6 +291,6 @@ describe("BillingService.computeProratedRefundAmount", () => {
       ...BASE_INPUT_EXTRAS,
     })
 
-    expect(result).toBe(0)
+    expect(result.val).toBe(0)
   })
 })

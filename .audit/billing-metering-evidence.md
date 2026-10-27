@@ -19,3 +19,17 @@ After: the three retry regressions pass. The invoice keeps its prior state after
 Adjacent verification: `pnpm --filter @unprice/services test src/billing/service.collect.test.ts src/billing/invoice-settlement.test.ts src/use-cases/billing/settle-invoice.test.ts`. Result: `Test Files 3 passed (3)`, `Tests 28 passed (28)`.
 
 Independent review: issue 5 diff and before/after logs passed review. No new comments or correctness findings.
+
+## Issue 8: Preserve refund retries
+
+Verdict: VERIFIED.
+
+Test: `internal/services/src/billing/service.generate-periods.test.ts`, `keeps a shortened paid period retryable when its ledger lookup fails`.
+
+Before: `Tests 1 failed | 12 passed (13)`. The stored period end changed from `1775001600000` to `1773662400000` after the failed lookup. No refund was issued, and retry omitted the shortened period.
+
+After: the failed lookup leaves the original period end and zero refund. Retry issues exactly `50_000_000` ledger minor units and shortens the period. The fake requires wallet adjustment to use the same transaction executor.
+
+Command: `pnpm --filter @unprice/services test src/billing/service.generate-periods.test.ts src/billing/service.proration.test.ts`. Result: `Tests 21 passed (21)`.
+
+Independent review: PASS. This regression proves transaction control flow with dependency fakes, not PostgreSQL rollback.

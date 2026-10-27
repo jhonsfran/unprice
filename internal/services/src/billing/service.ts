@@ -1957,8 +1957,8 @@ export class BillingService {
             })
 
             for (const period of invoicedPeriods) {
-              const refundAmount = dryRun
-                ? 0
+              const refundResult = dryRun
+                ? Ok(0)
                 : await this.computeProratedRefundAmount(tx, {
                     period,
                     phaseEndAt: phase.endAt!,
@@ -1966,6 +1966,9 @@ export class BillingService {
                     billingAnchor: phase.billingAnchor,
                     billingConfig: phase.planVersion.billingConfig,
                   })
+
+              if (refundResult.err) throw refundResult.err
+              const refundAmount = refundResult.val
 
               if (!dryRun) {
                 if (refundAmount > 0) {
@@ -2276,10 +2279,10 @@ export class BillingService {
       billingAnchor: number
       billingConfig: import("@unprice/db/validators").BillingConfig
     }
-  ): Promise<number> {
+  ): Promise<Result<number, UnPriceBillingError>> {
     const { period, phaseEndAt, phaseStartAt, billingAnchor, billingConfig } = input
 
-    if (!period.invoiceId) return 0
+    if (!period.invoiceId) return Ok(0)
 
     // Only paid invoices can generate refunds — otherwise we'd be
     // refunding money the customer never spent.
@@ -2289,7 +2292,7 @@ export class BillingService {
         and(eq(inv.id, period.invoiceId!), eq(inv.projectId, period.projectId)),
     })
 
-    if (!invoice || invoice.status !== "paid") return 0
+    if (!invoice || invoice.status !== "paid") return Ok(0)
 
     const prorationBillingConfig = {
       ...billingConfig,
@@ -2315,7 +2318,7 @@ export class BillingService {
 
     const oldFactor = originalProration.prorationFactor
     const newFactor = newProration.prorationFactor
-    if (!oldFactor || newFactor >= oldFactor) return 0
+    if (!oldFactor || newFactor >= oldFactor) return Ok(0)
 
     // Sum the ledger entries that credit `customer.*.consumed` for this billing
     // period. Uses the same projection contract as the invoice-lines read path.
@@ -2323,7 +2326,14 @@ export class BillingService {
       projectId: period.projectId,
       statementKey: invoice.statementKey,
     })
-    if (linesResult.err) return 0
+    if (linesResult.err) {
+      return Err(
+        new UnPriceBillingError({
+          code: "BILLING_OPERATION_FAILED",
+          message: `Failed to read refund lines for period ${period.id}: ${linesResult.err.message}`,
+        })
+      )
+    }
 
     const paidMinor = linesResult.val.reduce((sum, line) => {
       if (line.metadata?.billing_period_id !== period.id) return sum
@@ -2331,10 +2341,10 @@ export class BillingService {
       return sum + snap.amount
     }, 0)
 
-    if (paidMinor <= 0) return 0
+    if (paidMinor <= 0) return Ok(0)
 
     const unearnedFraction = 1 - newFactor / oldFactor
-    return Math.floor(paidMinor * unearnedFraction)
+    return Ok(Math.floor(paidMinor * unearnedFraction))
   }
 
   public async estimatePriceCurrentUsage({
