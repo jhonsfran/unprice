@@ -17,7 +17,11 @@ export type EntitlementWindowApplyResult = {
   allowed: boolean
   deniedReason?: Extract<
     IngestionRejectionReason,
-    "LIMIT_EXCEEDED" | "WALLET_EMPTY" | "LATE_EVENT_CLOSED_PERIOD" | "RUN_BUDGET_EXCEEDED"
+    | "LIMIT_EXCEEDED"
+    | "WALLET_EMPTY"
+    | "LATE_EVENT_CLOSED_PERIOD"
+    | "RUN_BUDGET_EXCEEDED"
+    | "INVALID_AGGREGATION_PROPERTIES"
   >
   idempotencyStatus?: IngestionIdempotencyStatus
   meterFacts?: AnalyticsEntitlementMeterFact[]

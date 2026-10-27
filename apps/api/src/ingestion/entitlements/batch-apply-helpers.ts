@@ -1,4 +1,7 @@
-import { computeMaxMarginalPriceMinor } from "@unprice/services/entitlements"
+import {
+  UnsupportedUsageCorrectionError,
+  computeMaxMarginalPriceMinor,
+} from "@unprice/services/entitlements"
 import {
   type ReservationPolicy,
   computeEffectiveWalletCost,
@@ -118,6 +121,7 @@ export function planWalletReservationSpend(params: {
   window: OpenWalletReservationSnapshot
 }): WalletReservationSpendPlan {
   const { createdAt, entitlement, eventTimestamp, policy, totalCost, totalUnits, window } = params
+  assertSupportedWalletCorrection({ totalCost, totalUnits, window })
   const spendCost = computeWalletReservationSpendCost({ totalCost, window })
 
   if (spendCost.effectiveCostAmount > spendCost.currentRemaining) {
@@ -131,7 +135,7 @@ export function planWalletReservationSpend(params: {
   }
 
   const nextConsumedAmount = window.consumedAmount + spendCost.effectiveCostAmount
-  const nextConsumedQuantity = window.consumedQuantity + Math.max(0, totalUnits)
+  const nextConsumedQuantity = window.consumedQuantity + totalUnits
   const refillPlan = planWalletReservationRefill({
     createdAt,
     entitlement,
@@ -521,4 +525,49 @@ export function computeBatchReservationRefillAmount(params: {
   )
 
   return Math.max(0, desiredRemainingAmount - Math.max(0, params.currentRemainingAmount))
+}
+
+export function assertSupportedWalletCorrection(params: {
+  totalCost: number
+  totalUnits: number
+  window: WalletReservationSnapshot
+}): void {
+  const { totalCost, totalUnits, window } = params
+  const hasPendingCapture =
+    window !== null && window.pendingFlushSeq !== null && window.pendingFlushSeq > window.flushSeq
+  const pendingCapture = hasPendingCapture ? (window?.pendingFlushAmount ?? 0) : 0
+  const pendingQuantity = hasPendingCapture ? (window?.pendingFlushQuantity ?? 0) : 0
+  const reversesAmount =
+    totalCost < 0 &&
+    (window?.consumedAmount ?? 0) + totalCost < (window?.flushedAmount ?? 0) + pendingCapture
+  const reversesQuantity =
+    totalUnits < 0 &&
+    (window?.consumedQuantity ?? 0) + totalUnits < (window?.flushedQuantity ?? 0) + pendingQuantity
+  if (reversesAmount || reversesQuantity) {
+    throw new UnsupportedUsageCorrectionError(
+      "Correction would reverse committed wallet consumption. Use a separate credit workflow for captured usage."
+    )
+  }
+}
+
+export function resolveBatchWalletSpendWindow(params: {
+  draft: WalletReservationSnapshot
+  persisted: WalletReservationSnapshot
+}): WalletReservationSnapshot {
+  const { draft, persisted } = params
+  if (!draft || draft.pendingFlushSeq === null) return draft
+  if (
+    persisted?.reservationId === draft.reservationId &&
+    persisted.pendingFlushSeq === draft.pendingFlushSeq
+  )
+    return draft
+  return {
+    ...draft,
+    pendingFlushSeq: null,
+    pendingFlushAmount: null,
+    pendingFlushQuantity: null,
+    pendingFlushFinal: false,
+    pendingRefillAmount: 0,
+    refillInFlight: false,
+  }
 }

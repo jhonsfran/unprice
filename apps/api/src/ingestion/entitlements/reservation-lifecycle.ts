@@ -17,6 +17,7 @@ import {
 } from "@unprice/services/wallet/reservation-sizing"
 import { addLedgerAmountDisplayFields, readLogCurrency } from "./apply-telemetry"
 import {
+  assertSupportedWalletCorrection,
   computeBatchReservationHeadroom,
   computeBatchReservationRefillAmount,
 } from "./batch-apply-helpers"
@@ -46,7 +47,7 @@ import type {
   EntitlementWindowWalletOps,
   EntitlementWindowWalletProvider,
 } from "./ports"
-import { firstGrantByDrainOrder, projectEventCostMinor } from "./pricing"
+import { firstGrantByDrainOrder, projectEventCostMinor, projectEventUsage } from "./pricing"
 import {
   type ReservationInvoiceContext,
   hasPendingWalletFlush,
@@ -1513,7 +1514,7 @@ export class ReservationLifecycle {
       timestamp: input.event.timestamp,
     })
 
-    return projectEventCostMinor({
+    const projected = projectEventUsage({
       activeGrants,
       entitlement: input.entitlement,
       event: input.event,
@@ -1522,6 +1523,15 @@ export class ReservationLifecycle {
       meter,
       meterState,
     })
+    const window = this.store.readWalletReservation()
+    if (window || projected.amountMinor > 0) {
+      assertSupportedWalletCorrection({
+        totalCost: projected.amountMinor,
+        totalUnits: projected.units,
+        window,
+      })
+    }
+    return projected.amountMinor
   }
 
   public computeProjectedBatchEventCostMinor(params: {

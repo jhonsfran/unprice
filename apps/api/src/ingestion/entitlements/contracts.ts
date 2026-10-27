@@ -78,7 +78,10 @@ export class EntitlementWindowReservationUnderfundedError extends Error {
 export type DeniedReason =
   | Extract<
       IngestionRejectionReason,
-      "LIMIT_EXCEEDED" | "WALLET_EMPTY" | "LATE_EVENT_CLOSED_PERIOD"
+      | "LIMIT_EXCEEDED"
+      | "WALLET_EMPTY"
+      | "LATE_EVENT_CLOSED_PERIOD"
+      | "INVALID_AGGREGATION_PROPERTIES"
     >
   | "RUN_BUDGET_EXCEEDED"
 
@@ -265,6 +268,7 @@ export const batchIdempotencyEntrySchema = z.object({
       "WALLET_EMPTY",
       "LATE_EVENT_CLOSED_PERIOD",
       "RUN_BUDGET_EXCEEDED",
+      "INVALID_AGGREGATION_PROPERTIES",
     ] satisfies readonly [DeniedReason, ...DeniedReason[]])
     .nullable(),
   denyMessage: z.string().nullable(),

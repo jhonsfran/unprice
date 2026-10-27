@@ -72,7 +72,7 @@ Verdict: VERIFIED.
 
 Before: `Failed checks 7`. The original SQL returns one unit for the actual processor output and for late sum/count and same-millisecond ordering cases.
 
-After: `python3 .audit/sql/prove-sql.py` reports seventeen passing checks and `Failed checks 0`. The checks cover both billing endpoints, exact transport duplicates, max, latest, signed corrections, and accepted money for partial reset windows. The processor regression also passes.
+After: `python3 .audit/sql/prove-sql.py` reports eighteen passing checks and `Failed checks 0`. The checks cover both billing endpoints, exact transport duplicates, max, latest, signed corrections, and accepted money for partial reset windows. A synthetic large-money check proves that Int128 aggregation preserves an unsafe total for rejection instead of wrapping it to zero. The processor regression also passes.
 
 Independent review reran the same SQL proof and passed it. The archived synthetic processor output is `.audit/sql/processor-facts.ndjson`.
 
@@ -103,3 +103,17 @@ After: `pnpm --filter api test src/ingestion/entitlements` passes all 129 tests.
 The fix keys raw state and batch drafts by reset period. Existing unscoped history cannot prove the raw value for an overlapping period. Such a period rejects new events without state changes and requires reconciliation. Periods after the legacy watermark start at zero. Cached and staged replay receipts continue to work without reconstructing raw state.
 
 Independent review: PASS after one additional batch defect was reproduced and fixed. Raw state now loads only after replay, active-grant, and closed-period checks. A valid new-period event succeeds beside a closed legacy event, which receives its normal denial. The reviewer ran twenty focused and independent cases. API type checking also passes.
+
+## Issue 4: Apply negative corrections to grant and wallet accounting
+
+Verdict: VERIFIED.
+
+The correction cases in `apps/api/src/ingestion/entitlements/processor.test.ts` call the real single and batch processors. They assert returned signed facts, persisted raw and grant state, restored capacity, wallet amounts and quantities, and replay results. They include sum and latest, enforced and unenforced limits, overcorrection debt, multiple grants, and overage reversal.
+
+Before: `pnpm --filter api test src/ingestion/entitlements/processor.test.ts -t 'correction|zero-price'` reports `Tests 32 failed | 81 skipped (113)`.
+
+After: all 160 entitlement tests pass. The adjacent aggregation and grant-allocation suites also pass all 65 tests.
+
+Unflushed `+10, -4, +4` finishes at ten units and ten dollars. A four-unit correction against ten units with seven already captured rejects the whole correction. Raw state, grants, and wallet remain unchanged. A three-unit correction remains valid. The same rule protects pending capture intents and retained closed-reservation totals. Zero-price cases verify that quantity watermarks receive the same protection. Rejected requests keep a stable `INVALID_AGGREGATION_PROPERTIES` receipt and a clear credit-workflow message. Reversing captured money requires a separate funded credit operation.
+
+Independent review: PASS. The reviewer independently reran all thirty-two correction cases under the explicit Node 24.17.0 binary. API and services type checks also pass. No added comments or suppressions.

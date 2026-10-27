@@ -7,6 +7,7 @@ import {
   EventTimestampTooOldError,
   type Fact,
   type GrantConsumptionState,
+  UnsupportedUsageCorrectionError,
   computeGrantPeriodBucket,
   computeUsagePriceDeltaMinor,
   resolveActiveGrants,
@@ -28,11 +29,13 @@ import {
   recordBatchWalletUnderfundedRetry,
 } from "./apply-telemetry"
 import {
+  assertSupportedWalletCorrection,
   buildBatchEventApplyInput,
   createAllowedBatchOutcome,
   createCachedBatchResult,
   createDeniedBatchOutcome,
   planWalletReservationSpend,
+  resolveBatchWalletSpendWindow,
 } from "./batch-apply-helpers"
 import {
   type ActiveGrantInput,
@@ -93,6 +96,7 @@ import {
   buildMeterFactPayload,
   findGrantLimitExceededFact,
   priceFactsFromGrantStates,
+  projectEventUsage,
   resolveLateClosedPeriod,
   resolveTotalGrantUnits,
 } from "./pricing"
@@ -620,9 +624,15 @@ export class EntitlementWindowProcessor {
       state,
       usesWalletReservation,
     } = params
+    const meterStateKey = resolveMeterStateKey({
+      entitlement: setup.entitlement,
+      timestamp: event.timestamp,
+    })
+    const eventMeterState = { ...state.readMeterState(meterStateKey) }
     let facts: Fact[]
     try {
       facts = this.applyOptimizedBatchMeterEvent({
+        meterState: eventMeterState,
         activeGrants,
         event,
         eventInput,
@@ -656,6 +666,26 @@ export class EntitlementWindowProcessor {
       facts,
       grantStates: state.grantStates,
     })
+    if (usesWalletReservation && state.wallet) {
+      try {
+        assertSupportedWalletCorrection({
+          totalCost: pricedFacts.reduce((total, fact) => total + fact.amountMinor, 0),
+          totalUnits: this.sumPricedFactUnits(pricedFacts),
+          window: resolveBatchWalletSpendWindow({ draft: state.wallet, persisted: setup.wallet }),
+        })
+      } catch (error) {
+        if (!(error instanceof UnsupportedUsageCorrectionError)) throw error
+        this.stageOptimizedBatchDeniedResult({
+          createdAt,
+          deniedReason: "INVALID_AGGREGATION_PROPERTIES",
+          message: error.message,
+          event,
+          state,
+        })
+        return null
+      }
+    }
+    state.meterStates.set(meterStateKey, eventMeterState)
     state.metrics.priced_fact_count += pricedFacts.length
     state.metrics.grant_allocation_count += touchedStates.size
     state.grantStates = [...grantStates]
@@ -713,18 +743,39 @@ export class EntitlementWindowProcessor {
       return false
     }
 
-    const projectedCost = this.reservations.computeProjectedBatchEventCostMinor({
+    const projected = projectEventUsage({
       activeGrants,
       entitlement: eventInput.entitlement,
       event: eventInput.event,
       eventTimestamp: event.timestamp,
       grantStates: state.grantStates,
       meter: setup.meter,
+      validationTimeMs: Date.now(),
       meterState: state.readMeterState(
         resolveMeterStateKey({ entitlement: setup.entitlement, timestamp: event.timestamp })
       ),
     })
 
+    try {
+      if (state.wallet || projected.amountMinor > 0) {
+        assertSupportedWalletCorrection({
+          totalCost: projected.amountMinor,
+          totalUnits: projected.units,
+          window: state.wallet,
+        })
+      }
+    } catch (error) {
+      if (!(error instanceof UnsupportedUsageCorrectionError)) throw error
+      this.stageOptimizedBatchDeniedResult({
+        createdAt,
+        deniedReason: "INVALID_AGGREGATION_PROPERTIES",
+        message: error.message,
+        event,
+        state,
+      })
+      return true
+    }
+    const projectedCost = projected.amountMinor
     if (projectedCost <= 0) {
       return false
     }
@@ -834,15 +885,12 @@ export class EntitlementWindowProcessor {
     event: ApplyBatchInput["events"][number]
     eventInput: ApplyInput
     input: ApplyBatchInput
+    meterState: MeterStateDraft
     setup: OptimizedBatchSetup
     state: OptimizedBatchDraft
   }): Fact[] {
-    const { activeGrants, event, eventInput, input, setup, state } = params
-    const adapter = new InMemoryMeterStorageAdapter(
-      state.readMeterState(
-        resolveMeterStateKey({ entitlement: setup.entitlement, timestamp: event.timestamp })
-      )
-    )
+    const { activeGrants, event, eventInput, input, meterState, setup, state } = params
+    const adapter = new InMemoryMeterStorageAdapter(meterState)
     const engine = new AsyncMeterAggregationEngine([setup.meter.config], adapter, event.now)
     return engine.applyEventSync(eventInput.event, {
       beforePersist: (pendingFacts) => {
@@ -883,11 +931,15 @@ export class EntitlementWindowProcessor {
     usesWalletReservation: boolean
   }): void {
     const { createdAt, event, pricedFacts, setup, state, usesWalletReservation } = params
-    const wallet = state.wallet
+    const wallet = resolveBatchWalletSpendWindow({ draft: state.wallet, persisted: setup.wallet })
+    const resetsDraftFlush =
+      wallet !== null &&
+      state.wallet !== null &&
+      wallet.pendingFlushSeq !== state.wallet.pendingFlushSeq
 
     if (usesWalletReservation && wallet?.reservationId && pricedFacts.length > 0) {
       const totalCost = pricedFacts.reduce((sum, { amountMinor }) => sum + amountMinor, 0)
-      const totalUnits = this.sumPositivePricedFactUnits(pricedFacts)
+      const totalUnits = this.sumPricedFactUnits(pricedFacts)
       const spendPlan = planWalletReservationSpend({
         createdAt,
         entitlement: setup.entitlement,
@@ -924,7 +976,34 @@ export class EntitlementWindowProcessor {
       }
       state.walletDirty = true
 
-      if (spendPlan.refillStateUpdate) {
+      const cancelsDraftFlush =
+        resetsDraftFlush && spendPlan.flushAmount === 0 && spendPlan.flushQuantity === 0
+      if (resetsDraftFlush) {
+        state.refillTrigger = null
+        const flushAmount = Math.max(0, nextWallet.consumedAmount - nextWallet.flushedAmount)
+        const flushQuantity = Math.max(0, nextWallet.consumedQuantity - nextWallet.flushedQuantity)
+        if (!spendPlan.refillStateUpdate && (flushAmount > 0 || flushQuantity > 0)) {
+          requireReservationInvoiceContext(wallet)
+          const flushSeq = wallet.flushSeq + 1
+          nextWallet = {
+            ...nextWallet,
+            pendingFlushSeq: flushSeq,
+            pendingFlushAmount: flushAmount,
+            pendingFlushQuantity: flushQuantity,
+            pendingFlushFinal: false,
+            pendingRefillAmount: spendPlan.refillAmount,
+            refillInFlight: true,
+          }
+          state.refillTrigger = {
+            flushSeq,
+            flushAmount,
+            flushQuantity,
+            refillAmount: spendPlan.refillAmount,
+            effectiveAt: event.timestamp,
+          }
+        }
+      }
+      if (spendPlan.refillStateUpdate && !cancelsDraftFlush) {
         nextWallet = {
           ...nextWallet,
           ...spendPlan.refillStateUpdate,
@@ -1247,6 +1326,16 @@ export class EntitlementWindowProcessor {
         return { allowed: true, meterFacts } as ApplyResult
       })
     } catch (error) {
+      if (error instanceof UnsupportedUsageCorrectionError) {
+        const deniedResult = this.persistDeniedApplyResult({
+          idempotencyKey,
+          createdAt,
+          deniedReason: "INVALID_AGGREGATION_PROPERTIES",
+          message: error.message,
+        })
+        metrics.idempotencyInsertCount = 1
+        return deniedResult
+      }
       if (error instanceof ExternalReservationBudgetExceededError) {
         const deniedResult = this.persistDeniedApplyResult({
           idempotencyKey,
@@ -1363,8 +1452,15 @@ export class EntitlementWindowProcessor {
       metrics.reservationBootstrapDurationMs = bootstrap.durationMs
       denial = bootstrap.result
     } catch (error) {
-      wideEvent.bootstrap_outcome = "error"
-      throw error
+      if (!(error instanceof UnsupportedUsageCorrectionError)) {
+        wideEvent.bootstrap_outcome = "error"
+        throw error
+      }
+      denial = {
+        allowed: false,
+        deniedReason: "INVALID_AGGREGATION_PROPERTIES",
+        message: error.message,
+      }
     }
 
     if (!denial) {
@@ -1642,6 +1738,17 @@ export class EntitlementWindowProcessor {
       handledError = new EntitlementWindowWalletEmptyError(handledError.params)
     }
 
+    if (handledError instanceof UnsupportedUsageCorrectionError) {
+      const deniedResult = this.persistDeniedApplyResult({
+        idempotencyKey,
+        createdAt,
+        deniedReason: "INVALID_AGGREGATION_PROPERTIES",
+        message: handledError.message,
+      })
+      metrics.idempotencyInsertCount = 1
+      return { kind: "done", result: deniedResult, synchronousRefillAttempted }
+    }
+
     if (handledError instanceof EntitlementWindowLimitExceededError) {
       const deniedResult = this.persistDeniedApplyResult({
         idempotencyKey,
@@ -1791,9 +1898,8 @@ export class EntitlementWindowProcessor {
 
     this.persistMeterStateDraft(tx, { meterState, metrics })
 
-    const grantStates = facts.some((fact) => fact.delta > 0)
-      ? tx.readGrantStatesForActiveGrants(activeGrants, input.event.timestamp)
-      : []
+    const grantStates =
+      facts.length > 0 ? tx.readGrantStatesForActiveGrants(activeGrants, input.event.timestamp) : []
     const priced = priceFactsFromGrantStates({
       activeGrants,
       entitlement,
@@ -1840,6 +1946,13 @@ export class EntitlementWindowProcessor {
       input,
       tx.readWalletReservation()
     )
+    if (usesWalletReservation && window) {
+      assertSupportedWalletCorrection({
+        totalCost: pricedFacts.reduce((sum, fact) => sum + fact.amountMinor, 0),
+        totalUnits: this.sumPricedFactUnits(pricedFacts),
+        window,
+      })
+    }
     if (!usesWalletReservation || !window?.reservationId || pricedFacts.length === 0) {
       return { lastEventAtStamped: false, window }
     }
@@ -2002,7 +2115,7 @@ export class EntitlementWindowProcessor {
     // Pricing has already run through Dinero and was normalized into
     // ledger-scale integers. Mixed currencies are rejected at grant sync.
     const totalCost = pricedFacts.reduce((sum, { amountMinor }) => sum + amountMinor, 0)
-    const totalUnits = this.sumPositivePricedFactUnits(pricedFacts)
+    const totalUnits = this.sumPricedFactUnits(pricedFacts)
     const spendPlan = planWalletReservationSpend({
       createdAt,
       entitlement,
@@ -2056,8 +2169,8 @@ export class EntitlementWindowProcessor {
     return { refillTrigger, totalCost, walletReservationWriteCount }
   }
 
-  private sumPositivePricedFactUnits(pricedFacts: PricedFact[]): number {
-    return pricedFacts.reduce((sum, fact) => sum + Math.max(0, fact.units), 0)
+  private sumPricedFactUnits(pricedFacts: readonly PricedFact[]): number {
+    return pricedFacts.reduce((sum, fact) => sum + fact.units, 0)
   }
 
   public async getEnforcementState(
