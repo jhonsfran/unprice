@@ -931,17 +931,6 @@ export class BillingService {
       )
     }
 
-    // check if the invoice has a payment method id
-    // this shouldn't happen but we add a check anyway just in case
-    if (!paymentMethodId || paymentMethodId === "") {
-      return Err(
-        new UnPriceBillingError({
-          code: "INVOICE_PAYMENT_METHOD_MISSING",
-          message: "Invoice requires a payment method, please set a payment method first",
-        })
-      )
-    }
-
     // Get subscription data with related entities
     const subscriptionData = await this.db.query.subscriptions.findFirst({
       where: (table, { eq, and }) =>
@@ -1175,6 +1164,15 @@ export class BillingService {
         }
 
         return Ok(updatedInvoice)
+      }
+
+      if (!paymentMethodId || paymentMethodId === "") {
+        return Err(
+          new UnPriceBillingError({
+            code: "INVOICE_PAYMENT_METHOD_MISSING",
+            message: "Invoice requires a payment method, please set a payment method first",
+          })
+        )
       }
 
       const providerPaymentInvoice = await paymentProviderService.collectPayment({

@@ -33,3 +33,15 @@ After: the failed lookup leaves the original period end and zero refund. Retry i
 Command: `pnpm --filter @unprice/services test src/billing/service.generate-periods.test.ts src/billing/service.proration.test.ts`. Result: `Tests 21 passed (21)`.
 
 Independent review: PASS. This regression proves transaction control flow with dependency fakes, not PostgreSQL rollback.
+
+## Issue 9: Send invoices without a saved payment method
+
+Verdict: VERIFIED.
+
+Tests: `sends a manual invoice without a saved payment method` and `reconciles a paid provider invoice without a saved payment method` in `internal/services/src/billing/service.collect.test.ts`.
+
+Command: `pnpm --filter @unprice/services test src/billing/service.collect.test.ts`.
+
+Before: `Tests 4 failed | 17 passed (21)`. Manual sending and paid-provider reconciliation return the payment-method error instead of the expected `waiting` or `paid` result.
+
+After: `Tests 21 passed (21)`. Payment-method validation applies only before a new automatic collection. Independent diff review passed.

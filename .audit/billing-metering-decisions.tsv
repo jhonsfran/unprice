@@ -2,3 +2,4 @@ ts	phase	decision	why	evidence	result
 2026-10-27T17:28:42Z	frame	Review all nine claims before fixing	Require a failing-before check and one commit per confirmed issue	.audit/billing-metering-plan.md	open
 2026-10-27T17:39:22Z	issue-5	Settle the receivable before saving paid	A failed settlement must remain eligible for collection retry	internal/services/src/billing/service.collect.test.ts	VERIFIED: 3 baseline failures, 28 adjacent tests pass
 2026-10-27T17:43:50Z	issue-8	Abort period shortening on refund lookup failure	Keep the original period eligible for retry	internal/services/src/billing/service.generate-periods.test.ts	VERIFIED: 1 baseline failure, 21 tests pass
+2026-10-27T17:46:17Z	issue-9	Validate the payment method only before a new automatic charge	Manual invoices and paid-provider reconciliation do not need a saved card	internal/services/src/billing/service.collect.test.ts	VERIFIED: 4 baseline failures, 21 tests pass
