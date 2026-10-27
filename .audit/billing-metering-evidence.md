@@ -45,3 +45,17 @@ Command: `pnpm --filter @unprice/services test src/billing/service.collect.test.
 Before: `Tests 4 failed | 17 passed (21)`. Manual sending and paid-provider reconciliation return the payment-method error instead of the expected `waiting` or `paid` result.
 
 After: `Tests 21 passed (21)`. Payment-method validation applies only before a new automatic collection. Independent diff review passed.
+
+## Issue 1: Rate each reset bucket
+
+Verdict: VERIFIED.
+
+Test: `billing across meter resets` in `internal/services/src/rating/service.extended.test.ts`.
+
+Two daily buckets contain 15 and 25 units. Each day includes ten free units and charges one dollar per later unit. The expected statement contains 40 units and charges of `5.00` and `15.00`.
+
+Before: `Tests 2 failed | 9 passed (11)`. Production rating returned 15 units and only `5.00`. The second regression also shows mixed daily and weekly grant attribution.
+
+After: `pnpm --filter @unprice/services test src/rating` passes 16 tests. Analytics and services type checks pass. The new allocation SQL was also executed in ClickHouse, and its actual two rows produced the expected charges through RatingService.
+
+Independent review: PASS. Deploy the new `v1_get_billing_usage_allocations` endpoint before the application reader.
