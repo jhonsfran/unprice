@@ -2,6 +2,7 @@
 import { useMutation } from "@tanstack/react-query"
 import { useState } from "react"
 
+import { signOut } from "@unprice/auth/react"
 import { AUTH_ROUTES } from "@unprice/config"
 import type { Workspace } from "@unprice/db/validators"
 import { Button } from "@unprice/ui/button"
@@ -19,7 +20,6 @@ import {
 import { Warning } from "@unprice/ui/icons"
 import { Input } from "@unprice/ui/input"
 import { Label } from "@unprice/ui/label"
-import { signOutAfterAccountDeletion } from "~/actions/sign-out-after-account-deletion"
 import { SubmitButton } from "~/components/submit-button"
 import { toastAction } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
@@ -38,12 +38,28 @@ export function DeletePersonalWorkspace({
 
   const { mutate, isPending } = useMutation(
     trpc.workspaces.deletePersonal.mutationOptions({
-      onSuccess: async () => {
+      onSuccess: async ({ accountDeleted }) => {
         toastAction("deleted")
 
-        // the account is gone, so the session must go too; the next sign-in starts onboarding
-        await signOutAfterAccountDeletion()
-        window.location.href = AUTH_ROUTES.SIGNIN
+        // Leave with a full navigation and no router.refresh, query invalidation, or server
+        // action: anything that re-requests this page goes through the middleware, which now
+        // redirects (the workspace is gone) and returns HTML instead of an RSC/tRPC payload.
+        if (!accountDeleted) {
+          // the account still has other workspaces; "/" redirects to the first remaining one
+          window.location.assign("/")
+          return
+        }
+
+        // The account is gone, so the session must go too; the next sign-in starts onboarding.
+        // signOut posts to the /api/auth route handler, which the middleware does not touch.
+        try {
+          await signOut({ redirect: false })
+        } catch (error) {
+          // the session callback also drops sessions of deleted users, so still leave
+          console.error("sign out after account deletion failed", error)
+        }
+
+        window.location.assign(AUTH_ROUTES.SIGNIN)
       },
     })
   )

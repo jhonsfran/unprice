@@ -73,7 +73,10 @@ describe("workspace deletePersonal mutation", () => {
 
   it("passes the resolved workspace and session user to the use case", async () => {
     deletePersonalWorkspaceMock.mockResolvedValue({
-      val: { workspace: { id: "ws_1", slug: "sebastian", name: "Sebastian" } },
+      val: {
+        workspace: { id: "ws_1", slug: "sebastian", name: "Sebastian" },
+        accountDeleted: true,
+      },
     })
 
     const result = await deletePersonalMutation({
@@ -92,7 +95,10 @@ describe("workspace deletePersonal mutation", () => {
       userId: "usr_1",
       confirmation: "sebastian",
     })
-    expect(result).toEqual({ workspace: { id: "ws_1", slug: "sebastian", name: "Sebastian" } })
+    expect(result).toEqual({
+      workspace: { id: "ws_1", slug: "sebastian", name: "Sebastian" },
+      accountDeleted: true,
+    })
   })
 
   it("throws a mapped tRPC error when the use case refuses", async () => {

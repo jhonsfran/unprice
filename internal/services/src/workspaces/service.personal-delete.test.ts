@@ -143,7 +143,11 @@ describe("WorkspaceService.deletePersonalWorkspaceAndOwner", () => {
     })
 
     expect(result.err).toBeUndefined()
-    expect(result.val).toMatchObject({ state: "ok", workspace: { id: "ws_1" } })
+    expect(result.val).toMatchObject({
+      state: "ok",
+      workspace: { id: "ws_1" },
+      accountDeleted: true,
+    })
     expect(tx.execute).toHaveBeenCalledTimes(1)
     expect(deleteCalls).toHaveLength(2)
   })

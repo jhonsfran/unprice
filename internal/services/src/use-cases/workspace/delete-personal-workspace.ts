@@ -16,6 +16,8 @@ export const deletePersonalWorkspaceInputSchema = z.object({
 
 export const deletePersonalWorkspaceOutputSchema = z.object({
   workspace: workspaceSelectBase.pick({ id: true, slug: true, name: true }),
+  // true when the owner's account was deleted too, so the client must sign out
+  accountDeleted: z.boolean(),
 })
 
 const deletePersonalWorkspaceErrorCodeSchema = z.enum([
@@ -210,5 +212,6 @@ export async function deletePersonalWorkspace(
       slug: deleted.workspace.slug,
       name: deleted.workspace.name,
     },
+    accountDeleted: deleted.accountDeleted,
   })
 }

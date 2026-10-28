@@ -352,7 +352,8 @@ export class WorkspaceService {
     userId: string
   }): Promise<
     Result<
-      { state: PersonalWorkspaceDeletionState } | { state: "ok"; workspace: Workspace },
+      | { state: PersonalWorkspaceDeletionState }
+      | { state: "ok"; workspace: Workspace; accountDeleted: boolean },
       FetchError
     >
   > {
@@ -381,9 +382,17 @@ export class WorkspaceService {
           return { state: "not_found" } as const
         }
 
-        await tx.delete(schema.users).where(eq(schema.users.id, userId))
+        const deletedUsers = await tx
+          .delete(schema.users)
+          .where(eq(schema.users.id, userId))
+          .returning({ id: schema.users.id })
 
-        return { state: "ok", workspace: deletedWorkspace as Workspace } as const
+        return {
+          state: "ok",
+          workspace: deletedWorkspace as Workspace,
+          // the client signs out only when the account is really gone
+          accountDeleted: deletedUsers.length > 0,
+        } as const
       }),
       (error) => {
         dbError = extractDbErrorDetails(error)

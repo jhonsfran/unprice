@@ -6,6 +6,7 @@
     ".": "./src/index.ts",
     "./server": "./src/server.ts",
     "./server-rsc": "./src/server-rsc.ts",
+    "./react": "./src/react.ts",
     "./config": "./src/config.ts",
     "./env": "./src/env.ts",
     "./utils": "./src/utils.ts"

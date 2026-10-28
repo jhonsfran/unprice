@@ -36,7 +36,7 @@ function createDeps({
     }),
     deletePersonalWorkspaceAndOwner: vi.fn(async () => {
       calls.push("delete")
-      return Ok({ state: "ok" as const, workspace })
+      return Ok({ state: "ok" as const, workspace, accountDeleted: true })
     }),
   }
 
@@ -93,6 +93,7 @@ describe("deletePersonalWorkspace", () => {
     expect(result.err).toBeUndefined()
     expect(result.val).toEqual({
       workspace: { id: "ws_1", slug: "sebastian", name: "Sebastian" },
+      accountDeleted: true,
     })
     expect(calls).toEqual(["check", "cancel:sub_1", "deactivate", "delete"])
     expect(subscriptions.listActiveSubscriptions).toHaveBeenCalledWith({
