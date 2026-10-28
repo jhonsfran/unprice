@@ -163,6 +163,7 @@ export async function deletePersonalWorkspace(
   }
 
   if (!mainProject?.id) {
+    deps.logger.error("deletePersonalWorkspace: main project not found", context)
     return Err(
       new DeletePersonalWorkspaceError({
         code: "WORKSPACE_BILLING_PROJECT_NOT_FOUND",
@@ -183,6 +184,7 @@ export async function deletePersonalWorkspace(
   )
 
   if (signOutErr) {
+    deps.logger.error(signOutErr, { ...context, context: "deletePersonalWorkspace sign out customer" })
     return Err(signOutErr)
   }
 
