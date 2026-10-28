@@ -11,6 +11,14 @@ export const signupIntentSchema = z.enum(["paid-action", "budgets"])
 export type SignupIntent = z.infer<typeof signupIntentSchema>
 
 /**
+ * Remembers the intent a signup started with, for the moments the query string cannot carry it: an
+ * OAuth round trip that comes back without its callbackUrl, or a first visit to `/` that the app
+ * middleware sends on to `/new`. Short-lived, because it only has to outlive one signup.
+ */
+export const SIGNUP_INTENT_COOKIE = "signup-intent"
+export const SIGNUP_INTENT_COOKIE_MAX_AGE_S = 60 * 30
+
+/**
  * Where a workspace sends a signup with this intent, or null for the workspace's own home. A
  * Budgets visitor needs a project and a runtime key, not the paid-action proof.
  */
@@ -94,6 +102,30 @@ export function buildAuthHref(
 
   const query = params.toString()
   return query ? `${route}?${query}` : route
+}
+
+/**
+ * The signup link for a marketing CTA. It names the intent and where auth continues even before a
+ * click adds the conversion session, so an unhydrated, middle-clicked, or copied link keeps it.
+ */
+export function acquisitionSignupHref(intent: SignupIntent, sessionId?: string): string {
+  return new URL(
+    buildAuthHref(AUTH_ROUTES.SIGNUP, { sessionId, intent, next: nextAfterAuth(intent) }),
+    APP_DOMAIN
+  ).toString()
+}
+
+/** The intent a marketing page's CTAs start: Budgets under /budgets, the paid-action proof elsewhere. */
+export function intentForMarketingPath(pathname: string | null | undefined): SignupIntent {
+  return pathname === "/budgets" || pathname?.startsWith("/budgets/") ? "budgets" : "paid-action"
+}
+
+/** The intent from the query when it names one, else the one the signup cookie remembered. */
+export function resolveSignupIntent(
+  query: string | string[] | undefined,
+  cookie: string | undefined
+): SignupIntent | undefined {
+  return getSignupIntent(query) ?? getSignupIntent(cookie)
 }
 
 export function createFunnelPageEventClaimer() {

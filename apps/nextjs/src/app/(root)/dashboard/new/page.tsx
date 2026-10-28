@@ -7,9 +7,10 @@ import { Suspense } from "react"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import LayoutLoader from "~/components/layout/layout-loader"
 import {
+  SIGNUP_INTENT_COOKIE,
   type SignupIntent,
-  getSignupIntent,
   intentLanding,
+  resolveSignupIntent,
   workspaceLanding,
 } from "~/lib/signup-funnel"
 import { api } from "~/trpc/server"
@@ -24,7 +25,8 @@ export default async function NewPage(props: {
 }) {
   const [{ workspace_id, intent }, cookieStore] = await Promise.all([props.searchParams, cookies()])
   const sessionId = cookieStore.get(COOKIES_APP.SESSION)?.value
-  const signupIntent = getSignupIntent(intent)
+  // The query carries the intent through auth; the signup cookie covers a round trip that lost it.
+  const signupIntent = resolveSignupIntent(intent, cookieStore.get(SIGNUP_INTENT_COOKIE)?.value)
 
   // A visitor whose intent has its own landing and who already runs a workspace goes there, not
   // to another workspace. Only a workspace they own or administer: an invited member cannot set up

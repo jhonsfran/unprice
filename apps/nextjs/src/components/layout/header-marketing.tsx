@@ -1,7 +1,7 @@
 import { buttonVariants } from "@unprice/ui/button"
 import { GitHub } from "@unprice/ui/icons"
 import { cn } from "@unprice/ui/utils"
-import { AcquisitionLink } from "~/components/landing/acquisition-link"
+import { HeaderAcquisitionLink } from "~/components/layout/header-acquisition-link"
 import { Logo } from "~/components/layout/logo"
 import { MainNav } from "~/components/layout/main-nav"
 import { siteConfig } from "~/constants/layout"
@@ -49,16 +49,7 @@ export default function HeaderMarketing() {
                 path's decision dot. (The comment said this before the code
                 did — launch audit 2026-07-27 found two competing primaries in
                 the first viewport.) */}
-            <AcquisitionLink
-              source="header"
-              className={buttonVariants({
-                variant: "outline",
-                className: "h-9 gap-1.5 whitespace-nowrap px-2.5 text-xs sm:px-3 sm:text-sm",
-              })}
-            >
-              <span className="sm:hidden">Start now</span>
-              <span className="hidden sm:inline">Start with one agent action</span>
-            </AcquisitionLink>
+            <HeaderAcquisitionLink />
           </div>
         </div>
       </div>
