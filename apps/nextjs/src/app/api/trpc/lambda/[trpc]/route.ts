@@ -53,7 +53,10 @@ const handler = withEvlog(
         }),
       onError: ({ error, path }) => {
         // also print to stdout so the error shows up in Vercel runtime logs, not only in Axiom
-        console.error(`[trpc] ${path ?? "unknown"} failed (requestId=${requestId})`, error.cause ?? error)
+        console.error(
+          `[trpc] ${path ?? "unknown"} failed (requestId=${requestId})`,
+          error.cause ?? error
+        )
         logger.error(error, {
           request: {
             route: path ? `/trpc/${path}` : undefined,

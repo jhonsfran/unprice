@@ -184,7 +184,10 @@ export async function deletePersonalWorkspace(
   )
 
   if (signOutErr) {
-    deps.logger.error(signOutErr, { ...context, context: "deletePersonalWorkspace sign out customer" })
+    deps.logger.error(signOutErr, {
+      ...context,
+      context: "deletePersonalWorkspace sign out customer",
+    })
     return Err(signOutErr)
   }
 
