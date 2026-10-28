@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest"
 import { z } from "zod"
 import { type UnpriceBudgetOptions, withUnpriceBudget } from "./index"
 
-const jsonObject = z.record(z.unknown())
+const jsonObject = z.record(z.string(), z.unknown())
 const input: Context = {
   systemPrompt: "Answer with local weather tools",
   tools: [

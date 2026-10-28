@@ -17,6 +17,23 @@ import { canAssignWorkspaceRole } from "./roles"
 
 type WorkspaceInvite = z.infer<typeof invitesSelectBase>
 type WorkspaceMember = z.infer<typeof listMembersSchema>
+/**
+ * Why a personal workspace cannot be deleted. `ok` means every guard passed.
+ * - not_found: the workspace does not exist
+ * - not_personal: team workspaces keep the deactivate flow (`deactivateWorkspaceById`)
+ * - main_workspace / internal_workspace: platform workspaces are never self-deleted
+ * - not_owner: the caller did not create the workspace or is not its OWNER member
+ * - has_other_workspaces: the account still belongs to, or created, another workspace, so
+ *   deleting the account would strand that workspace
+ */
+export type PersonalWorkspaceDeletionState =
+  | "not_found"
+  | "not_personal"
+  | "main_workspace"
+  | "internal_workspace"
+  | "not_owner"
+  | "has_other_workspaces"
+
 type WorkspaceWithMembership = Workspace & {
   role: Member["role"]
   userId: User["id"]
@@ -273,6 +290,137 @@ export class WorkspaceService {
     }
 
     return Ok((val as Workspace | null) ?? null)
+  }
+
+  /**
+   * Read-only check of the personal-workspace deletion guards. Callers run it before any
+   * side effect (for example cancelling the workspace's billing subscription);
+   * `deletePersonalWorkspaceAndOwner` repeats it inside its transaction.
+   */
+  public async checkPersonalWorkspaceDeletion({
+    workspaceId,
+    userId,
+  }: {
+    workspaceId: string
+    userId: string
+  }): Promise<
+    Result<
+      { state: PersonalWorkspaceDeletionState } | { state: "ok"; workspace: Workspace },
+      FetchError
+    >
+  > {
+    const { val, err } = await wrapResult(
+      findPersonalWorkspaceDeletionBlocker(this.db, { workspaceId, userId }),
+      (error) =>
+        new FetchError({
+          message: `error checking personal workspace deletion: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error(err, {
+        context: "error checking personal workspace deletion",
+        workspaceId,
+        userId,
+      })
+      return Err(err)
+    }
+
+    return Ok(val)
+  }
+
+  /**
+   * Hard-deletes a personal workspace and the user account that owns it, in one transaction.
+   *
+   * - Deleting the workspace cascades to members, invites, domains, and projects; projects
+   *   cascade to every project-owned table (customers, API keys, plans, subscriptions,
+   *   invoices, wallets, entitlements, budgets, events, ...), the same path
+   *   `ProjectService.deleteProjectRecord` relies on.
+   * - Deleting the user cascades to OAuth accounts, sessions, authenticators, and any
+   *   remaining memberships, so the next OAuth sign-in creates a brand-new user that starts
+   *   onboarding from scratch.
+   *
+   * The guards from `checkPersonalWorkspaceDeletion` run again under an advisory lock so a
+   * concurrent invite or workspace creation cannot slip in between the check and the delete.
+   */
+  public async deletePersonalWorkspaceAndOwner({
+    workspaceId,
+    userId,
+  }: {
+    workspaceId: string
+    userId: string
+  }): Promise<
+    Result<
+      | { state: PersonalWorkspaceDeletionState }
+      | { state: "ok"; workspace: Workspace; accountDeleted: boolean },
+      FetchError
+    >
+  > {
+    // Underlying Postgres error, kept for logs only (the FetchError message reaches the client).
+    let dbError: DbErrorDetails | undefined
+
+    const { val, err } = await wrapResult(
+      this.db.transaction(async (tx) => {
+        await tx.execute(
+          sql`SELECT pg_advisory_xact_lock(hashtext(${`workspace-members:${workspaceId}`}))`
+        )
+
+        const check = await findPersonalWorkspaceDeletionBlocker(tx, { workspaceId, userId })
+
+        if (check.state !== "ok") {
+          return check
+        }
+
+        const deletedWorkspace = await tx
+          .delete(schema.workspaces)
+          .where(eq(schema.workspaces.id, workspaceId))
+          .returning()
+          .then((rows) => rows[0] ?? null)
+
+        if (!deletedWorkspace) {
+          return { state: "not_found" } as const
+        }
+
+        const deletedUsers = await tx
+          .delete(schema.users)
+          .where(eq(schema.users.id, userId))
+          .returning({ id: schema.users.id })
+
+        return {
+          state: "ok",
+          workspace: deletedWorkspace as Workspace,
+          // the client signs out only when the account is really gone
+          accountDeleted: deletedUsers.length > 0,
+        } as const
+      }),
+      (error) => {
+        dbError = extractDbErrorDetails(error)
+        return new FetchError({
+          message: `error deleting personal workspace: ${error.message}`,
+          retry: false,
+        })
+      }
+    )
+
+    if (err) {
+      // stdout too, so the real DB message (e.g. a deferred constraint failing at COMMIT)
+      // shows up in Vercel runtime logs and not only in the drain.
+      console.error("[workspaces] error deleting personal workspace", {
+        workspaceId,
+        userId,
+        dbError,
+      })
+      this.logger.error(err, {
+        context: "error deleting personal workspace",
+        workspaceId,
+        userId,
+        dbError,
+      })
+      return Err(err)
+    }
+
+    return Ok(val)
   }
 
   public async listWorkspaceInvites({
@@ -692,5 +840,122 @@ export class WorkspaceService {
     }))
 
     return Ok(workspaces as WorkspaceWithMembership[])
+  }
+}
+
+async function findPersonalWorkspaceDeletionBlocker(
+  db: Database,
+  { workspaceId, userId }: { workspaceId: string; userId: string }
+): Promise<{ state: PersonalWorkspaceDeletionState } | { state: "ok"; workspace: Workspace }> {
+  const workspace = await db.query.workspaces.findFirst({
+    where: (record, { eq }) => eq(record.id, workspaceId),
+  })
+
+  if (!workspace) {
+    return { state: "not_found" }
+  }
+
+  if (workspace.isMain) {
+    return { state: "main_workspace" }
+  }
+
+  if (workspace.isInternal) {
+    return { state: "internal_workspace" }
+  }
+
+  if (!workspace.isPersonal) {
+    return { state: "not_personal" }
+  }
+
+  if (workspace.createdBy !== userId) {
+    return { state: "not_owner" }
+  }
+
+  const membership = await db.query.members.findFirst({
+    columns: { role: true },
+    where: (member, { and, eq }) =>
+      and(eq(member.workspaceId, workspaceId), eq(member.userId, userId)),
+  })
+
+  if (membership?.role !== "OWNER") {
+    return { state: "not_owner" }
+  }
+
+  // The account goes with the personal workspace, so it must not be holding any other
+  // workspace: a membership would silently disappear and a created workspace would block
+  // the user delete on `workspaces.created_by`.
+  const otherMembership = await db.query.members.findFirst({
+    columns: { workspaceId: true },
+    where: (member, { and, eq, ne }) =>
+      and(eq(member.userId, userId), ne(member.workspaceId, workspaceId)),
+  })
+
+  if (otherMembership) {
+    return { state: "has_other_workspaces" }
+  }
+
+  const otherCreatedWorkspace = await db.query.workspaces.findFirst({
+    columns: { id: true },
+    where: (record, { and, eq, ne }) =>
+      and(eq(record.createdBy, userId), ne(record.id, workspaceId)),
+  })
+
+  if (otherCreatedWorkspace) {
+    return { state: "has_other_workspaces" }
+  }
+
+  return { state: "ok", workspace: workspace as Workspace }
+}
+
+type DbErrorDetails = {
+  message?: string
+  code?: string
+  constraint?: string
+  detail?: string
+  table?: string
+  where?: string
+  query?: string
+}
+
+/**
+ * Drizzle wraps driver failures as `DrizzleQueryError` ("Failed query: <sql>") with the
+ * Postgres error on `cause`. Walk the cause chain and pick the first error that carries a
+ * SQLSTATE so logs show the real reason, e.g. a deferred constraint trigger raising
+ * `check_violation` on COMMIT.
+ */
+export function extractDbErrorDetails(error: unknown): DbErrorDetails {
+  const query =
+    error && typeof error === "object" && "query" in error && typeof error.query === "string"
+      ? error.query
+      : undefined
+
+  let current: unknown = error
+  for (let depth = 0; depth < 5 && current && typeof current === "object"; depth++) {
+    const candidate = current as Record<string, unknown>
+    if (typeof candidate.code === "string" && /^[0-9A-Z]{5}$/.test(candidate.code)) {
+      const pick = (key: string) =>
+        typeof candidate[key] === "string" ? (candidate[key] as string) : undefined
+      return {
+        message: pick("message"),
+        code: candidate.code,
+        constraint: pick("constraint"),
+        detail: pick("detail"),
+        table: pick("table"),
+        where: pick("where"),
+        query,
+      }
+    }
+    current = candidate.cause
+  }
+
+  const cause =
+    error && typeof error === "object" && "cause" in error
+      ? (error as { cause?: unknown }).cause
+      : undefined
+
+  return {
+    message:
+      cause instanceof Error ? cause.message : error instanceof Error ? error.message : undefined,
+    query,
   }
 }

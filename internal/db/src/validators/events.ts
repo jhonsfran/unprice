@@ -21,31 +21,37 @@ const eventPropertySchema = z
   })
 
 export const eventSelectBaseSchema = createSelectSchema(schema.events, {
-  slug: eventSlugSchema.describe(
-    "Project-scoped SDK event slug. Example: 'llm_completion' or 'storage_snapshot'"
-  ),
-  name: z.string().min(1).max(64).describe("Human-readable event name. Example: 'AI Completion'"),
-  availableProperties: z
-    .array(eventPropertySchema)
-    .nullable()
-    .optional()
-    .describe(
-      "Optional list of numeric payload properties available for aggregation. Example: ['input_tokens', 'output_tokens']"
+  slug: () =>
+    eventSlugSchema.describe(
+      "Project-scoped SDK event slug. Example: 'llm_completion' or 'storage_snapshot'"
     ),
+  name: () =>
+    z.string().min(1).max(64).describe("Human-readable event name. Example: 'AI Completion'"),
+  availableProperties: () =>
+    z
+      .array(eventPropertySchema)
+      .nullable()
+      .optional()
+      .describe(
+        "Optional list of numeric payload properties available for aggregation. Example: ['input_tokens', 'output_tokens']"
+      ),
 })
 
 export const eventInsertBaseSchema = createInsertSchema(schema.events, {
-  slug: eventSlugSchema.describe(
-    "Project-scoped SDK event slug. Example: 'llm_completion' or 'storage_snapshot'"
-  ),
-  name: z.string().min(1).max(64).describe("Human-readable event name. Example: 'AI Completion'"),
-  availableProperties: z
-    .array(eventPropertySchema)
-    .nullable()
-    .optional()
-    .describe(
-      "Optional list of numeric payload properties available for aggregation. Example: ['input_tokens', 'output_tokens']"
+  slug: () =>
+    eventSlugSchema.describe(
+      "Project-scoped SDK event slug. Example: 'llm_completion' or 'storage_snapshot'"
     ),
+  name: () =>
+    z.string().min(1).max(64).describe("Human-readable event name. Example: 'AI Completion'"),
+  availableProperties: () =>
+    z
+      .array(eventPropertySchema)
+      .nullable()
+      .optional()
+      .describe(
+        "Optional list of numeric payload properties available for aggregation. Example: ['input_tokens', 'output_tokens']"
+      ),
 })
   .omit({
     createdAtM: true,

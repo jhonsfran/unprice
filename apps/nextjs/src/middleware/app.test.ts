@@ -40,4 +40,20 @@ describe("AppMiddleware", () => {
     expect(response.cookies.get(COOKIES_APP.WORKSPACE)?.value).toBe("thoughtless-wolf")
     expect(response.cookies.get(COOKIES_APP.PROJECT)?.value).toBe("bewildered-gpu")
   })
+
+  it("sends a session dropped for a deleted account to sign-in, not onboarding", () => {
+    // the jwt callback returns null once the user row is gone, so auth() resolves to null
+    const request = Object.assign(
+      new NextRequest("http://app.localhost:3000/deleted-workspace/settings", {
+        headers: { host: "app.localhost:3000" },
+      }),
+      { auth: null }
+    ) as unknown as NextAuthRequest
+
+    const response = AppMiddleware(request)
+    const location = new URL(response.headers.get("location") ?? "")
+
+    expect(location.pathname).toBe("/auth/signin")
+    expect(location.searchParams.get("next")).toBe("/deleted-workspace/settings")
+  })
 })

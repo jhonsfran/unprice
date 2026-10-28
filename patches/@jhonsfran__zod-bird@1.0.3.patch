@@ -1,0 +1,204 @@
+diff --git a/dist/index.d.mts b/dist/index.d.mts
+index cc1f33f1242d1e7fdaf734b35363f49be2b8247f..a0f78b0bc1810cecd036fce0a0b4e96c6364be33 100644
+--- a/dist/index.d.mts
++++ b/dist/index.d.mts
+@@ -1,65 +1,18 @@
+ import { z } from 'zod';
+ 
+ declare const pipeResponseWithoutData: z.ZodObject<{
+-    meta: z.ZodArray<z.ZodObject<{
+-        name: z.ZodString;
+-        type: z.ZodString;
+-    }, "strip", z.ZodTypeAny, {
+-        name: string;
+-        type: string;
+-    }, {
+-        name: string;
+-        type: string;
+-    }>, "many">;
++    meta: z.ZodArray<z.ZodObject<{ name: z.ZodString; type: z.ZodString }>>;
+     rows: z.ZodOptional<z.ZodNumber>;
+     rows_before_limit_at_least: z.ZodOptional<z.ZodNumber>;
+     statistics: z.ZodOptional<z.ZodObject<{
+         elapsed: z.ZodOptional<z.ZodNumber>;
+         rows_read: z.ZodOptional<z.ZodNumber>;
+         bytes_read: z.ZodOptional<z.ZodNumber>;
+-    }, "strip", z.ZodTypeAny, {
+-        elapsed?: number | undefined;
+-        rows_read?: number | undefined;
+-        bytes_read?: number | undefined;
+-    }, {
+-        elapsed?: number | undefined;
+-        rows_read?: number | undefined;
+-        bytes_read?: number | undefined;
+     }>>;
+-}, "strip", z.ZodTypeAny, {
+-    meta: {
+-        name: string;
+-        type: string;
+-    }[];
+-    rows?: number | undefined;
+-    rows_before_limit_at_least?: number | undefined;
+-    statistics?: {
+-        elapsed?: number | undefined;
+-        rows_read?: number | undefined;
+-        bytes_read?: number | undefined;
+-    } | undefined;
+-}, {
+-    meta: {
+-        name: string;
+-        type: string;
+-    }[];
+-    rows?: number | undefined;
+-    rows_before_limit_at_least?: number | undefined;
+-    statistics?: {
+-        elapsed?: number | undefined;
+-        rows_read?: number | undefined;
+-        bytes_read?: number | undefined;
+-    } | undefined;
+ }>;
+ declare const eventIngestReponseData: z.ZodObject<{
+     successful_rows: z.ZodNumber;
+     quarantined_rows: z.ZodNumber;
+-}, "strip", z.ZodTypeAny, {
+-    successful_rows: number;
+-    quarantined_rows: number;
+-}, {
+-    successful_rows: number;
+-    quarantined_rows: number;
+ }>;
+ 
+ type Config = {
+@@ -77,7 +30,7 @@ declare class Tinybird {
+     private readonly noop;
+     constructor(config: Config);
+     private fetch;
+-    buildPipe<TParameters extends z.ZodSchema<any>, TData extends z.ZodSchema<any>>(req: {
++    buildPipe<TParameters extends z.ZodType, TData extends z.ZodType>(req: {
+         pipe: string;
+         parameters?: TParameters;
+         data: TData;
+@@ -106,7 +59,7 @@ declare class Tinybird {
+     }): (params: z.input<TParameters>) => Promise<z.infer<typeof pipeResponseWithoutData> & {
+         data: z.output<TData>[];
+     }>;
+-    buildIngestEndpoint<TSchema extends z.ZodSchema<any>>(req: {
++    buildIngestEndpoint<TSchema extends z.ZodType>(req: {
+         datasource: string;
+         event: TSchema;
+         wait?: boolean;
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+index cc1f33f1242d1e7fdaf734b35363f49be2b8247f..a0f78b0bc1810cecd036fce0a0b4e96c6364be33 100644
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -1,65 +1,18 @@
+ import { z } from 'zod';
+ 
+ declare const pipeResponseWithoutData: z.ZodObject<{
+-    meta: z.ZodArray<z.ZodObject<{
+-        name: z.ZodString;
+-        type: z.ZodString;
+-    }, "strip", z.ZodTypeAny, {
+-        name: string;
+-        type: string;
+-    }, {
+-        name: string;
+-        type: string;
+-    }>, "many">;
++    meta: z.ZodArray<z.ZodObject<{ name: z.ZodString; type: z.ZodString }>>;
+     rows: z.ZodOptional<z.ZodNumber>;
+     rows_before_limit_at_least: z.ZodOptional<z.ZodNumber>;
+     statistics: z.ZodOptional<z.ZodObject<{
+         elapsed: z.ZodOptional<z.ZodNumber>;
+         rows_read: z.ZodOptional<z.ZodNumber>;
+         bytes_read: z.ZodOptional<z.ZodNumber>;
+-    }, "strip", z.ZodTypeAny, {
+-        elapsed?: number | undefined;
+-        rows_read?: number | undefined;
+-        bytes_read?: number | undefined;
+-    }, {
+-        elapsed?: number | undefined;
+-        rows_read?: number | undefined;
+-        bytes_read?: number | undefined;
+     }>>;
+-}, "strip", z.ZodTypeAny, {
+-    meta: {
+-        name: string;
+-        type: string;
+-    }[];
+-    rows?: number | undefined;
+-    rows_before_limit_at_least?: number | undefined;
+-    statistics?: {
+-        elapsed?: number | undefined;
+-        rows_read?: number | undefined;
+-        bytes_read?: number | undefined;
+-    } | undefined;
+-}, {
+-    meta: {
+-        name: string;
+-        type: string;
+-    }[];
+-    rows?: number | undefined;
+-    rows_before_limit_at_least?: number | undefined;
+-    statistics?: {
+-        elapsed?: number | undefined;
+-        rows_read?: number | undefined;
+-        bytes_read?: number | undefined;
+-    } | undefined;
+ }>;
+ declare const eventIngestReponseData: z.ZodObject<{
+     successful_rows: z.ZodNumber;
+     quarantined_rows: z.ZodNumber;
+-}, "strip", z.ZodTypeAny, {
+-    successful_rows: number;
+-    quarantined_rows: number;
+-}, {
+-    successful_rows: number;
+-    quarantined_rows: number;
+ }>;
+ 
+ type Config = {
+@@ -77,7 +30,7 @@ declare class Tinybird {
+     private readonly noop;
+     constructor(config: Config);
+     private fetch;
+-    buildPipe<TParameters extends z.ZodSchema<any>, TData extends z.ZodSchema<any>>(req: {
++    buildPipe<TParameters extends z.ZodType, TData extends z.ZodType>(req: {
+         pipe: string;
+         parameters?: TParameters;
+         data: TData;
+@@ -106,7 +59,7 @@ declare class Tinybird {
+     }): (params: z.input<TParameters>) => Promise<z.infer<typeof pipeResponseWithoutData> & {
+         data: z.output<TData>[];
+     }>;
+-    buildIngestEndpoint<TSchema extends z.ZodSchema<any>>(req: {
++    buildIngestEndpoint<TSchema extends z.ZodType>(req: {
+         datasource: string;
+         event: TSchema;
+         wait?: boolean;
+diff --git a/dist/index.js b/dist/index.js
+index 4e06575310ba85111431d2c84912a4abfe547dbe..988866c92b9b1e2199e05a0005f7d0fbe2d3f0e5 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -110,7 +110,7 @@ var Tinybird = class {
+     throw new Error(`Tinybird request ${url.toString()} failed after ${retries} retries`);
+   }
+   buildPipe(req) {
+-    const outputSchema = pipeResponseWithoutData.setKey("data", import_zod2.z.array(req.data));
++    const outputSchema = pipeResponseWithoutData.extend({ data: import_zod2.z.array(req.data) });
+     return async (params) => {
+       let validatedParams = void 0;
+       if (req.parameters) {
+diff --git a/dist/index.mjs b/dist/index.mjs
+index c2b5fa3a08e141f860d69b264a3e1d99488d499e..7126c1ee7316de94f33d438c6cd2613b17b7518a 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -83,7 +83,7 @@ var Tinybird = class {
+     throw new Error(`Tinybird request ${url.toString()} failed after ${retries} retries`);
+   }
+   buildPipe(req) {
+-    const outputSchema = pipeResponseWithoutData.setKey("data", z2.array(req.data));
++    const outputSchema = pipeResponseWithoutData.extend({ data: z2.array(req.data) });
+     return async (params) => {
+       let validatedParams = void 0;
+       if (req.parameters) {

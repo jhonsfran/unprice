@@ -7,15 +7,15 @@ import { subscriptionItemsConfigSchema } from "./subscriptions/items"
 
 export const invitesSelectBase = createSelectSchema(schema.invites)
 export const inviteInsertBase = createInsertSchema(schema.invites, {
-  email: z.string().min(3, "Email must be at least 3 characters").email(),
-  name: z.string().min(3, "Name must be at least 3 characters"),
+  email: () => z.string().min(3, "Email must be at least 3 characters").email(),
+  name: () => z.string().min(3, "Name must be at least 3 characters"),
 })
 
 export const membersSelectBase = createSelectSchema(schema.members)
 
 export const workspaceSelectBase = createSelectSchema(schema.workspaces)
 export const workspaceInsertBase = createInsertSchema(schema.workspaces, {
-  name: z.string().min(3, "Name must be at least 3 characters"),
+  name: () => z.string().min(3, "Name must be at least 3 characters"),
 }).partial({
   id: true,
   createdAtM: true,

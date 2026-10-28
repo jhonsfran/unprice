@@ -11,6 +11,8 @@ overrides:
   "brace-expansion@^5.0.0": 5.0.12
   axios: 1.20.0
   basic-ftp: 6.2.3
+  "body-parser@^1.0.0": 1.20.9
+  "body-parser@^2.0.0": 2.4.0
   date-fns: ^3.3.1
   deepmerge-ts: 8.0.0
   engine.io: 6.6.11
@@ -39,8 +41,17 @@ overrides:
   systeminformation: 5.31.7
   "tar@^6.0.0": 7.5.22
   "tar@^7.0.0": 7.5.22
-  undici: 7.30.0
+  undici: 7.30.1
   vite: 6.4.4
+  "zod@^4.0.0": 4.6.7
+  "@jhonsfran/zod-bird@1.0.3>zod": 4.6.7
+  "@unkey/error@0.2.0>zod": 4.6.7
+  "@infisical/sdk@3.0.91>zod": 4.6.7
+  "@mintlify/scraping@4.0.934>zod": 4.6.7
+  "@mintlify/validation@0.1.813>zod": 4.6.7
+  # The validation patch replaces this v3-only converter with native v4 conversion.
+  "@mintlify/validation@0.1.813>zod-to-json-schema": "-"
+  "puppeteer@24.3.1": 25.16.0
 
 packageExtensions:
   "@hookform/resolvers":
@@ -51,4 +62,6 @@ packageExtensions:
       react: ">=16.6.3"
 
 patchedDependencies:
+  "@mintlify/validation@0.1.813": patches/@mintlify__validation@0.1.813.patch
+  "@jhonsfran/zod-bird@1.0.3": patches/@jhonsfran__zod-bird@1.0.3.patch
   "@unkey/cache@1.5.0": patches/@unkey__cache@1.5.0.patch

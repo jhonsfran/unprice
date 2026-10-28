@@ -5,7 +5,7 @@ import { createInsertSchema, createSelectSchema } from "drizzle-zod"
 import * as z from "zod"
 import { ZodError } from "zod"
 
-import { extendZodWithOpenApi } from "zod-openapi"
+import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi"
 import { planVersionFeatures } from "../schema/planVersionFeatures"
 import { FEATURE_TYPES_MAPS, USAGE_MODES_MAP } from "../utils"
 import { featureSelectBaseSchema } from "./features"
@@ -256,7 +256,7 @@ export const configTierSchema = z
             fatal: true,
           })
 
-          return false
+          return
         }
 
         if (!previousLastUnit) {
@@ -267,7 +267,7 @@ export const configTierSchema = z
             fatal: true,
           })
 
-          return false
+          return
         }
 
         if (!previousLastUnit) {
@@ -278,7 +278,7 @@ export const configTierSchema = z
             fatal: true,
           })
 
-          return false
+          return
         }
 
         if (currentFirstUnit > previousLastUnit + 1) {
@@ -289,7 +289,7 @@ export const configTierSchema = z
             fatal: true,
           })
 
-          return false
+          return
         }
         if (currentFirstUnit < previousLastUnit + 1) {
           ctx.addIssue({
@@ -299,12 +299,12 @@ export const configTierSchema = z
             fatal: true,
           })
 
-          return false
+          return
         }
       }
     }
 
-    return true
+    return
   })
 
 export const configUsageSchema = z
@@ -347,7 +347,7 @@ export const configUsageSchema = z
           fatal: true,
         })
 
-        return false
+        return
       }
     }
 
@@ -360,7 +360,7 @@ export const configUsageSchema = z
           fatal: true,
         })
 
-        return false
+        return
       }
 
       if (!data.units) {
@@ -371,7 +371,7 @@ export const configUsageSchema = z
           fatal: true,
         })
 
-        return false
+        return
       }
     }
 
@@ -386,7 +386,7 @@ export const configUsageSchema = z
           fatal: true,
         })
 
-        return false
+        return
       }
 
       for (let i = 0; i < tiers.length; i++) {
@@ -402,7 +402,7 @@ export const configUsageSchema = z
               fatal: true,
             })
 
-            return false
+            return
           }
 
           if (!previousLastUnit) {
@@ -413,7 +413,7 @@ export const configUsageSchema = z
               fatal: true,
             })
 
-            return false
+            return
           }
 
           if (!previousLastUnit) {
@@ -424,7 +424,7 @@ export const configUsageSchema = z
               fatal: true,
             })
 
-            return false
+            return
           }
 
           if (currentFirstUnit > previousLastUnit + 1) {
@@ -435,7 +435,7 @@ export const configUsageSchema = z
               fatal: true,
             })
 
-            return false
+            return
           }
           if (currentFirstUnit < previousLastUnit + 1) {
             ctx.addIssue({
@@ -445,13 +445,13 @@ export const configUsageSchema = z
               fatal: true,
             })
 
-            return false
+            return
           }
         }
       }
     }
 
-    return true
+    return
   })
 
 export const configFlatSchema = z
@@ -510,49 +510,58 @@ export type ConfigFeatureVersionType = z.infer<typeof configFeatureSchema>
 
 // TODO: use discriminated union
 export const planVersionFeatureSelectBaseSchema = createSelectSchema(planVersionFeatures, {
-  config: configFeatureSchema.describe(
-    "Pricing configuration for this feature. Structure depends on featureType"
-  ),
-  meterConfig: meterConfigSchema
-    .nullable()
-    .optional()
-    .describe(
-      "Snapshotted event-native meter configuration for this plan version feature. When present, it is the authoritative source for how usage should be measured"
+  config: () =>
+    configFeatureSchema.describe(
+      "Pricing configuration for this feature. Structure depends on featureType"
     ),
-  resetConfig: resetConfigSchema
-    .optional()
-    .describe(
-      "Configuration for resetting usage counters. Defines when and how usage limits reset (e.g., monthly, yearly)"
+  meterConfig: () =>
+    meterConfigSchema
+      .nullable()
+      .optional()
+      .describe(
+        "Snapshotted event-native meter configuration for this plan version feature. When present, it is the authoritative source for how usage should be measured"
+      ),
+  resetConfig: () =>
+    resetConfigSchema
+      .optional()
+      .describe(
+        "Configuration for resetting usage counters. Defines when and how usage limits reset (e.g., monthly, yearly)"
+      ),
+  metadata: () =>
+    planVersionFeatureMetadataSchema.describe(
+      "Additional feature settings including real-time tracking, notifications, and visibility options"
     ),
-  metadata: planVersionFeatureMetadataSchema.describe(
-    "Additional feature settings including real-time tracking, notifications, and visibility options"
-  ),
-  defaultQuantity: z.coerce
-    .number()
-    .int()
-    .optional()
-    .default(1)
-    .describe(
-      "Default quantity of this feature included when a customer subscribes. Example: 5 for '5 team members included'. Default: 1"
+  defaultQuantity: () =>
+    z.coerce
+      .number()
+      .int()
+      .optional()
+      .default(1)
+      .describe(
+        "Default quantity of this feature included when a customer subscribes. Example: 5 for '5 team members included'. Default: 1"
+      ),
+  limit: () =>
+    z.coerce
+      .number()
+      .int()
+      .optional()
+      .describe(
+        "Maximum allowed usage for this feature per billing period. Null or undefined means unlimited. Example: 10000 for 10,000 API calls/month"
+      ),
+  featureType: () =>
+    typeFeatureSchema.describe(
+      "The pricing model type: 'flat' (fixed price), 'tier' (volume-based tiers), 'usage' (pay-as-you-go), or 'package' (bundle pricing)"
     ),
-  limit: z.coerce
-    .number()
-    .int()
-    .optional()
-    .describe(
-      "Maximum allowed usage for this feature per billing period. Null or undefined means unlimited. Example: 10000 for 10,000 API calls/month"
+  unitOfMeasure: () =>
+    z
+      .string()
+      .describe(
+        "Unit of measurement captured for this plan version feature. Used for display and billing context without relying on mutable feature definitions"
+      ),
+  billingConfig: () =>
+    billingConfigSchema.describe(
+      "Billing cycle configuration including interval (month/year), billing anchor date, and plan type (recurring/onetime)"
     ),
-  featureType: typeFeatureSchema.describe(
-    "The pricing model type: 'flat' (fixed price), 'tier' (volume-based tiers), 'usage' (pay-as-you-go), or 'package' (bundle pricing)"
-  ),
-  unitOfMeasure: z
-    .string()
-    .describe(
-      "Unit of measurement captured for this plan version feature. Used for display and billing context without relying on mutable feature definitions"
-    ),
-  billingConfig: billingConfigSchema.describe(
-    "Billing cycle configuration including interval (month/year), billing anchor date, and plan type (recurring/onetime)"
-  ),
 })
 
 export const parseFeaturesConfig = (feature: PlanVersionFeature) => {
@@ -569,53 +578,62 @@ export const parseFeaturesConfig = (feature: PlanVersionFeature) => {
 }
 
 const planVersionFeatureMutationBaseObject = createInsertSchema(planVersionFeatures, {
-  config: configFeatureSchema
-    .optional()
-    .describe(
-      "Pricing configuration for this feature. Required structure depends on featureType. See configFlatSchema, configTierSchema, configUsageSchema, or configPackageSchema"
+  config: () =>
+    configFeatureSchema
+      .optional()
+      .describe(
+        "Pricing configuration for this feature. Required structure depends on featureType. See configFlatSchema, configTierSchema, configUsageSchema, or configPackageSchema"
+      ),
+  meterConfig: () =>
+    meterConfigSchema
+      .nullable()
+      .optional()
+      .describe(
+        "Optional event-native meter configuration snapshot. Allowed only for usage features and treated as the authoritative usage measurement configuration when present"
+      ),
+  metadata: () =>
+    planVersionFeatureMetadataSchema
+      .optional()
+      .describe(
+        "Optional additional settings for the feature including real-time tracking, usage notifications, overage handling, and visibility"
+      ),
+  billingConfig: () =>
+    billingConfigSchema.describe(
+      "Required billing cycle settings: billingInterval ('month', 'year', 'week', 'day'), billingIntervalCount, billingAnchor, and planType ('recurring', 'onetime')"
     ),
-  meterConfig: meterConfigSchema
-    .nullable()
-    .optional()
-    .describe(
-      "Optional event-native meter configuration snapshot. Allowed only for usage features and treated as the authoritative usage measurement configuration when present"
-    ),
-  metadata: planVersionFeatureMetadataSchema
-    .optional()
-    .describe(
-      "Optional additional settings for the feature including real-time tracking, usage notifications, overage handling, and visibility"
-    ),
-  billingConfig: billingConfigSchema.describe(
-    "Required billing cycle settings: billingInterval ('month', 'year', 'week', 'day'), billingIntervalCount, billingAnchor, and planType ('recurring', 'onetime')"
-  ),
-  resetConfig: resetConfigSchema
-    .optional()
-    .describe(
-      "Optional configuration for when usage counters reset. Useful for features with usage limits that refresh periodically"
-    ),
-  unitOfMeasure: z
-    .string()
-    .default("units")
-    .optional()
-    .describe("Unit of measurement snapshot for this plan version feature. Defaults to 'units'"),
-  defaultQuantity: z.coerce
-    .number()
-    .int()
-    .describe(
-      "Default quantity included with subscription. Must be a positive integer. Example: 5 for '5 seats included'"
-    ),
-  limit: z.coerce
-    .number()
-    .int()
-    .optional()
-    .describe(
-      "Maximum usage allowed per billing period. Leave undefined for unlimited. Example: 10000 for max 10,000 API calls"
-    ),
-  type: featureConfigType
-    .optional()
-    .describe(
-      "Feature configuration type for categorization. Options vary based on system configuration"
-    ),
+  resetConfig: () =>
+    resetConfigSchema
+      .optional()
+      .describe(
+        "Optional configuration for when usage counters reset. Useful for features with usage limits that refresh periodically"
+      ),
+  unitOfMeasure: () =>
+    z
+      .string()
+      .optional()
+      .describe("Unit of measurement snapshot for this plan version feature. Defaults to 'units'"),
+  defaultQuantity: () =>
+    z.coerce
+      .number()
+      .int()
+      .describe(
+        "Default quantity included with subscription. Must be a positive integer. Example: 5 for '5 seats included'"
+      )
+      .optional(),
+  limit: () =>
+    z.coerce
+      .number()
+      .int()
+      .optional()
+      .describe(
+        "Maximum usage allowed per billing period. Leave undefined for unlimited. Example: 10000 for max 10,000 API calls"
+      ),
+  type: () =>
+    featureConfigType
+      .optional()
+      .describe(
+        "Feature configuration type for categorization. Options vary based on system configuration"
+      ),
 }).omit({
   createdAtM: true,
   updatedAtM: true,
@@ -746,7 +764,7 @@ const validatePlanVersionFeatureMutation = ({
     }
   } catch (err) {
     if (err instanceof ZodError) {
-      err.errors.forEach((issue) => {
+      err.issues.forEach((issue) => {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message: issue.message,
@@ -782,7 +800,7 @@ export const planVersionFeatureInsertBaseSchema = planVersionFeatureMutationBase
     aggregationMethod: z.never().optional(),
   })
   .superRefine((data, ctx) => {
-    return validatePlanVersionFeatureMutation({
+    validatePlanVersionFeatureMutation({
       data,
       ctx,
       validateConfigWithoutFeatureType: true,
@@ -817,7 +835,7 @@ export const planVersionFeatureUpdateBaseSchema = planVersionFeatureMutationBase
     aggregationMethod: z.never().optional(),
   })
   .superRefine((data, ctx) => {
-    return validatePlanVersionFeatureMutation({ data, ctx })
+    validatePlanVersionFeatureMutation({ data, ctx })
   })
   .transform((data) => normalizePlanVersionFeatureMutation(data))
 

@@ -35,7 +35,14 @@ import { z } from "zod"
 
 const object = z.record(z.string(), z.unknown())
 const json: z.ZodType<ToolCall["arguments"][string]> = z.lazy(() =>
-  z.union([z.null(), z.boolean(), z.number(), z.string(), z.array(json), z.record(json)])
+  z.union([
+    z.null(),
+    z.boolean(),
+    z.number(),
+    z.string(),
+    z.array(json),
+    z.record(z.string(), json),
+  ])
 )
 const token = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
 const partSchema = z

@@ -12,7 +12,7 @@ import type { DurableObjectProject } from "./project/do"
 
 export const cloudflareRatelimiter = z.custom<{
   limit: (opts: { key: string }) => Promise<{ success: boolean }>
-}>((r) => !!r && typeof r.limit === "function")
+}>((r) => !!r && typeof r === "object" && "limit" in r && typeof r.limit === "function")
 
 function isCloudflarePipeline(value: unknown): value is Pipeline {
   if (!value || typeof value !== "object") {

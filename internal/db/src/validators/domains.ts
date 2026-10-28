@@ -6,14 +6,16 @@ import { domains } from "../schema"
 export const domainSelectBaseSchema = createSelectSchema(domains)
 export const domainCreateBaseSchema = createInsertSchema(domains, {
   // validate name as a domain or subdomain
-  name: z
-    .string()
-    .min(3)
-    .regex(/^[a-z0-9-]+(\.[a-z0-9-]+)+$/, "Invalid domain name"),
-  apexName: z
-    .string()
-    .min(3)
-    .regex(/^[a-z0-9-]+(\.[a-z0-9-]+)+$/, "Invalid domain name"),
+  name: () =>
+    z
+      .string()
+      .min(3)
+      .regex(/^[a-z0-9-]+(\.[a-z0-9-]+)+$/, "Invalid domain name"),
+  apexName: () =>
+    z
+      .string()
+      .min(3)
+      .regex(/^[a-z0-9-]+(\.[a-z0-9-]+)+$/, "Invalid domain name"),
 }).partial({
   id: true,
   workspaceId: true,

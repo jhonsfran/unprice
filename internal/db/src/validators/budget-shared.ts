@@ -1,6 +1,6 @@
+import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi"
 import { AMOUNT_PATTERN, type Amount, parseAmount } from "@unprice/money"
 import { z } from "zod"
-import { extendZodWithOpenApi } from "zod-openapi"
 
 extendZodWithOpenApi(z)
 

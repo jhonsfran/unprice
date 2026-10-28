@@ -155,6 +155,13 @@
       "when": 1792465687157,
       "tag": "0021_chubby_living_mummy",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1793158387496,
+      "tag": "0022_wallet_credits_invariant_skip_deleted_customer",
+      "breakpoints": true
     }
   ]
 }

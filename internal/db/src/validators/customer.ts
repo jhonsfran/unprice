@@ -1,6 +1,6 @@
+import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi"
 import { createInsertSchema, createSelectSchema } from "drizzle-zod"
 import { z } from "zod"
-import { extendZodWithOpenApi } from "zod-openapi"
 import * as schema from "../schema"
 import {
   billingIntervalSchema,
@@ -23,17 +23,17 @@ export const customerMetadataSchema = z.object({
 })
 
 export const customerSelectSchema = createSelectSchema(schema.customers, {
-  metadata: customerMetadataSchema,
-  timezone: z.string().min(1),
-  active: z.boolean(),
+  metadata: () => customerMetadataSchema,
+  timezone: () => z.string().min(1),
+  active: () => z.boolean(),
 })
 
 export const customerInsertBaseSchema = createInsertSchema(schema.customers, {
-  metadata: customerMetadataSchema,
-  email: z.string().min(3).email(),
-  name: z.string().min(3),
-  timezone: z.string().min(1),
-  active: z.boolean().default(true),
+  metadata: () => customerMetadataSchema.optional(),
+  email: () => z.string().min(3).email(),
+  name: () => z.string().min(3),
+  timezone: () => z.string().min(1).optional(),
+  active: () => z.boolean().optional(),
 })
   .omit({
     createdAtM: true,

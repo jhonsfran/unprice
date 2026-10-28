@@ -1,6 +1,6 @@
+import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi"
 import { createInsertSchema, createSelectSchema } from "drizzle-zod"
 import { z } from "zod"
-import { extendZodWithOpenApi } from "zod-openapi"
 
 import { subscriptionItems } from "../../schema/subscriptions"
 import { featureSelectBaseSchema } from "../features"
@@ -18,7 +18,7 @@ export const subscriptionItemExtendedSchema = createSelectSchema(subscriptionIte
 
 export const subscriptionItemsInsertSchema = createInsertSchema(subscriptionItems, {
   // units for the item, for flat features it's always 1, usage features it's the current usage
-  units: z.coerce.number().min(1),
+  units: () => z.coerce.number().min(1).optional(),
 })
   .partial({
     id: true,
@@ -68,7 +68,7 @@ export const subscriptionItemsConfigSchema = z
         fatal: true,
       })
 
-      return false
+      return
     }
 
     for (let i = 0; i < items.length; i++) {
@@ -82,7 +82,7 @@ export const subscriptionItemsConfigSchema = z
           fatal: true,
         })
 
-        return false
+        return
       }
 
       if (item?.units && item.min && item.units < item.min) {
@@ -93,11 +93,11 @@ export const subscriptionItemsConfigSchema = z
           fatal: true,
         })
 
-        return false
+        return
       }
     }
 
-    return true
+    return
   })
   .refine((items) => {
     if (items.length > 250) {

@@ -1,0 +1,125 @@
+diff --git a/dist/index.js b/dist/index.js
+index a4157b55723d596b54e262e43bd82937b5243899..4f5e33829981c31582f29f10eef63d6e0ce38af4 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -1,4 +1,4 @@
+-import { zodToJsonSchema } from 'zod-to-json-schema';
++import { zodToJsonSchema } from './zod-to-json-schema.js';
+ import { mintConfigSchema } from './mint-config/schemas/v1/config.js';
+ import { docsConfigSchema } from './mint-config/schemas/v2/index.js';
+ import { colorsSchema } from './mint-config/schemas/v2/properties/colors.js';
+diff --git a/dist/mint-config/customErrorMap.js b/dist/mint-config/customErrorMap.js
+index b5f7cea8dba86eec703041fa868ee0c949086af5..70097ffd391b46712028a03bcf6299d493123438 100644
+--- a/dist/mint-config/customErrorMap.js
++++ b/dist/mint-config/customErrorMap.js
+@@ -1,13 +1,13 @@
+-export const customErrorMap = (issue, ctx) => {
++export const customErrorMap = (issue) => {
+     switch (issue.code) {
+         case 'invalid_type':
+-            if (issue.received === 'undefined')
++            if (issue.input === undefined)
+                 return { message: 'This field is required' };
+             return {
+-                message: `Invalid type. Expected field to be of type '${issue.expected}', received '${issue.received}'`,
++                message: `Invalid type. Expected field to be of type '${issue.expected}', received '${issue.input === null ? 'null' : Array.isArray(issue.input) ? 'array' : typeof issue.input}'`,
+             };
+         case 'invalid_union':
+             return { message: `Invalid type. Field did not match any types in union` };
+     }
+-    return { message: ctx.defaultError };
++    return undefined;
+ };
+diff --git a/dist/mint-config/formatIssue.js b/dist/mint-config/formatIssue.js
+index bcf619c47ed4193ea247d43452d1d744d8f71c09..018259b0fcc0dccdab4b227a6720c1a8c118feea 100644
+--- a/dist/mint-config/formatIssue.js
++++ b/dist/mint-config/formatIssue.js
+@@ -4,8 +4,8 @@ export const formatIssue = (issue) => formatIssueWithIndent(issue);
+ export const formatIssueWithIndent = (issue, indent = 0) => {
+     const pathComponents = issue.path.map((value) => typeof value === 'string' ? `.${value}` : `[${value}]`);
+     const lines = issue.code === 'invalid_union'
+-        ? issue.unionErrors.flatMap((unionError, i) => {
+-            const unionErrorLines = unionError.issues.map((unionIssue) => formatIssueWithIndent(unionIssue, indent + 1));
++        ? issue.errors.flatMap((unionError, i) => {
++            const unionErrorLines = unionError.map((unionIssue) => formatIssueWithIndent(unionIssue, indent + 1));
+             unionErrorLines.unshift(`${INDENT.repeat(indent)}${HALF_INDENT}${i + 1}:`);
+             return unionErrorLines;
+         })
+diff --git a/dist/mint-config/schemas/v1/footer.js b/dist/mint-config/schemas/v1/footer.js
+index e36dc964a97c4b92a208db80e940c20c9e03cc75..45c21a1fe31c9baef07401d8b133a3d02ce3e191 100644
+--- a/dist/mint-config/schemas/v1/footer.js
++++ b/dist/mint-config/schemas/v1/footer.js
+@@ -13,7 +13,7 @@ export const footerLinksColumnSchema = z.object({
+ });
+ export const footerSocialsSchema = z
+     .union([
+-    z.record(z.enum(footerSocialKeys), z.string().url('Must be a valid URL')),
++    z.partialRecord(z.enum(footerSocialKeys), z.string().url('Must be a valid URL')),
+     // deprecated, prefer using the object type
+     z.array(z.object({
+         type: z.enum(footerSocialKeys),
+diff --git a/dist/mint-config/schemas/v2/properties/footer.js b/dist/mint-config/schemas/v2/properties/footer.js
+index d3fb303a7570ce6a8b91805eed9ceb6f37be77a5..ac63138e3ca54685d76c01323acfda33dab8936c 100644
+--- a/dist/mint-config/schemas/v2/properties/footer.js
++++ b/dist/mint-config/schemas/v2/properties/footer.js
+@@ -18,7 +18,7 @@ export const footerLinksColumnSchema = z.object({
+         .describe('The links to be displayed in the column'),
+ });
+ export const footerSocialsSchema = z
+-    .record(z.enum(footerSocialKeys), secureUrlSchema.describe('Must be a valid URL'))
++    .partialRecord(z.enum(footerSocialKeys), secureUrlSchema.describe('Must be a valid URL'))
+     .describe('An object in which each key is the name of a social media platform, and each value is the url to your profile.');
+ export const footerSchema = z
+     .object({
+diff --git a/dist/zod-to-json-schema.js b/dist/zod-to-json-schema.js
+new file mode 100644
+index 0000000000000000000000000000000000000000..e863989c7ef8d6338620b4ad9c0965fcf8cec0e9
+--- /dev/null
++++ b/dist/zod-to-json-schema.js
+@@ -0,0 +1,46 @@
++import { z } from 'zod';
++
++// Keep Mintlify's named draft-7 definitions while using the v4 schema visitor.
++export function zodToJsonSchema(schema, options = {}) {
++    const named = typeof options === 'string';
++    const rootId = named ? options : '__root';
++    const registry = z.registry();
++    const aliases = {};
++    for (const [id, definition] of Object.entries(named ? {} : options.definitions ?? {})) {
++        const existing = registry.get(definition);
++        if (existing) aliases[id] = { $ref: `#/definitions/${existing.id}` };
++        else registry.add(definition, { id });
++    }
++    registry.add(schema, { id: rootId });
++    const { schemas } = z.toJSONSchema(registry, {
++        target: 'draft-7',
++        io: 'input',
++        reused: 'ref',
++        override: ({ zodSchema, jsonSchema }) => {
++            if (zodSchema._zod.def.type === 'object' && !zodSchema._zod.def.catchall) {
++                jsonSchema.additionalProperties = false;
++            }
++        },
++        uri: (id) => !named && id === rootId ? '#' : `#/definitions/${id}`,
++    });
++    for (const definition of Object.values(schemas)) {
++        delete definition.$id;
++        delete definition.$schema;
++    }
++    // Registry references target separate documents; embed their fragments under definitions.
++    function localizeRefs(value) {
++        if (!value || typeof value !== 'object') return;
++        if (typeof value.$ref === 'string' && value.$ref.startsWith('#/definitions/')) {
++            value.$ref = '#' + value.$ref.slice(1).replaceAll('#', '');
++        }
++        for (const child of Object.values(value)) localizeRefs(child);
++    }
++    localizeRefs(schemas);
++    const root = schemas[rootId];
++    if (!named) delete schemas[rootId];
++    return {
++        $schema: 'http://json-schema.org/draft-07/schema#',
++        ...(named ? { $ref: `#/definitions/${rootId}` } : root),
++        definitions: { ...schemas, ...aliases },
++    };
++}
