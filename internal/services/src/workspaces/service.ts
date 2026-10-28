@@ -356,6 +356,9 @@ export class WorkspaceService {
       FetchError
     >
   > {
+    // Underlying Postgres error, kept for logs only (the FetchError message reaches the client).
+    let dbError: DbErrorDetails | undefined
+
     const { val, err } = await wrapResult(
       this.db.transaction(async (tx) => {
         await tx.execute(
@@ -382,18 +385,28 @@ export class WorkspaceService {
 
         return { state: "ok", workspace: deletedWorkspace as Workspace } as const
       }),
-      (error) =>
-        new FetchError({
+      (error) => {
+        dbError = extractDbErrorDetails(error)
+        return new FetchError({
           message: `error deleting personal workspace: ${error.message}`,
           retry: false,
         })
+      }
     )
 
     if (err) {
+      // stdout too, so the real DB message (e.g. a deferred constraint failing at COMMIT)
+      // shows up in Vercel runtime logs and not only in the drain.
+      console.error("[workspaces] error deleting personal workspace", {
+        workspaceId,
+        userId,
+        dbError,
+      })
       this.logger.error(err, {
         context: "error deleting personal workspace",
         workspaceId,
         userId,
+        dbError,
       })
       return Err(err)
     }
@@ -883,4 +896,57 @@ async function findPersonalWorkspaceDeletionBlocker(
   }
 
   return { state: "ok", workspace: workspace as Workspace }
+}
+
+type DbErrorDetails = {
+  message?: string
+  code?: string
+  constraint?: string
+  detail?: string
+  table?: string
+  where?: string
+  query?: string
+}
+
+/**
+ * Drizzle wraps driver failures as `DrizzleQueryError` ("Failed query: <sql>") with the
+ * Postgres error on `cause`. Walk the cause chain and pick the first error that carries a
+ * SQLSTATE so logs show the real reason, e.g. a deferred constraint trigger raising
+ * `check_violation` on COMMIT.
+ */
+export function extractDbErrorDetails(error: unknown): DbErrorDetails {
+  const query =
+    error && typeof error === "object" && "query" in error && typeof error.query === "string"
+      ? error.query
+      : undefined
+
+  let current: unknown = error
+  for (let depth = 0; depth < 5 && current && typeof current === "object"; depth++) {
+    const candidate = current as Record<string, unknown>
+    if (typeof candidate.code === "string" && /^[0-9A-Z]{5}$/.test(candidate.code)) {
+      const pick = (key: string) =>
+        typeof candidate[key] === "string" ? (candidate[key] as string) : undefined
+      return {
+        message: pick("message"),
+        code: candidate.code,
+        constraint: pick("constraint"),
+        detail: pick("detail"),
+        table: pick("table"),
+        where: pick("where"),
+        query,
+      }
+    }
+    current = candidate.cause
+  }
+
+  const cause =
+    error && typeof error === "object" && "cause" in error
+      ? (error as { cause?: unknown }).cause
+      : undefined
+
+  return {
+    message:
+      cause instanceof Error ? cause.message : error instanceof Error ? error.message : undefined,
+    query,
+  }
 }

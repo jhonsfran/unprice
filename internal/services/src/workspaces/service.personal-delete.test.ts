@@ -1,7 +1,7 @@
 import type { Database } from "@unprice/db"
 import type { Logger } from "@unprice/logs"
 import { describe, expect, it, vi } from "vitest"
-import { WorkspaceService } from "./service"
+import { WorkspaceService, extractDbErrorDetails } from "./service"
 
 function createLogger(): Logger {
   return {
@@ -175,5 +175,56 @@ describe("WorkspaceService.deletePersonalWorkspaceAndOwner", () => {
 
     expect(result.val).toEqual({ state: "not_found" })
     expect(deleteCalls).toHaveLength(1)
+  })
+
+  it("logs the underlying Postgres error when COMMIT fails, without changing the client message", async () => {
+    const pgError = Object.assign(
+      new Error("wallet_credits invariant violated for customer cus_1: credits_sum_minor=0"),
+      { code: "23514", where: "PL/pgSQL function assert_wallet_credits_match_ledger()" }
+    )
+    const commitError = Object.assign(new Error("Failed query: commit\nparams: "), {
+      query: "commit",
+      cause: pgError,
+    })
+    const db = {
+      transaction: vi.fn().mockRejectedValue(commitError),
+    } as unknown as Database
+    const logger = createLogger()
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const service = new WorkspaceService({ db, logger })
+
+    const result = await service.deletePersonalWorkspaceAndOwner({
+      workspaceId: "ws_1",
+      userId: "usr_1",
+    })
+
+    expect(result.err?.message).toBe(
+      "error deleting personal workspace: Failed query: commit\nparams: "
+    )
+    expect(logger.error).toHaveBeenCalledWith(
+      result.err,
+      expect.objectContaining({
+        dbError: expect.objectContaining({
+          code: "23514",
+          message: pgError.message,
+          query: "commit",
+        }),
+      })
+    )
+    expect(consoleError).toHaveBeenCalled()
+    consoleError.mockRestore()
+  })
+})
+
+describe("extractDbErrorDetails", () => {
+  it("falls back to the cause message when no SQLSTATE is present", () => {
+    const error = Object.assign(new Error("Failed query: commit"), {
+      query: "commit",
+      cause: new Error("connection terminated"),
+    })
+    expect(extractDbErrorDetails(error)).toEqual({
+      message: "connection terminated",
+      query: "commit",
+    })
   })
 })
