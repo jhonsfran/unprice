@@ -1,6 +1,5 @@
 "use client"
 
-import { APP_DOMAIN, AUTH_ROUTES } from "@unprice/config"
 import { Spinner } from "@unprice/ui/icons"
 import { cn } from "@unprice/ui/utils"
 import { track } from "@vercel/analytics"
@@ -8,12 +7,7 @@ import { ArrowRight } from "lucide-react"
 import { Link } from "next-view-transitions"
 import { type ComponentProps, type MouseEvent, useEffect, useState, useTransition } from "react"
 import { getOrCreateConversionId, persistConversionId } from "~/lib/conversion-session"
-import {
-  ACQUISITION_SIGNUP_URL,
-  type SignupIntent,
-  buildAuthHref,
-  nextAfterAuth,
-} from "~/lib/signup-funnel"
+import { type SignupIntent, acquisitionSignupHref } from "~/lib/signup-funnel"
 
 type AcquisitionSource =
   | "header"
@@ -27,13 +21,6 @@ type AcquisitionLinkProps = Omit<ComponentProps<typeof Link>, "href"> & {
   source: AcquisitionSource
   /** What the visitor came to start. It sets the signup copy and where they land after auth. */
   intent?: SignupIntent
-}
-
-function getAcquisitionHref(sessionId: string, intent: SignupIntent): string {
-  return new URL(
-    buildAuthHref(AUTH_ROUTES.SIGNUP, { sessionId, intent, next: nextAfterAuth(intent) }),
-    APP_DOMAIN
-  ).toString()
 }
 
 function isPrimaryUnmodifiedClick(event: MouseEvent<HTMLAnchorElement>): boolean {
@@ -58,14 +45,16 @@ export function AcquisitionLink({
   intent = "paid-action",
   ...props
 }: AcquisitionLinkProps) {
-  const [href, setHref] = useState(ACQUISITION_SIGNUP_URL)
+  // The rendered link already carries the intent; a click adds the conversion session and goes.
+  const initialHref = acquisitionSignupHref(intent)
+  const [href, setHref] = useState(initialHref)
   const [isPending, startTransition] = useTransition()
 
   useEffect(() => {
-    if (href !== ACQUISITION_SIGNUP_URL) {
+    if (href !== initialHref) {
       window.location.assign(href)
     }
-  }, [href])
+  }, [href, initialHref])
 
   return (
     <Link
@@ -87,7 +76,7 @@ export function AcquisitionLink({
         track("funnel_acquisition_cta_selected", { source })
 
         startTransition(() => {
-          setHref(getAcquisitionHref(sessionId, intent))
+          setHref(acquisitionSignupHref(intent, sessionId))
         })
       }}
     >
