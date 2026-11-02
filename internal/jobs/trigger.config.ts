@@ -1,4 +1,4 @@
-import { InfisicalSDK } from "@infisical/sdk"
+import { createRequire } from "node:module"
 import { syncEnvVars } from "@trigger.dev/build/extensions/core"
 import { defineConfig } from "@trigger.dev/sdk/v3"
 
@@ -6,6 +6,11 @@ export default defineConfig({
   build: {
     extensions: [
       syncEnvVars(async (ctx) => {
+        // Load the build-only SDK natively: Jiti v1 otherwise transforms its
+        // Zod v4 dependency and loses the named `z` export.
+        const { InfisicalSDK } = createRequire(import.meta.url)("@infisical/sdk") as typeof import(
+          "@infisical/sdk"
+        )
         const client = new InfisicalSDK()
 
         await client.auth().universalAuth.login({

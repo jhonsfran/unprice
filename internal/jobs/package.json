@@ -7,7 +7,7 @@
   "scripts": {
     "clean": "rm -rf .turbo node_modules",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "vitest run && node --test test/trigger-config.test.mjs",
     "dev:trigger": "pnpm dlx trigger.dev@4.8.1 dev",
     "deploy:trigger-prod": "npx trigger.dev@4.8.1 deploy",
     "delete": "pnpm tsx src/delete.ts"

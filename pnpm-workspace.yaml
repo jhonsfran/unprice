@@ -18,13 +18,14 @@ overrides:
   engine.io: 6.6.11
   fast-uri: 3.1.8
   fast-xml-parser: 5.10.1
-  follow-redirects: 1.16.1
+  follow-redirects: 1.16.2
   handlebars: 4.7.10
   http-cache-semantics: 4.3.0
   "js-yaml@^3.0.0": 3.15.2
   "js-yaml@^4.0.0": 4.3.2
   "@modelcontextprotocol/sdk": 1.32.1
   nodemailer: 10.1.0
+  node-forge: 1.4.1
   "nanoid@^3.0.0": 3.3.18
   "nanoid@^5.0.0": 5.1.16
   ip-address: 10.3.1
@@ -38,7 +39,7 @@ overrides:
   shell-quote: 1.12.0
   socket.io-parser: 4.2.7
   source-map-js: 1.2.2
-  systeminformation: 5.31.7
+  systeminformation: 5.33.16
   "tar@^6.0.0": 7.5.22
   "tar@^7.0.0": 7.5.22
   undici: 7.30.1
