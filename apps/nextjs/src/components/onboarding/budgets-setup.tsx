@@ -10,11 +10,13 @@ import { useRouter } from "next/navigation"
 import { type FormEvent, useState } from "react"
 
 import { updateContextCookies } from "~/actions/update-context-cookies"
+import { Term, TermList } from "~/components/budgets/budget-terms"
 import { budgetsTwoCalls } from "~/components/landing/budgets-snippets"
 import { CodePanel, InstallCommand } from "~/components/landing/code-panel"
 import { SuperLink } from "~/components/super-link"
 import { useTRPC } from "~/trpc/client"
 import { OnboardingFrame, type OnboardingMoment } from "./onboarding-frame"
+import { RevealedKey } from "./revealed-key"
 
 // The Budgets setup: what a visitor from /budgets needs before the first call, and nothing
 // else. Budgets and API keys live in a project, so the moments are a project, a runtime key,
@@ -22,12 +24,13 @@ import { OnboardingFrame, type OnboardingMoment } from "./onboarding-frame"
 // onboarding, which stays the default for every other signup.
 //
 // The project slug rides in the URL (`?project=`), so a reload resumes at the key instead of
-// creating a second project. The key is shown once, inside the code: the screen masks it, and
-// "Copy code" copies the snippet with the real key so it runs as pasted.
+// creating a second project. The new key is shown once, in its own box on the key step with a
+// copy button, and the builder moves on only after seeing it. The code on the last step masks
+// it, and "Copy code" copies the snippet with the real key so it runs as pasted.
 
 type Step =
   | { id: "project" }
-  | { id: "key"; projectSlug: string }
+  | { id: "key"; projectSlug: string; apiKey: string | null }
   | { id: "call"; projectSlug: string; apiKey: string }
 
 const MOMENTS: Record<Step["id"], OnboardingMoment> = {
@@ -155,11 +158,15 @@ function ProjectStep({ workspaceSlug }: { workspaceSlug: string }) {
 function KeyStep({
   workspaceSlug,
   projectSlug,
+  apiKey,
   onKey,
+  onContinue,
 }: {
   workspaceSlug: string
   projectSlug: string
+  apiKey: string | null
   onKey: (key: string) => void
+  onContinue: () => void
 }) {
   const trpc = useTRPC()
   const [error, setError] = useState<string | null>(null)
@@ -189,21 +196,26 @@ function KeyStep({
           {/* The secret is shown once and lives only on this page, so a reload before copying it
               means a new key. Say so, and say where the unused one is revoked. */}
           <p className="text-background-textContrast text-sm leading-6">
-            The key your code spends with. It is shown once, already in the code on the next step.
-            Each click creates a new key; revoke one you never copied in the project's API keys.
+            A <Term term="runtime key" /> is the key your code spends with. It is shown once, right
+            here after you create it. Each click creates a new key; revoke one you never copied in
+            the project's API keys.
           </p>
-          <Button
-            type="button"
-            variant="primary"
-            className="w-fit"
-            disabled={createKey.isPending}
-            onClick={onCreate}
-          >
-            {createKey.isPending ? "Creating key…" : "Create runtime key"}
-          </Button>
+          {apiKey ? (
+            <RevealedKey apiKey={apiKey} onContinue={onContinue} />
+          ) : (
+            <Button
+              type="button"
+              variant="primary"
+              className="w-fit"
+              disabled={createKey.isPending}
+              onClick={onCreate}
+            >
+              {createKey.isPending ? "Creating key…" : "Create runtime key"}
+            </Button>
+          )}
           <p className="text-background-text text-xs leading-5">
-            Raising a cap needs a config key. Create one later in the project's API keys, and keep
-            it out of the environment that spends.
+            Raising a cap needs a <Term term="config key" />. Create one later in the project's API
+            keys, and keep it out of the environment that spends.
           </p>
         </div>
         <Preview
@@ -232,8 +244,9 @@ function CallStep({
 }) {
   return (
     <div className="flex flex-col gap-5">
-      <p role="alert" className="text-sm text-warning-text">
-        Your key is in the code below, and it is shown once. Copy it now.
+      <p className="text-background-text text-sm">
+        The code below shows your runtime key masked. <strong>Copy code</strong> copies it with the
+        real key filled in, so it runs as pasted.
       </p>
 
       <InstallCommand className="w-fit" />
@@ -244,6 +257,11 @@ function CallStep({
         copyCode={budgetsTwoCalls(apiKey)}
         copyLabel="Copy code"
         className="rounded-md bg-surface-raised"
+      />
+
+      <TermList
+        terms={["budget key", "estimate", "actual", "lease"]}
+        className="rounded-md border border-background-border p-4"
       />
 
       <div className="flex flex-wrap items-center gap-3">
@@ -275,11 +293,12 @@ export function BudgetsSetup({
   projectSlug: string | null
 }) {
   const [apiKey, setApiKey] = useState<string | null>(null)
+  const [keySaved, setKeySaved] = useState(false)
   const step: Step = !projectSlug
     ? { id: "project" }
-    : apiKey
+    : apiKey && keySaved
       ? { id: "call", projectSlug, apiKey }
-      : { id: "key", projectSlug }
+      : { id: "key", projectSlug, apiKey }
 
   return (
     <OnboardingFrame
@@ -291,7 +310,13 @@ export function BudgetsSetup({
       <div className="flex flex-col gap-6 p-6 sm:p-8">
         {step.id === "project" ? <ProjectStep workspaceSlug={workspaceSlug} /> : null}
         {step.id === "key" ? (
-          <KeyStep workspaceSlug={workspaceSlug} projectSlug={step.projectSlug} onKey={setApiKey} />
+          <KeyStep
+            workspaceSlug={workspaceSlug}
+            projectSlug={step.projectSlug}
+            apiKey={step.apiKey}
+            onKey={setApiKey}
+            onContinue={() => setKeySaved(true)}
+          />
         ) : null}
         {step.id === "call" ? (
           <CallStep

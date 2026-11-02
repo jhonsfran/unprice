@@ -7,15 +7,18 @@ import {
   PRIVACY_URL,
   type SignupIntent,
   TERMS_URL,
+  acquisitionSignupHref,
   authNextPath,
   buildAuthHref,
   createFunnelPageEventClaimer,
   getSafeNextPath,
   getSignupIntent,
   getSingleSearchParam,
+  intentForMarketingPath,
   intentLanding,
   newWorkspacePath,
   nextAfterAuth,
+  resolveSignupIntent,
   signupIntentSchema,
   workspaceLanding,
 } from "./signup-funnel"
@@ -155,5 +158,54 @@ describe("funnel page event claims", () => {
     expect(claimFunnelPageEvent("/auth/signup?sessionId=session_123")).toBe(true)
     expect(claimFunnelPageEvent("/auth/signup?sessionId=session_123")).toBe(false)
     expect(claimFunnelPageEvent("/auth/signup?sessionId=session_456")).toBe(true)
+  })
+})
+
+describe("Budgets signup intent", () => {
+  it("renders the Budgets CTA with its intent and next before any click", () => {
+    const href = new URL(acquisitionSignupHref("budgets"))
+
+    expect(href.origin).toBe(new URL(APP_DOMAIN).origin)
+    expect(href.pathname).toBe(AUTH_ROUTES.SIGNUP)
+    expect(href.searchParams.get("intent")).toBe("budgets")
+    expect(href.searchParams.get("next")).toBe("/new?intent=budgets")
+    expect(href.searchParams.has("sessionId")).toBe(false)
+  })
+
+  it("adds the conversion session on click without dropping the intent", () => {
+    const href = new URL(acquisitionSignupHref("budgets", "sess_1"))
+
+    expect(href.searchParams.get("sessionId")).toBe("sess_1")
+    expect(href.searchParams.get("intent")).toBe("budgets")
+    expect(href.searchParams.get("next")).toBe("/new?intent=budgets")
+  })
+
+  it("keeps the paid-action CTA on the workspace itself", () => {
+    const href = new URL(acquisitionSignupHref("paid-action"))
+
+    expect(href.searchParams.get("intent")).toBe("paid-action")
+    expect(href.searchParams.has("next")).toBe(false)
+  })
+
+  it("starts Budgets from the /budgets page header and the proof everywhere else", () => {
+    expect(intentForMarketingPath("/budgets")).toBe("budgets")
+    expect(intentForMarketingPath("/budgets/")).toBe("budgets")
+    expect(intentForMarketingPath("/")).toBe("paid-action")
+    expect(intentForMarketingPath("/budgetsx")).toBe("paid-action")
+    expect(intentForMarketingPath(null)).toBe("paid-action")
+  })
+
+  it("prefers the query intent and falls back to the signup cookie", () => {
+    expect(resolveSignupIntent("budgets", "paid-action")).toBe("budgets")
+    expect(resolveSignupIntent(undefined, "budgets")).toBe("budgets")
+    expect(resolveSignupIntent("bogus", "budgets")).toBe("budgets")
+    expect(resolveSignupIntent(undefined, "bogus")).toBeUndefined()
+    expect(resolveSignupIntent(undefined, undefined)).toBeUndefined()
+  })
+
+  it("lands a new Budgets workspace on the Budgets setup", () => {
+    expect(workspaceLanding("acme", resolveSignupIntent(undefined, "budgets"))).toBe(
+      "/acme/onboarding/budgets"
+    )
   })
 })
