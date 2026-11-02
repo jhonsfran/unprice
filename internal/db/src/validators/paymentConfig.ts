@@ -61,15 +61,15 @@ export const paymentProviderConnectionDataSchema = z
   .nullable()
 
 export const insertPaymentProviderConfigSchema = createInsertSchema(paymentProviderConfig, {
-  key: z.string().min(1).optional().nullable(),
-  keyIv: z.string().optional().nullable(),
-  webhookSecret: z.string().optional(),
-  paymentProvider: paymentProviderSchema,
-  connectionType: paymentProviderConnectionTypeSchema.default("bring_your_own_key"),
-  mode: paymentProviderConnectionModeSchema.default("test"),
-  status: paymentProviderConnectionStatusSchema.default("not_connected"),
-  externalAccountId: z.string().optional().nullable(),
-  connectionData: paymentProviderConnectionDataSchema.optional(),
+  key: () => z.string().min(1).optional().nullable(),
+  keyIv: () => z.string().optional().nullable(),
+  webhookSecret: () => z.string().optional(),
+  paymentProvider: () => paymentProviderSchema.optional(),
+  connectionType: () => paymentProviderConnectionTypeSchema.optional(),
+  mode: () => paymentProviderConnectionModeSchema.optional(),
+  status: () => paymentProviderConnectionStatusSchema.optional(),
+  externalAccountId: () => z.string().optional().nullable(),
+  connectionData: () => paymentProviderConnectionDataSchema.optional(),
 })
   .required({
     paymentProvider: true,
@@ -87,10 +87,10 @@ export const insertPaymentProviderConfigSchema = createInsertSchema(paymentProvi
   })
 
 export const selectPaymentProviderConfigSchema = createSelectSchema(paymentProviderConfig, {
-  connectionType: paymentProviderConnectionTypeSchema,
-  mode: paymentProviderConnectionModeSchema,
-  status: paymentProviderConnectionStatusSchema,
-  connectionData: paymentProviderConnectionDataSchema.optional(),
+  connectionType: () => paymentProviderConnectionTypeSchema,
+  mode: () => paymentProviderConnectionModeSchema,
+  status: () => paymentProviderConnectionStatusSchema,
+  connectionData: () => paymentProviderConnectionDataSchema.optional(),
 })
 
 export const publicPaymentProviderConfigSchema = selectPaymentProviderConfigSchema.omit({

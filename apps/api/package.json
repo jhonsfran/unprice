@@ -43,8 +43,8 @@
     "wrangler": "4.67.0"
   },
   "dependencies": {
-    "@hono/zod-openapi": "^0.19.2",
-    "@scalar/hono-api-reference": "^0.7.2",
+    "@hono/zod-openapi": "^1.6.3",
+    "@scalar/hono-api-reference": "^0.12.14",
     "@t3-oss/env-core": "^0.12.0",
     "@unkey/cache": "^1.5.0",
     "@unprice/analytics": "workspace:^",
@@ -64,6 +64,6 @@
     "stoker": "^1.4.2",
     "ua-parser-js": "^2.0.3",
     "ulid": "^3.0.2",
-    "zod": "^3.24.2"
+    "zod": "^4.6.7"
   }
 }

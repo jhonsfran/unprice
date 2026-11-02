@@ -10,17 +10,17 @@ export const projectMetadataSchema = z.object({
 })
 
 export const projectSelectBaseSchema = createSelectSchema(schema.projects, {
-  name: z.string().min(4, "Name must be at least 5 characters"),
-  metadata: projectMetadataSchema.optional(),
+  name: () => z.string().min(4, "Name must be at least 5 characters"),
+  metadata: () => projectMetadataSchema.optional(),
 })
 
 export const projectInsertBaseSchema = createInsertSchema(schema.projects, {
-  name: z.string().min(1, "Name is required"),
-  url: z.string().url().optional(),
-  defaultCurrency: currencySchema,
-  timezone: z.string().min(1, "Timezone is required"),
-  contactEmail: z.string().email().optional(),
-  metadata: projectMetadataSchema.optional(),
+  name: () => z.string().min(1, "Name is required"),
+  url: () => z.string().url().optional(),
+  defaultCurrency: () => currencySchema,
+  timezone: () => z.string().min(1, "Timezone is required"),
+  contactEmail: () => z.string().email().optional(),
+  metadata: () => projectMetadataSchema.optional(),
 })
   .partial({
     id: true,

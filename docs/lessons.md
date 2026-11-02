@@ -36,6 +36,10 @@ patterns. Keep it cheap to load and useful.
 
 ## CI And GitHub Actions
 
+- 2026-10-27: Mintlify validation 0.1.813 needs the checked-in Zod v4 patch (partial enum records, issue formatting, native JSON schema conversion). Keep `apps/docs/test/zod-compatibility.test.mjs` passing when updating it; the removed converter dependency is replaced by that implementation, not an audit exclusion.
+- 2026-10-27: With drizzle-zod 0.8, use refinement callbacks to retain column nullability and explicitly mark optional insert overrides. Zod v4 runs defaults inside optional fields; omit those defaults when the old boundary left fields absent.
+- 2026-10-27: Zod GHSA-mrhx-c7xc-m3w5 is fixed in v4.6.6, but its upstream patch only changes v4. Keep v3 integrations explicit; upgrading the package and importing `zod/v3` does not apply that fix.
+
 - 2026-10-22: Next.js security patches must update both `apps/nextjs` and `internal/auth`. Keep the sharp 0.35.5 override; it mitigates the image RCE but does not fix Server Actions advisories.
 - 2026-10-22: For a dependency PR that must not deploy, include `renovate/` in the head branch name. `Test Renovate` runs the Build checks, and every `Deploy Preview` job skips that branch.
 - 2026-10-21: Vite security updates must change both the root dependency and workspace override. After pnpm resolves override changes, retain unrelated lockfile resolutions and verify with a frozen install.

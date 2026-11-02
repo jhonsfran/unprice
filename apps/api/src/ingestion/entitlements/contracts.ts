@@ -155,7 +155,7 @@ const rawEventSchema = z.object({
   id: z.string(),
   slug: z.string(),
   timestamp: z.number().finite(),
-  properties: z.record(z.unknown()),
+  properties: z.record(z.string(), z.unknown()),
   source: z.object({
     workspaceId: z.string().min(1),
     environment: z.string().min(1),

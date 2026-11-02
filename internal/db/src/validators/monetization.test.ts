@@ -94,7 +94,7 @@ describe("monetizationConfigSchema", () => {
         ...config,
         plans: [{ ...config.plans[0]!, version: { ...config.plans[0]!.version, planId: "pl_1" } }],
       })
-    ).toThrow(/Unrecognized key\(s\) in object: 'planId'/)
+    ).toThrow(/Unrecognized key.*planId/)
   })
 
   // An agent repairs its own document, so it navigates by path, not by prose.
@@ -215,7 +215,7 @@ describe("monetizationConfigSchema", () => {
         field === "groupBy" ? ["a"] : field === "windowSize" ? "HOUR" : { a: "b" }
 
       expect(() => monetizationConfigSchema.parse(invalid)).toThrow(
-        new RegExp(`Unrecognized key\\(s\\) in object: '${field}'`)
+        new RegExp(`Unrecognized key.*${field}`)
       )
     }
   )
@@ -260,9 +260,7 @@ describe("monetizationConfigSchema", () => {
     }
     invalid.plans[0]!.version.features[0]!.config.discount = "0.5"
 
-    expect(() => monetizationConfigSchema.parse(invalid)).toThrow(
-      /Unrecognized key\(s\) in object: 'discount'/
-    )
+    expect(() => monetizationConfigSchema.parse(invalid)).toThrow(/Unrecognized key.*discount/)
   })
 
   // The pricing rules below all come from `planVersionFeatureInsertBaseSchema`;

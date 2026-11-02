@@ -1,6 +1,6 @@
+import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi"
 import { createInsertSchema, createSelectSchema } from "drizzle-zod"
 import * as z from "zod"
-import { extendZodWithOpenApi } from "zod-openapi"
 import { versions } from "../schema/planVersions"
 import { featureSelectBaseSchema } from "./features"
 import { planVersionFeatureSelectBaseSchema } from "./planVersionFeatures"
@@ -49,7 +49,7 @@ export const insertBillingConfigSchema = billingConfigSchema
         fatal: true,
       })
 
-      return false
+      return
     }
 
     // billing anchor required for recurring plans
@@ -61,7 +61,7 @@ export const insertBillingConfigSchema = billingConfigSchema
         fatal: true,
       })
 
-      return false
+      return
     }
 
     // onetime plans default to day of creation
@@ -69,7 +69,7 @@ export const insertBillingConfigSchema = billingConfigSchema
       data.billingAnchor = "dayOfCreation"
     }
 
-    return true
+    return
   })
   .describe(
     "Billing configuration for creating a plan version. Requires: name (config name like 'monthly'), billingInterval ('month', 'year', 'week', 'day'), billingIntervalCount (number of intervals), planType ('recurring' or 'onetime'). For recurring plans, billingAnchor is also required (day of month 1-31 or 'dayOfCreation')"
@@ -79,53 +79,65 @@ export const insertBillingConfigSchema = billingConfigSchema
   })
 
 export const planVersionSelectBaseSchema = createSelectSchema(versions, {
-  tags: z
-    .array(z.string())
-    .describe(
-      "Array of tags for categorizing and filtering plan versions. Examples: ['popular', 'recommended', 'enterprise', 'startup']"
+  tags: () =>
+    z
+      .array(z.string())
+      .describe(
+        "Array of tags for categorizing and filtering plan versions. Examples: ['popular', 'recommended', 'enterprise', 'startup']"
+      ),
+  metadata: () =>
+    planVersionMetadataSchema.describe(
+      "Plan version metadata containing external integration identifiers"
     ),
-  metadata: planVersionMetadataSchema.describe(
-    "Plan version metadata containing external integration identifiers"
-  ),
-  currency: currencySchema.describe(
-    "ISO 4217 currency code for this plan version. Examples: 'USD', 'EUR'. Each plan version is tied to a single currency"
-  ),
-  billingConfig: billingConfigSchema
-    .describe(
-      "Complete billing cycle configuration including interval, count, anchor date, and plan type"
-    )
-    .openapi({
-      description: "The billing configuration for the plan version",
-    }),
+  currency: () =>
+    currencySchema.describe(
+      "ISO 4217 currency code for this plan version. Examples: 'USD', 'EUR'. Each plan version is tied to a single currency"
+    ),
+  billingConfig: () =>
+    billingConfigSchema
+      .describe(
+        "Complete billing cycle configuration including interval, count, anchor date, and plan type"
+      )
+      .openapi({
+        description: "The billing configuration for the plan version",
+      }),
 }).describe("Schema for reading/selecting plan version data from the database")
 
 export const versionInsertBaseSchema = createInsertSchema(versions, {
-  title: z
-    .string()
-    .describe(
-      "Human-readable plan version title (1-50 chars). Will be UPPERCASED. Examples: 'Starter', 'Pro', 'Enterprise'"
+  title: () =>
+    z
+      .string()
+      .describe(
+        "Human-readable plan version title (1-50 chars). Will be UPPERCASED. Examples: 'Starter', 'Pro', 'Enterprise'"
+      ),
+  description: () =>
+    z.string().describe("Description of the plan version explaining what's included"),
+  tags: () =>
+    z
+      .array(z.string())
+      .describe(
+        "Optional tags for categorizing the plan version. Examples: ['popular', 'recommended', 'limited-time']"
+      )
+      .optional(),
+  metadata: () =>
+    planVersionMetadataSchema.describe("Optional metadata for external integrations").optional(),
+  currency: () =>
+    currencySchema.describe(
+      "Required. ISO 4217 currency code. Examples: 'USD', 'EUR'. Determines the currency for all pricing in this version"
     ),
-  description: z.string().describe("Description of the plan version explaining what's included"),
-  tags: z
-    .array(z.string())
-    .describe(
-      "Optional tags for categorizing the plan version. Examples: ['popular', 'recommended', 'limited-time']"
+  billingConfig: () =>
+    insertBillingConfigSchema.describe(
+      "Required. Billing cycle configuration including interval, count, anchor, and plan type"
     ),
-  metadata: planVersionMetadataSchema.describe("Optional metadata for external integrations"),
-  currency: currencySchema.describe(
-    "Required. ISO 4217 currency code. Examples: 'USD', 'EUR'. Determines the currency for all pricing in this version"
-  ),
-  billingConfig: insertBillingConfigSchema.describe(
-    "Required. Billing cycle configuration including interval, count, anchor, and plan type"
-  ),
-  trialUnits: z.coerce
-    .number()
-    .int()
-    .min(0)
-    .default(0)
-    .describe(
-      "Number of trial duration units. Minute-billed plans use minutes; all other billing intervals use days. Example: 15 for a 15-day trial on a monthly plan. Default: 0 (no trial)"
-    ),
+  trialUnits: () =>
+    z.coerce
+      .number()
+      .int()
+      .min(0)
+      .describe(
+        "Number of trial duration units. Minute-billed plans use minutes; all other billing intervals use days. Example: 15 for a 15-day trial on a monthly plan. Default: 0 (no trial)"
+      )
+      .optional(),
 })
   .required({
     planId: true,
