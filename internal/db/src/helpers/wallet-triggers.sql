@@ -27,6 +27,21 @@ BEGIN
   v_customer_id := COALESCE(NEW.customer_id, OLD.customer_id);
   v_account_name := 'customer.' || v_customer_id || '.available.granted';
 
+  -- A credit row removed because its customer was deleted in the same
+  -- transaction (customer -> wallet_credits ON DELETE CASCADE, e.g. a
+  -- project/workspace hard-delete) has no wallet left to reconcile. The
+  -- pgledger accounts are append-only history and are not removed, so their
+  -- balance would never match the (now empty) credits set. Skip the check
+  -- only in that case; every other write keeps the invariant.
+  IF TG_OP = 'DELETE' AND NOT EXISTS (
+    SELECT 1
+      FROM unprice_customers
+     WHERE id = OLD.customer_id
+       AND project_id = OLD.project_id
+  ) THEN
+    RETURN NULL;
+  END IF;
+
   -- Sum active credits for this customer (post-commit state).
   SELECT COALESCE(SUM(remaining_amount), 0)
     INTO v_credit_sum

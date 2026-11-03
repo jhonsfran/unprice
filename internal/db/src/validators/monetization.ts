@@ -111,8 +111,8 @@ export const monetizationTierSchema = tiersSchema
  * schemas, through `validateAgainstInternalFeature` below. A union of the four
  * would type better but report every failure four times, once per branch.
  */
-export const monetizationPriceConfigSchema = configUsageSchema
-  .innerType()
+export const monetizationPriceConfigSchema = z
+  .object(configUsageSchema.shape)
   .extend({
     price: priceSchema.optional().describe("Price as a decimal string. Example: '0.000002'"),
     tiers: z.array(monetizationTierSchema).optional().describe("Pricing tiers, decimal strings"),
@@ -135,8 +135,8 @@ export const monetizationPriceConfigSchema = configUsageSchema
  * `meterConfigSchema` with its refinement intact, which is what enforces
  * "aggregationField is required unless the method is count".
  */
-export const monetizationMeterConfigSchema = meterConfigSchema
-  .innerType()
+export const monetizationMeterConfigSchema = z
+  .object(meterConfigSchema.shape)
   .omit({ eventId: true, filters: true, groupBy: true, windowSize: true })
   .strict()
   .describe("How usage is measured from a declared event")
@@ -191,7 +191,7 @@ const monetizationVersionFeatureBaseSchema = z
         },
         z
           .union([z.number(), z.string().regex(/^\d+$/)])
-          .pipe(z.coerce.number().int().nonnegative())
+          .pipe(z.coerce.number<string | number>().int().nonnegative())
           .refine((limit) => limit !== 0, {
             message:
               "limit cannot be 0: a zero allowance is stored as null, which means unlimited. Omit limit for unlimited, or leave the feature out of the plan to make it unavailable",

@@ -22,13 +22,13 @@ export type EntitlementReservationMetadata = z.infer<typeof entitlementReservati
 export const entitlementReservationSelectSchema = createSelectSchema(
   schema.entitlementReservations,
   {
-    metadata: entitlementReservationMetadataSchema.nullable(),
+    metadata: () => entitlementReservationMetadataSchema.nullable(),
   }
 )
 export const entitlementReservationInsertSchema = createInsertSchema(
   schema.entitlementReservations,
   {
-    metadata: entitlementReservationMetadataSchema.nullable().optional(),
+    metadata: () => entitlementReservationMetadataSchema.nullable().optional(),
   }
 )
 export type EntitlementReservation = typeof schema.entitlementReservations.$inferSelect
@@ -47,10 +47,10 @@ export const walletTopupInsertSchema = createInsertSchema(schema.walletTopups)
 export type WalletTopup = typeof schema.walletTopups.$inferSelect
 
 export const walletCreditSelectSchema = createSelectSchema(schema.walletCredits, {
-  metadata: walletCreditMetadataSchema,
+  metadata: () => walletCreditMetadataSchema,
 })
 export const walletCreditInsertSchema = createInsertSchema(schema.walletCredits, {
-  metadata: walletCreditMetadataSchema.nullable(),
+  metadata: () => walletCreditMetadataSchema.nullable().optional(),
 })
 export type WalletCredit = typeof schema.walletCredits.$inferSelect
 

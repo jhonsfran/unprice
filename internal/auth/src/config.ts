@@ -13,6 +13,7 @@ import { env } from "./env"
 import { authLogger } from "./logger"
 import { getCanonicalAuthRedirectUrl } from "./redirect-policy"
 import { shouldTrustAuthHost, shouldUseSecureAuthCookies } from "./runtime"
+import { keepTokenIfUserExists } from "./session-user"
 import { createUserFromProvider } from "./utils"
 
 const useSecureCookies = shouldUseSecureAuthCookies(env.APP_ENV)
@@ -173,7 +174,25 @@ export const authConfig: NextAuthConfig = {
       return session
     },
     jwt: async (opts) => {
-      const token = opts.token
+      // a deleted account must not keep a valid session: returning null clears the cookie
+      const token = await keepTokenIfUserExists({
+        token: opts.token,
+        isSignIn: !!opts.user,
+        userExists: async (userId) => {
+          const user = await db.query.users.findFirst({
+            columns: { id: true },
+            where: (users, { eq }) => eq(users.id, userId),
+          })
+          return !!user
+        },
+        onError: (error) =>
+          authLogger.error(error instanceof Error ? error : new Error(String(error))),
+      })
+
+      if (!token) {
+        return null
+      }
+
       const userId = token.sub
 
       if (userId) {

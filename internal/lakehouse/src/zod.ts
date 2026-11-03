@@ -16,7 +16,7 @@ export const lakehouseJsonValueSchema: z.ZodType<LakehouseJsonValue> = z.lazy(()
     z.boolean(),
     z.null(),
     z.array(lakehouseJsonValueSchema),
-    z.record(lakehouseJsonValueSchema),
+    z.record(z.string(), lakehouseJsonValueSchema),
   ])
 )
 
@@ -57,7 +57,7 @@ function fieldToSchema(field: LakehouseFieldDefinition): z.ZodTypeAny {
       schema = z.array(z.unknown())
       break
     case "struct":
-      schema = z.record(z.unknown())
+      schema = z.record(z.string(), z.unknown())
       break
     default: {
       const _never: never = field.type

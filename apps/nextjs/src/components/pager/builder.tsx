@@ -10,6 +10,7 @@ import { toast } from "@unprice/ui/sonner"
 import { Save } from "lucide-react"
 import { useEffect, useRef } from "react"
 import { useForm } from "react-hook-form"
+import { z } from "zod"
 import { useDebounce } from "~/hooks/use-debounce"
 import { useTRPC } from "~/trpc/client"
 import { BasicInformation } from "./basic-information"
@@ -20,8 +21,12 @@ import { PlanSelection } from "./plan-selection"
 
 export default function PageBuilderConfig({ page }: { page: Page }) {
   const trpc = useTRPC()
-  const form = useForm<Page>({
-    resolver: zodResolver(pageInsertBaseSchema),
+  const formSchema = z.preprocess(
+    (values: Page) => values,
+    pageInsertBaseSchema.transform((values) => ({ ...page, ...values }))
+  )
+  const form = useForm<Page, unknown, Page>({
+    resolver: zodResolver(formSchema),
     defaultValues: {
       ...page,
     },

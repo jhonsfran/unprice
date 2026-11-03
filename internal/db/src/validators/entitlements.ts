@@ -1,6 +1,6 @@
+import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi"
 import { createInsertSchema, createSelectSchema } from "drizzle-zod"
 import { z } from "zod"
-import { extendZodWithOpenApi } from "zod-openapi"
 import * as schema from "../schema"
 import { featureSelectBaseSchema } from "./features"
 import { planVersionFeatureSelectBaseSchema } from "./planVersionFeatures"
@@ -19,13 +19,13 @@ export const grantsMetadataSchema = z.record(
 )
 
 export const customerEntitlementSelectSchema = createSelectSchema(schema.customerEntitlements, {
-  metadata: customerEntitlementMetadataSchema.nullable(),
-  overageStrategy: overageStrategySchema,
+  metadata: () => customerEntitlementMetadataSchema.nullable(),
+  overageStrategy: () => overageStrategySchema,
 })
 
 export const customerEntitlementInsertSchema = createInsertSchema(schema.customerEntitlements, {
-  metadata: customerEntitlementMetadataSchema.nullable().optional(),
-  overageStrategy: overageStrategySchema.optional(),
+  metadata: () => customerEntitlementMetadataSchema.nullable().optional(),
+  overageStrategy: () => overageStrategySchema.optional(),
 })
   .partial({
     id: true,
@@ -41,13 +41,13 @@ export const customerEntitlementInsertSchema = createInsertSchema(schema.custome
   .strict()
 
 export const grantSchema = createSelectSchema(schema.grants, {
-  metadata: grantsMetadataSchema.nullable(),
-  allowanceUnits: z.number().int().nonnegative().nullable(),
+  metadata: () => grantsMetadataSchema.nullable(),
+  allowanceUnits: () => z.number().int().nonnegative().nullable(),
 })
 
 export const grantInsertSchema = createInsertSchema(schema.grants, {
-  metadata: grantsMetadataSchema.nullable().optional(),
-  allowanceUnits: z.number().int().nonnegative().nullable().optional(),
+  metadata: () => grantsMetadataSchema.nullable().optional(),
+  allowanceUnits: () => z.number().int().nonnegative().nullable().optional(),
 })
   .partial({
     id: true,

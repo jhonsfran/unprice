@@ -108,19 +108,19 @@ export const subscriptionPhaseMetadataSchema = z.object({
 })
 
 export const subscriptionSelectSchema = createSelectSchema(subscriptions, {
-  metadata: subscriptionMetadataSchema,
-  timezone: z.string().min(1),
-  status: subscriptionStatusSchema,
-  planSlug: z.string().min(1),
+  metadata: () => subscriptionMetadataSchema,
+  timezone: () => z.string().min(1),
+  status: () => subscriptionStatusSchema,
+  planSlug: () => z.string().min(1),
 })
 
 export const subscriptionPhaseSelectSchema = createSelectSchema(subscriptionPhases, {
-  planVersionId: z.string().min(1, { message: "Plan version is required" }),
-  paymentProvider: paymentProviderSchema,
-  creditLinePolicy: creditLinePolicySchema.default("uncapped"),
-  creditLineAmount: z.coerce.number().int().min(0).nullable(),
-  trialUnits: z.coerce.number().int().min(0).default(0),
-  metadata: subscriptionPhaseMetadataSchema,
+  planVersionId: () => z.string().min(1, { message: "Plan version is required" }),
+  paymentProvider: () => paymentProviderSchema,
+  creditLinePolicy: () => creditLinePolicySchema.default("uncapped"),
+  creditLineAmount: () => z.coerce.number().int().min(0).nullable(),
+  trialUnits: () => z.coerce.number().int().min(0).default(0),
+  metadata: () => subscriptionPhaseMetadataSchema,
 })
   .extend({
     items: subscriptionItemsSelectSchema.array().optional(),
@@ -145,12 +145,12 @@ export const subscriptionPhaseUpdateSchema = subscriptionPhaseSelectSchema.exten
 })
 
 export const subscriptionPhaseInsertSchema = createInsertSchema(subscriptionPhases, {
-  planVersionId: z.string().min(1, { message: "Plan version is required" }),
-  paymentProvider: paymentProviderSchema,
-  creditLinePolicy: creditLinePolicySchema.default("uncapped"),
-  creditLineAmount: z.coerce.number().int().min(0).nullable().optional(),
-  metadata: subscriptionPhaseMetadataSchema,
-  trialUnits: z.coerce.number().int().min(0).default(0),
+  planVersionId: () => z.string().min(1, { message: "Plan version is required" }),
+  paymentProvider: () => paymentProviderSchema.optional(),
+  creditLinePolicy: () => creditLinePolicySchema.optional(),
+  creditLineAmount: () => z.coerce.number().int().min(0).nullable().optional(),
+  metadata: () => subscriptionPhaseMetadataSchema.optional(),
+  trialUnits: () => z.coerce.number().int().min(0).optional(),
 })
   .extend({
     config: subscriptionItemsConfigSchema,
@@ -179,8 +179,8 @@ export const subscriptionPhaseInsertSchema = createInsertSchema(subscriptionPhas
   })
 
 export const subscriptionInsertSchema = createInsertSchema(subscriptions, {
-  metadata: subscriptionMetadataSchema,
-  timezone: z.string().min(1),
+  metadata: () => subscriptionMetadataSchema.optional(),
+  timezone: () => z.string().min(1).optional(),
 })
   .extend({
     // when creating a subscription, we don't need the subscriptionId
@@ -289,7 +289,7 @@ export const subscriptionChangePlanSchema = subscriptionSelectSchema
     paymentProvider: paymentProviderSchema.optional(),
     paymentMethodRequired: z.boolean().optional(),
     paymentMethodId: z.string().nullable().optional(),
-    creditLinePolicy: creditLinePolicySchema.default("uncapped").optional(),
+    creditLinePolicy: creditLinePolicySchema.optional(),
     creditLineAmount: z.coerce.number().int().min(0).nullable().optional(),
     trialUnits: z.coerce.number().int().min(0).optional(),
     // When set, the target plan version must use this currency. Callers that

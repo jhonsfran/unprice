@@ -1,7 +1,7 @@
+import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi"
 import { fromLedgerMinor, toCurrencyMinor } from "@unprice/money"
 import { createInsertSchema, createSelectSchema } from "drizzle-zod"
 import { z } from "zod"
-import { extendZodWithOpenApi } from "zod-openapi"
 import { budgetRuns } from "../schema/budget-runs"
 
 extendZodWithOpenApi(z)

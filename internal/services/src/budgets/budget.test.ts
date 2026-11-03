@@ -1477,8 +1477,8 @@ describe("config schema", () => {
       })
     ).toEqual([
       "limits.0.anchor: only day, week, and month windows take an anchor",
-      "limits.1.anchor: Expected integer, received float",
-      "closesAt: Number must be greater than or equal to 0",
+      "limits.1.anchor: Invalid input: expected int, received number",
+      "closesAt: Too small: expected number to be >=0",
     ])
   })
 })

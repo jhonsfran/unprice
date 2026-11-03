@@ -4,11 +4,14 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "dev": "mint dev --port 3333"
+    "dev": "mint dev --port 3333",
+    "test": "node --test test/*.test.mjs"
   },
   "keywords": [],
   "author": "Sebastian Franco",
   "devDependencies": {
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
     "mint": "^4.2.770"
   }
 }

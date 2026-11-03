@@ -15,43 +15,50 @@ export const planMetadataSchema = z
   .describe("Additional metadata for the plan used for external integrations and custom data")
 
 export const planSelectBaseSchema = createSelectSchema(schema.plans, {
-  title: z.string().describe("Title of the plan"),
-  metadata: planMetadataSchema.describe(
-    "Plan metadata containing external integration identifiers and custom data"
-  ),
+  title: () => z.string().describe("Title of the plan"),
+  metadata: () =>
+    planMetadataSchema.describe(
+      "Plan metadata containing external integration identifiers and custom data"
+    ),
 }).describe("Schema for reading/selecting plan data from the database")
 
 export const planInsertBaseSchema = createInsertSchema(schema.plans, {
-  title: z
-    .string()
-    .describe(
-      "Human-readable plan title (1-50 chars). Will be UPPERCASED. Examples: 'Starter', 'Pro', 'Enterprise'"
-    ),
-  metadata: planMetadataSchema
-    .optional()
-    .describe("Optional metadata for external integrations and custom data"),
-  slug: z
-    .string()
-    .min(3, "Slug must be at least 3 characters")
-    .describe(
-      "URL-friendly plan identifier (lowercase, hyphens). Examples: 'starter', 'pro', 'enterprise'. This becomes the parent for all plan versions."
-    ),
-  description: z
-    .string()
-    .optional()
-    .describe("Description of the plan explaining its target audience and value proposition"),
-  defaultPlan: z
-    .boolean()
-    .optional()
-    .describe(
-      "Whether this is the default plan shown to new users (only one plan can be default). Use for your 'Starter' or 'Free' tier."
-    ),
-  enterprisePlan: z
-    .boolean()
-    .optional()
-    .describe(
-      "Whether this is an enterprise plan with custom pricing. Enterprise plans show 'Contact Us' instead of a price."
-    ),
+  title: () =>
+    z
+      .string()
+      .describe(
+        "Human-readable plan title (1-50 chars). Will be UPPERCASED. Examples: 'Starter', 'Pro', 'Enterprise'"
+      ),
+  metadata: () =>
+    planMetadataSchema
+      .optional()
+      .describe("Optional metadata for external integrations and custom data"),
+  slug: () =>
+    z
+      .string()
+      .min(3, "Slug must be at least 3 characters")
+      .describe(
+        "URL-friendly plan identifier (lowercase, hyphens). Examples: 'starter', 'pro', 'enterprise'. This becomes the parent for all plan versions."
+      ),
+  description: () =>
+    z
+      .string()
+      .optional()
+      .describe("Description of the plan explaining its target audience and value proposition"),
+  defaultPlan: () =>
+    z
+      .boolean()
+      .optional()
+      .describe(
+        "Whether this is the default plan shown to new users (only one plan can be default). Use for your 'Starter' or 'Free' tier."
+      ),
+  enterprisePlan: () =>
+    z
+      .boolean()
+      .optional()
+      .describe(
+        "Whether this is an enterprise plan with custom pricing. Enterprise plans show 'Contact Us' instead of a price."
+      ),
 })
   .omit({
     createdAtM: true,

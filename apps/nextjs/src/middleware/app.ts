@@ -11,7 +11,13 @@ import {
 import { isSlug } from "@unprice/db/utils"
 import { parse } from "~/lib/domains"
 import { getWorkspacesUser } from "~/lib/session"
-import { getSafeNextPath } from "~/lib/signup-funnel"
+import {
+  SIGNUP_INTENT_COOKIE,
+  SIGNUP_INTENT_COOKIE_MAX_AGE_S,
+  getSafeNextPath,
+  getSignupIntent,
+  newWorkspacePath,
+} from "~/lib/signup-funnel"
 
 export default function AppMiddleware(req: NextAuthRequest) {
   const url = new URL(req.nextUrl.origin)
@@ -27,7 +33,23 @@ export default function AppMiddleware(req: NextAuthRequest) {
 
   // API routes we don't need to check if the user is logged in
   if (isApiRoute || isAppAuthRoute) {
-    return NextResponse.next()
+    const response = NextResponse.next()
+    // A signup or sign-in that names an intent remembers it, so the first workspace still lands on
+    // the intent when the OAuth round trip comes back without its callbackUrl.
+    const intent =
+      path === AUTH_ROUTES.SIGNUP || path === AUTH_ROUTES.SIGNIN
+        ? getSignupIntent(req.nextUrl.searchParams.get("intent") ?? undefined)
+        : undefined
+    if (intent) {
+      response.cookies.set(SIGNUP_INTENT_COOKIE, intent, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        path: "/",
+        maxAge: SIGNUP_INTENT_COOKIE_MAX_AGE_S,
+      })
+    }
+    return response
   }
 
   if (!isLoggedIn || !user) {
@@ -61,8 +83,10 @@ export default function AppMiddleware(req: NextAuthRequest) {
       return NextResponse.redirect(url)
     }
 
-    // if not workspace in path and no workspace in cookies or jwt, redirect to onboarding
-    return NextResponse.redirect(new URL("/new", req.url))
+    // if not workspace in path and no workspace in cookies or jwt, redirect to onboarding, keeping
+    // the intent the signup started with
+    const intent = getSignupIntent(req.cookies.get(SIGNUP_INTENT_COOKIE)?.value)
+    return NextResponse.redirect(new URL(newWorkspacePath(intent), req.url))
   }
 
   // check jwt claim for the workspace

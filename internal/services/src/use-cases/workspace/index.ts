@@ -35,3 +35,14 @@ export type {
 } from "./get-upgrade-options"
 export { inviteMember } from "./invite-member"
 export { resendInvite } from "./resend-invite"
+export {
+  DeletePersonalWorkspaceError,
+  deletePersonalWorkspace,
+  deletePersonalWorkspaceInputSchema,
+  deletePersonalWorkspaceOutputSchema,
+} from "./delete-personal-workspace"
+export type {
+  DeletePersonalWorkspaceDeps,
+  DeletePersonalWorkspaceInput,
+  DeletePersonalWorkspaceOutput,
+} from "./delete-personal-workspace"

@@ -1,7 +1,7 @@
 import * as z from "zod"
 
+import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi"
 import { formatInTimeZone, toZonedTime } from "date-fns-tz"
-import { extendZodWithOpenApi } from "zod-openapi"
 import {
   AGGREGATION_METHODS,
   BILLING_INTERVALS,

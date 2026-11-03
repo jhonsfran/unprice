@@ -36,7 +36,11 @@ patterns. Keep it cheap to load and useful.
 
 ## CI And GitHub Actions
 
-- 2026-11-03: GHSA-mrhx-c7xc-m3w5 has no Zod 3 patch; npm still lists 3.25.76 as its latest v3 release. Baseline that remaining v3 exposure while pinning Zod 4 tooling to the patched 4.6.6 release. Do not force the application schemas onto Zod 4 through an override.
+- 2026-11-03: When a billing PR predates the dependency migration on main, merge main before updating audit pins; preserve its Zod 4 compatibility patches and lockfile.
+- 2026-10-27: Mintlify validation 0.1.813 needs the checked-in Zod v4 patch (partial enum records, issue formatting, native JSON schema conversion). Keep `apps/docs/test/zod-compatibility.test.mjs` passing when updating it; the removed converter dependency is replaced by that implementation, not an audit exclusion.
+- 2026-10-27: With drizzle-zod 0.8, use refinement callbacks to retain column nullability and explicitly mark optional insert overrides. Zod v4 runs defaults inside optional fields; omit those defaults when the old boundary left fields absent.
+- 2026-10-27: Zod GHSA-mrhx-c7xc-m3w5 is fixed in v4.6.6, but its upstream patch only changes v4. Keep v3 integrations explicit; upgrading the package and importing `zod/v3` does not apply that fix.
+
 
 - 2026-10-22: Next.js security patches must update both `apps/nextjs` and `internal/auth`. Keep the sharp 0.35.5 override; it mitigates the image RCE but does not fix Server Actions advisories.
 - 2026-10-22: For a dependency PR that must not deploy, include `renovate/` in the head branch name. `Test Renovate` runs the Build checks, and every `Deploy Preview` job skips that branch.
