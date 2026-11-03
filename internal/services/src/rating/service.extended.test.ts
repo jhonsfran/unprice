@@ -1,3 +1,4 @@
+import { type Analytics, billingUsageAllocationRowSchema } from "@unprice/analytics"
 import { currencies, dinero } from "@unprice/db/utils"
 import type {
   BillingConfig,
@@ -7,9 +8,9 @@ import type {
   MeterConfig,
   ResetConfig,
 } from "@unprice/db/validators"
+import { toLedgerMinor } from "@unprice/money"
 import { toDecimal } from "dinero.js"
 import { describe, expect, it, vi } from "vitest"
-import { computeGrantPeriodBucket } from "../entitlements/grant-consumption"
 import { RatingService } from "./service"
 
 /**
@@ -50,13 +51,13 @@ function makeGrant(overrides: {
         }
       : null,
   } = overrides
-  const billingConfig = {
+  const billingConfig: BillingConfig = {
     name: "monthly",
     billingInterval: "month",
     billingIntervalCount: 1,
     billingAnchor: "dayOfCreation",
     planType: "recurring",
-  } satisfies BillingConfig
+  }
 
   return {
     id,
@@ -531,34 +532,47 @@ describe("RatingService - extended", () => {
     expect(toDecimal(result.val![0]!.price.totalPrice.dinero)).toBe("25.00")
   })
 
-  it("uses each grant reset cadence when fetching usage for one monthly billing statement", async () => {
-    const periodKeysSeen: string[][] = []
-    const getUsageBillingFeatures = vi.fn().mockImplementation(async (input) => {
-      periodKeysSeen.push(input.periodKeys)
-      return {
-        val: [{ featureSlug: "events", usage: 10 }],
-      }
-    })
+  it("preserves daily and weekly grant allocations on a monthly statement", async () => {
+    const data = [
+      {
+        customer_entitlement_id: "ce_daily",
+        grant_id: "grant_daily",
+        period_key: `day:${CYCLE_START}`,
+        period_start_at: CYCLE_START,
+        feature_slug: "events",
+        usage: 5,
+        amount: 500_000_000,
+        currency: "USD",
+        amount_scale: 8,
+      },
+      {
+        customer_entitlement_id: "ce_daily",
+        grant_id: "grant_daily",
+        period_key: `day:${CYCLE_START + 86_400_000}`,
+        period_start_at: CYCLE_START + 86_400_000,
+        feature_slug: "events",
+        usage: 10,
+        amount: 1_000_000_000,
+        currency: "USD",
+        amount_scale: 8,
+      },
+      {
+        customer_entitlement_id: "ce_weekly",
+        grant_id: "grant_weekly",
+        period_key: `week:${CYCLE_START}`,
+        period_start_at: CYCLE_START,
+        feature_slug: "events",
+        usage: 20,
+        amount: 2_000_000_000,
+        currency: "USD",
+        amount_scale: 8,
+      },
+    ]
     const service = new RatingService({
-      analytics: { getUsageBillingFeatures } as never,
+      analytics: { getBillingUsageAllocations: vi.fn(async () => ({ data })) } as never,
       grantsManager: {} as never,
       logger: { warn: vi.fn(), error: vi.fn() } as never,
     })
-    const effectiveAt = Date.UTC(2026, 0, 1, 0, 0, 0)
-    const dailyReset: ResetConfig = {
-      name: "daily meter reset",
-      resetInterval: "day",
-      resetIntervalCount: 1,
-      resetAnchor: "dayOfCreation",
-      planType: "recurring",
-    }
-    const weeklyReset: ResetConfig = {
-      name: "weekly meter reset",
-      resetInterval: "week",
-      resetIntervalCount: 1,
-      resetAnchor: "dayOfCreation",
-      planType: "recurring",
-    }
     const config = {
       price: {
         dinero: dinero({ amount: 100, currency: currencies.USD }).toJSON(),
@@ -567,64 +581,348 @@ describe("RatingService - extended", () => {
       usageMode: "unit" as const,
       units: 1,
     }
-    const grants = [
-      makeGrant({
-        id: "grant_daily",
-        customerEntitlementId: "ce_daily",
-        effectiveAt,
-        allowanceUnits: 5,
-        resetConfig: dailyReset,
-        config,
-      }),
-      makeGrant({
-        id: "grant_weekly",
-        customerEntitlementId: "ce_weekly",
-        effectiveAt,
-        allowanceUnits: 20,
-        resetConfig: weeklyReset,
-        config,
-      }),
-    ]
-
     const result = await service.rateBillingPeriod({
       projectId: "proj_1",
       customerId: "cus_1",
       featureSlug: "events",
       startAt: CYCLE_START,
       endAt: CYCLE_END,
-      grants,
+      grants: [
+        makeGrant({
+          id: "grant_daily",
+          customerEntitlementId: "ce_daily",
+          effectiveAt: CYCLE_START,
+          expiresAt: CYCLE_START + 2 * 86_400_000,
+          config,
+          resetConfig: {
+            name: "daily",
+            resetInterval: "day",
+            resetIntervalCount: 1,
+            resetAnchor: "dayOfCreation",
+            planType: "recurring",
+          },
+        }),
+        makeGrant({
+          id: "grant_weekly",
+          customerEntitlementId: "ce_weekly",
+          effectiveAt: CYCLE_START,
+          config,
+          resetConfig: {
+            name: "weekly",
+            resetInterval: "week",
+            resetIntervalCount: 1,
+            resetAnchor: "dayOfCreation",
+            planType: "recurring",
+          },
+        }),
+      ],
+    })
+    if (result.err) throw result.err
+    expect(
+      result.val.map((charge) => ({
+        grantId: charge.grantId,
+        usage: charge.usage,
+        amount: toDecimal(charge.price.totalPrice.dinero),
+        endAt: charge.cycleEndAt,
+      }))
+    ).toEqual([
+      { grantId: "grant_daily", usage: 5, amount: "5.00", endAt: CYCLE_START + 86_400_000 },
+      { grantId: "grant_daily", usage: 10, amount: "10.00", endAt: CYCLE_START + 2 * 86_400_000 },
+      { grantId: "grant_weekly", usage: 20, amount: "20.00", endAt: CYCLE_START + 7 * 86_400_000 },
+    ])
+  })
+})
+
+describe("billing across meter resets", () => {
+  it("rates every daily reset with its own graduated free tier", async () => {
+    const rows = [
+      { grantId: "grnt_1", periodKey: `day:${CYCLE_START}`, usage: 15 },
+      { grantId: "grnt_1", periodKey: `day:${CYCLE_START + 86_400_000}`, usage: 25 },
+    ]
+    const getUsageBillingFeatures = vi.fn<Analytics["getUsageBillingFeatures"]>(async (input) => ({
+      val: [
+        {
+          featureSlug: "events",
+          usage: rows
+            .filter((row) => !input.periodKeys?.length || input.periodKeys.includes(row.periodKey))
+            .reduce((total, row) => total + row.usage, 0),
+        },
+      ],
+    }))
+    const service = new RatingService({
+      analytics: {
+        getUsageBillingFeatures,
+        getBillingUsageAllocations: vi.fn(async () => ({
+          data: rows.map((row) => ({
+            customer_entitlement_id: "ce_1",
+            grant_id: row.grantId,
+            period_key: row.periodKey,
+            period_start_at: Number(row.periodKey.split(":")[1]),
+            feature_slug: "events",
+            usage: row.usage,
+            amount: row.usage === 15 ? 500_000_000 : 1_500_000_000,
+            currency: "USD",
+            amount_scale: 8,
+          })),
+        })),
+      } as never,
+      grantsManager: {} as never,
+      logger: { warn: vi.fn(), error: vi.fn() } as never,
+    })
+    const zero = {
+      dinero: dinero({ amount: 0, currency: currencies.USD }).toJSON(),
+      displayAmount: "0.00",
+    }
+    const one = {
+      dinero: dinero({ amount: 100, currency: currencies.USD }).toJSON(),
+      displayAmount: "1.00",
+    }
+    const result = await service.rateBillingPeriod({
+      projectId: "proj_1",
+      customerId: "cus_1",
+      featureSlug: "events",
+      startAt: CYCLE_START,
+      endAt: CYCLE_END,
+      grants: [
+        makeGrant({
+          effectiveAt: CYCLE_START,
+          resetConfig: {
+            name: "daily",
+            resetInterval: "day",
+            resetIntervalCount: 1,
+            resetAnchor: "dayOfCreation",
+            planType: "recurring",
+          },
+          config: {
+            usageMode: "tier",
+            tierMode: "graduated",
+            tiers: [
+              { firstUnit: 1, lastUnit: 10, unitPrice: zero, flatPrice: zero },
+              { firstUnit: 11, lastUnit: null, unitPrice: one, flatPrice: zero },
+            ],
+          },
+        }),
+      ],
+    })
+    if (result.err) throw result.err
+    expect({
+      usage: result.val.reduce((total, charge) => total + charge.usage, 0),
+      amounts: result.val.map((charge) => toDecimal(charge.price.totalPrice.dinero)),
+    }).toEqual({ usage: 40, amounts: ["5.00", "15.00"] })
+  })
+})
+
+describe("recorded prices in partial reset buckets", () => {
+  const effectiveAt = Date.UTC(2026, 0, 1)
+  const startAt = Date.UTC(2026, 0, 15)
+  const money = (amount: number) => ({
+    dinero: dinero({ amount, currency: currencies.USD }).toJSON(),
+    displayAmount: String(amount / 100),
+  })
+  const config = {
+    usageMode: "tier" as const,
+    tierMode: "graduated" as const,
+    tiers: [
+      { firstUnit: 1, lastUnit: 10, unitPrice: money(0), flatPrice: money(0) },
+      { firstUnit: 11, lastUnit: null, unitPrice: money(100), flatPrice: money(0) },
+    ],
+  }
+  const grant = makeGrant({
+    effectiveAt,
+    config,
+    resetConfig: {
+      name: "monthly on 1",
+      resetInterval: "month",
+      resetIntervalCount: 1,
+      resetAnchor: 1,
+      planType: "recurring",
+    },
+  })
+  grant.customerEntitlement.featurePlanVersion.billingConfig = {
+    name: "monthly on 15",
+    billingInterval: "month",
+    billingIntervalCount: 1,
+    billingAnchor: 15,
+    planType: "recurring",
+  }
+
+  it("keeps trial usage free when recorded facts have positive prices", async () => {
+    const service = new RatingService({
+      analytics: {
+        getBillingUsageAllocations: vi.fn(async () => ({
+          data: [
+            {
+              customer_entitlement_id: "ce_1",
+              grant_id: "grnt_1",
+              period_key: `month:${effectiveAt}`,
+              feature_slug: "events",
+              period_start_at: effectiveAt,
+              usage: 5,
+              amount: 500_000_000,
+              currency: "USD",
+              amount_scale: 8,
+            },
+          ],
+        })),
+      } as never,
+      grantsManager: {} as never,
+      logger: { warn: vi.fn(), error: vi.fn() } as never,
+    })
+    const result = await service.rateBillingPeriod({
+      projectId: "proj_1",
+      customerId: "cus_1",
+      featureSlug: "events",
+      startAt,
+      endAt: Date.UTC(2026, 0, 25),
+      grants: [{ ...grant, type: "trial" }],
     })
 
-    expect(result.err).toBeUndefined()
-    const expectedDaily = computeGrantPeriodBucket(
-      {
-        cadenceEffectiveAt: effectiveAt,
-        cadenceExpiresAt: null,
-        effectiveAt,
-        expiresAt: null,
-        grantId: "grant_daily",
-        resetConfig: dailyReset,
-      },
-      CYCLE_START
-    )?.periodKey
-    const expectedWeekly = computeGrantPeriodBucket(
-      {
-        cadenceEffectiveAt: effectiveAt,
-        cadenceExpiresAt: null,
-        effectiveAt,
-        expiresAt: null,
-        grantId: "grant_weekly",
-        resetConfig: weeklyReset,
-      },
-      CYCLE_START
-    )?.periodKey
-
-    expect(getUsageBillingFeatures).toHaveBeenCalledTimes(1)
-    expect(periodKeysSeen[0]).toEqual(expect.arrayContaining([expectedDaily, expectedWeekly]))
-    expect(getUsageBillingFeatures).toHaveBeenCalledWith(
-      expect.objectContaining({
-        customerEntitlementIds: ["ce_daily", "ce_weekly"],
-      })
-    )
+    if (result.err) throw result.err
+    expect(
+      result.val.map((charge) => ({
+        usage: charge.usage,
+        amount: toLedgerMinor(charge.price.totalPrice.dinero),
+        isTrial: charge.isTrial,
+        prorate: charge.prorate,
+      }))
+    ).toEqual([{ usage: 5, amount: 0, isTrial: true, prorate: 0 }])
   })
+
+  it.each([
+    { name: "multiple resets", endAt: Date.UTC(2026, 1, 15) },
+    { name: "one partial reset", endAt: Date.UTC(2026, 0, 25) },
+  ])("preserves the accepted five dollar charge for $name", async ({ endAt }) => {
+    const data = [
+      {
+        customer_entitlement_id: "ce_1",
+        grant_id: "grnt_1",
+        period_key: `month:${effectiveAt}`,
+        feature_slug: "events",
+        period_start_at: effectiveAt,
+        usage: 5,
+        amount: 500_000_000,
+        currency: "USD",
+        amount_scale: 8,
+      },
+    ]
+    const service = new RatingService({
+      analytics: {
+        getBillingUsageAllocations: vi.fn(async () => ({ data })),
+        getUsageBillingFeatures: vi.fn(async () => ({
+          val: [{ featureSlug: "events", usage: 5 }],
+        })),
+      } as never,
+      grantsManager: {} as never,
+      logger: { warn: vi.fn(), error: vi.fn() } as never,
+    })
+    const result = await service.rateBillingPeriod({
+      projectId: "proj_1",
+      customerId: "cus_1",
+      featureSlug: "events",
+      startAt,
+      endAt,
+      grants: [grant],
+    })
+    if (result.err) throw result.err
+    expect(
+      result.val.map((charge) => ({
+        usage: charge.usage,
+        amount: toDecimal(charge.price.totalPrice.dinero),
+      }))
+    ).toEqual([{ usage: 5, amount: "5.00" }])
+  })
+
+  it.each([
+    { usage: -4, amount: -400_000_000, expected: "-4.00" },
+    { usage: 1, amount: 1, expected: "0.00000001" },
+  ])("preserves the signed recorded amount $amount", async ({ usage, amount, expected }) => {
+    const data = [
+      {
+        customer_entitlement_id: "ce_1",
+        grant_id: "grnt_1",
+        period_key: `month:${effectiveAt}`,
+        feature_slug: "events",
+        period_start_at: effectiveAt,
+        usage,
+        amount,
+        currency: "USD",
+        amount_scale: 8,
+      },
+    ]
+    const service = new RatingService({
+      analytics: {
+        getBillingUsageAllocations: vi.fn(async () => ({ data })),
+        getUsageBillingFeatures: vi.fn(async () => ({ val: [{ featureSlug: "events", usage }] })),
+      } as never,
+      grantsManager: {} as never,
+      logger: { warn: vi.fn(), error: vi.fn() } as never,
+    })
+    const result = await service.rateBillingPeriod({
+      projectId: "proj_1",
+      customerId: "cus_1",
+      featureSlug: "events",
+      startAt,
+      endAt: Date.UTC(2026, 0, 25),
+      grants: [grant],
+    })
+    if (result.err) throw result.err
+    expect(result.val.map((charge) => toDecimal(charge.price.totalPrice.dinero))).toEqual([
+      expected,
+    ])
+  })
+
+  it.each([
+    { currency: "EUR", amount_scale: 8 },
+    { currency: "USD", amount_scale: 7 },
+  ])("rejects recorded money outside the grant currency and scale", async (money) => {
+    const data = [
+      {
+        customer_entitlement_id: "ce_1",
+        grant_id: "grnt_1",
+        period_key: `month:${effectiveAt}`,
+        feature_slug: "events",
+        period_start_at: effectiveAt,
+        usage: 5,
+        amount: 500_000_000,
+        ...money,
+      },
+    ]
+    const service = new RatingService({
+      analytics: {
+        getBillingUsageAllocations: vi.fn(async () => ({ data })),
+        getUsageBillingFeatures: vi.fn(async () => ({
+          val: [{ featureSlug: "events", usage: 5 }],
+        })),
+      } as never,
+      grantsManager: {} as never,
+      logger: { warn: vi.fn(), error: vi.fn() } as never,
+    })
+    const result = await service.rateBillingPeriod({
+      projectId: "proj_1",
+      customerId: "cus_1",
+      featureSlug: "events",
+      startAt,
+      endAt: Date.UTC(2026, 0, 25),
+      grants: [grant],
+    })
+    expect(result.err?.message).toBe("Recorded usage money does not match grant grnt_1")
+  })
+})
+
+it("parses recorded Int64 money without accepting unsafe totals", () => {
+  const row = {
+    customer_entitlement_id: "ce_1",
+    grant_id: "grnt_1",
+    period_key: "month:1767225600000",
+    feature_slug: "events",
+    period_start_at: 1767225600000,
+    usage: 5,
+    amount: "500000000",
+    currency: "USD",
+    amount_scale: 8,
+  }
+  expect(billingUsageAllocationRowSchema.parse(row).amount).toBe(500_000_000)
+  expect(
+    billingUsageAllocationRowSchema.safeParse({ ...row, amount: "9007199254740993" }).success
+  ).toBe(false)
 })

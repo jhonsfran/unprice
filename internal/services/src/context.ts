@@ -20,7 +20,10 @@ import { ProjectService } from "./projects/service"
 import { RatingService } from "./rating/service"
 import { DrizzleSubscriptionRepository } from "./subscriptions/repository.drizzle"
 import { SubscriptionService } from "./subscriptions/service"
-import { HttpBillingReservationFlushGateway } from "./use-cases/billing/reservation-flush-gateway"
+import {
+  type BillingReservationFlushGateway,
+  HttpBillingReservationFlushGateway,
+} from "./use-cases/billing/reservation-flush-gateway"
 import {
   type BudgetOperatorGateway,
   HttpBudgetOperatorGateway,
@@ -68,7 +71,11 @@ export interface ServiceContext {
  * Construction order matters: leaf services first, then services
  * that depend on them.
  */
-export function createServiceContext(deps: ServiceDeps): ServiceContext {
+export function createServiceContext(
+  deps: ServiceDeps & {
+    reservationFlushGateway?: BillingReservationFlushGateway
+  }
+): ServiceContext {
   // 1. Leaf services (no service deps)
   const budgetRuns = new BudgetRunService({
     db: deps.db,
@@ -190,6 +197,13 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     ledgerGateway: ledger,
   })
 
+  const reservationFlushGateway =
+    deps.reservationFlushGateway ??
+    new HttpBillingReservationFlushGateway({
+      baseUrl: env.UNPRICE_API_URL,
+      token: env.UNPRICE_API_KEY,
+    })
+
   const billing = new BillingService({
     db: deps.db,
     logger: deps.logger,
@@ -202,6 +216,7 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     ratingService: rating,
     ledgerService: ledger,
     walletService: wallet,
+    reservationFlushGateway,
   })
 
   const entitlements = new EntitlementService({
@@ -230,10 +245,7 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     ratingService: rating,
     ledgerService: ledger,
     walletService: wallet,
-    reservationFlushGateway: new HttpBillingReservationFlushGateway({
-      baseUrl: env.UNPRICE_API_URL,
-      token: env.UNPRICE_API_KEY,
-    }),
+    reservationFlushGateway,
   })
 
   const budgetOperator = new HttpBudgetOperatorGateway({

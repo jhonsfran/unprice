@@ -12,6 +12,7 @@ import type { Logger } from "@unprice/logs"
 import { type Dinero, dinero, toSnapshot } from "dinero.js"
 import * as dineroCurrencies from "dinero.js/currencies"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { createBillingGatewayStub } from "../test-fixtures/billing-gateway"
 
 import type { BillingService } from "../billing/service"
 import type { CustomerService } from "../customers/service"
@@ -448,22 +449,20 @@ describe("SubscriptionMachine - comprehensive", () => {
             return {
               where: vi.fn(() => ({
                 groupBy: vi.fn(() => ({
-                  having: vi.fn(() => ({
-                    limit: vi.fn(() =>
-                      Promise.resolve([
-                        {
-                          projectId: subscription.projectId,
-                          subscriptionId: subscription.id,
-                          subscriptionPhaseId: subscription.phases[0]!.id,
-                          cycleStartAt: subscription.currentCycleStartAt,
-                          cycleEndAt: subscription.currentCycleEndAt,
-                          invoiceAt: subscription.currentCycleStartAt,
-                          statementKey: "test_statement_key",
-                          subscriptionItem: subscription.phases[0]!.items[0]!,
-                        },
-                      ])
-                    ),
-                  })),
+                  limit: vi.fn(() =>
+                    Promise.resolve([
+                      {
+                        projectId: subscription.projectId,
+                        subscriptionId: subscription.id,
+                        subscriptionPhaseId: subscription.phases[0]!.id,
+                        cycleStartAt: subscription.currentCycleStartAt,
+                        cycleEndAt: subscription.currentCycleEndAt,
+                        invoiceAt: subscription.currentCycleStartAt,
+                        statementKey: "test_statement_key",
+                        subscriptionItem: subscription.phases[0]!.items[0]!,
+                      },
+                    ])
+                  ),
                 })),
               })),
             }
@@ -473,21 +472,19 @@ describe("SubscriptionMachine - comprehensive", () => {
             return {
               where: vi.fn(() => ({
                 groupBy: vi.fn(() => ({
-                  having: vi.fn(() => ({
-                    limit: vi.fn(() =>
-                      Promise.resolve([
-                        {
-                          projectId: subscription.projectId,
-                          subscriptionId: subscription.id,
-                          subscriptionPhaseId: subscription.phases[0]!.id,
-                          cycleStartAt: subscription.currentCycleStartAt,
-                          cycleEndAt: subscription.currentCycleEndAt,
-                          invoiceAt: subscription.currentCycleStartAt,
-                          statementKey: "test_statement_key",
-                        },
-                      ])
-                    ),
-                  })),
+                  limit: vi.fn(() =>
+                    Promise.resolve([
+                      {
+                        projectId: subscription.projectId,
+                        subscriptionId: subscription.id,
+                        subscriptionPhaseId: subscription.phases[0]!.id,
+                        cycleStartAt: subscription.currentCycleStartAt,
+                        cycleEndAt: subscription.currentCycleEndAt,
+                        invoiceAt: subscription.currentCycleStartAt,
+                        statementKey: "test_statement_key",
+                      },
+                    ])
+                  ),
                 })),
               })),
             }
@@ -499,6 +496,8 @@ describe("SubscriptionMachine - comprehensive", () => {
                 Promise.resolve([
                   {
                     id: "ce_123",
+                    effectiveAt: 0,
+                    expiresAt: null,
                   },
                 ])
               ),
@@ -508,9 +507,7 @@ describe("SubscriptionMachine - comprehensive", () => {
           return {
             where: vi.fn(() => ({
               groupBy: vi.fn(() => ({
-                having: vi.fn(() => ({
-                  limit: vi.fn(() => Promise.resolve([])),
-                })),
+                limit: vi.fn(() => Promise.resolve([])),
               })),
             })),
           }
@@ -662,6 +659,7 @@ describe("SubscriptionMachine - comprehensive", () => {
     billingService?: Pick<BillingService, "generateBillingPeriods">
   }) =>
     SubscriptionMachine.create({
+      reservationFlushGateway: createBillingGatewayStub(),
       subscriptionId: input.subscriptionId,
       projectId: input.projectId,
       analytics: mockAnalytics,
@@ -865,9 +863,7 @@ describe("SubscriptionMachine - comprehensive", () => {
             return {
               where: vi.fn(() => ({
                 groupBy: vi.fn(() => ({
-                  having: vi.fn(() => ({
-                    limit: vi.fn(() => Promise.resolve([])),
-                  })),
+                  limit: vi.fn(() => Promise.resolve([])),
                 })),
                 limit: vi.fn(() => Promise.resolve([])),
                 orderBy: vi.fn(() => ({

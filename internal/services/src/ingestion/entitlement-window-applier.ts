@@ -1,5 +1,10 @@
 import type { AnalyticsEntitlementMeterFact } from "@unprice/analytics"
 import type { MeterConfig } from "@unprice/db/validators"
+import type {
+  BillingUsageIdentity,
+  BillingUsageRegistration,
+  BillingUsageSnapshot,
+} from "../billing/usage-snapshot"
 import type { IngestionEntitlement, IngestionGrant } from "./entitlement-context"
 import { getMessageOutcomeKey } from "./fanout-outcomes"
 import type {
@@ -17,7 +22,11 @@ export type EntitlementWindowApplyResult = {
   allowed: boolean
   deniedReason?: Extract<
     IngestionRejectionReason,
-    "LIMIT_EXCEEDED" | "WALLET_EMPTY" | "LATE_EVENT_CLOSED_PERIOD" | "RUN_BUDGET_EXCEEDED"
+    | "LIMIT_EXCEEDED"
+    | "WALLET_EMPTY"
+    | "LATE_EVENT_CLOSED_PERIOD"
+    | "RUN_BUDGET_EXCEEDED"
+    | "INVALID_AGGREGATION_PROPERTIES"
   >
   idempotencyStatus?: IngestionIdempotencyStatus
   meterFacts?: AnalyticsEntitlementMeterFact[]
@@ -116,6 +125,9 @@ export type FlushReservationForInvoicingResult = {
 }
 
 export type EntitlementWindowController = {
+  registerBillingPeriods: (input: BillingUsageRegistration[]) => Promise<BillingUsageSnapshot[]>
+  sealBillingPeriods: (input: BillingUsageIdentity[]) => Promise<BillingUsageSnapshot[]>
+  completeBillingPeriods: (periodIds: string[]) => Promise<void>
   apply: (input: EntitlementWindowApplyInput) => Promise<EntitlementWindowApplyResult>
   applyBatch: (input: {
     customerId: string
@@ -127,7 +139,7 @@ export type EntitlementWindowController = {
   }) => Promise<{ results: EntitlementWindowApplyBatchResult[] }>
   getEnforcementState: (input: EntitlementWindowStateInput) => Promise<EntitlementWindowState>
   getStatus?: () => Promise<EntitlementWindowStatus>
-  flushReservationForInvoicing?: (
+  flushReservationForInvoicing: (
     input: FlushReservationForInvoicingInput
   ) => Promise<FlushReservationForInvoicingResult>
 }

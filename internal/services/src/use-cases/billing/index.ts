@@ -47,9 +47,11 @@ export type { ExplainChargeDeps, ExplainChargeInput, ExplainChargeOutput } from 
 export { renewPeriod } from "./renew-period"
 export { settlePrepaidInvoiceToWallet } from "./settle-invoice"
 export {
-  createNoopBillingReservationFlushGateway,
-  HttpBillingReservationFlushGateway,
-} from "./reservation-flush-gateway"
+  billingUsageOperationSchema,
+  billingUsageOperationOutputSchema,
+  processBillingUsageSnapshots,
+} from "./usage-snapshots"
+export { HttpBillingReservationFlushGateway } from "./reservation-flush-gateway"
 export type { BillingReservationFlushGateway } from "./reservation-flush-gateway"
 export {
   FlushReservationsForInvoicingError,

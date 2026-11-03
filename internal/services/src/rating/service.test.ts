@@ -266,16 +266,23 @@ describe("RatingService", () => {
   })
 
   it("filters usage billing by the grant period key", async () => {
-    const getUsageBillingFeatures = vi.fn().mockResolvedValue(
-      Ok([
+    const getBillingUsageAllocations = vi.fn().mockResolvedValue({
+      data: [
         {
-          featureSlug: "events",
+          customer_entitlement_id: "ce_123",
+          grant_id: "grnt_123",
+          feature_slug: "events",
+          period_key: `month:${Date.UTC(2026, 4, 7, 12, 5, 0)}`,
+          period_start_at: Date.UTC(2026, 4, 7, 12, 5, 0),
           usage: 5,
+          amount: 500_000,
+          currency: "EUR",
+          amount_scale: 8,
         },
-      ])
-    )
+      ],
+    })
     const service = new RatingService({
-      analytics: { getUsageBillingFeatures } as never,
+      analytics: { getBillingUsageAllocations } as never,
       grantsManager: {} as never,
       logger: { warn: vi.fn(), error: vi.fn() } as never,
     })
@@ -376,11 +383,18 @@ describe("RatingService", () => {
     })
 
     expect(result.err).toBeUndefined()
-    expect(getUsageBillingFeatures).toHaveBeenCalledWith(
+    expect(getBillingUsageAllocations).toHaveBeenCalledWith(
       expect.objectContaining({
-        customerEntitlementIds: ["ce_123"],
-        periodKeys: [`month:${effectiveAt}`],
+        customer_entitlement_ids: ["ce_123"],
+        start: periodStart,
+        end: Date.UTC(2026, 5, 7, 0, 0, 0),
       })
     )
+    expect(
+      result.val?.map((charge) => ({
+        usage: charge.usage,
+        amount: toDecimal(charge.price.totalPrice.dinero),
+      }))
+    ).toEqual([{ usage: 5, amount: "0.005" }])
   })
 })

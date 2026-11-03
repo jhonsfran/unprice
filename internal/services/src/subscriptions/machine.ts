@@ -79,7 +79,7 @@ export class SubscriptionMachine {
   private ledgerService: LedgerGateway
   private walletService: WalletService | null
   private billingService: Pick<BillingService, "generateBillingPeriods">
-  private reservationFlushGateway: BillingReservationFlushGateway | undefined
+  private reservationFlushGateway: BillingReservationFlushGateway
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private machine: any
   // Serializes event sends to this actor to avoid concurrent transitions/races.
@@ -111,7 +111,7 @@ export class SubscriptionMachine {
     ratingService: RatingService
     ledgerService: LedgerGateway
     walletService?: WalletService
-    reservationFlushGateway?: BillingReservationFlushGateway
+    reservationFlushGateway: BillingReservationFlushGateway
     billingService: Pick<BillingService, "generateBillingPeriods">
     now: number
     db: Database
@@ -188,7 +188,7 @@ export class SubscriptionMachine {
               repo: SubscriptionRepository
               ratingService: RatingService
               ledgerService: LedgerGateway
-              reservationFlushGateway?: BillingReservationFlushGateway
+              reservationFlushGateway: BillingReservationFlushGateway
             }
           }) => {
             const result = await invoiceSubscription({
@@ -1056,7 +1056,7 @@ export class SubscriptionMachine {
     ratingService: RatingService
     ledgerService: LedgerGateway
     walletService?: WalletService
-    reservationFlushGateway?: BillingReservationFlushGateway
+    reservationFlushGateway: BillingReservationFlushGateway
     billingService: Pick<BillingService, "generateBillingPeriods">
     now: number
     db: Database

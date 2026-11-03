@@ -1,16 +1,36 @@
-import { Err, Ok, type Result } from "@unprice/error"
-import { FetchError } from "@unprice/error"
+import { Err, FetchError, Ok, type Result } from "@unprice/error"
+import type { z } from "zod"
+import {
+  type FlushReservationsForInvoicingInput,
+  type FlushReservationsForInvoicingOutput,
+  flushReservationsForInvoicingInputSchema,
+  flushReservationsForInvoicingOutputSchema,
+} from "./flush-reservations-for-invoicing"
+import {
+  type BillingUsageOperation,
+  billingUsageOperationOutputSchema,
+  billingUsageOperationSchema,
+} from "./usage-snapshots"
 
+const INTERNAL_USAGE_PATH = "/v1/internal/billing-usage/snapshots"
 const INTERNAL_FLUSH_PATH = "/v1/internal/billing-reservations/flush-for-invoicing"
 const DEFAULT_API_BASE_URL = "https://api.unprice.dev"
 
+type RegisterPeriodsInput = Omit<
+  Extract<BillingUsageOperation, { operation: "register" }>,
+  "operation"
+>
+type CompleteForInvoicingInput = Omit<
+  Extract<BillingUsageOperation, { operation: "complete" }>,
+  "operation"
+>
+
 export interface BillingReservationFlushGateway {
-  flushForInvoicing(input: {
-    customerId: string
-    subscriptionId: string
-    subscriptionPhaseId: string
-    statementKey: string
-  }): Promise<Result<void, FetchError>>
+  registerPeriods(input: RegisterPeriodsInput): Promise<Result<void, FetchError>>
+  completeForInvoicing(input: CompleteForInvoicingInput): Promise<Result<void, FetchError>>
+  flushForInvoicing(
+    input: FlushReservationsForInvoicingInput
+  ): Promise<Result<FlushReservationsForInvoicingOutput, FetchError>>
 }
 
 type BillingReservationFlushGatewayFetch = (request: Request) => Promise<Response>
@@ -32,57 +52,73 @@ export class HttpBillingReservationFlushGateway implements BillingReservationFlu
     this.fetch = options.fetch ?? fetch
   }
 
-  async flushForInvoicing(input: {
-    customerId: string
-    subscriptionId: string
-    subscriptionPhaseId: string
-    statementKey: string
-  }): Promise<Result<void, FetchError>> {
-    const request = new Request(buildInternalFlushUrl(this.baseUrl), {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${this.token}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(input),
-    })
+  async flushForInvoicing(
+    input: FlushReservationsForInvoicingInput
+  ): Promise<Result<FlushReservationsForInvoicingOutput, FetchError>> {
+    return this.request(
+      INTERNAL_FLUSH_PATH,
+      input,
+      flushReservationsForInvoicingInputSchema,
+      flushReservationsForInvoicingOutputSchema
+    )
+  }
 
-    let response: Response
+  async registerPeriods(input: RegisterPeriodsInput): Promise<Result<void, FetchError>> {
+    const result = await this.request(
+      INTERNAL_USAGE_PATH,
+      { operation: "register", ...input },
+      billingUsageOperationSchema,
+      billingUsageOperationOutputSchema
+    )
+    return result.err ? Err(result.err) : Ok(undefined)
+  }
+
+  async completeForInvoicing(input: CompleteForInvoicingInput): Promise<Result<void, FetchError>> {
+    const result = await this.request(
+      INTERNAL_USAGE_PATH,
+      { operation: "complete", ...input },
+      billingUsageOperationSchema,
+      billingUsageOperationOutputSchema
+    )
+    return result.err ? Err(result.err) : Ok(undefined)
+  }
+
+  private async request<T>(
+    path: string,
+    input: unknown,
+    inputSchema: z.ZodType<unknown>,
+    outputSchema: z.ZodType<T>
+  ): Promise<Result<T, FetchError>> {
     try {
-      response = await this.fetch(request)
+      const response = await this.fetch(
+        new Request(`${this.baseUrl.replace(/\/+$/, "")}${path}`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${this.token}`, "content-type": "application/json" },
+          body: JSON.stringify(inputSchema.parse(input)),
+        })
+      )
+      if (!response.ok)
+        return Err(
+          new FetchError({
+            message: await readErrorMessage(response),
+            retry: shouldRetryFlushResponse(response.status),
+            context: { url: path, method: "POST", status: response.status },
+          })
+        )
+      const parsed = outputSchema.safeParse(await response.json())
+      if (!parsed.success)
+        return Err(new FetchError({ message: "Invalid internal billing response", retry: true }))
+      return Ok(parsed.data)
     } catch (error) {
       return Err(
         new FetchError({
-          message: error instanceof Error ? error.message : "Failed to flush billing reservations",
+          message: error instanceof Error ? error.message : String(error),
           retry: true,
-          context: {
-            url: INTERNAL_FLUSH_PATH,
-            method: "POST",
-          },
+          context: { url: path, method: "POST" },
         })
       )
     }
-
-    if (!response.ok) {
-      return Err(
-        new FetchError({
-          message: await readErrorMessage(response),
-          retry: shouldRetryFlushResponse(response.status),
-          context: {
-            url: INTERNAL_FLUSH_PATH,
-            method: "POST",
-            status: response.status,
-          },
-        })
-      )
-    }
-
-    return Ok(undefined)
   }
-}
-
-function buildInternalFlushUrl(baseUrl: string): string {
-  return `${baseUrl.replace(/\/+$/, "")}${INTERNAL_FLUSH_PATH}`
 }
 
 function shouldRetryFlushResponse(status: number): boolean {
@@ -115,11 +151,5 @@ async function readErrorMessage(response: Response): Promise<string> {
     return text || fallback
   } catch {
     return fallback
-  }
-}
-
-export function createNoopBillingReservationFlushGateway(): BillingReservationFlushGateway {
-  return {
-    flushForInvoicing: async () => Ok(undefined),
   }
 }

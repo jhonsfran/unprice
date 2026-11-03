@@ -12,6 +12,7 @@ import type { LedgerGateway } from "../ledger"
 import type { Metrics } from "../metrics"
 import { UnPriceRatingError } from "../rating/errors"
 import type { RatingService } from "../rating/service"
+import { createBillingGatewayStub } from "../test-fixtures/billing-gateway"
 import type { WalletService } from "../wallet"
 import { BillingService } from "./service"
 
@@ -24,6 +25,7 @@ describe("BillingService rating delegation", () => {
     } = {}
   ) =>
     new BillingService({
+      reservationFlushGateway: createBillingGatewayStub(),
       db: overrides.db ?? ({} as Database),
       logger: {
         set: vi.fn(),

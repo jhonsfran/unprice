@@ -9,11 +9,6 @@ import { describe, expect, it, vi } from "vitest"
 import { createDeferred } from "../test-fixtures/race"
 import { FLUSH_INTERVAL_MS } from "./constants"
 import type { ApplyInput } from "./contracts"
-import type { WalletReservationSnapshot } from "./contracts"
-import {
-  createApplyInput as createFixtureApplyInput,
-  createGrantSnapshot as createFixtureGrantSnapshot,
-} from "./entitlement-window-test-fixtures"
 import type { EntitlementWindowWalletOps } from "./ports"
 import { InMemoryEntitlementWindowStore } from "./testing/in-memory-store"
 import {
@@ -21,115 +16,20 @@ import {
   createEntitlementWindowStoreContractHostFactory,
   describeEntitlementWindowProcessorContract,
 } from "./testing/processor-contract"
-import { createEntitlementWindowWalletHarness } from "./testing/wallet-harness"
+import {
+  BASE_NOW,
+  createApplyInput,
+  createBatchInput,
+  createGrantSnapshot,
+  createHarness,
+  createWalletHarness,
+  seedWallet,
+} from "./testing/processor-regression-fixtures"
 
 // Characterizes the port boundary: the processor must run against a plain
 // in-memory store (no Durable Object, no SQLite/drizzle) using the real meter
 // engine, real pricing, and real Zod contracts. This is the seam a future
 // Redis-backed store implements.
-
-const BASE_NOW = Date.now()
-
-function createGrantSnapshot(overrides: Record<string, unknown> = {}) {
-  return createFixtureGrantSnapshot({
-    cadenceEffectiveAt: BASE_NOW - 60_000,
-    cadenceExpiresAt: BASE_NOW + 60_000,
-    effectiveAt: BASE_NOW - 60_000,
-    expiresAt: BASE_NOW + 60_000,
-    ...overrides,
-  })
-}
-
-function createApplyInput(overrides: Record<string, unknown> = {}) {
-  const now = typeof overrides.now === "number" ? overrides.now : BASE_NOW
-  const event = (overrides.event as Record<string, unknown> | undefined) ?? {}
-  return createFixtureApplyInput({
-    periodStartAt: now - 60_000,
-    periodEndAt: now + 60_000,
-    ...overrides,
-    event: { timestamp: now, ...event },
-  })
-}
-
-function createHarness(
-  params: Parameters<
-    typeof createEntitlementWindowProcessorHarness<InMemoryEntitlementWindowStore>
-  >[0]
-) {
-  let invalidateEnforcementStateCache = () => {}
-  const store =
-    params.store ?? new InMemoryEntitlementWindowStore(() => invalidateEnforcementStateCache())
-  const harness = createEntitlementWindowProcessorHarness({ ...params, store })
-  invalidateEnforcementStateCache = () => harness.processor.invalidateEnforcementStateCache()
-  return harness
-}
-
-const createWalletHarness = createEntitlementWindowWalletHarness
-
-function seedWallet(
-  store: InMemoryEntitlementWindowStore,
-  overrides: Partial<NonNullable<WalletReservationSnapshot>> = {}
-) {
-  store.walletRow = {
-    projectId: "proj_123",
-    customerId: "cus_123",
-    currency: "USD",
-    reservationEndAt: BASE_NOW + 60_000,
-    billingPeriodId: "bp_123",
-    cycleEndAt: BASE_NOW + 60_000,
-    cycleStartAt: BASE_NOW - 60_000,
-    featurePlanVersionItemId: "item_123",
-    featureSlug: "api_calls",
-    statementKey: "stmt_123",
-    reservationId: "res_seeded",
-    allocationAmount: 1_000_000_000,
-    consumedAmount: 0,
-    flushedAmount: 0,
-    consumedQuantity: 0,
-    flushedQuantity: 0,
-    refillThresholdBps: 2000,
-    refillChunkAmount: 200_000_000,
-    targetReservationAmount: 1_000_000_000,
-    spendEwmaAmount: 0,
-    lastRateSampledAtMs: null,
-    maxEventCostAmount: 0,
-    pendingRefillAmount: 0,
-    pendingFlushAmount: null,
-    pendingFlushQuantity: null,
-    refillInFlight: false,
-    flushSeq: 0,
-    pendingFlushSeq: null,
-    pendingFlushFinal: false,
-    lastEventAt: BASE_NOW,
-    lastFlushedAt: BASE_NOW,
-    deletionRequested: false,
-    recoveryRequired: false,
-    ...overrides,
-  }
-}
-
-function createBatchInput(
-  input: ReturnType<typeof createApplyInput>,
-  amounts: number[],
-  idPrefix = "batch"
-) {
-  return {
-    customerId: input.customerId,
-    entitlement: input.entitlement,
-    enforceLimit: input.enforceLimit,
-    events: amounts.map((amount, index) => ({
-      ...input.event,
-      correlationKey: `${idPrefix}_${index}`,
-      id: `evt_${idPrefix}_${index}`,
-      idempotencyKey: `idem_${idPrefix}_${index}`,
-      now: input.now + index,
-      properties: { amount },
-      timestamp: input.event.timestamp + index,
-    })),
-    grants: input.grants,
-    projectId: input.projectId,
-  }
-}
 
 const VOLUME_FLAT_TIER_PRICE_CONFIG = {
   tierMode: "volume" as const,
@@ -1053,7 +953,7 @@ describe("EntitlementWindowProcessor wallet behavior", () => {
     expect(wallet.extendReservation).not.toHaveBeenCalled()
   })
 
-  it("clamps negative corrections so consumed amount never falls below flushed", async () => {
+  it("rejects corrections that require reversing captured wallet consumption", async () => {
     const wallet = createWalletHarness()
     const store = new InMemoryEntitlementWindowStore()
     const harness = createHarness({ now: BASE_NOW, store, wallet: wallet.provider })
@@ -1067,7 +967,7 @@ describe("EntitlementWindowProcessor wallet behavior", () => {
     )
     await Promise.all(harness.waitUntilPromises)
     store.updateWalletReservation({ flushedAmount: 300_000_000, flushedQuantity: 3 })
-    await harness.processor.apply(
+    const rejected = await harness.processor.apply(
       createApplyInput({
         creditLinePolicy: "capped",
         idempotencyKey: "idem_negative_correction",
@@ -1075,7 +975,15 @@ describe("EntitlementWindowProcessor wallet behavior", () => {
       })
     )
 
-    expect(store.walletRow?.consumedAmount).toBe(300_000_000)
+    expect(rejected).toMatchObject({
+      allowed: false,
+      deniedReason: "INVALID_AGGREGATION_PROPERTIES",
+    })
+    expect([...store.meterStates.values()].map((state) => state.usage)).toEqual([4])
+    expect([...store.grantStates.values()].map((state) => state.consumedInCurrentWindow)).toEqual([
+      4,
+    ])
+    expect(store.walletRow?.consumedAmount).toBe(400_000_000)
     expect(store.walletRow?.consumedAmount).toBeGreaterThanOrEqual(
       store.walletRow?.flushedAmount ?? 0
     )

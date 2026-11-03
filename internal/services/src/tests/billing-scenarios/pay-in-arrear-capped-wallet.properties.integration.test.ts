@@ -1,7 +1,5 @@
-import type { Analytics } from "@unprice/analytics"
 import { sql } from "@unprice/db"
 import type { Customer, Subscription } from "@unprice/db/validators"
-import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { toLedgerMinor } from "@unprice/money"
 import * as fc from "fast-check"
@@ -10,6 +8,9 @@ import type { ServiceContext } from "../../context"
 import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
 import { RatingService } from "../../rating/service"
+import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
+import { billPeriod } from "../../use-cases/billing/bill-period"
+
 import { DrizzleSubscriptionRepository } from "../../subscriptions/repository.drizzle"
 import type { SubscriptionContext } from "../../subscriptions/types"
 import {
@@ -18,7 +19,7 @@ import {
   truncateTestDatabase,
 } from "../../test-fixtures/database"
 import { seedTestDb } from "../../test-fixtures/seed-db"
-import { billPeriod } from "../../use-cases/billing/bill-period"
+
 import { deriveActivationInputsFromPlan } from "../../use-cases/billing/derive-provision-inputs"
 import { activateSubscription } from "../../use-cases/billing/provision-period"
 import { WalletService } from "../../wallet"
@@ -59,24 +60,6 @@ function createLogger(): Logger {
     error: vi.fn(),
     flush: vi.fn(),
   } as unknown as Logger
-}
-
-function createAnalytics(usageByFeature: Record<string, number>): Analytics {
-  return {
-    getUsageBillingFeatures: vi.fn(
-      async ({
-        features,
-      }: {
-        features: Array<{ featureSlug: string }>
-      }) =>
-        Ok(
-          features.map((feature) => ({
-            featureSlug: feature.featureSlug,
-            usage: usageByFeature[feature.featureSlug] ?? 0,
-          }))
-        )
-    ),
-  } as unknown as Analytics
 }
 
 async function loadSubscriptionContext(): Promise<SubscriptionContext> {
@@ -127,7 +110,9 @@ async function runCappedWalletPropertyCase(usage: number) {
   const logger = createLogger()
   const ledger = new LedgerGateway({ db, logger })
   const wallet = new WalletService({ db, logger, ledgerGateway: ledger })
-  const analytics = createAnalytics({ events: usage })
+  const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+    events: { quantity: usage, amount: expectedEventsAmount(usage) },
+  })
   const rating = new RatingService({
     logger,
     analytics,
@@ -222,6 +207,7 @@ async function runCappedWalletPropertyCase(usage: number) {
   })
 
   const firstRun = await billPeriod({
+    reservationFlushGateway,
     context: await loadSubscriptionContext(),
     logger,
     db,
@@ -230,6 +216,7 @@ async function runCappedWalletPropertyCase(usage: number) {
     ledgerService: ledger,
   })
   const secondRun = await billPeriod({
+    reservationFlushGateway,
     context: await loadSubscriptionContext(),
     logger,
     db,
@@ -245,7 +232,6 @@ async function runCappedWalletPropertyCase(usage: number) {
   await expectReservationClosed(reservationId, expectedUsageAmount)
   await expectWalletCredit(remainingCreditLine)
   await expectLedgerSources()
-  expect(analytics.getUsageBillingFeatures).toHaveBeenCalledTimes(0)
 }
 
 describe("P0-B pay_in_arrear capped wallet properties", () => {

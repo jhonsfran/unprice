@@ -1,3 +1,4 @@
+import type { BillingUsageSnapshot } from "@unprice/services/billing"
 import type { GrantConsumptionState } from "@unprice/services/entitlements"
 import type { ReservationCloseReason } from "@unprice/services/wallet"
 import type {
@@ -23,8 +24,8 @@ export type OptimizedBatchWriteMetrics = Pick<
 >
 
 export type OptimizedBatchCommitPayload = {
-  idempotencyEntries: BatchIdempotencyEntry[]
-  meterState: MeterStateDraft
+  events: StagedBatchEvent[]
+  meterStates: Map<string, MeterStateDraft>
   refillTrigger: RefillTrigger | null
   reservationCloseReason: ReservationCloseReason | null
   touchedGrantStates: Map<string, GrantConsumptionState>
@@ -32,9 +33,16 @@ export type OptimizedBatchCommitPayload = {
   walletDirty: boolean
 }
 
+export type StagedBatchEvent = {
+  entry: BatchIdempotencyEntry
+  timestamp: number
+}
+
 export type OptimizedBatchDraft = {
+  billingUsageSnapshots: Map<string, BillingUsageSnapshot>
   grantStates: GrantConsumptionState[]
-  meterState: MeterStateDraft
+  meterStates: Map<string, MeterStateDraft>
+  readMeterState(meterKey: string): MeterStateDraft
   metrics: ApplyBatchMetrics
   results: ApplyBatchResultRow[]
   touchedGrantStates: Map<string, GrantConsumptionState>
@@ -43,21 +51,27 @@ export type OptimizedBatchDraft = {
   refillTrigger: RefillTrigger | null
   reservationCloseReason: ReservationCloseReason | null
   lookupStagedResult(eventId: string): BatchIdempotencyEntry | undefined
-  stageIdempotencyEntry(entry: BatchIdempotencyEntry): void
+  stageEvent(entry: BatchIdempotencyEntry, timestamp: number): void
   hasDurableMutations(): boolean
   toCommitPayload(): OptimizedBatchCommitPayload
 }
 
 export function createOptimizedBatchDraft(params: {
   grantStates: GrantConsumptionState[]
-  meterState: MeterStateDraft
+  meterStates: Map<string, MeterStateDraft>
   wallet: WalletReservationSnapshot
 }): OptimizedBatchDraft {
   const stagedResultsByKey = new Map<string, BatchIdempotencyEntry>()
-  const idempotencyEntries: BatchIdempotencyEntry[] = []
+  const events: StagedBatchEvent[] = []
   const draft: OptimizedBatchDraft = {
+    billingUsageSnapshots: new Map(),
     grantStates: params.grantStates.map((state) => ({ ...state })),
-    meterState: { ...params.meterState },
+    meterStates: new Map([...params.meterStates].map(([key, state]) => [key, { ...state }])),
+    readMeterState(meterKey) {
+      const state = draft.meterStates.get(meterKey)
+      if (!state) throw new Error(`Missing staged meter state for ${meterKey}`)
+      return state
+    },
     metrics: createApplyBatchMetrics(),
     results: [],
     touchedGrantStates: new Map<string, GrantConsumptionState>(),
@@ -68,26 +82,37 @@ export function createOptimizedBatchDraft(params: {
     lookupStagedResult(eventId) {
       return stagedResultsByKey.get(eventId)
     },
-    stageIdempotencyEntry(entry) {
-      idempotencyEntries.push(entry)
+    stageEvent(entry, timestamp) {
+      events.push({ entry, timestamp })
       stagedResultsByKey.set(entry.eventId, entry)
     },
     hasDurableMutations() {
       return (
-        idempotencyEntries.length > 0 ||
-        draft.meterState.dirty ||
+        events.length > 0 ||
+        [...draft.meterStates.values()].some((state) => state.dirty) ||
         draft.touchedGrantStates.size > 0 ||
         draft.walletDirty
       )
     },
     toCommitPayload() {
       return {
-        idempotencyEntries,
-        meterState: draft.meterState,
+        events,
+        meterStates: draft.meterStates,
         refillTrigger: draft.refillTrigger,
         reservationCloseReason: draft.reservationCloseReason,
         touchedGrantStates: draft.touchedGrantStates,
-        wallet: draft.wallet,
+        wallet:
+          draft.wallet && draft.refillTrigger
+            ? {
+                ...draft.wallet,
+                pendingFlushSeq: draft.refillTrigger.flushSeq,
+                pendingFlushAmount: draft.refillTrigger.flushAmount,
+                pendingFlushQuantity: draft.refillTrigger.flushQuantity,
+                pendingFlushFinal: false,
+                pendingRefillAmount: draft.refillTrigger.refillAmount,
+                refillInFlight: true,
+              }
+            : draft.wallet,
         walletDirty: draft.walletDirty,
       }
     },

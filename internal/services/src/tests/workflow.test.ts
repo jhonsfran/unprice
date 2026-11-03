@@ -58,6 +58,7 @@ describe("Workflow - Billing and Subscriptions", () => {
 
   const mockPlanVersion = {
     id: "pv_123",
+    currency: "USD",
     status: "published",
     active: true,
     paymentMethodRequired: false,
@@ -198,6 +199,15 @@ describe("Workflow - Billing and Subscriptions", () => {
           findFirst: vi.fn().mockResolvedValue(null),
           findMany: vi.fn().mockResolvedValue([]),
         },
+        customerEntitlements: {
+          findMany: vi.fn().mockResolvedValue([
+            {
+              id: "workflow_owner",
+              effectiveAt: initialNow,
+              expiresAt: null,
+            },
+          ]),
+        },
         grants: {
           findFirst: vi.fn().mockResolvedValue(null),
           findMany: vi.fn().mockImplementation(() => {
@@ -270,6 +280,11 @@ describe("Workflow - Billing and Subscriptions", () => {
     } as unknown as Database
 
     const serviceDeps = {
+      reservationFlushGateway: {
+        registerPeriods: vi.fn().mockResolvedValue(Ok(undefined)),
+        flushForInvoicing: vi.fn().mockResolvedValue(Ok({ flushed: 0, skipped: 0, snapshots: [] })),
+        completeForInvoicing: vi.fn().mockResolvedValue(Ok(undefined)),
+      },
       db: mockDb,
       logger: mockLogger,
       analytics: mockAnalytics,
@@ -427,7 +442,7 @@ describe("Workflow - Billing and Subscriptions", () => {
       whenToBill: "pay_in_advance",
       paymentProvider: "sandbox",
       collectionMethod: "charge_automatically",
-      currency: "usd",
+      currency: "USD",
       billingConfig: {
         ...mockPlanVersion.billingConfig,
         billingInterval: "month",
@@ -570,7 +585,8 @@ describe("Workflow - Billing and Subscriptions", () => {
         (value): value is Record<string, unknown> =>
           typeof value === "object" &&
           value !== null &&
-          String((value as { id?: unknown }).id ?? "").startsWith("billing_period_")
+          "cycleStartAt" in value &&
+          "statementKey" in value
       )
 
     expect(billingPeriodInsert).toBeDefined()
@@ -697,7 +713,7 @@ describe("Workflow - Billing and Subscriptions", () => {
         whenToBill,
         paymentProvider: "sandbox",
         collectionMethod: "charge_automatically",
-        currency: "usd",
+        currency: "USD",
       } as unknown as PlanVersion
 
       vi.spyOn(mockDb.query.versions, "findFirst").mockResolvedValue(planVersion)
@@ -723,6 +739,7 @@ describe("Workflow - Billing and Subscriptions", () => {
               id: "item_when_to_bill",
               featurePlanVersion: {
                 featureType,
+                feature: { slug: featureSlug },
                 unitOfMeasure: "units",
                 billingConfig: {
                   name: "standard",
@@ -756,7 +773,8 @@ describe("Workflow - Billing and Subscriptions", () => {
           (value): value is Record<string, unknown> =>
             typeof value === "object" &&
             value !== null &&
-            String((value as { id?: unknown }).id ?? "").startsWith("billing_period_")
+            "cycleStartAt" in value &&
+            "statementKey" in value
         )
 
       expect(billingPeriodInsert).toBeDefined()

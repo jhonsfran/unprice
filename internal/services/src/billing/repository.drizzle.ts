@@ -1,4 +1,4 @@
-import { type Database, and, eq, inArray, lte, sql } from "@unprice/db"
+import { type Database, aliasedTable, and, eq, inArray, lte, sql } from "@unprice/db"
 import { billingPeriods, invoices } from "@unprice/db/schema"
 import type { InvoiceStatus } from "@unprice/db/validators"
 import type { BillingPeriod, SubscriptionInvoice } from "@unprice/db/validators"
@@ -23,9 +23,29 @@ import type {
   UpdateInvoiceInput,
   VoidPendingPeriodsInput,
 } from "./repository"
-import { billingStrategyFor } from "./strategy"
 
 type DbExecutor = Database | Parameters<Parameters<Database["transaction"]>[0]>[0]
+
+export function billingStatementReadyForInvoicing({
+  now,
+  lateEventGraceMs = 0,
+}: Pick<ListPendingPeriodGroupsInput, "now" | "lateEventGraceMs">) {
+  const pending = aliasedTable(billingPeriods, "pending_statement_period")
+  return sql<boolean>`NOT EXISTS (
+    SELECT 1 FROM ${billingPeriods} AS ${pending}
+    WHERE ${pending.projectId} = ${billingPeriods.projectId}
+      AND ${pending.subscriptionId} = ${billingPeriods.subscriptionId}
+      AND ${pending.statementKey} = ${billingPeriods.statementKey}
+      AND ${pending.status} = 'pending'
+      AND (
+        ${pending.invoiceAt} > ${now}
+        OR (
+          ${pending.invoiceAt} >= ${pending.cycleEndAt}
+          AND ${pending.cycleEndAt} > ${now - lateEventGraceMs}
+        )
+      )
+  )`
+}
 
 export class DrizzleBillingRepository implements BillingRepository {
   constructor(private readonly db: DbExecutor) {}
@@ -37,8 +57,6 @@ export class DrizzleBillingRepository implements BillingRepository {
   }
 
   async listPendingPeriodGroups(input: ListPendingPeriodGroupsInput): Promise<PeriodGroupRow[]> {
-    const arrearsReadyAt = input.now - (input.lateEventGraceMs ?? 0)
-
     return this.db
       .select({
         projectId: billingPeriods.projectId,
@@ -53,7 +71,8 @@ export class DrizzleBillingRepository implements BillingRepository {
           eq(billingPeriods.status, "pending"),
           lte(billingPeriods.invoiceAt, input.now),
           eq(billingPeriods.projectId, input.projectId),
-          eq(billingPeriods.subscriptionId, input.subscriptionId)
+          eq(billingPeriods.subscriptionId, input.subscriptionId),
+          billingStatementReadyForInvoicing(input)
         )
       )
       .groupBy(
@@ -62,9 +81,6 @@ export class DrizzleBillingRepository implements BillingRepository {
         billingPeriods.subscriptionPhaseId,
         billingPeriods.statementKey,
         billingPeriods.invoiceAt
-      )
-      .having(
-        sql`bool_and(${billingPeriods.whenToBill} <> 'pay_in_arrear' OR ${billingPeriods.cycleEndAt} <= ${arrearsReadyAt})`
       )
       .limit(input.limit ?? 500)
   }
@@ -128,18 +144,13 @@ export class DrizzleBillingRepository implements BillingRepository {
   }
 
   async capPendingPeriodsAtPhaseEnd(input: CapPendingPeriodsAtPhaseEndInput): Promise<void> {
-    // Periods billed at period_end need their `invoiceAt` capped so they
-    // don't fire after the phase has been shortened. Period-start invoicing
-    // already fired at cycle start, so leave it alone.
-    const capStrategy = billingStrategyFor(input.whenToBill)
     await this.db
       .update(billingPeriods)
       .set({
         cycleEndAt: sql`LEAST(${billingPeriods.cycleEndAt}, ${input.phaseEndAt})`,
-        invoiceAt:
-          capStrategy.billPhaseTrigger === "period_end"
-            ? sql`LEAST(${billingPeriods.invoiceAt}, ${input.phaseEndAt})`
-            : billingPeriods.invoiceAt,
+        invoiceAt: sql`CASE WHEN ${billingPeriods.invoiceAt} >= ${billingPeriods.cycleEndAt}
+          THEN LEAST(${billingPeriods.invoiceAt}, ${input.phaseEndAt})
+          ELSE ${billingPeriods.invoiceAt} END`,
       })
       .where(
         and(

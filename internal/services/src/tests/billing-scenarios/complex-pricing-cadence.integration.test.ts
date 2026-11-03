@@ -8,6 +8,7 @@ import {
   invoices,
   planVersionFeatures,
   subscriptionItems,
+  subscriptionPhases,
   versions,
 } from "@unprice/db/schema"
 import type {
@@ -17,7 +18,6 @@ import type {
   ResetConfig,
   Subscription,
 } from "@unprice/db/validators"
-import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { toLedgerMinor } from "@unprice/money"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
@@ -26,6 +26,9 @@ import { LATE_EVENT_GRACE_MS } from "../../entitlements"
 import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
 import { RatingService } from "../../rating/service"
+import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
+import { billPeriod } from "../../use-cases/billing/bill-period"
+
 import { DrizzleSubscriptionRepository } from "../../subscriptions/repository.drizzle"
 import type { SubscriptionContext } from "../../subscriptions/types"
 import {
@@ -34,7 +37,6 @@ import {
   truncateTestDatabase,
 } from "../../test-fixtures/database"
 import { seedTestDb } from "../../test-fixtures/seed-db"
-import { billPeriod } from "../../use-cases/billing/bill-period"
 
 const db = createTestDatabaseConnection()
 
@@ -86,24 +88,6 @@ function createLogger(): Logger {
     error: vi.fn(),
     flush: vi.fn(),
   } as unknown as Logger
-}
-
-function createAnalytics(usageByFeature: Record<string, number>): Analytics {
-  return {
-    getUsageBillingFeatures: vi.fn(
-      async ({
-        features,
-      }: {
-        features: Array<{ featureSlug: string }>
-      }) =>
-        Ok(
-          features.map((feature) => ({
-            featureSlug: feature.featureSlug,
-            usage: usageByFeature[feature.featureSlug] ?? 0,
-          }))
-        )
-    ),
-  } as unknown as Analytics
 }
 
 function billingConfig(
@@ -936,9 +920,11 @@ async function addAdvanceFixedWithPriorArrearUsageConfiguration() {
 
 async function runBilling({
   analytics,
+  reservationFlushGateway,
   now = billableNow,
 }: {
   analytics: Analytics
+  reservationFlushGateway: ReturnType<typeof createRecordedUsageFixture>["reservationFlushGateway"]
   now?: number
 }) {
   const logger = createLogger()
@@ -947,6 +933,7 @@ async function runBilling({
   expect(ensureAccounts.err).toBeUndefined()
 
   const result = await billPeriod({
+    reservationFlushGateway,
     context: await loadSubscriptionContext(now),
     logger,
     db,
@@ -1025,13 +1012,13 @@ describe("DB-backed complex pricing and mixed meter cadence billing", () => {
   it("bills a plan mixing every price mode while usage meters use different billing/reset cadences", async () => {
     await addComplexPricingConfiguration()
 
-    const analytics = createAnalytics({
-      events: 120,
-      jobs: 51,
-      tokens: 40,
+    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+      events: { quantity: 120, amount: 112_000_000 },
+      jobs: { quantity: 51, amount: 1_200_000_000 },
+      tokens: { quantity: 40, amount: 1_000_000_000 },
     })
 
-    const { result, ledger } = await runBilling({ analytics })
+    const { result, ledger } = await runBilling({ analytics, reservationFlushGateway })
 
     expect(result.phasesProcessed).toBe(3)
     expect(await listInvoices()).toEqual(
@@ -1078,57 +1065,19 @@ describe("DB-backed complex pricing and mixed meter cadence billing", () => {
     expect(lineAmountsByStatement.get(dailyStatementKey)).toEqual([1_000_000_000])
     expect(lineAmountsByStatement.get(weeklyStatementKey)).toEqual([1_200_000_000])
     expect(await countInvoicedPeriods()).toBe(6)
-
-    const usageCalls = vi.mocked(analytics.getUsageBillingFeatures).mock.calls.map(([input]) => {
-      const typed = input as {
-        endAt: number
-        features: Array<{ featureSlug: string }>
-        periodKeys?: string[]
-        startAt: number
-      }
-
-      return {
-        endAt: typed.endAt,
-        featureSlug: typed.features[0]?.featureSlug,
-        periodKeys: typed.periodKeys ?? [],
-        startAt: typed.startAt,
-      }
-    })
-
-    expect(usageCalls).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          endAt: feb1,
-          featureSlug: "events",
-          startAt: jan1,
-          periodKeys: expect.arrayContaining([expect.stringMatching(/^month:/)]),
-        }),
-        expect.objectContaining({
-          endAt: jan2,
-          featureSlug: "tokens",
-          startAt: jan1,
-          periodKeys: expect.arrayContaining([expect.stringMatching(/^day:/)]),
-        }),
-        expect.objectContaining({
-          endAt: jan8,
-          featureSlug: "jobs",
-          startAt: jan1,
-          periodKeys: expect.arrayContaining([expect.stringMatching(/^week:/)]),
-        }),
-      ])
-    )
   })
 
   it("co-bills annual, monthly, daily, and hourly periods into one invoice when they share the same statement end", async () => {
     await addCoBilledCadenceConfiguration()
 
-    const analytics = createAnalytics({
-      "daily-units": 30,
-      "hourly-jobs": 23,
+    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+      "daily-units": { quantity: 30, amount: 300_000_000 },
+      "hourly-jobs": { quantity: 23, amount: 150_000_000 },
     })
 
     const { result, ledger } = await runBilling({
       analytics,
+      reservationFlushGateway,
       now: coBilledNow,
     })
 
@@ -1180,51 +1129,19 @@ describe("DB-backed complex pricing and mixed meter cadence billing", () => {
       },
     ])
     expect(await countInvoicedPeriods()).toBe(4)
-
-    const usageCalls = vi.mocked(analytics.getUsageBillingFeatures).mock.calls.map(([input]) => {
-      const typed = input as {
-        endAt: number
-        features: Array<{ featureSlug: string }>
-        periodKeys?: string[]
-        startAt: number
-      }
-
-      return {
-        endAt: typed.endAt,
-        featureSlug: typed.features[0]?.featureSlug,
-        periodKeys: typed.periodKeys ?? [],
-        startAt: typed.startAt,
-      }
-    })
-
-    expect(usageCalls).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          endAt: jan1_2027,
-          featureSlug: "daily-units",
-          periodKeys: expect.arrayContaining([expect.stringMatching(/^day:/)]),
-          startAt: dec31,
-        }),
-        expect.objectContaining({
-          endAt: jan1_2027,
-          featureSlug: "hourly-jobs",
-          periodKeys: expect.arrayContaining([expect.stringMatching(/^minute:/)]),
-          startAt: dec31HourBeforeMidnight,
-        }),
-      ])
-    )
   })
 
   it("keeps a mixed-cadence co-billed statement idempotent across reruns", async () => {
     await addCoBilledCadenceConfiguration()
 
-    const analytics = createAnalytics({
-      "daily-units": 30,
-      "hourly-jobs": 23,
+    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+      "daily-units": { quantity: 30, amount: 300_000_000 },
+      "hourly-jobs": { quantity: 23, amount: 150_000_000 },
     })
 
     const firstRun = await runBilling({
       analytics,
+      reservationFlushGateway,
       now: coBilledNow,
     })
     expect(firstRun.result.phasesProcessed).toBe(1)
@@ -1239,6 +1156,7 @@ describe("DB-backed complex pricing and mixed meter cadence billing", () => {
 
     const secondRun = await runBilling({
       analytics,
+      reservationFlushGateway,
       now: coBilledNow,
     })
 
@@ -1266,13 +1184,14 @@ describe("DB-backed complex pricing and mixed meter cadence billing", () => {
         )
       )
 
-    const analytics = createAnalytics({
-      "daily-units": 30,
-      "hourly-jobs": 23,
+    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+      "daily-units": { quantity: 30, amount: 300_000_000 },
+      "hourly-jobs": { quantity: 23, amount: 150_000_000 },
     })
 
     const { result, ledger } = await runBilling({
       analytics,
+      reservationFlushGateway,
       now: coBilledNow,
     })
 
@@ -1358,15 +1277,142 @@ describe("DB-backed complex pricing and mixed meter cadence billing", () => {
     ])
   })
 
+  it("holds advance-plan usage and co-billed fixed charges until usage clears late-event grace", async () => {
+    await addAdvanceFixedWithPriorArrearUsageConfiguration()
+    await db
+      .update(billingPeriods)
+      .set({ whenToBill: "pay_in_advance" })
+      .where(
+        and(
+          eq(billingPeriods.projectId, projectId),
+          eq(billingPeriods.subscriptionId, subscriptionId)
+        )
+      )
+    const repo = new DrizzleBillingRepository(db)
+    const atEnd = await repo.listPendingPeriodGroups({
+      projectId,
+      subscriptionId,
+      lateEventGraceMs: LATE_EVENT_GRACE_MS,
+      now: feb1,
+    })
+    const beforeGraceEnd = await repo.listPendingPeriodGroups({
+      projectId,
+      subscriptionId,
+      lateEventGraceMs: LATE_EVENT_GRACE_MS,
+      now: feb1 + LATE_EVENT_GRACE_MS - 1,
+    })
+    const atGraceEnd = await repo.listPendingPeriodGroups({
+      projectId,
+      subscriptionId,
+      lateEventGraceMs: LATE_EVENT_GRACE_MS,
+      now: feb1 + LATE_EVENT_GRACE_MS,
+    })
+    expect({ atEnd, beforeGraceEnd, atGraceEnd }).toEqual({
+      atEnd: [],
+      beforeGraceEnd: [],
+      atGraceEnd: [
+        {
+          projectId: "proj_test",
+          subscriptionId: "sub_test_monthly_arrear",
+          subscriptionPhaseId: "phase_test_monthly_arrear",
+          statementKey: "stmt_complex_advance_fixed_with_prior_arrear_usage",
+          invoiceAt: 1769904000000,
+        },
+      ],
+    })
+  })
+
+  it("holds every phase sharing a statement until its usage clears late-event grace", async () => {
+    await addAdvanceFixedWithPriorArrearUsageConfiguration()
+    const nextPhaseId = "phase_test_advance_next"
+    const nextItemId = "item_test_advance_next_access"
+    const phase = await db.query.subscriptionPhases.findFirst({
+      where: (table, { and, eq }) => and(eq(table.projectId, projectId), eq(table.id, phaseId)),
+    })
+    const item = await db.query.subscriptionItems.findFirst({
+      where: (table, { and, eq }) =>
+        and(eq(table.projectId, projectId), eq(table.id, "item_test_arrear_access")),
+    })
+    if (!phase || !item) throw new Error("Missing seeded subscription phase or item")
+    await db
+      .update(subscriptionPhases)
+      .set({ endAt: feb1 })
+      .where(eq(subscriptionPhases.id, phaseId))
+    await db
+      .insert(subscriptionPhases)
+      .values({ ...phase, id: nextPhaseId, startAt: feb1, endAt: null })
+    await db
+      .insert(subscriptionItems)
+      .values({ ...item, id: nextItemId, subscriptionPhaseId: nextPhaseId })
+    await db
+      .update(billingPeriods)
+      .set({
+        subscriptionPhaseId: nextPhaseId,
+        subscriptionItemId: nextItemId,
+      })
+      .where(eq(billingPeriods.id, "bp_test_advance_access_feb"))
+    const repository = new DrizzleBillingRepository(db)
+    const read = (now: number) =>
+      repository.listPendingPeriodGroups({
+        projectId,
+        subscriptionId,
+        now,
+        lateEventGraceMs: LATE_EVENT_GRACE_MS,
+      })
+    expect(await read(feb1)).toEqual([])
+    expect(await read(feb1 + LATE_EVENT_GRACE_MS - 1)).toEqual([])
+    expect(
+      (await read(feb1 + LATE_EVENT_GRACE_MS))
+        .map((group) => ({
+          phaseId: group.subscriptionPhaseId,
+          statementKey: group.statementKey,
+          invoiceAt: group.invoiceAt,
+        }))
+        .sort((left, right) => left.phaseId.localeCompare(right.phaseId))
+    ).toEqual([
+      { phaseId: nextPhaseId, statementKey: advanceWithPriorUsageStatementKey, invoiceAt: feb1 },
+      { phaseId, statementKey: advanceWithPriorUsageStatementKey, invoiceAt: feb1 },
+    ])
+  })
+
+  it("caps advance usage at the shortened phase end while preserving fixed period-start invoicing", async () => {
+    await addAdvanceFixedWithPriorArrearUsageConfiguration()
+    await db
+      .update(billingPeriods)
+      .set({ whenToBill: "pay_in_advance" })
+      .where(
+        and(
+          eq(billingPeriods.projectId, projectId),
+          eq(billingPeriods.subscriptionId, subscriptionId)
+        )
+      )
+    await db
+      .update(billingPeriods)
+      .set({ cycleStartAt: jan1, cycleEndAt: feb1, invoiceAt: jan1 })
+      .where(eq(billingPeriods.id, "bp_test_advance_access_feb"))
+    await new DrizzleBillingRepository(db).capPendingPeriodsAtPhaseEnd({
+      phaseId,
+      phaseEndAt: 1768435200000,
+    })
+    const periods = await listPeriods()
+    expect(periods.map(({ id, cycleEndAt, invoiceAt }) => ({ id, cycleEndAt, invoiceAt }))).toEqual(
+      [
+        { id: "bp_adv_prior_events_jan", cycleEndAt: 1768435200000, invoiceAt: 1768435200000 },
+        { id: "bp_test_advance_access_feb", cycleEndAt: 1768435200000, invoiceAt: 1767225600000 },
+      ]
+    )
+  })
+
   it("co-bills pay-in-advance fixed charges with prior arrears usage on the same statement", async () => {
     await addAdvanceFixedWithPriorArrearUsageConfiguration()
 
-    const analytics = createAnalytics({
-      events: 120,
+    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+      events: { quantity: 120, amount: 112_000_000 },
     })
 
     const { result, ledger } = await runBilling({
       analytics,
+      reservationFlushGateway,
       now: feb1 + LATE_EVENT_GRACE_MS,
     })
 
@@ -1417,7 +1463,6 @@ describe("DB-backed complex pricing and mixed meter cadence billing", () => {
     await new DrizzleBillingRepository(db).capPendingPeriodsAtPhaseEnd({
       phaseId,
       phaseEndAt,
-      whenToBill: "pay_in_arrear",
     })
 
     expect(await listPeriods()).toEqual([

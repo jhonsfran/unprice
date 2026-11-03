@@ -1,39 +1,24 @@
 import { type Database, and, asc, eq, sql } from "@unprice/db"
 import { billingPeriods, customerEntitlements } from "@unprice/db/schema"
-import { type Dinero, isZero, newId, toSnapshot } from "@unprice/db/utils"
+import { isZero, newId, toSnapshot } from "@unprice/db/utils"
 import { calculateDateAt } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logs"
-import { add, fromLedgerMinor, toLedgerMinor } from "@unprice/money"
+import { fromLedgerMinor, toLedgerMinor } from "@unprice/money"
 import { toZonedTime } from "date-fns-tz"
 import { format } from "date-fns/format"
 import { isNegative } from "dinero.js"
 import { summarizeInvoiceSettlementAmounts } from "../../billing/invoice-settlement"
 import { DrizzleBillingRepository } from "../../billing/repository.drizzle"
 import { billingStrategyForInterval } from "../../billing/strategy"
+import { ownsBillingUsagePeriod } from "../../billing/usage-snapshot"
 import { LATE_EVENT_GRACE_MS } from "../../entitlements"
 import { type InvoiceLine, type LedgerGateway, customerAccountKeys } from "../../ledger"
 import type { RatingService } from "../../rating/service"
 import type { SubscriptionRepository } from "../../subscriptions/repository"
 import type { SubscriptionContext } from "../../subscriptions/types"
+import { resolvePeriodCharge } from "./period-charge"
 import type { BillingReservationFlushGateway } from "./reservation-flush-gateway"
 
-/**
- * BILL phase. Materializes pending billing periods into ledger entries +
- * invoice rows for one subscription. Called from the XState `invoicing`
- * state actor; safe to run repeatedly (idempotent on the period →
- * statement_key → invoice projection).
- *
- * Sequence per pending period group:
- *   1. Rate each pending period (RatingService).
- *   2. Post `customer.receivable → customer.consumed` ledger transfers
- *      tagged with the statement_key.
- *   3. Aggregate posted entries into a single invoice row stamped with
- *      settlement totals and the statement window.
- *   4. Mark the periods as `invoiced`.
- *
- * Skipped for wallet-only subscriptions — the machine guard routes RENEW
- * straight to `activating` without going through `invoicing`.
- */
 export async function billPeriod({
   context,
   logger,
@@ -49,7 +34,7 @@ export async function billPeriod({
   repo: SubscriptionRepository
   ratingService: RatingService
   ledgerService: LedgerGateway
-  reservationFlushGateway?: BillingReservationFlushGateway
+  reservationFlushGateway: BillingReservationFlushGateway
 }): Promise<
   Partial<SubscriptionContext> & {
     phasesProcessed: number
@@ -57,6 +42,15 @@ export async function billPeriod({
 > {
   const { subscription, now } = context
   const billingRepo = new DrizzleBillingRepository(db)
+  const completeUsage = async () => {
+    const completed = await reservationFlushGateway.completeForInvoicing({
+      projectId: subscription.projectId,
+      customerId: context.customer.id,
+      subscriptionId: subscription.id,
+    })
+    if (completed.err) throw completed.err
+  }
+  await completeUsage()
 
   const periodItemsGroups = await billingRepo.listPendingPeriodGroups({
     lateEventGraceMs: LATE_EVENT_GRACE_MS,
@@ -131,24 +125,23 @@ export async function billPeriod({
 
     // Flush wallet reservation usage into the ledger before invoicing.
     // This ensures the invoice reflects all consumed usage up to this moment.
-    if (reservationFlushGateway) {
-      const flush = await reservationFlushGateway.flushForInvoicing({
-        customerId: phase.subscription.customerId,
+    const flush = await reservationFlushGateway.flushForInvoicing({
+      projectId: phase.projectId,
+      customerId: phase.subscription.customerId,
+      subscriptionId: periodItemGroup.subscriptionId,
+      subscriptionPhaseId: periodItemGroup.subscriptionPhaseId,
+      statementKey: periodItemGroup.statementKey,
+    })
+    if (flush.err) {
+      logger.warn("Blocking invoicing until wallet reservation usage flushes", {
+        projectId: periodItemGroup.projectId,
         subscriptionId: periodItemGroup.subscriptionId,
-        subscriptionPhaseId: periodItemGroup.subscriptionPhaseId,
         statementKey: periodItemGroup.statementKey,
+        error: flush.err.message,
       })
-
-      if (flush.err) {
-        logger.warn("Blocking invoicing until wallet reservation usage flushes", {
-          projectId: periodItemGroup.projectId,
-          subscriptionId: periodItemGroup.subscriptionId,
-          statementKey: periodItemGroup.statementKey,
-          error: flush.err.message,
-        })
-        throw flush.err
-      }
+      throw flush.err
     }
+    const usageSnapshots = flush.val.snapshots
 
     // Serialize concurrent re-runs for the same statement and wrap the entire
     // BILL flow (rate → ledger transfers → invoice upsert → mark periods
@@ -184,13 +177,12 @@ export async function billPeriod({
       //    double-post.
       for (const period of billingPeriodsToInvoice) {
         const feature = period.subscriptionItem.featurePlanVersion.feature
-        const nonUsageQuantity = period.subscriptionItem.units ?? 0
-        const usageData =
-          period.subscriptionItem.featurePlanVersion.featureType === "usage"
-            ? undefined
-            : [{ featureSlug: feature.slug, usage: nonUsageQuantity }]
         const entitlementRows = await tx
-          .select({ id: customerEntitlements.id })
+          .select({
+            id: customerEntitlements.id,
+            effectiveAt: customerEntitlements.effectiveAt,
+            expiresAt: customerEntitlements.expiresAt,
+          })
           .from(customerEntitlements)
           .where(
             and(
@@ -201,7 +193,9 @@ export async function billPeriod({
               eq(customerEntitlements.subscriptionItemId, period.subscriptionItemId)
             )
           )
-        const customerEntitlementIds = entitlementRows.map((row) => row.id)
+        const customerEntitlementIds = entitlementRows
+          .filter((row) => ownsBillingUsagePeriod(row, period))
+          .map((row) => row.id)
 
         if (customerEntitlementIds.length === 0) {
           throw new Error(
@@ -228,68 +222,31 @@ export async function billPeriod({
           throw walletSettlementForItem.err
         }
 
-        const existingWalletCapturesForItem = walletSettlementForItem.val.filter((line) => {
-          const metadata = line.metadata ?? {}
-          return (
-            metadata.billing_period_id === period.id &&
-            metadata.feature_plan_version_item_id === featurePlanVersionItemId &&
-            metadata.flow === "capture"
-          )
-        })
-
-        if (existingWalletCapturesForItem.length > 0) {
-          continue
-        }
-
-        const ratingResult = await ratingService.rateBillingPeriod({
-          projectId: period.projectId,
-          customerId: period.customerId,
+        const chargeResult = await resolvePeriodCharge({
+          period,
+          currency: phase.planVersion.currency,
+          creditLinePolicy: phase.creditLinePolicy,
           customerEntitlementIds,
-          featureSlug: feature.slug,
-          startAt: period.cycleStartAt,
-          endAt: period.cycleEndAt,
-          usageData,
+          snapshots: usageSnapshots,
+          statementLines: walletSettlementForItem.val,
+          ratingService,
         })
-
-        if (ratingResult.err) {
-          logger.error(ratingResult.err, {
+        if (chargeResult.err) {
+          logger.error(chargeResult.err, {
             billingPeriodId: period.id,
             phaseId: phase.id,
             statementKey: period.statementKey,
             context: "Error while rating billing period before ledger posting",
           })
-          throw ratingResult.err
+          throw chargeResult.err
         }
-
-        const ratedCharges = ratingResult.val
-        const firstCharge = ratedCharges[0]
-
-        const grossChargeAmount = ratedCharges.reduce<Dinero<number> | null>((sum, charge) => {
-          if (sum === null) return charge.price.totalPrice.dinero
-          return add(sum, charge.price.totalPrice.dinero)
-        }, null)
-
-        const unitAmount = firstCharge ? firstCharge.price.unitPrice.dinero : null
-        const ratedQuantity = ratedCharges.reduce(
-          (sum, charge) => sum + Math.max(0, charge.usage),
-          0
-        )
-        const quantity = ratedCharges.length > 0 ? Math.trunc(ratedQuantity) : nonUsageQuantity
-        const rawProrationFactor = firstCharge?.prorate
-        const prorationFactor =
-          period.type === "trial"
-            ? 0
-            : typeof rawProrationFactor === "number" && Number.isFinite(rawProrationFactor)
-              ? rawProrationFactor
-              : 1
+        const charge = chargeResult.val
+        if (!charge) continue
+        const { grossChargeAmount, unitAmount, quantity, prorationFactor, collectableAmount } =
+          charge
         const sourceType = "subscription_billing_period_charge_v1"
         const sourceId = `${period.id}:${period.subscriptionItemId}`
-        const kind =
-          period.type === "trial"
-            ? "trial"
-            : period.subscriptionItem.featurePlanVersion.featureType === "usage"
-              ? "usage"
-              : "subscription"
+        const kind = period.type === "trial" ? "trial" : charge.kind
         const entryMetadata = {
           subscription_id: period.subscriptionId,
           subscription_phase_id: period.subscriptionPhaseId,
@@ -322,21 +279,6 @@ export async function billPeriod({
           })
           continue
         }
-
-        const paidOrIncludedForItem = walletSettlementForItem.val.filter((line) => {
-          const metadata = line.metadata ?? {}
-          return (
-            metadata.billing_period_id === period.id &&
-            metadata.feature_plan_version_item_id === featurePlanVersionItemId &&
-            (metadata.settlement_status === "paid" || metadata.settlement_status === "included")
-          )
-        })
-
-        const coveredAmount = paidOrIncludedForItem.reduce(
-          (sum, line) => sum + toLedgerMinor(line.amount),
-          0
-        )
-        const collectableAmount = Math.max(0, toLedgerMinor(grossChargeAmount) - coveredAmount)
 
         if (collectableAmount <= 0) {
           continue
@@ -532,6 +474,7 @@ export async function billPeriod({
         })
       }
     })
+    await completeUsage()
   }
 
   return {

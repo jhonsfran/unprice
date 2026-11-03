@@ -11,13 +11,16 @@ import {
   getAnchor,
   type grantSchemaExtended,
 } from "@unprice/db/validators"
-import { Err, Ok, type Result } from "@unprice/error"
+import { Err, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import { formatMoney } from "@unprice/money"
-import { subtract, toSnapshot } from "dinero.js"
+import { LEDGER_SCALE, formatMoney } from "@unprice/money"
+import { subtract, toSnapshot, trimScale } from "dinero.js"
 import type { z } from "zod"
 import type { GrantsManager } from "../entitlements"
-import { computeGrantPeriodBucket } from "../entitlements/grant-consumption"
+import {
+  computeGrantPeriodBucket,
+  extractCurrencyCodeFromFeatureConfig,
+} from "../entitlements/grant-consumption"
 import { toErrorContext } from "../utils/log-context"
 import { UnPriceRatingError } from "./errors"
 import type {
@@ -122,141 +125,49 @@ export class RatingService {
     )
   }
 
-  /**
-   * Calculates usage data for features based on grants, entitlement state, and billing window.
-   * This method handles fetching usage data (if not provided) and computing total usage amounts.
-   *
-   * @returns Object containing usage information including usage, and isUsageFeature flag
-   */
-  private async calculateUsageOfFeatures({
+  private async rateUsageAllocations({
     projectId,
     customerId,
     customerEntitlementIds,
     featureSlug,
-    entitlement,
-    billingStartAt,
-    billingEndAt,
-    periodKeys,
-    usageData: providedUsageData,
-  }: {
-    projectId: string
-    customerId: string
-    customerEntitlementIds?: string[]
-    featureSlug: string
-    entitlement: RatingEntitlementContext
-    billingStartAt: number
-    billingEndAt: number
-    periodKeys?: string[]
-    usageData?: UsageFeatureData[]
-  }): Promise<
-    Result<
-      {
-        usage: number
-        isUsageFeature: boolean
-      },
-      UnPriceRatingError
-    >
-  > {
-    // Validate billing window
-    if (billingStartAt >= billingEndAt) {
-      return Err(
-        new UnPriceRatingError({
-          message: `Invalid billing window: startAt (${billingStartAt}) must be before endAt (${billingEndAt})`,
-        })
-      )
-    }
-
-    const featureType = entitlement.featureType
-    const aggregationMethod = entitlement.meterConfig?.aggregationMethod
-    const isUsageFeature = featureType === "usage"
-
-    // For non-usage features we only use explicit usage overrides (event-time rating path).
-    // Existing periodic callers that do not pass overrides preserve current behavior (0 usage).
-    if (!isUsageFeature) {
-      const overriddenUsage =
-        providedUsageData?.find((u) => u.featureSlug === featureSlug)?.usage ?? 0
-      return Ok({
-        usage: overriddenUsage,
-        isUsageFeature: false,
-      })
-    }
-
-    if (!aggregationMethod) {
-      return Err(
-        new UnPriceRatingError({
-          message: `Usage feature ${featureSlug} is missing an aggregation method`,
-        })
-      )
-    }
-
-    // Use provided usage data if available, otherwise fetch it
-    let usageData: UsageFeatureData[]
-    if (providedUsageData && providedUsageData.length > 0) {
-      usageData = providedUsageData
-    } else {
-      // Fetch TOTAL usage for this feature (no grant filtering)
-      const { err: usageErr, val: fetchedUsageData } = await this.analytics.getUsageBillingFeatures(
-        {
-          customerId,
-          customerEntitlementIds,
-          projectId,
-          features: [
-            {
-              featureSlug,
-              aggregationMethod,
-              featureType,
-            },
-          ],
-          startAt: billingStartAt,
-          endAt: billingEndAt,
-          periodKeys,
-        }
-      )
-
-      if (usageErr) {
-        this.logger.error(usageErr, {
-          featureSlug,
-          customerId,
-          projectId,
-          billingStartAt,
-          billingEndAt,
-          context: "Failed to get usage for feature",
-        })
-        return Err(new UnPriceRatingError({ message: usageErr.message }))
-      }
-
-      usageData = fetchedUsageData
-    }
-
-    // Extract usage values for the specific feature
-    const featureUsage = usageData.find((u) => u.featureSlug === featureSlug)
-    const currentCycleUsage = featureUsage?.usage ?? 0
-
-    return Ok({
-      usage: currentCycleUsage,
-      isUsageFeature: true,
-    })
-  }
-
-  private resolveUsagePeriodKeys({
     billingStartAt,
     billingEndAt,
     grants,
   }: {
+    projectId: string
+    customerId: string
+    customerEntitlementIds: string[]
+    featureSlug: string
     billingStartAt: number
     billingEndAt: number
     grants: z.infer<typeof grantSchemaExtended>[]
-  }): string[] {
-    const periodKeys = new Set<string>()
-
-    for (const grant of grants) {
-      const grantServiceStart = Math.max(billingStartAt, grant.effectiveAt)
-      const grantServiceEnd = Math.min(billingEndAt, grant.expiresAt ?? Number.POSITIVE_INFINITY)
-
-      if (grantServiceStart >= grantServiceEnd) {
-        continue
+  }): Promise<Result<RatedCharge[], UnPriceRatingError>> {
+    const usage = await wrapResult(
+      this.analytics.getBillingUsageAllocations({
+        project_id: projectId,
+        customer_id: customerId,
+        customer_entitlement_ids: customerEntitlementIds,
+        feature_slugs: [featureSlug],
+        start: billingStartAt,
+        end: billingEndAt,
+      }),
+      (error) => new UnPriceRatingError({ message: error.message })
+    )
+    if (usage.err) return Err(usage.err)
+    const { data } = usage.val
+    const charges: RatedCharge[] = []
+    for (const allocation of data) {
+      const grant = grants.find(
+        (item) =>
+          item.id === allocation.grant_id &&
+          item.customerEntitlement.id === allocation.customer_entitlement_id
+      )
+      if (!grant) {
+        return Err(
+          new UnPriceRatingError({ message: `Unknown usage grant ${allocation.grant_id}` })
+        )
       }
-
+      const entitlement = this.entitlementFromGrant(grant)
       const bucket = computeGrantPeriodBucket(
         {
           cadenceEffectiveAt: grant.customerEntitlement.effectiveAt,
@@ -266,15 +177,65 @@ export class RatingService {
           grantId: grant.id,
           resetConfig: grant.customerEntitlement.featurePlanVersion.resetConfig,
         },
-        grantServiceStart
+        Math.max(allocation.period_start_at, grant.effectiveAt)
       )
-
-      if (bucket) {
-        periodKeys.add(bucket.periodKey)
+      if (!bucket || bucket.periodKey !== allocation.period_key) {
+        return Err(
+          new UnPriceRatingError({ message: `Invalid usage period ${allocation.period_key}` })
+        )
       }
+      const cycleStartAt = Math.max(billingStartAt, bucket.start, grant.effectiveAt)
+      const cycleEndAt = Math.min(
+        billingEndAt,
+        bucket.end,
+        grant.expiresAt ?? Number.POSITIVE_INFINITY
+      )
+      if (cycleStartAt >= cycleEndAt) continue
+      const proration = this.calculateGrantProration({
+        grant,
+        billingStartAt: cycleStartAt,
+        billingEndAt: cycleEndAt,
+        resetConfig: entitlement.resetConfig,
+      })
+      const currencyCode = extractCurrencyCodeFromFeatureConfig(
+        grant.customerEntitlement.featurePlanVersion.config
+      )
+      if (allocation.currency !== currencyCode || allocation.amount_scale !== LEDGER_SCALE) {
+        return Err(
+          new UnPriceRatingError({
+            message: `Recorded usage money does not match grant ${grant.id}`,
+          })
+        )
+      }
+      const currency = this.resolveCurrency(undefined, [], [grant])
+      const isTrial = grant.type === "trial"
+      const amount = isTrial ? 0 : allocation.amount
+      const total = trimScale(dinero({ amount, currency, scale: LEDGER_SCALE }))
+      const unit = trimScale(
+        dinero({
+          amount: allocation.usage === 0 ? 0 : Math.round(amount / allocation.usage),
+          currency,
+          scale: LEDGER_SCALE,
+        })
+      )
+      const price = this.asCalculatedPrice(unit, total, total)
+      const freeUnits = calculateFreeUnits({
+        config: grant.customerEntitlement.featurePlanVersion.config,
+        featureType: entitlement.featureType,
+      })
+      charges.push({
+        grantId: grant.id,
+        price,
+        prorate: proration.prorationFactor,
+        cycleStartAt,
+        cycleEndAt,
+        usage: allocation.usage,
+        included: freeUnits.val ?? 0,
+        limit: grant.allowanceUnits ?? Number.POSITIVE_INFINITY,
+        isTrial,
+      })
     }
-
-    return [...periodKeys]
+    return Ok(charges)
   }
 
   private resolveUsageCustomerEntitlementIds({
@@ -522,37 +483,24 @@ export class RatingService {
     }
 
     const { billingStartAt, billingEndAt } = billingWindowResult.val
-    const periodKeys = this.resolveUsagePeriodKeys({
-      billingStartAt,
-      billingEndAt,
-      grants,
-    })
-    const usageCustomerEntitlementIds =
-      customerEntitlementIds ??
-      this.resolveUsageCustomerEntitlementIds({
+    if (entitlement.featureType === "usage" && providedUsageData === undefined) {
+      return this.rateUsageAllocations({
+        projectId,
+        customerId,
+        customerEntitlementIds:
+          customerEntitlementIds ??
+          this.resolveUsageCustomerEntitlementIds({
+            billingStartAt,
+            billingEndAt,
+            grants,
+          }),
+        featureSlug,
         billingStartAt,
         billingEndAt,
         grants,
       })
-
-    // Calculate usage
-    const usageResult = await this.calculateUsageOfFeatures({
-      projectId,
-      customerId,
-      customerEntitlementIds: usageCustomerEntitlementIds,
-      featureSlug,
-      entitlement,
-      billingStartAt,
-      billingEndAt,
-      periodKeys,
-      usageData: providedUsageData,
-    })
-
-    if (usageResult.err) {
-      return Err(usageResult.err)
     }
-
-    const { usage } = usageResult.val
+    const usage = providedUsageData?.find((item) => item.featureSlug === featureSlug)?.usage ?? 0
 
     // Track remaining usage for waterfall attribution
     const pricingGrants: Array<{

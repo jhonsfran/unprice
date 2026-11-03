@@ -1,0 +1,165 @@
+Final branch verification. Production base 7f55e2bf5. Node24.17.0 and pnpm10.28.0.
+
+final-compose-postgres.log
+ Test Files  27 passed (27)
+      Tests  76 passed (76)
+
+final-compose-services.log
+ Test Files  122 passed (122)
+      Tests  1044 passed (1044)
+
+final-compose-api.log
+ Test Files  60 passed (60)
+      Tests  572 passed (572)
+
+final-compose-workers.log
+ Test Files  8 passed (8)
+      Tests  63 passed (63)
+
+final-compose-jobs.log
+ Test Files  3 passed (3)
+      Tests  13 passed (13)
+
+final-compose-validate.log
+ Tasks:    29 successful, 29 total
+Formatted 1761 files in 175ms. No fixes applied.
+Checked 1761 files in 458ms. No fixes applied.
+
+final-compose-api-typecheck.log
+> api@ type-check $REPO/apps/api
+> pnpm exec tsc --noEmit
+
+final-compose-clickhouse.log
+PASS deduplicates_usage expected=[{"project_id": "p1", "customer_id": "c1", "feature_slug": "f1", "latest": 10}] actual=[{"project_id": "p1", "customer_id": "c1", "feature_slug": "f1", "latest": 10}]
+PASS keeps_latest_value_after_when_feature_is_updated expected=[{"project_id": "p1", "customer_id": "c1", "feature_slug": "f4", "latest": 3}] actual=[{"project_id": "p1", "customer_id": "c1", "feature_slug": "f4", "latest": 3}]
+PASS uses_idempotency_order_for_equal_timestamp_batch_rows expected=[{"project_id": "p1", "customer_id": "c1", "feature_slug": "f_tie", "latest": 15}] actual=[{"project_id": "p1", "customer_id": "c1", "feature_slug": "f_tie", "latest": 15}]
+PASS sums_latest_allocations_for_same_visible_feature expected=[{"project_id": "p1", "customer_id": "c1", "feature_slug": "f_multi", "latest": 15}] actual=[{"project_id": "p1", "customer_id": "c1", "feature_slug": "f_multi", "latest": 15}]
+PASS late_sum_with_duplicate_delivery expected=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "late_sum", "latest": 2}] actual=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "late_sum", "latest": 2}]
+PASS late_count_with_duplicate_delivery expected=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "late_count", "latest": 2}] actual=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "late_count", "latest": 2}]
+PASS same_ms_with_duplicate_delivery expected=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "same_ms", "latest": 2}] actual=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "same_ms", "latest": 2}]
+PASS late_max_with_duplicate_delivery expected=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "late_max", "latest": 7}] actual=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "late_max", "latest": 7}]
+PASS latest_correction_with_duplicate_delivery expected=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "latest_correction", "latest": 6}] actual=[{"project_id": "p_out_of_order", "customer_id": "c_out_of_order", "feature_slug": "latest_correction", "latest": 6}]
+PASS late_sum_allocation expected=[{"customer_entitlement_id": "ce_late_sum", "grant_id": "grant_late_sum", "period_key": "day:4070908800000", "feature_slug": "late_sum", "period_start_at": 4070908800000, "usage": 2, "amount": 200000000, "currency": "USD", "amount_scale": 8}] actual=[{"customer_entitlement_id": "ce_late_sum", "grant_id": "grant_late_sum", "period_key": "day:4070908800000", "feature_slug": "late_sum", "period_start_at": 4070908800000, "usage": 2, "amount": 200000000, "currency": "USD", "amount_scale": 8}]
+PASS late_count_allocation expected=[{"customer_entitlement_id": "ce_late_count", "grant_id": "grant_late_count", "period_key": "day:4070908800000", "feature_slug": "late_count", "period_start_at": 4070908800000, "usage": 2, "amount": 200000000, "currency": "USD", "amount_scale": 8}] actual=[{"customer_entitlement_id": "ce_late_count", "grant_id": "grant_late_count", "period_key": "day:4070908800000", "feature_slug": "late_count", "period_start_at": 4070908800000, "usage": 2, "amount": 200000000, "currency": "USD", "amount_scale": 8}]
+PASS same_ms_allocation expected=[{"customer_entitlement_id": "ce_same_ms", "grant_id": "grant_same_ms", "period_key": "day:4070908800000", "feature_slug": "same_ms", "period_start_at": 4070908800000, "usage": 2, "amount": 200000000, "currency": "USD", "amount_scale": 8}] actual=[{"customer_entitlement_id": "ce_same_ms", "grant_id": "grant_same_ms", "period_key": "day:4070908800000", "feature_slug": "same_ms", "period_start_at": 4070908800000, "usage": 2, "amount": 200000000, "currency": "USD", "amount_scale": 8}]
+PASS late_max_allocation expected=[{"customer_entitlement_id": "ce_late_max", "grant_id": "grant_late_max", "period_key": "day:4070908800000", "feature_slug": "late_max", "period_start_at": 4070908800000, "usage": 7, "amount": 700000000, "currency": "USD", "amount_scale": 8}] actual=[{"customer_entitlement_id": "ce_late_max", "grant_id": "grant_late_max", "period_key": "day:4070908800000", "feature_slug": "late_max", "period_start_at": 4070908800000, "usage": 7, "amount": 700000000, "currency": "USD", "amount_scale": 8}]
+PASS latest_correction_allocation expected=[{"customer_entitlement_id": "ce_latest_correction", "grant_id": "grant_latest_correction", "period_key": "day:4070908800000", "feature_slug": "latest_correction", "period_start_at": 4070908800000, "usage": 6, "amount": 600000000, "currency": "USD", "amount_scale": 8}] actual=[{"customer_entitlement_id": "ce_latest_correction", "grant_id": "grant_latest_correction", "period_key": "day:4070908800000", "feature_slug": "latest_correction", "period_start_at": 4070908800000, "usage": 6, "amount": 600000000, "currency": "USD", "amount_scale": 8}]
+PASS partial_reset_money expected=[{"customer_entitlement_id": "ce_partial", "grant_id": "grant_partial", "period_key": "month:1767225600000", "feature_slug": "partial", "period_start_at": 1767225600000, "usage": 5, "amount": 500000000, "currency": "USD", "amount_scale": 8}] actual=[{"customer_entitlement_id": "ce_partial", "grant_id": "grant_partial", "period_key": "month:1767225600000", "feature_slug": "partial", "period_start_at": 1767225600000, "usage": 5, "amount": 500000000, "currency": "USD", "amount_scale": 8}]
+PASS single_reset_money expected=[{"customer_entitlement_id": "ce_partial", "grant_id": "grant_partial", "period_key": "month:1767225600000", "feature_slug": "partial", "period_start_at": 1767225600000, "usage": 5, "amount": 500000000, "currency": "USD", "amount_scale": 8}] actual=[{"customer_entitlement_id": "ce_partial", "grant_id": "grant_partial", "period_key": "month:1767225600000", "feature_slug": "partial", "period_start_at": 1767225600000, "usage": 5, "amount": 500000000, "currency": "USD", "amount_scale": 8}]
+PASS actual_processor_late_events_and_replay expected=[{"project_id": "proj_123", "customer_id": "cus_123", "feature_slug": "api_calls", "latest": 2}] actual=[{"project_id": "proj_123", "customer_id": "cus_123", "feature_slug": "api_calls", "latest": 2}]
+PASS unsafe_money_does_not_wrap_to_zero actual=[{"customer_entitlement_id": "ce_overflow", "grant_id": "grant_overflow", "period_key": "day:4070908800000", "feature_slug": "overflow", "period_start_at": 4070908800000, "usage": 2049, "amount": 18446744073709552000, "currency": "USD", "amount_scale": 8}]
+Failed checks 0
+
+final-compose-readiness.log
+RUN  v4.1.10 $REPO/internal/services
+
+{
+  "atStart": [
+    "advance_start"
+  ],
+  "atEnd": [
+    "advance_next_fixed",
+    "advance_start"
+  ],
+  "beforeGraceEnd": [
+    "advance_next_fixed",
+    "advance_start"
+  ],
+  "atGraceEnd": [
+    "advance_next_fixed",
+    "advance_start",
+    "advance_usage",
+    "arrears",
+    "cross_phase",
+    "cross_phase",
+    "mixed"
+  ],
+  "capped": [
+    {
+      "id": "cap_fixed",
+      "cycleEndAt": 1788393600000,
+      "invoiceAt": 1788220800000
+    },
+    {
+      "id": "cap_invoiced",
+      "cycleEndAt": 1790812800000,
+      "invoiceAt": 1790812800000
+    },
+    {
+      "id": "cap_usage",
+      "cycleEndAt": 1788393600000,
+      "invoiceAt": 1788393600000
+    },
+    {
+      "id": "other_phase",
+      "cycleEndAt": 1790812800000,
+      "invoiceAt": 1790812800000
+    }
+  ]
+}
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  15:20:34
+   Duration  1.26s (transform 344ms, setup 0ms, import 823ms, tests 375ms, environment 0ms)
+
+Earlier property fixtures, before their clock correction.
+FAIL  src/tests/billing-scenarios/pay-in-advance-capped-wallet.properties.integration.test.ts > P0-D pay_in_advance capped wallet properties > keeps fixed start billing separate while generated usage drains capped wallet actuals
+Error: Property failed after 1 tests
+{ seed: 224958520, path: "0", endOnFailure: true }
+Counterexample: [1]
+Shrunk 0 time(s)
+
+Hint: Enable verbose mode in order to have the list of all failing values encountered during the run
+ ❯ buildError ../../node_modules/.pnpm/fast-check@4.5.3/node_modules/fast-check/lib/check/runner/utils/RunDetailsFormatter.js:156:19
+ ❯ asyncThrowIfFailed ../../node_modules/.pnpm/fast-check@4.5.3/node_modules/fast-check/lib/check/runner/utils/RunDetailsFormatter.js:170:11
+
+Caused by: AssertionError: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ runAdvanceCappedPropertyCase src/tests/billing-scenarios/pay-in-advance-capped-wallet.properties.integration.test.ts:269:36
+ ❯ AsyncProperty.run ../../node_modules/.pnpm/fast-check@4.5.3/node_modules/fast-check/lib/check/property/AsyncProperty.generic.js:43:28
+ ❯ asyncRunIt ../../node_modules/.pnpm/fast-check@4.5.3/node_modules/fast-check/lib/check/runner/Runner.js:24:21
+ ❯ src/tests/billing-scenarios/pay-in-advance-capped-wallet.properties.integration.test.ts:308:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/tests/billing-scenarios/pay-in-advance-metered.properties.integration.test.ts > P0-C pay_in_advance metered billing properties > keeps generated usage actuals separate from start-of-period fixed billing
+Error: Property failed after 1 tests
+{ seed: 2107265225, path: "0", endOnFailure: true }
+Counterexample: [1]
+Shrunk 0 time(s)
+
+Hint: Enable verbose mode in order to have the list of all failing values encountered during the run
+ ❯ buildError ../../node_modules/.pnpm/fast-check@4.5.3/node_modules/fast-check/lib/check/runner/utils/RunDetailsFormatter.js:156:19
+ ❯ asyncThrowIfFailed ../../node_modules/.pnpm/fast-check@4.5.3/node_modules/fast-check/lib/check/runner/utils/RunDetailsFormatter.js:170:11
+
+Caused by: AssertionError: expected +0 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 0
+
+ ❯ runAdvanceMeteredPropertyCase src/tests/billing-scenarios/pay-in-advance-metered.properties.integration.test.ts:176:36
+ ❯ AsyncProperty.run ../../node_modules/.pnpm/fast-check@4.5.3/node_modules/fast-check/lib/check/property/AsyncProperty.generic.js:43:28
+ ❯ asyncRunIt ../../node_modules/.pnpm/fast-check@4.5.3/node_modules/fast-check/lib/check/runner/Runner.js:24:21
+ ❯ src/tests/billing-scenarios/pay-in-advance-metered.properties.integration.test.ts:219:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed | 25 passed (27)
+      Tests  2 failed | 74 passed (76)
+   Start at  15:20:22
+   Duration  80.56s (transform 793ms, setup 0ms, import 14.41s, tests 62.15s, environment 1ms)
+
+$REPO/internal/services:
+ ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @unprice/services@0.1.0 test:integration: `NODE_ENV=test SKIP_ENV_VALIDATION=true APP_ENV=test vitest run --config vitest.integration.config.ts --no-file-parallelism --maxWorkers=1 --maxConcurrency=1`
+Exit status 1

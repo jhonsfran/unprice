@@ -8,6 +8,8 @@ import {
   analyticsEventSchema,
   billingPeriodUsageCoverageRowSchema,
   billingPeriodUsageRowSchema,
+  billingUsageAllocationQuerySchema,
+  billingUsageAllocationRowSchema,
   entitlementMeterFactSchemaV1,
   explainChargeEventRowSchema,
   explainChargeQuerySchema,
@@ -495,6 +497,15 @@ export class Analytics {
         retries: 3,
         timeout: 5000, // 5 seconds
       },
+    })
+  }
+
+  public get getBillingUsageAllocations() {
+    return this.readClient.buildPipe({
+      pipe: "v1_get_billing_usage_allocations",
+      parameters: billingUsageAllocationQuerySchema,
+      data: billingUsageAllocationRowSchema,
+      opts: { cache: "no-store", retries: 3, timeout: 5000 },
     })
   }
 

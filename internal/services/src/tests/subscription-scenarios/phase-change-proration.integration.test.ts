@@ -1,4 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
 import { sql } from "@unprice/db"
 import type { Customer, Subscription } from "@unprice/db/validators"
 import { Ok } from "@unprice/error"
@@ -6,11 +5,15 @@ import type { Logger } from "@unprice/logs"
 import { toLedgerMinor } from "@unprice/money"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Cache } from "../../cache"
-import { type ServiceContext, createServiceContext } from "../../context"
+import type { ServiceContext } from "../../context"
+import { createServiceContext } from "../../context"
 import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
 import type { Metrics } from "../../metrics"
 import { RatingService } from "../../rating/service"
+import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
+import { billPeriod } from "../../use-cases/billing/bill-period"
+
 import { DrizzleSubscriptionRepository } from "../../subscriptions/repository.drizzle"
 import type { SubscriptionContext } from "../../subscriptions/types"
 import {
@@ -19,7 +22,6 @@ import {
   truncateTestDatabase,
 } from "../../test-fixtures/database"
 import { seedTestDb } from "../../test-fixtures/seed-db"
-import { billPeriod } from "../../use-cases/billing/bill-period"
 
 const db = createTestDatabaseConnection()
 
@@ -54,25 +56,6 @@ function createLogger(): Logger {
   } as unknown as Logger
 }
 
-function createAnalytics(usageByFeature: Record<string, number> = {}): Analytics {
-  return {
-    getUsageBillingFeatures: vi.fn(
-      async ({
-        features,
-      }: {
-        features: Array<{ featureSlug: string }>
-      }) =>
-        Ok(
-          features.map((feature) => ({
-            featureSlug: feature.featureSlug,
-            usage: usageByFeature[feature.featureSlug] ?? 0,
-          }))
-        )
-    ),
-    ingestEvents: vi.fn(),
-  } as unknown as Analytics
-}
-
 function createCache(): Cache {
   return {
     accessControlList: {
@@ -85,12 +68,14 @@ function createCache(): Cache {
 
 function createServices(): { logger: Logger; services: ServiceContext } {
   const logger = createLogger()
+  const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {})
   return {
     logger,
     services: createServiceContext({
+      reservationFlushGateway,
       db,
       logger,
-      analytics: createAnalytics(),
+      analytics,
       waitUntil: (promise) => {
         void promise
       },
@@ -393,14 +378,18 @@ describe("DB-backed subscription phase changes", () => {
     const ledger = new LedgerGateway({ db, logger })
     const ensureAccounts = await ledger.ensureCustomerAccounts(customerId, "EUR")
     expect(ensureAccounts.err).toBeUndefined()
+    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+      events: { quantity: 120, amount: 112_000_000 },
+    })
     const billed = await billPeriod({
+      reservationFlushGateway,
       context: await loadSubscriptionContext(),
       logger,
       db,
       repo: new DrizzleSubscriptionRepository(db),
       ratingService: new RatingService({
         logger,
-        analytics: createAnalytics({ events: 120 }),
+        analytics,
         grantsManager: new GrantsManager({ db, logger }),
       }),
       ledgerService: ledger,

@@ -1,6 +1,7 @@
 import { logger, schedules } from "@trigger.dev/sdk/v3"
-import { and, eq, lte, sql } from "@unprice/db"
+import { and, eq, lte } from "@unprice/db"
 import { billingPeriods } from "@unprice/db/schema"
+import { billingStatementReadyForInvoicing } from "@unprice/services/billing"
 import { LATE_EVENT_GRACE_MS } from "@unprice/services/entitlements"
 import { db } from "../db"
 import { invoiceTask } from "../tasks/invoice"
@@ -16,11 +17,7 @@ export const invoicingSchedule = schedules.task({
   },
   run: async (payload) => {
     const now = payload.timestamp.getTime()
-    const arrearsReadyAt = now - LATE_EVENT_GRACE_MS
 
-    // Get pending statement groups. For arrears periods, wait for the
-    // late-event grace window before closing the statement so slow producers
-    // can still land usage in the intended billing window.
     const periodItems = await db
       .select({
         projectId: billingPeriods.projectId,
@@ -35,9 +32,12 @@ export const invoicingSchedule = schedules.task({
         billingPeriods.subscriptionPhaseId,
         billingPeriods.statementKey
       )
-      .where(and(eq(billingPeriods.status, "pending"), lte(billingPeriods.invoiceAt, now)))
-      .having(
-        sql`bool_and(${billingPeriods.whenToBill} <> 'pay_in_arrear' OR ${billingPeriods.cycleEndAt} <= ${arrearsReadyAt})`
+      .where(
+        and(
+          eq(billingPeriods.status, "pending"),
+          lte(billingPeriods.invoiceAt, now),
+          billingStatementReadyForInvoicing({ now, lateEventGraceMs: LATE_EVENT_GRACE_MS })
+        )
       )
       .limit(500) // limit to 500 period items to avoid overwhelming the system
 

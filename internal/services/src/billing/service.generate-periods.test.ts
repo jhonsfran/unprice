@@ -1,12 +1,13 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
-import { Ok, type Result } from "@unprice/error"
+import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Cache } from "../cache"
 import type { CustomerService } from "../customers/service"
 import type { GrantsManager } from "../entitlements"
 import type { LedgerGateway } from "../ledger"
+import { UnPriceLedgerError } from "../ledger/errors"
 import type { Metrics } from "../metrics"
 import type { RatingService } from "../rating/service"
 import type { WalletService } from "../wallet"
@@ -106,6 +107,7 @@ function makeItem(
     id,
     featurePlanVersion: {
       featureType: opts.featureType ?? "flat",
+      feature: { slug: "api_calls" },
       billingConfig: opts.billingConfig ?? makeBillingConfig("month", "monthly"),
     },
   }
@@ -143,7 +145,19 @@ function makePhase(overrides: Record<string, unknown> = {}) {
 
 function makeDb(phases: unknown[] = []): MockDb {
   const transaction = vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => {
-    return cb(transaction) // tx is the same mock so DrizzleBillingRepository uses it
+    return cb({
+      query: {
+        customerEntitlements: {
+          findMany: vi.fn().mockResolvedValue([
+            {
+              id: "ent_1",
+              effectiveAt: 0,
+              expiresAt: null,
+            },
+          ]),
+        },
+      },
+    })
   })
 
   const db = {
@@ -185,6 +199,11 @@ function makeBillingService(opts: { phases?: unknown[]; walletService?: WalletSe
   const logger = makeLogger()
   const walletService = opts.walletService ?? makeWalletService()
   const ledgerService = makeLedgerService()
+  const reservationFlushGateway = {
+    registerPeriods: vi.fn().mockResolvedValue(Ok(undefined)),
+    flushForInvoicing: vi.fn().mockResolvedValue(Ok({ snapshots: [], flushed: 0, skipped: 0 })),
+    completeForInvoicing: vi.fn().mockResolvedValue(Ok(undefined)),
+  }
 
   const billing = new BillingService({
     db,
@@ -200,9 +219,10 @@ function makeBillingService(opts: { phases?: unknown[]; walletService?: WalletSe
     ratingService: {} as RatingService,
     ledgerService,
     walletService,
+    reservationFlushGateway,
   })
 
-  return { billing, db, logger, walletService, ledgerService }
+  return { billing, db, logger, walletService, ledgerService, reservationFlushGateway }
 }
 
 function createdPeriods() {
@@ -226,6 +246,8 @@ function createdPeriods() {
 describe("BillingService._generateBillingPeriods", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    listInvoicedPeriodsExceedingPhaseEndMock.mockReset().mockResolvedValue([])
+    shortenBillingPeriodMock.mockReset().mockResolvedValue(undefined)
   })
 
   it("returns phasesProcessed=0 and cyclesCreated=0 when no phases found", async () => {
@@ -285,7 +307,6 @@ describe("BillingService._generateBillingPeriods", () => {
     expect(capPendingPeriodsAtPhaseEndMock).toHaveBeenCalledWith({
       phaseId: "phase_1",
       phaseEndAt: PHASE_END,
-      whenToBill: "pay_in_advance",
     })
   })
 
@@ -335,6 +356,76 @@ describe("BillingService._generateBillingPeriods", () => {
       periodId: "bp_1",
       cycleEndAt: PHASE_END,
     })
+  })
+
+  it("keeps a shortened paid period retryable when its ledger lookup fails", async () => {
+    const phaseEndAt = new Date("2026-03-16T12:00:00Z").getTime()
+    const phase = makePhase({
+      endAt: phaseEndAt,
+      items: [],
+      planVersion: {
+        ...makePhase().planVersion,
+        billingConfig: makeBillingConfig("month", "monthly", 1, "dayOfCreation"),
+      },
+    })
+    const { billing, db, walletService, ledgerService } = makeBillingService({ phases: [phase] })
+    const persisted = { cycleEndAt: PHASE_END, refundedAmount: 0 }
+    let transactionState = { ...persisted }
+    let transactionExecutor: Database | undefined
+    const period = {
+      id: "bp_1",
+      projectId: "proj_1",
+      invoiceId: "inv_1",
+      cycleStartAt: PHASE_START,
+    }
+    db.transaction.mockImplementation(async (run: (tx: Database) => Promise<unknown>) => {
+      transactionState = { ...persisted }
+      const tx = {
+        query: {
+          invoices: {
+            findFirst: vi.fn().mockResolvedValue({ status: "paid", statementKey: "stmt_1" }),
+          },
+        },
+      } as unknown as Database
+      transactionExecutor = tx
+      const value = await run(tx)
+      Object.assign(persisted, transactionState)
+      return value
+    })
+    listInvoicedPeriodsExceedingPhaseEndMock.mockImplementation(async () =>
+      transactionState.cycleEndAt > phaseEndAt
+        ? [{ ...period, cycleEndAt: transactionState.cycleEndAt }]
+        : []
+    )
+    shortenBillingPeriodMock.mockImplementation(async (input: { cycleEndAt: number }) => {
+      transactionState.cycleEndAt = input.cycleEndAt
+    })
+    vi.mocked(walletService.adjust).mockImplementation(async (input, executor) => {
+      if (executor !== transactionExecutor)
+        throw new Error("Refund requires the billing transaction")
+      transactionState.refundedAmount += input.signedAmount
+      return Ok({ clampedAmount: input.signedAmount, unclampedRemainder: 0 })
+    })
+    ledgerService.getInvoiceLines
+      .mockResolvedValueOnce(Err(new UnPriceLedgerError({ message: "LEDGER_GET_ENTRIES_FAILED" })))
+      .mockResolvedValue(
+        Ok([
+          {
+            amount: { toJSON: () => ({ amount: 100_000_000 }) },
+            metadata: { billing_period_id: period.id },
+          },
+        ])
+      )
+    const payload = { subscriptionId: "sub_1", projectId: "proj_1", now: NOW }
+
+    const failed = await generateBillingPeriods(billing, payload)
+    const stateAfterFailure = { ...persisted }
+    const retried = await generateBillingPeriods(billing, payload)
+
+    expect(stateAfterFailure).toEqual({ cycleEndAt: PHASE_END, refundedAmount: 0 })
+    expect(failed.err?.message).toContain("LEDGER_GET_ENTRIES_FAILED")
+    expect(retried.val).toEqual({ phasesProcessed: 1, cyclesCreated: 0 })
+    expect(persisted).toEqual({ cycleEndAt: phaseEndAt, refundedAmount: 50_000_000 })
   })
 
   it("dryRun=true skips DB writes but still counts cycles", async () => {
@@ -594,6 +685,114 @@ describe("BillingService._generateBillingPeriods", () => {
     const firstPeriods = createdPeriods().filter((period) => period.invoiceAt === PHASE_START)
     expect(firstPeriods).toHaveLength(4)
     expect(new Set(firstPeriods.map((period) => period.statementKey)).size).toBe(4)
+  })
+
+  it("registers new usage periods before commit and reuses their identity after registration fails", async () => {
+    const phase = makePhase({ items: [makeItem("item_usage", { featureType: "usage" })] })
+    const { billing, reservationFlushGateway } = makeBillingService({ phases: [phase] })
+    reservationFlushGateway.registerPeriods.mockResolvedValueOnce(
+      Err(new FetchError({ message: "registration unavailable", retry: true }))
+    )
+    const payload = { subscriptionId: "sub_1", projectId: "proj_1", now: NOW }
+
+    const failed = await generateBillingPeriods(billing, payload)
+    const periodsAfterFailure = createdPeriods()
+    const retried = await generateBillingPeriods(billing, payload)
+
+    expect(failed.err?.message).toBe("registration unavailable")
+    expect(periodsAfterFailure).toEqual([])
+    expect(retried.val?.cyclesCreated).toBe(1)
+    const registrations = reservationFlushGateway.registerPeriods.mock.calls.map(
+      ([input]) => input.registrations
+    )
+    expect(registrations[1]).toEqual(registrations[0])
+    expect(registrations[0][0]).toMatchObject({
+      origin: "period_generation_v1",
+      customerEntitlementId: "ent_1",
+      subscriptionItemId: "item_usage",
+    })
+    expect(createdPeriods()[0]?.cycleStartAt).toBe(PHASE_START)
+  })
+
+  it("registers only entitlement windows that overlap the new period", async () => {
+    const phase = makePhase({ items: [makeItem("item_usage", { featureType: "usage" })] })
+    const { billing, db, reservationFlushGateway } = makeBillingService({ phases: [phase] })
+    db.transaction.mockImplementation(async (cb: (tx: unknown) => Promise<unknown>) =>
+      cb({
+        query: {
+          customerEntitlements: {
+            findMany: vi.fn().mockResolvedValue([
+              {
+                id: "ent_current",
+                effectiveAt: PHASE_START,
+                expiresAt: null,
+              },
+              { id: "ent_expired", effectiveAt: 0, expiresAt: PHASE_START },
+              {
+                id: "ent_future",
+                effectiveAt: new Date("2027-01-01T00:00:00.000Z").getTime(),
+                expiresAt: null,
+              },
+            ]),
+          },
+        },
+      })
+    )
+
+    const result = await generateBillingPeriods(billing, {
+      subscriptionId: "sub_1",
+      projectId: "proj_1",
+      now: NOW,
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(
+      reservationFlushGateway.registerPeriods.mock.calls[0]?.[0].registrations.map(
+        (entry: { customerEntitlementId: string }) => entry.customerEntitlementId
+      )
+    ).toEqual(["ent_current"])
+  })
+
+  it("reuses acknowledged registrations after the database commit fails", async () => {
+    const phase = makePhase({ items: [makeItem("item_usage", { featureType: "usage" })] })
+    const { billing, db, reservationFlushGateway } = makeBillingService({ phases: [phase] })
+    let failCommit = true
+    let persistedPeriodCount = 0
+    db.transaction.mockImplementation(async (cb: (tx: unknown) => Promise<unknown>) => {
+      const value = await cb({
+        query: {
+          customerEntitlements: {
+            findMany: vi.fn().mockResolvedValue([
+              {
+                id: "ent_1",
+                effectiveAt: 0,
+                expiresAt: null,
+              },
+            ]),
+          },
+        },
+      })
+      if (failCommit) {
+        failCommit = false
+        throw new Error("commit failed after registration acknowledgement")
+      }
+      persistedPeriodCount = 1
+      return value
+    })
+    const payload = { subscriptionId: "sub_1", projectId: "proj_1", now: NOW }
+
+    const failed = await generateBillingPeriods(billing, payload)
+    expect(failed.err?.message).toContain("commit failed after registration acknowledgement")
+    expect(persistedPeriodCount).toBe(0)
+    expect(reservationFlushGateway.registerPeriods).toHaveBeenCalledTimes(1)
+
+    const retried = await generateBillingPeriods(billing, payload)
+    const registrations = reservationFlushGateway.registerPeriods.mock.calls.map(
+      ([input]) => input.registrations
+    )
+    expect(registrations[1]).toEqual(registrations[0])
+    expect(retried.val?.cyclesCreated).toBe(1)
+    expect(persistedPeriodCount).toBe(1)
   })
 
   it("returns Err with billing error when transaction throws", async () => {

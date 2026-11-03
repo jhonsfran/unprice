@@ -3,10 +3,10 @@ TOKEN "web-apps" READ
 TAGS "usage, billing"
 
 DESCRIPTION >
-    Get latest feature usage metrics for a given project and customer within a time range.
-    value_after is treated as the source of truth for latest aggregated usage.
+    Get billed feature usage for a given project and customer within a time range.
+    Deduplicate accepted event allocations before summing their signed deltas.
 
-NODE feature_usage_no_duplicates_allocations_node
+NODE feature_usage_no_duplicates_facts_node
 SQL >
     %
     SELECT
@@ -16,7 +16,8 @@ SQL >
         grant_id,
         period_key,
         feature_slug,
-        toFloat64(argMax(value_after, tuple(timestamp, created_at, idempotency_key))) AS latest
+        idempotency_key,
+        argMax(delta, tuple(created_at, event_id)) AS delta
     FROM unprice_entitlement_meter_facts
     WHERE
         project_id = {{ String(project_id) }}
@@ -31,6 +32,20 @@ SQL >
             AND period_key IN {{ Array(period_keys, 'String') }}
         {% end %}
         AND timestamp >= {{ Int64(start) }} AND timestamp < {{ Int64(end) }}
+    GROUP BY project_id, customer_id, customer_entitlement_id, grant_id, period_key, feature_slug, idempotency_key
+
+NODE feature_usage_no_duplicates_allocations_node
+SQL >
+    %
+    SELECT
+        project_id,
+        customer_id,
+        customer_entitlement_id,
+        grant_id,
+        period_key,
+        feature_slug,
+        toFloat64(sum(delta)) AS latest
+    FROM feature_usage_no_duplicates_facts_node
     GROUP BY project_id, customer_id, customer_entitlement_id, grant_id, period_key, feature_slug
 
 NODE feature_usage_no_duplicates_node

@@ -19,20 +19,21 @@
  * Everything runs in `proj_test` against the sandbox payment provider seeded by
  * `base-project.sql`. No customer, subscription, usage, or payment is created.
  */
-import type { Analytics } from "@unprice/analytics"
 import * as schema from "@unprice/db/schema"
 import type { MonetizationConfigInput } from "@unprice/db/validators"
 import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Cache } from "../../cache"
-import { type ServiceContext, createServiceContext } from "../../context"
+import type { ServiceContext } from "../../context"
+import { createServiceContext } from "../../context"
 import type { Metrics } from "../../metrics"
 import {
   closeTestDatabaseConnection,
   createTestDatabaseConnection,
   truncateTestDatabase,
 } from "../../test-fixtures/database"
+import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
 import { seedTestDb } from "../../test-fixtures/seed-db"
 import { applyMonetizationConfig } from "../../use-cases/monetization/apply"
 import { publishPlanVersion } from "../../use-cases/plan-version/publish"
@@ -61,13 +62,6 @@ function createLogger(): Logger {
   } as unknown as Logger
 }
 
-function createAnalytics(): Analytics {
-  return {
-    getUsageBillingFeatures: vi.fn(async () => Ok([])),
-    ingestEvents: vi.fn(),
-  } as unknown as Analytics
-}
-
 function createCache(): Cache {
   return {
     accessControlList: {
@@ -81,12 +75,14 @@ function createCache(): Cache {
 function createServices(): { logger: Logger; services: ServiceContext } {
   const logger = createLogger()
 
+  const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {})
   return {
     logger,
     services: createServiceContext({
+      reservationFlushGateway,
       db,
       logger,
-      analytics: createAnalytics(),
+      analytics,
       waitUntil: (promise) => {
         void promise
       },

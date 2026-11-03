@@ -45,7 +45,7 @@ export async function withLockedMachine<T>(args: {
   ledgerService: LedgerGateway
   walletService?: WalletService
   billingService: Pick<BillingService, "generateBillingPeriods">
-  reservationFlushGateway?: BillingReservationFlushGateway
+  reservationFlushGateway: BillingReservationFlushGateway
   setLockContext?: (context: {
     resource?: string
     action?: string

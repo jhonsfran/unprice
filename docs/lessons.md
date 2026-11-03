@@ -36,9 +36,11 @@ patterns. Keep it cheap to load and useful.
 
 ## CI And GitHub Actions
 
+- 2026-11-03: When a billing PR predates the dependency migration on main, merge main before updating audit pins; preserve its Zod 4 compatibility patches and lockfile.
 - 2026-10-27: Mintlify validation 0.1.813 needs the checked-in Zod v4 patch (partial enum records, issue formatting, native JSON schema conversion). Keep `apps/docs/test/zod-compatibility.test.mjs` passing when updating it; the removed converter dependency is replaced by that implementation, not an audit exclusion.
 - 2026-10-27: With drizzle-zod 0.8, use refinement callbacks to retain column nullability and explicitly mark optional insert overrides. Zod v4 runs defaults inside optional fields; omit those defaults when the old boundary left fields absent.
 - 2026-10-27: Zod GHSA-mrhx-c7xc-m3w5 is fixed in v4.6.6, but its upstream patch only changes v4. Keep v3 integrations explicit; upgrading the package and importing `zod/v3` does not apply that fix.
+
 
 - 2026-10-22: Next.js security patches must update both `apps/nextjs` and `internal/auth`. Keep the sharp 0.35.5 override; it mitigates the image RCE but does not fix Server Actions advisories.
 - 2026-10-22: For a dependency PR that must not deploy, include `renovate/` in the head branch name. `Test Renovate` runs the Build checks, and every `Deploy Preview` job skips that branch.
@@ -74,6 +76,8 @@ patterns. Keep it cheap to load and useful.
   `clearAllMocks()` preserves queued `mockResolvedValueOnce` results and can leak period rows.
 
 ## Cloudflare, API, And Ingestion
+
+- 2026-11-03: Tinybird meter-fact fixtures must use the existing 2099 timeline; past event timestamps can be removed by the 90-day TTL during test ingestion. Keep fixture dates and endpoint test windows aligned.
 
 - 2026-10-19: The API's `c.get("services")` is its own `DomainServiceContext` (`hono/env.ts`), filled
   in `middleware/init.ts`; a service added to `createServiceContext` must be added there too, and to
@@ -538,6 +542,17 @@ patterns. Keep it cheap to load and useful.
 
 ## Billing, Wallets, And Invoices
 
+- 2026-11-02: Batch snapshot registration and completion by entitlement owner; completed snapshots must not be rewritten on retries.
+- 2026-11-02: Trial reporting must zero accepted prices, as BILL already does.
+- 2026-11-02: Wallet quantity excludes free usage accepted before reservation allocation. A correction can cross that boundary; keep grant usage exact and floor the wallet quantity at zero while preserving captured and pending quantities.
+
+- 2026-10-27: Billing snapshot rollout uses fresh entitlement IDs, DO state, and billing periods;
+  register before acceptance and seal before wallet flush. Do not add legacy marker or recovery paths.
+- 2026-10-27: When collection succeeds, settle the receivable before saving `paid`; keep failed
+  settlement eligible for retry with the existing invoice idempotency key.
+- 2026-10-27: When checking invoice readiness, include all pending rows for the statement across
+  phases; advance-plan usage still needs grace because its stored invoice time is at cycle end.
+
 - 2026-09-20: Customer ledger statements must use `COALESCE(event_at, created_at)` for both date
   filters and pagination order; ordering by insert time moves late or backfilled transfers to the
   wrong visible date and page.
@@ -881,6 +896,9 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 
 ## Tests, Tooling, And Docs
 
+- 2026-10-27: Select integration databases through `BILLING_TEST_DATABASE_URL` in the shared test
+  helper; Vitest worker `env` alone does not select the database used by global setup.
+
 - 2026-10-19: Every API error's `docs` field links to
   `docs.unprice.dev/api-reference/errors/code/<CODE>`; give each code the API returns a page there
   and list it in `docs.json` (`BUDGET_EXCEEDED` and `INSUFFICIENT_PERMISSIONS` were missing).
@@ -1157,3 +1175,7 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-10-21: Local budget charges deduplicate only within one lease. `withUnpriceTool` requires a remote handle and rejects local handles before charging or executing a durable tool.
 - 2026-10-21: Export Pi Durable tools from `@unprice/pi-budget/tools`. The root declaration must compile without the optional Pi Durable peer installed.
 - 2026-10-21: AI output search changes only numeric output settings. Check its byte bound against the serialized request across digit boundaries, including Anthropic's enabled thinking budget.
+
+- 2026-10-27: Metering batches must preserve a persisted pending flush payload under its sequence. Coalesce only new draft flush intent.
+- 2026-10-27: Billing integration fixtures must declare accepted usage independently from wallet captures and pass their gateway explicitly.
+- 2026-10-27: Use classes for Vitest constructor mocks. `pnpm validate` can convert anonymous function mocks to non-constructible arrows.

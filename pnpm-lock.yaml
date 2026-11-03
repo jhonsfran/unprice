@@ -18,7 +18,7 @@ overrides:
   engine.io: 6.6.11
   fast-uri: 3.1.8
   fast-xml-parser: 5.10.1
-  follow-redirects: 1.16.1
+  follow-redirects: 1.16.2
   handlebars: 4.7.10
   http-cache-semantics: 4.3.0
   js-yaml@^3.0.0: 3.15.2
@@ -27,6 +27,7 @@ overrides:
   nodemailer: 10.1.0
   nanoid@^3.0.0: 3.3.18
   nanoid@^5.0.0: 5.1.16
+  node-forge: 1.4.1
   ip-address: 10.3.1
   postcss: 8.5.18
   proxy-addr: 2.0.8
@@ -38,7 +39,7 @@ overrides:
   shell-quote: 1.12.0
   socket.io-parser: 4.2.7
   source-map-js: 1.2.2
-  systeminformation: 5.31.7
+  systeminformation: 5.33.16
   tar@^6.0.0: 7.5.22
   tar@^7.0.0: 7.5.22
   undici: 7.30.1
@@ -8022,8 +8023,8 @@ packages:
   flatted@3.4.4:
     resolution: {integrity: sha512-5+ybhBZANEJxaH3X5evAFatUxLfEHSr7n6kYJ+1Qd0mUqr4eu9gIf6GDbWHf8RJijHrjjO8G+la14SlL2SeS1Q==}
 
-  follow-redirects@1.16.1:
-    resolution: {integrity: sha512-FNvFGzoMLWmE6Yj9spb/zjd7yiNCHiAW9/Tg9CXrQ8wuu32HtlJOwWO11OJafl5FfY3DxTdQ0vj42zU1kvv5jg==}
+  follow-redirects@1.16.2:
+    resolution: {integrity: sha512-/kVP2U8z596Ia0gwFrwyIeo74ta5aVmSeU1FfAUMAmcEP5EP7zydmag3SLiN64NaRKef3lxsq7i/g7ltJQDGow==}
     engines: {node: '>=4.0'}
     peerDependencies:
       debug: '*'
@@ -9835,8 +9836,8 @@ packages:
       encoding:
         optional: true
 
-  node-forge@1.3.3:
-    resolution: {integrity: sha512-rLvcdSyRCyouf6jcOIPe/BgwG/d7hKjzMKOas33/pHEr6gbq18IK9zV7DiPvzsz0oBJPme6qr6H6kGZuI9/DZg==}
+  node-forge@1.4.1:
+    resolution: {integrity: sha512-w5/MfWaeMrpR/5ba6fZyAUTLSuE6aYz7H/3cYrqwZEmf5eQS3IaaLgJt4MBv7HglGFWmV22K8h4U18RJQmw/ow==}
     engines: {node: '>= 6.13.0'}
 
   node-gyp-build@4.8.4:
@@ -11544,9 +11545,9 @@ packages:
     resolution: {integrity: sha512-ulAk51I9UVUyJgxlv9M6lFot2WP3e7t8Kz9+IS6D4rVba1tR9kON+Ey69f+1R4Q8cd45Lod6a4IcJIxnzGc/zA==}
     engines: {node: '>=18'}
 
-  systeminformation@5.31.7:
-    resolution: {integrity: sha512-/8NC53e5nP9nmhn42/ncdOkyJnOoue/Vy+tJOyUGd1Yv66G069wK4rrziwhrqDETgk78CudTQupw5z19S5uoZw==}
-    engines: {node: '>=8.0.0'}
+  systeminformation@5.33.16:
+    resolution: {integrity: sha512-R+Lh69IJXfJj6bfyH1In5cIR9FTr4hBS39YvlZHZjsK1p9cuELPq7hplZZIb56ZESMMb+DzdKqqE6Iomi01Mvg==}
+    engines: {node: '>=10.0.0'}
     os: [darwin, linux, win32, freebsd, openbsd, netbsd, sunos, android]
     hasBin: true
 
@@ -15115,7 +15116,7 @@ snapshots:
   '@opentelemetry/host-metrics@0.38.3(@opentelemetry/api@1.9.1)':
     dependencies:
       '@opentelemetry/api': 1.9.1
-      systeminformation: 5.31.7
+      systeminformation: 5.33.16
 
   '@opentelemetry/instrumentation@0.214.0(@opentelemetry/api@1.9.1)':
     dependencies:
@@ -17526,7 +17527,7 @@ snapshots:
 
   axios@1.20.0:
     dependencies:
-      follow-redirects: 1.16.1
+      follow-redirects: 1.16.2
       form-data: 4.0.6
       https-proxy-agent: 5.0.1
       proxy-from-env: 2.1.0
@@ -19392,7 +19393,7 @@ snapshots:
 
   flatted@3.4.4: {}
 
-  follow-redirects@1.16.1: {}
+  follow-redirects@1.16.2: {}
 
   for-each@0.3.5:
     dependencies:
@@ -20048,7 +20049,7 @@ snapshots:
   http-proxy@1.18.1:
     dependencies:
       eventemitter3: 4.0.7
-      follow-redirects: 1.16.1
+      follow-redirects: 1.16.2
       requires-port: 1.0.0
     transitivePeerDependencies:
       - debug
@@ -20752,7 +20753,7 @@ snapshots:
       http-shutdown: 1.2.2
       jiti: 2.4.2
       mlly: 1.8.0
-      node-forge: 1.3.3
+      node-forge: 1.4.1
       pathe: 1.1.2
       std-env: 3.10.0
       ufo: 1.6.3
@@ -21721,7 +21722,7 @@ snapshots:
     optionalDependencies:
       encoding: 0.1.13
 
-  node-forge@1.3.3: {}
+  node-forge@1.4.1: {}
 
   node-gyp-build@4.8.4: {}
 
@@ -23940,7 +23941,7 @@ snapshots:
 
   system-architecture@0.1.0: {}
 
-  systeminformation@5.31.7: {}
+  systeminformation@5.33.16: {}
 
   tagged-tag@1.0.0: {}
 

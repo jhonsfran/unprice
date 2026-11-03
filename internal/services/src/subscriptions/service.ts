@@ -101,7 +101,7 @@ export class SubscriptionService {
   private readonly ratingService: RatingService
   private readonly ledgerService: LedgerGateway
   private readonly walletService: WalletService | undefined
-  private readonly reservationFlushGateway: BillingReservationFlushGateway | undefined
+  private readonly reservationFlushGateway: BillingReservationFlushGateway
 
   constructor({
     db,
@@ -133,7 +133,7 @@ export class SubscriptionService {
     ratingService: RatingService
     ledgerService: LedgerGateway
     walletService?: WalletService
-    reservationFlushGateway?: BillingReservationFlushGateway
+    reservationFlushGateway: BillingReservationFlushGateway
   }) {
     this.db = db
     this.repo = repo

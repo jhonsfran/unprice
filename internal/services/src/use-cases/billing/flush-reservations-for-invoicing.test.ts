@@ -1,6 +1,11 @@
 import type { Database } from "@unprice/db"
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import { describe, expect, it, vi } from "vitest"
+import {
+  addBillingUsage,
+  registerBillingUsage,
+  sealBillingUsage,
+} from "../../billing/usage-snapshot"
 import type { EntitlementWindowController } from "../../ingestion"
 import { RunBudgetError } from "../runs"
 import {
@@ -34,7 +39,7 @@ describe("flushReservationsForInvoicing", () => {
 
     const result = await flushReservationsForInvoicing(deps, defaultInput)
 
-    expect(result.val).toEqual({ flushed: 2, skipped: 0 })
+    expect(result.val).toEqual({ flushed: 2, skipped: 0, snapshots: [] })
     expect(flushReservationForInvoicing).toHaveBeenCalledWith({
       statementKey: "stmt_1",
       billingPeriodIds: ["bp_1"],
@@ -65,6 +70,7 @@ describe("flushReservationsForInvoicing", () => {
       predicate("eq", "projectId", "proj_1"),
       predicate("eq", "customerId", "cus_1"),
       predicate("eq", "subscriptionId", "sub_1"),
+      predicate("eq", "subscriptionPhaseId", "phase_1"),
       predicate("eq", "statementKey", "stmt_1"),
     ])
     expect(onBudgetWhere).toHaveBeenCalledWith([
@@ -108,7 +114,7 @@ describe("flushReservationsForInvoicing", () => {
 
     const result = await flushReservationsForInvoicing(deps, defaultInput)
 
-    expect(result.val).toEqual({ flushed: 0, skipped: 1 })
+    expect(result.val).toEqual({ flushed: 0, skipped: 1, snapshots: [] })
   })
 
   it.each(["flushed", "no_reservation", "no_unflushed_usage"] as const)(
@@ -213,8 +219,8 @@ describe("flushReservationsForInvoicing", () => {
     const first = await flushReservationsForInvoicing(deps, defaultInput)
     const replay = await flushReservationsForInvoicing(deps, defaultInput)
 
-    expect(first.val).toEqual({ flushed: 2, skipped: 0 })
-    expect(replay.val).toEqual({ flushed: 0, skipped: 2 })
+    expect(first.val).toEqual({ flushed: 2, skipped: 0, snapshots: [] })
+    expect(replay.val).toEqual({ flushed: 0, skipped: 2, snapshots: [] })
     expect(persistedFlushes).toBe(2)
     expect(flushReservationForInvoicing).toHaveBeenCalledTimes(2)
     expect(flushCapturesForInvoicing).toHaveBeenCalledTimes(2)
@@ -225,8 +231,152 @@ describe("flushReservationsForInvoicing", () => {
 
     const result = await flushReservationsForInvoicing(deps, defaultInput)
 
-    expect(result.val).toEqual({ flushed: 0, skipped: 0 })
+    expect(result.val).toEqual({ flushed: 0, skipped: 0, snapshots: [] })
     expect(deps.db.query.budgetRuns.findMany).not.toHaveBeenCalled()
+  })
+
+  it("flushes an owner that expired at the billed service window end", async () => {
+    const start = 1_700_000_000_000
+    const end = start + 86_400_000
+    const expiredOwner = entitlement({ effectiveAt: start, expiresAt: end })
+    const flush = vi.fn().mockResolvedValue({ ok: true, outcome: "flushed" })
+    const deps = makeDeps({
+      billingPeriods: [{ id: "bp_1", cycleStartAt: start, cycleEndAt: end }],
+      flushReservationForInvoicing: flush,
+    })
+    vi.mocked(deps.services.entitlements.getCustomerEntitlementsForCustomer).mockImplementation(
+      async (query) =>
+        Ok(query.startAt === start && query.endAt === end ? [expiredOwner] : []) as Awaited<
+          ReturnType<typeof deps.services.entitlements.getCustomerEntitlementsForCustomer>
+        >
+    )
+
+    const result = await flushReservationsForInvoicing(deps, defaultInput)
+
+    expect(result.val).toEqual({ flushed: 1, skipped: 0, snapshots: [] })
+    expect(flush).toHaveBeenCalledWith({ statementKey: "stmt_1", billingPeriodIds: ["bp_1"] })
+  })
+  it("seals usage before flushing any entitlement or run capture", async () => {
+    const order: string[] = []
+    const sealBillingPeriods = vi.fn<EntitlementWindowController["sealBillingPeriods"]>(
+      async (identities) => {
+        order.push("seal")
+        return identities.map((identity) =>
+          sealBillingUsage(
+            addBillingUsage(
+              registerBillingUsage({
+                ...identity,
+                origin: "period_generation_v1",
+                registeredAt: identity.cycleStartAt,
+              }),
+              {
+                amount: 1_000_000_000,
+                quantity: 10,
+                currency: "USD",
+                amountScale: 8,
+                timestamp: identity.cycleStartAt,
+              }
+            ),
+            identity.cycleEndAt
+          )
+        )
+      }
+    )
+    const deps = makeDeps({
+      billingPeriods: [{ id: "bp_1", cycleStartAt: 1_700_000_000_000, featureType: "usage" }],
+      entitlements: [entitlement()],
+      budgetRuns: [{ id: "brun_1" }],
+      sealBillingPeriods,
+      flushReservationForInvoicing: vi.fn<
+        EntitlementWindowController["flushReservationForInvoicing"]
+      >(async () => {
+        order.push("entitlement")
+        return { ok: true, outcome: "flushed" }
+      }),
+      flushCapturesForInvoicing: vi.fn(async () => {
+        order.push("run")
+        return Ok({ flushed: 1, skipped: 0 })
+      }),
+    })
+
+    const result = await flushReservationsForInvoicing(deps, defaultInput)
+
+    expect(order).toEqual(["seal", "entitlement", "run"])
+    expect(result.val).toMatchObject({
+      flushed: 2,
+      skipped: 0,
+      snapshots: [
+        {
+          billingPeriodId: "bp_1",
+          customerEntitlementId: "ce_1",
+          state: "sealed",
+          amount: 1_000_000_000,
+          quantity: 10,
+        },
+      ],
+    })
+    expect(sealBillingPeriods).toHaveBeenCalledWith([
+      {
+        ...defaultInput,
+        billingPeriodId: "bp_1",
+        customerEntitlementId: "ce_1",
+        subscriptionItemId: "item_1",
+        featureSlug: "events",
+        currency: "USD",
+        amountScale: 8,
+        cycleStartAt: 1_700_000_000_000,
+        cycleEndAt: 1_700_086_400_000,
+      },
+    ])
+  })
+
+  it("does not flush captures when a usage owner cannot be sealed", async () => {
+    const flushReservationForInvoicing = vi.fn()
+    const flushCapturesForInvoicing = vi.fn()
+    const deps = makeDeps({
+      billingPeriods: [{ id: "bp_1", cycleStartAt: 1_700_000_000_000, featureType: "usage" }],
+      entitlements: [entitlement()],
+      budgetRuns: [{ id: "brun_1" }],
+      sealBillingPeriods: vi.fn().mockRejectedValue(new Error("snapshot unavailable")),
+      flushReservationForInvoicing,
+      flushCapturesForInvoicing,
+    })
+
+    const result = await flushReservationsForInvoicing(deps, defaultInput)
+
+    expect(result.err).toMatchObject({ reason: "deferred", message: "snapshot unavailable" })
+    expect(flushReservationForInvoicing).not.toHaveBeenCalled()
+    expect(flushCapturesForInvoicing).not.toHaveBeenCalled()
+  })
+
+  it("does not seal another phase that shares a ready fixed statement", async () => {
+    const sealBillingPeriods = vi.fn()
+    const deps = makeDeps({
+      billingPeriods: [
+        {
+          id: "bp_old_usage",
+          cycleStartAt: 1_700_000_000_000,
+          featureType: "usage",
+          subscriptionPhaseId: "phase_old",
+        },
+        {
+          id: "bp_ready_fixed",
+          cycleStartAt: 1_700_086_400_000,
+          featureType: "flat",
+          subscriptionPhaseId: "phase_ready",
+        },
+      ],
+      entitlements: [entitlement({ subscriptionPhaseId: "phase_old" })],
+      sealBillingPeriods,
+    })
+
+    const result = await flushReservationsForInvoicing(deps, {
+      ...defaultInput,
+      subscriptionPhaseId: "phase_ready",
+    })
+
+    expect(result.val).toEqual({ flushed: 0, skipped: 0, snapshots: [] })
+    expect(sealBillingPeriods).not.toHaveBeenCalled()
   })
 })
 
@@ -234,6 +384,9 @@ type Entitlement = {
   id: string
   subscriptionId: string
   subscriptionPhaseId: string
+  subscriptionItemId: string
+  effectiveAt: number
+  expiresAt: number | null
 }
 
 type CapturedPredicate = {
@@ -259,16 +412,27 @@ function entitlement(overrides: Partial<Entitlement> = {}): Entitlement {
     id: "ce_1",
     subscriptionId: "sub_1",
     subscriptionPhaseId: "phase_1",
+    subscriptionItemId: "item_1",
+    effectiveAt: 0,
+    expiresAt: null,
     ...overrides,
   }
 }
 
 function makeDeps(
   options: {
-    billingPeriods?: Array<{ id: string; cycleStartAt: number }>
+    billingPeriods?: Array<{
+      id: string
+      cycleStartAt: number
+      cycleEndAt?: number
+      featureType?: "usage" | "flat"
+      subscriptionPhaseId?: string
+      subscriptionItemId?: string
+    }>
     budgetRuns?: Array<{ id: string }>
     entitlements?: Entitlement[]
     entitlementsResult?: Result<Entitlement[], FetchError>
+    sealBillingPeriods?: EntitlementWindowController["sealBillingPeriods"]
     flushReservationForInvoicing?: EntitlementWindowController["flushReservationForInvoicing"]
     flushCapturesForInvoicing?: FlushReservationsForInvoicingDeps["runBudgetClient"]["flushCapturesForInvoicing"]
     onBillingWhere?: (predicates: CapturedPredicate[]) => void
@@ -276,18 +440,34 @@ function makeDeps(
   } = {}
 ): FlushReservationsForInvoicingDeps {
   const billingPeriodsFindMany = vi.fn(async (query: CapturedQuery) => {
-    options.onBillingWhere?.(
-      query.where(
-        {
-          projectId: "projectId",
-          customerId: "customerId",
-          subscriptionId: "subscriptionId",
-          statementKey: "statementKey",
-        },
-        predicateOperators
-      )
+    const predicates = query.where(
+      {
+        projectId: "projectId",
+        customerId: "customerId",
+        subscriptionId: "subscriptionId",
+        subscriptionPhaseId: "subscriptionPhaseId",
+        statementKey: "statementKey",
+      },
+      predicateOperators
     )
-    return options.billingPeriods ?? []
+    options.onBillingWhere?.(predicates)
+    return (options.billingPeriods ?? [{ id: "bp_1", cycleStartAt: 1_700_000_000_000 }])
+      .map((period) => ({
+        ...defaultInput,
+        subscriptionItemId: "item_1",
+        cycleEndAt: period.cycleStartAt + 86_400_000,
+        subscriptionItem: {
+          featurePlanVersion: {
+            featureType: period.featureType ?? "flat",
+            feature: { slug: "events" },
+          },
+        },
+        subscriptionPhase: { planVersion: { currency: "USD" } },
+        ...period,
+      }))
+      .filter((period) =>
+        predicates.every((predicate) => Reflect.get(period, predicate.field) === predicate.value)
+      )
   })
   const budgetRunsFindMany = vi.fn(async (query: CapturedQuery) => {
     options.onBudgetWhere?.(
@@ -317,7 +497,10 @@ function makeDeps(
   return {
     db,
     entitlementWindowClient: {
-      getEntitlementWindowStub: vi.fn().mockReturnValue({ flushReservationForInvoicing }),
+      getEntitlementWindowStub: vi.fn().mockReturnValue({
+        flushReservationForInvoicing,
+        sealBillingPeriods: options.sealBillingPeriods ?? vi.fn().mockResolvedValue([]),
+      }),
     },
     runBudgetClient: {
       flushCapturesForInvoicing:

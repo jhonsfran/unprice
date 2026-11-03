@@ -12,6 +12,7 @@ import type { Metrics } from "../metrics"
 import type { PaymentProviderService } from "../payment-provider/service"
 import type { RatingService } from "../rating/service"
 import type { SubscriptionMachine } from "../subscriptions/machine"
+import { createBillingGatewayStub } from "../test-fixtures/billing-gateway"
 import type { WalletService } from "../wallet"
 import { BillingService } from "./service"
 
@@ -82,6 +83,7 @@ function makeBillingService(provider: Partial<PaymentProviderService>) {
   } as unknown as Logger
 
   const billing = new BillingService({
+    reservationFlushGateway: createBillingGatewayStub(),
     db: {} as Database,
     logger,
     analytics: {} as Analytics,

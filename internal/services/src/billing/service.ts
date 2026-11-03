@@ -1,6 +1,6 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
-import { hashStringSHA256, newId } from "@unprice/db/utils"
+import { hashStringSHA256 } from "@unprice/db/utils"
 import {
   type CollectionMethod,
   type Currency,
@@ -32,11 +32,14 @@ import type { RatedCharge, RatingInput } from "../rating/types"
 import type { SubscriptionMachine } from "../subscriptions/machine"
 import { DrizzleSubscriptionRepository } from "../subscriptions/repository.drizzle"
 import { LockLostError, withLockedMachine } from "../subscriptions/withLockedMachine"
+import type { BillingReservationFlushGateway } from "../use-cases/billing/reservation-flush-gateway"
 import { settlePrepaidInvoiceToWallet } from "../use-cases/billing/settle-invoice"
 import type { WalletService } from "../wallet"
 import { UnPriceBillingError } from "./errors"
+import type { UpdateInvoiceInput } from "./repository"
 import { DrizzleBillingRepository } from "./repository.drizzle"
 import { billingStrategyFor } from "./strategy"
+import { billingUsageRegistrationSchema, ownsBillingUsagePeriod } from "./usage-snapshot"
 
 type ComputeCurrentUsageResult = RatedCharge
 
@@ -349,6 +352,7 @@ export class BillingService {
   private readonly ratingService: RatingService
   private readonly ledgerService: LedgerGateway
   private readonly walletService: WalletService
+  private readonly reservationFlushGateway: BillingReservationFlushGateway
 
   constructor({
     db,
@@ -362,6 +366,7 @@ export class BillingService {
     ratingService,
     ledgerService,
     walletService,
+    reservationFlushGateway,
   }: {
     db: Database
     logger: Logger
@@ -375,6 +380,7 @@ export class BillingService {
     ratingService: RatingService
     ledgerService: LedgerGateway
     walletService: WalletService
+    reservationFlushGateway: BillingReservationFlushGateway
   }) {
     this.db = db
     this.logger = logger
@@ -387,6 +393,7 @@ export class BillingService {
     this.ratingService = ratingService
     this.ledgerService = ledgerService
     this.walletService = walletService
+    this.reservationFlushGateway = reservationFlushGateway
   }
 
   private setLockContext(context: {
@@ -423,6 +430,7 @@ export class BillingService {
         ledgerService: this.ledgerService,
         walletService: this.walletService,
         billingService: this,
+        reservationFlushGateway: this.reservationFlushGateway,
         setLockContext: (ctx: Parameters<typeof this.setLockContext>[0]) =>
           this.setLockContext(ctx),
       })
@@ -931,17 +939,6 @@ export class BillingService {
       )
     }
 
-    // check if the invoice has a payment method id
-    // this shouldn't happen but we add a check anyway just in case
-    if (!paymentMethodId || paymentMethodId === "") {
-      return Err(
-        new UnPriceBillingError({
-          code: "INVOICE_PAYMENT_METHOD_MISSING",
-          message: "Invoice requires a payment method, please set a payment method first",
-        })
-      )
-    }
-
     // Get subscription data with related entities
     const subscriptionData = await this.db.query.subscriptions.findFirst({
       where: (table, { eq, and }) =>
@@ -1040,13 +1037,14 @@ export class BillingService {
       }
 
       // if the invoice is paid or void, we update the invoice status
-      if (["paid", "void"].includes(statusPaymentProviderInvoice.val.status)) {
-        // update the invoice status
-        const updatedInvoice = await billingRepo.updateInvoice({
-          invoiceId: invoice.id,
-          projectId,
+      if (
+        statusPaymentProviderInvoice.val.status === "paid" ||
+        statusPaymentProviderInvoice.val.status === "void"
+      ) {
+        return this.saveInvoiceCollection({
+          invoice,
           data: {
-            status: statusPaymentProviderInvoice.val.status as InvoiceStatus,
+            status: statusPaymentProviderInvoice.val.status,
             paidAt: statusPaymentProviderInvoice.val.paidAt,
             invoicePaymentProviderUrl: statusPaymentProviderInvoice.val.invoiceUrl,
             metadata: {
@@ -1059,32 +1057,6 @@ export class BillingService {
             },
           },
         })
-
-        if (!updatedInvoice) {
-          return Err(
-            new UnPriceBillingError({
-              code: "BILLING_OPERATION_FAILED",
-              message: "Error updating invoice",
-            })
-          )
-        }
-
-        if (statusPaymentProviderInvoice.val.status === "paid") {
-          const settled = await settlePrepaidInvoiceToWallet({
-            walletService: this.walletService,
-            invoice: updatedInvoice,
-          })
-          if (settled.err) {
-            return Err(
-              new UnPriceBillingError({
-                code: "PAYMENT_SETTLEMENT_FAILED",
-                message: `Failed to settle prepaid invoice ${updatedInvoice.id} to wallet: ${settled.err.message}`,
-              })
-            )
-          }
-        }
-
-        return Ok(updatedInvoice)
       }
 
       // Past due date reached — fail the invoice. Retry-attempt caps are no
@@ -1135,46 +1107,26 @@ export class BillingService {
       }
 
       // this happen when there are many invoices and stripe merge them into one invoice
-      if (["paid", "void"].includes(statusInvoice.val.status)) {
-        // update the invoice status if the payment is successful
-        // if not add the failed attempt
-        const updatedInvoice = await billingRepo.updateInvoice({
-          invoiceId: invoice.id,
-          projectId,
+      if (statusInvoice.val.status === "paid" || statusInvoice.val.status === "void") {
+        return this.saveInvoiceCollection({
+          invoice,
           data: {
-            status: statusInvoice.val.status as InvoiceStatus,
+            status: statusInvoice.val.status,
             ...(statusInvoice.val.status === "paid" ? { paidAt: Date.now() } : {}),
             ...(statusInvoice.val.status === "paid"
               ? { invoicePaymentProviderUrl: statusInvoice.val.invoiceUrl }
               : {}),
           },
         })
+      }
 
-        if (!updatedInvoice) {
-          return Err(
-            new UnPriceBillingError({
-              code: "BILLING_OPERATION_FAILED",
-              message: "Error updating invoice",
-            })
-          )
-        }
-
-        if (statusInvoice.val.status === "paid") {
-          const settled = await settlePrepaidInvoiceToWallet({
-            walletService: this.walletService,
-            invoice: updatedInvoice,
+      if (!paymentMethodId || paymentMethodId === "") {
+        return Err(
+          new UnPriceBillingError({
+            code: "INVOICE_PAYMENT_METHOD_MISSING",
+            message: "Invoice requires a payment method, please set a payment method first",
           })
-          if (settled.err) {
-            return Err(
-              new UnPriceBillingError({
-                code: "PAYMENT_SETTLEMENT_FAILED",
-                message: `Failed to settle prepaid invoice ${updatedInvoice.id} to wallet: ${settled.err.message}`,
-              })
-            )
-          }
-        }
-
-        return Ok(updatedInvoice)
+        )
       }
 
       const providerPaymentInvoice = await paymentProviderService.collectPayment({
@@ -1205,54 +1157,34 @@ export class BillingService {
       }
 
       const paymentStatus = providerPaymentInvoice.val.status
-      const isPaid = ["paid", "void"].includes(paymentStatus)
+      const transition = transitionInvoiceStatus({
+        currentStatus: invoice.status,
+        event: providerStatusToInvoiceEvent(paymentStatus),
+      })
+      const status = transition.event === "noop" ? "unpaid" : transition.nextStatus
+      const isPaid = status === "paid"
 
-      // update the invoice status if the payment is successful
-      // if not add the failed attempt
-      const updatedInvoice = await billingRepo.updateInvoice({
-        invoiceId: invoice.id,
-        projectId,
+      return this.saveInvoiceCollection({
+        invoice,
         data: {
-          status: isPaid ? "paid" : "unpaid",
+          status,
           ...(isPaid ? { paidAt: Date.now() } : {}),
           ...(isPaid ? { invoicePaymentProviderUrl: providerPaymentInvoice.val.invoiceUrl } : {}),
           metadata: {
             ...(invoice.metadata ?? {}),
-            reason: isPaid ? "payment_received" : "payment_pending",
-            note: isPaid ? "Invoice paid successfully" : `Payment pending for ${paymentStatus}`,
+            reason: isPaid
+              ? "payment_received"
+              : status === "unpaid"
+                ? "payment_pending"
+                : status === "void"
+                  ? "invoice_voided"
+                  : "payment_failed",
+            note: isPaid
+              ? "Invoice paid successfully"
+              : `Provider collection returned ${paymentStatus}`,
           },
         },
       })
-
-      if (!updatedInvoice) {
-        return Err(
-          new UnPriceBillingError({
-            code: "BILLING_OPERATION_FAILED",
-            message: "Error updating invoice",
-          })
-        )
-      }
-
-      // Synchronous providers (Sandbox today) confirm payment inline rather
-      // than via webhook, so the wallet settlement that the webhook handler
-      // does for Stripe must happen here too — otherwise the receivable IOU
-      // opened at invoice creation never gets cleared.
-      if (paymentStatus === "paid") {
-        const settled = await settlePrepaidInvoiceToWallet({
-          walletService: this.walletService,
-          invoice: updatedInvoice,
-        })
-        if (settled.err) {
-          return Err(
-            new UnPriceBillingError({
-              code: "PAYMENT_SETTLEMENT_FAILED",
-              message: `Failed to settle prepaid invoice ${updatedInvoice.id} to wallet: ${settled.err.message}`,
-            })
-          )
-        }
-      }
-
-      return Ok(updatedInvoice)
     }
 
     // send the invoice to the customer and wait for the payment
@@ -1303,6 +1235,44 @@ export class BillingService {
         message: "Unsupported status for invoice",
       })
     )
+  }
+
+  private async saveInvoiceCollection({
+    invoice,
+    data,
+  }: {
+    invoice: SubscriptionInvoice
+    data: UpdateInvoiceInput["data"] & { status: InvoiceStatus }
+  }): Promise<Result<SubscriptionInvoice, UnPriceBillingError>> {
+    if (data.status === "paid") {
+      const settled = await settlePrepaidInvoiceToWallet({
+        walletService: this.walletService,
+        invoice,
+      })
+      if (settled.err) {
+        return Err(
+          new UnPriceBillingError({
+            code: "PAYMENT_SETTLEMENT_FAILED",
+            message: `Failed to settle prepaid invoice ${invoice.id} to wallet: ${settled.err.message}`,
+          })
+        )
+      }
+    }
+
+    const updatedInvoice = await new DrizzleBillingRepository(this.db).updateInvoice({
+      invoiceId: invoice.id,
+      projectId: invoice.projectId,
+      data,
+    })
+    if (!updatedInvoice) {
+      return Err(
+        new UnPriceBillingError({
+          code: "BILLING_OPERATION_FAILED",
+          message: "Error updating invoice",
+        })
+      )
+    }
+    return Ok(updatedInvoice)
   }
 
   public async finalizeInvoice({
@@ -1911,7 +1881,7 @@ export class BillingService {
         subscription: true,
         items: {
           with: {
-            featurePlanVersion: true,
+            featurePlanVersion: { with: { feature: true } },
           },
         },
       },
@@ -1944,7 +1914,6 @@ export class BillingService {
               await txBillingRepo.capPendingPeriodsAtPhaseEnd({
                 phaseId: phase.id,
                 phaseEndAt: phase.endAt,
-                whenToBill: phase.planVersion.whenToBill,
               })
             }
 
@@ -1961,8 +1930,8 @@ export class BillingService {
             })
 
             for (const period of invoicedPeriods) {
-              const refundAmount = dryRun
-                ? 0
+              const refundResult = dryRun
+                ? Ok(0)
                 : await this.computeProratedRefundAmount(tx, {
                     period,
                     phaseEndAt: phase.endAt!,
@@ -1970,6 +1939,9 @@ export class BillingService {
                     billingAnchor: phase.billingAnchor,
                     billingConfig: phase.planVersion.billingConfig,
                   })
+
+              if (refundResult.err) throw refundResult.err
+              const refundAmount = refundResult.val
 
               if (!dryRun) {
                 if (refundAmount > 0) {
@@ -2061,7 +2033,7 @@ export class BillingService {
                 })
 
                 return {
-                  id: newId("billing_period"),
+                  id: `bp_bs1_${(await hashStringSHA256([phase.projectId, phase.subscriptionId, phase.id, item.id, w.start, w.end, "billing_usage_v1"].join("|"))).slice(0, 28)}`,
                   projectId: phase.projectId,
                   subscriptionId: phase.subscriptionId,
                   customerId: phase.subscription.customerId,
@@ -2084,6 +2056,52 @@ export class BillingService {
             // 4. Batch insert billing periods for this item
             if (billingPeriodValues.length > 0) {
               if (!dryRun) {
+                if (item.featurePlanVersion.featureType === "usage") {
+                  const entitlements = await tx.query.customerEntitlements.findMany({
+                    where: (table, { and, eq }) =>
+                      and(
+                        eq(table.projectId, phase.projectId),
+                        eq(table.subscriptionId, phase.subscriptionId),
+                        eq(table.subscriptionPhaseId, phase.id),
+                        eq(table.subscriptionItemId, item.id)
+                      ),
+                  })
+                  if (entitlements.length === 0)
+                    throw new Error(`No entitlement owns new billing periods for item ${item.id}`)
+                  const registrations = billingPeriodValues.flatMap((period) => {
+                    const owners = entitlements.filter((entitlement) =>
+                      ownsBillingUsagePeriod(entitlement, period)
+                    )
+                    if (owners.length === 0)
+                      throw new Error(`No entitlement owns new billing period ${period.id}`)
+                    return owners.map((entitlement) => {
+                      return billingUsageRegistrationSchema.parse({
+                        projectId: period.projectId,
+                        customerId: period.customerId,
+                        customerEntitlementId: entitlement.id,
+                        subscriptionId: period.subscriptionId,
+                        subscriptionPhaseId: period.subscriptionPhaseId,
+                        subscriptionItemId: item.id,
+                        billingPeriodId: period.id,
+                        statementKey: period.statementKey,
+                        featureSlug: item.featurePlanVersion.feature.slug,
+                        cycleStartAt: period.cycleStartAt,
+                        cycleEndAt: period.cycleEndAt,
+                        currency: phase.planVersion.currency,
+                        amountScale: 8,
+                        origin: "period_generation_v1",
+                        registeredAt: now,
+                      })
+                    })
+                  })
+                  const registered = await this.reservationFlushGateway.registerPeriods({
+                    projectId: phase.projectId,
+                    customerId: phase.subscription.customerId,
+                    subscriptionId: phase.subscriptionId,
+                    registrations,
+                  })
+                  if (registered.err) throw registered.err
+                }
                 await txBillingRepo.createPeriodsBatch({
                   periods: billingPeriodValues,
                 })
@@ -2280,10 +2298,10 @@ export class BillingService {
       billingAnchor: number
       billingConfig: import("@unprice/db/validators").BillingConfig
     }
-  ): Promise<number> {
+  ): Promise<Result<number, UnPriceBillingError>> {
     const { period, phaseEndAt, phaseStartAt, billingAnchor, billingConfig } = input
 
-    if (!period.invoiceId) return 0
+    if (!period.invoiceId) return Ok(0)
 
     // Only paid invoices can generate refunds — otherwise we'd be
     // refunding money the customer never spent.
@@ -2293,7 +2311,7 @@ export class BillingService {
         and(eq(inv.id, period.invoiceId!), eq(inv.projectId, period.projectId)),
     })
 
-    if (!invoice || invoice.status !== "paid") return 0
+    if (!invoice || invoice.status !== "paid") return Ok(0)
 
     const prorationBillingConfig = {
       ...billingConfig,
@@ -2319,7 +2337,7 @@ export class BillingService {
 
     const oldFactor = originalProration.prorationFactor
     const newFactor = newProration.prorationFactor
-    if (!oldFactor || newFactor >= oldFactor) return 0
+    if (!oldFactor || newFactor >= oldFactor) return Ok(0)
 
     // Sum the ledger entries that credit `customer.*.consumed` for this billing
     // period. Uses the same projection contract as the invoice-lines read path.
@@ -2327,7 +2345,14 @@ export class BillingService {
       projectId: period.projectId,
       statementKey: invoice.statementKey,
     })
-    if (linesResult.err) return 0
+    if (linesResult.err) {
+      return Err(
+        new UnPriceBillingError({
+          code: "BILLING_OPERATION_FAILED",
+          message: `Failed to read refund lines for period ${period.id}: ${linesResult.err.message}`,
+        })
+      )
+    }
 
     const paidMinor = linesResult.val.reduce((sum, line) => {
       if (line.metadata?.billing_period_id !== period.id) return sum
@@ -2335,10 +2360,10 @@ export class BillingService {
       return sum + snap.amount
     }, 0)
 
-    if (paidMinor <= 0) return 0
+    if (paidMinor <= 0) return Ok(0)
 
     const unearnedFraction = 1 - newFactor / oldFactor
-    return Math.floor(paidMinor * unearnedFraction)
+    return Ok(Math.floor(paidMinor * unearnedFraction))
   }
 
   public async estimatePriceCurrentUsage({

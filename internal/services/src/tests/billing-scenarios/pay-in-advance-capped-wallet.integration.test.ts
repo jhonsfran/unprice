@@ -1,14 +1,16 @@
-import type { Analytics } from "@unprice/analytics"
 import { sql } from "@unprice/db"
 import type { Customer, Subscription } from "@unprice/db/validators"
-import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { toLedgerMinor } from "@unprice/money"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ServiceContext } from "../../context"
+import { LATE_EVENT_GRACE_MS } from "../../entitlements"
 import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
 import { RatingService } from "../../rating/service"
+import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
+import { billPeriod } from "../../use-cases/billing/bill-period"
+
 import { DrizzleSubscriptionRepository } from "../../subscriptions/repository.drizzle"
 import type { SubscriptionContext } from "../../subscriptions/types"
 import {
@@ -17,7 +19,7 @@ import {
   truncateTestDatabase,
 } from "../../test-fixtures/database"
 import { seedTestDb } from "../../test-fixtures/seed-db"
-import { billPeriod } from "../../use-cases/billing/bill-period"
+
 import { deriveActivationInputsFromPlan } from "../../use-cases/billing/derive-provision-inputs"
 import { activateSubscription } from "../../use-cases/billing/provision-period"
 import { WalletService } from "../../wallet"
@@ -54,24 +56,6 @@ function createLogger(): Logger {
     error: vi.fn(),
     flush: vi.fn(),
   } as unknown as Logger
-}
-
-function createAnalytics(usageByFeature: Record<string, number>): Analytics {
-  return {
-    getUsageBillingFeatures: vi.fn(
-      async ({
-        features,
-      }: {
-        features: Array<{ featureSlug: string }>
-      }) =>
-        Ok(
-          features.map((feature) => ({
-            featureSlug: feature.featureSlug,
-            usage: usageByFeature[feature.featureSlug] ?? 0,
-          }))
-        )
-    ),
-  } as unknown as Analytics
 }
 
 async function loadSubscriptionContext(now: number): Promise<SubscriptionContext> {
@@ -114,7 +98,9 @@ describe("P0-D pay_in_advance capped wallet workflow", () => {
     const logger = createLogger()
     const ledger = new LedgerGateway({ db, logger })
     const wallet = new WalletService({ db, logger, ledgerGateway: ledger })
-    const analytics = createAnalytics({ events: 0 })
+    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+      events: { quantity: 1200, amount: usageAmount },
+    })
     const rating = new RatingService({
       logger,
       analytics,
@@ -156,6 +142,7 @@ describe("P0-D pay_in_advance capped wallet workflow", () => {
     })
 
     const startRun = await billPeriod({
+      reservationFlushGateway,
       context: await loadSubscriptionContext(jan1),
       logger,
       db,
@@ -238,7 +225,8 @@ describe("P0-D pay_in_advance capped wallet workflow", () => {
     })
 
     const usageRun = await billPeriod({
-      context: await loadSubscriptionContext(feb1),
+      reservationFlushGateway,
+      context: await loadSubscriptionContext(feb1 + LATE_EVENT_GRACE_MS + 1),
       logger,
       db,
       repo,
@@ -246,7 +234,8 @@ describe("P0-D pay_in_advance capped wallet workflow", () => {
       ledgerService: ledger,
     })
     const rerun = await billPeriod({
-      context: await loadSubscriptionContext(feb1),
+      reservationFlushGateway,
+      context: await loadSubscriptionContext(feb1 + LATE_EVENT_GRACE_MS + 1),
       logger,
       db,
       repo,
@@ -283,7 +272,6 @@ describe("P0-D pay_in_advance capped wallet workflow", () => {
     await expectInvoiceLineAmounts(ledger, usageStatementKey, [usageAmount])
     await expectReservationClosed(reservationId)
     await expectLedgerSources()
-    expect(analytics.getUsageBillingFeatures).toHaveBeenCalledTimes(0)
   })
 })
 

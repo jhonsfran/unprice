@@ -76,7 +76,7 @@ export function consumeGrantsByPriority<TGrant extends GrantConsumptionGrant>(pa
   timestamp: number
   units: number
 }): GrantConsumptionResult<TGrant> {
-  if (params.units <= 0) {
+  if (params.units === 0) {
     return { allocations: [], remaining: params.units }
   }
 
@@ -100,6 +100,35 @@ export function consumeGrantsByPriority<TGrant extends GrantConsumptionGrant>(pa
 
   let remaining = params.units
   const allocations: GrantConsumptionAllocation<TGrant>[] = []
+
+  if (remaining < 0) {
+    const correctionOrder = [
+      ...eligible.map((entry) => ({
+        ...entry,
+        limit:
+          entry.grant.allowanceUnits === null
+            ? 0
+            : Math.max(0, entry.state.consumedInCurrentWindow - entry.grant.allowanceUnits),
+      })),
+      ...eligible.toReversed().map((entry) => ({ ...entry, limit: Number.POSITIVE_INFINITY })),
+    ]
+    for (const entry of correctionOrder) {
+      const state = statesByBucketKey.get(entry.state.bucketKey) ?? entry.state
+      const units = -Math.min(-remaining, entry.limit, Math.max(0, state.consumedInCurrentWindow))
+      if (units === 0) continue
+      const allocation = allocateUnits({
+        grant: entry.grant,
+        state,
+        timestamp: params.timestamp,
+        units,
+      })
+      allocations.push(allocation)
+      statesByBucketKey.set(state.bucketKey, allocation.nextState)
+      remaining -= units
+      if (remaining === 0) break
+    }
+    return { allocations, remaining }
+  }
 
   for (const { grant, state } of eligible) {
     if (remaining <= 0) {
@@ -557,7 +586,9 @@ function allocateUnits<TGrant extends GrantConsumptionGrant>(params: {
       exhaustedAt:
         params.grant.allowanceUnits !== null && usageAfter >= params.grant.allowanceUnits
           ? params.timestamp
-          : params.state.exhaustedAt,
+          : params.units < 0
+            ? null
+            : params.state.exhaustedAt,
     },
     periodKey: params.state.periodKey,
     units: params.units,

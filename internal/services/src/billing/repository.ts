@@ -65,7 +65,6 @@ export interface MarkPeriodsInvoicedInput {
 export interface CapPendingPeriodsAtPhaseEndInput {
   phaseId: string
   phaseEndAt: number
-  whenToBill: "pay_in_advance" | "pay_in_arrear"
 }
 
 export interface ListInvoicedPeriodsExceedingPhaseEndInput {

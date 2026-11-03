@@ -1,9 +1,11 @@
 import type { MeterConfig } from "@unprice/services/entitlements"
 import {
+  computeGrantPeriodBucket,
   deriveMeterKey,
   extractCurrencyCodeFromFeatureConfig,
 } from "@unprice/services/entitlements"
 import type { ApplyInput, EntitlementConfigInput, MeterIdentity } from "./contracts"
+import type { EntitlementWindowStateOps } from "./ports"
 
 export { extractCurrencyCodeFromFeatureConfig } from "@unprice/services/entitlements"
 
@@ -54,4 +56,37 @@ function parseFiniteNumericValue(value: unknown): number | null {
 
   const parsedValue = Number(trimmedValue)
   return Number.isFinite(parsedValue) ? parsedValue : null
+}
+
+export function resolveMeterStateKey(params: {
+  entitlement: EntitlementConfigInput
+  timestamp: number
+}): string {
+  const { entitlement, timestamp } = params
+  const meterKey = deriveMeterKey(entitlement.meterConfig)
+  if (!entitlement.resetConfig || entitlement.resetConfig.resetInterval === "onetime") {
+    return meterKey
+  }
+  const period = computeGrantPeriodBucket(
+    {
+      grantId: entitlement.customerEntitlementId,
+      effectiveAt: entitlement.effectiveAt,
+      expiresAt: entitlement.expiresAt,
+      resetConfig: entitlement.resetConfig,
+    },
+    timestamp
+  )
+  if (!period) throw new Error("Unable to resolve meter aggregation period")
+  return `${meterKey}|period=${encodeURIComponent(period.periodKey)}`
+}
+
+export function readEventMeterState(params: {
+  createdAt: number
+  entitlement: EntitlementConfigInput
+  store: Pick<EntitlementWindowStateOps, "readMeterStateDraft">
+  timestamp: number
+}) {
+  const { createdAt, entitlement, store, timestamp } = params
+  const key = resolveMeterStateKey({ entitlement, timestamp })
+  return store.readMeterStateDraft(key, createdAt)
 }

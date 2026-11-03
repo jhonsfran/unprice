@@ -1,3 +1,4 @@
+import type { BillingUsageSnapshot } from "@unprice/services/billing"
 import type { GrantConsumptionState } from "@unprice/services/entitlements"
 import { DO_IDEMPOTENCY_TTL_MS, computeGrantPeriodBucket } from "@unprice/services/entitlements"
 import { idempotencyEntryToApplyResult } from "../batch-apply-helpers"
@@ -18,6 +19,7 @@ import type {
 type MeterStateRow = { usage: number; updatedAt: number | null; createdAt: number }
 
 export class InMemoryEntitlementWindowStore implements EntitlementWindowStateStore {
+  billingUsageSnapshots = new Map<string, BillingUsageSnapshot>()
   meterStates = new Map<string, MeterStateRow>()
   grantStates = new Map<string, GrantConsumptionState>()
   idempotency = new Map<string, BatchIdempotencyEntry>()
@@ -27,6 +29,7 @@ export class InMemoryEntitlementWindowStore implements EntitlementWindowStateSto
 
   atomically<T>(fn: (tx: EntitlementWindowStateOps) => T): T {
     const snapshot = {
+      billingUsageSnapshots: new Map(this.billingUsageSnapshots),
       meterStates: new Map([...this.meterStates].map(([k, v]) => [k, { ...v }])),
       grantStates: new Map([...this.grantStates].map(([k, v]) => [k, { ...v }])),
       idempotency: new Map(this.idempotency),
@@ -35,12 +38,25 @@ export class InMemoryEntitlementWindowStore implements EntitlementWindowStateSto
     try {
       return fn(this)
     } catch (error) {
+      this.billingUsageSnapshots = snapshot.billingUsageSnapshots
       this.meterStates = snapshot.meterStates
       this.grantStates = snapshot.grantStates
       this.idempotency = snapshot.idempotency
       this.walletRow = snapshot.walletRow
       throw error
     }
+  }
+
+  readBillingUsageSnapshot(periodId: string): BillingUsageSnapshot | null {
+    return this.billingUsageSnapshots.get(periodId) ?? null
+  }
+
+  writeBillingUsageSnapshot(snapshot: BillingUsageSnapshot): void {
+    this.billingUsageSnapshots.set(snapshot.billingPeriodId, { ...snapshot })
+  }
+
+  listBillingUsageSnapshots(): BillingUsageSnapshot[] {
+    return [...this.billingUsageSnapshots.values()]
   }
 
   ensureMeterState(params: { meterKey: string; createdAt: number }): void {
@@ -164,6 +180,12 @@ export class InMemoryEntitlementWindowStore implements EntitlementWindowStateSto
     }
     if (typeof this.walletRow?.lastEventAt === "number") {
       candidates.push(this.walletRow.lastEventAt)
+    }
+    for (const snapshot of this.billingUsageSnapshots.values()) {
+      candidates.push(
+        snapshot.completedAt ??
+          Math.max(snapshot.cycleEndAt, snapshot.sealedAt ?? snapshot.registeredAt)
+      )
     }
     const lastActivityAt = candidates.length > 0 ? Math.max(...candidates) : null
     const retentionCandidates = [lifecycleEndAt, lastActivityAt].filter(

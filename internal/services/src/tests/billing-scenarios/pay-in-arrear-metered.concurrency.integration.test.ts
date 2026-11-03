@@ -1,13 +1,14 @@
-import type { Analytics } from "@unprice/analytics"
 import { type Database, sql } from "@unprice/db"
 import type { Customer, Subscription } from "@unprice/db/validators"
-import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { toLedgerMinor } from "@unprice/money"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
 import { RatingService } from "../../rating/service"
+import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
+import { billPeriod } from "../../use-cases/billing/bill-period"
+
 import { DrizzleSubscriptionRepository } from "../../subscriptions/repository.drizzle"
 import type { SubscriptionContext } from "../../subscriptions/types"
 import {
@@ -16,7 +17,6 @@ import {
   truncateTestDatabase,
 } from "../../test-fixtures/database"
 import { seedTestDb } from "../../test-fixtures/seed-db"
-import { billPeriod } from "../../use-cases/billing/bill-period"
 
 const db = createTestDatabaseConnection()
 
@@ -44,24 +44,6 @@ function createLogger(): Logger {
     error: vi.fn(),
     flush: vi.fn(),
   } as unknown as Logger
-}
-
-function createAnalytics(usageByFeature: Record<string, number>): Analytics {
-  return {
-    getUsageBillingFeatures: vi.fn(
-      async ({
-        features,
-      }: {
-        features: Array<{ featureSlug: string }>
-      }) =>
-        Ok(
-          features.map((feature) => ({
-            featureSlug: feature.featureSlug,
-            usage: usageByFeature[feature.featureSlug] ?? 0,
-          }))
-        )
-    ),
-  } as unknown as Analytics
 }
 
 async function loadSubscriptionContext(dbForContext: Database): Promise<SubscriptionContext> {
@@ -92,7 +74,9 @@ async function loadSubscriptionContext(dbForContext: Database): Promise<Subscrip
 
 async function runBillPeriodWorker(dbForWorker: Database) {
   const logger = createLogger()
-  const analytics = createAnalytics({ events: 1200 })
+  const { analytics, reservationFlushGateway } = createRecordedUsageFixture(dbForWorker, {
+    events: { quantity: 1200, amount: 12_000_000_000 },
+  })
   const ledger = new LedgerGateway({ db: dbForWorker, logger })
   const rating = new RatingService({
     logger,
@@ -104,6 +88,7 @@ async function runBillPeriodWorker(dbForWorker: Database) {
   expect(ensureAccounts.err).toBeUndefined()
 
   return billPeriod({
+    reservationFlushGateway,
     context: await loadSubscriptionContext(dbForWorker),
     logger,
     db: dbForWorker,

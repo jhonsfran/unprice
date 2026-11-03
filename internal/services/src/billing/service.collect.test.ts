@@ -12,6 +12,7 @@ import type { Metrics } from "../metrics"
 import type { PaymentProviderService } from "../payment-provider/service"
 import type { RatingService } from "../rating/service"
 import type { SubscriptionMachine } from "../subscriptions/machine"
+import { createBillingGatewayStub } from "../test-fixtures/billing-gateway"
 import type { WalletService } from "../wallet"
 import type { UnPriceBillingError } from "./errors"
 import { BillingService } from "./service"
@@ -50,13 +51,14 @@ let findInvoiceByIdResult: SubscriptionInvoice | null = null
 const updateInvoiceMock = vi.fn(
   async (input: { invoiceId: string; projectId: string; data: Record<string, unknown> }) => {
     repoCalls.updateInvoice.push(input)
-    return {
+    findInvoiceByIdResult = {
       ...findInvoiceByIdResult,
       id: input.invoiceId,
       projectId: input.projectId,
       status: (input.data.status as string | undefined) ?? "unpaid",
       ...input.data,
     } as unknown as SubscriptionInvoice
+    return findInvoiceByIdResult
   }
 )
 
@@ -173,6 +175,7 @@ function makeBillingService(opts: {
   } as unknown as Logger
 
   const billing = new BillingService({
+    reservationFlushGateway: createBillingGatewayStub(),
     db,
     logger,
     analytics: {} as Analytics,
@@ -244,6 +247,31 @@ describe("BillingService._collectInvoicePayment", () => {
     expect(settleMock).not.toHaveBeenCalled()
   })
 
+  it.each([
+    { providerStatus: "void", expectedStatus: "void" },
+    { providerStatus: "uncollectible", expectedStatus: "failed" },
+  ] as const)(
+    "preserves the $providerStatus outcome returned by collection",
+    async ({ providerStatus, expectedStatus }) => {
+      const invoice = makeInvoice({ status: "unpaid", collectionMethod: "charge_automatically" })
+      const provider = makeProviderService({
+        collectPayment: vi.fn().mockResolvedValue(Ok({ status: providerStatus, invoiceUrl: "" })),
+      })
+      const { billing } = makeBillingService({ invoice, paymentProvider: provider })
+
+      const result = await collectInvoicePayment(billing, {
+        invoiceId: "inv_1",
+        projectId: "proj_1",
+        now: 5_000,
+      })
+
+      expect(result.err).toBeUndefined()
+      expect(result.val).toMatchObject({ status: expectedStatus, paidAt: null })
+      expect(findInvoiceByIdResult).toMatchObject({ status: expectedStatus, paidAt: null })
+      expect(settleMock).not.toHaveBeenCalled()
+    }
+  )
+
   it("charge_automatically provider already paid — skips collect, settles wallet", async () => {
     const invoice = makeInvoice({ status: "unpaid", collectionMethod: "charge_automatically" })
     const provider = makeProviderService({
@@ -268,6 +296,52 @@ describe("BillingService._collectInvoicePayment", () => {
     expect(settleMock).toHaveBeenCalled()
   })
 
+  it.each([
+    ["waiting", "send_invoice", "paid"],
+    ["unpaid", "charge_automatically", "paid"],
+    ["unpaid", "charge_automatically", "open"],
+  ] as const)(
+    "retries settlement after failure for %s invoice using %s with provider %s",
+    async (status, collectionMethod, providerStatus) => {
+      const invoice = makeInvoice({ status, collectionMethod })
+      let paidAtProvider = providerStatus === "paid"
+      let receivableBalance = invoice.amountDue
+      let settlementAttempts = 0
+      const provider = makeProviderService({
+        getStatusInvoice: vi.fn(async () =>
+          Ok({ status: paidAtProvider ? "paid" : "open", invoiceUrl: "", paidAt: 4_000 })
+        ),
+        collectPayment: vi.fn(async () => {
+          paidAtProvider = true
+          return Ok({ status: "paid", invoiceUrl: "" })
+        }),
+      } as unknown as Partial<PaymentProviderService>)
+      const { billing } = makeBillingService({ invoice, paymentProvider: provider })
+      settleMock.mockImplementation(async () => {
+        settlementAttempts++
+        if (settlementAttempts === 1) {
+          return Err(new FetchError({ message: "ledger unavailable", retry: false }))
+        }
+        receivableBalance = 0
+        return Ok(undefined)
+      })
+      const payload = { invoiceId: invoice.id, projectId: invoice.projectId, now: 5_000 }
+
+      const failed = await collectInvoicePayment(billing, payload)
+      expect(failed.err?.code).toBe("PAYMENT_SETTLEMENT_FAILED")
+      expect(receivableBalance).toBe(1_000_000_000)
+      const statusAfterFailure = findInvoiceByIdResult?.status
+
+      const retried = await collectInvoicePayment(billing, payload)
+      expect(statusAfterFailure).toBe(status)
+      expect(retried.val?.status).toBe("paid")
+      expect(findInvoiceByIdResult?.status).toBe("paid")
+      expect(receivableBalance).toBe(0)
+      expect(settlementAttempts).toBe(2)
+      expect(provider.collectPayment).toHaveBeenCalledTimes(providerStatus === "open" ? 1 : 0)
+    }
+  )
+
   it("send_invoice happy path — sends invoice, sets status to waiting", async () => {
     const invoice = makeInvoice({ status: "unpaid", collectionMethod: "send_invoice" })
     const provider = makeProviderService()
@@ -283,6 +357,51 @@ describe("BillingService._collectInvoicePayment", () => {
     expect(result.val).toMatchObject({ status: "waiting" })
     expect(provider.sendInvoice).toHaveBeenCalledWith({ invoiceId: "provider_inv_1" })
   })
+
+  it.each([null, ""])(
+    "sends a manual invoice without a saved payment method %s",
+    async (paymentMethodId) => {
+      const invoice = makeInvoice({ collectionMethod: "send_invoice", paymentMethodId })
+      const { billing, provider } = makeBillingService({ invoice })
+
+      const result = await collectInvoicePayment(billing, {
+        invoiceId: invoice.id,
+        projectId: invoice.projectId,
+        now: 5_000,
+      })
+
+      expect(result.val?.status).toBe("waiting")
+      expect(findInvoiceByIdResult?.status).toBe("waiting")
+      expect(provider.sendInvoice).toHaveBeenCalledWith({ invoiceId: "provider_inv_1" })
+    }
+  )
+
+  it.each(["waiting", "unpaid"] as const)(
+    "reconciles a paid provider invoice without a saved payment method from %s",
+    async (status) => {
+      const invoice = makeInvoice({
+        status,
+        collectionMethod: status === "waiting" ? "send_invoice" : "charge_automatically",
+        paymentMethodId: null,
+      })
+      const provider = makeProviderService({
+        getStatusInvoice: vi
+          .fn()
+          .mockResolvedValue(Ok({ status: "paid", invoiceUrl: "", paidAt: 4_000 })),
+      } as unknown as Partial<PaymentProviderService>)
+      const { billing } = makeBillingService({ invoice, paymentProvider: provider })
+
+      const result = await collectInvoicePayment(billing, {
+        invoiceId: invoice.id,
+        projectId: invoice.projectId,
+        now: 5_000,
+      })
+
+      expect(result.val?.status).toBe("paid")
+      expect(findInvoiceByIdResult?.status).toBe("paid")
+      expect(provider.collectPayment).not.toHaveBeenCalled()
+    }
+  )
 
   it("send_invoice failure — returns Err", async () => {
     const invoice = makeInvoice({ status: "unpaid", collectionMethod: "send_invoice" })
@@ -450,7 +569,6 @@ describe("BillingService._collectInvoicePayment", () => {
       walletService: expect.anything(),
       invoice: expect.objectContaining({
         id: "inv_1",
-        status: "paid",
         amountDue: 1_000_000_000,
       }),
     })

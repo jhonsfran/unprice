@@ -54,7 +54,8 @@ export function findGrantLimitExceededFact(params: {
     return null
   }
 
-  for (const fact of params.facts) {
+  for (const rawFact of params.facts) {
+    const fact = normalizeBillableFact(rawFact)
     if (fact.delta <= 0) {
       continue
     }
@@ -136,12 +137,15 @@ export function priceFactsFromGrantStates(params: {
   const activeGrants = params.activeGrants.map((grant) => ({ ...grant }))
   const priceGrant = firstGrantByDrainOrder(activeGrants)
 
-  for (const fact of params.facts) {
-    if (fact.delta <= 0) {
+  for (const rawFact of params.facts) {
+    const fact = normalizeBillableFact(rawFact)
+    if (fact.delta === 0) {
+      const bucket = computeGrantPeriodBucket(priceGrant, params.eventTimestamp)
+      const state = grantStates.find((state) => state.bucketKey === bucket?.bucketKey)
       pricedFacts.push(
         priceFactWithEntitlement({
           entitlement: params.entitlement,
-          fact,
+          fact: { ...fact, valueAfter: state?.consumedInCurrentWindow ?? 0 },
           grant: priceGrant,
           timestamp: params.eventTimestamp,
         })
@@ -156,7 +160,17 @@ export function priceFactsFromGrantStates(params: {
       units: fact.delta,
     })
 
+    const allocationsByBucket = new Map<string, (typeof consumed.allocations)[number]>()
     for (const allocation of consumed.allocations) {
+      const previous = allocationsByBucket.get(allocation.nextState.bucketKey)
+      allocationsByBucket.set(allocation.nextState.bucketKey, {
+        ...allocation,
+        units: (previous?.units ?? 0) + allocation.units,
+        usageBefore: previous?.usageBefore ?? allocation.usageBefore,
+      })
+    }
+
+    for (const allocation of allocationsByBucket.values()) {
       const deltaExplanation = computeUsagePriceDeltaExplanation({
         priceConfig: params.entitlement.featureConfig,
         usageAfter: allocation.usageAfter,
@@ -216,7 +230,7 @@ function replaceGrantState(
   states[index] = nextState
 }
 
-export function projectEventCostMinor(params: {
+export function projectEventUsage(params: {
   activeGrants: readonly ActiveGrantSnapshot[]
   entitlement: EntitlementConfigInput
   event: ApplyInput["event"]
@@ -226,7 +240,7 @@ export function projectEventCostMinor(params: {
   meterState: Readonly<MeterStateDraft>
   /** Omit only when the caller intentionally defers timestamp validation. */
   validationTimeMs?: number
-}): number {
+}): { amountMinor: number; units: number } {
   const transition = computeMeterTransition({
     currentState: params.meterState.exists
       ? {
@@ -239,7 +253,7 @@ export function projectEventCostMinor(params: {
     ...(params.validationTimeMs === undefined ? {} : { validationTimeMs: params.validationTimeMs }),
   })
   if (!transition) {
-    return 0
+    return { amountMinor: 0, units: 0 }
   }
 
   const { pricedFacts } = priceFactsFromGrantStates({
@@ -250,7 +264,14 @@ export function projectEventCostMinor(params: {
     grantStates: params.grantStates,
   })
 
-  return pricedFacts.reduce((sum, fact) => sum + fact.amountMinor, 0)
+  return {
+    amountMinor: pricedFacts.reduce((sum, fact) => sum + fact.amountMinor, 0),
+    units: pricedFacts.reduce((sum, fact) => sum + fact.units, 0),
+  }
+}
+
+export function projectEventCostMinor(params: Parameters<typeof projectEventUsage>[0]): number {
+  return projectEventUsage(params).amountMinor
 }
 
 export function priceFactWithEntitlement(params: {
@@ -338,4 +359,10 @@ export function compareGrantDrainOrder(
     (left.expiresAt ?? Number.POSITIVE_INFINITY) - (right.expiresAt ?? Number.POSITIVE_INFINITY) ||
     left.grantId.localeCompare(right.grantId)
   )
+}
+
+function normalizeBillableFact(fact: Fact): Fact {
+  const valueAfter = Math.max(0, fact.valueAfter)
+  const valueBefore = Math.max(0, fact.valueAfter - fact.delta)
+  return { ...fact, delta: valueAfter - valueBefore, valueAfter }
 }

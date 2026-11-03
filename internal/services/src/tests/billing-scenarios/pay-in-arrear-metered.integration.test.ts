@@ -1,13 +1,14 @@
-import type { Analytics } from "@unprice/analytics"
 import { sql } from "@unprice/db"
 import type { Customer, Subscription } from "@unprice/db/validators"
-import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { toLedgerMinor } from "@unprice/money"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
 import { RatingService } from "../../rating/service"
+import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
+import { billPeriod } from "../../use-cases/billing/bill-period"
+
 import { DrizzleSubscriptionRepository } from "../../subscriptions/repository.drizzle"
 import type { SubscriptionContext } from "../../subscriptions/types"
 import {
@@ -16,7 +17,6 @@ import {
 } from "../../test-fixtures/database"
 import { truncateTestDatabase } from "../../test-fixtures/database"
 import { seedTestDb } from "../../test-fixtures/seed-db"
-import { billPeriod } from "../../use-cases/billing/bill-period"
 
 const db = createTestDatabaseConnection()
 
@@ -44,24 +44,6 @@ function createLogger(): Logger {
     error: vi.fn(),
     flush: vi.fn(),
   } as unknown as Logger
-}
-
-function createAnalytics(usageByFeature: Record<string, number>): Analytics {
-  return {
-    getUsageBillingFeatures: vi.fn(
-      async ({
-        features,
-      }: {
-        features: Array<{ featureSlug: string }>
-      }) =>
-        Ok(
-          features.map((feature) => ({
-            featureSlug: feature.featureSlug,
-            usage: usageByFeature[feature.featureSlug] ?? 0,
-          }))
-        )
-    ),
-  } as unknown as Analytics
 }
 
 async function loadSubscriptionContext(): Promise<SubscriptionContext> {
@@ -102,7 +84,9 @@ describe("P0-A pay_in_arrear metered billing workflow", () => {
 
   it("P0-A rates pending periods, posts pgledger entries, creates one invoice, and is idempotent", async () => {
     const logger = createLogger()
-    const analytics = createAnalytics({ events: 1200 })
+    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+      events: { quantity: 1200, amount: 12_000_000_000 },
+    })
     const ledger = new LedgerGateway({ db, logger })
     const rating = new RatingService({
       logger,
@@ -115,6 +99,7 @@ describe("P0-A pay_in_arrear metered billing workflow", () => {
 
     const context = await loadSubscriptionContext()
     const firstRun = await billPeriod({
+      reservationFlushGateway,
       context,
       logger,
       db,
@@ -123,6 +108,7 @@ describe("P0-A pay_in_arrear metered billing workflow", () => {
       ledgerService: ledger,
     })
     const secondRun = await billPeriod({
+      reservationFlushGateway,
       context,
       logger,
       db,
@@ -229,6 +215,6 @@ describe("P0-A pay_in_arrear metered billing workflow", () => {
         AND i.statement_key = ${statementKey}
     `)
     expect(entryCount.rows).toEqual([{ count: 4 }])
-    expect(analytics.getUsageBillingFeatures).toHaveBeenCalledTimes(1)
+    expect(analytics.getUsageBillingFeatures).not.toHaveBeenCalled()
   })
 })
