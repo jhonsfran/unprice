@@ -77,6 +77,8 @@ patterns. Keep it cheap to load and useful.
 
 ## Cloudflare, API, And Ingestion
 
+- 2026-11-03: Tinybird meter-fact fixtures must use the existing 2099 timeline; past event timestamps can be removed by the 90-day TTL during test ingestion. Keep fixture dates and endpoint test windows aligned.
+
 - 2026-10-19: The API's `c.get("services")` is its own `DomainServiceContext` (`hono/env.ts`), filled
   in `middleware/init.ts`; a service added to `createServiceContext` must be added there too, and to
   the route test harnesses (`budgets.test.ts`, `local-mode.fuzz.test.ts`) that set `services` by hand.

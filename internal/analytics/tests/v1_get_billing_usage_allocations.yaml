@@ -31,12 +31,12 @@
 
 - name: partial_reset_money
   description: Preserves accepted money when billing begins after a reset free tier was consumed
-  parameters: project_id=p_partial&customer_id=c_partial&customer_entitlement_ids=ce_partial&feature_slugs=partial&start=1768435200000&end=1771113600000
+  parameters: project_id=p_partial&customer_id=c_partial&customer_entitlement_ids=ce_partial&feature_slugs=partial&start=4072118400000&end=4074796800000
   expected_result: |
-    {"customer_entitlement_id":"ce_partial","grant_id":"grant_partial","period_key":"month:1767225600000","feature_slug":"partial","period_start_at":1767225600000,"usage":5,"amount":500000000,"currency":"USD","amount_scale":8}
+    {"customer_entitlement_id":"ce_partial","grant_id":"grant_partial","period_key":"month:4070908800000","feature_slug":"partial","period_start_at":4070908800000,"usage":5,"amount":500000000,"currency":"USD","amount_scale":8}
 
 - name: single_reset_money
   description: Preserves accepted money when billing begins after a reset free tier was consumed
-  parameters: project_id=p_partial&customer_id=c_partial&customer_entitlement_ids=ce_partial&feature_slugs=partial&start=1768435200000&end=1769299200000
+  parameters: project_id=p_partial&customer_id=c_partial&customer_entitlement_ids=ce_partial&feature_slugs=partial&start=4072118400000&end=4072982400000
   expected_result: |
-    {"customer_entitlement_id":"ce_partial","grant_id":"grant_partial","period_key":"month:1767225600000","feature_slug":"partial","period_start_at":1767225600000,"usage":5,"amount":500000000,"currency":"USD","amount_scale":8}
+    {"customer_entitlement_id":"ce_partial","grant_id":"grant_partial","period_key":"month:4070908800000","feature_slug":"partial","period_start_at":4070908800000,"usage":5,"amount":500000000,"currency":"USD","amount_scale":8}
