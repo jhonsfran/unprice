@@ -8,6 +8,7 @@ import type {
   MeterConfig,
   ResetConfig,
 } from "@unprice/db/validators"
+import { toLedgerMinor } from "@unprice/money"
 import { toDecimal } from "dinero.js"
 import { describe, expect, it, vi } from "vitest"
 import { RatingService } from "./service"
@@ -744,6 +745,48 @@ describe("recorded prices in partial reset buckets", () => {
     billingAnchor: 15,
     planType: "recurring",
   }
+
+  it("keeps trial usage free when recorded facts have positive prices", async () => {
+    const service = new RatingService({
+      analytics: {
+        getBillingUsageAllocations: vi.fn(async () => ({
+          data: [
+            {
+              customer_entitlement_id: "ce_1",
+              grant_id: "grnt_1",
+              period_key: `month:${effectiveAt}`,
+              feature_slug: "events",
+              period_start_at: effectiveAt,
+              usage: 5,
+              amount: 500_000_000,
+              currency: "USD",
+              amount_scale: 8,
+            },
+          ],
+        })),
+      } as never,
+      grantsManager: {} as never,
+      logger: { warn: vi.fn(), error: vi.fn() } as never,
+    })
+    const result = await service.rateBillingPeriod({
+      projectId: "proj_1",
+      customerId: "cus_1",
+      featureSlug: "events",
+      startAt,
+      endAt: Date.UTC(2026, 0, 25),
+      grants: [{ ...grant, type: "trial" }],
+    })
+
+    if (result.err) throw result.err
+    expect(
+      result.val.map((charge) => ({
+        usage: charge.usage,
+        amount: toLedgerMinor(charge.price.totalPrice.dinero),
+        isTrial: charge.isTrial,
+        prorate: charge.prorate,
+      }))
+    ).toEqual([{ usage: 5, amount: 0, isTrial: true, prorate: 0 }])
+  })
 
   it.each([
     { name: "multiple resets", endAt: Date.UTC(2026, 1, 15) },

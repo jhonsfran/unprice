@@ -247,6 +247,31 @@ describe("BillingService._collectInvoicePayment", () => {
     expect(settleMock).not.toHaveBeenCalled()
   })
 
+  it.each([
+    { providerStatus: "void", expectedStatus: "void" },
+    { providerStatus: "uncollectible", expectedStatus: "failed" },
+  ] as const)(
+    "preserves the $providerStatus outcome returned by collection",
+    async ({ providerStatus, expectedStatus }) => {
+      const invoice = makeInvoice({ status: "unpaid", collectionMethod: "charge_automatically" })
+      const provider = makeProviderService({
+        collectPayment: vi.fn().mockResolvedValue(Ok({ status: providerStatus, invoiceUrl: "" })),
+      })
+      const { billing } = makeBillingService({ invoice, paymentProvider: provider })
+
+      const result = await collectInvoicePayment(billing, {
+        invoiceId: "inv_1",
+        projectId: "proj_1",
+        now: 5_000,
+      })
+
+      expect(result.err).toBeUndefined()
+      expect(result.val).toMatchObject({ status: expectedStatus, paidAt: null })
+      expect(findInvoiceByIdResult).toMatchObject({ status: expectedStatus, paidAt: null })
+      expect(settleMock).not.toHaveBeenCalled()
+    }
+  )
+
   it("charge_automatically provider already paid — skips collect, settles wallet", async () => {
     const invoice = makeInvoice({ status: "unpaid", collectionMethod: "charge_automatically" })
     const provider = makeProviderService({

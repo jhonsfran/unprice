@@ -2,7 +2,7 @@ import type { Database } from "@unprice/db"
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import { z } from "zod"
 import {
-  type BillingUsageSnapshot,
+  type BillingUsageRegistration,
   billingUsageRegistrationSchema,
   billingUsageSnapshotSchema,
   ownsBillingUsagePeriod,
@@ -34,8 +34,8 @@ export async function processBillingUsageSnapshots(
 ): Promise<Result<z.infer<typeof billingUsageOperationOutputSchema>, FetchError>> {
   const input = billingUsageOperationSchema.parse(rawInput)
   try {
-    const snapshots: BillingUsageSnapshot[] = []
     if (input.operation === "register") {
+      const registrationsByOwner = new Map<string, BillingUsageRegistration[]>()
       for (const registration of input.registrations) {
         if (
           registration.projectId !== input.projectId ||
@@ -44,10 +44,21 @@ export async function processBillingUsageSnapshots(
         ) {
           throw new Error("Billing usage registration is outside its authenticated scope")
         }
-        const stub = deps.entitlementWindowClient.getEntitlementWindowStub(registration)
-        snapshots.push(...(await stub.registerBillingPeriods([registration])))
+        const registrations = registrationsByOwner.get(registration.customerEntitlementId) ?? []
+        registrations.push(registration)
+        registrationsByOwner.set(registration.customerEntitlementId, registrations)
       }
-      return Ok({ snapshots })
+      const registered = await Promise.all(
+        [...registrationsByOwner].map(([customerEntitlementId, registrations]) => {
+          const stub = deps.entitlementWindowClient.getEntitlementWindowStub({
+            projectId: input.projectId,
+            customerId: input.customerId,
+            customerEntitlementId,
+          })
+          return stub.registerBillingPeriods(registrations)
+        })
+      )
+      return Ok({ snapshots: registered.flat() })
     }
 
     const periods = await deps.db.query.billingPeriods.findMany({
@@ -70,6 +81,7 @@ export async function processBillingUsageSnapshots(
           eq(table.subscriptionId, input.subscriptionId)
         ),
     })
+    const periodsByOwner = new Map<string, string[]>()
     for (const period of periods) {
       const item = period.subscriptionItem
       if (item.featurePlanVersion.featureType !== "usage") continue
@@ -81,15 +93,22 @@ export async function processBillingUsageSnapshots(
       )
       if (owners.length === 0) throw new Error(`No entitlement owns billing period ${period.id}`)
       for (const entitlement of owners) {
+        const periodIds = periodsByOwner.get(entitlement.id) ?? []
+        periodIds.push(period.id)
+        periodsByOwner.set(entitlement.id, periodIds)
+      }
+    }
+    await Promise.all(
+      [...periodsByOwner].map(([customerEntitlementId, periodIds]) => {
         const stub = deps.entitlementWindowClient.getEntitlementWindowStub({
-          customerEntitlementId: entitlement.id,
+          customerEntitlementId,
           customerId: input.customerId,
           projectId: input.projectId,
         })
-        await stub.completeBillingPeriods([period.id])
-      }
-    }
-    return Ok({ snapshots })
+        return stub.completeBillingPeriods(periodIds)
+      })
+    )
+    return Ok({ snapshots: [] })
   } catch (error) {
     return Err(
       new FetchError({

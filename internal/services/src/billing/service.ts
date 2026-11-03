@@ -36,6 +36,7 @@ import type { BillingReservationFlushGateway } from "../use-cases/billing/reserv
 import { settlePrepaidInvoiceToWallet } from "../use-cases/billing/settle-invoice"
 import type { WalletService } from "../wallet"
 import { UnPriceBillingError } from "./errors"
+import type { UpdateInvoiceInput } from "./repository"
 import { DrizzleBillingRepository } from "./repository.drizzle"
 import { billingStrategyFor } from "./strategy"
 import { billingUsageRegistrationSchema, ownsBillingUsagePeriod } from "./usage-snapshot"
@@ -1036,28 +1037,14 @@ export class BillingService {
       }
 
       // if the invoice is paid or void, we update the invoice status
-      if (["paid", "void"].includes(statusPaymentProviderInvoice.val.status)) {
-        if (statusPaymentProviderInvoice.val.status === "paid") {
-          const settled = await settlePrepaidInvoiceToWallet({
-            walletService: this.walletService,
-            invoice,
-          })
-          if (settled.err) {
-            return Err(
-              new UnPriceBillingError({
-                code: "PAYMENT_SETTLEMENT_FAILED",
-                message: `Failed to settle prepaid invoice ${invoice.id} to wallet: ${settled.err.message}`,
-              })
-            )
-          }
-        }
-
-        // update the invoice status
-        const updatedInvoice = await billingRepo.updateInvoice({
-          invoiceId: invoice.id,
-          projectId,
+      if (
+        statusPaymentProviderInvoice.val.status === "paid" ||
+        statusPaymentProviderInvoice.val.status === "void"
+      ) {
+        return this.saveInvoiceCollection({
+          invoice,
           data: {
-            status: statusPaymentProviderInvoice.val.status as InvoiceStatus,
+            status: statusPaymentProviderInvoice.val.status,
             paidAt: statusPaymentProviderInvoice.val.paidAt,
             invoicePaymentProviderUrl: statusPaymentProviderInvoice.val.invoiceUrl,
             metadata: {
@@ -1070,17 +1057,6 @@ export class BillingService {
             },
           },
         })
-
-        if (!updatedInvoice) {
-          return Err(
-            new UnPriceBillingError({
-              code: "BILLING_OPERATION_FAILED",
-              message: "Error updating invoice",
-            })
-          )
-        }
-
-        return Ok(updatedInvoice)
       }
 
       // Past due date reached — fail the invoice. Retry-attempt caps are no
@@ -1131,46 +1107,17 @@ export class BillingService {
       }
 
       // this happen when there are many invoices and stripe merge them into one invoice
-      if (["paid", "void"].includes(statusInvoice.val.status)) {
-        if (statusInvoice.val.status === "paid") {
-          const settled = await settlePrepaidInvoiceToWallet({
-            walletService: this.walletService,
-            invoice,
-          })
-          if (settled.err) {
-            return Err(
-              new UnPriceBillingError({
-                code: "PAYMENT_SETTLEMENT_FAILED",
-                message: `Failed to settle prepaid invoice ${invoice.id} to wallet: ${settled.err.message}`,
-              })
-            )
-          }
-        }
-
-        // update the invoice status if the payment is successful
-        // if not add the failed attempt
-        const updatedInvoice = await billingRepo.updateInvoice({
-          invoiceId: invoice.id,
-          projectId,
+      if (statusInvoice.val.status === "paid" || statusInvoice.val.status === "void") {
+        return this.saveInvoiceCollection({
+          invoice,
           data: {
-            status: statusInvoice.val.status as InvoiceStatus,
+            status: statusInvoice.val.status,
             ...(statusInvoice.val.status === "paid" ? { paidAt: Date.now() } : {}),
             ...(statusInvoice.val.status === "paid"
               ? { invoicePaymentProviderUrl: statusInvoice.val.invoiceUrl }
               : {}),
           },
         })
-
-        if (!updatedInvoice) {
-          return Err(
-            new UnPriceBillingError({
-              code: "BILLING_OPERATION_FAILED",
-              message: "Error updating invoice",
-            })
-          )
-        }
-
-        return Ok(updatedInvoice)
       }
 
       if (!paymentMethodId || paymentMethodId === "") {
@@ -1210,50 +1157,34 @@ export class BillingService {
       }
 
       const paymentStatus = providerPaymentInvoice.val.status
-      const isPaid = ["paid", "void"].includes(paymentStatus)
+      const transition = transitionInvoiceStatus({
+        currentStatus: invoice.status,
+        event: providerStatusToInvoiceEvent(paymentStatus),
+      })
+      const status = transition.event === "noop" ? "unpaid" : transition.nextStatus
+      const isPaid = status === "paid"
 
-      if (paymentStatus === "paid") {
-        const settled = await settlePrepaidInvoiceToWallet({
-          walletService: this.walletService,
-          invoice,
-        })
-        if (settled.err) {
-          return Err(
-            new UnPriceBillingError({
-              code: "PAYMENT_SETTLEMENT_FAILED",
-              message: `Failed to settle prepaid invoice ${invoice.id} to wallet: ${settled.err.message}`,
-            })
-          )
-        }
-      }
-
-      // update the invoice status if the payment is successful
-      // if not add the failed attempt
-      const updatedInvoice = await billingRepo.updateInvoice({
-        invoiceId: invoice.id,
-        projectId,
+      return this.saveInvoiceCollection({
+        invoice,
         data: {
-          status: isPaid ? "paid" : "unpaid",
+          status,
           ...(isPaid ? { paidAt: Date.now() } : {}),
           ...(isPaid ? { invoicePaymentProviderUrl: providerPaymentInvoice.val.invoiceUrl } : {}),
           metadata: {
             ...(invoice.metadata ?? {}),
-            reason: isPaid ? "payment_received" : "payment_pending",
-            note: isPaid ? "Invoice paid successfully" : `Payment pending for ${paymentStatus}`,
+            reason: isPaid
+              ? "payment_received"
+              : status === "unpaid"
+                ? "payment_pending"
+                : status === "void"
+                  ? "invoice_voided"
+                  : "payment_failed",
+            note: isPaid
+              ? "Invoice paid successfully"
+              : `Provider collection returned ${paymentStatus}`,
           },
         },
       })
-
-      if (!updatedInvoice) {
-        return Err(
-          new UnPriceBillingError({
-            code: "BILLING_OPERATION_FAILED",
-            message: "Error updating invoice",
-          })
-        )
-      }
-
-      return Ok(updatedInvoice)
     }
 
     // send the invoice to the customer and wait for the payment
@@ -1304,6 +1235,44 @@ export class BillingService {
         message: "Unsupported status for invoice",
       })
     )
+  }
+
+  private async saveInvoiceCollection({
+    invoice,
+    data,
+  }: {
+    invoice: SubscriptionInvoice
+    data: UpdateInvoiceInput["data"] & { status: InvoiceStatus }
+  }): Promise<Result<SubscriptionInvoice, UnPriceBillingError>> {
+    if (data.status === "paid") {
+      const settled = await settlePrepaidInvoiceToWallet({
+        walletService: this.walletService,
+        invoice,
+      })
+      if (settled.err) {
+        return Err(
+          new UnPriceBillingError({
+            code: "PAYMENT_SETTLEMENT_FAILED",
+            message: `Failed to settle prepaid invoice ${invoice.id} to wallet: ${settled.err.message}`,
+          })
+        )
+      }
+    }
+
+    const updatedInvoice = await new DrizzleBillingRepository(this.db).updateInvoice({
+      invoiceId: invoice.id,
+      projectId: invoice.projectId,
+      data,
+    })
+    if (!updatedInvoice) {
+      return Err(
+        new UnPriceBillingError({
+          code: "BILLING_OPERATION_FAILED",
+          message: "Error updating invoice",
+        })
+      )
+    }
+    return Ok(updatedInvoice)
   }
 
   public async finalizeInvoice({

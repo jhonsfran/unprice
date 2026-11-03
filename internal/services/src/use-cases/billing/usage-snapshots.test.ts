@@ -1,6 +1,6 @@
 import type { Database } from "@unprice/db"
 import { describe, expect, it, vi } from "vitest"
-import { registerBillingUsage } from "../../billing/usage-snapshot"
+import { type BillingUsageRegistration, registerBillingUsage } from "../../billing/usage-snapshot"
 import type { EntitlementWindowClient } from "../../ingestion/entitlement-window-applier"
 import { billingUsageOperationSchema, processBillingUsageSnapshots } from "./usage-snapshots"
 
@@ -39,6 +39,30 @@ describe("processBillingUsageSnapshots", () => {
     expect(registerBillingPeriods).toHaveBeenCalledWith([registration])
   })
 
+  it("registers multiple periods with one RPC per entitlement owner", async () => {
+    const registrations = [
+      registration,
+      { ...registration, billingPeriodId: "bp_2", cycleStartAt: 2000, cycleEndAt: 3000 },
+    ]
+    const snapshots = registrations.map(registerBillingUsage)
+    const registerBillingPeriods = vi.fn(async (input: BillingUsageRegistration[]) =>
+      input.map(registerBillingUsage)
+    )
+    const getEntitlementWindowStub = vi.fn().mockReturnValue({ registerBillingPeriods })
+
+    const result = await processBillingUsageSnapshots(
+      {
+        db: {} as Database,
+        entitlementWindowClient: { getEntitlementWindowStub } as unknown as EntitlementWindowClient,
+      },
+      { ...scope, operation: "register", registrations }
+    )
+
+    expect(result.val).toEqual({ snapshots })
+    expect(getEntitlementWindowStub).toHaveBeenCalledTimes(1)
+    expect(registerBillingPeriods).toHaveBeenCalledExactlyOnceWith(registrations)
+  })
+
   it("rejects registration outside the authenticated scope before contacting the owner", async () => {
     const getEntitlementWindowStub = vi.fn()
 
@@ -50,7 +74,7 @@ describe("processBillingUsageSnapshots", () => {
       {
         ...scope,
         operation: "register",
-        registrations: [{ ...registration, customerId: "cus_other" }],
+        registrations: [registration, { ...registration, customerId: "cus_other" }],
       }
     )
 
@@ -86,6 +110,7 @@ describe("processBillingUsageSnapshots", () => {
         billingPeriods: {
           findMany: select([
             period,
+            { ...period, id: "bp_2", cycleStartAt: 1500 },
             { ...period, id: "bp_pending", status: "pending" },
             {
               ...period,
@@ -119,7 +144,7 @@ describe("processBillingUsageSnapshots", () => {
       customerId: "cus_1",
       projectId: "proj_1",
     })
-    expect(completeBillingPeriods).toHaveBeenCalledWith(["bp_1"])
+    expect(completeBillingPeriods).toHaveBeenCalledExactlyOnceWith(["bp_1", "bp_2"])
   })
 
   it("does not expose a separate seal operation", () => {

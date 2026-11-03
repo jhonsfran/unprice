@@ -130,6 +130,7 @@ export function sealBillingPeriods(
       }
     }
     assertIdentity(snapshot, identity)
+    if (snapshot.state !== "open") return snapshot
     const sealed = sealBillingUsage(snapshot, now)
     store.writeBillingUsageSnapshot(sealed)
     return sealed
@@ -143,7 +144,7 @@ export function completeBillingPeriods(
 ): void {
   for (const periodId of periodIds) {
     const snapshot = store.readBillingUsageSnapshot(periodId)
-    if (!snapshot) continue
+    if (!snapshot || snapshot.state === "completed") continue
     store.writeBillingUsageSnapshot(completeBillingUsage(snapshot, now))
   }
 }

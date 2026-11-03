@@ -208,10 +208,12 @@ export class RatingService {
         )
       }
       const currency = this.resolveCurrency(undefined, [], [grant])
-      const total = trimScale(dinero({ amount: allocation.amount, currency, scale: LEDGER_SCALE }))
+      const isTrial = grant.type === "trial"
+      const amount = isTrial ? 0 : allocation.amount
+      const total = trimScale(dinero({ amount, currency, scale: LEDGER_SCALE }))
       const unit = trimScale(
         dinero({
-          amount: allocation.usage === 0 ? 0 : Math.round(allocation.amount / allocation.usage),
+          amount: allocation.usage === 0 ? 0 : Math.round(amount / allocation.usage),
           currency,
           scale: LEDGER_SCALE,
         })
@@ -230,7 +232,7 @@ export class RatingService {
         usage: allocation.usage,
         included: freeUnits.val ?? 0,
         limit: grant.allowanceUnits ?? Number.POSITIVE_INFINITY,
-        isTrial: grant.type === "trial",
+        isTrial,
       })
     }
     return Ok(charges)

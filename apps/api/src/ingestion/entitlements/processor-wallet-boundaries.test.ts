@@ -11,6 +11,70 @@ import {
 } from "./testing/processor-regression-fixtures"
 
 describe("correction accounting boundaries", () => {
+  it.each(["single", "batch", "split batches"] as const)(
+    "corrects free usage accepted before wallet allocation through %s",
+    async (mode) => {
+      const now = BASE_NOW
+      const wallet = createWalletHarness({ allocationAmount: 1_000_000_000_000 })
+      const harness = createHarness({ now, wallet: wallet.provider })
+      await harness.processor.initialize()
+      const money = (amount: number) => ({
+        dinero: { amount, currency: { code: "USD", base: 10, exponent: 2 }, scale: 2 },
+        displayAmount: String(amount / 100),
+      })
+      const base = createApplyInput({
+        now,
+        creditLinePolicy: "capped",
+        priceConfig: {
+          usageMode: "tier",
+          tierMode: "graduated",
+          tiers: [
+            { firstUnit: 1, lastUnit: 10, unitPrice: money(0), flatPrice: money(0) },
+            { firstUnit: 11, lastUnit: null, unitPrice: money(100), flatPrice: money(0) },
+          ],
+        },
+      })
+      const input = createBatchInput(base, [10, 1, -2], "free-before-wallet")
+      const results: ApplyResult[] = []
+      if (mode === "batch") results.push(...(await harness.processor.applyBatch(input)).results)
+      else {
+        for (const event of input.events) {
+          if (mode === "split batches")
+            results.push(
+              ...(await harness.processor.applyBatch({ ...input, events: [event] })).results
+            )
+          else
+            results.push(
+              await harness.processor.apply({
+                ...base,
+                event,
+                idempotencyKey: event.idempotencyKey,
+                now: event.now,
+              })
+            )
+        }
+      }
+
+      expect(results.map((result) => result.allowed)).toEqual([true, true, true])
+      expect(
+        results.flatMap((result) => result.meterFacts ?? []).map((fact) => fact.amount)
+      ).toEqual([0, 100_000_000, -100_000_000])
+      expect(harness.store.walletRow).toMatchObject({
+        consumedAmount: 0,
+        consumedQuantity: mode === "batch" ? 9 : 0,
+        flushedAmount: 0,
+        flushedQuantity: 0,
+      })
+      await expect(
+        harness.processor.getEnforcementState({
+          entitlement: base.entitlement,
+          grants: base.grants,
+          now,
+        })
+      ).resolves.toMatchObject({ usage: 9 })
+    }
+  )
+
   it.each(["single", "batch"] as const)(
     "keeps unchanged max snapshots per grant through %s",
     async (mode) => {

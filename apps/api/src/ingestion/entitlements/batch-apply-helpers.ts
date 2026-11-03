@@ -135,7 +135,8 @@ export function planWalletReservationSpend(params: {
   }
 
   const nextConsumedAmount = window.consumedAmount + spendCost.effectiveCostAmount
-  const nextConsumedQuantity = window.consumedQuantity + totalUnits
+  // Free usage accepted before allocation is outside this reservation's quantity.
+  const nextConsumedQuantity = Math.max(0, window.consumedQuantity + totalUnits)
   const refillPlan = planWalletReservationRefill({
     createdAt,
     entitlement,
@@ -542,7 +543,8 @@ export function assertSupportedWalletCorrection(params: {
     (window?.consumedAmount ?? 0) + totalCost < (window?.flushedAmount ?? 0) + pendingCapture
   const reversesQuantity =
     totalUnits < 0 &&
-    (window?.consumedQuantity ?? 0) + totalUnits < (window?.flushedQuantity ?? 0) + pendingQuantity
+    Math.max(0, (window?.consumedQuantity ?? 0) + totalUnits) <
+      (window?.flushedQuantity ?? 0) + pendingQuantity
   if (reversesAmount || reversesQuantity) {
     throw new UnsupportedUsageCorrectionError(
       "Correction would reverse committed wallet consumption. Use a separate credit workflow for captured usage."

@@ -36,6 +36,8 @@ patterns. Keep it cheap to load and useful.
 
 ## CI And GitHub Actions
 
+- 2026-11-03: GHSA-mrhx-c7xc-m3w5 has no Zod 3 patch; npm still lists 3.25.76 as its latest v3 release. Baseline that remaining v3 exposure while pinning Zod 4 tooling to the patched 4.6.6 release. Do not force the application schemas onto Zod 4 through an override.
+
 - 2026-10-22: Next.js security patches must update both `apps/nextjs` and `internal/auth`. Keep the sharp 0.35.5 override; it mitigates the image RCE but does not fix Server Actions advisories.
 - 2026-10-22: For a dependency PR that must not deploy, include `renovate/` in the head branch name. `Test Renovate` runs the Build checks, and every `Deploy Preview` job skips that branch.
 - 2026-10-21: Vite security updates must change both the root dependency and workspace override. After pnpm resolves override changes, retain unrelated lockfile resolutions and verify with a frozen install.
@@ -533,6 +535,10 @@ patterns. Keep it cheap to load and useful.
   request-time API make that route dynamic and retain explicit `unstable_cache` data caching.
 
 ## Billing, Wallets, And Invoices
+
+- 2026-11-02: Batch snapshot registration and completion by entitlement owner; completed snapshots must not be rewritten on retries.
+- 2026-11-02: Trial reporting must zero accepted prices, as BILL already does.
+- 2026-11-02: Wallet quantity excludes free usage accepted before reservation allocation. A correction can cross that boundary; keep grant usage exact and floor the wallet quantity at zero while preserving captured and pending quantities.
 
 - 2026-10-27: Billing snapshot rollout uses fresh entitlement IDs, DO state, and billing periods;
   register before acceptance and seal before wallet flush. Do not add legacy marker or recovery paths.

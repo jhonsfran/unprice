@@ -153,6 +153,21 @@ describe("authoritative billing usage", () => {
     await processor.alarm()
     expect(wasDestroyed()).toBe(true)
   })
+
+  it("does not rewrite completed snapshots when completion is retried", async () => {
+    const { processor, registration, store, setNow } = createBillingHarness()
+    await processor.registerBillingPeriods([registration])
+    await processor.sealBillingPeriods([registration])
+    await processor.completeBillingPeriods([registration.billingPeriodId])
+    const completed = store.readBillingUsageSnapshot(registration.billingPeriodId)
+    const write = vi.spyOn(store, "writeBillingUsageSnapshot")
+
+    setNow(registration.registeredAt + 1000)
+    await processor.completeBillingPeriods([registration.billingPeriodId])
+
+    expect(store.readBillingUsageSnapshot(registration.billingPeriodId)).toEqual(completed)
+    expect(write).not.toHaveBeenCalled()
+  })
   it("rejects a correction that would require a credit from an earlier billing period", async () => {
     const { processor, input, registration, store } = createBillingHarness()
     await processor.registerBillingPeriods([registration])
