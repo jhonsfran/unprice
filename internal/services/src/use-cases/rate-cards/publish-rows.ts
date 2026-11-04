@@ -1,5 +1,6 @@
-import type { RateRowDraft } from "@unprice/db/validators"
+import { publishRateRowsInputSchema } from "@unprice/db/validators"
 import { Err, type FetchError, type Result } from "@unprice/error"
+import { z } from "zod"
 import type { ServiceContext } from "../../context"
 import type { PublishRowsResult, UnPriceRateCardError } from "../../rate-cards"
 import { projectFeaturePricing } from "./project-features"
@@ -8,13 +9,12 @@ export type PublishRateRowsDeps = {
   services: Pick<ServiceContext, "features" | "rateCards">
 }
 
-export type PublishRateRowsInput = {
-  projectId: string
-  cardId: string
-  rows: readonly RateRowDraft[]
-  effectiveFrom: number
-  now: number
-}
+const publishRateRowsUseCaseInputSchema = publishRateRowsInputSchema.extend({
+  projectId: z.string().min(1),
+  now: z.number(),
+})
+
+export type PublishRateRowsInput = z.infer<typeof publishRateRowsUseCaseInputSchema>
 
 /** Publishes hand-written price rows on a card; see `planPublish` for the rules. */
 export async function publishRateRows(

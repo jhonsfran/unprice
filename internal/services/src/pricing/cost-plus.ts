@@ -10,7 +10,6 @@ import type {
 import type { Amount } from "@unprice/money"
 import { ONE, ceilDiv } from "./decimal"
 import { matchKey } from "./model"
-import { isEffective } from "./resolve"
 
 export type CostPlusPolicy = Extract<MarginPolicy, { type: "costPlus" }>
 export type CostPlusCard = RateCard & { marginPolicy: CostPlusPolicy }
@@ -48,8 +47,10 @@ export type RowChange =
 export type CostPlusDraft = Readonly<{ cardId: string; at: number; changes: readonly RowChange[] }>
 
 /**
- * Proposes one unit row per model at cost times (1 + markup), rounded up to `roundTo`, and
- * diffs it against the rows effective at `at`. A manual cost row beats an imported one.
+ * Proposes one unit row per model at the costs effective at `at`: cost times (1 + markup), rounded
+ * up to `roundTo`. Each proposal is diffed against its key's open row, the row publishing it would
+ * replace, even when that row starts after `at`. A manual cost row beats an imported one. Changes
+ * are ordered by match, so the draft and its hash never depend on the order costs arrive in.
  */
 export function costPlusRevision(
   card: CostPlusCard,
@@ -58,20 +59,20 @@ export function costPlusRevision(
   at: number
 ): CostPlusDraft {
   const policy = card.marginPolicy
-  const changes: RowChange[] = []
+  const open = new Map(
+    currentRows
+      .filter((row) => row.featureSlug === policy.featureSlug && row.effectiveTo === null)
+      .map((row) => [matchKey(row.match), row])
+  )
+  const changes: [string, RowChange][] = []
   for (const cost of effectiveCosts(costs, at)) {
     const proposed = proposeRow(card, cost)
     if (!proposed) continue
-    const current = currentRows.find(
-      (row) =>
-        row.featureSlug === policy.featureSlug &&
-        row.price.type !== "flat" &&
-        isEffective(row, at) &&
-        matchKey(row.match) === matchKey(proposed.match)
-    )
-    changes.push(diffRow(current, proposed))
+    const key = matchKey(proposed.match)
+    changes.push([key, diffRow(open.get(key), proposed)])
   }
-  return { cardId: card.id, at, changes }
+  changes.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+  return { cardId: card.id, at, changes: changes.map(([, change]) => change) }
 }
 
 function effectiveCosts(costs: readonly ModelCost[], at: number): ModelCost[] {

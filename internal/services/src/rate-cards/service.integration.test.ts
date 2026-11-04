@@ -194,6 +194,122 @@ describe("RateCardService", () => {
     ])
   })
 
+  it("keeps publishing after a feature is regrouped and retires its stale rows", async () => {
+    await db.insert(featuresTable).values({
+      id: "ft_images",
+      projectId,
+      slug: "images",
+      title: "Images",
+      meterConfig: {
+        eventId: "evt_images",
+        eventSlug: "images",
+        aggregationMethod: "count",
+        groupBy: ["size"],
+      },
+    })
+    const image = rateRowDraftSchema.parse({
+      featureSlug: "images",
+      match: { size: "1024" },
+      price: { type: "unit", components: [{ property: null, rate: "0.04", per: 1 }] },
+      cost: null,
+    })
+    const card = await createCard()
+    const [stale] = (await value(publish(card.id, [gpt41("2.00", "8.00")], NOW))).inserted
+    await db
+      .update(featuresTable)
+      .set({
+        meterConfig: {
+          eventId: "evt_tokens",
+          eventSlug: "tokens",
+          aggregationMethod: "sum",
+          aggregationField: "input_tokens",
+          groupBy: ["model_id"],
+        },
+      })
+      .where(eq(featuresTable.id, "ft_llm_tokens"))
+    const close = (effectiveTo: number) =>
+      rateCards.closeRows({
+        projectId,
+        cardId: card.id,
+        rowIds: [stale?.id ?? ""],
+        effectiveTo,
+        now: NOW,
+      })
+
+    const images = await value(publish(card.id, [image], NOW + 10 * MINUTE))
+    const early = await rejection(close(NOW + 9 * MINUTE))
+    const closed = await value(close(NOW + 10 * MINUTE))
+    const retried = await value(close(NOW + 10 * MINUTE))
+    const regrouped = await value(
+      publish(
+        card.id,
+        [{ ...gpt41("2.00", "8.00"), match: { model_id: "gpt-4.1" } }],
+        NOW + 10 * MINUTE
+      )
+    )
+
+    expect(images.inserted.map((row) => row.featureSlug)).toEqual(["images"])
+    expect(early).toEqual({
+      code: "NOTICE_TOO_SHORT",
+      featureSlug: "llm_tokens",
+      earliest: NOW + 10 * MINUTE,
+    })
+    expect(closed).toEqual({
+      closed: [{ rowId: stale?.id, effectiveTo: NOW + 10 * MINUTE }],
+      unchanged: 0,
+    })
+    expect(retried).toEqual({ closed: [], unchanged: 1 })
+    expect(regrouped.inserted.map((row) => row.match)).toEqual([{ model_id: "gpt-4.1" }])
+    expect(
+      (await cardRows(card.id)).map((row) => [
+        row.featureSlug,
+        row.match,
+        row.effectiveFrom - NOW,
+        row.effectiveTo === null ? null : row.effectiveTo - NOW,
+      ])
+    ).toEqual([
+      ["images", { size: "1024" }, 10 * MINUTE, null],
+      ["llm_tokens", { model: "gpt-4.1" }, 0, 10 * MINUTE],
+      ["llm_tokens", { model_id: "gpt-4.1" }, 10 * MINUTE, null],
+    ])
+  })
+
+  it("refuses a cost-plus draft whose open row was replaced after the preview", async () => {
+    const card = await createCard({
+      type: "costPlus",
+      featureSlug: "llm_tokens",
+      markup: "0.3",
+      roundTo: "0.01",
+      dimension: "model",
+      componentMap: { input: "input_tokens", output: "output_tokens" },
+    })
+    await value(publish(card.id, [gpt41("2.00", "8.00")], NOW))
+    await rateCards.insertModelCosts([modelCosts.gpt41])
+    const preview = await value(rateCards.previewCostPlus(projectId, card.id, NOW))
+    await value(publish(card.id, [gpt41("9.00", "9.00")], NOW + 10 * MINUTE))
+    const before = intervals(await cardRows(card.id))
+
+    const stale = await rejection(
+      publishCostPlus(
+        { services },
+        {
+          projectId,
+          cardId: card.id,
+          effectiveFrom: NOW + 60 * MINUTE,
+          draftHash: preview.draftHash,
+          now: NOW + MINUTE,
+        }
+      )
+    )
+
+    expect(stale).toMatchObject({ code: "DRAFT_STALE" })
+    expect(before).toEqual([
+      [0, 10 * MINUTE, ["2", "8"]],
+      [10 * MINUTE, null, ["9", "9"]],
+    ])
+    expect(intervals(await cardRows(card.id))).toEqual(before)
+  })
+
   it("imports only changed catalog costs and never touches a manual cost", async () => {
     const day = 24 * 60 * MINUTE
     await db.insert(modelCostsTable).values([
@@ -286,11 +402,6 @@ describe("RateCardService", () => {
     ).toEqual([
       [
         "changed",
-        { model: "gpt-4.1" },
-        ["input_tokens=2.6", "output_tokens=10.4", "cached_input_tokens=0.65"],
-      ],
-      [
-        "changed",
         { model: "claude-sonnet-4" },
         [
           "input_tokens=3.9",
@@ -299,11 +410,16 @@ describe("RateCardService", () => {
           "cache_write_tokens=4.88",
         ],
       ],
+      [
+        "changed",
+        { model: "gpt-4.1" },
+        ["input_tokens=2.6", "output_tokens=10.4", "cached_input_tokens=0.65"],
+      ],
     ])
     expect(stale).toEqual({ code: "DRAFT_STALE", draftHash: preview.draftHash })
     expect(published.inserted.map((row) => [row.match.model, row.source, row.sourceRef])).toEqual([
-      ["gpt-4.1", "catalog", costIds["gpt-4.1"]],
       ["claude-sonnet-4", "catalog", costIds["claude-sonnet-4"]],
+      ["gpt-4.1", "catalog", costIds["gpt-4.1"]],
     ])
     expect(published.closed.length).toBe(2)
     expect(
@@ -317,8 +433,8 @@ describe("RateCardService", () => {
       ["gpt-4.1", "manual", 0, 11 * MINUTE],
       ["gpt-4.1-mini", "manual", 0, null],
       ["claude-sonnet-4", "manual", 0, 11 * MINUTE],
-      ["gpt-4.1", "catalog", 11 * MINUTE, null],
       ["claude-sonnet-4", "catalog", 11 * MINUTE, null],
+      ["gpt-4.1", "catalog", 11 * MINUTE, null],
     ])
   })
 })

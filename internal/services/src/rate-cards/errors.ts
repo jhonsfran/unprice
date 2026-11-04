@@ -10,6 +10,8 @@ export type RateCardRejection =
   | Readonly<{ code: "INVALID_CARD"; violations: readonly CardViolation[] }>
   | Readonly<{ code: "DRAFT_STALE"; draftHash: string }>
   | Readonly<{ code: "NOT_COST_PLUS"; cardId: string }>
+  | Readonly<{ code: "ROW_NOT_FOUND"; rowIds: readonly string[] }>
+  | Readonly<{ code: "ROW_CLOSED"; rowId: string; effectiveTo: number }>
 
 export type RateCardErrorCode = RateCardRejection["code"]
 
@@ -22,6 +24,8 @@ const KIND: Record<RateCardErrorCode, DomainErrorKind> = {
   SCHEDULE_CONFLICT: "conflict",
   INVALID_CARD: "bad_request",
   DRAFT_STALE: "conflict",
+  ROW_NOT_FOUND: "not_found",
+  ROW_CLOSED: "conflict",
 }
 
 function message(rejection: RateCardRejection): string {
@@ -42,6 +46,10 @@ function message(rejection: RateCardRejection): string {
       return "The cost-plus draft changed since it was previewed; preview it again"
     case "NOT_COST_PLUS":
       return `Rate card ${rejection.cardId} has no cost-plus margin policy`
+    case "ROW_NOT_FOUND":
+      return `Rate rows not found: ${rejection.rowIds.join(", ")}`
+    case "ROW_CLOSED":
+      return `Rate row ${rejection.rowId} already ends at ${new Date(rejection.effectiveTo).toISOString()}`
   }
 }
 

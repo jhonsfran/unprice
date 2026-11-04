@@ -2,6 +2,7 @@ import { type Database, and, asc, desc, eq, gt, inArray, isNull, lt, lte, or } f
 import { modelCosts, rateCardRows, rateCards } from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
 import {
+  type CloseRateRowsInput,
   type CreateRateCardInput,
   type FeaturePricing,
   type ModelCost,
@@ -13,9 +14,10 @@ import {
 } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import { formatAmount } from "@unprice/money"
+import type { DbExecutor, Transaction } from "../deps"
 import { type CostPlusCard, type CostPlusDraft, costPlusRevision } from "../pricing"
 import { UnPriceRateCardError } from "./errors"
-import { type RowDraft, planPublish } from "./publish"
+import { type RowDraft, planClose, planPublish } from "./publish"
 import { stableHash, toWire } from "./wire"
 
 type RateCardServiceDeps = {
@@ -33,6 +35,19 @@ export type PublishRowsInput = {
   now: number
   /** The project's features; a draft for any other slug is UNKNOWN_FEATURE. */
   features: readonly FeaturePricing[]
+}
+
+export type PublishCostPlusInput = Omit<PublishRowsInput, "drafts"> & {
+  /** The `draftHash` of the preview the caller reviewed. */
+  draftHash: string
+}
+
+export type CloseRowsInput = CloseRateRowsInput & { projectId: string; now: number }
+
+export type CloseRowsResult = {
+  closed: { rowId: string; effectiveTo: number }[]
+  /** Rows already closed at `effectiveTo`. */
+  unchanged: number
 }
 
 export type PublishRowsResult = {
@@ -121,57 +136,53 @@ export class RateCardService {
     return rows.map(toRateRow)
   }
 
-  /**
-   * Publishes drafts in one transaction that holds the card's row lock, so two publishes on a
-   * card never plan against the same open rows. See `planPublish` for the rules.
-   */
+  /** Publishes drafts on a card; see `planPublish` for the rules. */
   async publishRows(
     input: PublishRowsInput
   ): Promise<Result<PublishRowsResult, UnPriceRateCardError>> {
-    const { projectId, cardId } = input
-    return this.deps.db.transaction(async (tx) => {
-      const [card] = await tx
-        .select()
-        .from(rateCards)
-        .where(and(eq(rateCards.projectId, projectId), eq(rateCards.id, cardId)))
-        .for("update")
-      if (!card) return Err(new UnPriceRateCardError({ code: "CARD_NOT_FOUND", cardId }))
+    return this.withLockedCard(input.projectId, input.cardId, (tx, card, rows) =>
+      writePublish(tx, input, card, rows, input.drafts)
+    )
+  }
 
-      const plan = planPublish({
-        card: toRateCard(card),
-        rows: await this.cardRows(tx, projectId, cardId),
-        drafts: input.drafts,
-        effectiveFrom: input.effectiveFrom,
+  /**
+   * Publishes the added and changed rows of a card's cost-plus revision, recomputed at `now`
+   * under the card's lock. A draft that differs from the one the caller previewed is DRAFT_STALE
+   * and writes nothing.
+   */
+  async publishCostPlus(
+    input: PublishCostPlusInput
+  ): Promise<Result<PublishRowsResult, UnPriceRateCardError>> {
+    return this.withLockedCard(input.projectId, input.cardId, async (tx, card, rows) => {
+      const preview = await costPlusPreview(tx, card, rows, input.now)
+      if (preview.err) return Err(preview.err)
+      if (preview.val.draftHash !== input.draftHash) {
+        return Err(
+          new UnPriceRateCardError({ code: "DRAFT_STALE", draftHash: preview.val.draftHash })
+        )
+      }
+      const drafts: RowDraft[] = preview.val.draft.changes.flatMap((change) => {
+        if (change.type === "unchanged") return []
+        const { featureSlug, match, price, cost, source, sourceRef } = change.proposed
+        return [{ featureSlug, match: { ...match }, price, cost, source, sourceRef }]
+      })
+      return writePublish(tx, input, card, rows, drafts)
+    })
+  }
+
+  /** Ends open rows at `effectiveTo`; see `planClose` for the rules. */
+  async closeRows(input: CloseRowsInput): Promise<Result<CloseRowsResult, UnPriceRateCardError>> {
+    return this.withLockedCard(input.projectId, input.cardId, async (tx, _card, rows) => {
+      const plan = planClose({
+        rows,
+        rowIds: input.rowIds,
+        effectiveTo: input.effectiveTo,
         now: input.now,
-        features: input.features,
-        newRowId: () => newId("rate_card_row"),
       })
       if (plan.err) return Err(plan.err)
-
-      for (const close of plan.val.closes) {
-        const closed = await tx
-          .update(rateCardRows)
-          .set({ effectiveTo: close.effectiveTo })
-          .where(
-            and(
-              eq(rateCardRows.projectId, projectId),
-              eq(rateCardRows.id, close.rowId),
-              isNull(rateCardRows.effectiveTo)
-            )
-          )
-          .returning({ id: rateCardRows.id })
-        if (closed.length !== 1) throw new Error(`rate row ${close.rowId} is no longer open`)
-      }
-      if (plan.val.inserts.length > 0) {
-        await tx
-          .insert(rateCardRows)
-          .values(plan.val.inserts.map((row) => toInsert(projectId, row)))
-      }
-      return Ok({
-        inserted: [...plan.val.inserts],
-        closed: [...plan.val.closes],
-        unchanged: plan.val.unchanged,
-      })
+      const rowIds = plan.val.closes.map((close) => close.rowId)
+      await closeOpenRows(tx, input.projectId, rowIds, input.effectiveTo)
+      return Ok({ closed: [...plan.val.closes], unchanged: plan.val.unchanged })
     })
   }
 
@@ -186,20 +197,7 @@ export class RateCardService {
   ): Promise<Result<CostPlusPreview, UnPriceRateCardError>> {
     const found = await this.getCard(projectId, cardId)
     if (found.err) return Err(found.err)
-    const { card, rows } = found.val
-    if (card.marginPolicy.type !== "costPlus") {
-      return Err(new UnPriceRateCardError({ code: "NOT_COST_PLUS", cardId }))
-    }
-    const costRows = await this.deps.db
-      .select()
-      .from(modelCosts)
-      .where(lte(modelCosts.effectiveFrom, at))
-    // costPlusRevision copies a cost's sourceRef onto its proposed row, and a catalog row
-    // references the cost row it was priced from.
-    const costs = costRows.map((row) => ({ ...toModelCost(row), sourceRef: row.id }))
-    const costPlusCard: CostPlusCard = { ...card, marginPolicy: card.marginPolicy }
-    const draft = costPlusRevision(costPlusCard, costs, rows, at)
-    return Ok({ draft, draftHash: draftHash(draft) })
+    return costPlusPreview(this.deps.db, found.val.card, found.val.rows, at)
   }
 
   /** The newest `modelsdev` cost of each provider and model. */
@@ -234,7 +232,7 @@ export class RateCardService {
   }
 
   private async cardRows(
-    executor: Pick<Database, "select">,
+    executor: DbExecutor,
     projectId: string,
     cardId: string
   ): Promise<RateRow[]> {
@@ -245,6 +243,113 @@ export class RateCardService {
       .orderBy(asc(rateCardRows.featureSlug), asc(rateCardRows.effectiveFrom), asc(rateCardRows.id))
     return rows.map(toRateRow)
   }
+
+  /**
+   * Runs `write` in one transaction that holds the card's row lock, so two writes on a card never
+   * plan against the same rows.
+   */
+  private async withLockedCard<T>(
+    projectId: string,
+    cardId: string,
+    write: (
+      tx: Transaction,
+      card: RateCard,
+      rows: RateRow[]
+    ) => Promise<Result<T, UnPriceRateCardError>>
+  ): Promise<Result<T, UnPriceRateCardError>> {
+    return this.deps.db.transaction(async (tx) => {
+      const [card] = await tx
+        .select()
+        .from(rateCards)
+        .where(and(eq(rateCards.projectId, projectId), eq(rateCards.id, cardId)))
+        .for("update")
+      if (!card) return Err(new UnPriceRateCardError({ code: "CARD_NOT_FOUND", cardId }))
+      return write(tx, toRateCard(card), await this.cardRows(tx, projectId, cardId))
+    })
+  }
+}
+
+async function writePublish(
+  tx: Transaction,
+  input: Omit<PublishRowsInput, "drafts" | "cardId">,
+  card: RateCard,
+  rows: readonly RateRow[],
+  drafts: readonly RowDraft[]
+): Promise<Result<PublishRowsResult, UnPriceRateCardError>> {
+  const plan = planPublish({
+    card,
+    rows,
+    drafts,
+    effectiveFrom: input.effectiveFrom,
+    now: input.now,
+    features: input.features,
+    newRowId: () => newId("rate_card_row"),
+  })
+  if (plan.err) return Err(plan.err)
+  const closedIds = plan.val.closes.map((close) => close.rowId)
+  await closeOpenRows(tx, input.projectId, closedIds, input.effectiveFrom)
+  if (plan.val.inserts.length > 0) {
+    await tx
+      .insert(rateCardRows)
+      .values(plan.val.inserts.map((row) => toInsert(input.projectId, row)))
+  }
+  return Ok({
+    inserted: [...plan.val.inserts],
+    closed: [...plan.val.closes],
+    unchanged: plan.val.unchanged,
+  })
+}
+
+/** Ends open rows at `effectiveTo` in one statement. The caller holds the card's lock. */
+async function closeOpenRows(
+  tx: Transaction,
+  projectId: string,
+  rowIds: readonly string[],
+  effectiveTo: number
+): Promise<void> {
+  if (rowIds.length === 0) return
+  const closed = await tx
+    .update(rateCardRows)
+    .set({ effectiveTo })
+    .where(
+      and(
+        eq(rateCardRows.projectId, projectId),
+        inArray(rateCardRows.id, [...rowIds]),
+        isNull(rateCardRows.effectiveTo)
+      )
+    )
+    .returning({ id: rateCardRows.id })
+  if (closed.length !== rowIds.length) {
+    throw new Error(`${rowIds.length - closed.length} of ${rowIds.length} rate rows are not open`)
+  }
+}
+
+async function costPlusPreview(
+  executor: DbExecutor,
+  card: RateCard,
+  rows: readonly RateRow[],
+  at: number
+): Promise<Result<CostPlusPreview, UnPriceRateCardError>> {
+  if (card.marginPolicy.type !== "costPlus") {
+    return Err(new UnPriceRateCardError({ code: "NOT_COST_PLUS", cardId: card.id }))
+  }
+  const costRows = await executor
+    .select()
+    .from(modelCosts)
+    .where(lte(modelCosts.effectiveFrom, at))
+    .orderBy(
+      asc(modelCosts.provider),
+      asc(modelCosts.model),
+      asc(modelCosts.source),
+      asc(modelCosts.effectiveFrom),
+      asc(modelCosts.id)
+    )
+  // costPlusRevision copies a cost's sourceRef onto its proposed row, and a catalog row
+  // references the cost row it was priced from.
+  const costs = costRows.map((row) => ({ ...toModelCost(row), sourceRef: row.id }))
+  const costPlusCard: CostPlusCard = { ...card, marginPolicy: card.marginPolicy }
+  const draft = costPlusRevision(costPlusCard, costs, rows, at)
+  return Ok({ draft, draftHash: draftHash(draft) })
 }
 
 type ModelCostRow = typeof modelCosts.$inferSelect

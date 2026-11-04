@@ -51,8 +51,9 @@ A public upsert to a key that starts with `customer:cus_` returns 403. The other
 | Subscription | an optional overlay card, limit overrides, funding | the subscription |
 
 - A price row is immutable. A price change closes the row (`effectiveTo`) and inserts a successor.
-- A published successor must start at least 10 minutes after publish. A budget refreshes its card
-  at least every 5 minutes, so no budget prices with a stale card.
+- Once a card has a live or scheduled row, every row published on it, and every row end, takes
+  effect at least 10 minutes after publish; only a card's first rows may start at once. A budget
+  refreshes its card at least every 5 minutes, so no budget prices with a stale card.
 - An overlay card's rows win over the base card's rows of the same specificity.
 - A plan version stores no price and no currency inside a feature.
 

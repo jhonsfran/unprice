@@ -1,8 +1,8 @@
 import { type ModelRate, rateRowSchema } from "@unprice/db/validators"
 import { describe, expect, it } from "vitest"
-import { CARD_FROM, features, modelCosts, usdCard } from "../pricing/fixtures"
+import { CARD_FROM, features, modelCosts, usdCard, usdCardWithFallback } from "../pricing/fixtures"
 import { catalogCosts, changedCosts } from "./model-costs"
-import { RATE_CHANGE_NOTICE_MS, featurePricingOf, planPublish } from "./publish"
+import { RATE_CHANGE_NOTICE_MS, featurePricingOf, planClose, planPublish } from "./publish"
 import { canonicalJson, toWire } from "./wire"
 
 const NOW = CARD_FROM + 60_000
@@ -78,6 +78,150 @@ describe("planPublish", () => {
       code: "NOTICE_TOO_SHORT",
       featureSlug: "llm_tokens",
       earliest: NOW + RATE_CHANGE_NOTICE_MS,
+    })
+  })
+
+  it("publishes past rows of a deleted feature and an unchanged retry past stale dimensions", () => {
+    const regrouped = { ...features.llmTokens, dimensions: ["model_id"] }
+    const change = planPublish({
+      card,
+      rows: usdCard.rows,
+      drafts: [draft("6")],
+      effectiveFrom: NOW + RATE_CHANGE_NOTICE_MS,
+      now: NOW,
+      features: [features.llmTokens],
+      newRowId: () => "row_new",
+    })
+    const retry = planPublish({
+      card,
+      rows: usdCard.rows,
+      drafts: [draft("8")],
+      effectiveFrom: NOW,
+      now: NOW,
+      features: [regrouped],
+      newRowId: () => "row_new",
+    })
+    const staleInsert = planPublish({
+      card,
+      rows: usdCard.rows,
+      drafts: [draft("6")],
+      effectiveFrom: NOW + RATE_CHANGE_NOTICE_MS,
+      now: NOW,
+      features: [regrouped],
+      newRowId: () => "row_new",
+    })
+
+    expect(change.val?.closes).toEqual([
+      { rowId: "row_gpt41", effectiveTo: NOW + RATE_CHANGE_NOTICE_MS },
+    ])
+    expect(retry.val).toEqual({ closes: [], inserts: [], unchanged: 1 })
+    expect(staleInsert.err?.rejection).toEqual({
+      code: "INVALID_CARD",
+      violations: [{ code: "UNKNOWN_DIMENSION", rowId: "row_new", key: "model" }],
+    })
+  })
+
+  it("publishes a regrouped feature's first row where its retired rows end", () => {
+    const retireAt = NOW + RATE_CHANGE_NOTICE_MS
+    const retired = usdCard.rows
+      .filter((row) => row.featureSlug === "llm_tokens")
+      .map((row) => ({ ...row, effectiveTo: retireAt }))
+    const regrouped = { ...features.llmTokens, dimensions: ["model_id"] }
+    const first = draft("6")
+
+    const result = planPublish({
+      card,
+      rows: retired,
+      drafts: [{ ...first, match: { model_id: "gpt-5" } }],
+      effectiveFrom: retireAt,
+      now: NOW,
+      features: [regrouped],
+      newRowId: () => "row_gpt5",
+    })
+
+    expect(result.val?.inserts.map((row) => [row.id, row.match, row.effectiveFrom])).toEqual([
+      ["row_gpt5", { model_id: "gpt-5" }, retireAt],
+    ])
+  })
+
+  it("gives a new row the notice once the card has a live or scheduled row", () => {
+    const fallback = usdCardWithFallback.rows.filter((row) => row.id === "row_tokens_default")
+    const gpt5 = { ...draft("6"), match: { model: "gpt-5" } }
+    const publish = (rows: typeof fallback, effectiveFrom: number) =>
+      planPublish({
+        card,
+        rows,
+        drafts: [gpt5],
+        effectiveFrom,
+        now: NOW,
+        features: [features.llmTokens],
+        newRowId: () => "row_gpt5",
+      })
+    const ended = fallback.map((row) => ({ ...row, effectiveTo: NOW }))
+
+    expect(publish(fallback, NOW).err?.rejection).toEqual({
+      code: "NOTICE_TOO_SHORT",
+      featureSlug: "llm_tokens",
+      earliest: NOW + RATE_CHANGE_NOTICE_MS,
+    })
+    expect(publish(fallback, NOW + RATE_CHANGE_NOTICE_MS).val?.inserts.length).toBe(1)
+    expect(publish([], NOW).val?.inserts.map((row) => row.effectiveFrom)).toEqual([NOW])
+    expect(publish(ended, NOW).val?.inserts.map((row) => row.effectiveFrom)).toEqual([NOW])
+  })
+})
+
+describe("planClose", () => {
+  const open = usdCard.rows.filter((row) => row.featureSlug === "llm_tokens")
+  const closeAt = NOW + RATE_CHANGE_NOTICE_MS
+  const close = (rows: typeof open, rowIds: string[], effectiveTo: number) =>
+    planClose({ rows, rowIds, effectiveTo, now: NOW })
+
+  it("closes open rows and counts a row already closed at that time as unchanged", () => {
+    const first = close(open, ["row_gpt41", "row_gpt41_mini", "row_gpt41"], closeAt)
+    const closed = open.map((row) =>
+      row.id === "row_gpt41" ? { ...row, effectiveTo: closeAt } : row
+    )
+    const retry = close(closed, ["row_gpt41", "row_gpt41_mini"], closeAt)
+
+    expect(first.val).toEqual({
+      closes: [
+        { rowId: "row_gpt41", effectiveTo: closeAt },
+        { rowId: "row_gpt41_mini", effectiveTo: closeAt },
+      ],
+      unchanged: 0,
+    })
+    expect(retry.val).toEqual({
+      closes: [{ rowId: "row_gpt41_mini", effectiveTo: closeAt }],
+      unchanged: 1,
+    })
+  })
+
+  it("refuses a close inside the notice, before a row starts, or of a row it cannot close", () => {
+    const scheduled = open.map((row) =>
+      row.id === "row_gpt41" ? { ...row, effectiveFrom: closeAt + 5 } : row
+    )
+    const endedEarlier = open.map((row) =>
+      row.id === "row_gpt41" ? { ...row, effectiveTo: closeAt + 1 } : row
+    )
+
+    expect(close(open, ["row_gpt41"], closeAt - 1).err?.rejection).toEqual({
+      code: "NOTICE_TOO_SHORT",
+      featureSlug: "llm_tokens",
+      earliest: closeAt,
+    })
+    expect(close(scheduled, ["row_gpt41"], closeAt + 5).err?.rejection).toEqual({
+      code: "SCHEDULE_CONFLICT",
+      featureSlug: "llm_tokens",
+      scheduledFrom: closeAt + 5,
+    })
+    expect(close(endedEarlier, ["row_gpt41"], closeAt).err?.rejection).toEqual({
+      code: "ROW_CLOSED",
+      rowId: "row_gpt41",
+      effectiveTo: closeAt + 1,
+    })
+    expect(close(open, ["row_gpt41", "row_x", "row_y"], closeAt).err?.rejection).toEqual({
+      code: "ROW_NOT_FOUND",
+      rowIds: ["row_x", "row_y"],
     })
   })
 })

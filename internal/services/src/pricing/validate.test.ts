@@ -226,4 +226,30 @@ describe("validateCard", () => {
     ]
     expect(validateCard(card, rows, [features.llmTokens])).toEqual([])
   })
+
+  it("allows a feature's match keys to change where one set of rows ends and the next starts", () => {
+    const regional = { ...features.llmTokens, dimensions: ["model", "region"] }
+    const rows = [
+      row({
+        id: "global",
+        featureSlug: "llm_tokens",
+        match: { model: "m" },
+        price: unit("input_tokens"),
+        effectiveTo: CARD_FROM + 10,
+      }),
+      row({
+        id: "regional",
+        featureSlug: "llm_tokens",
+        match: { model: "m", region: "eu" },
+        price: unit("input_tokens"),
+        effectiveFrom: CARD_FROM + 10,
+      }),
+    ]
+    const overlapping = rows.map((r) => ({ ...r, effectiveTo: null }))
+
+    expect(validateCard(card, rows, [regional])).toEqual([])
+    expect(validateCard(card, overlapping, [regional])).toEqual([
+      { code: "MIXED_MATCH_KEYS", feature: "llm_tokens", keySets: ["model", "model,region"] },
+    ])
+  })
 })

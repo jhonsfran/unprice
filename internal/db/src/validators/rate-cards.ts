@@ -196,9 +196,17 @@ export const publishRateRowsInputSchema = z.object({
   effectiveFrom: epochMsSchema,
 })
 
+/** Ends open rows, for instance rows a feature change left stale; an end is a price change too. */
+export const closeRateRowsInputSchema = z.object({
+  cardId: z.string().min(1),
+  rowIds: z.array(z.string().min(1)).min(1).max(500),
+  effectiveTo: epochMsSchema,
+})
+
 export const previewCostPlusInputSchema = z.object({
   cardId: z.string().min(1),
-  at: epochMsSchema,
+  /** When the revision is computed; now when absent. */
+  at: epochMsSchema.optional(),
 })
 
 export const publishCostPlusInputSchema = z.object({
@@ -223,3 +231,4 @@ export type FeaturePricing = z.infer<typeof featurePricingSchema>
 export type FeaturePricingInput = z.input<typeof featurePricingSchema>
 export type CreateRateCardInput = z.infer<typeof createRateCardInputSchema>
 export type RateRowDraft = z.infer<typeof rateRowDraftSchema>
+export type CloseRateRowsInput = z.infer<typeof closeRateRowsInputSchema>

@@ -46,20 +46,6 @@ describe("costPlusRevision", () => {
     expect(summary(draft)).toEqual([
       {
         type: "changed",
-        match: { model: "gpt-4.1" },
-        rates: [
-          "input_tokens=2.6/1000000",
-          "cached_input_tokens=0.65/1000000",
-          "output_tokens=10.4/1000000",
-        ],
-        components: [
-          ["input_tokens", "2", "2.6"],
-          ["cached_input_tokens", "0.5", "0.65"],
-          ["output_tokens", "8", "10.4"],
-        ],
-      },
-      {
-        type: "changed",
         match: { model: "claude-sonnet-4" },
         rates: [
           "input_tokens=3.9/1000000",
@@ -74,8 +60,22 @@ describe("costPlusRevision", () => {
           ["cache_write_tokens", "3.75", "4.88"],
         ],
       },
+      {
+        type: "changed",
+        match: { model: "gpt-4.1" },
+        rates: [
+          "input_tokens=2.6/1000000",
+          "cached_input_tokens=0.65/1000000",
+          "output_tokens=10.4/1000000",
+        ],
+        components: [
+          ["input_tokens", "2", "2.6"],
+          ["cached_input_tokens", "0.5", "0.65"],
+          ["output_tokens", "8", "10.4"],
+        ],
+      },
     ])
-    const claude = draft.changes[1]?.proposed
+    const claude = draft.changes[0]?.proposed
     expect(claude?.cost.components.map((c) => formatAmount(c.rate))).toEqual([
       "3",
       "0.3",
@@ -91,22 +91,22 @@ describe("costPlusRevision", () => {
     expect(summary(draft)).toEqual([
       {
         type: "added",
-        match: { model: "gpt-4.1" },
-        rates: [
-          "input_tokens=260/1000000",
-          "cached_input_tokens=65/1000000",
-          "output_tokens=1040/1000000",
-        ],
-        components: [],
-      },
-      {
-        type: "added",
         match: { model: "claude-sonnet-4" },
         rates: [
           "input_tokens=390/1000000",
           "cached_input_tokens=39/1000000",
           "output_tokens=1950/1000000",
           "cache_write_tokens=488/1000000",
+        ],
+        components: [],
+      },
+      {
+        type: "added",
+        match: { model: "gpt-4.1" },
+        rates: [
+          "input_tokens=260/1000000",
+          "cached_input_tokens=65/1000000",
+          "output_tokens=1040/1000000",
         ],
         components: [],
       },
@@ -132,6 +132,43 @@ describe("costPlusRevision", () => {
     expect(summary(draft).map((change) => [change.type, change.components])).toEqual([
       ["changed", []],
     ])
+  })
+
+  it("diffs against the open row a publish replaces, even one scheduled after `at`", () => {
+    const [gpt] = costPlusRevision(usdCostPlusCard, [modelCosts.gpt41], [], at).changes
+    if (!gpt) throw new Error("no proposal")
+    const scheduledFrom = at + 60_000
+    const catalog = { ...asRow(gpt.proposed, "row_catalog"), effectiveTo: scheduledFrom }
+    const manual: RateRow = {
+      ...asRow(gpt.proposed, "row_manual"),
+      price: {
+        type: "unit",
+        components: [{ property: "input_tokens", rate: BigInt(900_000_000), per: 1_000_000 }],
+      },
+      source: "manual",
+      sourceRef: null,
+      effectiveFrom: scheduledFrom,
+    }
+
+    const draft = costPlusRevision(usdCostPlusCard, [modelCosts.gpt41], [catalog, manual], at)
+
+    expect(
+      draft.changes.map((change) => [
+        change.type,
+        change.type === "added" ? null : change.current.id,
+      ])
+    ).toEqual([["changed", "row_manual"]])
+  })
+
+  it("orders its changes by match, whatever order the costs arrive in", () => {
+    const forward = costPlusRevision(usdCostPlusCard, costs, [], at)
+    const reversed = costPlusRevision(usdCostPlusCard, [...costs].reverse(), [], at)
+
+    expect(forward.changes.map((change) => change.proposed.match.model)).toEqual([
+      "claude-sonnet-4",
+      "gpt-4.1",
+    ])
+    expect(reversed).toEqual(forward)
   })
 
   it("prefers a manual cost and ignores costs not yet effective", () => {

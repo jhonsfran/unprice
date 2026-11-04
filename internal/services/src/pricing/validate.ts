@@ -14,7 +14,9 @@ export function pricedProperties(row: RateRow): readonly (string | null)[] {
   }
 }
 
-function overlaps(a: RateRow, b: RateRow): boolean {
+type Interval = Readonly<{ effectiveFrom: number; effectiveTo: number | null }>
+
+function overlaps(a: Interval, b: Interval): boolean {
   const aEnd = a.effectiveTo ?? Number.POSITIVE_INFINITY
   const bEnd = b.effectiveTo ?? Number.POSITIVE_INFINITY
   return a.effectiveFrom < bEnd && b.effectiveFrom < aEnd
@@ -24,16 +26,22 @@ function duplicates<T>(values: readonly T[]): T[] {
   return values.filter((value, index) => values.indexOf(value) !== index)
 }
 
-/** Every rule a card's rows break, in row order; an empty list means the card is valid. */
+/**
+ * Every rule a card's rows break, in row order; an empty list means the card is valid. The rules
+ * of a single row apply to `checked` (every row by default); the rules between rows apply to all
+ * rows of `features`. Stored rows are immutable, so a publish checks only the rows it inserts: a
+ * feature that changed after a row was stored cannot block the card.
+ */
 export function validateCard(
   card: RateCard,
   rows: readonly RateRow[],
-  features: readonly FeaturePricing[]
+  features: readonly FeaturePricing[],
+  checked: readonly RateRow[] = rows
 ): CardViolation[] {
   const violations: CardViolation[] = []
   const featureBySlug = new Map(features.map((feature) => [feature.slug, feature]))
 
-  for (const row of rows) {
+  for (const row of checked) {
     if (row.rateCardId !== card.id) violations.push({ code: "ROW_OF_OTHER_CARD", rowId: row.id })
     const feature = featureBySlug.get(row.featureSlug)
     if (!feature) {
@@ -101,23 +109,47 @@ function featureViolations(feature: FeaturePricing, rows: readonly RateRow[]): C
     violations.push({ code: "INCLUDED_WITH_DIMENSIONS", feature: feature.slug })
   }
 
-  const keySets = new Set(
-    rows.map((row) => Object.keys(row.match).sort().join(",")).filter((keySet) => keySet !== "")
+  // Two key sets are mixed only while both are in force; a regrouped meter's rows can follow the
+  // rows they replace.
+  const spans = new Map<string, Interval>()
+  const byMatch = new Map<string, RateRow[]>()
+  for (const row of rows) {
+    const keySet = Object.keys(row.match).sort().join(",")
+    const span = spans.get(keySet)
+    if (keySet !== "") {
+      spans.set(keySet, {
+        effectiveFrom: Math.min(span?.effectiveFrom ?? row.effectiveFrom, row.effectiveFrom),
+        effectiveTo: Math.max(span?.effectiveTo ?? 0, row.effectiveTo ?? Number.POSITIVE_INFINITY),
+      })
+    }
+    const key = matchKey(row.match)
+    const sameMatch = byMatch.get(key)
+    if (sameMatch) sameMatch.push(row)
+    else byMatch.set(key, [row])
+  }
+  const mixed = [...spans].filter(([keySet, span]) =>
+    [...spans].some(([other, otherSpan]) => other !== keySet && overlaps(span, otherSpan))
   )
-  if (keySets.size > 1) {
-    violations.push({ code: "MIXED_MATCH_KEYS", feature: feature.slug, keySets: [...keySets] })
+  if (mixed.length > 0) {
+    violations.push({
+      code: "MIXED_MATCH_KEYS",
+      feature: feature.slug,
+      keySets: mixed.map(([keySet]) => keySet),
+    })
   }
 
-  rows.forEach((row, index) => {
-    for (const other of rows.slice(index + 1)) {
-      if (matchKey(row.match) === matchKey(other.match) && overlaps(row, other)) {
-        violations.push({
-          code: "OVERLAPPING_ROWS",
-          feature: feature.slug,
-          rowIds: [row.id, other.id],
-        })
+  for (const sameMatch of byMatch.values()) {
+    sameMatch.forEach((row, index) => {
+      for (const other of sameMatch.slice(index + 1)) {
+        if (overlaps(row, other)) {
+          violations.push({
+            code: "OVERLAPPING_ROWS",
+            feature: feature.slug,
+            rowIds: [row.id, other.id],
+          })
+        }
       }
-    }
-  })
+    })
+  }
   return violations
 }
