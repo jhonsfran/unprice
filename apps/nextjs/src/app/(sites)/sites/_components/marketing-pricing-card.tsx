@@ -212,6 +212,8 @@ export function MarketingPricingCard({
             const ctaLink = new URL(plan.ctaLink)
             const sessionId = Cookies.get("session-id")
             ctaLink.searchParams.set("sessionId", sessionId ?? "")
+            // the clicked plan travels with the link: sign-up must not wait for analytics to land
+            ctaLink.searchParams.set("planVersionId", plan.id)
 
             // @ts-ignore
             window.Unprice.trackEvent("plan_click", {

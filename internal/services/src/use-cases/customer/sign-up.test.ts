@@ -1,10 +1,11 @@
 import type { Database } from "@unprice/db"
 import { customers } from "@unprice/db/schema"
 import { Ok } from "@unprice/error"
-import { createWebEventsWriter } from "@unprice/lakehouse"
+import { type BasinSql, type WebEventsWriter, createWebEventsWriter } from "@unprice/lakehouse"
 import type { Logger } from "@unprice/logs"
 import { fromCurrencyMinor, toLedgerMinor } from "@unprice/money"
 import { describe, expect, it, vi } from "vitest"
+import { z } from "zod"
 import { UnPriceCustomerError } from "../../customers/errors"
 import { signUp } from "./sign-up"
 
@@ -508,5 +509,174 @@ describe("customer signUp payment provider guard", () => {
     expect(committedCustomers).toHaveLength(1)
     expect(createSubscription).toHaveBeenCalledTimes(2)
     expect(generateBillingPeriods).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("customer signUp plan attribution", () => {
+  type VersionRow = ReturnType<typeof createPlanVersion>
+
+  /** Evaluates the use case's drizzle `where` callback against in-memory plan versions. */
+  function versionsTable(rows: VersionRow[]) {
+    return {
+      findFirst: vi.fn(async ({ where }: { where: (...args: unknown[]) => unknown }) => {
+        const conditions = where(
+          { id: "id", projectId: "projectId", currency: "currency" },
+          {
+            eq: (column: keyof VersionRow, value: unknown) => [column, value],
+            and: (...clauses: unknown[]) => clauses.filter(Boolean),
+          }
+        ) as [keyof VersionRow, unknown][]
+        return rows.find((row) => conditions.every(([column, value]) => row[column] === value))
+      }),
+    }
+  }
+
+  function createDeps(opts: { versions: VersionRow[]; basinRows: unknown[] }) {
+    const tx = {
+      insert: vi.fn(() => ({
+        values: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([{ id: "cus_123" }]),
+        }),
+      })),
+    }
+    const basinQuery = vi.fn(async (_sql: string, row: z.ZodType<unknown>) =>
+      Ok(z.array(row).parse(opts.basinRows))
+    )
+    const send = vi.fn().mockResolvedValue(Ok({ sent: 1 }))
+    const pending: Promise<unknown>[] = []
+    const deps = {
+      db: {
+        query: {
+          versions: versionsTable(opts.versions),
+          paymentProviderConfig: {
+            findFirst: vi.fn().mockResolvedValue({
+              id: "ppc_123",
+              projectId: "proj_123",
+              paymentProvider: "sandbox",
+              active: true,
+              connectionType: "managed_connection",
+              mode: "test",
+              status: "active",
+              key: null,
+              keyIv: null,
+            }),
+          },
+        },
+        transaction: vi.fn(async (callback: (tx: Database) => Promise<unknown>) =>
+          callback(tx as unknown as Database)
+        ),
+      } as unknown as Database,
+      logger: createLogger(),
+      basinSql: { query: basinQuery } as unknown as BasinSql,
+      webEvents: { send } as unknown as WebEventsWriter,
+      waitUntil: (promise: Promise<unknown>) => {
+        pending.push(promise)
+      },
+      services: {
+        customers: { getCustomerByExternalId: vi.fn(), getPaymentProvider: vi.fn() },
+        subscriptions: {
+          createSubscription: vi.fn().mockResolvedValue(Ok({ id: "sub_123" })),
+          createPhase: vi.fn().mockResolvedValue(Ok({ id: "phase_123" })),
+          getSubscriptionData: vi.fn().mockResolvedValue({ status: "inactive" }),
+          activateWallet: vi.fn().mockResolvedValue(undefined),
+        },
+        billing: {
+          generateBillingPeriods: vi
+            .fn()
+            .mockResolvedValue(Ok({ cyclesCreated: 1, phasesProcessed: 1 })),
+        },
+        plans: {},
+      } as never,
+    }
+    return { deps, basinQuery, send, pending }
+  }
+
+  const baseInput = {
+    email: "customer@example.com",
+    successUrl: "https://example.com/success/{CUSTOMER_ID}",
+    cancelUrl: "https://example.com/cancel",
+  }
+
+  it("signs up with the explicit plan version while Basin has no plan click yet", async () => {
+    const { deps, basinQuery, send, pending } = createDeps({
+      versions: [createPlanVersion("sandbox")],
+      basinRows: [],
+    })
+
+    const result = await signUp(deps, {
+      projectId: "proj_123",
+      input: { ...baseInput, planVersionId: "version_123", sessionId: "sess_1" } as never,
+    })
+    await Promise.all(pending)
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.success).toBe(true)
+    expect(basinQuery).not.toHaveBeenCalled()
+    expect(send.mock.calls[0]?.[0]).toEqual([
+      expect.objectContaining({
+        kind: "signup",
+        session_id: "sess_1",
+        plan_version_id: "version_123",
+        signup_status: "signup_success",
+      }),
+    ])
+  })
+
+  it("rejects a plan version that belongs to another project", async () => {
+    const { deps, basinQuery } = createDeps({
+      versions: [{ ...createPlanVersion("sandbox"), id: "version_other", projectId: "proj_other" }],
+      basinRows: [],
+    })
+
+    const result = await signUp(deps, {
+      projectId: "proj_123",
+      input: { ...baseInput, planVersionId: "version_other", sessionId: "sess_1" } as never,
+    })
+
+    expect(result.err).toBeInstanceOf(UnPriceCustomerError)
+    expect(result.err?.message).toBe("Plan version not found in this project")
+    expect(basinQuery).not.toHaveBeenCalled()
+  })
+
+  it("resolves a session-only sign-up through the plan click in Basin", async () => {
+    const { deps, basinQuery, send, pending } = createDeps({
+      versions: [createPlanVersion("sandbox")],
+      basinRows: [
+        {
+          timestamp: "2026-11-03T10:00:00.000Z",
+          session_id: "sess_1",
+          plan_version_id: "version_123",
+          page_id: "page_1",
+        },
+      ],
+    })
+
+    const result = await signUp(deps, {
+      projectId: "proj_123",
+      input: { ...baseInput, sessionId: "sess_1" } as never,
+    })
+    await Promise.all(pending)
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.success).toBe(true)
+    expect(basinQuery).toHaveBeenCalledTimes(1)
+    expect(send.mock.calls[0]?.[0]).toEqual([
+      expect.objectContaining({
+        kind: "signup",
+        page_id: "page_1",
+        plan_version_id: "version_123",
+      }),
+    ])
+  })
+
+  it("keeps the session error when Basin has no plan click and no plan version was passed", async () => {
+    const { deps } = createDeps({ versions: [createPlanVersion("sandbox")], basinRows: [] })
+
+    const result = await signUp(deps, {
+      projectId: "proj_123",
+      input: { ...baseInput, sessionId: "sess_1" } as never,
+    })
+
+    expect(result.err?.message).toBe("Session not found")
   })
 })

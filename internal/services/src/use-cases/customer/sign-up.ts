@@ -146,7 +146,33 @@ async function resolvePlanVersion(
   let planVersion: PlanVersionWithProject | null = null
   let pageId: string | null = null
 
-  if (sessionId) {
+  // An explicit plan version (the pricing page puts the clicked one on the CTA link) wins, so
+  // sign-up never waits for the plan click to reach R2, which takes 3-7 minutes.
+  if (planVersionId) {
+    planVersion = await deps.db.query.versions
+      .findFirst({
+        with: {
+          project: true,
+          plan: true,
+        },
+        where: (version, { eq, and }) =>
+          and(
+            eq(version.id, planVersionId),
+            eq(version.projectId, projectId),
+            defaultCurrency ? eq(version.currency, defaultCurrency) : undefined
+          ),
+      })
+      .then((data) => data ?? null)
+
+    if (!planVersion) {
+      return Err(
+        new UnPriceCustomerError({
+          code: "PLAN_VERSION_NOT_FOUND",
+          message: "Plan version not found in this project",
+        })
+      )
+    }
+  } else if (sessionId) {
     deps.logger.set({
       business: {
         operation: "customer.sign_up.resolve_plan",
@@ -161,48 +187,22 @@ async function resolvePlanVersion(
     })
 
     if (planClick.err) {
-      deps.logger.warn("plan click attribution unavailable; signing up without it", {
-        error: planClick.err.message,
-      })
+      deps.logger.warn("plan click lookup failed", { error: planClick.err.message })
     }
 
     const session = planClick.val ?? null
 
     if (!session) {
-      if (!planVersionId) {
-        return Err(
-          new UnPriceCustomerError({
-            code: "PLAN_VERSION_NOT_FOUND",
-            message: "Session not found",
-          })
-        )
-      }
-
-      planVersion = await deps.db.query.versions
-        .findFirst({
-          with: {
-            project: true,
-            plan: true,
-          },
-          where: (version, { eq, and }) =>
-            and(eq(version.id, planVersionId), eq(version.projectId, projectId)),
+      return Err(
+        new UnPriceCustomerError({
+          code: "PLAN_VERSION_NOT_FOUND",
+          message: "Session not found",
         })
-        .then((data) => data ?? null)
-    } else {
-      pageId = session.payload.page_id
-
-      planVersion = await deps.db.query.versions
-        .findFirst({
-          with: {
-            project: true,
-            plan: true,
-          },
-          where: (version, { eq, and }) =>
-            and(eq(version.id, session.payload.plan_version_id), eq(version.projectId, projectId)),
-        })
-        .then((data) => data ?? null)
+      )
     }
-  } else if (planVersionId) {
+
+    pageId = session.payload.page_id
+
     planVersion = await deps.db.query.versions
       .findFirst({
         with: {
@@ -210,11 +210,7 @@ async function resolvePlanVersion(
           plan: true,
         },
         where: (version, { eq, and }) =>
-          and(
-            eq(version.id, planVersionId),
-            eq(version.projectId, projectId),
-            defaultCurrency ? eq(version.currency, defaultCurrency) : undefined
-          ),
+          and(eq(version.id, session.payload.plan_version_id), eq(version.projectId, projectId)),
       })
       .then((data) => data ?? null)
   } else if (planSlug) {
