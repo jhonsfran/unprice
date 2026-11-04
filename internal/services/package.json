@@ -14,6 +14,7 @@
     "./context": "./src/context.ts",
     "./metrics": "./src/metrics/index.ts",
     "./plans": "./src/plans/index.ts",
+    "./pricing": "./src/pricing/index.ts",
     "./subscriptions": "./src/subscriptions/index.ts",
     "./customers": "./src/customers/index.ts",
     "./analytics": "./src/analytics/index.ts",

@@ -327,6 +327,11 @@ patterns. Keep it cheap to load and useful.
   weighted 3, faults on half the steps, and close weighted 2 cut that to about 40 (at most 110).
 - 2026-10-18: `pnpm add` can re-resolve unrelated peer variants in `pnpm-lock.yaml`; add only the
   importer entries and confirm with `corepack pnpm install --frozen-lockfile`.
+- 2026-11-03: `@unprice/services/pricing` prices usage as `round(f(after)) - round(f(before))` on
+  the cumulative position. Rounding the exact per-event delta instead fails every split-invariance
+  property in `pricing.properties.test.ts`; never "simplify" `delta` in `rate.ts`.
+- 2026-11-03: Rate card decimals parse into `Amount` in `internal/db/src/validators/rate-cards.ts`; write
+  pricing fixtures in wire form and parse them through the schemas (`pricing/fixtures.ts`).
 - 2026-10-16: Budget amounts are `@unprice/money` `Amount` (bigint at `LEDGER_SCALE`) and the wire
   patterns live in `@unprice/db/validators`; never redeclare them in the budget core.
 - 2026-10-16: `Omit` over a generic `BudgetOutcome & { type: T }` does not narrow; strip `type` at
