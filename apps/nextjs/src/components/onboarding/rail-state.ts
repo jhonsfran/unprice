@@ -76,7 +76,7 @@ const LABELS: Record<StationKey, string> = {
   apikey: "API key",
   customer: "Customer",
   subscription: "Subscription",
-  run: "Budgeted run",
+  run: "Proof budget",
   check: "access.check",
 }
 
