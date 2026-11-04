@@ -153,28 +153,28 @@ describe("budgets API", () => {
     expect(mocks.execute.mock.calls[0]?.[1]).toMatchObject({
       type: "upsert",
       mayLoosen,
-      keepsPricing: true,
     })
+    expect(mocks.execute.mock.calls[0]?.[1]).not.toHaveProperty("setsPricing")
   })
 
-  it("refuses to upsert a customer's subscription budget, which keeps its other verbs", async () => {
+  it("refuses to create or upsert a key Unprice writes, and still runs a verb on one", async () => {
     mocks.keyAuth.mockResolvedValue({ id: "key_1", projectId: "proj_123", type: "config" })
     rejectWith({ code: "BUDGET_NOT_FOUND" })
+    const key = "unprice:customer:cus_acme"
+    const ifMissing = { unit: "USD", limits: [] }
 
-    const response = await call("/v1/budgets/upsert", {
-      key: "customer:cus_acme",
-      unit: "USD",
-      limits: [],
-    })
+    const refused = await Promise.all([
+      call("/v1/budgets/upsert", { key, unit: "USD", limits: [] }),
+      call("/v1/budgets/charge", { key, amount: "0", idempotencyKey: "c0", ifMissing }),
+      call("/v1/budgets/authorize", { key, amount: "1", idempotencyKey: "a0", ifMissing }),
+      call("/v1/budgets/lease", { key, leaseKey: "l0", amount: "1", ttlMs: 60_000, ifMissing }),
+    ])
 
-    expect(response.status).toBe(403)
+    expect(refused.map((response) => response.status)).toEqual([403, 403, 403, 403])
     expect(mocks.execute).not.toHaveBeenCalled()
-    await call("/v1/budgets/charge", {
-      key: "customer:cus_acme",
-      amount: "1",
-      idempotencyKey: "c1",
-    })
-    expect(mocks.execute).toHaveBeenCalledTimes(1)
+    await call("/v1/budgets/charge", { key, amount: "1", idempotencyKey: "c1" })
+    await call("/v1/budgets/upsert", { key: "customer:cus_acme", unit: "USD", limits: [] })
+    expect(mocks.execute).toHaveBeenCalledTimes(2)
   })
 
   it("authenticates every other verb with a runtime key only", async () => {

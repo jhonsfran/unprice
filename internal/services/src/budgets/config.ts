@@ -1,7 +1,12 @@
 /** Budget config (ADR-0006 B1): the stored record, and the audit of an upsert. */
 
-import { type BudgetConfig, CLOSED_BUDGET_RETENTION_MS } from "@unprice/db/validators"
+import {
+  type BudgetConfig,
+  type BudgetPricing,
+  CLOSED_BUDGET_RETENTION_MS,
+} from "@unprice/db/validators"
 import type { Amount } from "@unprice/money"
+import { canonicalJson } from "../rate-cards/wire"
 
 // The wire schema parses a config into these types; the timing constants live with it, whose
 // descriptions state them.
@@ -111,20 +116,27 @@ export function diffConfig(prev: BudgetConfig, next: BudgetConfig): ConfigChange
     changes.push({ change: "holds" })
   }
   if (prev.closesAt !== next.closesAt) changes.push({ change: "closesAt" })
-  if (pricingKey(prev) !== pricingKey(next)) changes.push({ change: "pricing" })
+  if (!samePricing(prev.pricing, next.pricing)) changes.push({ change: "pricing" })
   return changes
 }
 
-/** A config's pricing in a form two configs compare by; amounts are bigints. */
-function pricingKey(config: BudgetConfig): string {
-  return JSON.stringify(config.pricing ?? null, (_key, value: unknown) =>
-    typeof value === "bigint" ? value.toString() : value
-  )
+/** Whether two pricings price alike: the order of features and of dimensions carries no meaning. */
+export function samePricing(a: BudgetPricing | undefined, b: BudgetPricing | undefined): boolean {
+  return a === b || pricingKey(a) === pricingKey(b)
+}
+
+function pricingKey(pricing: BudgetPricing | undefined): string {
+  if (!pricing) return "null"
+  const features = [...pricing.features]
+    .sort((x, y) => (x.slug < y.slug ? -1 : x.slug > y.slug ? 1 : 0))
+    .map((feature) => ({ ...feature, dimensions: [...feature.dimensions].sort() }))
+  return canonicalJson({ ...pricing, features })
 }
 
 /**
  * The first change that lets more spend through: a hard limit removed, raised, or made soft, a
- * close time cleared or postponed, or any pricing change (it decides what usage costs). Null when `next` only keeps or tightens what `prev` enforced.
+ * close time cleared or postponed, or any pricing change (it decides what usage costs). Null when
+ * `next` only keeps or tightens what `prev` enforced.
  * Soft limits and hold TTLs never deny, so changing them loosens nothing.
  */
 export function loosening(prev: BudgetConfig, next: BudgetConfig): ConfigChange | null {
@@ -143,7 +155,7 @@ export function loosening(prev: BudgetConfig, next: BudgetConfig): ConfigChange 
   const postponed =
     prev.closesAt !== null && (next.closesAt === null || next.closesAt > prev.closesAt)
   if (postponed) return { change: "closesAt" }
-  return pricingKey(prev) === pricingKey(next) ? null : { change: "pricing" }
+  return samePricing(prev.pricing, next.pricing) ? null : { change: "pricing" }
 }
 
 /**

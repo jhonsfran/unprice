@@ -3,6 +3,7 @@
  * Types only, plus the error a rejection travels in.
  */
 
+import type { BudgetStatementRegistration } from "@unprice/db/validators"
 import { BaseError, Err, type Result } from "@unprice/error"
 import { type Amount, type SignedAmount, formatAmount } from "@unprice/money"
 import {
@@ -148,9 +149,7 @@ export type Statement = Readonly<{
 }>
 
 /** What billing registers for one period; the rest of the statement starts at zero. */
-export type StatementRegistration = Readonly<
-  Pick<Statement, "periodId" | "statementKey" | "featureSlug" | "start" | "end">
->
+export type StatementRegistration = Readonly<BudgetStatementRegistration>
 
 /**
  * A hold stays open until it is settled or released, or until `expiresAt` passes: the alarm then
@@ -300,6 +299,8 @@ export type BudgetView = Readonly<{
   expired: readonly ReservationOperation[]
   /** The rate cards the budget's pricing names, by card id, as the store cached them. */
   cards: Readonly<Record<string, CardRows>>
+  /** For an upsert that changes an existing budget's pricing: whether a hold or lease is open. */
+  reservationsOpen: boolean
   /**
    * The statements the command reads: for an event, its features' open statements and those
    * covering its time; for a statement command, the ones it addresses.
@@ -338,10 +339,11 @@ export type BudgetCommand =
        */
       mayLoosen: boolean
       /**
-       * The caller cannot set pricing (the public upsert): an existing budget keeps the pricing it
-       * has, whatever `config.pricing` says.
+       * Whether `config.pricing` replaces an existing budget's pricing (billing's compile). Without
+       * it an existing budget keeps the pricing it has, so a caller that cannot see pricing (the
+       * public upsert) never strips it. A new budget takes `config.pricing` either way.
        */
-      keepsPricing?: boolean
+      setsPricing?: boolean
     }>
   /**
    * `usage` or `event` is the most the work may consume, on every measure. An event is priced at
@@ -594,7 +596,7 @@ export type BudgetRejection =
   | PricingRejection
   /** No metered feature takes this event slug, or the budget has no pricing. */
   | Readonly<{ code: "UNKNOWN_EVENT"; slug: string }>
-  /** Usage needs a registered statement and none covers `at` or is open after it. */
+  /** Usage needs a registered statement and none covers `at`. */
   | Readonly<{ code: "NO_STATEMENT"; featureSlug: string; at: number }>
   /** The statement covering `at` is sealed and no later one is open. */
   | Readonly<{ code: "PERIOD_CLOSED"; featureSlug: string; at: number; periodId: string }>
@@ -609,7 +611,10 @@ export type BudgetRejection =
   | Readonly<{ code: "CARD_INCOMPATIBLE"; cardId: string; violations: readonly CardViolation[] }>
   /** The budget prices usage from events, so an amount or a lease would never reach a statement. */
   | Readonly<{ code: "EVENT_REQUIRED" }>
-  /** Pricing can be added only while nothing is held, so every open hold has an estimate. */
+  /**
+   * Pricing changes only while no hold or lease is open: an open hold settles under the pricing
+   * that estimated it, and a lease never reaches a statement.
+   */
   | Readonly<{ code: "RESERVATIONS_OPEN" }>
 
 export type BudgetErrorCode = BudgetRejection["code"]
@@ -647,7 +652,7 @@ function rejectionMessage(rejection: BudgetRejection): string {
       return `Hold ${rejection.holdId} does not exist`
     case "HOLD_CLOSED":
       return rejection.status === "expired"
-        ? `Hold ${rejection.holdId} expired and was settled at its full amount`
+        ? `Hold ${rejection.holdId} expired and was settled by the budget`
         : `Hold ${rejection.holdId} is already ${rejection.status}`
     case "HOLD_AMOUNT_EXCEEDED": {
       const { measure } = rejection
@@ -691,7 +696,7 @@ function rejectionMessage(rejection: BudgetRejection): string {
     case "UNKNOWN_EVENT":
       return `No metered feature takes event ${rejection.slug}`
     case "NO_STATEMENT":
-      return `No billing statement of ${rejection.featureSlug} covers ${rejection.at} or is open after it`
+      return `No billing statement of ${rejection.featureSlug} covers ${rejection.at}`
     case "PERIOD_CLOSED":
       return `Statement ${rejection.periodId} of ${rejection.featureSlug} is sealed and no later one is open`
     case "STATEMENT_CONFLICT":
@@ -711,7 +716,7 @@ function rejectionMessage(rejection: BudgetRejection): string {
     case "EVENT_REQUIRED":
       return "This budget prices usage from events; send an event instead of an amount or a lease"
     case "RESERVATIONS_OPEN":
-      return "Pricing can be added only while nothing is held; settle or release open holds and leases first"
+      return "Pricing can change only while no hold or lease is open; settle or release them first"
   }
 }
 

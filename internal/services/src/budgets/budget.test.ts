@@ -1844,6 +1844,7 @@ describe("history does not slow the hot path", () => {
       history: [],
       expired: [],
       cards: {},
+      reservationsOpen: false,
       statements: [],
     }
     const first = transition({ view: state, command: upsert(month100), clockMs: t0 })

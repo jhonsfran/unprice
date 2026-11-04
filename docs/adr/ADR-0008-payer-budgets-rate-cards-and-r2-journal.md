@@ -27,7 +27,8 @@ the decisions those two left open and the ones that changed on 2026-11-03.
 
 ### D1. One budget per payer is the runtime
 
-Every Unprice customer has one budget at key `customer:<customerId>` in `BudgetDO`. It holds:
+Every Unprice customer has one budget at key `unprice:customer:<customerId>` in `BudgetDO`. It
+holds:
 
 - one amount measure in the subscription's unit (money or credits);
 - one quantity measure per metered feature;
@@ -38,10 +39,14 @@ A plan change rewrites the budget's configuration. It never moves usage to anoth
 `EntitlementWindowDO`, `RunBudgetDO`, `budget_runs`, and the `/v1/runs/*` routes are deleted. A run
 cap is a standalone budget key with `closesAt`, as ADR-0006 already allows.
 
-A public upsert to a key that starts with `customer:cus_` returns 403. The other verbs work on it.
+Keys that start with `unprice:` are written by Unprice. A public upsert, or an `ifMissing` that
+would create one, returns 403, so no caller can define a payer budget before billing compiles it.
 A budget with pricing takes events only: an amount, a usage vector, or a lease is refused with
-`EVENT_REQUIRED`, because nothing would bill it. Pricing is added to a budget only while nothing is
-held.
+`EVENT_REQUIRED`, because nothing would bill it. Until the event routes ship (U11), the public API
+can only read a payer budget. An upsert keeps a budget's pricing unless the caller sets it, and
+only billing's compile sets it. Pricing changes only while no hold or lease is open: an open hold
+settles under the pricing that estimated it. The compile retries a change refused with
+`RESERVATIONS_OPEN`; a hold lives at most its TTL.
 
 ### D2. A rate card owns every price; a plan version owns the package
 

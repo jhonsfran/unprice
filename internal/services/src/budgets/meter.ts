@@ -7,6 +7,7 @@ import type { BudgetPricing } from "@unprice/db/validators"
 import { Ok, type Result } from "@unprice/error"
 import type { Amount } from "@unprice/money"
 import { type CardRows, type RateCards, estimateUsage, priceUsage, quantityOf } from "../pricing"
+import { canonicalJson } from "../rate-cards/wire"
 import type { BudgetRecord } from "./config"
 import {
   type BudgetEvent,
@@ -70,7 +71,7 @@ type MeterInput = Readonly<{
 export function meterEvent(input: MeterInput): Result<Metered, UnPriceBudgetError> {
   const { budget, event, at } = input
   const pricing = budget.config.pricing
-  const features = pricing?.features.filter((feature) => feature.eventSlug === event.slug) ?? []
+  const features = pricing ? featuresOf(pricing, event.slug) : []
   if (!pricing || features.length === 0) return reject({ code: "UNKNOWN_EVENT", slug: event.slug })
   const size = new TextEncoder().encode(JSON.stringify(event.properties)).length
   if (size > MAX_EVENT_PROPERTIES_BYTES) {
@@ -111,7 +112,7 @@ export function meterEvent(input: MeterInput): Result<Metered, UnPriceBudgetErro
         feature,
         properties: event.properties,
         at,
-        positionOf: (key) => (hasOwn(positions, key) ? (positions[key] as Amount) : ZERO),
+        positionOf: (key) => (Object.hasOwn(positions, key) ? (positions[key] as Amount) : ZERO),
       })
       if (result.err) return reject(result.err.rejection)
       const { cardId, rowId, lines, meterQuantity, amount, cost } = result.val
@@ -129,8 +130,18 @@ export function meterEvent(input: MeterInput): Result<Metered, UnPriceBudgetErro
   })
 }
 
-function hasOwn(record: object, key: string): boolean {
-  return Object.prototype.hasOwnProperty.call(record, key)
+/** The metered features an event slug feeds. */
+export function featuresOf(
+  pricing: BudgetPricing,
+  eventSlug: string
+): BudgetPricing["features"][number][] {
+  return pricing.features.filter((feature) => feature.eventSlug === eventSlug)
+}
+
+/** The ids of the cards the pricing names: the base, then the overlay. */
+export function cardIdsOf(pricing: BudgetPricing): string[] {
+  const { base, overlay } = pricing.cards
+  return overlay === undefined ? [base] : [base, overlay]
 }
 
 /** The cards the pricing names, each cached and in the budget's unit. */
@@ -139,17 +150,18 @@ export function cardsOf(
   unit: string,
   cached: Readonly<Record<string, CardRows>>
 ): Result<RateCards, UnPriceBudgetError> {
-  const { base: baseId, overlay: overlayId } = pricing.cards
-  const ids = overlayId === undefined ? [baseId] : [baseId, overlayId]
-  for (const cardId of ids) {
-    const card = cached[cardId]
+  const cards: CardRows[] = []
+  for (const cardId of cardIdsOf(pricing)) {
+    // Card ids are caller data: `constructor` is a missing card, not Object's.
+    const card = Object.hasOwn(cached, cardId) ? cached[cardId] : undefined
     if (!card) return reject({ code: "CARD_NOT_FOUND", cardId })
     if (card.card.unit !== unit) {
       return reject({ code: "UNIT_MISMATCH", cardId, unit, cardUnit: card.card.unit })
     }
+    cards.push(card)
   }
-  const base = cached[baseId] as CardRows
-  return Ok(overlayId === undefined ? { base } : { base, overlay: cached[overlayId] })
+  const [base, overlay] = cards as [CardRows, CardRows?]
+  return Ok(overlay === undefined ? { base } : { base, overlay })
 }
 
 /**
@@ -213,27 +225,26 @@ export function emptyStatement(
 function applied(statement: Statement, feature: PricedFeature, at: number): Statement {
   const positions: Record<string, Amount> = { ...statement.positions }
   for (const line of feature.lines) positions[line.positionKey] = line.after
-  const { cost } = feature
   return {
     ...statement,
     quantity: statement.quantity + feature.meterQuantity,
     amount: statement.amount + feature.amount,
-    cost: cost === null ? statement.cost : (statement.cost ?? ZERO) + cost,
+    cost: sumCosts([statement.cost, feature.cost]),
     events: statement.events + 1,
     lastEventAt: statement.lastEventAt === null ? at : Math.max(statement.lastEventAt, at),
     positions,
   }
 }
 
-/** Whether a retry repeats the event: the same slug and the same properties, key order aside. */
-export function sameEvent(a: BudgetEvent, b: BudgetEvent): boolean {
-  return a.slug === b.slug && canonical(a.properties) === canonical(b.properties)
+/** USD costs summed; null until one is known, so uncosted lines never read as free. */
+export function sumCosts(costs: readonly (Amount | null)[]): Amount | null {
+  return costs.reduce<Amount | null>(
+    (sum, cost) => (cost === null ? sum : (sum ?? ZERO) + cost),
+    null
+  )
 }
 
-function canonical(properties: BudgetEvent["properties"]): string {
-  return JSON.stringify(
-    Object.keys(properties)
-      .sort()
-      .map((key) => [key, properties[key]])
-  )
+/** Whether a retry repeats the event: the same slug and the same properties, key order aside. */
+export function sameEvent(a: BudgetEvent, b: BudgetEvent): boolean {
+  return a.slug === b.slug && canonicalJson(a.properties) === canonicalJson(b.properties)
 }

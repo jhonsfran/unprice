@@ -31,6 +31,12 @@ import { CloudflareBudgetClient } from "~/ingestion/budget/client"
 export const BUDGET_REMAINING_HEADER = "Unprice-Budget-Remaining"
 
 /**
+ * Keys Unprice writes itself: a customer's subscription budget is `unprice:customer:<customerId>`
+ * (ADR-0008 D1). A public call may read and spend under one, never create or define it.
+ */
+export const RESERVED_KEY_PREFIX = "unprice:"
+
+/**
  * Runs one verb against the budget at `key` and sets the remaining header. Authenticates a runtime
  * key unless the route already authenticated `apiKey` itself. Returns the verb's outcome, or
  * throws the HTTP error its rejection maps to.
@@ -42,6 +48,13 @@ export async function runBudgetVerb<R extends BudgetVerbRequest>(
   apiKey?: Pick<ApiKeyExtended, "projectId">
 ) {
   const { projectId } = apiKey ?? (await keyAuth(c))
+  const defines = request.type === "upsert" || ("ifMissing" in request && request.ifMissing)
+  if (defines && key.startsWith(RESERVED_KEY_PREFIX)) {
+    throw new UnpriceApiError({
+      code: "FORBIDDEN",
+      message: `Keys starting with ${RESERVED_KEY_PREFIX} are written by Unprice; a call cannot create or upsert one`,
+    })
+  }
   const budgets = new CloudflareBudgetClient(c.env)
   const { budgetCatalog } = c.get("services")
   const result = await callBudget(c, request.type, () =>

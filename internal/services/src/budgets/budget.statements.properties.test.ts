@@ -43,7 +43,7 @@ const FEATURES = [
 
 const configOf = (features: readonly (typeof FEATURES)[number][]) =>
   upsertBudgetInternalInputSchema.parse({
-    key: "customer:cus_model",
+    key: "unprice:customer:cus_model",
     unit: "USD",
     limits: [],
     pricing: {
@@ -53,7 +53,7 @@ const configOf = (features: readonly (typeof FEATURES)[number][]) =>
     },
   }).config
 const config = configOf(FEATURES)
-/** Emails stop being metered: open email estimates can no longer be billed at expiry. */
+/** Emails stop being metered; the change waits until no hold is open. */
 const withoutEmails = configOf(FEATURES.filter((feature) => feature.slug !== "emails"))
 const pricedFeatures = config.pricing?.features ?? []
 
@@ -86,8 +86,22 @@ const stepArb = (verbs: readonly Verb[]) =>
 const scenarioArb = (verbs: readonly Verb[]) =>
   fc.record({
     sealLag: fc.integer({ min: 0, max: 12 * hour }),
-    steps: fc.array(stepArb(verbs), { minLength: 20, maxLength: 60 }),
+    steps: fc.array(stepArb(verbs), { minLength: 20, maxLength: 60, size: "max" }),
   })
+
+/**
+ * Each step's clock. The advances are scaled so the last step lands on LAST_CLOCK: every scenario
+ * crosses both month ends and seals November and December.
+ */
+function clocksOf(steps: readonly Readonly<{ advance: number }>[]): number[] {
+  const start = FIRST + day
+  const total = steps.reduce((sum, step) => sum + step.advance + 1, 0)
+  let elapsed = 0
+  return steps.map((step) => {
+    elapsed += step.advance + 1
+    return start + Math.floor((LAST_CLOCK - start) * (elapsed / total))
+  })
+}
 
 /** A budget with every feature's statements registered for November to January. */
 function newBudget() {
@@ -102,7 +116,7 @@ function newBudget() {
   run(
     {
       type: "upsert",
-      key: "customer:cus_model",
+      key: "unprice:customer:cus_model",
       projectId: "proj_1",
       unit: "money:USD",
       config,
@@ -244,9 +258,9 @@ describe("statements through the budget", () => {
       fc.property(scenarioArb(["record"]), ({ sealLag, steps }) => {
         const { store, run, sealed, sealDue } = newBudget()
         const expected = new Map<string, Expected>()
-        let clock = FIRST + day
+        const clocks = clocksOf(steps)
         steps.forEach((step, n) => {
-          clock = Math.min(clock + step.advance, LAST_CLOCK)
+          const clock = clocks[n] ?? LAST_CLOCK
           sealDue(clock, sealLag)
           const at = clock - step.lag
           run({ type: "record", idempotencyKey: `e${n}`, event: step.event, occurredAt: at }, clock)
@@ -275,7 +289,7 @@ describe("statements through the budget", () => {
   })
 
   it("with holds, settles, expiries, seals, and repricing: statements price their usage as one event and sum to the ledger less unbilled estimates", () => {
-    const seen = { unbilled: 0, late: 0, billedExpiries: 0 }
+    const seen = { unbilled: 0, late: 0, billedExpiries: 0, repriced: 0, deferred: 0 }
     fc.assert(
       fc.property(
         scenarioArb(["record", "charge", "settle", "abandon", "reprice"]),
@@ -284,6 +298,7 @@ describe("statements through the budget", () => {
           const unbilled = new Map<string, Usage>()
           // Every event a row billed, by row id: rows are purged after retention.
           const billed = new Map<string, PricedEvent>()
+          const billedExpiries = new Set<string>()
           const capture = () => {
             for (const row of store.rows.values()) {
               if ((row.kind === "charge" || row.kind === "record") && row.priced) {
@@ -292,12 +307,14 @@ describe("statements through the budget", () => {
               if (row.kind !== "hold" || row.state.status !== "settled") continue
               if (row.state.unbilled) unbilled.set(row.id, row.reserved)
               if (row.state.priced) billed.set(row.id, row.state.priced)
+              if (row.state.priced && row.state.byExpiry) billedExpiries.add(row.id)
             }
           }
           let repriced = false
+          const clocks = clocksOf(steps)
           let clock = FIRST + day
           steps.forEach((step, n) => {
-            clock = Math.min(clock + step.advance, LAST_CLOCK)
+            clock = clocks[n] ?? LAST_CLOCK
             // Sealing before the alarm leaves holds open across a seal: their expiry counts late,
             // or, with no later period open, unbilled.
             if (step.sealFirst) sealDue(clock, sealLag)
@@ -319,10 +336,25 @@ describe("statements through the budget", () => {
             } else if (step.verb === "abandon") {
               run({ type: "authorize", idempotencyKey: key, event, ttlMs }, clock)
             } else if (step.verb === "reprice") {
-              repriced = !repriced
-              const next = repriced ? withoutEmails : config
-              const upsert = { key: "customer:cus_model", projectId: "proj_1", unit: "money:USD" }
-              run({ type: "upsert", ...upsert, config: next, mayLoosen: true }, clock)
+              const next = repriced ? config : withoutEmails
+              const upsert = {
+                key: "unprice:customer:cus_model",
+                projectId: "proj_1",
+                unit: "money:USD",
+              }
+              const result = store.run(
+                { type: "upsert", ...upsert, config: next, mayLoosen: true, setsPricing: true },
+                clock
+              )
+              if (result.err) {
+                // An open hold settles under the pricing that estimated it.
+                expect(result.err.code).toBe("RESERVATIONS_OPEN")
+                expect(store.hasOpenReservations()).toBe(true)
+                seen.deferred += 1
+              } else {
+                repriced = !repriced
+                seen.repriced += 1
+              }
             } else {
               // Two holds estimated at one position; the settles price past each other.
               const holdIds = [`${key}a`, `${key}b`].map((idempotencyKey) => {
@@ -335,7 +367,11 @@ describe("statements through the budget", () => {
             }
             capture()
           })
-          store.alarm(clock + day)
+          // January seals before the alarm closes the last holds; with no later period open, their
+          // estimates stay unbilled.
+          const end = MONTHS[3].start + day
+          run({ type: "sealStatements", statementKey: MONTHS[2].key, at: MONTHS[3].start }, end)
+          store.alarm(end)
           capture()
 
           const expected = new Map<string, Expected>()
@@ -347,11 +383,7 @@ describe("statements through the budget", () => {
               if (feature.late) seen.late += 1
             }
           }
-          for (const row of store.rows.values()) {
-            if (row.kind === "hold" && row.state.status === "settled" && row.state.byExpiry) {
-              if (row.state.priced) seen.billedExpiries += 1
-            }
-          }
+          seen.billedExpiries += billedExpiries.size
           seen.unbilled += unbilled.size
           expectStatements(store, expected)
 
@@ -378,5 +410,7 @@ describe("statements through the budget", () => {
     expect(seen.unbilled).toBeGreaterThan(0)
     expect(seen.late).toBeGreaterThan(0)
     expect(seen.billedExpiries).toBeGreaterThan(0)
+    expect(seen.repriced).toBeGreaterThan(0)
+    expect(seen.deferred).toBeGreaterThan(0)
   })
 })

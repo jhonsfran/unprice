@@ -71,7 +71,7 @@ type PricedBudget = Readonly<{
 function pricedUpsert(budget: PricedBudget): BudgetCommand {
   const [base = usdCard, overlay] = budget.cards ?? [usdCard]
   const parsed = upsertBudgetInternalInputSchema.parse({
-    key: "customer:cus_acme",
+    key: "unprice:customer:cus_acme",
     unit: budget.unit ?? "USD",
     limits: budget.limits ?? [],
     pricing: {
@@ -86,7 +86,7 @@ function pricedUpsert(budget: PricedBudget): BudgetCommand {
       statements: budget.statements ?? "required",
     },
   })
-  return { type: "upsert", projectId: "proj_1", mayLoosen: true, ...parsed }
+  return { type: "upsert", projectId: "proj_1", mayLoosen: true, setsPricing: true, ...parsed }
 }
 
 function pricedStore(budget: PricedBudget, at = NOV + hour) {
@@ -817,7 +817,7 @@ describe("a payer budget keeps every amount it consumes on a statement", () => {
     const store = new MemoryBudgetStore()
     store.cacheCards(usdCard, includedApiCallsCard)
     const parsed = upsertBudgetInternalInputSchema.parse({
-      key: "customer:cus_acme",
+      key: "unprice:customer:cus_acme",
       unit: "USD",
       limits,
     })
@@ -851,6 +851,48 @@ describe("a payer budget keeps every amount it consumes on a statement", () => {
     expect(lifetime(store)).toEqual({ amount: "0.04", quantities: { images: "1" } })
   })
 
+  it("adds pricing only while no hold or lease is open, whatever it holds", () => {
+    const store = unpricedStore()
+    const at = NOV + 2 * hour
+    ok(store.run({ type: "lease", leaseKey: "l1", amount: ONE, ttlMs: hour }, at))
+    const captured = { final: false, captured: ONE, extend: BigInt(0) } as const
+    ok(store.run({ type: "report", leaseKey: "l1", seq: 1, request: captured }, at))
+    expect(store.ledger.held.amount).toBe(BigInt(0))
+    expect(rejection(store.run(pricedUpsert({ features: [images] }), at))).toEqual({
+      code: "RESERVATIONS_OPEN",
+    })
+    const final = { final: true, captured: ONE } as const
+    ok(store.run({ type: "report", leaseKey: "l1", seq: 2, request: final }, at))
+    ok(store.run(pricedUpsert({ features: [images] }), at))
+  })
+
+  it("changes or drops pricing only once open holds are settled", () => {
+    const store = pricedStore({ features: [images, tokens] })
+    ok(store.run(register(month("images", NOV, DEC), month("llm_tokens", NOV, DEC)), NOV + hour))
+    const at = NOV + 2 * hour
+    const hold = ok(
+      store.run({ type: "authorize", idempotencyKey: "a1", event: image("1024") }, at)
+    )
+    if (hold.outcome.type !== "authorize") throw new Error("not a hold")
+    const unpriced = upsertBudgetInternalInputSchema.parse({
+      key: "unprice:customer:cus_acme",
+      unit: "USD",
+      limits: [],
+    })
+    const changed: BudgetCommand[] = [
+      pricedUpsert({ features: [images] }),
+      pricedUpsert({ features: [images, tokens], statements: "none" }),
+      { type: "upsert", projectId: "proj_1", mayLoosen: true, setsPricing: true, ...unpriced },
+    ]
+    expect(changed.map((command) => rejection(store.run(command, at)))).toEqual(
+      Array(3).fill({ code: "RESERVATIONS_OPEN" })
+    )
+    ok(store.run(pricedUpsert({ features: [tokens, images] }), at))
+    ok(store.run({ type: "settle", holdId: hold.outcome.holdId, event: image("1024") }, at))
+    expect(totals(store.statements.get("images:inv_2026-11")).amount).toBe("0.04")
+    ok(store.run(pricedUpsert({ features: [images] }), at))
+  })
+
   it("adds pricing only while nothing is held", () => {
     const store = unpricedStore()
     const held = ok(
@@ -868,24 +910,67 @@ describe("a payer budget keeps every amount it consumes on a statement", () => {
     expect(store.budget?.config.pricing?.cards).toEqual({ base: usdCard.card.id })
   })
 
-  it("keeps its pricing through an upsert that cannot set it", () => {
+  it("keeps its pricing through an upsert that does not set it, cards cached or not", () => {
     const store = pricedStore({
       features: [images],
       limits: [{ id: "month", amount: "100", window: "month" }],
     })
+    store.cards.clear()
     const tightened = upsertBudgetInternalInputSchema.parse({
-      key: "customer:cus_acme",
+      key: "unprice:customer:cus_acme",
       unit: "USD",
       limits: [{ id: "month", amount: "50", window: "month" }],
     })
     const upserted = ok(
       store.run(
-        { type: "upsert", projectId: "proj_1", mayLoosen: false, keepsPricing: true, ...tightened },
+        { type: "upsert", projectId: "proj_1", mayLoosen: true, ...tightened },
         NOV + 2 * hour
       )
     )
     if (upserted.outcome.type !== "upsert") throw new Error("not an upsert")
     expect(upserted.outcome.changes.map((change) => change.change)).toEqual(["limit.amount"])
+    expect(store.budget?.config.pricing?.features.map((feature) => feature.slug)).toEqual([
+      "images",
+    ])
+  })
+
+  it("ignores pricing an upsert sends without setting it, and the order of features", () => {
+    const store = pricedStore({ features: [images, tokens] })
+    const { setsPricing: _sets, ...unset } = pricedUpsert({ features: [images] }) as Extract<
+      BudgetCommand,
+      { type: "upsert" }
+    >
+    const kept = ok(store.run(unset, NOV + 2 * hour))
+    if (kept.outcome.type !== "upsert") throw new Error("not an upsert")
+    expect(kept.outcome.changes).toEqual([])
+    const reordered = ok(store.run(pricedUpsert({ features: [tokens, images] }), NOV + 2 * hour))
+    if (reordered.outcome.type !== "upsert") throw new Error("not an upsert")
+    expect(reordered.outcome.changes).toEqual([])
+    expect(store.budget?.config.pricing?.features.map((feature) => feature.slug)).toEqual([
+      "images",
+      "llm_tokens",
+    ])
+  })
+
+  it("holds only rows in force to a feature's dimensions, so a regrouped card stays usable", () => {
+    // Images were matched on `resolution` until the regroup, and on `size` since.
+    const regroupAt = NOV + day
+    const regrouped: CardRows = {
+      card: usdCard.card,
+      rows: usdCard.rows.flatMap((row) => {
+        if (row.featureSlug !== "images") return [row]
+        const before = {
+          ...row,
+          id: `${row.id}_resolution`,
+          match: { resolution: row.match.size ?? "" },
+          effectiveTo: regroupAt,
+        }
+        return [before, { ...row, effectiveFrom: regroupAt }]
+      }),
+    }
+    const store = new MemoryBudgetStore()
+    store.cacheCards(regrouped)
+    ok(store.run(pricedUpsert({ features: [images] }), regroupAt + hour))
     expect(store.budget?.config.pricing?.features.map((feature) => feature.slug)).toEqual([
       "images",
     ])

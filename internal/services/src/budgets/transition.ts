@@ -19,9 +19,10 @@ import {
   deletableAt,
   isClosed,
 } from "./config"
-import { type Change, balanceOf, decide, holdNumber } from "./decide"
+import { type Change, balanceOf, decide, holdNumber, repricesBudget, upsertPricing } from "./decide"
 import { type RowStep, checkTransition } from "./invariants"
 import { alarmAt, consume, dueAt, rollUsage, trackLimits } from "./ledger"
+import { cardIdsOf, featuresOf } from "./meter"
 import type {
   BudgetBalance,
   BudgetCommand,
@@ -37,7 +38,7 @@ import type {
   UnPriceBudgetError,
   WindowPeriod,
 } from "./model"
-import { sealedAt, statementViolations, statementsAnswer } from "./statements"
+import { byPeriodId, sealCutoff, statementViolations, statementsAnswer } from "./statements"
 import { addUsage, subtractUsage } from "./usage"
 import { type WindowId, windowIdOf } from "./windows"
 
@@ -58,6 +59,8 @@ export type BudgetReader = {
    * leases, holds by number.
    */
   readExpired(now: number, limit: number): ReservationOperation[]
+  /** Whether any hold or lease is open, expired or not. */
+  hasOpenReservations(): boolean
   /** The cached rate cards with these ids; a card the store has not cached is absent. */
   readCards(cardIds: readonly string[]): Record<string, CardRows>
   /** The statements with these period ids. */
@@ -91,6 +94,7 @@ export function loadView(
   const expired =
     command.type === "sweep" && budget ? reader.readExpired(now, EXPIRED_PER_SWEEP) : []
   const prices = pricing !== undefined && willPrice(command, budget, target, expired, now)
+  const repriced = command.type === "upsert" && budget !== null && repricesBudget(command, budget)
   const statements = statementsOf(
     reader,
     command,
@@ -109,21 +113,23 @@ export function loadView(
         : [],
     expired,
     cards: pricing && prices ? reader.readCards(cardIdsOf(pricing)) : {},
+    reservationsOpen: repriced && reader.hasOpenReservations(),
     // Several expiries may read the same statement.
-    statements: [...new Map(statements.map((s) => [s.periodId, s])).values()],
+    statements: [...byPeriodId(statements).values()],
   }
 }
 
-/** The pricing the command runs under: an upsert's new one, else the budget's or the one it creates. */
+/** The pricing the command runs under: an upsert's, else the budget's or the one it creates. */
 function pricingOf(command: BudgetCommand, budget: BudgetRecord | null): BudgetPricing | undefined {
-  if (command.type === "upsert") return command.config.pricing ?? budget?.config.pricing
+  if (command.type === "upsert") return upsertPricing(command, budget)
   if (budget) return budget.config.pricing
   return "ifMissing" in command ? command.ifMissing?.config.pricing : undefined
 }
 
 /**
- * Whether the command reaches the cards: an upsert or a create checks them, an event is priced,
- * an expired estimate is billed. A keyed replay and a settle of a closed hold answer from their row.
+ * Whether the command reaches the cards: a create or an upsert that changes pricing checks them, an
+ * event is priced, an expired estimate is billed. A keyed replay and a settle of a closed hold
+ * answer from their row.
  */
 function willPrice(
   command: BudgetCommand,
@@ -132,7 +138,8 @@ function willPrice(
   expired: readonly ReservationOperation[],
   now: number
 ): boolean {
-  if (command.type === "upsert" || budget === null) return true
+  if (budget === null) return true
+  if (command.type === "upsert") return repricesBudget(command, budget)
   const live = target !== null && !isPastRetention(target, now)
   switch (command.type) {
     case "authorize":
@@ -150,18 +157,6 @@ function willPrice(
   }
 }
 
-function cardIdsOf(pricing: BudgetPricing): string[] {
-  const { base, overlay } = pricing.cards
-  return overlay === undefined ? [base] : [base, overlay]
-}
-
-/** The features an event slug feeds. */
-function featuresFed(pricing: BudgetPricing, eventSlug: string): string[] {
-  return pricing.features
-    .filter((feature) => feature.eventSlug === eventSlug)
-    .map((feature) => feature.slug)
-}
-
 /**
  * The statements a command reads. An event reads its features' open statements and those covering
  * the time it prices at: a record's `occurredAt`, a settle's (or an expiry's) hold `createdAt`,
@@ -176,7 +171,7 @@ function statementsOf(
   now: number
 ): Statement[] {
   const eventStatements = (slug: string, from: number, to: number) => {
-    const features = pricing ? featuresFed(pricing, slug) : []
+    const features = pricing ? featuresOf(pricing, slug).map((feature) => feature.slug) : []
     return features.length === 0 ? [] : reader.readFeatureStatements(features, from, to)
   }
   switch (command.type) {
@@ -217,7 +212,7 @@ function statementsOf(
       ]
     }
     case "sealStatements":
-      return reader.readSealable(command.statementKey, sealedAt(command, now))
+      return reader.readSealable(command.statementKey, sealCutoff(command, now))
     case "completeStatements":
       return reader.readStatements(command.periodIds)
     case "statements":
@@ -309,6 +304,7 @@ export function transition(params: {
       expired: view.expired,
       cards: view.cards,
       statements: view.statements,
+      reservationsOpen: view.reservationsOpen,
     },
     now
   )
@@ -337,7 +333,7 @@ export function transition(params: {
   if (live) priors.set(live.id, live)
 
   const statements = change.statements ?? []
-  const priorStatements = new Map(view.statements.map((s) => [s.periodId, s]))
+  const priorStatements = byPeriodId(view.statements)
   const steps = change.rows.map((row): RowStep => [priors.get(row.id), row])
   const violations = [
     ...checkTransition({
@@ -392,9 +388,7 @@ export function transition(params: {
       changes: change.configured?.changes ?? [],
       created: change.configured !== undefined && command.type !== "upsert",
       history: [...periods, ...view.history],
-      statements: [
-        ...new Map([...view.statements, ...statements].map((s) => [s.periodId, s])).values(),
-      ],
+      statements: [...byPeriodId([...view.statements, ...statements]).values()],
       now,
     }),
   })

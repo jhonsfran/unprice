@@ -6,7 +6,7 @@
 import { Ok, type Result } from "@unprice/error"
 import type { Amount } from "@unprice/money"
 import type { RowStep } from "./invariants"
-import { emptyStatement, isPerpetual } from "./meter"
+import { emptyStatement, isPerpetual, sumCosts } from "./meter"
 import {
   type BudgetCommand,
   type PricedEvent,
@@ -40,7 +40,7 @@ export function decideRegister(
   known: readonly Statement[],
   now: number
 ): Result<Statement[], UnPriceBudgetError> {
-  const byId = new Map(known.map((statement) => [statement.periodId, statement]))
+  const byId = byPeriodId(known)
   const created: Statement[] = []
   for (const registration of registrations) {
     const { periodId, start, end } = registration
@@ -75,11 +75,16 @@ export function decideRegister(
 
 type SealCommand = Extract<BudgetCommand, { type: "sealStatements" }>
 
+/** Statements by period id; a later one with the same id wins. */
+export function byPeriodId(statements: readonly Statement[]): Map<string, Statement> {
+  return new Map(statements.map((statement) => [statement.periodId, statement]))
+}
+
 /**
- * When a seal takes effect: `at`, but never past the budget's clock, so a period that has not
- * ended cannot be sealed early.
+ * The seal's cutoff: statements ending by it seal. `at`, but never past the budget's clock, so a
+ * period that has not ended cannot be sealed early.
  */
-export function sealedAt(command: SealCommand, now: number): number {
+export function sealCutoff(command: SealCommand, now: number): number {
   return Math.min(command.at, now)
 }
 
@@ -100,7 +105,7 @@ export function decideSeal(
 function isSealable(statement: Statement, command: SealCommand, now: number): boolean {
   return (
     statement.statementKey === command.statementKey &&
-    statement.end <= sealedAt(command, now) &&
+    statement.end <= sealCutoff(command, now) &&
     !isPerpetual(statement)
   )
 }
@@ -111,7 +116,7 @@ export function decideComplete(
   known: readonly Statement[],
   now: number
 ): Result<Statement[], UnPriceBudgetError> {
-  const byId = new Map(known.map((statement) => [statement.periodId, statement]))
+  const byId = byPeriodId(known)
   const completed: Statement[] = []
   for (const periodId of new Set(periodIds)) {
     const statement = byId.get(periodId)
@@ -130,7 +135,7 @@ export function statementsAnswer(
   statements: readonly Statement[],
   now: number
 ) {
-  const byId = new Map(statements.map((statement) => [statement.periodId, statement]))
+  const byId = byPeriodId(statements)
   const named = (periodIds: readonly string[]) =>
     [...new Set(periodIds)].flatMap((periodId) => byId.get(periodId) ?? [])
   switch (command.type) {
@@ -175,9 +180,6 @@ function billedBy([prior, row]: RowStep): Billed | null {
   return null
 }
 
-const sumCosts = (costs: readonly (Amount | null)[]) =>
-  costs.reduce<Amount | null>((sum, cost) => (cost === null ? sum : (sum ?? ZERO) + cost), null)
-
 /**
  * Violations of statement conservation; empty when the transition may commit.
  * 1. A statement keeps its identity and moves only open -> sealed -> completed.
@@ -206,7 +208,6 @@ export function statementViolations(params: {
     if (routed.length > 0 && prior && prior.state !== "open") {
       violations.push(`${at} is ${prior.state} but took usage`)
     }
-    const routedCost = sumCosts(routed.map((feature) => feature.cost))
     const expected = {
       amount: routed.reduce((sum, feature) => sum + feature.amount, prior?.amount ?? ZERO),
       quantity: routed.reduce(
@@ -214,7 +215,7 @@ export function statementViolations(params: {
         prior?.quantity ?? ZERO
       ),
       events: (prior?.events ?? 0) + routed.length,
-      cost: routedCost === null ? (prior?.cost ?? null) : (prior?.cost ?? ZERO) + routedCost,
+      cost: sumCosts([prior?.cost ?? null, ...routed.map((feature) => feature.cost)]),
     }
     for (const field of ["amount", "quantity", "events", "cost"] as const) {
       if (statement[field] !== expected[field]) {

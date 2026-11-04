@@ -138,6 +138,12 @@ export class MemoryBudgetStore implements BudgetReader {
     return windowIds.flatMap((id) => (this.history.get(id) ?? []).slice(0, limit))
   }
 
+  hasOpenReservations() {
+    return [...this.rows.values()].some(
+      (row) => (row.kind === "hold" || row.kind === "lease") && row.state.status === "open"
+    )
+  }
+
   readExpired(now: number, limit: number) {
     const order = (row: ReservationOperation) => (row.kind === "hold" ? holdNumber(row.id) : 0)
     return [...this.rows.values()]

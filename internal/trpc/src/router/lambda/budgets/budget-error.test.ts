@@ -42,7 +42,7 @@ describe("releaseRejectedTrpcError", () => {
     expect(answers).toEqual([
       [
         "CONFLICT",
-        "h_7 already closed. Its caller settled it, or it expired and was charged in full. Nothing was released.",
+        "h_7 already closed. Its caller settled it, or it expired and the budget settled it. Nothing was released.",
       ],
       [
         "CONFLICT",

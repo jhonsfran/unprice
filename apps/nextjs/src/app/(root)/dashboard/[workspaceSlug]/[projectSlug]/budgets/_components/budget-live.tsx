@@ -137,7 +137,8 @@ export function BudgetLive({
 
         <Panel value="open">
           <Explainer>
-            Holds and leases, soonest expiry first. At expiry an open hold is charged in full.{" "}
+            Holds and leases, soonest expiry first. At expiry the budget settles an open hold: in
+            full, or at its event's price when it was authorized for one.{" "}
             {amount(sumAmounts(pages.map((page) => page.listed)))} of {amount(balance.held)} held
             listed.
           </Explainer>

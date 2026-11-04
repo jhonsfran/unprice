@@ -23,6 +23,10 @@ await unprice.budgets.upsert({
 The key names what the cap is about. You choose it, and it is unique within the project: up to 128
 letters, digits, and `: / _ . @ -`, starting with a letter or digit.
 
+Keys that start with `unprice:` belong to Unprice, which keeps each customer's subscription budget
+there. You can read and spend under one, but an upsert or an `ifMissing` that would create one
+returns 403 `FORBIDDEN`.
+
 | Cap | Key |
 | --- | --- |
 | One end customer of your product | `customer:acme` |

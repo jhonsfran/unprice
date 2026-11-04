@@ -30,9 +30,7 @@ export function amountUsage(amount: Amount): Usage {
  * slug like `constructor` reads 0, not Object's.
  */
 function quantityIn(quantities: Readonly<Record<string, Amount>>, feature: string): Amount {
-  return Object.prototype.hasOwnProperty.call(quantities, feature)
-    ? (quantities[feature] as Amount)
-    : ZERO
+  return Object.hasOwn(quantities, feature) ? (quantities[feature] as Amount) : ZERO
 }
 
 /** The canonical vector: zero quantities dropped, features in key order. */
@@ -49,11 +47,12 @@ export function usageOf(amount: Amount, quantities: Readonly<Record<string, Amou
 
 function combine(a: Usage, b: Usage, sign: bigint): Usage {
   if (isNoUsage(b)) return a
-  const quantities = new Map(Object.entries(a.quantities))
+  // Without a prototype, `__proto__` and `constructor` are plain keys.
+  const quantities: Record<string, Amount> = Object.assign(Object.create(null), a.quantities)
   for (const [feature, quantity] of Object.entries(b.quantities)) {
-    quantities.set(feature, (quantities.get(feature) ?? ZERO) + sign * quantity)
+    quantities[feature] = (quantities[feature] ?? ZERO) + sign * quantity
   }
-  return usageOf(a.amount + sign * b.amount, Object.fromEntries(quantities))
+  return usageOf(a.amount + sign * b.amount, quantities)
 }
 
 export function addUsage(a: Usage, b: Usage): Usage {

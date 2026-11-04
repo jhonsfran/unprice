@@ -229,6 +229,18 @@ function bind(db: SqliteTx): BudgetStoreTx {
       throw new Error(`row for ${leaseKey} is not a lease`)
     },
 
+    // Asked only when an upsert changes pricing, so the scan without a status index is rare.
+    hasOpenReservations() {
+      return (
+        db
+          .select({ id: operations.id })
+          .from(operations)
+          .where(eq(operations.status, "open"))
+          .limit(1)
+          .all().length > 0
+      )
+    },
+
     readExpired(now, limit) {
       return (
         db

@@ -1,4 +1,5 @@
 import { OpenAPIHono } from "@hono/zod-openapi"
+import { inspectBudgetResponseSchema } from "@unprice/db/validators"
 import { Err, Ok } from "@unprice/error"
 import { type BudgetInspection, UnPriceBudgetError } from "@unprice/services/budgets"
 import type { ExecutionContext } from "hono"
@@ -263,7 +264,9 @@ describe("POST /v1/internal/budgets/inspect", () => {
     const response = await call({ projectId: "proj_tenant", key: "customer:acme" })
 
     expect(response.status).toBe(200)
-    const { found } = (await response.json()) as { found: { estimate: unknown } }
+    // The dashboard's gateway parses the answer: the estimate must survive it.
+    const { found } = inspectBudgetResponseSchema.parse(await response.json())
+    if (found?.kind !== "hold") throw new Error("not a hold")
     expect(found.estimate).toMatchObject({
       features: [
         {

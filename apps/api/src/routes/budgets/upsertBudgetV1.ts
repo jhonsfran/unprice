@@ -2,15 +2,11 @@ import { createRoute } from "@hono/zod-openapi"
 import { upsertBudgetInputSchema, upsertBudgetResponseSchema } from "@unprice/db/validators"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { keyAuth } from "~/auth/key"
-import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 import { budgetToWire, runBudgetVerb, toWire } from "./budget-verb"
-
-/** Where a customer's own budget lives: one per payer, written from its subscription. */
-const PAYER_BUDGET_PREFIX = "customer:cus_"
 
 export const route = createRoute(
   defineEndpointContract(
@@ -19,7 +15,7 @@ export const route = createRoute(
       operationId: "budgets.upsert",
       summary: "create or update a budget",
       description:
-        "Create the budget at a key, or replace its definition. Every upsert sends the whole definition: a field it leaves out takes its default, so an omitted closesAt reopens a closing budget and omitted hold TTLs return to their defaults. Sending the same definition again changes nothing. The unit cannot change after creation. A hard cap below current consumption plus outstanding reservations returns 409. A runtime key can create a budget or tighten it; raising or removing a hard limit, making it soft, or clearing or postponing closesAt needs a config key and otherwise returns 403, so whoever spends under a cap cannot lift it. A key that starts with customer:cus_ holds a customer's subscription budget and returns 403.",
+        "Create the budget at a key, or replace its definition. Every upsert sends the whole definition: a field it leaves out takes its default, so an omitted closesAt reopens a closing budget and omitted hold TTLs return to their defaults. Sending the same definition again changes nothing. The unit cannot change after creation. A hard cap below current consumption plus outstanding reservations returns 409. A runtime key can create a budget or tighten it; raising or removing a hard limit, making it soft, or clearing or postponing closesAt needs a config key and otherwise returns 403, so whoever spends under a cap cannot lift it. Keys starting with unprice: are written by Unprice (a customer's subscription budget) and return 403.",
       method: "post",
       tags: ["budgets"],
       request: {
@@ -46,19 +42,12 @@ export const registerUpsertBudgetV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { key, ...request } = c.req.valid("json")
     const apiKey = await keyAuth(c, { requireType: ["runtime", "config"] })
-    // A payer budget is compiled from its subscription (ADR-0008 D1); the other verbs still work.
-    if (key.startsWith(PAYER_BUDGET_PREFIX)) {
-      throw new UnpriceApiError({
-        code: "FORBIDDEN",
-        message: `Budgets under ${PAYER_BUDGET_PREFIX} follow the customer's subscription and cannot be upserted`,
-      })
-    }
     const mayLoosen = apiKey.type === "config"
-    // The public wire carries no pricing: an existing budget keeps its own.
+    // The public wire carries no pricing and never sets it, so an existing budget keeps its own.
     const { changes, budget } = await runBudgetVerb(
       c,
       key,
-      { type: "upsert", ...request, mayLoosen, keepsPricing: true },
+      { type: "upsert", ...request, mayLoosen },
       apiKey
     )
     return c.json({ changes: toWire(changes), budget: budgetToWire(budget) }, HttpStatusCodes.OK)

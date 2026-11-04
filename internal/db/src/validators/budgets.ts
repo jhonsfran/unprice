@@ -190,14 +190,16 @@ export const budgetStatementRegistrationSchema = z
     periodId: statementIdSchema,
     statementKey: statementIdSchema,
     featureSlug: budgetFeatureSchema,
-    start: z.number().int().nonnegative(),
-    end: z.number().int().nonnegative(),
+    start: budgetInstantInputSchema,
+    end: budgetInstantInputSchema,
   })
   .strict()
   .refine((statement) => statement.end > statement.start, {
     path: ["end"],
     message: "end must be after start",
   })
+
+export type BudgetStatementRegistration = z.output<typeof budgetStatementRegistrationSchema>
 
 const meteredBudgetDefinitionFields = {
   ...budgetDefinitionFields,

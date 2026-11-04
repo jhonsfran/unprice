@@ -21,12 +21,45 @@ import {
 // travel as the budget core keeps them, amounts as decimals, except that each usage vector (a
 // hold's reservation, a settle's actual, a charge's usage) travels as its amount.
 
+/** An event as the budget priced it: per feature, the statement it counts in and its lines. */
+const budgetPricedEventSchema = z.object({
+  slug: z.string(),
+  properties: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])),
+  at: budgetEpochMsSchema,
+  features: z.array(
+    z.object({
+      featureSlug: z.string(),
+      periodId: z.string(),
+      late: z.boolean(),
+      cardId: z.string().nullable(),
+      rowId: z.string().nullable(),
+      lines: z.array(
+        z.object({
+          positionKey: z.string(),
+          property: z.string().nullable(),
+          before: budgetDecimalSchema,
+          after: budgetDecimalSchema,
+          amount: budgetDecimalSchema,
+          cost: budgetDecimalSchema.nullable(),
+        })
+      ),
+      meterQuantity: budgetDecimalSchema,
+      amount: budgetDecimalSchema,
+      cost: budgetDecimalSchema.nullable(),
+    })
+  ),
+})
+
 const budgetSettledHoldStateSchema = z.object({
   status: z.literal("settled"),
   closedAt: budgetEpochMsSchema,
   actual: budgetDecimalSchema,
   crossed: z.array(z.string()),
   byExpiry: z.literal(true).optional(),
+  /** The event the hold consumed: the settle's, or at expiry the estimate's. */
+  priced: budgetPricedEventSchema.optional(),
+  /** An expired estimate no statement could take; the ledger consumed what it reserved. */
+  unbilled: z.object({ reason: z.string() }).optional(),
 })
 
 export const budgetHoldOperationSchema = z.object({
@@ -37,6 +70,8 @@ export const budgetHoldOperationSchema = z.object({
   ttlMs: z.number().int().nullable(),
   createdAt: budgetEpochMsSchema,
   expiresAt: budgetEpochMsSchema,
+  /** The event the hold was authorized for, priced as the most it can cost. */
+  estimate: budgetPricedEventSchema.optional(),
   state: z.discriminatedUnion("status", [
     z.object({ status: z.literal("open") }),
     budgetSettledHoldStateSchema,
@@ -51,6 +86,7 @@ export const budgetChargeOperationSchema = z.object({
   amount: budgetDecimalSchema,
   createdAt: budgetEpochMsSchema,
   crossed: z.array(z.string()),
+  priced: budgetPricedEventSchema.optional(),
 })
 
 export const budgetLeaseOperationSchema = z.object({
