@@ -81,7 +81,6 @@
   "dependencies": {
     "@t3-oss/env-core": "^0.12.0",
     "@unkey/cache": "^1.5.0",
-    "@unprice/analytics": "workspace:^",
     "@unprice/api": "workspace:^",
     "@unprice/config": "workspace:^",
     "@unprice/db": "workspace:^",

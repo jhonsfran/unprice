@@ -3,7 +3,7 @@ import {
   analyticsIntervalSchema,
   getUsageResponseSchema,
   prepareInterval,
-} from "@unprice/analytics"
+} from "@unprice/db/validators"
 import { formatAmount, formatMoney } from "@unprice/money"
 import { FEATURE_SLOTS, type FeatureUsageRow, customerOfKey } from "@unprice/services/analytics"
 import { endTime, startTime } from "hono/timing"

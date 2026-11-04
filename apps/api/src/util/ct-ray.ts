@@ -1,8 +1,4 @@
-import {
-  type ParserReturn,
-  type RegionCloudflare,
-  regionsCloudflare,
-} from "@unprice/analytics/utils"
+import { type ParserReturn, type RegionCloudflare, regionsCloudflare } from "./cf-regions"
 
 export function parseCfRay(header: string): ParserReturn<RegionCloudflare> {
   const regex = /\b([A-Z]{3})\b/g

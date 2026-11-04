@@ -1,4 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
 import { hashStringSHA256, newApiKeySecret, newId } from "@unprice/db/utils"
 import type {
   ApiKey,
@@ -44,7 +43,6 @@ export class ApiKeysService {
   private readonly cache: Cache
   private readonly metrics: Metrics
   private readonly logger: Logger
-  private readonly analytics: Analytics
   private hashCache: Map<string, string>
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private readonly waitUntil: (promise: Promise<any>) => void
@@ -53,7 +51,6 @@ export class ApiKeysService {
   constructor(opts: {
     cache: Cache
     metrics: Metrics
-    analytics: Analytics
     logger: Logger
     db: Database
     /**
@@ -67,7 +64,6 @@ export class ApiKeysService {
   }) {
     this.cache = opts.cache
     this.metrics = opts.metrics
-    this.analytics = opts.analytics
     this.logger = opts.logger
     this.db = opts.db
     this.httpDb = opts.httpDb ?? null

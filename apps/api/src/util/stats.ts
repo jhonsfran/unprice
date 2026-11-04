@@ -1,7 +1,63 @@
-import { EU_COUNTRY_CODES, type Stats } from "@unprice/analytics/utils"
 import type { Context } from "hono"
 import { UAParser } from "ua-parser-js"
 import { isBot } from "ua-parser-js/helpers"
+
+/** Request geo and user-agent facts read from the Cloudflare `cf` object and headers. */
+export interface Stats {
+  ip: string
+  continent: string
+  country: string
+  region: string
+  colo: string
+  city: string
+  latitude: string
+  longitude: string
+  device: string
+  device_vendor: string
+  device_model: string
+  browser: string
+  browser_version: string
+  engine: string
+  engine_version: string
+  os: string
+  os_version: string
+  cpu_architecture: string
+  ua: string
+  bot: boolean
+  isEUCountry: boolean
+  source: string
+}
+
+const EU_COUNTRY_CODES = [
+  "AT",
+  "BE",
+  "BG",
+  "CY",
+  "CZ",
+  "DE",
+  "DK",
+  "EE",
+  "ES",
+  "FI",
+  "FR",
+  "GB",
+  "GR",
+  "HR",
+  "HU",
+  "IE",
+  "IT",
+  "LT",
+  "LU",
+  "LV",
+  "MT",
+  "NL",
+  "PL",
+  "PT",
+  "RO",
+  "SE",
+  "SI",
+  "SK",
+]
 
 function capitalize(type: string): string {
   return type.charAt(0).toUpperCase() + type.slice(1)

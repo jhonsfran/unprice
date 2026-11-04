@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server"
-import { type Usage, analyticsIntervalSchema } from "@unprice/analytics"
+import { type Usage, analyticsIntervalSchema } from "@unprice/db/validators"
 import { z } from "zod"
 import { protectedWorkspaceProcedure } from "#trpc"
 import { unprice } from "#utils/unprice"

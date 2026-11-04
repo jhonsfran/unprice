@@ -1,5 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
-import type { Stats } from "@unprice/analytics/utils"
 import type { Database } from "@unprice/db"
 import type { WebEventsWriter } from "@unprice/lakehouse"
 import type { Logger } from "@unprice/logs"
@@ -22,6 +20,7 @@ import type { SubscriptionService } from "@unprice/services/subscriptions"
 import type { WalletService } from "@unprice/services/wallet"
 import type { EvlogVariables } from "evlog/hono"
 import type { Env } from "~/env"
+import type { Stats } from "~/util/stats"
 
 /**
  * Domain services — business logic, properly wired via createServiceContext.
@@ -68,7 +67,6 @@ export type HonoEnv = EvlogVariables & {
     cache: Cache
     logger: Logger
     metrics: Metrics
-    analytics: Analytics
     /** Web analytics: sign-up rows go to the web_events stream. */
     webEvents: WebEventsWriter
     // biome-ignore lint/suspicious/noExplicitAny: platform-specific promise handler

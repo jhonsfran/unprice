@@ -1,4 +1,4 @@
-import { prepareInterval } from "@unprice/analytics"
+import { prepareInterval } from "@unprice/db/validators"
 import type { SearchParams } from "nuqs/server"
 import { Suspense } from "react"
 import { buildIngestionHealthInput } from "~/components/analytics/ingestion-health-query"

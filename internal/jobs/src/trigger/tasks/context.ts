@@ -1,4 +1,3 @@
-import { Analytics } from "@unprice/analytics"
 import {
   createStandaloneRequestLogger,
   createUnpriceDrain,
@@ -77,17 +76,10 @@ export const createContext = async ({
     },
   })
 
-  const analytics = new Analytics({
-    emit: true,
-    tinybirdToken: env.TINYBIRD_TOKEN,
-    tinybirdUrl: env.TINYBIRD_URL,
-  })
-
   const metrics = new NoopMetrics()
   const deps = {
     db,
     logger,
-    analytics,
     waitUntil: () => {},
     cache: cache.getCache(),
     metrics,

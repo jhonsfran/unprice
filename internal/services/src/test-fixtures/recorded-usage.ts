@@ -1,4 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import { Ok } from "@unprice/error"
 import { statementPeriodId } from "../use-cases/budgets/compile-payer-budget"
@@ -16,8 +15,6 @@ const SCALE = 100_000_000
  * statement keeps what it answered on a retry; completions are recorded.
  */
 export function createRecordedUsageFixture(db: Database, acceptedUsage: AcceptedUsage) {
-  // Billing never sends analytics; web events go through their own writer, not this client.
-  const analytics = {} as Analytics
   const sealed = new Map<string, PayerStatementLine>()
   const completed: string[] = []
   const payerBudgets: PayerBudgetGateway = {
@@ -72,5 +69,5 @@ export function createRecordedUsageFixture(db: Database, acceptedUsage: Accepted
       return Ok({ completed: done })
     },
   }
-  return { analytics, payerBudgets, completed }
+  return { payerBudgets, completed }
 }

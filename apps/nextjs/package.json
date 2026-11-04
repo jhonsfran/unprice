@@ -34,7 +34,6 @@
     "@trpc/client": "11.5.0",
     "@trpc/server": "11.5.0",
     "@trpc/tanstack-react-query": "11.5.0",
-    "@unprice/analytics": "workspace:^",
     "@unprice/api": "workspace:^",
     "@unprice/auth": "workspace:^",
     "@unprice/config": "workspace:^",

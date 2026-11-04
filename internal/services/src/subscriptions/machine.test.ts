@@ -1,4 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import { billingPeriods, customerEntitlements, invoices, subscriptions } from "@unprice/db/schema"
 import type {
@@ -183,7 +182,6 @@ function buildMockSubscription({
 }
 
 describe("SubscriptionMachine - comprehensive", () => {
-  let mockAnalytics: Analytics
   let mockCustomerService: CustomerService
   let mockLogger: Logger
   let mockDb: Database
@@ -194,8 +192,6 @@ describe("SubscriptionMachine - comprehensive", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     dbMockData = []
-
-    mockAnalytics = {} as unknown as Analytics
 
     mockLogger = {
       set: vi.fn(),
@@ -629,7 +625,6 @@ describe("SubscriptionMachine - comprehensive", () => {
       invoicing: createInvoicingStub({ rows: [flatRateRow("test-feature", "1")] }),
       subscriptionId: input.subscriptionId,
       projectId: input.projectId,
-      analytics: mockAnalytics,
       logger: mockLogger,
       now: input.now ?? Date.now(),
       customer: mockCustomerService,

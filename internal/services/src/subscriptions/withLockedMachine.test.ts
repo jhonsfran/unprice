@@ -1,4 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
@@ -164,7 +163,6 @@ describe("withLockedMachine", () => {
 function createDeps(projectId: string, subscriptionId: string, db: Database) {
   return {
     invoicing: createInvoicingStub(),
-    analytics: {} as Analytics,
     billingService: {
       generateBillingPeriods: vi
         .fn()

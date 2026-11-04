@@ -1,4 +1,4 @@
-import { analyticsIntervalSchema } from "@unprice/analytics"
+import { analyticsIntervalSchema } from "@unprice/db/validators"
 import { Err, FetchError, Ok } from "@unprice/error"
 import {
   type CurrentEntitlementsReader,

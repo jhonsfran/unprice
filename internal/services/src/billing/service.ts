@@ -1,4 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import { hashStringSHA256 } from "@unprice/db/utils"
 import {
@@ -341,7 +340,6 @@ function isProviderInvoiceNotFound(error: { message: string; context?: Record<st
 export class BillingService {
   private readonly db: Database
   private readonly logger: Logger
-  private readonly analytics: Analytics
   private readonly cache: Cache
   private readonly metrics: Metrics
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
@@ -355,7 +353,6 @@ export class BillingService {
   constructor({
     db,
     logger,
-    analytics,
     waitUntil,
     cache,
     metrics,
@@ -367,7 +364,6 @@ export class BillingService {
   }: {
     db: Database
     logger: Logger
-    analytics: Analytics
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
     waitUntil: (promise: Promise<any>) => void
     cache: Cache
@@ -381,7 +377,6 @@ export class BillingService {
   }) {
     this.db = db
     this.logger = logger
-    this.analytics = analytics
     this.cache = cache
     this.metrics = metrics
     this.waitUntil = waitUntil
@@ -465,7 +460,6 @@ export class BillingService {
         db: trx,
         repo: new DrizzleSubscriptionRepository(trx),
         logger: this.logger,
-        analytics: this.analytics,
         customer: this.customerService,
         ledgerService: this.ledgerService,
         walletService: this.walletService,

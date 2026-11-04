@@ -10,7 +10,7 @@ const TRACKING_RATE_LIMIT_KEY_PREFIX = "nextjs:tracking:rate-limit"
 
 // One shared budget per client IP across both actions: generous for a human
 // clicking through pages, tight enough to stop a script from inflating
-// Tinybird ingestion volume through this unauthenticated endpoint.
+// web_events stream volume through this unauthenticated endpoint.
 const TRACKING_IP_LIMIT = 120
 const TRACKING_WINDOW_SECONDS = 60
 

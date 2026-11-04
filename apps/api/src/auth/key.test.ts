@@ -319,7 +319,6 @@ describe("keyAuth with an unknown key", () => {
     const apikey = new ApiKeysService({
       cache: cache as never,
       metrics: { emit: vi.fn() } as never,
-      analytics: {} as never,
       logger: logger as never,
       db: {
         query: { apikeys: { findFirst: replicaFindFirst } },

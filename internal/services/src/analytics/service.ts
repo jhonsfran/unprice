@@ -1,7 +1,11 @@
-import { type Interval, prepareInterval, type statsSchema } from "@unprice/analytics"
 import { type Database, and, between, count, eq } from "@unprice/db"
 import { features, plans, subscriptions, versions } from "@unprice/db/schema"
-import type { Currency } from "@unprice/db/validators"
+import {
+  type Currency,
+  type Interval,
+  prepareInterval,
+  type statsSchema,
+} from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { BasinSql, BasinSqlError } from "@unprice/lakehouse"
 import type { Logger } from "@unprice/logs"

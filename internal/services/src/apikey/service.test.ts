@@ -26,7 +26,6 @@ describe("ApiKeysService customer binding", () => {
     error: vi.fn(),
     flush: vi.fn(),
   } as unknown as Logger
-  const analytics = {} as never
   const hashCache = new Map<string, string>()
   const waitUntil = vi.fn<(promise: Promise<unknown>) => void>()
 
@@ -53,7 +52,6 @@ describe("ApiKeysService customer binding", () => {
     const service = new ApiKeysService({
       cache,
       metrics,
-      analytics,
       logger,
       db,
       waitUntil,
@@ -85,7 +83,6 @@ describe("ApiKeysService customer binding", () => {
     const service = new ApiKeysService({
       cache,
       metrics,
-      analytics,
       logger,
       db,
       waitUntil,
@@ -116,7 +113,6 @@ describe("ApiKeysService customer binding", () => {
     const service = new ApiKeysService({
       cache,
       metrics,
-      analytics,
       logger,
       db,
       waitUntil,
@@ -138,7 +134,6 @@ describe("ApiKeysService customer binding", () => {
     const service = new ApiKeysService({
       cache,
       metrics,
-      analytics,
       logger,
       db,
       waitUntil,
@@ -164,7 +159,6 @@ describe("ApiKeysService customer binding", () => {
     const service = new ApiKeysService({
       cache,
       metrics,
-      analytics,
       logger,
       db,
       waitUntil,
@@ -199,7 +193,6 @@ describe("ApiKeysService customer binding", () => {
     const service = new ApiKeysService({
       cache,
       metrics,
-      analytics,
       logger,
       db,
       waitUntil,
@@ -230,7 +223,6 @@ describe("ApiKeysService customer binding", () => {
     const service = new ApiKeysService({
       cache,
       metrics,
-      analytics,
       logger,
       db,
       waitUntil,
@@ -255,7 +247,6 @@ describe("ApiKeysService customer binding", () => {
     const service = new ApiKeysService({
       cache,
       metrics,
-      analytics,
       logger,
       db,
       waitUntil,
@@ -293,7 +284,6 @@ describe("ApiKeysService customer binding", () => {
     const service = new ApiKeysService({
       cache,
       metrics,
-      analytics,
       logger,
       db,
       waitUntil,
@@ -329,7 +319,6 @@ describe("ApiKeysService customer binding", () => {
     const service = new ApiKeysService({
       cache,
       metrics,
-      analytics,
       logger,
       db,
       waitUntil,
@@ -361,7 +350,6 @@ describe("ApiKeysService customer binding", () => {
     const service = new ApiKeysService({
       cache,
       metrics,
-      analytics,
       logger,
       db,
       waitUntil,
@@ -410,7 +398,6 @@ describe("ApiKeysService customer binding", () => {
     const service = new ApiKeysService({
       cache,
       metrics,
-      analytics,
       logger,
       db,
       waitUntil,
@@ -435,7 +422,6 @@ describe("ApiKeysService customer binding", () => {
     const service = new ApiKeysService({
       cache,
       metrics,
-      analytics,
       logger,
       db,
       waitUntil,
@@ -456,7 +442,6 @@ describe("ApiKeysService customer binding", () => {
     const service = new ApiKeysService({
       cache,
       metrics,
-      analytics,
       logger,
       db: {
         query: {
@@ -479,7 +464,6 @@ describe("ApiKeysService customer binding", () => {
     const service = new ApiKeysService({
       cache,
       metrics,
-      analytics,
       logger,
       db: {} as Database,
       waitUntil,
@@ -499,7 +483,6 @@ describe("ApiKeysService customer binding", () => {
     const service = new ApiKeysService({
       cache,
       metrics,
-      analytics,
       logger,
       db: {} as Database,
       waitUntil,
@@ -533,7 +516,6 @@ describe("ApiKeysService customer binding", () => {
     const service = new ApiKeysService({
       cache,
       metrics,
-      analytics,
       logger,
       db: {
         query: { apikeys: { findFirst } },
@@ -580,7 +562,6 @@ describe("ApiKeysService customer binding", () => {
     const service = new ApiKeysService({
       cache,
       metrics,
-      analytics,
       logger,
       db: {
         query: { apikeys: { findFirst: poolFindFirst } },
@@ -623,7 +604,6 @@ describe("ApiKeysService customer binding", () => {
     const service = new ApiKeysService({
       cache,
       metrics,
-      analytics,
       logger,
       db: {
         query: { apikeys: { findFirst: vi.fn() } },
@@ -660,7 +640,6 @@ describe("ApiKeysService customer binding", () => {
     const service = new ApiKeysService({
       cache,
       metrics,
-      analytics,
       logger,
       db,
       waitUntil,
@@ -720,7 +699,6 @@ describe("ApiKeysService customer binding", () => {
     const service = new ApiKeysService({
       cache,
       metrics,
-      analytics,
       logger,
       db,
       waitUntil,
@@ -797,7 +775,6 @@ describe("ApiKeysService customer binding", () => {
     const service = new ApiKeysService({
       cache,
       metrics,
-      analytics,
       logger,
       db,
       waitUntil,
@@ -882,7 +859,6 @@ describe("ApiKeysService customer binding", () => {
     const service = new ApiKeysService({
       cache,
       metrics,
-      analytics,
       logger,
       db,
       waitUntil,
@@ -906,7 +882,6 @@ describe("ApiKeysService customer binding", () => {
     const service = new ApiKeysService({
       cache,
       metrics,
-      analytics,
       logger,
       db: {
         query: {
@@ -957,7 +932,6 @@ describe("ApiKeysService customer binding", () => {
     const service = new ApiKeysService({
       cache,
       metrics,
-      analytics,
       logger,
       db,
       waitUntil,

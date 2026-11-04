@@ -8,7 +8,7 @@
  * display uses `toCurrencyMinor`.
  *
  * Changing this value is a data-model break: existing ledger entries,
- * persisted outbox payloads, and Tinybird rows all interpret `amount` at
+ * persisted outbox payloads, and budget journal rows all interpret `amount` at
  * this scale. Treat as a constant, not a configuration knob.
  */
 export const LEDGER_SCALE = 8

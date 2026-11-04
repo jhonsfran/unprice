@@ -3,7 +3,7 @@ import { type WorkspaceChangePlanInput, changeWorkspacePlan } from "@unprice/ser
 import { domainErrorToTrpcError } from "#domain-error"
 import type { Context } from "#trpc"
 
-export type ChangePlanMutationCtx = Pick<Context, "analytics" | "db" | "logger" | "services"> & {
+export type ChangePlanMutationCtx = Pick<Context, "db" | "logger" | "services"> & {
   verifyRole: (roles: WorkspaceRole[]) => void
   workspace: {
     id: string

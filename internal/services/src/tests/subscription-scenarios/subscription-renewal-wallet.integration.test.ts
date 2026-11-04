@@ -1,4 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
 import { sql } from "@unprice/db"
 import { Err, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
@@ -64,7 +63,7 @@ function createCache(): Cache {
 
 function createServices() {
   const logger = createLogger()
-  const { analytics, payerBudgets } = createRecordedUsageFixture(db, {})
+  const { payerBudgets } = createRecordedUsageFixture(db, {})
   const cache = createCache()
   const metrics = {} as Metrics
   const waitUntil = vi.fn()
@@ -72,19 +71,17 @@ function createServices() {
     payerBudgets,
     db,
     logger,
-    analytics,
     waitUntil,
     cache,
     metrics,
   })
 
-  return { analytics, payerBudgets, cache, logger, metrics, services, waitUntil }
+  return { payerBudgets, cache, logger, metrics, services, waitUntil }
 }
 
 function createSubscriptionServiceWithWallet(input: {
   base: ServiceContext
   logger: Logger
-  analytics: Analytics
   payerBudgets: ReturnType<typeof createRecordedUsageFixture>["payerBudgets"]
   cache: Cache
   metrics: Metrics
@@ -96,7 +93,6 @@ function createSubscriptionServiceWithWallet(input: {
     db,
     repo: new DrizzleSubscriptionRepository(db),
     logger: input.logger,
-    analytics: input.analytics,
     waitUntil: input.waitUntil,
     cache: input.cache,
     metrics: input.metrics,
@@ -272,14 +268,12 @@ describe("subscription renewal and wallet activation DB lifecycle", () => {
   })
 
   it("parks failed wallet activation in pending_activation and retries without duplicate credits", async () => {
-    const { analytics, payerBudgets, cache, logger, metrics, services, waitUntil } =
-      createServices()
+    const { payerBudgets, cache, logger, metrics, services, waitUntil } = createServices()
     const failingWallet = walletWithFirstAdjustFailure(services.wallet)
     const subscriptions = createSubscriptionServiceWithWallet({
       payerBudgets,
       base: services,
       logger,
-      analytics,
       cache,
       metrics,
       waitUntil,

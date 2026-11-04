@@ -1,4 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
 import { sql } from "@unprice/db"
 import type { Customer, Subscription } from "@unprice/db/validators"
 import { Err, Ok } from "@unprice/error"
@@ -386,14 +385,12 @@ function customerServiceFor(provider: AsyncWebhookPaymentProvider): CustomerServ
 }
 
 function createBillingService({
-  analytics,
   payerBudgets,
   ledger,
   logger,
   provider,
   wallet,
 }: {
-  analytics: Analytics
   payerBudgets: ReturnType<typeof createRecordedUsageFixture>["payerBudgets"]
   ledger: LedgerGateway
   logger: Logger
@@ -404,7 +401,6 @@ function createBillingService({
     invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
     db,
     logger,
-    analytics,
     waitUntil: (promise) => {
       void promise
     },
@@ -614,7 +610,7 @@ async function processProviderWebhook({
 
 function createLifecycleRuntime(loggerErrors: unknown[] = []) {
   const logger = createLogger(loggerErrors)
-  const { analytics, payerBudgets } = createRecordedUsageFixture(db, {
+  const { payerBudgets } = createRecordedUsageFixture(db, {
     events: { quantity: 1200, amount: 12_000_000_000 },
   })
   const waitUntil = vi.fn((promise: Promise<unknown>) => {
@@ -624,14 +620,12 @@ function createLifecycleRuntime(loggerErrors: unknown[] = []) {
     payerBudgets,
     db,
     logger,
-    analytics,
     waitUntil,
     cache: {} as Cache,
     metrics: {} as Metrics,
   })
   const provider = new AsyncWebhookPaymentProvider()
   const billing = createBillingService({
-    analytics,
     payerBudgets,
     ledger: services.ledger,
     logger,
@@ -639,7 +633,7 @@ function createLifecycleRuntime(loggerErrors: unknown[] = []) {
     wallet: services.wallet,
   })
 
-  return { analytics, payerBudgets, billing, logger, provider, services, waitUntil }
+  return { payerBudgets, billing, logger, provider, services, waitUntil }
 }
 
 async function prepareCollectedUnpaidInvoice({
@@ -691,7 +685,7 @@ describe("paid invoice lifecycle integration", () => {
   it("bills, finalizes, collects asynchronously, processes the paid webhook, settles receivables, and dedupes replay", async () => {
     const loggerErrors: unknown[] = []
     const logger = createLogger(loggerErrors)
-    const { analytics, payerBudgets } = createRecordedUsageFixture(db, {
+    const { payerBudgets } = createRecordedUsageFixture(db, {
       events: { quantity: 1200, amount: 12_000_000_000 },
     })
     const waitUntil = vi.fn((promise: Promise<unknown>) => {
@@ -701,14 +695,12 @@ describe("paid invoice lifecycle integration", () => {
       payerBudgets,
       db,
       logger,
-      analytics,
       waitUntil,
       cache: {} as Cache,
       metrics: {} as Metrics,
     })
     const provider = new AsyncWebhookPaymentProvider()
     const billing = createBillingService({
-      analytics,
       payerBudgets,
       ledger: services.ledger,
       logger,
@@ -937,7 +929,7 @@ describe("paid invoice lifecycle integration", () => {
   it("persists a failed webhook attempt when settlement fails, then recovers on provider replay", async () => {
     const loggerErrors: unknown[] = []
     const logger = createLogger(loggerErrors)
-    const { analytics, payerBudgets } = createRecordedUsageFixture(db, {
+    const { payerBudgets } = createRecordedUsageFixture(db, {
       events: { quantity: 1200, amount: 12_000_000_000 },
     })
     const waitUntil = vi.fn((promise: Promise<unknown>) => {
@@ -947,7 +939,6 @@ describe("paid invoice lifecycle integration", () => {
       payerBudgets,
       db,
       logger,
-      analytics,
       waitUntil,
       cache: {} as Cache,
       metrics: {} as Metrics,
@@ -955,7 +946,6 @@ describe("paid invoice lifecycle integration", () => {
     const provider = new AsyncWebhookPaymentProvider()
     const flakyWallet = walletWithFirstSettlementFailure(services.wallet)
     const billing = createBillingService({
-      analytics,
       payerBudgets,
       ledger: services.ledger,
       logger,

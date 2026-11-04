@@ -184,7 +184,7 @@ function createBillingService(
   errors: unknown[]
 ) {
   const logger = createLogger(errors)
-  const { analytics, payerBudgets } = createRecordedUsageFixture(dbForWorker, {
+  const { payerBudgets } = createRecordedUsageFixture(dbForWorker, {
     events: { quantity: 1200, amount: 12_000_000_000 },
   })
   const ledger = new LedgerGateway({ db: dbForWorker, logger })
@@ -193,7 +193,6 @@ function createBillingService(
     invoicing: { payerBudgets, rateCards: new RateCardService({ db: dbForWorker }) },
     db: dbForWorker,
     logger,
-    analytics,
     waitUntil: (promise) => {
       void promise
     },

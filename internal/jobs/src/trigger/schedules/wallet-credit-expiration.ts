@@ -1,10 +1,8 @@
 import { logger, schedules } from "@trigger.dev/sdk/v3"
-import { Analytics } from "@unprice/analytics"
 import { CacheService } from "@unprice/services/cache"
 import { createServiceContext } from "@unprice/services/context"
 import { NoopMetrics } from "@unprice/services/metrics"
 import { expireWalletCredits } from "@unprice/services/use-cases"
-import { env } from "../../env"
 import { db } from "../db"
 
 type WalletCreditExpirationLogger = Parameters<typeof expireWalletCredits>[0]["logger"]
@@ -35,16 +33,9 @@ export const walletCreditExpirationSchedule = schedules.task({
     const cache = new CacheService({ waitUntil: () => {} }, new NoopMetrics(), false)
     cache.init([])
 
-    const analytics = new Analytics({
-      emit: true,
-      tinybirdToken: env.TINYBIRD_TOKEN,
-      tinybirdUrl: env.TINYBIRD_URL,
-    })
-
     const services = createServiceContext({
       db,
       logger: log,
-      analytics,
       waitUntil: () => {},
       cache: cache.getCache(),
       metrics: new NoopMetrics(),

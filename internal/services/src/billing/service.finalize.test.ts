@@ -1,4 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import type { Customer, SubscriptionInvoice } from "@unprice/db/validators"
 import { Err, FetchError, Ok } from "@unprice/error"
@@ -262,7 +261,6 @@ function makeBillingService(opts: {
     invoicing: createInvoicingStub(),
     db,
     logger,
-    analytics: {} as Analytics,
     waitUntil: (p) => p,
     cache: {} as Cache,
     metrics: {} as Metrics,

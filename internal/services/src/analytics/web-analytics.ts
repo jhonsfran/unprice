@@ -15,8 +15,8 @@ const DAY_MS = 24 * HOUR_MS
 export type WebAnalyticsWindow = { from: Date; to: Date }
 
 /**
- * From the start of the UTC day `intervalDays` days ago until `now`: the window the Tinybird
- * endpoints used (`date >= toStartOfDay(today() - interval_days)`).
+ * From the start of the UTC day `intervalDays` days ago until `now`
+ * (`date >= toStartOfDay(today() - interval_days)`).
  */
 export function webAnalyticsWindow(now: number, intervalDays: number): WebAnalyticsWindow {
   const startOfToday = Math.floor(now / DAY_MS) * DAY_MS
@@ -134,7 +134,7 @@ export type PageOverview = z.infer<typeof pageOverviewSchema>[]
 
 export type OverviewBucket = "hour" | "day"
 
-/** The Tinybird pipe bucketed by hour for a one-day interval and by day otherwise. */
+/** Buckets by hour for a one-day interval and by day otherwise. */
 export function overviewBucket(intervalDays: number): OverviewBucket {
   return intervalDays === 1 ? "hour" : "day"
 }
@@ -173,8 +173,7 @@ type PagesOverviewSqlRow = z.infer<typeof pagesOverviewSqlRowSchema>
 
 /**
  * Folds per-device rows into one row per bucket and page, and fills empty buckets with a zero row
- * (page_id is the filtered page or ""), as the Tinybird interval join did. Tablets count only in
- * the totals, as before.
+ * (page_id is the filtered page or ""). Tablets count only in the totals.
  */
 export function foldPagesOverview(
   rows: readonly PagesOverviewSqlRow[],
@@ -249,8 +248,7 @@ export type PlansConversion = z.infer<typeof planConversionSchema>[]
 
 /**
  * Views and clicks are distinct sessions. Sign-ups are distinct customers with a `signup_success`
- * row: the Tinybird pipe merged the latest status per (plan version, page), so it counted at most
- * one sign-up per plan version and page. Groups are ordered by sign-ups, then clicks, then views:
+ * row, counted at most once per plan version and page. Groups are ordered by sign-ups, then clicks, then views:
  * the beacon is unauthenticated, so groups made of forged views alone must not push real plans
  * past the limit.
  */

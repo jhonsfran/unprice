@@ -1,4 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import type { BillingConfig, ResetConfig } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logs"
@@ -20,7 +19,6 @@ function createLogger(): Logger {
 }
 
 function createPlanService(db: Database) {
-  const analytics = {} as unknown as Analytics
   const cache = {
     planVersionList: { swr: vi.fn((_key: string, fn: () => Promise<unknown>) => fn()) },
   } as unknown as Cache
@@ -29,7 +27,6 @@ function createPlanService(db: Database) {
   return new PlanService({
     db,
     logger: createLogger(),
-    analytics,
     waitUntil: () => {},
     cache,
     metrics,

@@ -1,5 +1,4 @@
 import { CloudflareStore } from "@unkey/cache/stores"
-import { Analytics } from "@unprice/analytics"
 import { createConnection, createHttpConnection } from "@unprice/db"
 import { newId } from "@unprice/db/utils"
 import { createBasinSql, createWebEventsWriter } from "@unprice/lakehouse"
@@ -164,12 +163,6 @@ export function init(): MiddlewareHandler<HonoEnv> {
       logger: c.env.DRIZZLE_LOG.toString() === "true",
     })
 
-    const analytics = new Analytics({
-      emit: true,
-      tinybirdToken: c.env.TINYBIRD_TOKEN,
-      tinybirdUrl: c.env.TINYBIRD_URL,
-    })
-
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
     const waitUntil = (promise: Promise<any>) => c.executionCtx.waitUntil(promise)
 
@@ -178,7 +171,6 @@ export function init(): MiddlewareHandler<HonoEnv> {
     const svcCtx = createServiceContext({
       db,
       logger,
-      analytics,
       waitUntil,
       cache,
       metrics,
@@ -194,7 +186,6 @@ export function init(): MiddlewareHandler<HonoEnv> {
 
     const apikey = new ApiKeysService({
       cache,
-      analytics,
       logger,
       metrics,
       db,
@@ -206,7 +197,6 @@ export function init(): MiddlewareHandler<HonoEnv> {
     c.set("cache", cache)
     c.set("logger", logger)
     c.set("metrics", metrics)
-    c.set("analytics", analytics)
     c.set(
       "webEvents",
       createWebEventsWriter({

@@ -19,7 +19,6 @@ import {
   createTestDatabaseConnection,
   truncateTestDatabase,
 } from "../../test-fixtures/database"
-import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
 import { seedTestDb } from "../../test-fixtures/seed-db"
 import {
   type BudgetClient,
@@ -86,7 +85,6 @@ function createHarness() {
       store.cacheCardsAt(clock.now, ...cards)
     },
   }
-  const { analytics } = createRecordedUsageFixture(db, {})
   let deps: SyncPayerBudgetDeps | null = null
   const ready = () => {
     if (!deps) throw new Error("harness not ready")
@@ -98,7 +96,6 @@ function createHarness() {
     payerBudgets: gateway,
     db,
     logger,
-    analytics,
     waitUntil: (promise) => {
       void promise
     },

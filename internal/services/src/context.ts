@@ -120,7 +120,6 @@ export function createServiceContext(
   const customers = new CustomerService({
     db: deps.db,
     logger: deps.logger,
-    analytics: deps.analytics,
     waitUntil: deps.waitUntil,
     cache: deps.cache,
     metrics: deps.metrics,
@@ -135,7 +134,6 @@ export function createServiceContext(
   const apikeys = new ApiKeysService({
     db: deps.db,
     logger: deps.logger,
-    analytics: deps.analytics,
     waitUntil: deps.waitUntil,
     cache: deps.cache,
     metrics: deps.metrics,
@@ -145,7 +143,6 @@ export function createServiceContext(
   const plans = new PlanService({
     db: deps.db,
     logger: deps.logger,
-    analytics: deps.analytics,
     waitUntil: deps.waitUntil,
     cache: deps.cache,
     metrics: deps.metrics,
@@ -174,7 +171,6 @@ export function createServiceContext(
   const projects = new ProjectService({
     db: deps.db,
     logger: deps.logger,
-    analytics: deps.analytics,
     waitUntil: deps.waitUntil,
     cache: deps.cache,
     metrics: deps.metrics,
@@ -205,7 +201,6 @@ export function createServiceContext(
   const billing = new BillingService({
     db: deps.db,
     logger: deps.logger,
-    analytics: deps.analytics,
     waitUntil: deps.waitUntil,
     cache: deps.cache,
     metrics: deps.metrics,
@@ -219,7 +214,6 @@ export function createServiceContext(
   const entitlements = new EntitlementService({
     db: deps.db,
     logger: deps.logger,
-    analytics: deps.analytics,
     waitUntil: deps.waitUntil,
     cache: deps.cache,
     metrics: deps.metrics,
@@ -232,7 +226,6 @@ export function createServiceContext(
     db: deps.db,
     repo: new DrizzleSubscriptionRepository(deps.db),
     logger: deps.logger,
-    analytics: deps.analytics,
     waitUntil: deps.waitUntil,
     cache: deps.cache,
     metrics: deps.metrics,

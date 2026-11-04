@@ -1,5 +1,4 @@
 import { createEnv } from "@t3-oss/env-core"
-import { env as analyticsEnv } from "@unprice/analytics/env"
 import { env as dbEnv } from "@unprice/db/env"
 import { assertAllOrNoneConfigured } from "@unprice/lakehouse"
 import { env as observabilityEnv } from "@unprice/observability/env"
@@ -25,7 +24,7 @@ export const env = createEnv({
   },
   runtimeEnv: process.env,
   skipValidation: !!process.env.SKIP_ENV_VALIDATION || process.env.npm_lifecycle_event === "lint",
-  extends: [vercelEnv, dbEnv, observabilityEnv, analyticsEnv, servicesEnv],
+  extends: [vercelEnv, dbEnv, observabilityEnv, servicesEnv],
   onValidationError: (issues) => {
     throw new Error(`Invalid environment variables in TRPC: ${JSON.stringify(issues, null, 2)}`)
   },

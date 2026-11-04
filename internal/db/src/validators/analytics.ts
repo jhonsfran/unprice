@@ -1,5 +1,7 @@
 import { z } from "zod"
 
+// Dashboard analytics contracts: interval windows, stat cards, and the public usage rows.
+
 export const DEFAULT_INTERVALS = {
   "24h": "Last 24 hours",
   "7d": "Last 7 days",
@@ -86,3 +88,33 @@ export function preparePage(pageId: string) {
     isSelected: !!isValidPage, // if the page is valid, it is selected
   }
 }
+
+export const statsSchema = z.record(
+  z.string(),
+  z.object({
+    total: z.number(),
+    title: z.string(),
+    description: z.string(),
+    unit: z.string().optional(),
+  })
+)
+
+export type Stats = z.infer<typeof statsSchema>
+
+export const usageSpendingResponseSchema = z.object({
+  amount: z.string(),
+  currency: z.string().length(3),
+  display_amount: z.string(),
+})
+
+export const getUsageResponseSchema = z.object({
+  project_id: z.string(),
+  customer_id: z.string().optional(),
+  feature_slug: z.string(),
+  usage: z.number(),
+  spending: usageSpendingResponseSchema,
+})
+
+export type GetUsageResponse = z.infer<typeof getUsageResponseSchema>
+
+export type Usage = GetUsageResponse[]

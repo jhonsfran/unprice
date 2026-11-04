@@ -1,4 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import type { CustomerEntitlement, PlanVersion } from "@unprice/db/validators"
 import { Ok } from "@unprice/error"
@@ -45,7 +44,6 @@ describe("Workflow - Billing and Subscriptions", () => {
   let _billingService: BillingService
 
   let mockDb: Database
-  let mockAnalytics: Analytics
   let mockCache: Cache
   let mockLogger: Logger
   let mockMetrics: Metrics
@@ -106,11 +104,6 @@ describe("Workflow - Billing and Subscriptions", () => {
       error: vi.fn(),
       flush: vi.fn(),
     } as unknown as Logger
-
-    mockAnalytics = {
-      ingestFeaturesVerification: vi.fn().mockResolvedValue({ successful_rows: 1 }),
-      ingestFeaturesUsage: vi.fn().mockResolvedValue({ successful_rows: 1 }),
-    } as unknown as Analytics
 
     mockMetrics = {} as unknown as Metrics
     mockCache = {
@@ -286,7 +279,6 @@ describe("Workflow - Billing and Subscriptions", () => {
       },
       db: mockDb,
       logger: mockLogger,
-      analytics: mockAnalytics,
       // biome-ignore lint/suspicious/noExplicitAny: <explanation>
       waitUntil: (p: Promise<any>) => p,
       cache: mockCache,

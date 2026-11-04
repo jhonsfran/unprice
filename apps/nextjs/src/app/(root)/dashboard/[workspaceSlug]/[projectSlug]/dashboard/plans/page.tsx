@@ -1,8 +1,8 @@
 import type { SearchParams } from "nuqs/server"
 import { Suspense } from "react"
 
-import { prepareInterval } from "@unprice/analytics"
 import { FEATURE_SLUGS } from "@unprice/config"
+import { prepareInterval } from "@unprice/db/validators"
 import { IntervalFilter } from "~/components/analytics/interval-filter"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import UpgradePlanError from "~/components/layout/error"

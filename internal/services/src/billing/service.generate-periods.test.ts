@@ -1,4 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import { Err, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
@@ -203,7 +202,6 @@ function makeBillingService(opts: { phases?: unknown[]; walletService?: WalletSe
   const billing = new BillingService({
     db,
     logger,
-    analytics: {} as Analytics,
     waitUntil: (p: Promise<unknown>) => {
       void p
     },

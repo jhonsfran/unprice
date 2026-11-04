@@ -1,4 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
@@ -28,7 +27,6 @@ describe("BillingService statement lines", () => {
         debug: vi.fn(),
         warn: vi.fn(),
       } as unknown as Logger,
-      analytics: {} as Analytics,
       waitUntil: (promise: Promise<unknown>) => promise,
       cache: {} as Cache,
       metrics: {} as Metrics,

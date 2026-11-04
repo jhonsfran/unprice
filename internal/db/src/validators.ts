@@ -1,3 +1,4 @@
+export * from "./validators/analytics"
 export * from "./validators/apikey"
 export * from "./validators/auth"
 export * from "./validators/customer"

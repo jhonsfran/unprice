@@ -1,4 +1,3 @@
-import type { Stats, Usage } from "@unprice/analytics"
 import type {
   ApiKeyExtended,
   ApiKeyType,
@@ -7,8 +6,10 @@ import type {
   Feature,
   PlanVersionApi,
   Project,
+  Stats,
   SubscriptionCache,
   SubscriptionStatus,
+  Usage,
   User,
   Workspace,
   WorkspaceRole,

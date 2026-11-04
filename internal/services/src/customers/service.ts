@@ -1,4 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
 import { type Database, and, count, eq, getTableColumns, ilike, inArray, or } from "@unprice/db"
 import { customers, invoices, subscriptions } from "@unprice/db/schema"
 import { INVOICE_STATUS, newId, withDateFilters, withPagination } from "@unprice/db/utils"
@@ -25,7 +24,6 @@ import { UnPriceCustomerError } from "./errors"
 export class CustomerService {
   private readonly db: Database
   private readonly logger: Logger
-  private readonly analytics: Analytics
   private readonly cache: Cache
   private readonly metrics: Metrics
   private readonly paymentProviderResolver: PaymentProviderResolver
@@ -35,7 +33,6 @@ export class CustomerService {
   constructor({
     db,
     logger,
-    analytics,
     waitUntil,
     cache,
     metrics,
@@ -43,7 +40,6 @@ export class CustomerService {
   }: {
     db: Database
     logger: Logger
-    analytics: Analytics
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
     waitUntil: (promise: Promise<any>) => void
     cache: Cache
@@ -52,7 +48,6 @@ export class CustomerService {
   }) {
     this.db = db
     this.logger = logger
-    this.analytics = analytics
     this.waitUntil = waitUntil
     this.cache = cache
     this.metrics = metrics

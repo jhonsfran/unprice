@@ -3,7 +3,6 @@ import "server-only"
 import { TRPCError, initTRPC } from "@trpc/server"
 import type { Cache as C } from "@unkey/cache"
 import { UpstashRedisStore } from "@unkey/cache/stores"
-import { Analytics } from "@unprice/analytics"
 import type { NextAuthRequest } from "@unprice/auth"
 import type { Session } from "@unprice/auth/server"
 import { auth } from "@unprice/auth/server"
@@ -128,19 +127,11 @@ export const createInnerTRPCContext = (
   opts: CreateContextOptions
 ): CreateContextOptions & {
   db: Database
-  analytics: Analytics
   services: ServiceContext
 } => {
-  const analytics = new Analytics({
-    tinybirdToken: env.TINYBIRD_TOKEN,
-    tinybirdUrl: env.TINYBIRD_URL,
-    emit: true,
-  })
-
   const services = createServiceContext({
     db,
     logger: opts.logger,
-    analytics,
     waitUntil: opts.waitUntil,
     cache: opts.cache,
     metrics: opts.metrics,
@@ -154,7 +145,6 @@ export const createInnerTRPCContext = (
   return {
     ...opts,
     db: db,
-    analytics,
     services,
   }
 }

@@ -1,4 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import type { Logger } from "@unprice/logs"
 import type { BillingService } from "../billing/service"
@@ -38,7 +37,6 @@ export async function withLockedMachine<T>(args: {
   repo: SubscriptionRepository
   dryRun?: boolean
   logger: Logger
-  analytics: Analytics
   customer: CustomerService
   ledgerService: LedgerGateway
   walletService?: WalletService
@@ -65,7 +63,6 @@ export async function withLockedMachine<T>(args: {
     repo,
     dryRun = false,
     logger,
-    analytics,
     customer,
     ledgerService,
     walletService,
@@ -132,7 +129,6 @@ export async function withLockedMachine<T>(args: {
       subscriptionId,
       projectId,
       logger,
-      analytics,
       customer,
       ledgerService,
       walletService,

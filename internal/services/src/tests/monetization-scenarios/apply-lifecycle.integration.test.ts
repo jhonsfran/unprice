@@ -75,14 +75,13 @@ function createCache(): Cache {
 function createServices(): { logger: Logger; services: ServiceContext } {
   const logger = createLogger()
 
-  const { analytics, payerBudgets } = createRecordedUsageFixture(db, {})
+  const { payerBudgets } = createRecordedUsageFixture(db, {})
   return {
     logger,
     services: createServiceContext({
       payerBudgets,
       db,
       logger,
-      analytics,
       waitUntil: (promise) => {
         void promise
       },

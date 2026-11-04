@@ -1,6 +1,9 @@
-import { type Interval, analyticsIntervalSchema } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
-import { paymentProviderSchema } from "@unprice/db/validators"
+import {
+  type Interval,
+  analyticsIntervalSchema,
+  paymentProviderSchema,
+} from "@unprice/db/validators"
 import { Err, type FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { z } from "zod"

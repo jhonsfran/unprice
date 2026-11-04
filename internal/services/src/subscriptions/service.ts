@@ -1,4 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import { newId } from "@unprice/db/utils"
 import {
@@ -91,7 +90,6 @@ export class SubscriptionService {
   private readonly db: Database
   private readonly repo: SubscriptionRepository
   private readonly logger: Logger
-  private readonly analytics: Analytics
   private readonly metrics: Metrics
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private readonly waitUntil: (promise: Promise<any>) => void
@@ -106,7 +104,6 @@ export class SubscriptionService {
     db,
     repo,
     logger,
-    analytics,
     waitUntil,
     cache: _cache,
     metrics,
@@ -120,7 +117,6 @@ export class SubscriptionService {
     db: Database
     repo: SubscriptionRepository
     logger: Logger
-    analytics: Analytics
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
     waitUntil: (promise: Promise<any>) => void
     cache: Cache
@@ -135,7 +131,6 @@ export class SubscriptionService {
     this.db = db
     this.repo = repo
     this.logger = logger
-    this.analytics = analytics
     this.metrics = metrics
     this.waitUntil = waitUntil
     this.customerService = customerService
@@ -2008,7 +2003,6 @@ export class SubscriptionService {
         db: this.db,
         repo: this.repo,
         logger: this.logger,
-        analytics: this.analytics,
         customer: this.customerService,
         ledgerService: this.ledgerService,
         walletService: this.walletService,

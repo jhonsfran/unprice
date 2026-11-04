@@ -1,8 +1,12 @@
-import { type Interval, analyticsIntervalSchema, prepareInterval } from "@unprice/analytics"
 import { inArray } from "@unprice/db"
 import type { Database } from "@unprice/db"
 import { customers } from "@unprice/db/schema"
-import type { Currency } from "@unprice/db/validators"
+import {
+  type Currency,
+  type Interval,
+  analyticsIntervalSchema,
+  prepareInterval,
+} from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import { type SignedAmount, formatAmount, formatMoney } from "@unprice/money"
 import { z } from "zod"

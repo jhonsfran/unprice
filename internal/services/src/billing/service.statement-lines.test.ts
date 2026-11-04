@@ -1,4 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import { Err, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
@@ -62,7 +61,6 @@ function makeBillingService(db: Database) {
     invoicing: createInvoicingStub(),
     db,
     logger: makeLogger(),
-    analytics: {} as Analytics,
     waitUntil: (p) => p,
     cache: {} as Cache,
     metrics: {} as Metrics,

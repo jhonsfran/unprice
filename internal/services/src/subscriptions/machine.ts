@@ -1,4 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import type { Customer, Subscription, SubscriptionStatus } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
@@ -66,7 +65,6 @@ import type {
 export class SubscriptionMachine {
   private subscriptionId: string
   private projectId: string
-  private analytics: Analytics
   private logger: Logger
   private actor!: AnyActorRef
   private db: Database
@@ -89,7 +87,6 @@ export class SubscriptionMachine {
   private constructor({
     subscriptionId,
     projectId,
-    analytics,
     logger,
     customer,
     ledgerService,
@@ -102,7 +99,6 @@ export class SubscriptionMachine {
   }: {
     subscriptionId: string
     projectId: string
-    analytics: Analytics
     logger: Logger
     customer: CustomerService
     ledgerService: LedgerGateway
@@ -115,7 +111,6 @@ export class SubscriptionMachine {
   }) {
     this.subscriptionId = subscriptionId
     this.projectId = projectId
-    this.analytics = analytics
     this.logger = logger
     this.now = now
     this.customerService = customer
@@ -1042,7 +1037,6 @@ export class SubscriptionMachine {
   public static async create(payload: {
     subscriptionId: string
     projectId: string
-    analytics: Analytics
     logger: Logger
     customer: CustomerService
     ledgerService: LedgerGateway

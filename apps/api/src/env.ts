@@ -1,6 +1,5 @@
 import type { Pipeline } from "cloudflare:pipelines"
 import { type StandardSchemaV1, createEnv } from "@t3-oss/env-core"
-import { env as envAnalytics } from "@unprice/analytics/env"
 import { env as envDb } from "@unprice/db/env"
 import { assertAllOrNoneConfigured } from "@unprice/lakehouse"
 import { env as envObservability } from "@unprice/observability/env"
@@ -128,7 +127,7 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
     },
     emptyStringAsUndefined: true,
     runtimeEnv: workerEnv as Record<string, string | number | boolean | undefined>,
-    extends: [envServices, envDb, envAnalytics, envObservability],
+    extends: [envServices, envDb, envObservability],
     skipValidation:
       !!process.env.SKIP_ENV_VALIDATION ||
       process.env.npm_lifecycle_event === "lint" ||

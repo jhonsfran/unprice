@@ -1,4 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
 import { type Database, eq } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
 import { createSlug, newId } from "@unprice/db/utils"
@@ -25,7 +24,6 @@ import { UnPriceProjectError } from "./errors"
 export class ProjectService {
   private readonly db: Database
   private readonly logger: Logger
-  private readonly analytics: Analytics
   private readonly cache: Cache
   private readonly metrics: Metrics
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
@@ -34,14 +32,12 @@ export class ProjectService {
   constructor({
     db,
     logger,
-    analytics,
     waitUntil,
     cache,
     metrics,
   }: {
     db: Database
     logger: Logger
-    analytics: Analytics
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
     waitUntil: (promise: Promise<any>) => void
     cache: Cache
@@ -49,7 +45,6 @@ export class ProjectService {
   }) {
     this.db = db
     this.logger = logger
-    this.analytics = analytics
     this.waitUntil = waitUntil
     this.cache = cache
     this.metrics = metrics

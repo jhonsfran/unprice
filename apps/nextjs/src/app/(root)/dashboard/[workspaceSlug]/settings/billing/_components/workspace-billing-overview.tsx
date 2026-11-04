@@ -1,7 +1,7 @@
 "use client"
 
 import { useSuspenseQuery } from "@tanstack/react-query"
-import type { Interval } from "@unprice/analytics"
+import type { Interval } from "@unprice/db/validators"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { UsageDashboardView } from "~/components/analytics/usage-dashboard-view"
 import { CurrentAccessOverview } from "~/components/billing/current-access-overview"

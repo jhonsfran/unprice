@@ -1,5 +1,5 @@
-import { prepareInterval, preparePage } from "@unprice/analytics"
 import { FEATURE_SLUGS } from "@unprice/config"
+import { prepareInterval, preparePage } from "@unprice/db/validators"
 import type { SearchParams } from "nuqs/server"
 import { Suspense } from "react"
 import { IntervalFilter } from "~/components/analytics/interval-filter"

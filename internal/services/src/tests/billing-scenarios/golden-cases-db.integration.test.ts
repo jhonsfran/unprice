@@ -184,14 +184,13 @@ describe("DB-backed billing golden cases", () => {
   it("cancellation at the renewal boundary bills the earned period and creates no future charge", async () => {
     const loggerErrors: unknown[] = []
     const logger = createLogger(loggerErrors)
-    const { analytics, payerBudgets } = createRecordedUsageFixture(db, {
+    const { payerBudgets } = createRecordedUsageFixture(db, {
       events: { quantity: 1200, amount: 12_000_000_000 },
     })
     const services = createServiceContext({
       payerBudgets,
       db,
       logger,
-      analytics,
       waitUntil: (promise) => {
         void promise
       },
