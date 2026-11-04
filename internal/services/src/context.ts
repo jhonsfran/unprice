@@ -19,7 +19,6 @@ import { PaymentProviderResolver } from "./payment-provider/resolver"
 import { PlanService } from "./plans/service"
 import { ProjectService } from "./projects/service"
 import { RateCardService } from "./rate-cards/service"
-import { RatingService } from "./rating/service"
 import { DrizzleSubscriptionRepository } from "./subscriptions/repository.drizzle"
 import { SubscriptionService } from "./subscriptions/service"
 import {
@@ -56,7 +55,6 @@ export interface ServiceContext {
   workspaces: WorkspaceService
   grantsManager: GrantsManager
   paymentProviderResolver: PaymentProviderResolver
-  rating: RatingService
   rateCards: RateCardService
   ledger: LedgerGateway
   customerLedger: CustomerLedgerService
@@ -196,11 +194,6 @@ export function createServiceContext(
   const rateCards = new RateCardService({ db: deps.db })
 
   // 2. Services with deps on leaves
-  const rating = new RatingService({
-    logger: deps.logger,
-    grantsManager,
-  })
-
   const wallet = new WalletService({
     db: deps.db,
     logger: deps.logger,
@@ -278,7 +271,6 @@ export function createServiceContext(
     workspaces,
     grantsManager,
     paymentProviderResolver,
-    rating,
     rateCards,
     ledger,
     customerLedger,

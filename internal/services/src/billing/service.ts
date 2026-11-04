@@ -27,7 +27,6 @@ import {
   providerStatusToInvoiceEvent,
   transitionInvoiceStatus,
 } from "../payment-provider/invoice-state-machine"
-import type { RatedCharge } from "../rating/types"
 import type { SubscriptionMachine } from "../subscriptions/machine"
 import { DrizzleSubscriptionRepository } from "../subscriptions/repository.drizzle"
 import { LockLostError, withLockedMachine } from "../subscriptions/withLockedMachine"
@@ -42,8 +41,6 @@ import { UnPriceBillingError } from "./errors"
 import type { UpdateInvoiceInput } from "./repository"
 import { DrizzleBillingRepository } from "./repository.drizzle"
 import { billingStrategyFor } from "./strategy"
-
-type ComputeCurrentUsageResult = RatedCharge
 
 export interface InvoiceStatementLine {
   entryId: string
@@ -2429,27 +2426,6 @@ export class BillingService {
 
     const unearnedFraction = 1 - newFactor / oldFactor
     return Ok(Math.floor(paidMinor * unearnedFraction))
-  }
-
-  public async estimatePriceCurrentUsage({
-    customerId,
-    projectId,
-    now = Date.now(),
-    usageOverrides,
-  }: {
-    customerId: string
-    projectId: string
-    now?: number
-    usageOverrides?: Map<string, number>
-  }): Promise<Result<ComputeCurrentUsageResult[], UnPriceBillingError>> {
-    this.logger.warn("estimatePriceCurrentUsage is pending customer-entitlement billing rewrite", {
-      customerId,
-      projectId,
-      now,
-      hasUsageOverrides: Boolean(usageOverrides?.size),
-    })
-
-    return Ok([])
   }
 
   // all variables that affect the invoice should be included in the statement key
