@@ -115,7 +115,6 @@ export function buildMeterFactPayload(params: {
     amount_scale: LEDGER_SCALE,
     priced_at: createdAt,
     tier_index: pricedFact.tierIndex,
-    tier_mode: pricedFact.tierMode,
     pricing_component_count: pricedFact.pricingComponentCount,
   }
 }
@@ -193,7 +192,6 @@ export function priceFactsFromGrantStates(params: {
         periodKey: allocation.periodKey,
         pricingComponentCount: deltaExplanation.pricingComponentCount,
         tierIndex: deltaExplanation.tierIndex,
-        tierMode: deltaExplanation.tierMode,
         usageAfter: allocation.usageAfter,
         usageBefore: allocation.usageBefore,
         units: allocation.units,
@@ -310,7 +308,6 @@ export function priceFactWithEntitlement(params: {
     periodKey: bucket.periodKey,
     pricingComponentCount: deltaExplanation.pricingComponentCount,
     tierIndex: deltaExplanation.tierIndex,
-    tierMode: deltaExplanation.tierMode,
     usageAfter,
     usageBefore,
     units: fact.delta,

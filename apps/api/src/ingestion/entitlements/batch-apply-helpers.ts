@@ -4,7 +4,6 @@ import {
 } from "@unprice/services/entitlements"
 import {
   type ReservationPolicy,
-  computeEffectiveWalletCost,
   computeRefillDecision,
   updateSpendVelocity,
 } from "@unprice/services/wallet/reservation-sizing"
@@ -23,10 +22,6 @@ import type {
 type ApplyBatchEventInput = ApplyBatchInput["events"][number]
 type OpenWalletReservationSnapshot = NonNullable<WalletReservationSnapshot> & {
   reservationId: string
-}
-
-type WalletReservationSpendCost = ReturnType<typeof computeEffectiveWalletCost> & {
-  currentRemaining: number
 }
 
 type WalletSpendVelocity = {
@@ -51,14 +46,12 @@ type WalletReservationRefillPlan = {
 
 export type WalletReservationSpendPlan =
   | {
-      clampedNegativeAmount: number
       currentRemaining: number
       effectiveCostAmount: number
       kind: "underfunded"
       totalCost: number
     }
   | {
-      clampedNegativeAmount: number
       currentRemaining: number
       effectiveCostAmount: number
       flushAmount: number
@@ -121,20 +114,21 @@ export function planWalletReservationSpend(params: {
   window: OpenWalletReservationSnapshot
 }): WalletReservationSpendPlan {
   const { createdAt, entitlement, eventTimestamp, policy, totalCost, totalUnits, window } = params
+  // Rejects any negative cost that would reverse flushed or pending-capture
+  // consumption, so the cost applies locally as-is.
   assertSupportedWalletCorrection({ totalCost, totalUnits, window })
-  const spendCost = computeWalletReservationSpendCost({ totalCost, window })
+  const currentRemaining = Math.max(0, window.allocationAmount - window.consumedAmount)
 
-  if (spendCost.effectiveCostAmount > spendCost.currentRemaining) {
+  if (totalCost > currentRemaining) {
     return {
-      clampedNegativeAmount: spendCost.clampedNegativeAmount,
-      currentRemaining: spendCost.currentRemaining,
-      effectiveCostAmount: spendCost.effectiveCostAmount,
+      currentRemaining,
+      effectiveCostAmount: totalCost,
       kind: "underfunded",
       totalCost,
     }
   }
 
-  const nextConsumedAmount = window.consumedAmount + spendCost.effectiveCostAmount
+  const nextConsumedAmount = window.consumedAmount + totalCost
   // Free usage accepted before allocation is outside this reservation's quantity.
   const nextConsumedQuantity = Math.max(0, window.consumedQuantity + totalUnits)
   const refillPlan = planWalletReservationRefill({
@@ -149,9 +143,8 @@ export function planWalletReservationSpend(params: {
   })
 
   return {
-    clampedNegativeAmount: spendCost.clampedNegativeAmount,
-    currentRemaining: spendCost.currentRemaining,
-    effectiveCostAmount: spendCost.effectiveCostAmount,
+    currentRemaining,
+    effectiveCostAmount: totalCost,
     flushAmount: refillPlan.flushAmount,
     flushQuantity: refillPlan.flushQuantity,
     kind: "funded",
@@ -171,21 +164,6 @@ export function planWalletReservationSpend(params: {
       maxEventCostAmount: refillPlan.refillDecision.maxEventCostAmount,
       lastEventAt: createdAt,
     },
-  }
-}
-
-function computeWalletReservationSpendCost(params: {
-  totalCost: number
-  window: OpenWalletReservationSnapshot
-}): WalletReservationSpendCost {
-  const { totalCost, window } = params
-  return {
-    ...computeEffectiveWalletCost({
-      requestedCostAmount: totalCost,
-      consumedAmount: window.consumedAmount,
-      flushedAmount: window.flushedAmount,
-    }),
-    currentRemaining: Math.max(0, window.allocationAmount - window.consumedAmount),
   }
 }
 

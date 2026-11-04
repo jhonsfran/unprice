@@ -468,7 +468,6 @@ function baseConfig(): MonetizationConfigInput {
               featureType: "usage",
               config: {
                 usageMode: "tier",
-                tierMode: "graduated",
                 tiers: [
                   { firstUnit: 1, lastUnit: 10, unitPrice: "0.10", flatPrice: "0" },
                   { firstUnit: 11, lastUnit: null, unitPrice: "0.05", flatPrice: "0" },
@@ -511,7 +510,6 @@ function baseConfig(): MonetizationConfigInput {
               featureSlug: "bandwidth",
               featureType: "tier",
               config: {
-                tierMode: "volume",
                 tiers: [
                   { firstUnit: 1, lastUnit: 100, unitPrice: "0.02", flatPrice: "5.00" },
                   { firstUnit: 101, lastUnit: null, unitPrice: "0.01", flatPrice: "0" },
@@ -616,7 +614,6 @@ describe("getMonetizationConfig", () => {
         featureSlug: "bandwidth",
         featureType: "tier",
         config: {
-          tierMode: "volume",
           tiers: [
             { firstUnit: 1, lastUnit: 100, unitPrice: "0.02", flatPrice: "5.00" },
             { firstUnit: 101, lastUnit: null, unitPrice: "0.01", flatPrice: "0" },
@@ -666,7 +663,6 @@ describe("getMonetizationConfig", () => {
       featureType: "usage",
       config: {
         usageMode: "tier",
-        tierMode: "graduated",
         tiers: [
           { firstUnit: 1, lastUnit: 10, unitPrice: "0.10", flatPrice: "0" },
           { firstUnit: 11, lastUnit: null, unitPrice: "0.05", flatPrice: "0" },
@@ -970,7 +966,6 @@ describe("getMonetizationConfig", () => {
     support.featureType = "tier"
     const usd = USD
     support.config = {
-      tierMode: "volume",
       tiers: [
         {
           firstUnit: 1,
@@ -988,7 +983,6 @@ describe("getMonetizationConfig", () => {
     const emitted = read.config.plans[1]?.version.features[0]
     expect(emitted?.featureType).toBe("tier")
     expect(emitted?.config).toEqual({
-      tierMode: "volume",
       tiers: [{ firstUnit: 1, lastUnit: null, unitPrice: "1.00", flatPrice: "0" }],
     })
   })

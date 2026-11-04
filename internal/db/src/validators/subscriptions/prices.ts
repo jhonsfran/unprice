@@ -288,7 +288,7 @@ export const calculateFreeUnits = ({
       return Ok(0)
     }
     case "tier": {
-      const { tiers, tierMode } = configTierSchema.parse(config)
+      const { tiers } = configTierSchema.parse(config)
       let total = 0
       for (const tier of tiers) {
         // if limit is infinity, we can't calculate the free units and also means
@@ -298,7 +298,6 @@ export const calculateFreeUnits = ({
         const { val: totalPrice } = calculateTierPrice({
           tiers,
           quantity: limit,
-          tierMode,
           isUsageBased: false,
         })
 
@@ -310,9 +309,9 @@ export const calculateFreeUnits = ({
       return Ok(total)
     }
     case "usage": {
-      const { tiers, usageMode, units, price, tierMode } = configUsageSchema.parse(config)
+      const { tiers, usageMode, units, price } = configUsageSchema.parse(config)
 
-      if (usageMode === "tier" && tierMode && tiers && tiers.length > 0) {
+      if (usageMode === "tier" && tiers && tiers.length > 0) {
         let total = 0
         for (const tier of tiers) {
           // if limit is infinity, we can't calculate the free units and also means
@@ -322,7 +321,6 @@ export const calculateFreeUnits = ({
           const { val: totalPrice } = calculateTierPrice({
             tiers,
             quantity: limit,
-            tierMode,
             isUsageBased: false,
           })
 
@@ -391,13 +389,11 @@ export const calculateFreeUnits = ({
 export const calculateTierPrice = ({
   tiers,
   quantity,
-  tierMode,
   isUsageBased,
   prorate,
 }: {
   tiers: z.infer<typeof tiersSchema>[]
   quantity: z.infer<typeof unitsSchema>
-  tierMode: z.infer<typeof configTierSchema>["tierMode"]
   isUsageBased: boolean
   prorate?: number
 }): Result<CalculatedPrice, UnPriceCalculationError> => {
@@ -439,149 +435,84 @@ export const calculateTierPrice = ({
     })
   }
 
-  // here we have to calculate the total price based on the tier mode.
-  // tier mode is volume, then all units are priced based on the final tier reached
-  if (tierMode === "volume") {
-    // find the tier that the quantity falls into
-    const tier = findTierForQuantity(tiers, quantity)
+  // graduated tiers: each unit is priced at the tier it falls into
+  let remaining = quantity // make a copy, so we don't mutate the original
 
-    if (!tier) {
-      return Err(new UnPriceCalculationError({ message: "No pricing tier found for quantity" }))
+  // find the tier that the quantity falls into
+  const tier = findTierForQuantity(tiers, quantity)
+
+  if (!tier) {
+    return Err(new UnPriceCalculationError({ message: "No pricing tier found for quantity" }))
+  }
+
+  // we know the currency is the same for all tiers
+  const defaultCurrency = tier.unitPrice.dinero.currency.code as keyof typeof currencies
+  // initialize the total price as 0
+  let total: Dinero<number> = dinero({
+    amount: 0,
+    currency: currencies[defaultCurrency],
+  })
+
+  let subtotal: Dinero<number> = dinero({
+    amount: 0,
+    currency: currencies[defaultCurrency],
+  })
+
+  // iterate through the tiers and calculate the total price
+  // for tiered graduated, we need to calculate the price for each tier the quantity falls into
+  // and sum them up to get the total price
+  // but the flat price is only applied once where the quantity falls into the tier
+  for (const tier of tiers) {
+    if (remaining <= 0) {
+      break
     }
 
-    // flat price is prorated; per-unit charges are NOT prorated
-    const flatNonProrated = trimScale(dinero(tier.flatPrice.dinero))
-    const flatProrated =
+    const quantityCalculation =
+      tier.lastUnit === null ? remaining : Math.min(tier.lastUnit - tier.firstUnit + 1, remaining)
+    remaining -= quantityCalculation
+
+    const unitPrice = dinero(tier.unitPrice.dinero)
+    // multiply the unit price by the quantity calculation
+    total = add(total, multiply(unitPrice, toDineroMultiplier(quantityCalculation)))
+  }
+
+  // add the flat price of the tier the quantity falls into if it exists
+  if (tier?.flatPrice) {
+    // subtotal is the price per unit multiplied by the quantity without proration
+    subtotal = trimScale(add(total, trimScale(dinero(tier.flatPrice.dinero))))
+    // flat price needs to be prorated as well
+    const dineroFlatPrice =
       prorate !== undefined
-        ? trimScale(calculatePercentage(flatNonProrated, prorate))
-        : flatNonProrated
-
-    const unitPriceNoProration = trimScale(dinero(tier.unitPrice.dinero))
-    const subtotalPerUnit = trimScale(multiply(unitPriceNoProration, toDineroMultiplier(quantity)))
-
-    // subtotal: per-unit x quantity + flat (non-prorated)
-    const dineroSubtotalPrice = isZero(flatNonProrated)
-      ? subtotalPerUnit
-      : trimScale(add(subtotalPerUnit, flatNonProrated))
-
-    // total: per-unit x quantity + flat (prorated if provided)
-    const dineroTotalPrice = isZero(flatProrated)
-      ? subtotalPerUnit
-      : trimScale(add(subtotalPerUnit, flatProrated))
-
-    return Ok({
-      unitPrice: {
-        dinero: unitPriceNoProration,
-        displayAmount: toDecimal(unitPriceNoProration, ({ value, currency }) => {
-          const prefix = isUsageBased ? "starts at " : ""
-          if (isZero(flatNonProrated)) {
-            return `${prefix} ${formatMoney(value, currency.code)} per unit`
-          }
-
-          return `${prefix} ${formatMoney(
-            toDecimal(flatNonProrated),
-            currency.code
-          )} + ${formatMoney(value, currency.code)} per unit`
-        }),
-      },
-      subtotalPrice: {
-        dinero: dineroSubtotalPrice,
-        displayAmount: toDecimal(dineroSubtotalPrice, ({ value, currency }) => {
-          return `${formatMoney(value, currency.code)}`
-        }),
-      },
-      totalPrice: {
-        dinero: dineroTotalPrice,
-        displayAmount: toDecimal(
-          dineroTotalPrice,
-          ({ value, currency }) => `${formatMoney(value, currency.code)}`
-        ),
-      },
-    })
+        ? trimScale(calculatePercentage(dinero(tier.flatPrice.dinero), prorate))
+        : trimScale(dinero(tier.flatPrice.dinero))
+    total = trimScale(add(total, dineroFlatPrice))
   }
 
-  // if the tier mode is graduated, then the tiers applies progressively as quantity increases
-  if (tierMode === "graduated") {
-    let remaining = quantity // make a copy, so we don't mutate the original
+  return Ok({
+    unitPrice: {
+      dinero: dinero(tier.unitPrice.dinero),
+      displayAmount: toDecimal(dinero(tier.unitPrice.dinero), ({ value, currency }) => {
+        if (isUsageBased) {
+          return `starts at ${formatMoney(value, currency.code)} per unit`
+        }
 
-    // find the tier that the quantity falls into
-    const tier = findTierForQuantity(tiers, quantity)
-
-    if (!tier) {
-      return Err(new UnPriceCalculationError({ message: "No pricing tier found for quantity" }))
-    }
-
-    // we know the currency is the same for all tiers
-    const defaultCurrency = tier.unitPrice.dinero.currency.code as keyof typeof currencies
-    // initialize the total price as 0
-    let total: Dinero<number> = dinero({
-      amount: 0,
-      currency: currencies[defaultCurrency],
-    })
-
-    let subtotal: Dinero<number> = dinero({
-      amount: 0,
-      currency: currencies[defaultCurrency],
-    })
-
-    // iterate through the tiers and calculate the total price
-    // for tiered graduated, we need to calculate the price for each tier the quantity falls into
-    // and sum them up to get the total price
-    // but the flat price is only applied once where the quantity falls into the tier
-    for (const tier of tiers) {
-      if (remaining <= 0) {
-        break
-      }
-
-      const quantityCalculation =
-        tier.lastUnit === null ? remaining : Math.min(tier.lastUnit - tier.firstUnit + 1, remaining)
-      remaining -= quantityCalculation
-
-      const unitPrice = dinero(tier.unitPrice.dinero)
-      // multiply the unit price by the quantity calculation
-      total = add(total, multiply(unitPrice, toDineroMultiplier(quantityCalculation)))
-    }
-
-    // add the flat price of the tier the quantity falls into if it exists
-    if (tier?.flatPrice) {
-      // subtotal is the price per unit multiplied by the quantity without proration
-      subtotal = trimScale(add(total, trimScale(dinero(tier.flatPrice.dinero))))
-      // flat price needs to be prorated as well
-      const dineroFlatPrice =
-        prorate !== undefined
-          ? trimScale(calculatePercentage(dinero(tier.flatPrice.dinero), prorate))
-          : trimScale(dinero(tier.flatPrice.dinero))
-      total = trimScale(add(total, dineroFlatPrice))
-    }
-
-    return Ok({
-      unitPrice: {
-        dinero: dinero(tier.unitPrice.dinero),
-        displayAmount: toDecimal(dinero(tier.unitPrice.dinero), ({ value, currency }) => {
-          if (isUsageBased) {
-            return `starts at ${formatMoney(value, currency.code)} per unit`
-          }
-
-          return `${formatMoney(value, currency.code)} per unit`
-        }),
-      },
-      totalPrice: {
-        dinero: total,
-        displayAmount: toDecimal(
-          total,
-          ({ value, currency }) => `${formatMoney(value, currency.code)}`
-        ),
-      },
-      subtotalPrice: {
-        dinero: subtotal,
-        displayAmount: toDecimal(subtotal, ({ value, currency }) => {
-          return `${formatMoney(value, currency.code)}`
-        }),
-      },
-    })
-  }
-
-  return Err(new UnPriceCalculationError({ message: "unknown tier mode" }))
+        return `${formatMoney(value, currency.code)} per unit`
+      }),
+    },
+    totalPrice: {
+      dinero: total,
+      displayAmount: toDecimal(
+        total,
+        ({ value, currency }) => `${formatMoney(value, currency.code)}`
+      ),
+    },
+    subtotalPrice: {
+      dinero: subtotal,
+      displayAmount: toDecimal(subtotal, ({ value, currency }) => {
+        return `${formatMoney(value, currency.code)}`
+      }),
+    },
+  })
 }
 
 function findTierForQuantity(
@@ -752,24 +683,22 @@ export const calculatePricePerFeature = (
     }
 
     case "tier": {
-      const { tiers, tierMode } = configTierSchema.parse(config)
+      const { tiers } = configTierSchema.parse(config)
       return calculateTierPrice({
         tiers,
         quantity: defaultQuantity,
-        tierMode,
         isUsageBased: false,
         prorate,
       })
     }
 
     case "usage": {
-      const { tiers, usageMode, units, price, tierMode } = configUsageSchema.parse(config)
+      const { tiers, usageMode, units, price } = configUsageSchema.parse(config)
 
-      if (usageMode === "tier" && tierMode && tiers && tiers.length > 0) {
+      if (usageMode === "tier" && tiers && tiers.length > 0) {
         return calculateTierPrice({
           tiers,
           quantity: defaultQuantity,
-          tierMode,
           isUsageBased: true,
         })
       }

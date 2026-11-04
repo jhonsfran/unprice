@@ -522,7 +522,6 @@ export async function materializeTemplatePlanFeatures(
         }
       : {
           usageMode: "tier",
-          tierMode: "graduated",
           tiers: template.usage.config.tiers.map((tier) => ({
             firstUnit: tier.firstUnit,
             lastUnit: tier.lastUnit,
@@ -554,7 +553,6 @@ export async function materializeTemplatePlanFeatures(
     featureType: "usage",
     config: {
       usageMode: "tier",
-      tierMode: "graduated",
       tiers: [
         {
           firstUnit: 1,

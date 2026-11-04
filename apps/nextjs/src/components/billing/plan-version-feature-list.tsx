@@ -1,6 +1,6 @@
 "use client"
 
-import { FEATURE_TYPES_MAPS, TIER_MODES_MAP, USAGE_MODES_MAP, nFormatter } from "@unprice/db/utils"
+import { FEATURE_TYPES_MAPS, USAGE_MODES_MAP, nFormatter } from "@unprice/db/utils"
 import {
   type PlanVersionExtended,
   calculateFreeUnits,
@@ -174,9 +174,6 @@ export function PlanVersionFeatureListItem({
               >
                 {feature.featureType && `* ${FEATURE_TYPES_MAPS[feature.featureType].description}`}{" "}
                 {feature.featureType && <br />}
-                {feature.config?.tierMode &&
-                  `* ${TIER_MODES_MAP[feature.config.tierMode].description}`}{" "}
-                {feature.config?.tierMode && <br />}
                 {feature.config?.usageMode &&
                   `* ${USAGE_MODES_MAP[feature.config.usageMode].description}`}{" "}
                 {feature.config?.usageMode && <br />}

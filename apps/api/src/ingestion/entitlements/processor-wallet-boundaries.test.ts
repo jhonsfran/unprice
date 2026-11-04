@@ -27,7 +27,6 @@ describe("correction accounting boundaries", () => {
         creditLinePolicy: "capped",
         priceConfig: {
           usageMode: "tier",
-          tierMode: "graduated",
           tiers: [
             { firstUnit: 1, lastUnit: 10, unitPrice: money(0), flatPrice: money(0) },
             { firstUnit: 11, lastUnit: null, unitPrice: money(100), flatPrice: money(0) },

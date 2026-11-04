@@ -200,7 +200,6 @@ export const entitlementMeterFactSchemaV1 = z.object({
   currency: z.string().length(3),
   priced_at: z.number().int(),
   tier_index: z.number().int().nullable(),
-  tier_mode: z.union([z.enum(["volume", "graduated"]), z.null()]),
   pricing_component_count: z.number().int().nonnegative(),
 })
 
@@ -386,7 +385,6 @@ export const explainChargeEventRowSchema = entitlementMeterFactSchemaV1
     currency: true,
     priced_at: true,
     tier_index: true,
-    tier_mode: true,
     pricing_component_count: true,
     source_type: true,
     source_id: true,

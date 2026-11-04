@@ -49,33 +49,7 @@ describe("pricing calculators", () => {
     expect(toDecimal(val!.totalPrice.dinero)).toBe("10.00")
   })
 
-  it("calculateTierPrice volume: subtotal includes full flat fee, total includes prorated flat fee", () => {
-    const unitPrice = dinero({ amount: 200, currency: currencies.USD }) // $2
-    const flatPrice = dinero({ amount: 1000, currency: currencies.USD }) // $10 flat
-
-    const { val, err } = calculateTierPrice({
-      tiers: [
-        {
-          unitPrice: { dinero: unitPrice.toJSON(), displayAmount: "2.00" },
-          flatPrice: { dinero: flatPrice.toJSON(), displayAmount: "10.00" },
-          firstUnit: 1,
-          lastUnit: null,
-        },
-      ],
-      quantity: 3,
-      tierMode: "volume",
-      isUsageBased: false,
-      prorate: 0.5,
-    })
-
-    expect(err).toBeUndefined()
-    // subtotal: 3*2 + 10 = 16
-    expect(toDecimal(val!.subtotalPrice.dinero)).toBe("16.00")
-    // total: 3*2 + (10 * 0.5) = 11
-    expect(toDecimal(val!.totalPrice.dinero)).toBe("11.00")
-  })
-
-  it("calculateTierPrice volume: prices fractional usage below firstUnit with the first tier", () => {
+  it("calculateTierPrice: prices fractional usage below firstUnit with the first tier", () => {
     const unitPrice = dinero({ amount: 100, currency: currencies.USD }) // $1
     const flatPrice = dinero({ amount: 0, currency: currencies.USD })
 
@@ -89,7 +63,6 @@ describe("pricing calculators", () => {
         },
       ],
       quantity: 0.1,
-      tierMode: "volume",
       isUsageBased: true,
     })
 
@@ -97,7 +70,7 @@ describe("pricing calculators", () => {
     expect(toDecimal(val!.totalPrice.dinero)).toBe("0.10")
   })
 
-  it("calculateTierPrice volume: prices fractional usage with sub-cent unit prices", () => {
+  it("calculateTierPrice: prices fractional usage with sub-cent unit prices", () => {
     const unitPrice = dinero({ amount: 1, currency: currencies.EUR, scale: 3 }) // EUR 0.001
     const flatPrice = dinero({ amount: 100, currency: currencies.EUR, scale: 2 }) // EUR 1
 
@@ -111,7 +84,6 @@ describe("pricing calculators", () => {
         },
       ],
       quantity: 0.1,
-      tierMode: "volume",
       isUsageBased: true,
     })
 
@@ -144,7 +116,6 @@ describe("pricing calculators", () => {
         },
       ],
       quantity: 7,
-      tierMode: "graduated",
       isUsageBased: false,
       prorate: 0.5,
     })
@@ -173,7 +144,6 @@ describe("pricing calculators", () => {
         id: "f-tier",
         featureType: "tier" as const,
         config: {
-          tierMode: "volume",
           tiers: [
             {
               unitPrice: { dinero: unit.toJSON(), displayAmount: "5.00" },
@@ -200,7 +170,7 @@ describe("pricing calculators", () => {
     expect(toDecimal(val!.dinero)).toBe("20.00")
   })
 
-  it("calculateTotalPricePlan: sums flat, package, tier, usage unit, usage package, and usage volume-tier features", () => {
+  it("calculateTotalPricePlan: sums flat, package, tier, usage unit, usage package, and usage tier features", () => {
     const zero = dinero({ amount: 0, currency: currencies.USD })
     const features = [
       {
@@ -228,7 +198,6 @@ describe("pricing calculators", () => {
         id: "f-tier",
         featureType: "tier" as const,
         config: {
-          tierMode: "graduated" as const,
           tiers: [
             {
               firstUnit: 1,
@@ -279,11 +248,10 @@ describe("pricing calculators", () => {
         },
       },
       {
-        id: "f-usage-volume-tier",
+        id: "f-usage-tier",
         featureType: "usage" as const,
         config: {
           usageMode: "tier" as const,
-          tierMode: "volume" as const,
           tiers: [
             {
               firstUnit: 1,
@@ -318,15 +286,15 @@ describe("pricing calculators", () => {
         "f-tier": 8,
         "f-usage-unit": 40,
         "f-usage-package": 51,
-        "f-usage-volume-tier": 120,
+        "f-usage-tier": 120,
       },
       currency: "USD",
     })
 
     expect(err).toBeUndefined()
     // flat 20 + package ceil(21/10)*7 + graduated tier 16
-    // + usage unit 10 + usage package ceil(51/25)*4 + volume tier 8 = 87
-    expect(toDecimal(val!.dinero)).toBe("87.00")
+    // + usage unit 10 + usage package ceil(51/25)*4 + usage tier (100*0.10 + 20*0.05 + 2) 13 = 92
+    expect(toDecimal(val!.dinero)).toBe("92.00")
   })
 })
 
@@ -538,7 +506,6 @@ describe("planVersionRequiresPaymentMethod", () => {
           {
             featureType: "tier",
             config: {
-              tierMode: "volume",
               tiers: [
                 {
                   unitPrice: zeroPrice,
@@ -559,10 +526,10 @@ describe("planVersionRequiresPaymentMethod", () => {
 })
 
 describe("combined pricing scenarios", () => {
-  it("flat + tier volume (with flat) + usage package (ceil) with prorate", () => {
+  it("flat + single tier (with flat) + usage package (ceil) with prorate", () => {
     const flat = dinero({ amount: 1500, currency: currencies.USD }) // $15 flat feature
 
-    // Tier volume: $2/unit + $5 flat, quantity=7 -> per-unit 7*2=14, subtotal adds flat (19), total prorates flat only 0.5 -> 14 + 2.5 = 16.5
+    // Single tier: $2/unit + $5 flat, quantity=7 -> per-unit 7*2=14, subtotal adds flat (19), total prorates flat only 0.5 -> 14 + 2.5 = 16.5
     const tUnit = dinero({ amount: 200, currency: currencies.USD }) // $2
     const tFlat = dinero({ amount: 500, currency: currencies.USD }) // $5
 
@@ -578,10 +545,9 @@ describe("combined pricing scenarios", () => {
         },
       } as unknown as PlanVersionFeature,
       {
-        id: "f-tier-vol",
+        id: "f-tier-single",
         featureType: "tier",
         config: {
-          tierMode: "volume",
           tiers: [
             {
               unitPrice: { dinero: tUnit.toJSON(), displayAmount: "2.00" },
@@ -605,7 +571,7 @@ describe("combined pricing scenarios", () => {
 
     const { val, err } = calculateTotalPricePlan({
       features,
-      quantities: { "f-tier-vol": 7, "f-usage-pkg": 9 },
+      quantities: { "f-tier-single": 7, "f-usage-pkg": 9 },
       prorate: 0.5,
       currency: "USD",
     })
@@ -633,7 +599,6 @@ describe("combined pricing scenarios", () => {
         id: "f-tier-grad",
         featureType: "tier",
         config: {
-          tierMode: "graduated",
           tiers: [
             {
               unitPrice: { dinero: t1.toJSON(), displayAmount: "1.00" },
@@ -678,16 +643,15 @@ describe("combined pricing scenarios", () => {
   it("rounding: package ceil and proration at 0.333 on tier flat", () => {
     // Package: $1.25 per 3 units, quantity=7 -> ceil(7/3)=3 packages => subtotal $3.75, with 33.3% proration => total ~$1.25
     const pkg = dinero({ amount: 125, currency: currencies.USD })
-    // Tier volume: $0.80 per unit + $0.90 flat, quantity=2 => per-unit $1.60, prorated flat at 0.333 => ~$0.30, total ~$1.90
+    // Single tier: $0.80 per unit + $0.90 flat, quantity=2 => per-unit $1.60, prorated flat at 0.333 => ~$0.30, total ~$1.90
     const unit = dinero({ amount: 80, currency: currencies.USD })
     const flat = dinero({ amount: 90, currency: currencies.USD })
 
     const features: PlanVersionFeature[] = [
       {
-        id: "f-tier-vol-small",
+        id: "f-tier-small",
         featureType: "tier",
         config: {
-          tierMode: "volume",
           tiers: [
             {
               unitPrice: { dinero: unit.toJSON(), displayAmount: "0.80" },
@@ -712,7 +676,7 @@ describe("combined pricing scenarios", () => {
     const prorate = 0.333 // 33.3%
     const { val, err } = calculateTotalPricePlan({
       features,
-      quantities: { "f-tier-vol-small": 2, "f-usage-pkg-small": 7 },
+      quantities: { "f-tier-small": 2, "f-usage-pkg-small": 7 },
       prorate,
       currency: "USD",
     })

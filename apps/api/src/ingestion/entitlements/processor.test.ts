@@ -31,8 +31,7 @@ import {
 // engine, real pricing, and real Zod contracts. This is the seam a future
 // Redis-backed store implements.
 
-const VOLUME_FLAT_TIER_PRICE_CONFIG = {
-  tierMode: "volume" as const,
+const FLAT_TIER_PRICE_CONFIG = {
   usageMode: "tier" as const,
   tiers: [
     {
@@ -420,13 +419,13 @@ describe("EntitlementWindowProcessor apply behavior", () => {
 })
 
 describe("EntitlementWindowProcessor pricing behavior", () => {
-  it("charges a volume-tier flat fee once at the paid boundary", async () => {
+  it("charges a tier flat fee once at the paid boundary", async () => {
     const harness = createHarness({ now: BASE_NOW, store: new InMemoryEntitlementWindowStore() })
     await harness.processor.initialize()
     const base = createApplyInput({
       creditLinePolicy: "uncapped",
       currency: "EUR",
-      priceConfig: VOLUME_FLAT_TIER_PRICE_CONFIG,
+      priceConfig: FLAT_TIER_PRICE_CONFIG,
     })
 
     const free = await harness.processor.apply({
@@ -447,14 +446,13 @@ describe("EntitlementWindowProcessor pricing behavior", () => {
 
     expect(free.meterFacts?.[0]).toMatchObject({ amount: 0, value_after: 30 })
     expect(crossing.meterFacts?.[0]).toMatchObject({
-      amount: 103_100_000,
-      amount_after: 103_100_000,
+      amount: 100_100_000,
+      amount_after: 100_100_000,
       value_after: 31,
-      tier_mode: "volume",
     })
     expect(inside.meterFacts?.[0]).toMatchObject({
       amount: 100_000,
-      amount_after: 103_200_000,
+      amount_after: 100_200_000,
       value_after: 32,
     })
   })
@@ -466,14 +464,14 @@ describe("EntitlementWindowProcessor pricing behavior", () => {
       createApplyInput({
         creditLinePolicy: "uncapped",
         currency: "EUR",
-        priceConfig: VOLUME_FLAT_TIER_PRICE_CONFIG,
+        priceConfig: FLAT_TIER_PRICE_CONFIG,
         event: { properties: { amount: 50 } },
       })
     )
 
     expect(result.meterFacts?.[0]).toMatchObject({
-      amount: 105_000_000,
-      amount_after: 105_000_000,
+      amount: 102_000_000,
+      amount_after: 102_000_000,
       delta: 50,
     })
   })
@@ -486,7 +484,7 @@ describe("EntitlementWindowProcessor pricing behavior", () => {
     const base = createApplyInput({
       creditLinePolicy: "capped",
       currency: "EUR",
-      priceConfig: VOLUME_FLAT_TIER_PRICE_CONFIG,
+      priceConfig: FLAT_TIER_PRICE_CONFIG,
     })
 
     await harness.processor.apply({
@@ -503,7 +501,7 @@ describe("EntitlementWindowProcessor pricing behavior", () => {
     })
     expect(paid).toMatchObject({ allowed: true })
     expect(wallet.createReservation).toHaveBeenCalledWith(
-      expect.objectContaining({ currency: "EUR", requestedAmount: 103_100_000 })
+      expect.objectContaining({ currency: "EUR", requestedAmount: 100_100_000 })
     )
   })
 

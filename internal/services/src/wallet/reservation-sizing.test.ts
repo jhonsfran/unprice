@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest"
 import {
   DEFAULT_RESERVATION_POLICY,
   type ReservationPolicy,
-  computeEffectiveWalletCost,
   computeInitialReservation,
   computeRefillDecision,
   computeSyncGrowRefillAmount,
@@ -271,30 +270,6 @@ describe("computeRefillDecision", () => {
     expect(result.watermarkAmount).toBe(72)
     expect(result.needsRefill).toBe(true)
     expect(result.refillAmount).toBe(290)
-  })
-})
-
-describe("computeEffectiveWalletCost", () => {
-  it("prevents negative corrections from reducing consumed below flushed", () => {
-    const result = computeEffectiveWalletCost({
-      requestedCostAmount: -5,
-      consumedAmount: 10,
-      flushedAmount: 8,
-    })
-
-    expect(result.effectiveCostAmount).toBe(-2)
-    expect(result.clampedNegativeAmount).toBe(-3)
-  })
-
-  it("passes positive costs through unchanged", () => {
-    const result = computeEffectiveWalletCost({
-      requestedCostAmount: 7,
-      consumedAmount: 10,
-      flushedAmount: 8,
-    })
-
-    expect(result.effectiveCostAmount).toBe(7)
-    expect(result.clampedNegativeAmount).toBe(0)
   })
 })
 

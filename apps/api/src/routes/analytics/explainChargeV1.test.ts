@@ -113,7 +113,6 @@ describe("explainChargeV1 route", () => {
       pricing: {
         feature_type: "usage",
         usage_mode: "unit",
-        tier_mode: null,
         unit_of_measure: "token",
         description: "Unit pricing: 0.01 USD per token",
         rows: [{ label: "Unit price", value: "0.01 USD / token" }],
@@ -353,7 +352,6 @@ function makeExplainChargeOutput() {
     pricing: {
       featureType: "usage",
       usageMode: "unit",
-      tierMode: null,
       unitOfMeasure: "token",
       description: "Unit pricing: 0.01 USD per token",
       rows: [{ label: "Unit price", value: "0.01 USD / token" }],
@@ -420,7 +418,6 @@ function makeEvent() {
     currency: "USD",
     priced_at: 1_700_000_000_100,
     tier_index: 0,
-    tier_mode: "graduated",
     pricing_component_count: 1,
     source_type: "api_key",
     source_id: "key_1",

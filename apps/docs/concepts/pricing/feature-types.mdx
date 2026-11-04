@@ -10,19 +10,14 @@ feature charge. It does not define whether your product workload runs. Use `acce
 | Type | Charge rule | Typical use |
 | --- | --- | --- |
 | Flat | One fixed amount for the feature. | Base fee, premium support, or SSO access. |
-| Tier | The price depends on the tier that applies to the quantity. | Seats or volume-based pricing. |
+| Tier | Each tier prices the units that fall inside it. | Seats priced lower at higher counts. |
 | Usage | The charge follows metered consumption. | API requests, tokens, bandwidth, or storage. |
 | Package | The charge covers fixed groups of units. | Credit packs or seat bundles. |
 
-## Tier modes
+## Tiers are graduated
 
-Use a **volume** tier when every unit uses the price of the highest tier reached. Use a
-**graduated** tier when each tier prices only its own units.
-
-For example, with 100 units at $10 and units above 100 at $8:
-
-- Volume pricing charges 150 units at $8 each.
-- Graduated pricing charges the first 100 units at $10 and the next 50 units at $8.
+Each tier prices only its own units. With 100 units at $10 and units above 100 at $8, 150 units
+cost 100 at $10 plus 50 at $8, which is $1,400.
 
 ## Usage features need a meter
 

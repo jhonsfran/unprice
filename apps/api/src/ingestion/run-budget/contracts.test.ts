@@ -105,7 +105,6 @@ describe("run budget contracts", () => {
           currency: "USD",
           priced_at: 1_781_503_200_001,
           tier_index: 0,
-          tier_mode: "volume",
           pricing_component_count: 1,
         },
       ],

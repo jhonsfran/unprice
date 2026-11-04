@@ -6,13 +6,7 @@ import { useRouter } from "next/navigation"
 import { useEffect, useMemo, useState } from "react"
 
 import { DOCS_DOMAIN } from "@unprice/config"
-import {
-  OVERAGE_STRATEGIES_MAP,
-  TIER_MODES,
-  TIER_MODES_MAP,
-  USAGE_MODES,
-  USAGE_MODES_MAP,
-} from "@unprice/db/utils"
+import { OVERAGE_STRATEGIES_MAP, USAGE_MODES, USAGE_MODES_MAP } from "@unprice/db/utils"
 import type { FeatureType } from "@unprice/db/utils"
 import type {
   PlanVersion,
@@ -129,7 +123,6 @@ export function FeatureConfigForm({
         },
       ],
       usageMode: defaultValues.config?.usageMode ?? "tier",
-      tierMode: defaultValues.config?.tierMode ?? "volume",
       units: defaultValues.config?.units ?? 1,
     },
     billingConfig: defaultValues.billingConfig ?? planVersion?.billingConfig,
@@ -571,18 +564,6 @@ function ConfigureFields({
   if (featureType === "tier") {
     return (
       <div className="space-y-4">
-        <ModeSelect
-          form={form}
-          name="config.tierMode"
-          label="Tier mode"
-          tooltip="How tiered prices apply to the chosen quantity."
-          isDisabled={isDisabled}
-          options={TIER_MODES.map((m) => ({
-            value: m,
-            label: TIER_MODES_MAP[m].label,
-            description: TIER_MODES_MAP[m].description,
-          }))}
-        />
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <QuantityFormField form={form} isDisabled={isDisabled} />
           <LimitFormField form={form} isDisabled={isDisabled} units={unitOfMeasure} />
@@ -608,20 +589,6 @@ function ConfigureFields({
             description: USAGE_MODES_MAP[m].description,
           }))}
         />
-        {usageMode === "tier" && (
-          <ModeSelect
-            form={form}
-            name="config.tierMode"
-            label="Tier mode"
-            tooltip="How tiered usage prices apply."
-            isDisabled={isDisabled}
-            options={TIER_MODES.map((m) => ({
-              value: m,
-              label: TIER_MODES_MAP[m].label,
-              description: TIER_MODES_MAP[m].description,
-            }))}
-          />
-        )}
       </div>
 
       {/* Meter is required for usage features — render inline so its errors are always visible */}
@@ -663,7 +630,7 @@ function ConfigureFields({
   )
 }
 
-// ─── small inline mode select used for tierMode / usageMode ──────────────
+// ─── small inline mode select used for usageMode ──────────────
 function ModeSelect({
   form,
   name,

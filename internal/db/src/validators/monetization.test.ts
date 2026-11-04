@@ -226,7 +226,6 @@ describe("monetizationConfigSchema", () => {
     const configs: Record<string, unknown> = {
       flat: { price: "1" },
       tier: {
-        tierMode: "volume",
         tiers: [{ firstUnit: 1, lastUnit: null, unitPrice: "1", flatPrice: "0" }],
       },
       package: { price: "10", units: 5 },
@@ -298,7 +297,6 @@ describe("monetizationConfigSchema", () => {
         featureType: "usage",
         config: {
           usageMode: "tier",
-          tierMode: "graduated",
           tiers: [
             { firstUnit: 1, lastUnit: 10, unitPrice: "1", flatPrice: "0" },
             { firstUnit: 20, lastUnit: null, unitPrice: "1", flatPrice: "0" },

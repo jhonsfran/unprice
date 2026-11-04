@@ -224,7 +224,6 @@ function createMeterFact() {
     amount_scale: 8 as const,
     priced_at: NOW,
     tier_index: null,
-    tier_mode: null,
     pricing_component_count: 1,
     run_id: "brun_123",
     trace_id: null,

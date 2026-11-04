@@ -542,6 +542,9 @@ patterns. Keep it cheap to load and useful.
 
 ## Billing, Wallets, And Invoices
 
+- 2026-11-03: Tiers are graduated only (volume and `tierMode` removed, U1). A graduated config
+  whose higher tier has a smaller flat fee still prices a positive usage delta negatively (the seeded
+  plans do at 1000 -> 1001), so never assume tier cost deltas are non-negative.
 - 2026-11-02: Batch snapshot registration and completion by entitlement owner; completed snapshots must not be rewritten on retries.
 - 2026-11-02: Trial reporting must zero accepted prices, as BILL already does.
 - 2026-11-02: Wallet quantity excludes free usage accepted before reservation allocation. A correction can cross that boundary; keep grant usage exact and floor the wallet quantity at zero while preserving captured and pending quantities.

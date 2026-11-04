@@ -146,7 +146,6 @@ export const entitlementApplyMeterFactSchema = z
     amount_scale: z.literal(LEDGER_SCALE),
     priced_at: z.number().int(),
     tier_index: z.number().int().nullable(),
-    tier_mode: z.enum(["volume", "graduated"]).nullable(),
     pricing_component_count: z.number().int().nonnegative(),
   })
   .transform((fact) => ({
@@ -396,7 +395,6 @@ export type PricedFact = {
   periodKey: string
   pricingComponentCount: number
   tierIndex: number | null
-  tierMode: "volume" | "graduated" | null
   usageAfter: number
   usageBefore: number
   units: number

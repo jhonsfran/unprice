@@ -82,13 +82,13 @@ async function loadSubscriptionContext(): Promise<SubscriptionContext> {
 function expectedEventsAmount(usage: number) {
   if (usage <= 0) return 0
 
-  // The seeded arrears plan uses volume tiers:
-  // 1..1000 => 1 EUR flat + 0.001 EUR/unit, 1001+ => 0.10 EUR/unit.
+  // The seeded arrears plan uses graduated tiers:
+  // 1..1000 => 1 EUR flat + 0.001 EUR/unit; 1001+ => 1 EUR for the first 1000 units + 0.10 EUR/unit above, no flat.
   if (usage <= 1000) {
     return 100_000_000 + usage * 100_000
   }
 
-  return usage * 10_000_000
+  return 100_000_000 + (usage - 1000) * 10_000_000
 }
 
 async function runBillingPropertyCase(usage: number) {

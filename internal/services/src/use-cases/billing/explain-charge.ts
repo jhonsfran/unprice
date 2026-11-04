@@ -67,7 +67,6 @@ export const explainChargeOutputSchema = z.object({
   pricing: z.object({
     featureType: z.string(),
     usageMode: z.string().nullable(),
-    tierMode: z.string().nullable(),
     unitOfMeasure: z.string(),
     description: z.string(),
     rows: z.array(
@@ -614,7 +613,6 @@ function buildPricingSummary({
       return {
         featureType: "usage",
         usageMode: config.usageMode,
-        tierMode: null,
         unitOfMeasure: unit,
         description: `Unit pricing: ${price} per ${unit}`,
         rows: [{ label: "Unit price", value: `${price} / ${unit}` }],
@@ -626,7 +624,6 @@ function buildPricingSummary({
       return {
         featureType: "usage",
         usageMode: config.usageMode,
-        tierMode: null,
         unitOfMeasure: unit,
         description: `Package pricing: ${price} per ${formatUsage(config.units)} ${unit}`,
         rows: [
@@ -636,11 +633,10 @@ function buildPricingSummary({
       }
     }
 
-    if (config.usageMode === "tier" && config.tiers && config.tierMode) {
+    if (config.usageMode === "tier" && config.tiers) {
       return tierPricingSummary({
         featureType: "usage",
         usageMode: config.usageMode,
-        tierMode: config.tierMode,
         unit,
         tiers: config.tiers,
       })
@@ -652,7 +648,6 @@ function buildPricingSummary({
     return tierPricingSummary({
       featureType: "tier",
       usageMode: null,
-      tierMode: config.tierMode,
       unit,
       tiers: config.tiers,
     })
@@ -664,7 +659,6 @@ function buildPricingSummary({
     return {
       featureType: "package",
       usageMode: null,
-      tierMode: null,
       unitOfMeasure: unit,
       description: `Package pricing: ${price} per ${formatUsage(config.units)} ${unit}`,
       rows: [
@@ -679,7 +673,6 @@ function buildPricingSummary({
   return {
     featureType: "flat",
     usageMode: null,
-    tierMode: null,
     unitOfMeasure: unit,
     description: `Fixed price: ${price}`,
     rows: [{ label: "Fixed price", value: price }],
@@ -689,24 +682,19 @@ function buildPricingSummary({
 function tierPricingSummary({
   featureType,
   usageMode,
-  tierMode,
   unit,
   tiers,
 }: {
   featureType: string
   usageMode: string | null
-  tierMode: string
   unit: string
   tiers: TierSnapshot[]
 }): ExplainChargeOutput["pricing"] {
-  const modeLabel = tierMode === "graduated" ? "Graduated tiers" : "Volume tiers"
-
   return {
     featureType,
     usageMode,
-    tierMode,
     unitOfMeasure: unit,
-    description: `${modeLabel}: price changes by ${unit} range`,
+    description: `Graduated tiers: price changes by ${unit} range`,
     rows: tiers.map((tier) => ({
       label: tierRangeLabel(tier, unit),
       value: tierValueLabel(tier),

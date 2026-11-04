@@ -442,7 +442,6 @@ describe("RatingService - extended", () => {
               },
             ],
             usageMode: "tier",
-            tierMode: "graduated",
           },
           resetConfig: null,
         }),
@@ -695,7 +694,6 @@ describe("billing across meter resets", () => {
           },
           config: {
             usageMode: "tier",
-            tierMode: "graduated",
             tiers: [
               { firstUnit: 1, lastUnit: 10, unitPrice: zero, flatPrice: zero },
               { firstUnit: 11, lastUnit: null, unitPrice: one, flatPrice: zero },
@@ -721,7 +719,6 @@ describe("recorded prices in partial reset buckets", () => {
   })
   const config = {
     usageMode: "tier" as const,
-    tierMode: "graduated" as const,
     tiers: [
       { firstUnit: 1, lastUnit: 10, unitPrice: money(0), flatPrice: money(0) },
       { firstUnit: 11, lastUnit: null, unitPrice: money(100), flatPrice: money(0) },

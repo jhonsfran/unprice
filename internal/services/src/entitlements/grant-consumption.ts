@@ -15,7 +15,6 @@ export type UsagePriceDeltaExplanation = {
   amountMinor: number
   usageBefore: number
   usageAfter: number
-  tierMode: "volume" | "graduated" | null
   tierIndex: number | null
   pricingComponentCount: number
 }
@@ -387,18 +386,11 @@ export function computeUsagePriceDeltaExplanation(params: {
   usageBefore: number
 }): UsagePriceDeltaExplanation {
   const amountMinor = computeUsagePriceDeltaMinor(params)
-  const tierMode =
-    "usageMode" in params.priceConfig && params.priceConfig.usageMode === "tier"
-      ? (params.priceConfig.tierMode ?? null)
-      : "tierMode" in params.priceConfig
-        ? (params.priceConfig.tierMode ?? null)
-        : null
 
   return {
     amountMinor,
     usageBefore: Math.max(0, params.usageBefore),
     usageAfter: Math.max(0, params.usageAfter),
-    tierMode,
     tierIndex: resolveTierIndex(params.priceConfig, Math.max(0, params.usageAfter)),
     pricingComponentCount: resolvePricingComponentCount(
       params.priceConfig,
@@ -480,14 +472,6 @@ export function resolvePricingComponentCount(
   const lower = Math.min(before, after)
   const upper = Math.max(before, after)
 
-  if (resolveTierMode(priceConfig) === "volume") {
-    return new Set(
-      [resolveTierIndex(priceConfig, lower), resolveTierIndex(priceConfig, upper)].filter(
-        (index): index is number => index !== null
-      )
-    ).size
-  }
-
   return tiers.filter((tier, index) => {
     const tierStartExclusive = index === 0 ? 0 : tier.firstUnit - 1
     const tierEnd = tier.lastUnit ?? Number.POSITIVE_INFINITY
@@ -523,14 +507,6 @@ function resolveGrantPricingFeatureType(
   }
 
   return "flat"
-}
-
-function resolveTierMode(priceConfig: ConfigFeatureVersionType): "volume" | "graduated" | null {
-  if ("usageMode" in priceConfig && priceConfig.usageMode === "tier") {
-    return priceConfig.tierMode ?? null
-  }
-
-  return "tierMode" in priceConfig ? (priceConfig.tierMode ?? null) : null
 }
 
 function resolvePackageComponentCount(

@@ -162,6 +162,13 @@
       "when": 1793158387496,
       "tag": "0022_wallet_credits_invariant_skip_deleted_customer",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1793764917240,
+      "tag": "0023_melodic_cerise",
+      "breakpoints": true
     }
   ]
 }

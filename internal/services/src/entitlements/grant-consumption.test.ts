@@ -534,7 +534,6 @@ describe("grant pricing helpers", () => {
 
   it("includes flat tier jumps when sizing the max marginal price", () => {
     const priceConfig = {
-      tierMode: "volume",
       usageMode: "tier",
       tiers: [
         {
@@ -558,13 +557,12 @@ describe("grant pricing helpers", () => {
         usageBefore: 30,
         usageAfter: 31,
       })
-    ).toBe(103_100_000)
-    expect(computeMaxMarginalPriceMinor(priceConfig)).toBe(103_100_000)
+    ).toBe(100_100_000)
+    expect(computeMaxMarginalPriceMinor(priceConfig)).toBe(100_100_000)
   })
 
   it("prices positive fractional tier usage against the first tier", () => {
     const priceConfig = {
-      tierMode: "volume",
       usageMode: "tier",
       tiers: [
         {
@@ -587,7 +585,6 @@ describe("grant pricing helpers", () => {
 
   it("normalizes binary floating point residue in fractional usage", () => {
     const priceConfig = {
-      tierMode: "volume",
       usageMode: "tier",
       tiers: [
         {
@@ -610,7 +607,6 @@ describe("grant pricing helpers", () => {
 
   it("prices fractional sub-cent tier deltas at ledger scale", () => {
     const priceConfig = {
-      tierMode: "volume",
       usageMode: "tier",
       tiers: [
         {
@@ -645,45 +641,8 @@ describe("grant pricing helpers", () => {
     ).toBe(10_000)
   })
 
-  it("explains volume tier pricing with the after tier and crossed components", () => {
-    const priceConfig = {
-      tierMode: "volume",
-      usageMode: "tier",
-      tiers: [
-        {
-          firstUnit: 1,
-          lastUnit: 30,
-          unitPrice: price("0.00", EUR),
-          flatPrice: price("0.00", EUR),
-        },
-        {
-          firstUnit: 31,
-          lastUnit: null,
-          unitPrice: price("0.001", EUR),
-          flatPrice: price("1.00", EUR),
-        },
-      ],
-    } as ConfigFeatureVersionType
-
-    expect(
-      computeUsagePriceDeltaExplanation({
-        priceConfig,
-        usageBefore: 30,
-        usageAfter: 31,
-      })
-    ).toEqual({
-      amountMinor: 103_100_000,
-      usageBefore: 30,
-      usageAfter: 31,
-      tierMode: "volume",
-      tierIndex: 1,
-      pricingComponentCount: 2,
-    })
-  })
-
   it("explains graduated tier pricing with each touched tier component", () => {
     const priceConfig = {
-      tierMode: "graduated",
       usageMode: "tier",
       tiers: [
         {
@@ -711,7 +670,6 @@ describe("grant pricing helpers", () => {
       amountMinor: 600_000_000,
       usageBefore: 8,
       usageAfter: 12,
-      tierMode: "graduated",
       tierIndex: 1,
       pricingComponentCount: 2,
     })
@@ -719,7 +677,6 @@ describe("grant pricing helpers", () => {
 
   it("explains positive fractional graduated usage below the first integer tier", () => {
     const priceConfig = {
-      tierMode: "graduated",
       usageMode: "tier",
       tiers: [
         {
@@ -747,7 +704,6 @@ describe("grant pricing helpers", () => {
       amountMinor: 10_000_000,
       usageBefore: 0,
       usageAfter: 0.1,
-      tierMode: "graduated",
       tierIndex: 0,
       pricingComponentCount: 1,
     })
@@ -755,7 +711,6 @@ describe("grant pricing helpers", () => {
 
   it("explains exact graduated tier boundary usage as the next tier component", () => {
     const priceConfig = {
-      tierMode: "graduated",
       usageMode: "tier",
       tiers: [
         {
@@ -783,7 +738,6 @@ describe("grant pricing helpers", () => {
       amountMinor: 200_000_000,
       usageBefore: 10,
       usageAfter: 11,
-      tierMode: "graduated",
       tierIndex: 1,
       pricingComponentCount: 1,
     })
@@ -805,7 +759,6 @@ describe("grant pricing helpers", () => {
       amountMinor: 300_000_000,
       usageBefore: 2,
       usageAfter: 5,
-      tierMode: null,
       tierIndex: null,
       pricingComponentCount: 1,
     })
@@ -828,7 +781,6 @@ describe("grant pricing helpers", () => {
       amountMinor: 1_000_000_000,
       usageBefore: 9,
       usageAfter: 21,
-      tierMode: null,
       tierIndex: null,
       pricingComponentCount: 2,
     })
@@ -849,7 +801,6 @@ describe("grant pricing helpers", () => {
       amountMinor: 0,
       usageBefore: 0,
       usageAfter: 1,
-      tierMode: null,
       tierIndex: null,
       pricingComponentCount: 1,
     })

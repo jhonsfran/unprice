@@ -401,7 +401,6 @@ async function addComplexPricingConfiguration() {
         featureType: "tier",
         unitOfMeasure: "seat",
         config: {
-          tierMode: "graduated",
           tiers: [
             {
               unitPrice: eurPrice(200, "2.00"),

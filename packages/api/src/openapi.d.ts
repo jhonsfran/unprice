@@ -5868,7 +5868,7 @@ export interface operations {
               type: "feature" | "addon"
               featureId: string
               /**
-               * @description The pricing model type: 'flat' (fixed price), 'tier' (volume-based tiers), 'usage' (pay-as-you-go), or 'package' (bundle pricing)
+               * @description The pricing model type: 'flat' (fixed price), 'tier' (graduated tiers), 'usage' (pay-as-you-go), or 'package' (bundle pricing)
                * @enum {string}
                */
               featureType: "flat" | "tier" | "package" | "usage"
@@ -5954,11 +5954,6 @@ export interface operations {
                      * @enum {string}
                      */
                     usageMode?: "tier" | "package" | "unit"
-                    /**
-                     * @description Not used for flat pricing. Will be removed during validation
-                     * @enum {string}
-                     */
-                    tierMode?: "volume" | "graduated"
                     /** @description Not used for flat pricing. Will be removed during validation */
                     units?: number
                   }
@@ -5984,11 +5979,6 @@ export interface operations {
                       /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
                       displayAmount: string
                     }
-                    /**
-                     * @description How tier pricing is calculated: 'volume' (all units priced at the tier they fall into) or 'graduated' (each unit priced at its respective tier)
-                     * @enum {string}
-                     */
-                    tierMode: "volume" | "graduated"
                     /** @description Array of pricing tiers defining price brackets. Tiers must be consecutive (no gaps or overlaps). The last tier's lastUnit should be null for unlimited */
                     tiers: {
                       /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
@@ -6071,15 +6061,10 @@ export interface operations {
                       displayAmount: string
                     }
                     /**
-                     * @description How usage is calculated and billed: 'unit' (per-unit pricing), 'tier' (volume-based tiers), or 'package' (bundle of units)
+                     * @description How usage is calculated and billed: 'unit' (per-unit pricing), 'tier' (graduated tiers), or 'package' (bundle of units)
                      * @enum {string}
                      */
                     usageMode: "tier" | "package" | "unit"
-                    /**
-                     * @description Tier calculation method when usageMode is 'tier': 'volume' or 'graduated'. Only applicable when usageMode is 'tier'
-                     * @enum {string}
-                     */
-                    tierMode?: "volume" | "graduated"
                     /** @description Pricing tiers for tier-based usage. Required when usageMode is 'tier'. Must be consecutive with no gaps */
                     tiers?: {
                       /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
@@ -6212,11 +6197,6 @@ export interface operations {
                      * @enum {string}
                      */
                     usageMode?: "tier" | "package" | "unit"
-                    /**
-                     * @description Not used for package pricing. Will be removed during validation
-                     * @enum {string}
-                     */
-                    tierMode?: "volume" | "graduated"
                     /** @description Number of units included in each package. Required. Example: 100 means each package includes 100 units */
                     units: number
                   }
@@ -7612,15 +7592,10 @@ export interface operations {
                     /** @description Price as a decimal string. Example: '0.000002' */
                     price?: string
                     /**
-                     * @description How usage is calculated and billed: 'unit' (per-unit pricing), 'tier' (volume-based tiers), or 'package' (bundle of units)
+                     * @description How usage is calculated and billed: 'unit' (per-unit pricing), 'tier' (graduated tiers), or 'package' (bundle of units)
                      * @enum {string}
                      */
                     usageMode?: "tier" | "package" | "unit"
-                    /**
-                     * @description Tier calculation method when usageMode is 'tier': 'volume' or 'graduated'. Only applicable when usageMode is 'tier'
-                     * @enum {string}
-                     */
-                    tierMode?: "volume" | "graduated"
                     /** @description Pricing tiers, decimal strings */
                     tiers?: {
                       /** @description Price per unit inside this tier, as a decimal string */
@@ -7902,15 +7877,10 @@ export interface operations {
                       /** @description Price as a decimal string. Example: '0.000002' */
                       price?: string
                       /**
-                       * @description How usage is calculated and billed: 'unit' (per-unit pricing), 'tier' (volume-based tiers), or 'package' (bundle of units)
+                       * @description How usage is calculated and billed: 'unit' (per-unit pricing), 'tier' (graduated tiers), or 'package' (bundle of units)
                        * @enum {string}
                        */
                       usageMode?: "tier" | "package" | "unit"
-                      /**
-                       * @description Tier calculation method when usageMode is 'tier': 'volume' or 'graduated'. Only applicable when usageMode is 'tier'
-                       * @enum {string}
-                       */
-                      tierMode?: "volume" | "graduated"
                       /** @description Pricing tiers, decimal strings */
                       tiers?: {
                         /** @description Price per unit inside this tier, as a decimal string */
@@ -8480,7 +8450,7 @@ export interface operations {
                 type: "feature" | "addon"
                 featureId: string
                 /**
-                 * @description The pricing model type: 'flat' (fixed price), 'tier' (volume-based tiers), 'usage' (pay-as-you-go), or 'package' (bundle pricing)
+                 * @description The pricing model type: 'flat' (fixed price), 'tier' (graduated tiers), 'usage' (pay-as-you-go), or 'package' (bundle pricing)
                  * @enum {string}
                  */
                 featureType: "flat" | "tier" | "package" | "usage"
@@ -8566,11 +8536,6 @@ export interface operations {
                        * @enum {string}
                        */
                       usageMode?: "tier" | "package" | "unit"
-                      /**
-                       * @description Not used for flat pricing. Will be removed during validation
-                       * @enum {string}
-                       */
-                      tierMode?: "volume" | "graduated"
                       /** @description Not used for flat pricing. Will be removed during validation */
                       units?: number
                     }
@@ -8596,11 +8561,6 @@ export interface operations {
                         /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
                         displayAmount: string
                       }
-                      /**
-                       * @description How tier pricing is calculated: 'volume' (all units priced at the tier they fall into) or 'graduated' (each unit priced at its respective tier)
-                       * @enum {string}
-                       */
-                      tierMode: "volume" | "graduated"
                       /** @description Array of pricing tiers defining price brackets. Tiers must be consecutive (no gaps or overlaps). The last tier's lastUnit should be null for unlimited */
                       tiers: {
                         /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
@@ -8683,15 +8643,10 @@ export interface operations {
                         displayAmount: string
                       }
                       /**
-                       * @description How usage is calculated and billed: 'unit' (per-unit pricing), 'tier' (volume-based tiers), or 'package' (bundle of units)
+                       * @description How usage is calculated and billed: 'unit' (per-unit pricing), 'tier' (graduated tiers), or 'package' (bundle of units)
                        * @enum {string}
                        */
                       usageMode: "tier" | "package" | "unit"
-                      /**
-                       * @description Tier calculation method when usageMode is 'tier': 'volume' or 'graduated'. Only applicable when usageMode is 'tier'
-                       * @enum {string}
-                       */
-                      tierMode?: "volume" | "graduated"
                       /** @description Pricing tiers for tier-based usage. Required when usageMode is 'tier'. Must be consecutive with no gaps */
                       tiers?: {
                         /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
@@ -8824,11 +8779,6 @@ export interface operations {
                        * @enum {string}
                        */
                       usageMode?: "tier" | "package" | "unit"
-                      /**
-                       * @description Not used for package pricing. Will be removed during validation
-                       * @enum {string}
-                       */
-                      tierMode?: "volume" | "graduated"
                       /** @description Number of units included in each package. Required. Example: 100 means each package includes 100 units */
                       units: number
                     }
@@ -9172,7 +9122,7 @@ export interface operations {
                 type: "feature" | "addon"
                 featureId: string
                 /**
-                 * @description The pricing model type: 'flat' (fixed price), 'tier' (volume-based tiers), 'usage' (pay-as-you-go), or 'package' (bundle pricing)
+                 * @description The pricing model type: 'flat' (fixed price), 'tier' (graduated tiers), 'usage' (pay-as-you-go), or 'package' (bundle pricing)
                  * @enum {string}
                  */
                 featureType: "flat" | "tier" | "package" | "usage"
@@ -9258,11 +9208,6 @@ export interface operations {
                        * @enum {string}
                        */
                       usageMode?: "tier" | "package" | "unit"
-                      /**
-                       * @description Not used for flat pricing. Will be removed during validation
-                       * @enum {string}
-                       */
-                      tierMode?: "volume" | "graduated"
                       /** @description Not used for flat pricing. Will be removed during validation */
                       units?: number
                     }
@@ -9288,11 +9233,6 @@ export interface operations {
                         /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
                         displayAmount: string
                       }
-                      /**
-                       * @description How tier pricing is calculated: 'volume' (all units priced at the tier they fall into) or 'graduated' (each unit priced at its respective tier)
-                       * @enum {string}
-                       */
-                      tierMode: "volume" | "graduated"
                       /** @description Array of pricing tiers defining price brackets. Tiers must be consecutive (no gaps or overlaps). The last tier's lastUnit should be null for unlimited */
                       tiers: {
                         /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
@@ -9375,15 +9315,10 @@ export interface operations {
                         displayAmount: string
                       }
                       /**
-                       * @description How usage is calculated and billed: 'unit' (per-unit pricing), 'tier' (volume-based tiers), or 'package' (bundle of units)
+                       * @description How usage is calculated and billed: 'unit' (per-unit pricing), 'tier' (graduated tiers), or 'package' (bundle of units)
                        * @enum {string}
                        */
                       usageMode: "tier" | "package" | "unit"
-                      /**
-                       * @description Tier calculation method when usageMode is 'tier': 'volume' or 'graduated'. Only applicable when usageMode is 'tier'
-                       * @enum {string}
-                       */
-                      tierMode?: "volume" | "graduated"
                       /** @description Pricing tiers for tier-based usage. Required when usageMode is 'tier'. Must be consecutive with no gaps */
                       tiers?: {
                         /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
@@ -9516,11 +9451,6 @@ export interface operations {
                        * @enum {string}
                        */
                       usageMode?: "tier" | "package" | "unit"
-                      /**
-                       * @description Not used for package pricing. Will be removed during validation
-                       * @enum {string}
-                       */
-                      tierMode?: "volume" | "graduated"
                       /** @description Number of units included in each package. Required. Example: 100 means each package includes 100 units */
                       units: number
                     }
@@ -10087,7 +10017,6 @@ export interface operations {
             pricing: {
               feature_type: string
               usage_mode: string | null
-              tier_mode: string | null
               unit_of_measure: string
               description: string
               rows: {
@@ -10118,7 +10047,6 @@ export interface operations {
               currency: string
               priced_at: number
               tier_index: number | null
-              tier_mode: ("volume" | "graduated") | unknown | unknown
               pricing_component_count: number
               /** @enum {string} */
               source_type: "api_key" | "system" | "unknown"

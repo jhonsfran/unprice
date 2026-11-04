@@ -20,7 +20,6 @@ import {
   PLAN_TYPES,
   SUBJECT_TYPES,
   SUBSCRIPTION_STATUS,
-  TIER_MODES,
   USAGE_MODES,
   WHEN_TO_BILLING,
 } from "../utils"
@@ -62,7 +61,6 @@ export const meterConfigSchema = z
     }
   })
 
-export const tierModeSchema = z.enum(TIER_MODES)
 export const featureConfigType = z.enum(FEATURE_CONFIG_TYPES)
 export const unitSchema = z.coerce.number().int().min(1)
 export const collectionMethodSchema = z.enum(COLLECTION_METHODS)

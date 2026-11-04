@@ -58,7 +58,6 @@ export const explainChargeApiResponseSchema = z.object({
   pricing: z.object({
     feature_type: z.string(),
     usage_mode: z.string().nullable(),
-    tier_mode: z.string().nullable(),
     unit_of_measure: z.string(),
     description: z.string(),
     rows: z.array(
@@ -207,7 +206,6 @@ export const registerExplainChargeV1 = (app: App) =>
       pricing: {
         feature_type: result.val.pricing.featureType,
         usage_mode: result.val.pricing.usageMode,
-        tier_mode: result.val.pricing.tierMode,
         unit_of_measure: result.val.pricing.unitOfMeasure,
         description: result.val.pricing.description,
         rows: result.val.pricing.rows,

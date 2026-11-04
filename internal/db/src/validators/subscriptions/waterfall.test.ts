@@ -15,7 +15,6 @@ describe("calculateWaterfallPrice", () => {
 
   const tieredConfig = {
     usageMode: "tier" as const,
-    tierMode: "graduated" as const,
     tiers: [
       {
         firstUnit: 1,

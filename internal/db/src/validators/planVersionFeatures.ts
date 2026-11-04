@@ -15,7 +15,6 @@ import {
   meterConfigSchema,
   overageStrategySchema,
   resetConfigSchema,
-  tierModeSchema,
   typeFeatureSchema,
   unitSchema,
   usageModeSchema,
@@ -222,9 +221,6 @@ export const configTierSchema = z
     price: dineroSchema
       .optional()
       .describe("Base price for the feature. Not typically used in tier pricing mode"),
-    tierMode: tierModeSchema.describe(
-      "How tier pricing is calculated: 'volume' (all units priced at the tier they fall into) or 'graduated' (each unit priced at its respective tier)"
-    ),
     tiers: z
       .array(tiersSchema)
       .describe(
@@ -238,7 +234,7 @@ export const configTierSchema = z
       .describe("Number of units included. Not typically used in tier-type features"),
   })
   .describe(
-    "Configuration for tier-based pricing where different price rates apply to different volume ranges"
+    "Configuration for graduated tier pricing: each unit is priced at the rate of the tier it falls into"
   )
   .superRefine((data, ctx) => {
     const tiers = data.tiers
@@ -315,13 +311,8 @@ export const configUsageSchema = z
         "Price per unit when usageMode is 'unit' or 'package'. Required for unit/package modes, not used for tier mode"
       ),
     usageMode: usageModeSchema.describe(
-      "How usage is calculated and billed: 'unit' (per-unit pricing), 'tier' (volume-based tiers), or 'package' (bundle of units)"
+      "How usage is calculated and billed: 'unit' (per-unit pricing), 'tier' (graduated tiers), or 'package' (bundle of units)"
     ),
-    tierMode: tierModeSchema
-      .optional()
-      .describe(
-        "Tier calculation method when usageMode is 'tier': 'volume' or 'graduated'. Only applicable when usageMode is 'tier'"
-      ),
     tiers: z
       .array(tiersSchema)
       .optional()
@@ -466,9 +457,6 @@ export const configFlatSchema = z
     usageMode: usageModeSchema
       .optional()
       .describe("Not used for flat pricing. Will be removed during validation"),
-    tierMode: tierModeSchema
-      .optional()
-      .describe("Not used for flat pricing. Will be removed during validation"),
     units: unitSchema
       .optional()
       .describe("Not used for flat pricing. Will be removed during validation"),
@@ -487,9 +475,6 @@ export const configPackageSchema = z
       "The price per package. Example: $10 per package of 100 API calls"
     ),
     usageMode: usageModeSchema
-      .optional()
-      .describe("Not used for package pricing. Will be removed during validation"),
-    tierMode: tierModeSchema
       .optional()
       .describe("Not used for package pricing. Will be removed during validation"),
     units: unitSchema.describe(
@@ -550,7 +535,7 @@ export const planVersionFeatureSelectBaseSchema = createSelectSchema(planVersion
       ),
   featureType: () =>
     typeFeatureSchema.describe(
-      "The pricing model type: 'flat' (fixed price), 'tier' (volume-based tiers), 'usage' (pay-as-you-go), or 'package' (bundle pricing)"
+      "The pricing model type: 'flat' (fixed price), 'tier' (graduated tiers), 'usage' (pay-as-you-go), or 'package' (bundle pricing)"
     ),
   unitOfMeasure: () =>
     z
@@ -652,7 +637,6 @@ const normalizePlanVersionFeatureMutation = <
     switch (data.featureType) {
       case FEATURE_TYPES_MAPS.flat.code:
         delete data.config.tiers
-        delete data.config.tierMode
         delete data.config.usageMode
         delete data.config.units
         return data
@@ -660,7 +644,6 @@ const normalizePlanVersionFeatureMutation = <
       case FEATURE_TYPES_MAPS.package.code:
         delete data.config.usageMode
         delete data.config.tiers
-        delete data.config.tierMode
         delete data.config.usageMode
 
         return data
@@ -674,7 +657,6 @@ const normalizePlanVersionFeatureMutation = <
 
       case FEATURE_TYPES_MAPS.usage.code:
         if (data.config.usageMode === USAGE_MODES_MAP.unit.code) {
-          delete data.config.tierMode
           delete data.config.tiers
         }
 
@@ -684,7 +666,6 @@ const normalizePlanVersionFeatureMutation = <
         }
 
         if (data.config.usageMode === USAGE_MODES_MAP.package.code) {
-          delete data.config.tierMode
           delete data.config.tiers
         }
 

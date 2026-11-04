@@ -1572,7 +1572,6 @@ export class EntitlementWindowProcessor {
       "sync_refill_requested_amount",
       "wallet_raw_cost_minor",
       "wallet_effective_cost_minor",
-      "wallet_clamped_negative_minor",
       "reservation_remaining_amount",
       "reservation_target_amount",
       "reservation_threshold_amount",
@@ -2134,7 +2133,6 @@ export class EntitlementWindowProcessor {
 
     wideEvent.wallet_raw_cost_minor = totalCost
     wideEvent.wallet_effective_cost_minor = spendPlan.effectiveCostAmount
-    wideEvent.wallet_clamped_negative_minor = spendPlan.clampedNegativeAmount
     wideEvent.reservation_remaining_amount = spendPlan.remainingAmount
     wideEvent.reservation_target_amount = spendPlan.targetReservationAmount
     wideEvent.reservation_threshold_amount = spendPlan.thresholdAmount

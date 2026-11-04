@@ -97,7 +97,7 @@ export const featureVerificationSchema = z
     featureType: typeFeatureSchema
       .optional()
       .describe(
-        "The pricing model type for this feature: 'flat' (fixed price), 'tier' (volume-based pricing tiers), 'package' (bundle pricing), or 'usage' (pay-as-you-go)"
+        "The pricing model type for this feature: 'flat' (fixed price), 'tier' (graduated pricing tiers), 'package' (bundle pricing), or 'usage' (pay-as-you-go)"
       ),
     units: z
       .number()

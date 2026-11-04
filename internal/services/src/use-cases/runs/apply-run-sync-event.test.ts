@@ -525,7 +525,6 @@ function createMeterFact(
     currency: "USD",
     priced_at: TEST_NOW + 100,
     tier_index: null,
-    tier_mode: null,
     pricing_component_count: 1,
     ...overrides,
   }

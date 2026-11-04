@@ -718,7 +718,6 @@ function baseEventRow() {
     currency: "USD",
     priced_at: 1_700_000_000_100,
     tier_index: 0,
-    tier_mode: "graduated" as const,
     pricing_component_count: 1,
     source_type: "api_key" as const,
     source_id: "key_1",

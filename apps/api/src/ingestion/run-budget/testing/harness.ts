@@ -42,7 +42,6 @@ export function createRunBudgetMeterFact(
     currency: "USD",
     priced_at: RUN_BUDGET_TEST_NOW,
     tier_index: null,
-    tier_mode: null,
     pricing_component_count: 1,
     ...overrides,
   }

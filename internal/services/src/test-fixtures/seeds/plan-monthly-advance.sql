@@ -132,7 +132,7 @@ INSERT INTO "unprice_plan_versions_features" (
     'feat_test_events',
     'usage',
     'event',
-    '{"tierMode":"volume","tiers":[{"unitPrice":{"dinero":{"amount":1,"currency":{"code":"EUR","base":10,"exponent":2},"scale":3},"displayAmount":"0.001"},"flatPrice":{"dinero":{"amount":100,"currency":{"code":"EUR","base":10,"exponent":2},"scale":2},"displayAmount":"1"},"firstUnit":1,"lastUnit":1000},{"unitPrice":{"dinero":{"amount":1,"currency":{"code":"EUR","base":10,"exponent":2},"scale":1},"displayAmount":"0.1"},"flatPrice":{"dinero":{"amount":0,"currency":{"code":"EUR","base":10,"exponent":2},"scale":2},"displayAmount":"0.00"},"firstUnit":1001,"lastUnit":null}],"usageMode":"tier"}'::json,
+    '{"tiers":[{"unitPrice":{"dinero":{"amount":1,"currency":{"code":"EUR","base":10,"exponent":2},"scale":3},"displayAmount":"0.001"},"flatPrice":{"dinero":{"amount":100,"currency":{"code":"EUR","base":10,"exponent":2},"scale":2},"displayAmount":"1"},"firstUnit":1,"lastUnit":1000},{"unitPrice":{"dinero":{"amount":1,"currency":{"code":"EUR","base":10,"exponent":2},"scale":1},"displayAmount":"0.1"},"flatPrice":{"dinero":{"amount":0,"currency":{"code":"EUR","base":10,"exponent":2},"scale":2},"displayAmount":"0.00"},"firstUnit":1001,"lastUnit":null}],"usageMode":"tier"}'::json,
     '{"name":"monthly","billingInterval":"month","billingIntervalCount":1,"billingAnchor":"dayOfCreation","planType":"recurring"}'::json,
     '{"name":"monthly","resetInterval":"month","resetIntervalCount":1,"resetAnchor":"dayOfCreation","planType":"recurring"}'::json,
     '{}'::json,

@@ -4,7 +4,7 @@ import { InMemoryEntitlementWindowStore } from "./testing/in-memory-store"
 import { createEntitlementWindowProcessorHarness } from "./testing/processor-contract"
 import { createEntitlementWindowWalletHarness } from "./testing/wallet-harness"
 
-describe("volume correction after wallet close", () => {
+describe("quantity correction after wallet close", () => {
   it.each(["single", "batch"] as const)(
     "rejects a committed quantity correction without opening a new wallet hold through %s",
     async (mode) => {
@@ -25,7 +25,6 @@ describe("volume correction after wallet close", () => {
         periodEndAt: start + 60_000,
         priceConfig: {
           usageMode: "tier",
-          tierMode: "volume",
           tiers: [
             {
               firstUnit: 1,
@@ -53,26 +52,26 @@ describe("volume correction after wallet close", () => {
             },
           ],
         },
-        event: { id: "volume-initial", timestamp: start, properties: { amount: 11 } },
+        event: { id: "correction-initial", timestamp: start, properties: { amount: 11 } },
       })
       const first = await harness.processor.apply(base)
       expect(first.meterFacts?.map((fact) => [fact.delta, fact.amount])).toEqual([
-        [11, 110_000_000],
+        [11, 1_010_000_000],
       ])
       await Promise.all(harness.waitUntilPromises)
       clock = start + 60_001
       await harness.processor.alarm()
       expect(store.walletRow).toMatchObject({
         reservationId: null,
-        consumedAmount: 110_000_000,
+        consumedAmount: 1_010_000_000,
         consumedQuantity: 11,
-        flushedAmount: 110_000_000,
+        flushedAmount: 1_010_000_000,
         flushedQuantity: 11,
       })
       const before = structuredClone(store.walletRow)
       const event = {
         ...base.event,
-        id: "volume-correction",
+        id: "quantity-correction",
         properties: { amount: -1 },
         timestamp: start + 1,
       }
@@ -81,7 +80,7 @@ describe("volume correction after wallet close", () => {
           ? await harness.processor.apply({
               ...base,
               now: clock,
-              idempotencyKey: "volume-correction",
+              idempotencyKey: "quantity-correction",
               event,
             })
           : (
@@ -94,8 +93,8 @@ describe("volume correction after wallet close", () => {
                 events: [
                   {
                     ...event,
-                    correlationKey: "volume-correction",
-                    idempotencyKey: "volume-correction",
+                    correlationKey: "quantity-correction",
+                    idempotencyKey: "quantity-correction",
                     now: clock,
                   },
                 ],
