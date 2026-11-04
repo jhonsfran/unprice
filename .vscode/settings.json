@@ -1,7 +1,4 @@
 {
-  "tinybird.dataProjectSubdir": "internal/analytics",
-  "tinybird.venvActivate": "bin/activate",
-  "tinybird.venv": ".venv",
   "editor.codeActionsOnSave": {
     "source.organizeImports": "never",
     "source.sortImports": "never",
@@ -79,7 +76,6 @@
     "SIGNIN",
     "signout",
     "Signup",
-    "tinybird",
     "Tiptap",
     "tsbuildinfo",
     "typecheck",

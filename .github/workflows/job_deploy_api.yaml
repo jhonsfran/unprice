@@ -85,8 +85,6 @@ jobs:
         shell: bash
         run: |
           required_secrets=(
-            TINYBIRD_TOKEN
-            TINYBIRD_URL
             AUTH_SECRET
             REALTIME_TICKET_SECRET
             CLOUDFLARE_ZONE_ID
@@ -152,8 +150,6 @@ jobs:
           CLOUDFLARE_ZONE_ID: ${{ env.CLOUDFLARE_ZONE_ID }}
           CLOUDFLARE_CACHE_DOMAIN: ${{ env.CLOUDFLARE_CACHE_DOMAIN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ env.CLOUDFLARE_ACCOUNT_ID }}
-          TINYBIRD_TOKEN: ${{ env.TINYBIRD_TOKEN }}
-          TINYBIRD_URL: ${{ env.TINYBIRD_URL }}
           AUTH_SECRET: ${{ env.AUTH_SECRET }}
           REALTIME_TICKET_SECRET: ${{ env.REALTIME_TICKET_SECRET }}
           # we are passing the preview database url to the deploy action

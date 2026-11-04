@@ -25,12 +25,6 @@ jobs:
     with:
       run_integration_tests: true
 
-  ci-production-tinybird:
-    if: ${{ !contains(github.head_ref, 'renovate/') }}
-    uses: ./.github/workflows/job_tinybird_ci.yml
-    needs:
-      - build-lint
-
   deploy-production-neon:
     runs-on: ubuntu-latest
 
@@ -68,18 +62,9 @@ jobs:
           DATABASE_READ2_URL: ${{ env.DATABASE_READ2_URL }}
           MAIN_PROJECT_ID: ${{ env.MAIN_PROJECT_ID }}
 
-  deploy-production-tinybird:
-    uses: ./.github/workflows/job_tinybird_cd.yml
-    needs:
-      - deploy-production-neon
-      - ci-production-tinybird
-    secrets: inherit
-    with:
-      env: "prod"
-
   deploy-production-api:
     needs:
-      - deploy-production-tinybird
+      - deploy-production-neon
     uses: ./.github/workflows/job_deploy_api.yaml
     secrets:
       MACHINE_IDENTITY_CLIENT_ID: ${{ secrets.MACHINE_IDENTITY_CLIENT_ID }}
@@ -91,7 +76,7 @@ jobs:
     runs-on: ubuntu-latest
 
     needs:
-      - deploy-production-tinybird
+      - deploy-production-neon
 
     steps:
       - uses: actions/checkout@v5
@@ -143,7 +128,7 @@ jobs:
     runs-on: ubuntu-latest
 
     needs:
-      - deploy-production-tinybird
+      - deploy-production-neon
 
     permissions:
       pull-requests: write

@@ -25,12 +25,6 @@ jobs:
     with:
       run_integration_tests: true
 
-  ci-preview-tinybird:
-    if: ${{ !contains(github.head_ref, 'renovate/') }}
-    uses: ./.github/workflows/job_tinybird_ci.yml
-    needs:
-      - build-lint
-
   deploy-preview-neon:
     if: ${{ !contains(github.head_ref, 'renovate/') }}
     runs-on: ubuntu-latest
@@ -130,21 +124,10 @@ jobs:
           op: encode
           in: ${{ steps.branch-name.outputs.current_branch }}
 
-  deploy-preview-tinybird:
-    if: ${{ !contains(github.head_ref, 'renovate/') }}
-    uses: ./.github/workflows/job_tinybird_cd.yml
-    needs:
-      - deploy-preview-neon
-      - ci-preview-tinybird
-    secrets: inherit
-    with:
-      env: "preview"
-
   deploy-preview-api:
     if: ${{ !contains(github.head_ref, 'renovate/') }}
     needs:
       - deploy-preview-neon
-      - deploy-preview-tinybird
 
     uses: ./.github/workflows/job_deploy_api.yaml
     secrets:
@@ -161,7 +144,6 @@ jobs:
 
     needs:
       - deploy-preview-neon
-      - deploy-preview-tinybird
 
     permissions:
       pull-requests: write
@@ -229,7 +211,6 @@ jobs:
 
     needs:
       - deploy-preview-neon
-      - deploy-preview-tinybird
 
     permissions:
       pull-requests: write

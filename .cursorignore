@@ -1,8 +1,7 @@
 # Add directories or file patterns to ignore during indexing (e.g. foo/ or *.csv)
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
-# tinybird
-.tinyb
+# local env and tooling
 .env
 .venv
 .diff_tmp/

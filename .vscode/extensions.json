@@ -4,7 +4,6 @@
     "biomejs.biome",
     "WallabyJs.console-ninja",
     "jgclark.vscode-todo-highlight",
-    "yoavbls.pretty-ts-errors",
-    "tinybirdco.vscode-tinybird-support"
+    "yoavbls.pretty-ts-errors"
   ]
 }

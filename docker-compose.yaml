@@ -50,13 +50,6 @@ services:
       # - pgbouncer
       - db
 
-  # tinybird:
-  #   platform: linux/amd64
-  #   image: tinybirdco/tinybird-local:latest
-  #   ports:
-  #     - "7181:7181"
-  #     - "8080:80"
-
   redis:
     image: redis
     ports:

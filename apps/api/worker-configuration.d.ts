@@ -6,8 +6,6 @@ declare namespace Cloudflare {
 		mainModule: typeof import("./src/index");
 	}
 	interface ProdEnv {
-		TINYBIRD_TOKEN: string;
-		TINYBIRD_URL: string;
 		CLOUDFLARE_ZONE_ID: string;
 		CLOUDFLARE_API_TOKEN: string;
 		CLOUDFLARE_ACCOUNT_ID: string;
@@ -33,8 +31,6 @@ declare namespace Cloudflare {
 		RL_FREE_6000_60s: RateLimit;
 	}
 	interface PreviewEnv {
-		TINYBIRD_TOKEN: string;
-		TINYBIRD_URL: string;
 		CLOUDFLARE_ZONE_ID: string;
 		CLOUDFLARE_API_TOKEN: string;
 		CLOUDFLARE_ACCOUNT_ID: string;
@@ -60,8 +56,6 @@ declare namespace Cloudflare {
 		RL_FREE_6000_60s: RateLimit;
 	}
 	interface DevEnv {
-		TINYBIRD_TOKEN: string;
-		TINYBIRD_URL: string;
 		CLOUDFLARE_ZONE_ID: string;
 		CLOUDFLARE_API_TOKEN: string;
 		CLOUDFLARE_ACCOUNT_ID: string;
@@ -87,8 +81,6 @@ declare namespace Cloudflare {
 		RL_FREE_6000_60s: RateLimit;
 	}
 	interface Env {
-		TINYBIRD_TOKEN: string;
-		TINYBIRD_URL: string;
 		CLOUDFLARE_ZONE_ID: string;
 		CLOUDFLARE_API_TOKEN: string;
 		CLOUDFLARE_ACCOUNT_ID: string;
@@ -119,7 +111,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "TINYBIRD_TOKEN" | "TINYBIRD_URL" | "CLOUDFLARE_ZONE_ID" | "CLOUDFLARE_API_TOKEN" | "CLOUDFLARE_ACCOUNT_ID" | "DATABASE_URL" | "DATABASE_READ1_URL" | "DATABASE_READ2_URL" | "ENCRYPTION_KEY" | "AUTH_SECRET" | "DRIZZLE_LOG" | "APP_ENV" | "NODE_ENV" | "AXIOM_API_TOKEN" | "AXIOM_DATASET" | "UPSTASH_REDIS_REST_URL" | "UPSTASH_REDIS_REST_TOKEN" | "UNPRICE_API_KEY" | "UNPRICE_API_URL" | "STRIPE_API_KEY" | "STRIPE_CONNECT_WEBHOOK_SECRET">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "CLOUDFLARE_ZONE_ID" | "CLOUDFLARE_API_TOKEN" | "CLOUDFLARE_ACCOUNT_ID" | "DATABASE_URL" | "DATABASE_READ1_URL" | "DATABASE_READ2_URL" | "ENCRYPTION_KEY" | "AUTH_SECRET" | "DRIZZLE_LOG" | "APP_ENV" | "NODE_ENV" | "AXIOM_API_TOKEN" | "AXIOM_DATASET" | "UPSTASH_REDIS_REST_URL" | "UPSTASH_REDIS_REST_TOKEN" | "UNPRICE_API_KEY" | "UNPRICE_API_URL" | "STRIPE_API_KEY" | "STRIPE_CONNECT_WEBHOOK_SECRET">> {}
 }
 declare module "*.sql" {
 	const value: string;

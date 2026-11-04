@@ -24,7 +24,7 @@ fi
 
 echo "Starting up"
 
-# lets check first that docker, tb cli and node are installed
+# lets check first that docker and node are installed
 if ! command -v docker &> /dev/null; then
   echo "Docker could not be found"
   exit 1
@@ -32,11 +32,6 @@ fi
 
 if ! command -v docker-compose &> /dev/null; then
   echo "Docker Compose could not be found"
-  exit 1
-fi
-
-if ! command -v tb &> /dev/null; then
-  echo "Tinybird CLI could not be found"
   exit 1
 fi
 
@@ -65,7 +60,6 @@ if [ "$MODE_ID" = "dev" ]; then
   echo "########################################################"
   echo ""
 
-  # override tinybird host
   NODE_ENV="development"
   APP_ENV="development"
   UNPRICE_API_URL="http://localhost:8787"
