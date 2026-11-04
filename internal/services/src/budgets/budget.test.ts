@@ -1843,6 +1843,8 @@ describe("history does not slow the hot path", () => {
       target: null,
       history: [],
       expired: [],
+      cards: {},
+      statements: [],
     }
     const first = transition({ view: state, command: upsert(month100), clockMs: t0 })
     if (first.err) throw first.err

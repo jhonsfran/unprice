@@ -3,8 +3,10 @@
  * makes or a rejection; applying the change to the ledger is `transition`'s job.
  */
 
+import type { BudgetPricing } from "@unprice/db/validators"
 import { Ok, type Result } from "@unprice/error"
 import type { Amount, SignedAmount } from "@unprice/money"
+import { type RateCards, validateCard } from "../pricing"
 import {
   type BudgetConfig,
   type BudgetRecord,
@@ -20,11 +22,13 @@ import {
   loosening,
 } from "./config"
 import { consume, exposureOf } from "./ledger"
+import { type Metered, cardsOf, meterEvent, sameEvent } from "./meter"
 import {
   type Blocked,
   type BlockedRemedy,
   type BudgetBalance,
   type BudgetCommand,
+  type BudgetEvent,
   type BudgetRejection,
   type BudgetView,
   type ChargeOperation,
@@ -36,15 +40,19 @@ import {
   type LimitBalance,
   type Operation,
   type ReservationOperation,
+  type Statement,
   type UnPriceBudgetError,
+  type UsageOrEvent,
   reject,
 } from "./model"
+import { decideComplete, decideRegister, decideSeal } from "./statements"
 import {
   NO_USAGE,
   type Usage,
   addUsage,
   amountUsage,
   exceededMeasure,
+  isNoUsage,
   measured,
   sameMeasure,
   sameUsage,
@@ -56,6 +64,9 @@ import { windowBounds, windowIdOf } from "./windows"
 const ZERO = BigInt(0)
 
 type Funded = Readonly<{ budget: BudgetRecord; ledger: Ledger }>
+
+/** What a verb decides against: the funded budget plus the cards and statements it prices on. */
+type Context = Funded & Pick<BudgetView, "cards" | "statements">
 
 // Reads
 
@@ -187,6 +198,8 @@ export type Change = Readonly<{
   /** Signed on every measure: a reservation adds, a close removes. */
   held: Usage
   consumed: Usage
+  /** Statements created or changed; the store upserts exactly these. */
+  statements?: readonly Statement[]
 }>
 
 const unchanged = (row: Operation | null): Change => ({
@@ -204,17 +217,24 @@ const negated = (usage: Usage) => subtractUsage(NO_USAGE, usage)
  */
 export function decide(
   command: BudgetCommand,
-  view: Pick<BudgetView, "budget" | "ledger" | "target" | "expired">,
+  view: Pick<BudgetView, "budget" | "ledger" | "target" | "expired" | "cards" | "statements">,
   now: number
 ): Result<Change, UnPriceBudgetError> {
-  if (command.type === "upsert") return decideUpsert(command, view.budget, view.ledger, now)
+  const { cards, statements } = view
+  if (command.type === "upsert") {
+    return decideUpsert(command, view.budget, view.ledger, cards, now)
+  }
   const budget = view.budget
   if (command.type === "sweep") {
     return Ok(
-      budget ? decideSweep({ budget, ledger: view.ledger }, view.expired, now) : unchanged(null)
+      budget
+        ? decideSweep({ budget, ledger: view.ledger, cards, statements }, view.expired, now)
+        : unchanged(null)
     )
   }
-  if (budget) return decideVerb(command, { budget, ledger: view.ledger }, view.target, now)
+  if (budget) {
+    return decideVerb(command, { budget, ledger: view.ledger, cards, statements }, view.target, now)
+  }
 
   // A keyed verb may carry the budget to create when its key has none (ADR-0006 D8). The verb
   // then runs against the new budget in the same change, so a denial creates nothing.
@@ -224,6 +244,7 @@ export function decide(
     { type: "upsert", ...definition, mayLoosen: false },
     null,
     view.ledger,
+    cards,
     now
   )
   if (created.err) return created
@@ -231,7 +252,7 @@ export function decide(
   if (!configured) throw new Error(`creating ${definition.key} configured nothing`)
   const decided = decideVerb(
     command,
-    { budget: configured.budget, ledger: view.ledger },
+    { budget: configured.budget, ledger: view.ledger, cards, statements },
     view.target,
     now
   )
@@ -241,13 +262,20 @@ export function decide(
 
 function decideVerb(
   command: Exclude<BudgetCommand, { type: "upsert" | "sweep" }>,
-  state: Funded,
+  state: Context,
   target: Operation | null,
   now: number
 ): Result<Change, UnPriceBudgetError> {
   switch (command.type) {
     case "get":
+    case "statements":
       return Ok(unchanged(null))
+    case "registerStatements":
+      return writesStatements(decideRegister(command.statements, state.statements, now))
+    case "sealStatements":
+      return writesStatements(Ok(decideSeal(command, state.statements, now)))
+    case "completeStatements":
+      return writesStatements(decideComplete(command.periodIds, state.statements, now))
     case "authorize":
     case "charge":
     case "record":
@@ -263,14 +291,30 @@ function decideVerb(
   }
 }
 
+function writesStatements(
+  decided: Result<readonly Statement[], UnPriceBudgetError>
+): Result<Change, UnPriceBudgetError> {
+  if (decided.err) return decided
+  return Ok({ ...unchanged(null), statements: decided.val })
+}
+
 function decideUpsert(
   command: Extract<BudgetCommand, { type: "upsert" }>,
   budget: BudgetRecord | null,
   ledger: Ledger,
+  cards: BudgetView["cards"],
   now: number
 ): Result<Change, UnPriceBudgetError> {
-  const { key, projectId, unit, config } = command
+  const { key, projectId, unit } = command
+  // A caller that cannot set pricing keeps the budget's.
+  const config =
+    command.keepsPricing && budget
+      ? withPricing(command.config, budget.config.pricing)
+      : command.config
+  // Every card the pricing names must be cached, price in the budget's unit, and suit its features.
+  const unpriceable = config.pricing ? compatibleCards(config.pricing, unit, cards) : null
   if (!budget) {
+    if (unpriceable?.err) return unpriceable
     const changes = config.limits.map((limit) => ({
       change: "limit.added" as const,
       limitId: limit.id,
@@ -285,6 +329,10 @@ function decideUpsert(
   }
   if (budget.unit !== unit) {
     return reject({ code: "UNIT_IMMUTABLE", current: budget.unit, requested: unit })
+  }
+  if (unpriceable?.err) return unpriceable
+  if (!budget.config.pricing && config.pricing && !isNoUsage(ledger.held)) {
+    return reject({ code: "RESERVATIONS_OPEN" })
   }
   const previous = new Map(budget.config.limits.map((limit) => [limit.id, limit]))
   for (const limit of config.limits) {
@@ -341,32 +389,137 @@ function decideUpsert(
   return Ok({ ...unchanged(null), configured: { budget: updated, changes } })
 }
 
+function withPricing(config: BudgetConfig, pricing: BudgetPricing | undefined): BudgetConfig {
+  const { pricing: _requested, ...rest } = config
+  return pricing === undefined ? rest : { ...rest, pricing }
+}
+
 /**
- * Closes every expired reservation into consumption of all it still holds: a timer cannot prove
- * the work or the process stopped, so a hold counts everything it permitted and a lease everything
- * it was granted. Held capacity becomes consumption in the current window and returns when that
- * window rolls. A late settle of a hold's full amount replays; another is refused.
+ * The cards the pricing names, each cached, in the budget's unit, and valid for the features it
+ * prices: an `included` allowance only on a feature without dimensions whose rows price its meter.
  */
-function decideSweep(state: Funded, expired: readonly ReservationOperation[], now: number): Change {
+function compatibleCards(
+  pricing: BudgetPricing,
+  unit: string,
+  cached: BudgetView["cards"]
+): Result<RateCards, UnPriceBudgetError> {
+  const resolved = cardsOf(pricing, unit, cached)
+  if (resolved.err) return resolved
+  const priced = pricing.features.filter((feature) => feature.priced)
+  const slugs = new Set(priced.map((feature) => feature.slug))
+  const { base, overlay } = resolved.val
+  for (const { card, rows } of overlay ? [base, overlay] : [base]) {
+    const featureRows = rows.filter((row) => slugs.has(row.featureSlug))
+    const violations = validateCard(card, featureRows, priced)
+    if (violations.length > 0) {
+      return reject({ code: "CARD_INCOMPATIBLE", cardId: card.id, violations })
+    }
+  }
+  return resolved
+}
+
+/**
+ * Closes every expired reservation into consumption: a timer cannot prove the work or the process
+ * stopped, so a hold counts everything it permitted and a lease everything it was granted. An
+ * estimate is consumed as its event priced where the positions stand, which the estimate bounds.
+ * Held capacity becomes consumption in the current window and returns when that window rolls. A
+ * late settle that repeats the hold's own request replays; another is refused.
+ */
+function decideSweep(
+  state: Context,
+  expired: readonly ReservationOperation[],
+  now: number
+): Change {
   const balance = balanceOf(state, now)
   let consumed = NO_USAGE
+  let released = NO_USAGE
+  // Statements as the expiries before this one left them, so two holds can bill one statement.
+  const statements = byPeriodId(state.statements)
+  const written = new Map<string, Statement>()
   const rows = expired.map((row): ReservationOperation => {
     if (row.state.status !== "open" || row.expiresAt > now) {
       throw new Error(`${row.kind} ${row.id} is not open past its expiry`)
     }
-    const exposure = exposureOf(row)
-    const prior = consumed
-    consumed = addUsage(consumed, exposure)
     if (row.kind === "lease") {
+      const exposure = exposureOf(row)
+      consumed = addUsage(consumed, exposure)
+      released = addUsage(released, exposure)
       return { ...row, captured: row.granted, state: { status: "expired", closedAt: now } }
     }
-    const crossed = crossings(balance, exposure, prior)
-    return {
-      ...row,
-      state: { status: "settled", closedAt: now, actual: row.reserved, crossed, byExpiry: true },
+    const expiry = expiryOf(state, row, [...statements.values()], now)
+    const crossed = crossings(balance, expiry.actual, consumed)
+    consumed = addUsage(consumed, expiry.actual)
+    released = addUsage(released, row.reserved)
+    for (const statement of expiry.statements) {
+      statements.set(statement.periodId, statement)
+      written.set(statement.periodId, statement)
     }
+    const settled = { status: "settled", closedAt: now, actual: expiry.actual, crossed } as const
+    return { ...closing(row), state: { ...settled, byExpiry: true, ...expiry.billing } }
   })
-  return { rows, row: null, held: negated(consumed), consumed }
+  return {
+    rows,
+    row: null,
+    held: negated(released),
+    consumed,
+    statements: [...written.values()],
+  }
+}
+
+type Expiry = Readonly<{
+  actual: Usage
+  statements: readonly Statement[]
+  billing: Pick<Extract<HoldOperation["state"], { status: "settled" }>, "priced" | "unbilled">
+}>
+
+/**
+ * An expired hold without an estimate consumes `reserved`. An estimate is billed like a settle of
+ * its event at the hold's time; when no statement can take it, or it now prices above the hold
+ * (the pricing changed), the ledger consumes `reserved` and marks it unbilled.
+ */
+function expiryOf(
+  state: Context,
+  hold: HoldOperation,
+  statements: readonly Statement[],
+  now: number
+): Expiry {
+  const { estimate, reserved } = hold
+  const unbilled = (reason: BudgetRejection["code"]): Expiry => ({
+    actual: reserved,
+    statements: [],
+    billing: { unbilled: { reason } },
+  })
+  if (!estimate) return { actual: reserved, statements: [], billing: {} }
+  const { budget, cards } = state
+  const event = { slug: estimate.slug, properties: estimate.properties }
+  const at = hold.createdAt
+  const metered = meterEvent({ budget, cards, statements, event, at, now, estimate: false })
+  if (metered.err) return unbilled(metered.err.code)
+  if (exceededMeasure(metered.val.usage, reserved)) return unbilled("HOLD_AMOUNT_EXCEEDED")
+  const { usage, priced } = metered.val
+  return { actual: usage, statements: metered.val.statements, billing: { priced } }
+}
+
+/** A closed hold keeps its estimate's event for retries, not the lines it reserved on. */
+function closing(hold: HoldOperation): HoldOperation {
+  const { estimate } = hold
+  if (!estimate) return hold
+  const features = estimate.features.map((feature) => ({ ...feature, lines: [] }))
+  return { ...hold, estimate: { ...estimate, features } }
+}
+
+function byPeriodId(statements: readonly Statement[]): Map<string, Statement> {
+  return new Map(statements.map((statement) => [statement.periodId, statement]))
+}
+
+/**
+ * Whether `input` repeats a request: the same event when the request was priced from one,
+ * otherwise the same usage vector and no event.
+ */
+function repeats(input: UsageOrEvent, priced: BudgetEvent | undefined, usage: Usage): boolean {
+  return input.event
+    ? priced !== undefined && sameEvent(priced, input.event)
+    : priced === undefined && sameUsage(usage, input.usage)
 }
 
 /**
@@ -377,19 +530,21 @@ function sameRequest(
   row: HoldOperation | ChargeOperation,
   command: Extract<BudgetCommand, { type: "authorize" | "charge" | "record" }>
 ): boolean {
-  if (!sameUsage(row.kind === "hold" ? row.reserved : row.usage, command.usage)) return false
+  const priced = row.kind === "hold" ? row.estimate : row.priced
+  const usage = row.kind === "hold" ? row.reserved : row.usage
+  if (!repeats(command, priced, usage)) return false
   if (command.type !== "authorize") return row.kind === command.type
   return row.kind === "hold" && row.ttlMs === (command.ttlMs ?? null)
 }
 
 function decideKeyed(
   command: Extract<BudgetCommand, { type: "authorize" | "charge" | "record" }>,
-  state: Funded,
+  state: Context,
   target: Operation | null,
   now: number
 ): Result<Change, UnPriceBudgetError> {
   const { idempotencyKey } = command
-  const usage = usageOf(command.usage.amount, command.usage.quantities)
+  // A replay answers from its row before anything is priced: prices may have changed since.
   if (target) {
     if (target.kind === "lease" || target.idempotencyKey !== idempotencyKey) {
       throw new Error(`target ${target.id} is not the row for key ${idempotencyKey}`)
@@ -424,6 +579,12 @@ function decideKeyed(
     return reject({ code: "BUDGET_CLOSED", closedAt: config.closesAt })
   }
 
+  // An estimate and a charge price at the clock; a record at the time the usage happened.
+  const at = command.type === "record" ? command.occurredAt : now
+  const metering = measure(command, state, at, now, command.type === "authorize")
+  if (metering.err) return metering
+  const { usage, metered } = metering.val
+
   const balance = balanceOf(state, now)
   // Recorded work already ran: refusing it would lose the count, not the spend.
   const rejection =
@@ -441,6 +602,8 @@ function decideKeyed(
       createdAt: now,
       expiresAt,
       state: { status: "open" },
+      // The estimate moves no position: only the settle's actual does.
+      ...(metered && { estimate: metered.priced }),
     }
     return Ok({ rows: [hold], row: hold, held: usage, consumed: NO_USAGE })
   }
@@ -451,8 +614,36 @@ function decideKeyed(
     usage,
     createdAt: now,
     crossed: crossings(balance, usage),
+    ...(metered && { priced: metered.priced }),
   }
-  return Ok({ rows: [row], row, held: NO_USAGE, consumed: usage })
+  return Ok({ rows: [row], row, held: NO_USAGE, consumed: usage, ...movedBy(metered) })
+}
+
+/**
+ * The usage a command reserves or consumes: its vector, or its event metered and priced at `at`. A
+ * priced budget takes events only, so all it consumes reaches a statement.
+ */
+function measure(
+  input: UsageOrEvent,
+  state: Context,
+  at: number,
+  now: number,
+  estimate: boolean
+): Result<{ usage: Usage; metered: Metered | null }, UnPriceBudgetError> {
+  const { budget, cards, statements } = state
+  if (!input.event) {
+    if (budget.config.pricing) return reject({ code: "EVENT_REQUIRED" })
+    return Ok({ usage: usageOf(input.usage.amount, input.usage.quantities), metered: null })
+  }
+  const event = input.event
+  const metered = meterEvent({ budget, cards, statements, event, at, now, estimate })
+  if (metered.err) return metered
+  return Ok({ usage: metered.val.usage, metered: metered.val })
+}
+
+/** The statements a consumed event moves. */
+function movedBy(metered: Metered | null): Pick<Change, "statements"> {
+  return metered ? { statements: metered.statements } : {}
 }
 
 /** A hold's or a lease's TTL: from MIN_HOLD_TTL_MS up to the budget's `holds.maxTtlMs`. */
@@ -480,6 +671,8 @@ function decideLease(
     return reject({ code: "IDEMPOTENCY_CONFLICT", idempotencyKey: leaseKey })
   }
   const { config } = state.budget
+  // A lease spends an amount in the caller's memory, which no statement would ever see.
+  if (config.pricing) return reject({ code: "EVENT_REQUIRED" })
   const invalid = invalidTtl(ttlMs, config.holds.maxTtlMs)
   if (invalid) return invalid
   if (config.closesAt !== null && isClosed(config, now)) {
@@ -619,41 +812,59 @@ function leaseOf(target: Operation, leaseKey: string): LeaseOperation {
 
 function decideSettle(
   command: Extract<BudgetCommand, { type: "settle" }>,
-  state: Funded,
+  state: Context,
   target: Operation | null,
   now: number
 ): Result<Change, UnPriceBudgetError> {
   const hold = holdOf(target, command.holdId, state.ledger)
   if (hold.err) return hold
   const { holdId } = command
-  const actual = usageOf(command.actual.amount, command.actual.quantities)
   const { reserved, state: holdState } = hold.val
 
+  const input: UsageOrEvent = command.event ? { event: command.event } : { usage: command.actual }
   switch (holdState.status) {
-    case "settled":
-      if (sameUsage(holdState.actual, actual)) return Ok(unchanged(hold.val))
+    case "settled": {
+      // The caller's settle replays its own request; one closed at expiry, the hold's.
+      const same = holdState.byExpiry
+        ? repeats(input, hold.val.estimate, reserved)
+        : repeats(input, holdState.priced, holdState.actual)
+      if (same) return Ok(unchanged(hold.val))
       return reject({ code: "HOLD_CLOSED", holdId, status: closedStatus(hold.val) })
+    }
     case "released":
       return reject({ code: "HOLD_CLOSED", holdId, status: "released" })
     case "open": {
+      // The actual prices at the authorization time, so a price change between authorize and
+      // settle never changes what one call costs (B3). It prices where the positions stand now,
+      // which the estimate bounded from any position.
+      const metering = measure(input, state, hold.val.createdAt, now, false)
+      if (metering.err) return metering
+      const { usage: actual, metered } = metering.val
       // A hard cap holds only if usage never exceeds, on any measure, what was reserved before
       // the work ran.
-      const measure = exceededMeasure(actual, reserved)
-      if (measure) {
+      const exceeded = exceededMeasure(actual, reserved)
+      if (exceeded) {
         return reject({
           code: "HOLD_AMOUNT_EXCEEDED",
           holdId,
-          measure,
-          maximum: measured(reserved, measure),
-          actual: measured(actual, measure),
+          measure: exceeded,
+          maximum: measured(reserved, exceeded),
+          actual: measured(actual, exceeded),
         })
       }
       const crossed = crossings(balanceOf(state, now), actual)
+      const priced = metered && { priced: metered.priced }
       const row: HoldOperation = {
-        ...hold.val,
-        state: { status: "settled", closedAt: now, actual, crossed },
+        ...closing(hold.val),
+        state: { status: "settled", closedAt: now, actual, crossed, ...priced },
       }
-      return Ok({ rows: [row], row, held: negated(reserved), consumed: actual })
+      return Ok({
+        rows: [row],
+        row,
+        held: negated(reserved),
+        consumed: actual,
+        ...movedBy(metered),
+      })
     }
   }
 }
@@ -675,7 +886,10 @@ function decideRelease(
     case "settled":
       return reject({ code: "HOLD_CLOSED", holdId: command.holdId, status: closedStatus(hold.val) })
     case "open": {
-      const row: HoldOperation = { ...hold.val, state: { status: "released", closedAt: now } }
+      const row: HoldOperation = {
+        ...closing(hold.val),
+        state: { status: "released", closedAt: now },
+      }
       return Ok({ rows: [row], row, held: negated(hold.val.reserved), consumed: NO_USAGE })
     }
   }

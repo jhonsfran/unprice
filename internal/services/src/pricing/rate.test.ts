@@ -14,7 +14,7 @@ import {
   usdCardWithFallback,
 } from "./fixtures"
 import type { CardRows, PricedUsage, RateCards } from "./model"
-import { priceQuantity, priceUsage, quantityOf } from "./rate"
+import { estimateUsage, priceQuantity, priceUsage, quantityOf } from "./rate"
 
 const at = CARD_FROM + 60 * 60 * 1000
 
@@ -347,5 +347,98 @@ describe("quantityOf", () => {
     expect(priced.err?.rejection).toBeUndefined()
     expect(priced.val && formatAmount(priced.val.amount)).toBe("0.02")
     expect(priced.val && formatAmount(priced.val.meterQuantity)).toBe("0")
+  })
+})
+
+describe("estimateUsage: the most usage can cost from any position", () => {
+  const estimate = (
+    cards: RateCards,
+    feature: FeaturePricing,
+    properties: Record<string, unknown>
+  ) => {
+    const result = estimateUsage({ cards, feature, properties, at, positionOf: () => BigInt(0) })
+    if (result.err) throw result.err
+    return formatAmount(result.val.amount)
+  }
+
+  it("bounds graduated calls by the costliest stretch of tiers, flats included", () => {
+    const calls = (n: number) => estimate({ base: usdCard }, features.apiCalls, { calls: n })
+    // From 10,000: the $5 entry plus 1,500 x $0.001.
+    expect(calls(1_500)).toBe("6.5")
+    // From 10,000: $5 + 90,000 x $0.001 + 110,000 x $0.0005, more than from 0 ($145).
+    expect(calls(200_000)).toBe("150")
+    expect(calls(0)).toBe("0")
+  })
+
+  it("bounds a flat into a cheaper tier where usage straddles the boundary", () => {
+    const card: CardRows = {
+      card: { ...usdCard.card, id: "rc_flat_into_cheaper" },
+      rows: [
+        rateRowSchema.parse({
+          ...rowOf(usdCard, "row_api_calls"),
+          id: "row_flat_into_cheaper",
+          rateCardId: "rc_flat_into_cheaper",
+          price: {
+            type: "graduated",
+            property: "calls",
+            per: 1,
+            tiers: [
+              { upTo: 100, rate: "1", flat: "0" },
+              { upTo: null, rate: "0.1", flat: "10" },
+            ],
+          },
+        }),
+      ],
+    }
+    // From just past 50: almost 50 calls at $1, then the $10 flat, rounded up to $60.
+    expect(estimate({ base: card }, features.apiCalls, { calls: 50 })).toBe("60")
+  })
+
+  it("bounds packages by one package per started size, however the units straddle", () => {
+    const emails = (n: number) => estimate({ base: usdCard }, features.emails, { emails: n })
+    expect([emails(1), emails(1_000), emails(1_001), emails(2_500)]).toEqual(["1", "1", "2", "3"])
+  })
+
+  it("bounds included units at the full rate: any of them may be past the allowance", () => {
+    const included = estimate({ base: includedApiCallsCard }, features.apiCallsIncluded, {
+      calls: 1_000,
+    })
+    expect(included).toBe("2")
+  })
+
+  it("bounds unit prices by the exact price rounded up", () => {
+    const mini = estimate({ base: usdCard }, features.llmTokens, {
+      model: "gpt-4.1-mini",
+      input_tokens: 1,
+    })
+    expect(mini).toBe("0.0000004")
+  })
+
+  it("refuses an allowance a row cannot take: one matching a dimension or pricing two quantities", () => {
+    const twoQuantities: CardRows = {
+      ...includedApiCallsCard,
+      rows: includedApiCallsCard.rows.map((row) => ({
+        ...row,
+        price: {
+          type: "unit" as const,
+          components: [
+            { property: "calls", rate: amountOf("0.002"), per: 1 },
+            { property: null, rate: amountOf("0.001"), per: 1 },
+          ],
+        },
+      })),
+    }
+    const result = priceUsage({
+      cards: { base: twoQuantities },
+      feature: features.apiCallsIncluded,
+      properties: { calls: 500 },
+      at,
+      positionOf: () => BigInt(0),
+    })
+    expect(result.err?.rejection).toEqual({
+      code: "INCLUDED_NOT_APPLICABLE",
+      feature: "api_calls",
+      rowId: "row_api_calls_included",
+    })
   })
 })

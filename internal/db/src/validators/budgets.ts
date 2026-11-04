@@ -30,6 +30,8 @@ import {
   describeDuration,
   toAmount,
 } from "./budget-shared"
+import { eventSlugSchema } from "./events"
+import { featurePricingSchema } from "./rate-cards"
 
 export {
   BUDGET_WINDOWS,
@@ -90,6 +92,7 @@ export const budgetMeasureSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("quantity"), feature: budgetFeatureSchema }),
 ])
 export type BudgetMeasure = z.infer<typeof budgetMeasureSchema>
+export type BudgetPricing = z.infer<typeof budgetPricingSchema>
 
 const anchoredOnly = <T extends { window: string; anchor?: number }>(limit: T) =>
   limit.anchor === undefined ||
@@ -155,9 +158,51 @@ const budgetDefinitionFields = {
 
 const budgetDefinitionObject = z.object(budgetDefinitionFields).strict()
 
+/**
+ * A metered feature (ADR-0008 D1, D4): the event that feeds it, how the pricing core reads it, and
+ * whether the budget prices it. An event slug may feed several features.
+ */
+export const budgetMeteredFeatureSchema = featurePricingSchema.extend({
+  slug: budgetFeatureSchema,
+  eventSlug: eventSlugSchema,
+  priced: z.boolean(),
+})
+
+/**
+ * How a budget meters and prices usage events: the rate cards by id (their unit must be the
+ * budget's), the metered features, and whether usage needs a registered billing statement
+ * (ADR-0007: payer budgets require one). Internal callers only.
+ */
+export const budgetPricingSchema = z
+  .object({
+    cards: z.object({ base: z.string().min(1), overlay: z.string().min(1).optional() }).strict(),
+    features: z.array(budgetMeteredFeatureSchema).max(64),
+    statements: z.enum(["required", "none"]),
+  })
+  .strict()
+
+/** A period id or statement key; "#" starts the budget's own perpetual statements. */
+const statementIdSchema = z.string().min(1).max(128).regex(/^[^#]/, "must not start with #")
+
+/** One billing period of one feature, as billing registers it with the payer budget. */
+export const budgetStatementRegistrationSchema = z
+  .object({
+    periodId: statementIdSchema,
+    statementKey: statementIdSchema,
+    featureSlug: budgetFeatureSchema,
+    start: z.number().int().nonnegative(),
+    end: z.number().int().nonnegative(),
+  })
+  .strict()
+  .refine((statement) => statement.end > statement.start, {
+    path: ["end"],
+    message: "end must be after start",
+  })
+
 const meteredBudgetDefinitionFields = {
   ...budgetDefinitionFields,
   limits: limitsSchema(meteredBudgetLimitSchema),
+  pricing: budgetPricingSchema.optional(),
 }
 
 function toBudgetDefinition({
@@ -166,10 +211,12 @@ function toBudgetDefinition({
   holds,
   onUnavailable,
   closesAt,
+  pricing,
 }: z.output<z.ZodObject<typeof meteredBudgetDefinitionFields>>) {
   return {
     unit: /^[A-Z]{3}$/.test(unit) ? `money:${unit}` : unit,
     config: {
+      ...(pricing !== undefined && { pricing }),
       limits: limits.map(({ id, enforce, feature, ...limit }) => {
         const measure: BudgetMeasure =
           feature === undefined ? { type: "amount" } : { type: "quantity", feature }
@@ -204,6 +251,17 @@ function withValidLimits(
       })
     }
     seen.add(limit.id)
+  })
+  const features = new Set<string>()
+  config.pricing?.features.forEach((feature, index) => {
+    if (features.has(feature.slug)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["pricing", "features", index, "slug"],
+        message: `duplicate feature ${feature.slug}`,
+      })
+    }
+    features.add(feature.slug)
   })
   if (config.holds.defaultTtlMs > config.holds.maxTtlMs) {
     ctx.addIssue({
@@ -254,8 +312,9 @@ export type BudgetConfigInput = Omit<
 >
 
 /**
- * The wire form of a config; parsing it back with `upsertBudgetInternalInputSchema` returns the
- * same config. An amount limit has no `feature`, so a public config's wire form is unchanged.
+ * The public wire form of a config; parsing it back with `upsertBudgetInternalInputSchema` returns
+ * the same config less its `pricing`, which only internal callers set and the public wire never
+ * shows. An amount limit has no `feature`, so a public config's wire form is unchanged.
  */
 export function formatBudgetConfig(config: BudgetConfig) {
   return {

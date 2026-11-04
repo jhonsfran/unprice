@@ -25,24 +25,35 @@ export function amountUsage(amount: Amount): Usage {
   return { amount, quantities: {} }
 }
 
+/**
+ * A feature's quantity in a vector. Feature slugs are caller data, so only own entries count: a
+ * slug like `constructor` reads 0, not Object's.
+ */
+function quantityIn(quantities: Readonly<Record<string, Amount>>, feature: string): Amount {
+  return Object.prototype.hasOwnProperty.call(quantities, feature)
+    ? (quantities[feature] as Amount)
+    : ZERO
+}
+
 /** The canonical vector: zero quantities dropped, features in key order. */
 export function usageOf(amount: Amount, quantities: Readonly<Record<string, Amount>> = {}): Usage {
   const kept = Object.keys(quantities)
     .sort()
     .flatMap((feature) => {
-      const quantity = quantities[feature] ?? ZERO
+      const quantity = quantityIn(quantities, feature)
       return quantity === ZERO ? [] : [[feature, quantity] as const]
     })
+  // fromEntries defines own properties, so a `__proto__` slug is a key, not the prototype.
   return { amount, quantities: Object.fromEntries(kept) }
 }
 
 function combine(a: Usage, b: Usage, sign: bigint): Usage {
   if (isNoUsage(b)) return a
-  const quantities: Record<string, Amount> = { ...a.quantities }
+  const quantities = new Map(Object.entries(a.quantities))
   for (const [feature, quantity] of Object.entries(b.quantities)) {
-    quantities[feature] = (quantities[feature] ?? ZERO) + sign * quantity
+    quantities.set(feature, (quantities.get(feature) ?? ZERO) + sign * quantity)
   }
-  return usageOf(a.amount + sign * b.amount, quantities)
+  return usageOf(a.amount + sign * b.amount, Object.fromEntries(quantities))
 }
 
 export function addUsage(a: Usage, b: Usage): Usage {
@@ -59,7 +70,7 @@ export function isNoUsage(usage: Usage): boolean {
 
 /** What `usage` counts on one measure. */
 export function measured(usage: Usage, measure: BudgetMeasure): SignedAmount {
-  return measure.type === "amount" ? usage.amount : (usage.quantities[measure.feature] ?? ZERO)
+  return measure.type === "amount" ? usage.amount : quantityIn(usage.quantities, measure.feature)
 }
 
 /** The measures either vector counts: the amount, then each feature in key order. */

@@ -262,9 +262,11 @@ patterns. Keep it cheap to load and useful.
   it always counts, even past a hard limit: refusing it loses the count, not the spend.
 - 2026-10-17: Keep unresolved BudgetDO holds reserved across timeouts and window resets. Only
   final settlement or explicit zero-usage release can return capacity; see ADR-0006 B2-B3.
-- 2026-10-17: No BudgetDO data has shipped (see 136ab303a). Change its stored format without
-  read-compat, startup repair, or legacy states; keep its migrations append-only and wipe local
-  `.wrangler` budget state after a format change.
+- 2026-11-04 (replaces 2026-10-17): BudgetDO data has shipped since 10-18: preview benchmark
+  budgets and prod test budgets. A stored-format change ships a custom migration
+  (`bin/migrate.dev budget --custom`) that clears the rows the new code cannot read, never an
+  in-place reinterpretation; still no read-compat or legacy states. See
+  `0007_reset_rows_before_usage_vectors.sql`.
 - 2026-10-17: The installed Drizzle SQLite generator splits commas in index expressions. For
   budget key lookup, use `data_json ->> '$.idempotencyKey'`, generate through
   `bin/migrate.dev budget`, and verify index selection with `EXPLAIN QUERY PLAN` in workerd.
@@ -355,6 +357,20 @@ patterns. Keep it cheap to load and useful.
 - 2026-11-03: Budget usage is a vector (`Usage` in `budgets/usage.ts`: the amount plus quantities per
   feature); a limit reads one measure. The public wire still carries amounts: route adapters convert
   with `amountUsage` and project back with the `*ToWire` helpers in `routes/budgets/budget-verb.ts`.
+- 2026-11-04: Workers RPC types a tuple (`readonly [string, string]`) in a BudgetDO reply as
+  `string[]`, so the stub's reply stops matching `BudgetRejection` while `pnpm typecheck` stays
+  green. Typecheck the api tests with the scratch tsconfig below and diff per-file error counts
+  against the same run on HEAD; use arrays, never tuples, in replies.
+- 2026-11-04: A hold's estimate is the most its event can cost from any position. A property that
+  an actual within the estimate never prices above it passed with the bound's jump points removed
+  until a scenario had a flat into a cheaper tier; give bound properties a curve where the worst
+  stretch straddles a boundary.
+- 2026-11-04: A field typed `unknown` anywhere in a BudgetDO reply (an operation row inside
+  `BudgetInspection`) is not RPC-serializable, so the stub's reply type stops narrowing on `ok`
+  (`client.ts` loses `reply.inspection`). Type stored event properties as flat JSON scalars.
+- 2026-11-04: A routing mutation in `budget.statements.properties.test.ts` survived 200 runs until
+  every scenario crossed both month boundaries (at least 20 steps, up to 3-day advances); keep the
+  clock long enough to seal a period and send records older than the seal.
 - 2026-11-03: `apps/api` tsconfig excludes tests, so a core type change breaks DO and route tests only
   at runtime. Typecheck them with a scratch tsconfig that extends `./tsconfig.json`, includes
   `src/ingestion/budget` and `src/routes/budgets`, and adds `@cloudflare/vitest-pool-workers` types.

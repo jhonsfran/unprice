@@ -66,6 +66,7 @@ export type ConfigChange =
   | Readonly<{ change: "limits.order" }>
   | Readonly<{ change: "holds" }>
   | Readonly<{ change: "closesAt" }>
+  | Readonly<{ change: "pricing" }>
 
 export function diffConfig(prev: BudgetConfig, next: BudgetConfig): ConfigChange[] {
   const changes: ConfigChange[] = []
@@ -110,12 +111,20 @@ export function diffConfig(prev: BudgetConfig, next: BudgetConfig): ConfigChange
     changes.push({ change: "holds" })
   }
   if (prev.closesAt !== next.closesAt) changes.push({ change: "closesAt" })
+  if (pricingKey(prev) !== pricingKey(next)) changes.push({ change: "pricing" })
   return changes
 }
 
+/** A config's pricing in a form two configs compare by; amounts are bigints. */
+function pricingKey(config: BudgetConfig): string {
+  return JSON.stringify(config.pricing ?? null, (_key, value: unknown) =>
+    typeof value === "bigint" ? value.toString() : value
+  )
+}
+
 /**
- * The first change that lets more spend through: a hard limit removed, raised, or made soft, or a
- * close time cleared or postponed. Null when `next` only keeps or tightens what `prev` enforced.
+ * The first change that lets more spend through: a hard limit removed, raised, or made soft, a
+ * close time cleared or postponed, or any pricing change (it decides what usage costs). Null when `next` only keeps or tightens what `prev` enforced.
  * Soft limits and hold TTLs never deny, so changing them loosens nothing.
  */
 export function loosening(prev: BudgetConfig, next: BudgetConfig): ConfigChange | null {
@@ -133,7 +142,8 @@ export function loosening(prev: BudgetConfig, next: BudgetConfig): ConfigChange 
   }
   const postponed =
     prev.closesAt !== null && (next.closesAt === null || next.closesAt > prev.closesAt)
-  return postponed ? { change: "closesAt" } : null
+  if (postponed) return { change: "closesAt" }
+  return pricingKey(prev) === pricingKey(next) ? null : { change: "pricing" }
 }
 
 /**

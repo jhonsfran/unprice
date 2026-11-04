@@ -3,7 +3,7 @@ import * as z from "zod"
 
 import * as schema from "../schema"
 
-const eventSlugSchema = z
+export const eventSlugSchema = z
   .string()
   .min(1)
   .max(64)

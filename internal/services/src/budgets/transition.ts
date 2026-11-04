@@ -8,7 +8,9 @@
  * record), and the window history.
  */
 
+import type { BudgetPricing } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
+import type { CardRows } from "../pricing"
 import {
   type BudgetOperations,
   type BudgetRecord,
@@ -31,9 +33,11 @@ import type {
   Ledger,
   Operation,
   ReservationOperation,
+  Statement,
   UnPriceBudgetError,
   WindowPeriod,
 } from "./model"
+import { sealedAt, statementViolations, statementsAnswer } from "./statements"
 import { addUsage, subtractUsage } from "./usage"
 import { type WindowId, windowIdOf } from "./windows"
 
@@ -54,14 +58,25 @@ export type BudgetReader = {
    * leases, holds by number.
    */
   readExpired(now: number, limit: number): ReservationOperation[]
+  /** The cached rate cards with these ids; a card the store has not cached is absent. */
+  readCards(cardIds: readonly string[]): Record<string, CardRows>
+  /** The statements with these period ids. */
+  readStatements(periodIds: readonly string[]): Statement[]
+  /** Statements of these features that are open or overlap [from, to). */
+  readFeatureStatements(features: readonly string[], from: number, to: number): Statement[]
+  /** Open and sealed statements with this key whose `end <= at`. */
+  readSealable(statementKey: string, at: number): Statement[]
+  /** Every open and sealed statement. */
+  readUnfinishedStatements(): Statement[]
 }
 
 /** The most expired reservations one sweep closes; the alarm comes back at once for the rest. */
 export const EXPIRED_PER_SWEEP = 256
 
 /**
- * Loads the addressed operation, the history a `get` returns, and the expired reservations a
- * `sweep` closes at the clock `transition` will clamp to.
+ * Loads the addressed operation, the history a `get` returns, the expired reservations a `sweep`
+ * closes at the clock `transition` will clamp to, and the cards and statements a command that
+ * prices or addresses statements needs.
  */
 export function loadView(
   reader: BudgetReader,
@@ -71,15 +86,144 @@ export function loadView(
   const ledger = reader.readLedger()
   const budget = reader.readBudget()
   const now = Math.max(clockMs, ledger.lastAt)
+  const target = targetOf(reader, command)
+  const pricing = pricingOf(command, budget)
+  const expired =
+    command.type === "sweep" && budget ? reader.readExpired(now, EXPIRED_PER_SWEEP) : []
+  const prices = pricing !== undefined && willPrice(command, budget, target, expired, now)
+  const statements = statementsOf(
+    reader,
+    command,
+    prices ? pricing : undefined,
+    target,
+    expired,
+    now
+  )
   return {
     budget,
     ledger,
-    target: targetOf(reader, command),
+    target,
     history:
       command.type === "get" && budget
         ? reader.readHistory(limitedWindows(budget), WINDOW_HISTORY_PERIODS)
         : [],
-    expired: command.type === "sweep" && budget ? reader.readExpired(now, EXPIRED_PER_SWEEP) : [],
+    expired,
+    cards: pricing && prices ? reader.readCards(cardIdsOf(pricing)) : {},
+    // Several expiries may read the same statement.
+    statements: [...new Map(statements.map((s) => [s.periodId, s])).values()],
+  }
+}
+
+/** The pricing the command runs under: an upsert's new one, else the budget's or the one it creates. */
+function pricingOf(command: BudgetCommand, budget: BudgetRecord | null): BudgetPricing | undefined {
+  if (command.type === "upsert") return command.config.pricing ?? budget?.config.pricing
+  if (budget) return budget.config.pricing
+  return "ifMissing" in command ? command.ifMissing?.config.pricing : undefined
+}
+
+/**
+ * Whether the command reaches the cards: an upsert or a create checks them, an event is priced,
+ * an expired estimate is billed. A keyed replay and a settle of a closed hold answer from their row.
+ */
+function willPrice(
+  command: BudgetCommand,
+  budget: BudgetRecord | null,
+  target: Operation | null,
+  expired: readonly ReservationOperation[],
+  now: number
+): boolean {
+  if (command.type === "upsert" || budget === null) return true
+  const live = target !== null && !isPastRetention(target, now)
+  switch (command.type) {
+    case "authorize":
+    case "charge":
+    case "record":
+      return command.event !== undefined && !live
+    case "settle":
+      return (
+        command.event !== undefined && target?.kind === "hold" && target.state.status === "open"
+      )
+    case "sweep":
+      return expired.some((row) => row.kind === "hold" && row.estimate !== undefined)
+    default:
+      return false
+  }
+}
+
+function cardIdsOf(pricing: BudgetPricing): string[] {
+  const { base, overlay } = pricing.cards
+  return overlay === undefined ? [base] : [base, overlay]
+}
+
+/** The features an event slug feeds. */
+function featuresFed(pricing: BudgetPricing, eventSlug: string): string[] {
+  return pricing.features
+    .filter((feature) => feature.eventSlug === eventSlug)
+    .map((feature) => feature.slug)
+}
+
+/**
+ * The statements a command reads. An event reads its features' open statements and those covering
+ * the time it prices at: a record's `occurredAt`, a settle's (or an expiry's) hold `createdAt`,
+ * else the clock. `pricing` is undefined when the command will not price.
+ */
+function statementsOf(
+  reader: BudgetReader,
+  command: BudgetCommand,
+  pricing: BudgetPricing | undefined,
+  target: Operation | null,
+  expired: readonly ReservationOperation[],
+  now: number
+): Statement[] {
+  const eventStatements = (slug: string, from: number, to: number) => {
+    const features = pricing ? featuresFed(pricing, slug) : []
+    return features.length === 0 ? [] : reader.readFeatureStatements(features, from, to)
+  }
+  switch (command.type) {
+    case "authorize":
+    case "charge":
+    case "record":
+    case "settle": {
+      const { event } = command
+      if (!event) return []
+      let at = now
+      if (command.type === "record") at = command.occurredAt
+      if (command.type === "settle") {
+        if (target?.kind !== "hold") return []
+        at = target.createdAt
+      }
+      return eventStatements(event.slug, at, at + 1)
+    }
+    case "sweep": {
+      // One read per event slug, over the span of its holds' times.
+      const spans = new Map<string, { from: number; to: number }>()
+      for (const row of expired) {
+        if (row.kind !== "hold" || !row.estimate) continue
+        const span = spans.get(row.estimate.slug)
+        spans.set(row.estimate.slug, {
+          from: Math.min(span?.from ?? row.createdAt, row.createdAt),
+          to: Math.max(span?.to ?? row.createdAt + 1, row.createdAt + 1),
+        })
+      }
+      return [...spans].flatMap(([slug, { from, to }]) => eventStatements(slug, from, to))
+    }
+    case "registerStatements": {
+      const { statements } = command
+      return [
+        ...reader.readStatements(statements.map((statement) => statement.periodId)),
+        ...statements.flatMap(({ featureSlug, start, end }) =>
+          reader.readFeatureStatements([featureSlug], start, end)
+        ),
+      ]
+    }
+    case "sealStatements":
+      return reader.readSealable(command.statementKey, sealedAt(command, now))
+    case "completeStatements":
+      return reader.readStatements(command.periodIds)
+    case "statements":
+      return reader.readUnfinishedStatements()
+    default:
+      return []
   }
 }
 
@@ -125,6 +269,8 @@ export type BudgetTransition = Readonly<{
   periods: readonly WindowPeriod[]
   /** Anchored schedules whose inactive current period ended. */
   retiredWindows: readonly WindowId[]
+  /** Statements created or changed; the store upserts exactly these. */
+  statements: readonly Statement[]
   /**
    * Earliest `alarmAt` among the written rows, and a new config's `deletableAt`; the store only
    * ever lowers its alarm to it. A window boundary needs no wake: a counter keeps its period's
@@ -156,7 +302,14 @@ export function transition(params: {
 
   const decided = decide(
     command,
-    { budget: view.budget, ledger: rolledLedger, target: live, expired: view.expired },
+    {
+      budget: view.budget,
+      ledger: rolledLedger,
+      target: live,
+      expired: view.expired,
+      cards: view.cards,
+      statements: view.statements,
+    },
     now
   )
   if (decided.err) return Err(decided.err)
@@ -183,14 +336,23 @@ export function transition(params: {
   const priors = new Map<string, Operation>(view.expired.map((row) => [row.id, row]))
   if (live) priors.set(live.id, live)
 
-  const violations = checkTransition({
-    before: view.ledger,
-    after: ledger,
-    limits,
-    resultingLimits: budget?.config.limits ?? [],
-    steps: change.rows.map((row): RowStep => [priors.get(row.id), row]),
-    periods,
-  })
+  const statements = change.statements ?? []
+  const priorStatements = new Map(view.statements.map((s) => [s.periodId, s]))
+  const steps = change.rows.map((row): RowStep => [priors.get(row.id), row])
+  const violations = [
+    ...checkTransition({
+      before: view.ledger,
+      after: ledger,
+      limits,
+      resultingLimits: budget?.config.limits ?? [],
+      steps,
+      periods,
+    }),
+    ...statementViolations({
+      steps: statements.map((s) => [priorStatements.get(s.periodId), s] as const),
+      rows: steps,
+    }),
+  ]
   if (violations.length > 0) {
     throw new Error(`budget transition breaks invariants: ${violations.join("; ")}`)
   }
@@ -205,6 +367,7 @@ export function transition(params: {
   const write =
     budget !== null &&
     (operations.length > 0 ||
+      statements.length > 0 ||
       periods.length > 0 ||
       rolled.retired.length > 0 ||
       change.configured !== undefined ||
@@ -219,6 +382,7 @@ export function transition(params: {
     operations,
     periods,
     retiredWindows: rolled.retired,
+    statements,
     wakeAt,
     ...replyOf(command, {
       budget,
@@ -228,6 +392,9 @@ export function transition(params: {
       changes: change.configured?.changes ?? [],
       created: change.configured !== undefined && command.type !== "upsert",
       history: [...periods, ...view.history],
+      statements: [
+        ...new Map([...view.statements, ...statements].map((s) => [s.periodId, s])).values(),
+      ],
       now,
     }),
   })
@@ -243,7 +410,15 @@ function countCall(
   command: BudgetCommand,
   change: Pick<Change, "rows" | "configured" | "row">
 ): BudgetOperations {
-  if (command.type === "get" || command.type === "sweep") return operations
+  switch (command.type) {
+    case "get":
+    case "sweep":
+    case "statements":
+    case "registerStatements":
+    case "sealStatements":
+    case "completeStatements":
+      return operations
+  }
   if (change.rows.length === 0 && change.configured === undefined) return operations
   if (refusalOf(change.row)) return operations
   return { ...operations, [command.type]: operations[command.type] + 1 }
@@ -270,6 +445,8 @@ type OutcomeParams = Readonly<{
   created: boolean
   /** This transition's periods, then the stored ones. */
   history: readonly WindowPeriod[]
+  /** The statements the command read, with its writes applied. */
+  statements: readonly Statement[]
   now: number
 }>
 
@@ -302,6 +479,14 @@ function outcomeOf(command: BudgetCommand, params: OutcomeParams): BudgetOutcome
         type: "get",
         budget: snapshotOf(budget, ledger, balance, now),
         history: historyOf(budget, params.history),
+      }
+    case "statements":
+    case "registerStatements":
+    case "sealStatements":
+    case "completeStatements":
+      return {
+        type: command.type,
+        statements: statementsAnswer(command, params.statements, now),
       }
     case "authorize": {
       if (row?.kind !== "hold") throw new Error("authorize produced no hold row")

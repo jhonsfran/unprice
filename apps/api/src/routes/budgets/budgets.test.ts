@@ -150,7 +150,31 @@ describe("budgets API", () => {
     expect(mocks.keyAuth).toHaveBeenCalledWith(expect.anything(), {
       requireType: ["runtime", "config"],
     })
-    expect(mocks.execute.mock.calls[0]?.[1]).toMatchObject({ type: "upsert", mayLoosen })
+    expect(mocks.execute.mock.calls[0]?.[1]).toMatchObject({
+      type: "upsert",
+      mayLoosen,
+      keepsPricing: true,
+    })
+  })
+
+  it("refuses to upsert a customer's subscription budget, which keeps its other verbs", async () => {
+    mocks.keyAuth.mockResolvedValue({ id: "key_1", projectId: "proj_123", type: "config" })
+    rejectWith({ code: "BUDGET_NOT_FOUND" })
+
+    const response = await call("/v1/budgets/upsert", {
+      key: "customer:cus_acme",
+      unit: "USD",
+      limits: [],
+    })
+
+    expect(response.status).toBe(403)
+    expect(mocks.execute).not.toHaveBeenCalled()
+    await call("/v1/budgets/charge", {
+      key: "customer:cus_acme",
+      amount: "1",
+      idempotencyKey: "c1",
+    })
+    expect(mocks.execute).toHaveBeenCalledTimes(1)
   })
 
   it("authenticates every other verb with a runtime key only", async () => {

@@ -13,6 +13,7 @@ import {
   usdCardWithFallback,
 } from "./fixtures"
 import type { CardRows, PricedUsage, RateCards } from "./model"
+import { estimateUsage, priceUsage } from "./rate"
 
 const runs = Number.parseInt(process.env.UNPRICE_MODEL_RUNS ?? "300", 10)
 const seed = process.env.UNPRICE_MODEL_SEED
@@ -33,6 +34,32 @@ type Scenario = Readonly<{
 }>
 
 const tokens = { input_tokens: 2_000_000, cached_input_tokens: 500_000, output_tokens: 200_000 }
+
+const flatIntoCheaperTier: CardRows = {
+  card: { ...usdCard.card, id: "rc_flat_into_cheaper" },
+  rows: [
+    rateRowSchema.parse({
+      id: "row_calls_flat_into_cheaper",
+      rateCardId: "rc_flat_into_cheaper",
+      featureSlug: "api_calls",
+      match: {},
+      price: {
+        type: "graduated",
+        property: "calls",
+        per: 1,
+        tiers: [
+          { upTo: 100, rate: "1", flat: "0" },
+          { upTo: null, rate: "0.1", flat: "10" },
+        ],
+      },
+      cost: null,
+      effectiveFrom: CARD_FROM,
+      effectiveTo: null,
+      source: "manual",
+      sourceRef: null,
+    }),
+  ],
+}
 
 const scenarios: readonly Scenario[] = [
   {
@@ -83,6 +110,14 @@ const scenarios: readonly Scenario[] = [
     feature: features.apiCallsIncluded,
     fixed: {},
     quantities: { calls: 3_000 },
+  },
+  {
+    // A flat to enter a cheaper tier: the costliest stretch straddles the boundary.
+    name: "graduated calls with a flat into a cheaper tier",
+    cards: { base: flatIntoCheaperTier },
+    feature: features.apiCalls,
+    fixed: {},
+    quantities: { calls: 300 },
   },
   {
     name: "email packages",
@@ -288,6 +323,42 @@ describe("pricing properties", () => {
           expect(totals(priceAll(scenario, quantities).priced)).toEqual(expected)
         }
       ),
+      { numRuns: runs, seed }
+    )
+  })
+  it("an estimate bounds the same or less usage priced from any position", () => {
+    const arb = fc.constantFrom(...scenarios).chain((scenario) =>
+      fc.record({
+        scenario: fc.constant(scenario),
+        warmUp: eventArb(scenario, 1),
+        estimate: eventArb(scenario, 4),
+        // Each actual quantity as a share of its estimate, in percent.
+        shares: fc.array(fc.integer({ min: 0, max: 100 }), { minLength: 5, maxLength: 5 }),
+      })
+    )
+    fc.assert(
+      fc.property(arb, ({ scenario, warmUp, estimate, shares }) => {
+        const { positions } = priceAll(scenario, [warmUp])
+        const actual = Object.fromEntries(
+          Object.entries(estimate).map(([property, quantity], index) => [
+            property,
+            (quantity * BigInt(shares[index] ?? 100)) / BigInt(100),
+          ])
+        )
+        const [estimated] = events(scenario, [estimate])
+        const [used] = events(scenario, [actual])
+        if (!estimated || !used) throw new Error("no event")
+        const input = { cards: scenario.cards, feature: scenario.feature, at }
+        const bound = estimateUsage({ ...input, ...estimated, positionOf: () => ZERO })
+        const priced = priceUsage({
+          ...input,
+          ...used,
+          positionOf: (key) => positions.get(key) ?? ZERO,
+        })
+        if (bound.err || priced.err) throw bound.err ?? priced.err
+        expect(priced.val.amount <= bound.val.amount).toBe(true)
+        expect((priced.val.cost ?? ZERO) <= (bound.val.cost ?? ZERO)).toBe(true)
+      }),
       { numRuns: runs, seed }
     )
   })

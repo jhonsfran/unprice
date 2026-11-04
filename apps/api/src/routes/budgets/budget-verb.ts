@@ -149,7 +149,8 @@ export function reservationToWire(row: ReservationOperation) {
   if (row.kind === "lease") return toWire(row)
   const { reserved, state, ...hold } = row
   return {
-    ...hold,
+    // An estimate carries the bigints of the event it priced.
+    ...toWire(hold),
     amount: amountToWire(reserved),
     state:
       state.status === "settled" ? { ...toWire(state), actual: amountToWire(state.actual) } : state,
@@ -291,13 +292,28 @@ function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): Unprice
     case "LEASE_CLOSED":
     case "LEASE_SEQ_CONFLICT":
     case "LEASE_CAPTURE_OUT_OF_RANGE":
+    case "PERIOD_CLOSED":
+    case "NO_STATEMENT":
+    case "STATEMENT_CONFLICT":
+    case "STATEMENT_OVERLAP":
+    case "STATEMENT_NOT_SEALED":
+    case "UNIT_MISMATCH":
+    case "CARD_INCOMPATIBLE":
+    case "INCLUDED_NOT_APPLICABLE":
+    case "RESERVATIONS_OPEN":
       return new UnpriceApiError({ code: "CONFLICT", message, cause: error })
     case "BUDGET_NOT_FOUND":
     case "HOLD_NOT_FOUND":
     case "LEASE_NOT_FOUND":
+    case "STATEMENT_NOT_FOUND":
+    case "CARD_NOT_FOUND":
       return new UnpriceApiError({ code: "NOT_FOUND", message, cause: error })
     case "INVALID_TTL":
     case "INVALID_OCCURRED_AT":
+    case "INVALID_USAGE":
+    case "NOT_PRICED":
+    case "UNKNOWN_EVENT":
+    case "EVENT_REQUIRED":
       return new UnpriceApiError({ code: "BAD_REQUEST", message, cause: error })
   }
 }

@@ -221,4 +221,57 @@ describe("POST /v1/internal/budgets/inspect", () => {
       {}
     )
   })
+
+  it("answers a hold priced from an event with its estimate's amounts as decimals", async () => {
+    mocks.keyAuth.mockResolvedValue(keyOf({ isMain: false, isInternal: true }))
+    const estimate = {
+      slug: "image.generated",
+      properties: { size: "1024" },
+      at: hold.createdAt,
+      features: [
+        {
+          featureSlug: "images",
+          periodId: "images:inv_2026-11",
+          late: false,
+          cardId: "rc_usd",
+          rowId: "row_image_1024",
+          lines: [
+            {
+              positionKey: 'images|{"size":"1024"}|#event',
+              property: null,
+              before: usd(0),
+              after: usd(1),
+              amount: usd(5),
+              cost: null,
+            },
+          ],
+          meterQuantity: usd(1),
+          amount: usd(5),
+          cost: null,
+        },
+      ],
+    }
+    const priced = { ...hold, estimate }
+    mocks.inspect.mockResolvedValue(
+      Ok({
+        ...inspection,
+        expiringNext: { rows: [priced], examined: 1, next: null },
+        found: priced,
+      })
+    )
+
+    const response = await call({ projectId: "proj_tenant", key: "customer:acme" })
+
+    expect(response.status).toBe(200)
+    const { found } = (await response.json()) as { found: { estimate: unknown } }
+    expect(found.estimate).toMatchObject({
+      features: [
+        {
+          amount: "5",
+          meterQuantity: "1",
+          lines: [{ before: "0", after: "1", amount: "5" }],
+        },
+      ],
+    })
+  })
 })

@@ -63,6 +63,11 @@ export type PriceUsageInput = Readonly<{
 export type PricingRejection =
   | Readonly<{ code: "INVALID_USAGE"; property: string; reason: string }>
   | Readonly<{ code: "NOT_PRICED"; feature: string; match: Readonly<Record<string, string>> }>
+  /**
+   * The feature has `included` units but the matched row cannot take them: it matches on a
+   * dimension, or no single quantity component counts the feature's meter (ADR-0008 D5).
+   */
+  | Readonly<{ code: "INCLUDED_NOT_APPLICABLE"; feature: string; rowId: string }>
 
 export type PricingErrorCode = PricingRejection["code"]
 
@@ -73,17 +78,19 @@ export class UnPricePricingError extends BaseError<{ code: PricingErrorCode }> {
   public readonly code: PricingErrorCode
 
   constructor(public readonly rejection: PricingRejection) {
-    super({ message: rejectionMessage(rejection), context: { code: rejection.code } })
+    super({ message: pricingRejectionMessage(rejection), context: { code: rejection.code } })
     this.code = rejection.code
   }
 }
 
-function rejectionMessage(rejection: PricingRejection): string {
+export function pricingRejectionMessage(rejection: PricingRejection): string {
   switch (rejection.code) {
     case "INVALID_USAGE":
       return `Property ${rejection.property} is not a usable quantity: ${rejection.reason}`
     case "NOT_PRICED":
       return `No rate prices ${rejection.feature} for ${JSON.stringify(rejection.match)}`
+    case "INCLUDED_NOT_APPLICABLE":
+      return `Row ${rejection.rowId} cannot take the included units of ${rejection.feature}: it matches a dimension or prices more than one quantity`
   }
 }
 
@@ -91,7 +98,7 @@ function rejectionMessage(rejection: PricingRejection): string {
 export type CardViolation = Readonly<
   | { code: "ROW_OF_OTHER_CARD"; rowId: string }
   | { code: "UNKNOWN_FEATURE"; rowId: string; feature: string }
-  | { code: "OVERLAPPING_ROWS"; feature: string; rowIds: readonly [string, string] }
+  | { code: "OVERLAPPING_ROWS"; feature: string; rowIds: readonly string[] }
   | { code: "MIXED_MATCH_KEYS"; feature: string; keySets: readonly string[] }
   | { code: "UNKNOWN_DIMENSION"; rowId: string; key: string }
   | { code: "TIERED_WITH_DIMENSIONS"; rowId: string }

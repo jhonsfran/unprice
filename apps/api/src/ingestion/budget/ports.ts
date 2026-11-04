@@ -21,7 +21,14 @@ export type BudgetStoreTx = BudgetReader & {
   commit(
     transition: Pick<
       BudgetTransition,
-      "budget" | "ledger" | "purged" | "operations" | "periods" | "retiredWindows" | "now"
+      | "budget"
+      | "ledger"
+      | "purged"
+      | "operations"
+      | "periods"
+      | "retiredWindows"
+      | "statements"
+      | "now"
     >
   ): void
   /** Deletes up to `limit` closed rows whose retention ended by `now`. */

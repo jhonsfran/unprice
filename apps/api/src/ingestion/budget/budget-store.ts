@@ -23,25 +23,41 @@ type SqliteHandle = DrizzleSqliteDODatabase<typeof schema>
 
 const SINGLETON_ID = 1
 
-/**
- * JSON with bigints tagged as decimal strings, so amounts in the config, usage vectors, counters,
- * and rows round-trip exactly.
- */
-function encode(value: unknown): string {
-  return JSON.stringify(value, (_key: string, item: unknown) =>
-    typeof item === "bigint" ? { $bigint: item.toString() } : item
-  )
+const BIGINT_TAG = "$bigint"
+
+function isRecord(item: unknown): item is Record<string, unknown> {
+  return item !== null && typeof item === "object" && !Array.isArray(item)
 }
 
-function decode<T>(text: string): T {
-  return JSON.parse(text, (_key: string, item: unknown) =>
-    item !== null &&
-    typeof item === "object" &&
-    "$bigint" in item &&
-    typeof item.$bigint === "string"
-      ? BigInt(item.$bigint)
-      : item
-  ) as T
+/** Renames the keys of `item` that start with `$`; null when none does. */
+function renamedDollarKeys(item: Record<string, unknown>, rename: (key: string) => string) {
+  const keys = Object.keys(item)
+  if (!keys.some((key) => key.startsWith("$"))) return null
+  // fromEntries defines own properties, so a `__proto__` key stays a key.
+  return Object.fromEntries(keys.map((key) => [key.startsWith("$") ? rename(key) : key, item[key]]))
+}
+
+/**
+ * JSON with bigints tagged as `{"$bigint": "<decimal>"}`, so amounts in the config, usage vectors,
+ * counters, and rows round-trip exactly. Event properties are caller data and may name a key
+ * `$bigint`, so every key that starts with `$` is stored with one more `$`: an unescaped
+ * `$bigint` key is always the tag.
+ */
+export function encode(value: unknown): string {
+  return JSON.stringify(value, (_key: string, item: unknown) => {
+    if (typeof item === "bigint") return { [BIGINT_TAG]: item.toString() }
+    return isRecord(item) ? (renamedDollarKeys(item, (key) => `$${key}`) ?? item) : item
+  })
+}
+
+export function decode<T>(text: string): T {
+  return JSON.parse(text, (_key: string, item: unknown) => {
+    if (!isRecord(item)) return item
+    const keys = Object.keys(item)
+    const tag = item[BIGINT_TAG]
+    if (keys.length === 1 && keys[0] === BIGINT_TAG && typeof tag === "string") return BigInt(tag)
+    return renamedDollarKeys(item, (key) => key.slice(1)) ?? item
+  }) as T
 }
 
 type Payload =
@@ -231,6 +247,14 @@ function bind(db: SqliteTx): BudgetStoreTx {
       )
     },
 
+    // Statements and the rate card cache are not stored yet: no card is cached and no statement
+    // is registered, so a priced event is refused (CARD_NOT_FOUND, NO_STATEMENT) before it writes.
+    readCards: () => ({}),
+    readStatements: () => [],
+    readFeatureStatements: () => [],
+    readSealable: () => [],
+    readUnfinishedStatements: () => [],
+
     readHistory(windowIds, limit) {
       const history = schema.budgetWindowHistory
       return windowIds.flatMap((windowId) =>
@@ -249,7 +273,20 @@ function bind(db: SqliteTx): BudgetStoreTx {
       )
     },
 
-    commit({ budget, ledger, purged, operations: changed, periods, retiredWindows, now }) {
+    commit({
+      budget,
+      ledger,
+      purged,
+      operations: changed,
+      periods,
+      retiredWindows,
+      statements,
+      now,
+    }) {
+      if (statements.length > 0) {
+        // Fails the transaction rather than acknowledging a statement this store would drop.
+        throw new Error("BudgetDO does not store billing statements yet")
+      }
       if (budget) {
         const record = {
           key: budget.key,

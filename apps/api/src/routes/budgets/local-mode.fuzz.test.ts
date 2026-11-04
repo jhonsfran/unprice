@@ -112,6 +112,11 @@ class MemoryBudgetStore implements BudgetStore {
       const row = this.rows.get(`l:${leaseKey}`)
       return row?.kind === "lease" ? structuredClone(row) : null
     },
+    readCards: () => ({}),
+    readStatements: () => [],
+    readFeatureStatements: () => [],
+    readSealable: () => [],
+    readUnfinishedStatements: () => [],
     readHistory: (windowIds, limit) =>
       windowIds.flatMap((id) =>
         this.history

@@ -9,6 +9,7 @@ import {
   RECORD_ACCEPT_WINDOW_MS,
   RECORD_DEDUPE_MS,
   RECORD_FUTURE_SKEW_MS,
+  type StatementCommandType,
   type Usage,
   anchoredWindowBounds,
   countersOf,
@@ -26,6 +27,9 @@ const minute = 60 * second
 const hour = 60 * minute
 const day = 24 * hour
 const ZERO = BigInt(0)
+
+/** What the model takes: every verb with a usage vector; events and statements are out of scope. */
+type ModelCommand = Exclude<BudgetCommand, { type: StatementCommandType } | { event: object }>
 
 type Window = "hour" | "day" | "week" | "month" | "never"
 type Every = "day" | "week" | "month"
@@ -464,7 +468,7 @@ class ReferenceBudget {
    * kept, so the same key replays it even after room returns. It changes no balance or count.
    */
   private grant(
-    command: Extract<BudgetCommand, { type: "lease" }>,
+    command: Extract<ModelCommand, { type: "lease" }>,
     config: ModelConfig,
     now: number
   ) {
@@ -508,7 +512,7 @@ class ReferenceBudget {
    * extends by what fits after it and renews below half the TTL; a final one returns the rest.
    */
   private report(
-    command: Extract<BudgetCommand, { type: "report" }>,
+    command: Extract<ModelCommand, { type: "report" }>,
     config: ModelConfig,
     now: number
   ) {
@@ -565,7 +569,7 @@ class ReferenceBudget {
     return { outcome: this.reported(leaseKey, lease, false), wrote: true, checkBalance: true }
   }
 
-  apply(command: BudgetCommand, clock: number): Expected {
+  apply(command: ModelCommand, clock: number): Expected {
     const now = Math.max(clock, this.lastWriteAt)
     const decided = this.decide(command, now)
     // A rejection writes nothing, except a refused lease, which is kept like an accepted command.
@@ -588,7 +592,7 @@ class ReferenceBudget {
   }
 
   private decide(
-    command: BudgetCommand,
+    command: ModelCommand,
     now: number
   ): Rejected | { outcome: Record<string, unknown>; wrote: boolean; checkBalance: boolean } {
     if (command.type === "upsert") {
@@ -886,7 +890,7 @@ function configArb(scale: bigint, features: readonly string[]): fc.Arbitrary<Bud
  * record names its `occurredAt` relative to the clock; `retry-record` resends the last record.
  */
 type Planned =
-  | BudgetCommand
+  | ModelCommand
   /** `all` and `half` settle the named hold's reservation, or half of each measure of it. */
   | { type: "settle-ref"; offset: number; portion: "all" | "half" | Usage }
   | { type: "release-ref"; offset: number }
@@ -1043,10 +1047,10 @@ function commandArb(scale: bigint, features: readonly string[]): fc.Arbitrary<Pl
 
 function resolve(
   planned: Planned,
-  previous: { command: BudgetCommand; record: BudgetCommand | null },
+  previous: { command: ModelCommand; record: ModelCommand | null },
   model: ReferenceBudget,
   clock: number
-): BudgetCommand {
+): ModelCommand {
   const holdId = (offset: number) => `h_${Math.max(0, model.holdCount - offset)}`
   switch (planned.type) {
     case "retry":
@@ -1231,7 +1235,7 @@ describe("budget core against a reference model", () => {
         let clock = start
         /** Every event a record counted: its key, amount, and `occurredAt`. */
         const recordedEvents: string[] = []
-        const previous: { command: BudgetCommand; record: BudgetCommand | null } = {
+        const previous: { command: ModelCommand; record: ModelCommand | null } = {
           command: {
             type: "upsert",
             key: "customer:acme",

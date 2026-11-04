@@ -5,6 +5,13 @@
 
 import { BaseError, Err, type Result } from "@unprice/error"
 import { type Amount, type SignedAmount, formatAmount } from "@unprice/money"
+import {
+  type CardRows,
+  type CardViolation,
+  type PricedLine,
+  type PricingRejection,
+  pricingRejectionMessage,
+} from "../pricing"
 import type {
   BudgetConfig,
   BudgetLimit,
@@ -80,10 +87,76 @@ export const emptyLedger: Ledger = {
   },
 }
 
+// Metering (ADR-0008 D4, D6)
+
+/** An event property: a flat JSON scalar, so rows that keep it cross Workers RPC. */
+export type EventProperty = string | number | boolean | null
+
+/** A usage event as the caller sends it; the budget meters and prices it. */
+export type BudgetEvent = Readonly<{
+  slug: string
+  properties: Readonly<Record<string, EventProperty>>
+}>
+
+/**
+ * One feature an event fed: the statement it counted in and how it was priced. `late` marks usage
+ * counted in a statement other than the sealed one covering its time. An unpriced feature has no
+ * card, no row, and no lines. `amount` and `cost` are the lines' sums: what the statement records
+ * for consumed usage, and the most it can cost for a hold's estimate.
+ */
+export type PricedFeature = Readonly<{
+  featureSlug: string
+  periodId: string
+  late: boolean
+  cardId: string | null
+  rowId: string | null
+  lines: readonly PricedLine[]
+  meterQuantity: Amount
+  amount: Amount
+  /** USD; null when no line carries a cost. */
+  cost: Amount | null
+}>
+
+/**
+ * An event as the budget priced it, at `at`: what an operation row keeps for the journal, and what a
+ * retry must repeat (slug and properties).
+ */
+export type PricedEvent = BudgetEvent & Readonly<{ at: number; features: readonly PricedFeature[] }>
+
+/**
+ * One billing period of one feature (ADR-0007, ADR-0008 D4): usage sums here as it is accepted and
+ * billing invoices the sealed totals. Pricing positions live in the row and reset with each period.
+ * open -> sealed -> completed; a sealed or completed statement never changes its totals.
+ */
+export type Statement = Readonly<{
+  periodId: string
+  statementKey: string
+  featureSlug: string
+  start: number
+  end: number
+  state: "open" | "sealed" | "completed"
+  registeredAt: number
+  sealedAt: number | null
+  completedAt: number | null
+  quantity: Amount
+  amount: Amount
+  /** USD; null until a line with a cost lands. */
+  cost: Amount | null
+  events: number
+  lastEventAt: number | null
+  positions: Readonly<Record<string, Amount>>
+}>
+
+/** What billing registers for one period; the rest of the statement starts at zero. */
+export type StatementRegistration = Readonly<
+  Pick<Statement, "periodId" | "statementKey" | "featureSlug" | "start" | "end">
+>
+
 /**
  * A hold stays open until it is settled or released, or until `expiresAt` passes: the alarm then
  * settles it at all it reserved, because a timer cannot prove the work stopped. Counting all of it
- * keeps the cap, and the capacity returns when the window rolls instead of never.
+ * keeps the cap, and the capacity returns when the window rolls instead of never. An expired
+ * estimate is consumed as its event priced at the positions then, which never exceeds `reserved`.
  * Per state: open counts `reserved`; settled consumed `actual` (at most `reserved` on every
  * measure) and returned the rest; released returned `reserved`.
  */
@@ -94,8 +167,19 @@ export type HoldState =
       closedAt: number
       actual: Usage
       crossed: readonly string[]
-      /** The alarm settled it at `reserved` once `expiresAt` passed; the caller never did. */
+      /**
+       * The event consumed, priced at the hold's `createdAt`: the settle's, or at expiry the
+       * estimate's.
+       */
+      priced?: PricedEvent
+      /** The alarm settled it once `expiresAt` passed; the caller never did. */
       byExpiry?: true
+      /**
+       * An expired estimate no statement could take (PERIOD_CLOSED, NO_STATEMENT, ...): the ledger
+       * consumed `reserved`, billing did not. Set only with `byExpiry` and an `estimate`, never with
+       * `priced`.
+       */
+      unbilled?: Readonly<{ reason: BudgetErrorCode }>
     }>
   | Readonly<{ status: "released"; closedAt: number }>
 
@@ -113,6 +197,11 @@ export type HoldOperation = Readonly<{
   createdAt: number
   expiresAt: number
   state: HoldState
+  /**
+   * The estimate event, priced at `createdAt` as the most it can cost from any position. Its lines
+   * are dropped when the hold closes; a retry compares only the slug and properties.
+   */
+  estimate?: PricedEvent
 }>
 
 /**
@@ -126,6 +215,8 @@ export type ChargeOperation = Readonly<{
   usage: Usage
   createdAt: number
   crossed: readonly string[]
+  /** The event this usage was priced from, when the command sent one. */
+  priced?: PricedEvent
 }>
 
 /**
@@ -207,6 +298,13 @@ export type BudgetView = Readonly<{
   history: readonly WindowPeriod[]
   /** For `sweep`: open holds and leases whose `expiresAt` passed, earliest first, a bounded batch. */
   expired: readonly ReservationOperation[]
+  /** The rate cards the budget's pricing names, by card id, as the store cached them. */
+  cards: Readonly<Record<string, CardRows>>
+  /**
+   * The statements the command reads: for an event, its features' open statements and those
+   * covering its time; for a statement command, the ones it addresses.
+   */
+  statements: readonly Statement[]
 }>
 
 // Commands
@@ -222,6 +320,11 @@ export type BudgetDefinition = Readonly<{
   config: BudgetConfig
 }>
 
+/** A metered verb consumes a usage vector, or an event the budget meters and prices. */
+export type UsageOrEvent =
+  | Readonly<{ usage: Usage; event?: never }>
+  | Readonly<{ event: BudgetEvent; usage?: never }>
+
 export type BudgetCommand =
   | Readonly<{
       type: "upsert"
@@ -234,30 +337,43 @@ export type BudgetCommand =
        * create a budget or keep and tighten one, so whoever spends under a cap cannot lift it.
        */
       mayLoosen: boolean
+      /**
+       * The caller cannot set pricing (the public upsert): an existing budget keeps the pricing it
+       * has, whatever `config.pricing` says.
+       */
+      keepsPricing?: boolean
     }>
-  | Readonly<{
+  /**
+   * `usage` or `event` is the most the work may consume, on every measure. An event is priced at
+   * the clock as the most it can cost from any position, and moves no position.
+   */
+  | (Readonly<{
       type: "authorize"
       idempotencyKey: string
-      /** The most the work may consume, on every measure. */
-      usage: Usage
       ttlMs?: number
       ifMissing?: BudgetDefinition
-    }>
-  | Readonly<{ type: "settle"; holdId: string; actual: Usage }>
+    }> &
+      UsageOrEvent)
+  /** An actual event is priced at the hold's `createdAt` and moves the positions. */
+  | (Readonly<{ type: "settle"; holdId: string }> &
+      (
+        | Readonly<{ actual: Usage; event?: never }>
+        | Readonly<{ event: BudgetEvent; actual?: never }>
+      ))
   | Readonly<{ type: "release"; holdId: string; holdCreatedAt?: number }>
-  | Readonly<{
-      type: "charge"
-      idempotencyKey: string
-      usage: Usage
-      ifMissing?: BudgetDefinition
-    }>
-  | Readonly<{
+  /** An event is priced at the clock. */
+  | (Readonly<{ type: "charge"; idempotencyKey: string; ifMissing?: BudgetDefinition }> &
+      UsageOrEvent)
+  | (Readonly<{
       type: "record"
       idempotencyKey: string
-      usage: Usage
-      /** Epoch ms the usage happened. Bounds acceptance only; usage counts when it arrives. */
+      /**
+       * Epoch ms the usage happened. Bounds acceptance; an event is priced at it and counts in the
+       * statement that covers it. A usage vector counts against the windows when it arrives.
+       */
       occurredAt: number
-    }>
+    }> &
+      UsageOrEvent)
   /** Debits `min(amount, room)` under every hard amount limit for a process to spend locally. */
   | Readonly<{
       type: "lease"
@@ -269,6 +385,14 @@ export type BudgetCommand =
   | Readonly<{ type: "report"; leaseKey: string; seq: number; request: LeaseReportRequest }>
   | Readonly<{ type: "get" }>
   | Readonly<{ type: "sweep" }>
+  /** Idempotent per period id. Statements of one feature never overlap. */
+  | Readonly<{ type: "registerStatements"; statements: readonly StatementRegistration[] }>
+  /** Seals every open statement with this key whose `end <= at`. */
+  | Readonly<{ type: "sealStatements"; statementKey: string; at: number }>
+  /** Sealed -> completed, once the invoice committed. */
+  | Readonly<{ type: "completeStatements"; periodIds: readonly string[] }>
+  /** Open and sealed statements. */
+  | Readonly<{ type: "statements" }>
 
 // Outcomes
 
@@ -394,6 +518,13 @@ export type BudgetOutcome =
       balance: BudgetBalance
     }>
   | Readonly<{ type: "sweep" }>
+  | Readonly<{ type: StatementCommandType; statements: readonly Statement[] }>
+
+export type StatementCommandType =
+  | "registerStatements"
+  | "sealStatements"
+  | "completeStatements"
+  | "statements"
 
 /** The outcome a command of type `T` answers with. */
 export type OutcomeOf<T extends BudgetOutcome["type"]> = BudgetOutcome & Readonly<{ type: T }>
@@ -460,6 +591,26 @@ export type BudgetRejection =
       maximum: Amount
       captured: Amount
     }>
+  | PricingRejection
+  /** No metered feature takes this event slug, or the budget has no pricing. */
+  | Readonly<{ code: "UNKNOWN_EVENT"; slug: string }>
+  /** Usage needs a registered statement and none covers `at` or is open after it. */
+  | Readonly<{ code: "NO_STATEMENT"; featureSlug: string; at: number }>
+  /** The statement covering `at` is sealed and no later one is open. */
+  | Readonly<{ code: "PERIOD_CLOSED"; featureSlug: string; at: number; periodId: string }>
+  | Readonly<{ code: "STATEMENT_CONFLICT"; periodId: string }>
+  | Readonly<{ code: "STATEMENT_OVERLAP"; periodId: string; overlaps: string }>
+  | Readonly<{ code: "STATEMENT_NOT_FOUND"; periodId: string }>
+  | Readonly<{ code: "STATEMENT_NOT_SEALED"; periodId: string }>
+  /** The budget's pricing names a card the store has not cached. */
+  | Readonly<{ code: "CARD_NOT_FOUND"; cardId: string }>
+  | Readonly<{ code: "UNIT_MISMATCH"; cardId: string; unit: string; cardUnit: string }>
+  /** A card's rows break a rule for the features this budget meters (ADR-0008 D5). */
+  | Readonly<{ code: "CARD_INCOMPATIBLE"; cardId: string; violations: readonly CardViolation[] }>
+  /** The budget prices usage from events, so an amount or a lease would never reach a statement. */
+  | Readonly<{ code: "EVENT_REQUIRED" }>
+  /** Pricing can be added only while nothing is held, so every open hold has an estimate. */
+  | Readonly<{ code: "RESERVATIONS_OPEN" }>
 
 export type BudgetErrorCode = BudgetRejection["code"]
 
@@ -533,6 +684,34 @@ function rejectionMessage(rejection: BudgetRejection): string {
       return `Lease ${rejection.leaseKey} applied report ${rejection.seq}; expected ${rejection.seq + 1} or an exact retry of ${rejection.seq}, got ${rejection.requested}`
     case "LEASE_CAPTURE_OUT_OF_RANGE":
       return `Lease ${rejection.leaseKey} accepts a cumulative capture from ${formatAmount(rejection.minimum)} to ${formatAmount(rejection.maximum)}, not ${formatAmount(rejection.captured)}`
+    case "INVALID_USAGE":
+    case "NOT_PRICED":
+    case "INCLUDED_NOT_APPLICABLE":
+      return pricingRejectionMessage(rejection)
+    case "UNKNOWN_EVENT":
+      return `No metered feature takes event ${rejection.slug}`
+    case "NO_STATEMENT":
+      return `No billing statement of ${rejection.featureSlug} covers ${rejection.at} or is open after it`
+    case "PERIOD_CLOSED":
+      return `Statement ${rejection.periodId} of ${rejection.featureSlug} is sealed and no later one is open`
+    case "STATEMENT_CONFLICT":
+      return `Statement ${rejection.periodId} is registered with different fields`
+    case "STATEMENT_OVERLAP":
+      return `Statement ${rejection.periodId} overlaps ${rejection.overlaps} of the same feature`
+    case "STATEMENT_NOT_FOUND":
+      return `Statement ${rejection.periodId} is not registered`
+    case "STATEMENT_NOT_SEALED":
+      return `Statement ${rejection.periodId} is open; seal it before completing it`
+    case "CARD_NOT_FOUND":
+      return `Rate card ${rejection.cardId} is not cached on this budget`
+    case "UNIT_MISMATCH":
+      return `Rate card ${rejection.cardId} prices in ${rejection.cardUnit}, not the budget's ${rejection.unit}`
+    case "CARD_INCOMPATIBLE":
+      return `Rate card ${rejection.cardId} breaks ${rejection.violations.map((v) => v.code).join(", ")} for this budget's features`
+    case "EVENT_REQUIRED":
+      return "This budget prices usage from events; send an event instead of an amount or a lease"
+    case "RESERVATIONS_OPEN":
+      return "Pricing can be added only while nothing is held; settle or release open holds and leases first"
   }
 }
 
@@ -544,6 +723,8 @@ function describeLoosening(change: ConfigChange): string {
       return `raises hard limit ${change.limitId} from ${formatAmount(change.from)} to ${formatAmount(change.to)}`
     case "limit.enforce":
       return `makes hard limit ${change.limitId} ${change.to}`
+    case "pricing":
+      return "changes how usage is priced"
     default:
       return "clears or postpones closesAt"
   }

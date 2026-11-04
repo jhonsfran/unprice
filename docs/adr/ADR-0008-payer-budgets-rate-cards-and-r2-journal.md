@@ -39,6 +39,9 @@ A plan change rewrites the budget's configuration. It never moves usage to anoth
 cap is a standalone budget key with `closesAt`, as ADR-0006 already allows.
 
 A public upsert to a key that starts with `customer:cus_` returns 403. The other verbs work on it.
+A budget with pricing takes events only: an amount, a usage vector, or a lease is refused with
+`EVENT_REQUIRED`, because nothing would bill it. Pricing is added to a budget only while nothing is
+held.
 
 ### D2. A rate card owns every price; a plan version owns the package
 
@@ -76,6 +79,11 @@ A public upsert to a key that starts with `customer:cus_` returns 403. The other
   the card at period close with the purchased quantity.
 - Usage of a priced feature that matches no row is rejected with `NOT_PRICED`. It is never priced at
   zero.
+- A hold reserves the most its event can cost from any position, and moves no position. A settle or
+  an expiry prices the actual where the positions stand then. So concurrent holds never share an
+  allowance or a cheap tier, a settle within the estimate's quantities never exceeds the hold, and
+  statements still telescope to the price of their total. Near a hard limit, holds on tiered or
+  `included` features reserve more than they usually cost.
 
 ### D5. Allowances live on the package
 
