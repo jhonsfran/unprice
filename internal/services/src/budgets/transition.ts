@@ -38,7 +38,14 @@ import type {
   UnPriceBudgetError,
   WindowPeriod,
 } from "./model"
-import { byPeriodId, sealCutoff, statementViolations, statementsAnswer } from "./statements"
+import {
+  type PositionWrite,
+  byPeriodId,
+  movedPositions,
+  sealCutoff,
+  statementViolations,
+  statementsAnswer,
+} from "./statements"
 import { addUsage, subtractUsage } from "./usage"
 import { type WindowId, windowIdOf } from "./windows"
 
@@ -266,6 +273,8 @@ export type BudgetTransition = Readonly<{
   retiredWindows: readonly WindowId[]
   /** Statements created or changed; the store upserts exactly these. */
   statements: readonly Statement[]
+  /** The positions those statements moved; a store that keeps positions apart writes these. */
+  positions: readonly PositionWrite[]
   /**
    * Earliest `alarmAt` among the written rows, and a new config's `deletableAt`; the store only
    * ever lowers its alarm to it. A window boundary needs no wake: a counter keeps its period's
@@ -379,6 +388,7 @@ export function transition(params: {
     periods,
     retiredWindows: rolled.retired,
     statements,
+    positions: statements.flatMap((s) => movedPositions(priorStatements.get(s.periodId), s)),
     wakeAt,
     ...replyOf(command, {
       budget,

@@ -152,6 +152,22 @@ export function statementsAnswer(
   }
 }
 
+/** A pricing position a write moved, at its new value. */
+export type PositionWrite = Readonly<{ periodId: string; positionKey: string; value: Amount }>
+
+/** The positions `statement` holds at another value than `prior` did, or that `prior` lacked. */
+export function movedPositions(
+  prior: Statement | undefined,
+  statement: Statement
+): PositionWrite[] {
+  const before = prior?.positions ?? {}
+  return Object.entries(statement.positions).flatMap(([positionKey, value]) =>
+    Object.hasOwn(before, positionKey) && before[positionKey] === value
+      ? []
+      : [{ periodId: statement.periodId, positionKey, value }]
+  )
+}
+
 /** One statement moving from what it was (undefined when created) to what it became. */
 type StatementStep = readonly [prior: Statement | undefined, statement: Statement]
 

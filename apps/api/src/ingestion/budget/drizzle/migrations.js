@@ -6,6 +6,7 @@ import m0004 from "./0004_ledger_operations_hold_key_index.sql"
 import m0005 from "./0005_burly_blazing_skull.sql"
 import m0006 from "./0006_youthful_yellowjacket.sql"
 import m0007 from "./0007_reset_rows_before_usage_vectors.sql"
+import m0008 from "./0008_statements_positions_cards.sql"
 import journal from "./meta/_journal.json"
 
 export default {
@@ -19,5 +20,6 @@ export default {
     m0005,
     m0006,
     m0007,
+    m0008,
   },
 }

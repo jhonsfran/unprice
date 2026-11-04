@@ -1,4 +1,5 @@
 import type { BudgetReader, BudgetTransition, InspectReader } from "@unprice/services/budgets"
+import type { CardRows } from "@unprice/services/pricing"
 
 export type BudgetClock = { now(): number }
 
@@ -28,9 +29,12 @@ export type BudgetStoreTx = BudgetReader & {
       | "periods"
       | "retiredWindows"
       | "statements"
+      | "positions"
       | "now"
     >
   ): void
+  /** Replaces the cached copy of each card with what the card source returned at `at`. */
+  cacheCards(cards: readonly CardRows[], at: number): void
   /** Deletes up to `limit` closed rows whose retention ended by `now`. */
   purgeOperations(now: number, limit: number): void
   /** The earliest `alarmAt` of any row: an open hold's expiry or a closed row's retention end. */

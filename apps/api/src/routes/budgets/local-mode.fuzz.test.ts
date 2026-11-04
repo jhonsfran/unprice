@@ -117,6 +117,7 @@ class MemoryBudgetStore implements BudgetStore {
         (row) => (row.kind === "hold" || row.kind === "lease") && row.state.status === "open"
       ),
     readCards: () => ({}),
+    cacheCards: () => {},
     readStatements: () => [],
     readFeatureStatements: () => [],
     readSealable: () => [],

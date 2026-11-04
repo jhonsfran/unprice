@@ -8,13 +8,28 @@ import {
   type Ledger,
   type Operation,
   type ReservationOperation,
+  type Statement,
   WINDOW_HISTORY_PERIODS,
   type WindowId,
   type WindowPeriod,
   alarmAt,
   emptyLedger,
 } from "@unprice/services/budgets"
-import { type SQL, and, asc, desc, eq, gt, inArray, lte, min, notInArray, sql } from "drizzle-orm"
+import type { CardRows } from "@unprice/services/pricing"
+import {
+  type SQL,
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  inArray,
+  lte,
+  min,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm"
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite"
 import * as schema from "./db/schema"
 import type { BudgetStore, BudgetStoreTx, Sync } from "./ports"
@@ -168,8 +183,39 @@ function bindInspect(db: SqliteTx): InspectReader {
   }
 }
 
+type StatementTotals = Pick<Statement, "quantity" | "amount" | "cost">
+
+/** A JSON array bound as one parameter: DO SQLite caps bound parameters at 100 per statement. */
+const jsonList = (values: readonly string[]) =>
+  sql`(SELECT value FROM json_each(${JSON.stringify(values)}))`
+
 function bind(db: SqliteTx): BudgetStoreTx {
   const operations = schema.budgetOperations
+  const statements = schema.budgetStatements
+  const positions = schema.budgetPositions
+  /** The statements `where` selects, each with its positions. */
+  const readStatementsWhere = (where: SQL | undefined): Statement[] => {
+    const rows = db.select().from(statements).where(where).all()
+    if (rows.length === 0) return []
+    const byPeriod = new Map<string, Record<string, bigint>>()
+    const moved = db
+      .select()
+      .from(positions)
+      .where(sql`${positions.periodId} IN ${jsonList(rows.map((row) => row.periodId))}`)
+      .all()
+    for (const { periodId, positionKey, value } of moved) {
+      // Without a prototype, a position key is never an inherited member.
+      const held = byPeriod.get(periodId) ?? Object.create(null)
+      held[positionKey] = BigInt(value)
+      byPeriod.set(periodId, held)
+    }
+    return rows.map(({ totalsJson, ...row }) => ({
+      ...row,
+      ...decode<StatementTotals>(totalsJson),
+      positions: { ...byPeriod.get(row.periodId) },
+    }))
+  }
+
   const terminal = sql`${operations.status} IN ('done', 'settled', 'released')`
   const readOperationWhere = (where: SQL) => {
     const row = db
@@ -259,13 +305,57 @@ function bind(db: SqliteTx): BudgetStoreTx {
       )
     },
 
-    // Statements and the rate card cache are not stored yet: no card is cached and no statement
-    // is registered, so a priced event is refused (CARD_NOT_FOUND, NO_STATEMENT) before it writes.
-    readCards: () => ({}),
-    readStatements: () => [],
-    readFeatureStatements: () => [],
-    readSealable: () => [],
-    readUnfinishedStatements: () => [],
+    readCards(cardIds) {
+      if (cardIds.length === 0) return {}
+      const cards = schema.budgetCards
+      const rows = db
+        .select({ cardId: cards.cardId, cardJson: cards.cardJson })
+        .from(cards)
+        .where(sql`${cards.cardId} IN ${jsonList(cardIds)}`)
+        .all()
+      return Object.fromEntries(rows.map((row) => [row.cardId, decode<CardRows>(row.cardJson)]))
+    },
+
+    readStatements: (periodIds) =>
+      periodIds.length === 0
+        ? []
+        : readStatementsWhere(sql`${statements.periodId} IN ${jsonList(periodIds)}`),
+
+    readFeatureStatements: (features, from, to) =>
+      features.length === 0
+        ? []
+        : readStatementsWhere(
+            and(
+              sql`${statements.featureSlug} IN ${jsonList(features)}`,
+              or(
+                eq(statements.state, "open"),
+                and(sql`${statements.start} < ${to}`, gt(statements.end, from))
+              )
+            )
+          ),
+
+    readSealable: (statementKey, at) =>
+      readStatementsWhere(
+        and(
+          eq(statements.statementKey, statementKey),
+          lte(statements.end, at),
+          sql`${statements.state} IN ('open', 'sealed')`
+        )
+      ),
+
+    readUnfinishedStatements: () =>
+      readStatementsWhere(sql`${statements.state} IN ('open', 'sealed')`),
+
+    cacheCards(cards, at) {
+      const table = schema.budgetCards
+      for (const card of cards) {
+        const row = { cardJson: encode(card), refreshedAt: at }
+        db.insert(table)
+          .values({ cardId: card.card.id, ...row })
+          .onConflictDoUpdate({ target: table.cardId, set: row })
+          .run()
+      }
+    },
 
     readHistory(windowIds, limit) {
       const history = schema.budgetWindowHistory
@@ -292,12 +382,25 @@ function bind(db: SqliteTx): BudgetStoreTx {
       operations: changed,
       periods,
       retiredWindows,
-      statements,
+      statements: written,
+      positions: moved,
       now,
     }) {
-      if (statements.length > 0) {
-        // Fails the transaction rather than acknowledging a statement this store would drop.
-        throw new Error("BudgetDO does not store billing statements yet")
+      for (const { positions: _positions, quantity, amount, cost, ...statement } of written) {
+        const row = { ...statement, totalsJson: encode({ quantity, amount, cost }) }
+        db.insert(statements)
+          .values(row)
+          .onConflictDoUpdate({ target: statements.periodId, set: row })
+          .run()
+      }
+      for (const { periodId, positionKey, value } of moved) {
+        db.insert(positions)
+          .values({ periodId, positionKey, value: value.toString() })
+          .onConflictDoUpdate({
+            target: [positions.periodId, positions.positionKey],
+            set: { value: value.toString() },
+          })
+          .run()
       }
       if (budget) {
         const record = {

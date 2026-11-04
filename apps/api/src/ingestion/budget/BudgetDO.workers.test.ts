@@ -17,6 +17,7 @@ import {
   EXPIRED_PER_SWEEP,
   amountUsage,
 } from "@unprice/services/budgets"
+import { CARD_FROM, usdCard } from "@unprice/services/pricing/fixtures"
 import type { BudgetReply, BudgetRequest } from "@unprice/services/use-cases"
 import { and, asc, eq, lte, min, sql } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/durable-sqlite"
@@ -681,6 +682,111 @@ describe("BudgetDO verbs", () => {
 
       state.storage.sql.exec("DROP TRIGGER fail_hold_row")
       expect(outcome(await processor.execute(request), "authorize").holdId).toBe("h_1")
+    })
+  })
+})
+
+describe("BudgetDO statements", () => {
+  const NOV = CARD_FROM
+  const DEC = Date.parse("2026-12-01T00:00:00.000Z")
+  const apiBatch = (calls: number) => ({ slug: "api.batch", properties: { calls } })
+
+  function pricedUpsert(key: string): BudgetRequest {
+    const parsed = upsertBudgetInternalInputSchema.parse({
+      key,
+      unit: "USD",
+      limits: [],
+      pricing: {
+        cards: { base: usdCard.card.id },
+        features: [
+          {
+            slug: "api_calls",
+            eventSlug: "api.batch",
+            dimensions: [],
+            meterProperty: "calls",
+            included: null,
+            priced: true,
+          },
+        ],
+        statements: "required",
+      },
+    })
+    return { type: "upsert", projectId: "proj_1", ...parsed, mayLoosen: true }
+  }
+
+  it("prices from the cached card and the stored positions, and seals and completes", async () => {
+    const key = "unprice:customer:cus_statements"
+    const stub = stubFor(key)
+    let now = NOV + 3 * DAY
+    await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
+      await migrate(drizzle(state.storage), migrations)
+      const processor = realStorageProcessor(state, () => now)
+      processor.cacheCards([usdCard])
+      outcome(await processor.execute(pricedUpsert(key)), "upsert")
+      const period = {
+        periodId: "api_calls:inv_2026-11",
+        statementKey: "inv_2026-11",
+        featureSlug: "api_calls",
+        start: NOV,
+        end: DEC,
+      }
+      outcome(
+        await processor.execute({ type: "registerStatements", statements: [period] }),
+        "registerStatements"
+      )
+      // 10,000 calls are free; entering the second tier costs $5 plus $0.001 a call.
+      const first = outcome(
+        await processor.execute({ type: "charge", idempotencyKey: "c1", event: apiBatch(8_000) }),
+        "charge"
+      )
+      const second = outcome(
+        await processor.execute({ type: "charge", idempotencyKey: "c2", event: apiBatch(4_000) }),
+        "charge"
+      )
+      expect([first.usage.amount, second.usage.amount]).toEqual([BigInt(0), units(7)])
+      expect(
+        state.storage.sql.exec("SELECT period_id, value FROM budget_positions").toArray()
+      ).toEqual([{ period_id: period.periodId, value: (BigInt(12_000) * UNIT).toString() }])
+
+      now = DEC + HOUR
+      outcome(
+        await processor.execute({ type: "sealStatements", statementKey: "inv_2026-11", at: DEC }),
+        "sealStatements"
+      )
+      outcome(
+        await processor.execute({ type: "completeStatements", periodIds: [period.periodId] }),
+        "completeStatements"
+      )
+    })
+
+    await evictDurableObject(stub)
+    const read = outcome(await stub.execute({ type: "statements" }), "statements")
+    expect(read.statements).toEqual([])
+    await runInDurableObject(stub, (_instance: BudgetDO, state) => {
+      expect(
+        state.storage.sql
+          .exec("SELECT period_id, state, events, completed_at FROM budget_statements")
+          .toArray()
+      ).toEqual([
+        {
+          period_id: "api_calls:inv_2026-11",
+          state: "completed",
+          events: 2,
+          completed_at: DEC + HOUR,
+        },
+      ])
+      const store = new BudgetSqliteStore(drizzle(state.storage, { schema, logger: false }))
+      const [statement] = store.atomically((tx) => tx.readStatements(["api_calls:inv_2026-11"]))
+      expect(statement).toMatchObject({
+        amount: units(7),
+        quantity: BigInt(12_000) * UNIT,
+        cost: null,
+        lastEventAt: NOV + 3 * DAY,
+      })
+      expect(Object.values(statement?.positions ?? {})).toEqual([BigInt(12_000) * UNIT])
+      expect(
+        store.atomically((tx) => Object.keys(tx.readCards([usdCard.card.id, "rc_missing"])))
+      ).toEqual([usdCard.card.id])
     })
   })
 })

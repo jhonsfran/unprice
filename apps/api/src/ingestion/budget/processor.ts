@@ -9,6 +9,7 @@ import {
   loadView,
   transition,
 } from "@unprice/services/budgets"
+import type { CardRows } from "@unprice/services/pricing"
 import type { BudgetRequest } from "@unprice/services/use-cases"
 import type { BudgetProcessorDeps, BudgetStoreTx } from "./ports"
 
@@ -54,6 +55,12 @@ export class BudgetProcessor {
     const { reply, wakeAt } = this.deps.store.atomically((tx) => commit(tx, request, clockMs))
     await this.lowerAlarm(wakeAt)
     return reply
+  }
+
+  /** Replaces the cached copy of each card; the next command prices with it. */
+  cacheCards(cards: readonly CardRows[]): void {
+    const at = this.deps.clock.now()
+    this.deps.store.atomically((tx) => tx.cacheCards(cards, at))
   }
 
   /** Whether the storage holds a budget, as opposed to a schema a refused first call left. */

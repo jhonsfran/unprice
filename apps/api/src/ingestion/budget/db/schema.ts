@@ -68,3 +68,51 @@ export const budgetWindowHistory = sqliteTable(
   },
   (table) => ({ pk: primaryKey({ columns: [table.windowId, table.start] }) })
 )
+
+/**
+ * One billing period of one feature, or a budget's perpetual statement per feature. Totals are a
+ * tagged-bigint JSON object (`quantity`, `amount`, `cost`); positions live in `budget_positions`.
+ */
+export const budgetStatements = sqliteTable(
+  "budget_statements",
+  {
+    periodId: text("period_id").primaryKey(),
+    statementKey: text("statement_key").notNull(),
+    featureSlug: text("feature_slug").notNull(),
+    start: integer("start").notNull(),
+    end: integer("end").notNull(),
+    state: text("state", { enum: ["open", "sealed", "completed"] }).notNull(),
+    registeredAt: integer("registered_at").notNull(),
+    sealedAt: integer("sealed_at"),
+    completedAt: integer("completed_at"),
+    totalsJson: text("totals_json").notNull(),
+    events: integer("events").notNull(),
+    lastEventAt: integer("last_event_at"),
+  },
+  (table) => ({
+    feature: index("budget_statements_feature_idx").on(table.featureSlug, table.end),
+    key: index("budget_statements_key_idx").on(table.statementKey, table.end),
+  })
+)
+
+/**
+ * A pricing position of a statement: one row per line an event moved, so an event writes the
+ * positions it moved, not every position of its statement. The value is a decimal of scale 8.
+ */
+export const budgetPositions = sqliteTable(
+  "budget_positions",
+  {
+    periodId: text("period_id").notNull(),
+    positionKey: text("position_key").notNull(),
+    value: text("value").notNull(),
+  },
+  (table) => ({ pk: primaryKey({ columns: [table.periodId, table.positionKey] }) })
+)
+
+/** The rate cards the budget's pricing names, as last read from the card source. */
+export const budgetCards = sqliteTable("budget_cards", {
+  cardId: text("card_id").primaryKey(),
+  /** The card and its rows, tagged-bigint JSON. */
+  cardJson: text("card_json").notNull(),
+  refreshedAt: integer("refreshed_at").notNull(),
+})

@@ -15,6 +15,7 @@
     "./metrics": "./src/metrics/index.ts",
     "./plans": "./src/plans/index.ts",
     "./pricing": "./src/pricing/index.ts",
+    "./pricing/fixtures": "./src/pricing/fixtures.ts",
     "./subscriptions": "./src/subscriptions/index.ts",
     "./customers": "./src/customers/index.ts",
     "./analytics": "./src/analytics/index.ts",
