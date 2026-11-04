@@ -1,4 +1,5 @@
 import type { Database } from "@unprice/db"
+import * as schema from "@unprice/db/schema"
 import type { Logger } from "@unprice/logs"
 import { describe, expect, it, vi } from "vitest"
 import { duplicatePlanVersion } from "./duplicate"
@@ -72,18 +73,26 @@ function createPlanVersion(overrides?: InsertedValues): InsertedValues {
   }
 }
 
-function createDbMocks(planVersionData: InsertedValues | null) {
+function createDbMocks(planVersionData: InsertedValues | null, cards: InsertedValues[] = []) {
   let insertedVersion: InsertedValues | null = null
   const insertedFeatures: InsertedValues[] = []
+  const insertedCards: InsertedValues[] = []
 
   const tx = {
     select: vi.fn(() => ({
-      from: vi.fn(() => ({
-        where: vi.fn().mockResolvedValue([{ count: 1 }]),
+      from: vi.fn((table: unknown) => ({
+        where: vi
+          .fn()
+          .mockResolvedValue(table === schema.planVersionRateCards ? cards : [{ count: 1 }]),
       })),
     })),
-    insert: vi.fn(() => ({
-      values: vi.fn((values: InsertedValues) => {
+    insert: vi.fn((table: unknown) => ({
+      values: vi.fn((values: InsertedValues | InsertedValues[]) => {
+        if (table === schema.planVersionRateCards) {
+          insertedCards.push(...(Array.isArray(values) ? values : [values]))
+          return Promise.resolve()
+        }
+        if (Array.isArray(values)) throw new Error("unexpected batch insert")
         if ("planId" in values) {
           insertedVersion = values
           return {
@@ -113,11 +122,32 @@ function createDbMocks(planVersionData: InsertedValues | null) {
         return insertedVersion
       },
       features: insertedFeatures,
+      cards: insertedCards,
     },
   }
 }
 
 describe("duplicatePlanVersion", () => {
+  it("copies the version's rate card per currency onto the copy", async () => {
+    const { db, inserted } = createDbMocks(createPlanVersion(), [
+      { currency: "USD", rateCardId: "rc_usd" },
+      { currency: "EUR", rateCardId: "rc_eur" },
+    ])
+
+    const result = await duplicatePlanVersion(
+      { db, logger: createLogger() },
+      { id: "pv_source", projectId: "proj_123" }
+    )
+
+    if (!result.val || result.val.state !== "ok") throw new Error("expected a duplicate")
+    const planVersionId = result.val.planVersion.id
+    expect(inserted.cards.map(({ id: _, ...card }) => card)).toEqual([
+      { currency: "USD", rateCardId: "rc_usd", projectId: "proj_123", planVersionId },
+      { currency: "EUR", rateCardId: "rc_eur", projectId: "proj_123", planVersionId },
+    ])
+    expect(planVersionId).not.toBe("pv_source")
+  })
+
   it("duplicates default plan versions without preserving a stale payment method requirement", async () => {
     const { db, inserted } = createDbMocks(createPlanVersion())
 

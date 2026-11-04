@@ -31,6 +31,7 @@ export const update = protectedProjectProcedure
       type,
       unitOfMeasure,
       meterConfig,
+      included,
     } = opts.input
 
     const project = opts.ctx.project
@@ -56,6 +57,7 @@ export const update = protectedProjectProcedure
       unitOfMeasure,
       meterConfig,
       hasMeterConfigOverride,
+      included,
     })
 
     if (err) {

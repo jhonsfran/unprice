@@ -2035,6 +2035,7 @@ export class PlanService {
     unitOfMeasure,
     meterConfig,
     hasMeterConfigOverride,
+    included,
   }: {
     projectId: string
     featureId: string
@@ -2051,6 +2052,8 @@ export class PlanService {
     unitOfMeasure?: PlanVersionFeature["unitOfMeasure"]
     meterConfig?: PlanVersionFeature["meterConfig"]
     hasMeterConfigOverride: boolean
+    /** Units included per statement period (ADR-0008 D5); only a usage feature keeps them. */
+    included?: PlanVersionFeature["included"]
   }): Promise<
     Result<
       | {
@@ -2169,6 +2172,7 @@ export class PlanService {
             resetConfig: resetConfigCreate,
             type: type ?? "feature",
             meterConfig: meterConfigSnapshot,
+            included: featureType === "usage" ? (included ?? null) : null,
           })
           .returning()
           .then((rows) => rows[0] ?? null)
@@ -2241,6 +2245,7 @@ export class PlanService {
     unitOfMeasure,
     meterConfig,
     hasMeterConfigOverride,
+    included,
   }: {
     projectId: string
     id: string
@@ -2258,6 +2263,8 @@ export class PlanService {
     unitOfMeasure?: PlanVersionFeature["unitOfMeasure"]
     meterConfig?: PlanVersionFeature["meterConfig"]
     hasMeterConfigOverride: boolean
+    /** Units included per statement period (ADR-0008 D5); undefined keeps the stored value. */
+    included?: PlanVersionFeature["included"]
   }): Promise<
     Result<
       | {
@@ -2402,6 +2409,10 @@ export class PlanService {
               billingConfig: billingConfigUpdate,
             }),
             ...(featureTypeUpdate === "usage" && { resetConfig: resetConfigUpdate }),
+            // Only a usage feature keeps an allowance.
+            ...(featureTypeUpdate !== "usage"
+              ? { included: null }
+              : included !== undefined && { included }),
             ...(type && { type }),
             updatedAtM: Date.now(),
           })

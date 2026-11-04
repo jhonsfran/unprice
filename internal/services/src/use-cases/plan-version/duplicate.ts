@@ -103,6 +103,30 @@ export async function duplicatePlanVersion(
         })
       )
 
+      // The copy prices with the same card per currency (ADR-0008 D2): a plan version owns its cards.
+      const cards = await tx
+        .select({
+          currency: schema.planVersionRateCards.currency,
+          rateCardId: schema.planVersionRateCards.rateCardId,
+        })
+        .from(schema.planVersionRateCards)
+        .where(
+          and(
+            eq(schema.planVersionRateCards.projectId, projectId),
+            eq(schema.planVersionRateCards.planVersionId, planVersionData.id)
+          )
+        )
+      if (cards.length > 0) {
+        await tx.insert(schema.planVersionRateCards).values(
+          cards.map((card) => ({
+            ...card,
+            id: newId("plan_version_rate_card"),
+            projectId,
+            planVersionId,
+          }))
+        )
+      }
+
       return version
     })
 
