@@ -512,7 +512,7 @@ patterns. Keep it cheap to load and useful.
   `theme`; `theme` can be `"system"` while the rendered UI needs the actual light/dark palette.
 - 2026-07-09: `.ledger-dots` is a background utility; keep its pseudo-element isolated and behind
   content instead of raising each child panel or text layer.
-- 2026-07-04: Workspace signup should omit `planVersionId` when no pricing/session plan is
+- 2026-07-04: Workspace signup should omit `planVersionId` when no pricing CTA plan is
   selected; sending an empty string blocks the customer signup default-plan resolver.
 - 2026-07-04: Dashboard header full logos should use the `Logo` size prop, not Tailwind
   `size-*` width/height classes; fixed-size wrappers can make the SVG mark flex-shrink away while
@@ -1222,4 +1222,4 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-11-03 ([ADR-0008 D8](adr/ADR-0008-payer-budgets-rate-cards-and-r2-journal.md#d8-tinybird-is-deleted)): Web analytics rows go through `createWebEventsWriter` (validates with `webEventRowSchema`); a Pipelines stream accepts an invalid row and drops it silently.
 - 2026-11-03: Web analytics reads are SQL builders in `services/src/analytics/web-analytics.ts` run by the `BasinSql` port. Escape every value with `sqlString`/`sqlTimestamp`; test with literal SQL and a fake port.
 - 2026-11-04: An unauthenticated beacon (`/api/tracking`) parses its payload into its own object with `~/lib/web-tracking` schemas; never spread payload keys next to validated envelope ids, and bound every id with `attributionIdSchema`.
-- 2026-11-04: A sign-up that names only `sessionId` depends on a plan click Basin exposes minutes later: a miss or a Basin failure is a retryable `FetchError`, never a precondition failure.
+- 2026-11-04: Sign-up attribution travels only as explicit `planVersionId` and `pageId`: the pricing CTA URL carries them, `/auth/*` hands them to `/new`, and sign-up validates them. Never resolve a plan from web analytics; Basin exposes a plan click minutes later.

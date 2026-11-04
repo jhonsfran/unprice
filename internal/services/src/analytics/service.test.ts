@@ -203,41 +203,6 @@ describe("AnalyticsService web analytics reads", () => {
     })
   })
 
-  it("returns the session's latest plan click", async () => {
-    const { basinSql } = fakeBasinSql([
-      {
-        timestamp: "2026-11-03T10:00:00.000Z",
-        session_id: "sess_1",
-        plan_version_id: "pv_1",
-        page_id: "page_1",
-      },
-    ])
-
-    const result = await createService(basinSql).getPlanClickBySessionId({
-      projectId: "proj_1",
-      sessionId: "sess_1",
-    })
-
-    expect(result).toEqual({
-      val: {
-        timestamp: new Date("2026-11-03T10:00:00.000Z"),
-        session_id: "sess_1",
-        payload: { plan_version_id: "pv_1", page_id: "page_1" },
-      },
-    })
-  })
-
-  it("returns null when the session has no plan click", async () => {
-    const { basinSql } = fakeBasinSql([])
-
-    const result = await createService(basinSql).getPlanClickBySessionId({
-      projectId: "proj_1",
-      sessionId: "sess_1",
-    })
-
-    expect(result).toEqual({ val: null })
-  })
-
   it("maps a Basin SQL failure to a FetchError", async () => {
     const basinSql: BasinSql = {
       query: async () =>

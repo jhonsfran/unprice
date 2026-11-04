@@ -115,7 +115,6 @@ describe("completeProviderSignUp", () => {
     expect(webEvents.send).toHaveBeenCalledWith([
       expect.objectContaining({
         kind: "signup",
-        session_id: "session_1",
         project_id: "proj_1",
         customer_id: "cus_unprice_1",
         plan_id: "plan_1",
@@ -150,7 +149,6 @@ function createReplayDb() {
       paymentMethodRequired: true,
     },
     metadata: {
-      sessionId: "session_1",
       pageId: "page_1",
     },
   }

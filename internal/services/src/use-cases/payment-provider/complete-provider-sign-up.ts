@@ -474,7 +474,6 @@ export async function completeProviderSignUp(
         projectId,
         customerId: customerUnprice.id,
         planVersion: customerSession.planVersion,
-        sessionId: customerSession.metadata?.sessionId,
         pageId: customerSession.metadata?.pageId,
         status: "signup_success",
       }),

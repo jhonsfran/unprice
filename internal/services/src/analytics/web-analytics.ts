@@ -1,7 +1,4 @@
-import { Ok, type Result } from "@unprice/error"
 import {
-  type BasinSql,
-  type BasinSqlError,
   WEB_EVENTS_TABLE,
   type WebEventKind,
   type WebEventRow,
@@ -36,7 +33,6 @@ function webEventsWhere(opts: {
   kinds: readonly WebEventKind[]
   window: WebAnalyticsWindow
   pageId?: string
-  sessionId?: string
 }): string {
   const kinds =
     opts.kinds.length === 1
@@ -47,7 +43,6 @@ function webEventsWhere(opts: {
     `WHERE project_id = ${sqlString(opts.projectId)}`,
     `  AND ${kinds}`,
     ...(opts.pageId === undefined ? [] : [`  AND page_id = ${sqlString(opts.pageId)}`]),
-    ...(opts.sessionId === undefined ? [] : [`  AND session_id = ${sqlString(opts.sessionId)}`]),
     `  AND __ingest_ts >= ${sqlTimestamp(opts.window.from)}`,
     `  AND timestamp >= ${sqlTimestamp(opts.window.from)}`,
     `  AND timestamp <= ${sqlTimestamp(opts.window.to)}`,
@@ -317,68 +312,6 @@ export function foldPlansConversion(
     .slice(0, 100)
 }
 
-// ---- plan click attribution (v1_get_session_event) ----
-
-export const planClickSchema = z.object({
-  timestamp: z.date(),
-  session_id: z.string(),
-  payload: z.object({ plan_version_id: z.string(), page_id: z.string() }),
-})
-export type PlanClick = z.infer<typeof planClickSchema>
-
-export function buildLatestPlanClickSql(opts: {
-  projectId: string
-  sessionId: string
-  window: WebAnalyticsWindow
-}): string {
-  return [
-    "SELECT timestamp, session_id, plan_version_id, page_id",
-    `FROM ${WEB_EVENTS_TABLE}`,
-    webEventsWhere({
-      projectId: opts.projectId,
-      kinds: ["plan_click"],
-      window: opts.window,
-      sessionId: opts.sessionId,
-    }),
-    "ORDER BY timestamp DESC",
-    "LIMIT 1",
-  ].join("\n")
-}
-
-const latestPlanClickRowSchema = z
-  .object({
-    timestamp: z.coerce.date(),
-    session_id: z.string(),
-    plan_version_id: z.string(),
-    page_id: z.string(),
-  })
-  .transform(
-    (row): PlanClick => ({
-      timestamp: row.timestamp,
-      session_id: row.session_id,
-      payload: { plan_version_id: row.plan_version_id, page_id: row.page_id },
-    })
-  )
-
-/** The session's latest plan click within `intervalDays` days before `now` (one day by default). */
-export async function findLatestPlanClick(
-  basinSql: BasinSql,
-  opts: { projectId: string; sessionId: string; now: number; intervalDays?: number }
-): Promise<Result<PlanClick | null, BasinSqlError>> {
-  const window = {
-    from: new Date(opts.now - (opts.intervalDays ?? 1) * DAY_MS),
-    to: new Date(opts.now),
-  }
-  const result = await basinSql.query(
-    buildLatestPlanClickSql({ projectId: opts.projectId, sessionId: opts.sessionId, window }),
-    latestPlanClickRowSchema
-  )
-  if (result.err) {
-    return result
-  }
-  return Ok(result.val[0] ?? null)
-}
-
 // ---- writes ----
 
 export type SignupWebEventStatus = "signup_success" | "waiting_payment_provider_setup"
@@ -389,13 +322,12 @@ export function signupWebEventRow(opts: {
   customerId: string
   /** `planId` is absent only on a customer session stored before sessions carried it. */
   planVersion: { id: string; planId?: string }
-  sessionId?: string | null
   pageId?: string | null
   status: SignupWebEventStatus
 }): WebEventRow {
   return createWebEventRow({
     kind: "signup",
-    session_id: opts.sessionId ?? "",
+    session_id: "",
     project_id: opts.projectId,
     customer_id: opts.customerId,
     plan_id: opts.planVersion.planId,

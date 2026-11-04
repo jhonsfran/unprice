@@ -2,7 +2,7 @@ import type { Database } from "@unprice/db"
 import { customerProviderIds, customerSessions, customers } from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
 import type { CustomerSignUp, Plan, PlanVersion, Project } from "@unprice/db/validators"
-import { Err, FetchError, Ok, type Result } from "@unprice/error"
+import { Err, type FetchError, Ok, type Result } from "@unprice/error"
 import { type WebEventsWriter, recordWebEvents } from "@unprice/lakehouse"
 import type { Logger } from "@unprice/logs"
 import { fromCurrencyMinor, toLedgerMinor } from "@unprice/money"
@@ -14,10 +14,7 @@ import { checkPaymentProviderAvailability } from "../payment-provider/availabili
 import { activateWalletIfSubscriptionIsActive } from "../subscription/activate-wallet-if-active"
 
 type SignUpDeps = {
-  services: Pick<
-    ServiceContext,
-    "plans" | "customers" | "subscriptions" | "billing" | "analytics" | "pages"
-  >
+  services: Pick<ServiceContext, "plans" | "customers" | "subscriptions" | "billing" | "pages">
   db: Database
   logger: Logger
   webEvents: WebEventsWriter
@@ -137,7 +134,7 @@ async function getExternalIdReplay(
 }
 
 /**
- * The page a pricing CTA or plan click named, kept only when it belongs to the project and lists the
+ * The page a pricing CTA named, kept only when it belongs to the project and lists the
  * plan version. Attribution never fails a sign-up: an unusable page id or a failed read is logged
  * and dropped.
  */
@@ -173,19 +170,15 @@ async function resolvePlanVersion(
   deps: SignUpDeps,
   opts: SignUpInput
 ): Promise<
-  Result<
-    { planVersion: PlanVersionWithProject; pageId: string | null },
-    UnPriceCustomerError | FetchError
-  >
+  Result<{ planVersion: PlanVersionWithProject; pageId: string | null }, UnPriceCustomerError>
 > {
   const { input, projectId } = opts
-  const { planVersionId, defaultCurrency, planSlug, sessionId, billingInterval } = input
+  const { planVersionId, defaultCurrency, planSlug, billingInterval } = input
 
   let planVersion: PlanVersionWithProject | null = null
   let pageId: string | null = null
 
-  // An explicit plan version (the pricing page puts the clicked one on the CTA link) wins, so
-  // sign-up never waits for the plan click to reach R2, which takes 3-7 minutes.
+  // An explicit plan version (the pricing page puts the clicked one on the CTA link) wins.
   if (planVersionId) {
     planVersion = await deps.db.query.versions
       .findFirst({
@@ -215,59 +208,6 @@ async function resolvePlanVersion(
       pageId = await resolvePageAttribution(deps, {
         projectId,
         pageId: input.pageId,
-        planVersionId: planVersion.id,
-      })
-    }
-  } else if (sessionId) {
-    deps.logger.set({
-      business: {
-        operation: "customer.sign_up.resolve_plan",
-        project_id: projectId,
-      },
-    })
-
-    // The plan click reaches R2 3-7 minutes after it happens, so a miss or a failed read is
-    // retryable: the same request can succeed later. The analytics service logs a failed read.
-    const planClick = await deps.services.analytics.getPlanClickBySessionId({
-      projectId,
-      sessionId,
-    })
-
-    if (planClick.err) {
-      return Err(
-        new FetchError({
-          message: `plan click lookup failed: ${planClick.err.message}`,
-          retry: true,
-        })
-      )
-    }
-
-    const session = planClick.val
-
-    if (!session) {
-      return Err(
-        new FetchError({
-          message: "No plan click recorded for this session yet; retry later or pass planVersionId",
-          retry: true,
-        })
-      )
-    }
-
-    planVersion = await deps.db.query.versions
-      .findFirst({
-        with: {
-          project: true,
-          plan: true,
-        },
-        where: (version, { eq, and }) =>
-          and(eq(version.id, session.payload.plan_version_id), eq(version.projectId, projectId)),
-      })
-      .then((data) => data ?? null)
-
-    if (planVersion) {
-      pageId = await resolvePageAttribution(deps, {
-        projectId,
-        pageId: session.payload.page_id,
         planVersionId: planVersion.id,
       })
     }
@@ -330,7 +270,7 @@ async function resolvePlanVersion(
       return Err(
         new UnPriceCustomerError({
           code: "NO_DEFAULT_PLAN_FOUND",
-          message: "Default plan not found, provide a plan version id, slug or session id",
+          message: "Default plan not found, provide a plan version id or slug",
         })
       )
     }
@@ -475,7 +415,6 @@ async function handlePaymentRequiredFlow(
         paymentMethodRequired: paymentRequired,
       },
       metadata: {
-        sessionId: input.sessionId ?? undefined,
         pageId: pageId ?? undefined,
       },
     })
@@ -527,7 +466,6 @@ async function handlePaymentRequiredFlow(
         projectId,
         customerId,
         planVersion,
-        sessionId: input.sessionId,
         pageId,
         status: "waiting_payment_provider_setup",
       }),
@@ -680,7 +618,6 @@ async function handleDirectProvisioningFlow(
           projectId,
           customerId,
           planVersion,
-          sessionId: input.sessionId,
           pageId,
           status: "signup_success",
         }),

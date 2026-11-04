@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
 import {
-  buildLatestPlanClickSql,
   buildPageDimensionSql,
   buildPagesOverviewSql,
   buildPlansConversionSql,
@@ -97,32 +96,14 @@ ORDER BY plan_signups DESC, plan_clicks DESC, plan_views DESC
 LIMIT 1000`)
   })
 
-  it("builds the latest plan click query", () => {
-    expect(
-      buildLatestPlanClickSql({
-        projectId: "proj_1",
-        sessionId: "sess_1",
-        window: { from: new Date(now - 86_400_000), to: new Date(now) },
-      })
-    ).toBe(`SELECT timestamp, session_id, plan_version_id, page_id
-FROM lakehouse.web_events
-WHERE project_id = 'proj_1'
-  AND kind = 'plan_click'
-  AND session_id = 'sess_1'
-  AND __ingest_ts >= '2026-11-02T10:30:00.000Z'
-  AND timestamp >= '2026-11-02T10:30:00.000Z'
-  AND timestamp <= '2026-11-03T10:30:00.000Z'
-ORDER BY timestamp DESC
-LIMIT 1`)
-  })
-
-  it("escapes a malicious session id into a single string literal", () => {
-    const sql = buildLatestPlanClickSql({
+  it("escapes a malicious page id into a single string literal", () => {
+    const sql = buildPageDimensionSql({
       projectId: "proj_1",
-      sessionId: "x' OR project_id <> 'proj_1",
+      pageId: "x' OR project_id <> 'proj_1",
+      dimension: "country",
       window,
     })
 
-    expect(sql).toContain("  AND session_id = 'x'' OR project_id <> ''proj_1'\n")
+    expect(sql).toContain("  AND page_id = 'x'' OR project_id <> ''proj_1'\n")
   })
 })

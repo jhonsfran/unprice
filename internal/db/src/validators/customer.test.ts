@@ -30,13 +30,13 @@ describe("customerSignUpSchema", () => {
     const parse = (fields: Record<string, string>) =>
       customerSignUpSchema.safeParse({ ...baseSignUpInput, ...fields }).success
 
-    expect(parse({ sessionId: "8f14e45f-ceea-4e7a-9b1d-2f6a1c0b7d11", pageId: "page_1" })).toBe(
+    expect(parse({ planVersionId: "8f14e45f-ceea-4e7a-9b1d-2f6a1c0b7d11", pageId: "page_1" })).toBe(
       true
     )
-    expect(parse({ sessionId: "sess\u0000" })).toBe(false)
-    expect(parse({ sessionId: "sess'1" })).toBe(false)
-    expect(parse({ sessionId: "" })).toBe(false)
-    expect(parse({ sessionId: "s".repeat(129) })).toBe(false)
+    expect(parse({ pageId: "page\u0000" })).toBe(false)
+    expect(parse({ pageId: "page'1" })).toBe(false)
+    expect(parse({ pageId: "" })).toBe(false)
+    expect(parse({ planVersionId: "p".repeat(129) })).toBe(false)
     expect(parse({ pageId: "page\n1" })).toBe(false)
     expect(parse({ planVersionId: "pv 1" })).toBe(false)
   })

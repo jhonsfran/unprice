@@ -35,7 +35,6 @@ export const workspaceSignupSchema = workspaceInsertBase
     config: subscriptionItemsConfigSchema.optional(),
     successUrl: z.string().url(),
     cancelUrl: z.string().url(),
-    sessionId: attributionIdSchema.optional(),
     pageId: attributionIdSchema.optional(),
   })
 

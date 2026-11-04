@@ -75,14 +75,9 @@ export const customerSignUpSchema = z
         "If provided, the system will intelligently pick the latest plan version for that slug and sign up the customer for it. If omitted with planVersionId, the default plan is used.",
       example: "PRO",
     }),
-    sessionId: attributionIdSchema.optional().openapi({
-      description:
-        "The pricing page session id (from track.js), used for conversion analytics. Prefer passing planVersionId: without it, the plan is resolved from the session's latest plan click, which reaches analytics storage only minutes after the click (eventually consistent). Until then the sign-up fails with a retryable 5xx error; retry later or pass planVersionId.",
-      example: "sess_1234567890",
-    }),
     planVersionId: attributionIdSchema.optional().openapi({
       description:
-        "The plan version the customer is signing up for. Preferred over resolving the plan from sessionId. Enterprise plan versions are refused.",
+        "The plan version the customer is signing up for, such as the one a pricing page CTA carries. Enterprise plan versions are refused.",
       example: "pv_1234567890",
     }),
     pageId: attributionIdSchema.optional().openapi({
@@ -223,7 +218,6 @@ export const customerSessionPlanVersionSchema = z.object({
 })
 
 export const customerSessionMetadataSchema = z.object({
-  sessionId: z.string().optional(),
   pageId: z.string().optional(),
 })
 

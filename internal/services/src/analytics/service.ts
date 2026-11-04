@@ -14,12 +14,10 @@ import {
   type PageCountryVisits,
   type PageDimension,
   type PageOverview,
-  type PlanClick,
   type PlansConversion,
   buildPageDimensionSql,
   buildPagesOverviewSql,
   buildPlansConversionSql,
-  findLatestPlanClick,
   foldPagesOverview,
   foldPlansConversion,
   overviewBucket,
@@ -359,28 +357,6 @@ export class AnalyticsService {
     }
 
     return Ok({ data: foldPlansConversion(rows.val) })
-  }
-
-  public async getPlanClickBySessionId({
-    projectId,
-    sessionId,
-    intervalDays,
-  }: {
-    projectId: string
-    sessionId: string
-    intervalDays?: number
-  }): Promise<Result<PlanClick | null, FetchError>> {
-    const result = await findLatestPlanClick(this.basinSql, {
-      projectId,
-      sessionId,
-      intervalDays,
-      now: Date.now(),
-    })
-    if (result.err) {
-      this.logReadFailure(result.err, { context: "failed to fetch plan click", projectId })
-      return Err(new FetchError({ message: result.err.message, retry: result.err.retry }))
-    }
-    return Ok(result.val)
   }
 
   private async getPageDimensionVisits<D extends PageDimension>({

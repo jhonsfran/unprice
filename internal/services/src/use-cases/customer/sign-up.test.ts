@@ -1,17 +1,10 @@
 import type { Database } from "@unprice/db"
 import { customers } from "@unprice/db/schema"
-import { Err, FetchError, Ok } from "@unprice/error"
-import {
-  type BasinSql,
-  BasinSqlError,
-  type WebEventsWriter,
-  createWebEventsWriter,
-} from "@unprice/lakehouse"
+import { Ok } from "@unprice/error"
+import { type WebEventsWriter, createWebEventsWriter } from "@unprice/lakehouse"
 import type { Logger } from "@unprice/logs"
 import { fromCurrencyMinor, toLedgerMinor } from "@unprice/money"
 import { describe, expect, it, vi } from "vitest"
-import { z } from "zod"
-import { AnalyticsService } from "../../analytics/service"
 import { UnPriceCustomerError } from "../../customers/errors"
 import { PageService } from "../../pages/service"
 import { signUp } from "./sign-up"
@@ -555,9 +548,7 @@ describe("customer signUp plan attribution", () => {
 
   function createDeps(opts: {
     versions: VersionRow[]
-    basinRows: unknown[]
     pages?: PageRow[]
-    basinError?: BasinSqlError
   }) {
     const tx = {
       insert: vi.fn(() => ({
@@ -566,9 +557,6 @@ describe("customer signUp plan attribution", () => {
         }),
       })),
     }
-    const basinQuery = vi.fn(async (_sql: string, row: z.ZodType<unknown>) =>
-      opts.basinError ? Err(opts.basinError) : Ok(z.array(row).parse(opts.basinRows))
-    )
     const send = vi.fn().mockResolvedValue(Ok({ sent: 1 }))
     const pending: Promise<unknown>[] = []
     const logger = createLogger()
@@ -615,16 +603,10 @@ describe("customer signUp plan attribution", () => {
             .mockResolvedValue(Ok({ cyclesCreated: 1, phasesProcessed: 1 })),
         },
         plans: {},
-        analytics: new AnalyticsService({
-          db,
-          logger,
-          basinSql: { query: basinQuery } as unknown as BasinSql,
-          ledgerGateway: {} as never,
-        }),
         pages: new PageService({ db, logger }),
       } as never,
     }
-    return { deps, basinQuery, send, pending }
+    return { deps, send, pending }
   }
 
   const baseInput = {
@@ -633,25 +615,22 @@ describe("customer signUp plan attribution", () => {
     cancelUrl: "https://example.com/cancel",
   }
 
-  it("signs up with the explicit plan version while Basin has no plan click yet", async () => {
-    const { deps, basinQuery, send, pending } = createDeps({
+  it("signs up with the explicit plan version", async () => {
+    const { deps, send, pending } = createDeps({
       versions: [createPlanVersion("sandbox")],
-      basinRows: [],
     })
 
     const result = await signUp(deps, {
       projectId: "proj_123",
-      input: { ...baseInput, planVersionId: "version_123", sessionId: "sess_1" } as never,
+      input: { ...baseInput, planVersionId: "version_123" } as never,
     })
     await Promise.all(pending)
 
     expect(result.err).toBeUndefined()
     expect(result.val?.success).toBe(true)
-    expect(basinQuery).not.toHaveBeenCalled()
     expect(send.mock.calls[0]?.[0]).toEqual([
       expect.objectContaining({
         kind: "signup",
-        session_id: "sess_1",
         plan_version_id: "version_123",
         signup_status: "signup_success",
       }),
@@ -659,57 +638,22 @@ describe("customer signUp plan attribution", () => {
   })
 
   it("rejects a plan version that belongs to another project", async () => {
-    const { deps, basinQuery } = createDeps({
+    const { deps } = createDeps({
       versions: [{ ...createPlanVersion("sandbox"), id: "version_other", projectId: "proj_other" }],
-      basinRows: [],
     })
 
     const result = await signUp(deps, {
       projectId: "proj_123",
-      input: { ...baseInput, planVersionId: "version_other", sessionId: "sess_1" } as never,
+      input: { ...baseInput, planVersionId: "version_other" } as never,
     })
 
     expect(result.err).toBeInstanceOf(UnPriceCustomerError)
     expect(result.err?.message).toBe("Plan version not found in this project")
-    expect(basinQuery).not.toHaveBeenCalled()
-  })
-
-  it("resolves a session-only sign-up through the plan click in Basin", async () => {
-    const { deps, basinQuery, send, pending } = createDeps({
-      versions: [createPlanVersion("sandbox")],
-      pages: [{ id: "page_1", projectId: "proj_123", selectedPlans: [{ id: "version_123" }] }],
-      basinRows: [
-        {
-          timestamp: "2026-11-03T10:00:00.000Z",
-          session_id: "sess_1",
-          plan_version_id: "version_123",
-          page_id: "page_1",
-        },
-      ],
-    })
-
-    const result = await signUp(deps, {
-      projectId: "proj_123",
-      input: { ...baseInput, sessionId: "sess_1" } as never,
-    })
-    await Promise.all(pending)
-
-    expect(result.err).toBeUndefined()
-    expect(result.val?.success).toBe(true)
-    expect(basinQuery).toHaveBeenCalledTimes(1)
-    expect(send.mock.calls[0]?.[0]).toEqual([
-      expect.objectContaining({
-        kind: "signup",
-        page_id: "page_1",
-        plan_version_id: "version_123",
-      }),
-    ])
   })
 
   it("records the CTA page when it belongs to the project and lists the plan version", async () => {
     const { deps, send, pending } = createDeps({
       versions: [createPlanVersion("sandbox")],
-      basinRows: [],
       pages: [{ id: "page_1", projectId: "proj_123", selectedPlans: [{ id: "version_123" }] }],
     })
 
@@ -732,7 +676,6 @@ describe("customer signUp plan attribution", () => {
   it("drops a CTA page that does not list the plan version, and still signs up", async () => {
     const { deps, send, pending } = createDeps({
       versions: [createPlanVersion("sandbox")],
-      basinRows: [],
       pages: [
         { id: "page_1", projectId: "proj_123", selectedPlans: [{ id: "version_other" }] },
         { id: "page_2", projectId: "proj_other", selectedPlans: [{ id: "version_123" }] },
@@ -762,69 +705,9 @@ describe("customer signUp plan attribution", () => {
     })
   })
 
-  it("answers a retryable error when Basin has no plan click yet and no plan version was passed", async () => {
-    const { deps } = createDeps({ versions: [createPlanVersion("sandbox")], basinRows: [] })
-
-    const result = await signUp(deps, {
-      projectId: "proj_123",
-      input: { ...baseInput, sessionId: "sess_1" } as never,
-    })
-
-    expect(result.err).toBeInstanceOf(FetchError)
-    expect(result.err).toMatchObject({ retry: true })
-    expect(result.err?.message).toBe(
-      "No plan click recorded for this session yet; retry later or pass planVersionId"
-    )
-  })
-
-  it("answers a retryable error and logs at error level when the Basin read fails", async () => {
-    const { deps } = createDeps({
-      versions: [createPlanVersion("sandbox")],
-      basinRows: [],
-      basinError: new BasinSqlError({ code: "TIMEOUT", message: "timed out", retry: true }),
-    })
-
-    const result = await signUp(deps, {
-      projectId: "proj_123",
-      input: { ...baseInput, sessionId: "sess_1" } as never,
-    })
-
-    expect(result.err).toBeInstanceOf(FetchError)
-    expect(result.err).toMatchObject({ retry: true })
-    expect(deps.logger.error).toHaveBeenCalledWith(expect.objectContaining({ code: "TIMEOUT" }), {
-      context: "failed to fetch plan click",
-      projectId: "proj_123",
-    })
-  })
-
-  it("drops a plan click's page that does not list the clicked plan version", async () => {
-    const { deps, send, pending } = createDeps({
-      versions: [createPlanVersion("sandbox")],
-      pages: [{ id: "page_1", projectId: "proj_123", selectedPlans: [{ id: "version_other" }] }],
-      basinRows: [
-        {
-          timestamp: "2026-11-03T10:00:00.000Z",
-          session_id: "sess_1",
-          plan_version_id: "version_123",
-          page_id: "page_1",
-        },
-      ],
-    })
-
-    const result = await signUp(deps, {
-      projectId: "proj_123",
-      input: { ...baseInput, sessionId: "sess_1" } as never,
-    })
-    await Promise.all(pending)
-
-    expect(result.val?.success).toBe(true)
-    expect(send.mock.calls[0]?.[0][0].page_id).toBeUndefined()
-  })
-
   it("signs up without page attribution when the page read fails", async () => {
     const { deps, send, pending } = createDeps({
       versions: [createPlanVersion("sandbox")],
-      basinRows: [],
     })
     ;(deps.db.query.pages.findFirst as ReturnType<typeof vi.fn>).mockRejectedValue(
       new Error("connection reset")
@@ -843,7 +726,7 @@ describe("customer signUp plan attribution", () => {
   it("refuses an enterprise plan version passed explicitly", async () => {
     const enterprise = createPlanVersion("sandbox")
     enterprise.plan.enterprisePlan = true
-    const { deps } = createDeps({ versions: [enterprise], basinRows: [] })
+    const { deps } = createDeps({ versions: [enterprise] })
 
     const result = await signUp(deps, {
       projectId: "proj_123",
