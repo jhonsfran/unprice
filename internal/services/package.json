@@ -30,6 +30,7 @@
     "./ingestion": "./src/ingestion/index.ts",
     "./apikey": "./src/apikey/index.ts",
     "./billing": "./src/billing/index.ts",
+    "./rate-cards": "./src/rate-cards/index.ts",
     "./rating": "./src/rating/index.ts",
     "./entitlements": "./src/entitlements/index.ts",
     "./wallet": "./src/wallet/index.ts",

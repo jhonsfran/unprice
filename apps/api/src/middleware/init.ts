@@ -232,6 +232,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
       ledger: svcCtx.ledger,
       wallet: svcCtx.wallet,
       billing: svcCtx.billing,
+      rateCards: svcCtx.rateCards,
     })
 
     await next()

@@ -904,6 +904,11 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 
 ## Tests, Tooling, And Docs
 
+- 2026-11-03: Zod 4 throws on `.pick`/`.omit` of a refined object; export the unrefined fields
+  schema and refine each composition (see `validators/rate-cards.ts`). Postgres `jsonb` reorders
+  object keys (shorter first), so compare stored JSON with `canonicalJson` (`rate-cards/wire.ts`)
+  and expect stored-map iteration order, not authoring order.
+
 - 2026-10-27: Select integration databases through `BILLING_TEST_DATABASE_URL` in the shared test
   helper; Vitest worker `env` alone does not select the database used by global setup.
 

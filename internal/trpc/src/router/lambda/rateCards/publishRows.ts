@@ -1,0 +1,18 @@
+import { publishRateRowsInputSchema } from "@unprice/db/validators"
+import { publishRateRows } from "@unprice/services/use-cases"
+import { domainErrorToTrpcError } from "#domain-error"
+import { protectedProjectProcedure } from "#trpc"
+
+/** Publishes price rows; a change to an open row starts at least 10 minutes from now. */
+export const publishRows = protectedProjectProcedure
+  .input(publishRateRowsInputSchema)
+  .mutation(async (opts) => {
+    opts.ctx.verifyRole(["OWNER", "ADMIN"])
+    const { features, rateCards } = opts.ctx.services
+    const result = await publishRateRows(
+      { services: { features, rateCards } },
+      { projectId: opts.ctx.project.id, ...opts.input, now: Date.now() }
+    )
+    if (result.err) throw domainErrorToTrpcError(result.err)
+    return result.val
+  })

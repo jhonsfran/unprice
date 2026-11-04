@@ -74,24 +74,27 @@ export const rateCostSchema = z.object({
   components: z.array(rateComponentSchema).min(1).max(8),
 })
 
-export const rateRowSchema = z
-  .object({
-    id: z.string().min(1),
-    rateCardId: z.string().min(1),
-    featureSlug: featureSlugSchema,
-    /** Exact-match dimension values; {} is the feature's default row. */
-    match: z.record(z.string().min(1), z.string()),
-    price: ratePriceSchema,
-    cost: rateCostSchema.nullable(),
-    effectiveFrom: epochMsSchema,
-    effectiveTo: epochMsSchema.nullable(),
-    source: z.enum(["manual", "catalog"]),
-    sourceRef: z.string().nullable(),
-  })
-  .refine((row) => row.effectiveTo === null || row.effectiveTo > row.effectiveFrom, {
+const rateRowFieldsSchema = z.object({
+  id: z.string().min(1),
+  rateCardId: z.string().min(1),
+  featureSlug: featureSlugSchema,
+  /** Exact-match dimension values; {} is the feature's default row. */
+  match: z.record(z.string().min(1), z.string()),
+  price: ratePriceSchema,
+  cost: rateCostSchema.nullable(),
+  effectiveFrom: epochMsSchema,
+  effectiveTo: epochMsSchema.nullable(),
+  source: z.enum(["manual", "catalog"]),
+  sourceRef: z.string().nullable(),
+})
+
+export const rateRowSchema = rateRowFieldsSchema.refine(
+  (row) => row.effectiveTo === null || row.effectiveTo > row.effectiveFrom,
+  {
     message: "effectiveTo must be after effectiveFrom",
     path: ["effectiveTo"],
-  })
+  }
+)
 
 export const marginPolicySchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("manual") }),
@@ -112,41 +115,46 @@ export const marginPolicySchema = z.discriminatedUnion("type", [
   }),
 ])
 
-export const rateCardSchema = z
-  .object({
-    id: z.string().min(1),
-    projectId: z.string().min(1),
-    name: z.string().min(1),
-    unit: rateCardUnitSchema,
-    /** What one credit is worth in USD; credits cards only. */
-    creditValueUsd: positiveDecimalSchema.optional(),
-    marginPolicy: marginPolicySchema,
-  })
-  .superRefine((card, ctx) => {
-    const credits = card.unit.startsWith("credits:")
-    if (!credits && card.creditValueUsd !== undefined) {
-      ctx.addIssue({
-        code: "custom",
-        message: "only a credits card has a credit value",
-        path: ["creditValueUsd"],
-      })
-    }
-    if (card.marginPolicy.type !== "costPlus") return
-    if (credits && card.creditValueUsd === undefined) {
-      ctx.addIssue({
-        code: "custom",
-        message: "a cost-plus credits card needs creditValueUsd",
-        path: ["creditValueUsd"],
-      })
-    }
-    if (!credits && card.unit !== "money:USD") {
-      ctx.addIssue({
-        code: "custom",
-        message: "costs are in USD, so a cost-plus money card must be money:USD",
-        path: ["marginPolicy"],
-      })
-    }
-  })
+const rateCardFieldsSchema = z.object({
+  id: z.string().min(1),
+  projectId: z.string().min(1),
+  name: z.string().min(1),
+  unit: rateCardUnitSchema,
+  /** What one credit is worth in USD; credits cards only. */
+  creditValueUsd: positiveDecimalSchema.optional(),
+  marginPolicy: marginPolicySchema,
+})
+
+function refineCard(
+  card: Pick<z.infer<typeof rateCardFieldsSchema>, "unit" | "creditValueUsd" | "marginPolicy">,
+  ctx: z.RefinementCtx
+) {
+  const credits = card.unit.startsWith("credits:")
+  if (!credits && card.creditValueUsd !== undefined) {
+    ctx.addIssue({
+      code: "custom",
+      message: "only a credits card has a credit value",
+      path: ["creditValueUsd"],
+    })
+  }
+  if (card.marginPolicy.type !== "costPlus") return
+  if (credits && card.creditValueUsd === undefined) {
+    ctx.addIssue({
+      code: "custom",
+      message: "a cost-plus credits card needs creditValueUsd",
+      path: ["creditValueUsd"],
+    })
+  }
+  if (!credits && card.unit !== "money:USD") {
+    ctx.addIssue({
+      code: "custom",
+      message: "costs are in USD, so a cost-plus money card must be money:USD",
+      path: ["marginPolicy"],
+    })
+  }
+}
+
+export const rateCardSchema = rateCardFieldsSchema.superRefine(refineCard)
 
 /** One provider's cost for one model, in USD per million of each component. */
 export const modelCostSchema = z.object({
@@ -169,6 +177,37 @@ export const featurePricingSchema = z.object({
   included: rateDecimalSchema.nullable(),
 })
 
+/** A new card; its id and project come from the caller's context. */
+export const createRateCardInputSchema = rateCardFieldsSchema
+  .omit({ id: true, projectId: true })
+  .superRefine(refineCard)
+
+/** A row to publish: the card, interval, and provenance come from the publish itself. */
+export const rateRowDraftSchema = rateRowFieldsSchema.pick({
+  featureSlug: true,
+  match: true,
+  price: true,
+  cost: true,
+})
+
+export const publishRateRowsInputSchema = z.object({
+  cardId: z.string().min(1),
+  rows: z.array(rateRowDraftSchema).min(1).max(500),
+  effectiveFrom: epochMsSchema,
+})
+
+export const previewCostPlusInputSchema = z.object({
+  cardId: z.string().min(1),
+  at: epochMsSchema,
+})
+
+export const publishCostPlusInputSchema = z.object({
+  cardId: z.string().min(1),
+  effectiveFrom: epochMsSchema,
+  /** The `draftHash` of the preview the caller reviewed. */
+  draftHash: z.string().min(1),
+})
+
 export type RateComponent = z.infer<typeof rateComponentSchema>
 export type RateTier = z.infer<typeof rateTierSchema>
 export type RatePrice = z.infer<typeof ratePriceSchema>
@@ -182,3 +221,5 @@ export type ModelCost = z.infer<typeof modelCostSchema>
 export type ModelCostInput = z.input<typeof modelCostSchema>
 export type FeaturePricing = z.infer<typeof featurePricingSchema>
 export type FeaturePricingInput = z.input<typeof featurePricingSchema>
+export type CreateRateCardInput = z.infer<typeof createRateCardInputSchema>
+export type RateRowDraft = z.infer<typeof rateRowDraftSchema>

@@ -47,6 +47,9 @@ export const prefixes = {
   budget_run: "brun",
   budget: "bgt",
   budget_audit: "bga",
+  rate_card: "rc",
+  rate_card_row: "rr",
+  model_cost: "mc",
 } as const
 
 // Thread-local counter for monotonicity within the same millisecond

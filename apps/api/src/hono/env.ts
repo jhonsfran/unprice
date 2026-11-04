@@ -16,6 +16,7 @@ import type { LedgerGateway } from "@unprice/services/ledger"
 import type { Metrics } from "@unprice/services/metrics"
 import type { PlanService } from "@unprice/services/plans"
 import type { ProjectService } from "@unprice/services/projects"
+import type { RateCardService } from "@unprice/services/rate-cards"
 import type { SubscriptionService } from "@unprice/services/subscriptions"
 import type { WalletService } from "@unprice/services/wallet"
 import type { EvlogVariables } from "evlog/hono"
@@ -40,6 +41,7 @@ export type DomainServiceContext = {
   ledger: LedgerGateway
   wallet: WalletService
   billing: BillingService
+  rateCards: RateCardService
 }
 
 /**

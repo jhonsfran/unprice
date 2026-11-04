@@ -1,0 +1,60 @@
+import { DomainError, type DomainErrorKind } from "../domain-error-kind"
+import type { CardViolation } from "../pricing"
+
+export type RateCardRejection =
+  | Readonly<{ code: "CARD_NOT_FOUND"; cardId: string }>
+  | Readonly<{ code: "CARD_NAME_TAKEN"; name: string }>
+  | Readonly<{ code: "UNKNOWN_FEATURE"; features: readonly string[] }>
+  | Readonly<{ code: "NOTICE_TOO_SHORT"; featureSlug: string; earliest: number }>
+  | Readonly<{ code: "SCHEDULE_CONFLICT"; featureSlug: string; scheduledFrom: number }>
+  | Readonly<{ code: "INVALID_CARD"; violations: readonly CardViolation[] }>
+  | Readonly<{ code: "DRAFT_STALE"; draftHash: string }>
+  | Readonly<{ code: "NOT_COST_PLUS"; cardId: string }>
+
+export type RateCardErrorCode = RateCardRejection["code"]
+
+const KIND: Record<RateCardErrorCode, DomainErrorKind> = {
+  CARD_NOT_FOUND: "not_found",
+  NOT_COST_PLUS: "precondition",
+  CARD_NAME_TAKEN: "conflict",
+  UNKNOWN_FEATURE: "bad_request",
+  NOTICE_TOO_SHORT: "bad_request",
+  SCHEDULE_CONFLICT: "conflict",
+  INVALID_CARD: "bad_request",
+  DRAFT_STALE: "conflict",
+}
+
+function message(rejection: RateCardRejection): string {
+  switch (rejection.code) {
+    case "CARD_NOT_FOUND":
+      return `Rate card ${rejection.cardId} not found`
+    case "CARD_NAME_TAKEN":
+      return `A rate card named ${rejection.name} already exists`
+    case "UNKNOWN_FEATURE":
+      return `Unknown features: ${rejection.features.join(", ")}`
+    case "NOTICE_TOO_SHORT":
+      return `A price change for ${rejection.featureSlug} can start at ${new Date(rejection.earliest).toISOString()} at the earliest`
+    case "SCHEDULE_CONFLICT":
+      return `${rejection.featureSlug} already has a price scheduled from ${new Date(rejection.scheduledFrom).toISOString()}; a change must start after it`
+    case "INVALID_CARD":
+      return `The card would be invalid: ${JSON.stringify(rejection.violations)}`
+    case "DRAFT_STALE":
+      return "The cost-plus draft changed since it was previewed; preview it again"
+    case "NOT_COST_PLUS":
+      return `Rate card ${rejection.cardId} has no cost-plus margin policy`
+  }
+}
+
+/** An expected rate card failure; `rejection` is plain data for adapters to map. */
+export class UnPriceRateCardError extends DomainError<{ code: RateCardErrorCode }> {
+  public readonly retry = false
+  public readonly name = "UnPriceRateCardError"
+  public readonly code: RateCardErrorCode
+  public readonly kind: DomainErrorKind
+
+  constructor(public readonly rejection: RateCardRejection) {
+    super({ message: message(rejection), context: { code: rejection.code } })
+    this.code = rejection.code
+    this.kind = KIND[rejection.code]
+  }
+}
