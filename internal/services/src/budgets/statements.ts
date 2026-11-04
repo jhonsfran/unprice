@@ -31,9 +31,26 @@ function sameRegistration(statement: Statement, registration: StatementRegistrat
 }
 
 /**
- * The statements to create. A period id registered with the same fields replays; with others it
- * conflicts. A new statement must not overlap another of its feature. `known` holds every stored
- * statement with one of the period ids, and every one of each feature that is open or overlaps.
+ * Whether `registration` ends an open statement early: billing cut its period short (a plan change
+ * or a cancel ends the phase mid-cycle), and no event the statement counted happened at or after
+ * the new end, so every line still falls inside it.
+ */
+function shortens(statement: Statement, registration: StatementRegistration): boolean {
+  return (
+    statement.state === "open" &&
+    statement.statementKey === registration.statementKey &&
+    statement.featureSlug === registration.featureSlug &&
+    statement.start === registration.start &&
+    registration.end < statement.end &&
+    (statement.lastEventAt === null || statement.lastEventAt < registration.end)
+  )
+}
+
+/**
+ * The statements to create or cut short. A period id registered with the same fields replays; an
+ * earlier end shortens an open statement whose events all fell before it; anything else conflicts.
+ * A new statement must not overlap another of its feature. `known` holds every stored statement
+ * with one of the period ids, and every one of each feature that is open or overlaps.
  */
 export function decideRegister(
   registrations: readonly StatementRegistration[],
@@ -50,7 +67,11 @@ export function decideRegister(
     const existing = byId.get(periodId)
     if (existing) {
       if (sameRegistration(existing, registration)) continue
-      return reject({ code: "STATEMENT_CONFLICT", periodId })
+      if (!shortens(existing, registration)) return reject({ code: "STATEMENT_CONFLICT", periodId })
+      const shortened = { ...existing, end }
+      byId.set(periodId, shortened)
+      created.push(shortened)
+      continue
     }
     // "#" names the budget's own perpetual statements; billing never registers into them.
     if (periodId.startsWith("#") || registration.statementKey.startsWith("#")) {
@@ -198,7 +219,8 @@ function billedBy([prior, row]: RowStep): Billed | null {
 
 /**
  * Violations of statement conservation; empty when the transition may commit.
- * 1. A statement keeps its identity and moves only open -> sealed -> completed.
+ * 1. A statement keeps its identity and moves only open -> sealed -> completed. Only an open one
+ *    may end earlier, and never at or before an event it counted.
  * 2. Its amount, quantity, cost, and events grow by exactly what the rows billed to it, and its
  *    positions move exactly as the billed lines say, in row order. A sealed statement never
  *    changes.
@@ -267,8 +289,10 @@ export function statementViolations(params: {
   return violations
 }
 
+/** The same statement, or an open one cut short before any event it counted. */
 function sameIdentity(a: Statement, b: Statement): boolean {
-  return a.periodId === b.periodId && sameRegistration(a, b)
+  if (a.periodId !== b.periodId) return false
+  return sameRegistration(a, b) || (b.state === "open" && shortens(a, b))
 }
 
 function samePositions(a: Readonly<Record<string, Amount>>, b: Readonly<Record<string, Amount>>) {

@@ -585,6 +585,65 @@ describe("a payer budget prices usage events at ingestion", () => {
     })
   })
 
+  it("meters a free plan without a card: usage counts on its quantity limit and costs nothing", () => {
+    const parsed = upsertBudgetInternalInputSchema.parse({
+      key: "unprice:customer:cus_acme",
+      unit: "USD",
+      limits: [{ feature: "api_calls", amount: "100", window: "month" }],
+      pricing: {
+        features: [{ ...apiCalls, dimensions: [], included: null, priced: false }],
+        statements: "required",
+      },
+    })
+    const store = new MemoryBudgetStore()
+    ok(
+      store.run(
+        { type: "upsert", projectId: "proj_1", mayLoosen: true, setsPricing: true, ...parsed },
+        NOV + hour
+      )
+    )
+    ok(store.run(register(month("api_calls", NOV, DEC)), NOV + hour))
+
+    ok(store.run(record("r1", apiBatch(60), NOV + 2 * hour), NOV + 2 * hour))
+    const over = store.run(charge("c1", apiBatch(50)), NOV + 3 * hour)
+
+    expect(rejection(over).code).toBe("LIMIT_EXCEEDED")
+    expect(totals(store.statements.get("api_calls:inv_2026-11"))).toMatchObject({ amount: "0" })
+    expect(() =>
+      upsertBudgetInternalInputSchema.parse({
+        key: "unprice:customer:cus_acme",
+        unit: "USD",
+        limits: [],
+        pricing: {
+          features: [{ ...apiCalls, dimensions: [], included: null, priced: true }],
+          statements: "required",
+        },
+      })
+    ).toThrow("a priced feature needs a rate card")
+  })
+
+  it("cuts an open period short when billing ends it early, never before an event it counted", () => {
+    const store = pricedStore({ features: [images] })
+    const nov = month("images", NOV, DEC)
+    ok(store.run(register(nov), NOV + hour))
+    ok(store.run(charge("c1", image("1024")), NOV + 10 * day))
+
+    const changeAt = NOV + 10 * day - hour
+    expect(rejection(store.run(register({ ...nov, end: changeAt }), NOV + 10 * day))).toEqual({
+      code: "STATEMENT_CONFLICT",
+      periodId: "images:inv_2026-11",
+    })
+    const cutAt = NOV + 12 * day
+    const after = { ...month("images", cutAt, DEC), periodId: "images:inv_2026-11b" }
+    ok(store.run(register({ ...nov, end: cutAt }, after), NOV + 12 * day))
+    const listed = ok(store.run({ type: "statements" }, NOV + 12 * day))
+    if (listed.outcome.type !== "statements") throw new Error("not a listing")
+    expect(listed.outcome.statements.map((s) => [s.periodId, s.end, s.events])).toEqual([
+      ["images:inv_2026-11", cutAt, 1],
+      ["images:inv_2026-11b", DEC, 0],
+    ])
+  })
+
   it("replays a record after a price change with the amount it was first priced at", () => {
     const store = pricedStore({ cards: [priceChangeCard], features: [tokens] })
     ok(store.run(register(month("llm_tokens", NOV, DEC)), NOV + hour))

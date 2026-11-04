@@ -32,7 +32,7 @@ import {
 } from "./budget-shared"
 import { eventSlugSchema } from "./events"
 import { featurePricingSchema } from "./rate-cards"
-import { currencySchema } from "./shared"
+import { currencySchema, featureSlugSchema } from "./shared"
 
 export {
   BUDGET_WINDOWS,
@@ -81,16 +81,13 @@ const budgetLimitFields = {
   enforce: budgetEnforceSchema.optional().openapi({ description: "Defaults to hard" }),
 }
 
-/** A feature slug: what a quantity measure counts. */
-const budgetFeatureSchema = z.string().regex(/^[a-z0-9_-]{1,64}$/)
-
 /**
  * What a limit caps: the amount every consumption carries, or the quantity of one feature. Not on
  * the public wire yet, where every limit caps the amount.
  */
 export const budgetMeasureSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("amount") }),
-  z.object({ type: z.literal("quantity"), feature: budgetFeatureSchema }),
+  z.object({ type: z.literal("quantity"), feature: featureSlugSchema }),
 ])
 export type BudgetMeasure = z.infer<typeof budgetMeasureSchema>
 export type BudgetPricing = z.infer<typeof budgetPricingSchema>
@@ -107,7 +104,7 @@ const budgetLimitSchema = z.object(budgetLimitFields).refine(anchoredOnly, ancho
 
 /** A limit that may cap a feature's quantity; only internal callers send `feature`. */
 const meteredBudgetLimitSchema = z
-  .object({ ...budgetLimitFields, feature: budgetFeatureSchema.optional() })
+  .object({ ...budgetLimitFields, feature: featureSlugSchema.optional() })
   .refine(anchoredOnly, anchoredOnlyMessage)
 
 function limitsSchema<T extends z.ZodTypeAny>(limit: T) {
@@ -164,7 +161,7 @@ const budgetDefinitionObject = z.object(budgetDefinitionFields).strict()
  * whether the budget prices it. An event slug may feed several features.
  */
 export const budgetMeteredFeatureSchema = featurePricingSchema.extend({
-  slug: budgetFeatureSchema,
+  slug: featureSlugSchema,
   eventSlug: eventSlugSchema,
   priced: z.boolean(),
 })
@@ -184,16 +181,25 @@ export type BudgetFunding = z.infer<typeof budgetFundingSchema>
 /**
  * How a budget meters and prices usage events: the rate cards by id (their unit must be the
  * budget's), the metered features, whether usage needs a registered billing statement
- * (ADR-0007: payer budgets require one), and how priced usage is funded. Internal callers only.
+ * (ADR-0007: payer budgets require one), and how priced usage is funded. A budget whose features
+ * are all free (a free plan) meters without cards; a priced feature needs them. Internal callers
+ * only.
  */
 export const budgetPricingSchema = z
   .object({
-    cards: z.object({ base: z.string().min(1), overlay: z.string().min(1).optional() }).strict(),
+    cards: z
+      .object({ base: z.string().min(1), overlay: z.string().min(1).optional() })
+      .strict()
+      .optional(),
     features: z.array(budgetMeteredFeatureSchema).max(64),
     statements: z.enum(["required", "none"]),
     funding: budgetFundingSchema.optional(),
   })
   .strict()
+  .refine((pricing) => pricing.cards !== undefined || !pricing.features.some((f) => f.priced), {
+    path: ["cards"],
+    message: "a priced feature needs a rate card",
+  })
 
 /** A period id or statement key; "#" starts the budget's own perpetual statements. */
 const statementIdSchema = z.string().min(1).max(128).regex(/^[^#]/, "must not start with #")
@@ -203,7 +209,7 @@ export const budgetStatementRegistrationSchema = z
   .object({
     periodId: statementIdSchema,
     statementKey: statementIdSchema,
-    featureSlug: budgetFeatureSchema,
+    featureSlug: featureSlugSchema,
     start: budgetInstantInputSchema,
     end: budgetInstantInputSchema,
   })
@@ -450,6 +456,10 @@ export const budgetBalanceSchema = z.object({
       id: z.string(),
       window: budgetWindowSchema,
       enforce: budgetEnforceSchema,
+      feature: featureSlugSchema.optional().openapi({
+        description:
+          "The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount",
+      }),
       amount: budgetDecimalSchema.openapi({ description: "The limit" }),
       consumed: budgetDecimalSchema.openapi({ description: "Used in the current period" }),
       held: budgetDecimalSchema.openapi({ description: "Held by open holds and leases" }),
@@ -502,6 +512,10 @@ export const budgetSchema = z.object({
         description: "The anchor instant of an anchored window, in epoch milliseconds",
       }),
       enforce: budgetEnforceSchema,
+      feature: featureSlugSchema.optional().openapi({
+        description:
+          "The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount",
+      }),
     })
   ),
   holds: z.object({ defaultTtlMs: z.number().int(), maxTtlMs: z.number().int() }),

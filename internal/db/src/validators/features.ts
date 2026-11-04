@@ -2,7 +2,12 @@ import { createInsertSchema, createSelectSchema } from "drizzle-zod"
 import * as z from "zod"
 
 import * as schema from "../schema"
-import { deniedReasonSchema, meterConfigSchema, typeFeatureSchema } from "./shared"
+import {
+  deniedReasonSchema,
+  featureSlugSchema,
+  meterConfigSchema,
+  typeFeatureSchema,
+} from "./shared"
 
 export const featureSelectBaseSchema = createSelectSchema(schema.features, {
   meterConfig: () =>
@@ -27,15 +32,9 @@ export const featureInsertBaseSchema = createInsertSchema(schema.features, {
         "Human-readable name for the feature displayed to users. Must contain only letters, numbers, and spaces. Example: 'API Calls', 'Storage GB', 'Team Members'"
       ),
   slug: () =>
-    z
-      .string()
-      .min(1)
-      .refine((slug) => /^[a-z0-9-]+$/.test(slug), {
-        message: "Slug must be a valid slug",
-      })
-      .describe(
-        "URL-friendly unique identifier for the feature. Must be lowercase with hyphens only. Used for API lookups and references. Example: 'api-calls', 'storage-gb', 'team-members'"
-      ),
+    featureSlugSchema.describe(
+      "Unique identifier for the feature: lowercase letters, digits, hyphens and underscores, at most 64 characters. Used for API lookups, rate card rows, and budget limits. Example: 'api-calls', 'storage_gb', 'team-members'"
+    ),
   unitOfMeasure: () =>
     z
       .string()

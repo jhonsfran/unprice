@@ -331,7 +331,7 @@ function decideUpsert(
   // Only new pricing reaches the cards: each must be cached, price in the budget's unit, and suit
   // its features. Unchanged pricing was checked when it was set.
   const unpriceable =
-    config.pricing && repricesBudget(command, budget)
+    config.pricing?.cards && repricesBudget(command, budget)
       ? compatibleCards(config.pricing, unit, view.cards, now)
       : null
   if (!budget) {

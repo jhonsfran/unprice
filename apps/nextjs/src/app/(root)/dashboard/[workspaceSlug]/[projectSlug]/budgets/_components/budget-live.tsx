@@ -17,6 +17,7 @@ import { useTRPC, useTRPCClient } from "~/trpc/client"
 import {
   formatBudgetAmount,
   formatCountdown,
+  formatLimitAmount,
   formatUnit,
   subtractAmount,
   sumAmounts,
@@ -360,7 +361,7 @@ function ReservationRow({
 }
 
 function LimitRow({ limit, unit }: { limit: Limit; unit: string }) {
-  const amount = (value: string) => formatBudgetAmount(value, unit)
+  const amount = (value: string) => formatLimitAmount(value, limit, unit)
   const base = Number(toBaseUnits(limit.amount))
   const share = (value: string) =>
     base > 0 ? Math.min(100, (Number(toBaseUnits(value)) / base) * 100) : 0

@@ -138,8 +138,9 @@ export function featuresOf(
   return pricing.features.filter((feature) => feature.eventSlug === eventSlug)
 }
 
-/** The ids of the cards the pricing names: the base, then the overlay. */
+/** The ids of the cards the pricing names: the base, then the overlay; none when nothing is priced. */
 export function cardIdsOf(pricing: BudgetPricing): string[] {
+  if (pricing.cards === undefined) return []
   const { base, overlay } = pricing.cards
   return overlay === undefined ? [base] : [base, overlay]
 }
@@ -151,6 +152,8 @@ export function cardsOf(
   cached: Readonly<Record<string, CardRows>>
 ): Result<RateCards, UnPriceBudgetError> {
   const cards: CardRows[] = []
+  // The schema gives every priced feature its cards; a pricing without cards prices nothing.
+  if (pricing.cards === undefined) throw new Error("a pricing without cards prices nothing")
   for (const cardId of cardIdsOf(pricing)) {
     // Card ids are caller data: `constructor` is a missing card, not Object's.
     const card = Object.hasOwn(cached, cardId) ? cached[cardId] : undefined

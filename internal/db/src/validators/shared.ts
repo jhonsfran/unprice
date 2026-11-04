@@ -42,6 +42,18 @@ export const attributionIdSchema = z
   .max(128)
   .regex(/^[A-Za-z0-9_.:-]+$/, "must be 1-128 letters, digits, '_', '-', '.' or ':'")
 export const typeFeatureSchema = z.enum(FEATURE_TYPES)
+
+/**
+ * The one feature slug: what features, rate rows, and budget measures name a feature by. Lowercase
+ * letters, digits, "-" and "_", starting with a letter or digit; never "|" or ":", because pricing
+ * positions and quantity limit ids key on them.
+ */
+export const featureSlugSchema = z
+  .string()
+  .regex(
+    /^[a-z0-9][a-z0-9_-]{0,63}$/,
+    "a lowercase slug: letters, digits, - and _, starting with a letter or digit, at most 64 characters"
+  )
 export const billingPeriodStatusSchema = z.enum(BILLING_PERIOD_STATUS)
 export const billingPeriodTypeSchema = z.enum(BILLING_PERIOD_TYPE)
 export const usageModeSchema = z.enum(USAGE_MODES)
