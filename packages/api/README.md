@@ -20,28 +20,28 @@ const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN!,
 })
 
-const { result, error } = await unprice.usage.consume({
+const { error } = await unprice.usage.consume({
   customerId: "cus_1234567890",
-  featureSlug: "ai-messages",
   eventSlug: "completions",
   idempotencyKey: "req_123",
   properties: {
-    aiMessages: 1,
     inputTokens: 1840,
     outputTokens: 620,
+    model: "gpt-4.1-mini",
   },
 })
 
+// A limit with no room, or a prepaid wallet that cannot fund the event, is a 402.
+if (error?.code === "BUDGET_EXCEEDED") {
+  return new Response("Usage limit reached", { status: 429 })
+}
 if (error) {
   throw new Error(error.message)
 }
-
-if (!result.allowed) {
-  return new Response("Usage limit reached", { status: 429 })
-}
 ```
 
-Use `access.check` for read-only shadow checks and `usage.record` for async usage evidence. For a
+Use `access.check` for read-only shadow checks and `usage.record` (up to 100 events with their
+`occurredAt`) for usage that already happened. For a
 multi-step workload, call `runs.start` once, `runs.settle` after each completed provider step, and
 `runs.end` once. `runs.consume` remains the pre-work enforcing operation.
 

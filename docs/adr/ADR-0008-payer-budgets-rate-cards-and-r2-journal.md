@@ -42,8 +42,8 @@ cap is a standalone budget key with `closesAt`, as ADR-0006 already allows.
 Keys that start with `unprice:` are written by Unprice. A public upsert, or an `ifMissing` that
 would create one, returns 403, so no caller can define a payer budget before billing compiles it.
 A budget with pricing takes events only: an amount, a usage vector, or a lease is refused with
-`EVENT_REQUIRED`, because nothing would bill it. Until the event routes ship (U11), the public API
-can only read a payer budget. An upsert keeps a budget's pricing unless the caller sets it, and
+`EVENT_REQUIRED`, because nothing would bill it. The public API reaches a payer budget through the
+usage routes (D6) and the access routes, which read it; none of them creates one. An upsert keeps a budget's pricing unless the caller sets it, and
 only billing's compile sets it. Pricing changes only while no hold or lease is open: an open hold
 settles under the pricing that estimated it. A request path (sign-up, change-plan, cancel, wallet
 activation) syncs once and leaves a change refused with `RESERVATIONS_OPEN` to the next sync; a
@@ -119,12 +119,27 @@ period's usage was priced in the unit in force when it landed.
 - Usage counts in the statement period that contains `occurredAt`. If that period is sealed, it
   counts in the earliest open period and the journal marks it `late`. If no period is open, it is
   rejected with `PERIOD_CLOSED`.
+- `record` takes 1 to 100 events and answers one result per event in request order; a refused
+  event carries the HTTP error a single call would return, and the others still count. `consume`
+  is a `charge`: it admits one event only if it fits, and a denial (`LIMIT_EXCEEDED`,
+  `WALLET_EMPTY`) is a 402. Each event names its customer and goes to
+  `unprice:customer:<customerId>`; a customer without a payer budget gets `BUDGET_NOT_FOUND` (404).
+- `/v1/access/check` and `/v1/access/entitlements/current` read the payer budget for metered
+  features. The budget holds metered features only, so a flat, seat, or package feature answers
+  from the customer's entitlement rows.
+- A late record is priced with the card and pricing the budget holds when it arrives: after a plan
+  change, that is the new phase's card, even for usage that falls in the old phase's statement. The
+  budget keeps one pricing, not one per phase, so pricing a late record with its own phase's card
+  would need per-statement pricing and a card cache per phase. Until then this is a known
+  limitation; it reaches only usage recorded late across a plan change, within the 24-hour window.
 
 ### D7. The journal is the budget's operation rows, exported to R2
 
 - Each accepted operation row gets a per-budget `seq`. The alarm sends rows after the export cursor
   to a Pipelines stream that writes an R2 Iceberg table. A row is purged only after it is exported.
-- The API worker sends rejected events to the same stream.
+- The API worker sends rejected events to the same stream, best effort after the response: `seq`
+  0 (the budget never wrote them), operation id `r:<idempotency key>`, status `rejected`, and the
+  event with its rejection in `data`. Readers keep them apart from operation rows by status.
 - Dashboards read history from R2 with Basin SQL. Live balances and current-period usage read the
   budget.
 - Readers deduplicate on `(budget key, seq)`, because export is at least once. Every write of a

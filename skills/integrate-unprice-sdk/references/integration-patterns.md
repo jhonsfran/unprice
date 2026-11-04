@@ -190,24 +190,22 @@ shape rather than copying these field names blindly.
 Derive the idempotency key from a stable logical request or command ID.
 
 ```ts
-const { result, error } = await unprice.usage.consume({
+const { error } = await unprice.usage.consume({
   customerId,
-  featureSlug: "ai-messages",
   eventSlug: "completions",
   idempotencyKey: requestId,
   properties: {
-    aiMessages: 1,
     inputTokens,
     outputTokens,
   },
 })
 
+// 402: a hard limit has no room, or a prepaid wallet cannot fund the event.
+if (error?.code === "BUDGET_EXCEEDED") {
+  return denyPaidAction(error)
+}
 if (error) {
   throw new Error(error.message)
-}
-
-if (!result.allowed) {
-  return denyPaidAction(result)
 }
 
 return performPaidAction()
@@ -224,16 +222,22 @@ run rather than pretending a guessed consume amount is exact.
 Use the host's durable background or after-response mechanism when available.
 
 ```ts
-const { error } = await unprice.usage.record({
-  customerId,
-  eventSlug: "completions",
-  idempotencyKey: requestId,
-  properties: {
-    aiMessages: 1,
-    inputTokens,
-    outputTokens,
-  },
+const { result, error } = await unprice.usage.record({
+  events: [
+    {
+      customerId,
+      eventSlug: "completions",
+      idempotencyKey: requestId,
+      // When the work ran, not when the call is sent: a retry then replays.
+      occurredAt: completedAt,
+      properties: {
+        inputTokens,
+        outputTokens,
+      },
+    },
+  ],
 })
+// Each event answers on its own; a refused one carries error.reason (NOT_PRICED, TOO_LATE, ...).
 
 if (error) {
   logger.error(new Error(error.message), {

@@ -1,31 +1,30 @@
 ---
 title: "Consume usage"
-description: "Synchronously apply usage and return the allow or deny decision."
+description: "Price one usage event and count it only if it fits, before the work runs."
 ---
 
 <RequestExample>
 
 ```ts
 const { result, error } = await unprice.usage.consume({
-  idempotencyKey: "idem_123",
+  idempotencyKey: "req_8f2c",
   eventSlug: "completions",
-  featureSlug: "ai-messages",
   customerId: "cus_1234567890",
   properties: {
-    aiMessages: 1,
     inputTokens: 1840,
     outputTokens: 620,
-    model: "gpt-4.1-mini"
-  }
+    model: "gpt-4.1-mini",
+  },
 });
 
+if (error?.code === "BUDGET_EXCEEDED") {
+  return new Response("Usage limit reached", { status: 429 });
+}
 if (error) {
   throw new Error(`${error.code}: ${error.message}`);
 }
 
-if (!result.allowed) {
-  return new Response(result.rejectionReason ?? "Usage denied", { status: 429 });
-}
+console.log(result.amount);
 ```
 
 </RequestExample>
@@ -34,45 +33,61 @@ if (!result.allowed) {
 ```json
 {
   "allowed": true,
-  "state": "processed",
-  "idempotencyStatus": "new"
+  "customerId": "cus_1234567890",
+  "amount": "0.0042",
+  "crossed": [],
+  "replayed": false,
+  "balance": {
+    "remaining": null,
+    "held": "0",
+    "limits": [
+      {
+        "id": "completions:month",
+        "window": "month",
+        "enforce": "hard",
+        "feature": "completions",
+        "amount": "1000",
+        "consumed": "43",
+        "held": "0",
+        "remaining": "957",
+        "resetsAt": 1798761600000
+      }
+    ],
+    "asOf": 1796083200000
+  }
 }
 ```
 </ResponseExample>
 
 ## Request
 
-<ParamField body="featureSlug" type="string" required>
-    The specific feature or entitlement to consume against, for example `ai-messages`.
-</ParamField>
-
-<ParamField body="customerId" type="string">
-    The customer ID. This is required when the API key has no default customer binding.
-</ParamField>
-
 <ParamField body="idempotencyKey" type="string" required>
-    Logical key used to deduplicate the event.
+    Up to 256 characters. A retry with the same key and the same event replays the first answer
+    (`replayed: true`) and counts once.
 </ParamField>
 
 <ParamField body="eventSlug" type="string" required>
-    The broad event kind configured in Unprice, for example `completions`.
+    The event a metered feature of the customer's plan listens to, for example `completions`. One
+    event can feed several features.
 </ParamField>
 
-<ParamField body="id" type="string">
-    Optional event ID from your system. Unprice creates an internal ID when you omit it.
+<ParamField body="customerId" type="string">
+    The customer ID. Required when the API key has no default customer binding.
 </ParamField>
 
-<ParamField body="timestamp" type="number">
-    Optional event timestamp in epoch milliseconds. Unprice uses the request time when you omit it.
-</ParamField>
-
-<ParamField body="properties" type="object" required>
-    Event properties used by meters. For `usage.consume`, the targeted feature's meter reads the
-    relevant field from this object.
+<ParamField body="properties" type="object">
+    Flat strings, numbers, booleans, or null, at most 4 KB. The meter reads the quantity and the
+    dimensions (such as `model`) from them.
 </ParamField>
 
 ## Response
 
-Returns an allow or deny decision for the targeted feature. `state` is `processed` when the event
-was applied and `rejected` when Unprice denied it. On a denial, inspect `rejectionReason` and
-`message`. Reuse the same `idempotencyKey` when you retry the same logical request.
+The customer's subscription budget prices the event at the current time and counts it only if it
+fits every hard limit. `amount` is what it cost, in the budget's unit.
+
+| Status | Error code | When |
+| --- | --- | --- |
+| 402 | `BUDGET_EXCEEDED` | A hard limit has no room (`details.blocked` names it), or a prepaid wallet cannot fund the event |
+| 400 | `BAD_REQUEST` | No rate prices the event (`NOT_PRICED`), or no metered feature takes its slug (`UNKNOWN_EVENT`) |
+| 404 | `NOT_FOUND` | The customer has no subscription yet |
+| 409 | `CONFLICT` | The key was used for another event, the billing period is closed, or the subscription ended |
