@@ -197,9 +197,7 @@ describe("processWebhookEvent", () => {
       },
       db,
       logger,
-      analytics: {
-        ingestEvents: vi.fn(),
-      } as never,
+      webEvents: { send: vi.fn() } as never,
       waitUntil: vi.fn(),
     }
   }

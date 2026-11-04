@@ -63,9 +63,7 @@ describe("completeProviderSignUp", () => {
   it("reuses an existing subscription and phase when provider signup completion is replayed", async () => {
     const { db, txExecute, txInsert, txUpdate } = createReplayDb()
     const logger = createLogger()
-    const analytics = {
-      ingestEvents: vi.fn().mockResolvedValue(undefined),
-    }
+    const webEvents = { send: vi.fn().mockResolvedValue(Ok({ sent: 1 })) }
     const generateBillingPeriods = vi
       .fn()
       .mockResolvedValue(Ok({ cyclesCreated: 0, phasesProcessed: 1 }))
@@ -84,7 +82,7 @@ describe("completeProviderSignUp", () => {
         },
         db,
         logger,
-        analytics: analytics as never,
+        webEvents,
         waitUntil,
       },
       {

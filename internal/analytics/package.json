@@ -6,7 +6,6 @@
   "exports": {
     ".": "./src/index.ts",
     "./env": "./env.ts",
-    "./client": "./src/client.ts",
     "./utils": "./src/utils/index.ts"
   },
   "typesVersions": {

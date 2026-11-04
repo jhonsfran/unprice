@@ -1,9 +1,10 @@
-import type { Analytics, PageBrowserVisits } from "@unprice/analytics"
+import type { PageBrowserVisits } from "@unprice/services/analytics"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
+import { pageVisitsInputSchema } from "./web-analytics-input"
 
 export const getBrowserVisits = protectedProjectProcedure
-  .input(z.custom<Parameters<Analytics["getBrowserVisits"]>[0]>())
+  .input(pageVisitsInputSchema)
   .output(
     z.object({
       data: z.custom<PageBrowserVisits>(),

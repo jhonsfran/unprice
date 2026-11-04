@@ -1,6 +1,7 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Stats } from "@unprice/analytics/utils"
 import type { Database } from "@unprice/db"
+import type { BasinSql, WebEventsWriter } from "@unprice/lakehouse"
 import type { Logger } from "@unprice/logs"
 import type { ApiKeysService } from "@unprice/services/apikey"
 import type { BillingService } from "@unprice/services/billing"
@@ -68,6 +69,9 @@ export type HonoEnv = EvlogVariables & {
     logger: Logger
     metrics: Metrics
     analytics: Analytics
+    /** Web analytics: sign-up rows go to the web_events stream; plan-click attribution reads it. */
+    webEvents: WebEventsWriter
+    basinSql: BasinSql
     rawIngestionQueue: RawIngestionQueueClient
     // biome-ignore lint/suspicious/noExplicitAny: platform-specific promise handler
     waitUntil: (promise: Promise<any>) => void

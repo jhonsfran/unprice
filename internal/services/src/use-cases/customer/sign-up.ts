@@ -1,11 +1,12 @@
-import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import { customerProviderIds, customerSessions, customers } from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
 import type { CustomerSignUp, Plan, PlanVersion, Project } from "@unprice/db/validators"
 import { Err, type FetchError, Ok, type Result } from "@unprice/error"
+import { type BasinSql, type WebEventsWriter, createWebEventRow } from "@unprice/lakehouse"
 import type { Logger } from "@unprice/logs"
 import { fromCurrencyMinor, toLedgerMinor } from "@unprice/money"
+import { findLatestPlanClick, recordWebEvents } from "../../analytics/web-analytics"
 import type { ServiceContext } from "../../context"
 import { UnPriceCustomerError } from "../../customers/errors"
 import { getPaymentProviderCapabilities } from "../../payment-provider/service"
@@ -16,7 +17,8 @@ type SignUpDeps = {
   services: Pick<ServiceContext, "plans" | "customers" | "subscriptions" | "billing">
   db: Database
   logger: Logger
-  analytics: Analytics
+  basinSql: BasinSql
+  webEvents: WebEventsWriter
   waitUntil: (promise: Promise<unknown>) => void
 }
 
@@ -152,13 +154,19 @@ async function resolvePlanVersion(
       },
     })
 
-    const data = await deps.analytics.getPlanClickBySessionId({
-      session_id: sessionId,
-      project_id: projectId,
-      action: "plan_click",
+    const planClick = await findLatestPlanClick(deps.basinSql, {
+      projectId,
+      sessionId,
+      now: Date.now(),
     })
 
-    const session = data.data.at(0)
+    if (planClick.err) {
+      deps.logger.warn("plan click attribution unavailable; signing up without it", {
+        error: planClick.err.message,
+      })
+    }
+
+    const session = planClick.val ?? null
 
     if (!session) {
       if (!planVersionId) {
@@ -448,19 +456,18 @@ async function handlePaymentRequiredFlow(
   }
 
   deps.waitUntil(
-    deps.analytics.ingestEvents({
-      action: "signup",
-      version: "1",
-      session_id: input.sessionId ?? "",
-      project_id: projectId,
-      timestamp: new Date().toISOString(),
-      payload: {
+    recordWebEvents(deps, [
+      createWebEventRow({
+        kind: "signup",
+        session_id: input.sessionId ?? "",
+        project_id: projectId,
         customer_id: customerId,
+        plan_id: planVersion.planId,
         plan_version_id: planVersion.id,
-        page_id: pageId,
-        status: "waiting_payment_provider_setup",
-      },
-    })
+        page_id: pageId ?? undefined,
+        signup_status: "waiting_payment_provider_setup",
+      }),
+    ])
   )
 
   return Ok({
@@ -604,19 +611,18 @@ async function handleDirectProvisioningFlow(
     })
 
     deps.waitUntil(
-      deps.analytics.ingestEvents({
-        action: "signup",
-        version: "1",
-        session_id: input.sessionId ?? "",
-        project_id: projectId,
-        timestamp: new Date().toISOString(),
-        payload: {
+      recordWebEvents(deps, [
+        createWebEventRow({
+          kind: "signup",
+          session_id: input.sessionId ?? "",
+          project_id: projectId,
           customer_id: customerId,
+          plan_id: planVersion.planId,
           plan_version_id: planVersion.id,
-          page_id: pageId,
-          status: "signup_success",
-        },
-      })
+          page_id: pageId ?? undefined,
+          signup_status: "signup_success",
+        }),
+      ])
     )
 
     return Ok({

@@ -347,6 +347,268 @@ export const lakehouseSourceSchemaRegistry = {
       },
     ],
   },
+  web_events: {
+    source: "web_events",
+    firstVersion: 1,
+    currentVersion: 1,
+    streamName: "lakehouse_web_events_stream",
+    schemaFile: "web_events.json",
+    sinkTable: "web_events",
+    frontendTable: "web_events",
+    tableAliases: ["web_events"],
+    partitionColumns: LAKEHOUSE_PARTITION_COLUMNS,
+    fields: [
+      {
+        name: "schema_version",
+        type: "int32",
+        required: true,
+        addedInVersion: 1,
+        defaultValue: 1,
+        description: "Schema version for this row.",
+      },
+      {
+        name: "event_id",
+        type: "string",
+        required: true,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Unique row identifier (UUID). Readers deduplicate on it.",
+      },
+      {
+        name: "kind",
+        type: "string",
+        required: true,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Row kind: page_hit, plan_view, plan_click, or signup.",
+      },
+      {
+        name: "timestamp",
+        type: "timestamp",
+        required: true,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Event time (RFC 3339, UTC).",
+      },
+      {
+        name: "project_id",
+        type: "string",
+        required: true,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Project that owns the page or the sign-up.",
+      },
+      {
+        name: "session_id",
+        type: "string",
+        required: true,
+        addedInVersion: 1,
+        defaultValue: "",
+        description: "Visitor session id from track.js. Empty for sign-ups without a session.",
+      },
+      {
+        name: "page_id",
+        type: "string",
+        required: false,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Pricing page id.",
+      },
+      {
+        name: "plan_id",
+        type: "string",
+        required: false,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Plan id, when known (sign-ups).",
+      },
+      {
+        name: "plan_version_id",
+        type: "string",
+        required: false,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Plan version id (plan_view, plan_click, signup).",
+      },
+      {
+        name: "customer_id",
+        type: "string",
+        required: false,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Customer id created by a sign-up.",
+      },
+      {
+        name: "signup_status",
+        type: "string",
+        required: false,
+        addedInVersion: 1,
+        defaultValue: null,
+        description:
+          "Sign-up status: waiting_payment_provider_setup, signup_success, or signup_failed.",
+      },
+      {
+        name: "pathname",
+        type: "string",
+        required: false,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Page path of a page hit.",
+      },
+      {
+        name: "url",
+        type: "string",
+        required: false,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Full URL of a page hit.",
+      },
+      {
+        name: "referrer",
+        type: "string",
+        required: false,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Referrer domain, or (direct).",
+      },
+      {
+        name: "referrer_url",
+        type: "string",
+        required: false,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Full referrer URL, or (direct).",
+      },
+      {
+        name: "locale",
+        type: "string",
+        required: false,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Browser locale.",
+      },
+      {
+        name: "country",
+        type: "string",
+        required: false,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Country code from the edge geolocation.",
+      },
+      {
+        name: "region",
+        type: "string",
+        required: false,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Region from the edge geolocation.",
+      },
+      {
+        name: "city",
+        type: "string",
+        required: false,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "City from the edge geolocation.",
+      },
+      {
+        name: "continent",
+        type: "string",
+        required: false,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Continent from the edge geolocation.",
+      },
+      {
+        name: "device",
+        type: "string",
+        required: false,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Device type: desktop, mobile, tablet, or another user-agent type.",
+      },
+      {
+        name: "device_vendor",
+        type: "string",
+        required: false,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Device vendor from the user agent.",
+      },
+      {
+        name: "device_model",
+        type: "string",
+        required: false,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Device model from the user agent.",
+      },
+      {
+        name: "browser",
+        type: "string",
+        required: false,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Browser name from the user agent.",
+      },
+      {
+        name: "browser_version",
+        type: "string",
+        required: false,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Browser version from the user agent.",
+      },
+      {
+        name: "os",
+        type: "string",
+        required: false,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Operating system from the user agent.",
+      },
+      {
+        name: "os_version",
+        type: "string",
+        required: false,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Operating system version from the user agent.",
+      },
+      {
+        name: "engine",
+        type: "string",
+        required: false,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Rendering engine from the user agent.",
+      },
+      {
+        name: "engine_version",
+        type: "string",
+        required: false,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Rendering engine version from the user agent.",
+      },
+      {
+        name: "cpu_architecture",
+        type: "string",
+        required: false,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "CPU architecture from the user agent.",
+      },
+      {
+        name: "bot",
+        type: "bool",
+        required: false,
+        addedInVersion: 1,
+        defaultValue: false,
+        description: "Whether the user agent looked like a bot.",
+      },
+    ],
+  },
 } as const satisfies SourceSchemaMap
 
 const tableAliasToSource = new Map<string, LakehouseSource>()
@@ -492,6 +754,7 @@ export function buildCloudflareLakehousePipelineDefinitions(
   return listLakehouseSourceSchemas().map((entry) => {
     const suffixBySource: Record<LakehouseSource, string> = {
       events: "events",
+      web_events: "web_events",
     }
     const suffix = suffixBySource[entry.source]
 
@@ -559,8 +822,13 @@ type EventsEventFromRegistry = LakehouseEventFromFields<
   (typeof lakehouseSourceSchemaRegistry)["events"]["fields"]
 >
 
+type WebEventsEventFromRegistry = LakehouseEventFromFields<
+  (typeof lakehouseSourceSchemaRegistry)["web_events"]["fields"]
+>
+
 export type LakehouseEventBySource = {
   events: EventsEventFromRegistry
+  web_events: WebEventsEventFromRegistry
 }
 
 export type LakehouseEventForSource<S extends LakehouseSource> = LakehouseEventBySource[S]

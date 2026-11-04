@@ -1,9 +1,10 @@
-import type { Analytics, PlansConversion } from "@unprice/analytics"
+import type { PlansConversion } from "@unprice/services/analytics"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
+import { intervalDaysSchema } from "./web-analytics-input"
 
 export const getPlansConversion = protectedProjectProcedure
-  .input(z.custom<Parameters<Analytics["getPlansConversion"]>[0]>())
+  .input(z.object({ interval_days: intervalDaysSchema }))
   .output(
     z.object({
       data: z.custom<PlansConversion>(),
@@ -11,25 +12,14 @@ export const getPlansConversion = protectedProjectProcedure
     })
   )
   .query(async (opts) => {
-    const { interval_days } = opts.input
-    const project_id = opts.ctx.project.id
+    const { err, val } = await opts.ctx.services.analytics.getPlansConversion({
+      projectId: opts.ctx.project.id,
+      intervalDays: opts.input.interval_days,
+    })
 
-    try {
-      const data = await opts.ctx.analytics
-        .getPlansConversion({
-          project_id,
-          interval_days,
-        })
-        .then((res) => res.data)
-
-      return { data: data ?? [] }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to fetch plans conversion"
-      opts.ctx.logger.error(message, {
-        project_id,
-        interval_days,
-      })
-
-      return { data: [], error: message }
+    if (err) {
+      return { data: [], error: err.message }
     }
+
+    return val
   })

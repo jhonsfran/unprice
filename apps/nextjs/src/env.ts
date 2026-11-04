@@ -23,6 +23,15 @@ export const env = createEnv({
       .string()
       .optional()
       .describe("The UserJot Secret Key for Identity Verification"),
+    LAKEHOUSE_WEB_EVENTS_URL: z
+      .string()
+      .url()
+      .optional()
+      .describe("HTTP ingest endpoint of the web_events Basin Pipelines stream"),
+    LAKEHOUSE_WEB_EVENTS_TOKEN: z
+      .string()
+      .optional()
+      .describe("API token with Pipelines Send for the web_events stream"),
   },
   runtimeEnv: process.env,
   clientPrefix: "NEXT_PUBLIC_",

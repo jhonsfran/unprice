@@ -97,7 +97,8 @@ export const registerSignUpV1 = (app: App) =>
         },
         db: c.get("db"),
         logger: c.get("logger"),
-        analytics: c.get("analytics"),
+        basinSql: c.get("basinSql"),
+        webEvents: c.get("webEvents"),
         waitUntil: c.get("waitUntil"),
       },
       {

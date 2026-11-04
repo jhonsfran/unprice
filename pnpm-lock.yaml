@@ -321,6 +321,9 @@ importers:
       '@unprice/db':
         specifier: workspace:^
         version: link:../../internal/db
+      '@unprice/lakehouse':
+        specifier: workspace:^
+        version: link:../../internal/lakehouse
       '@unprice/logs':
         specifier: workspace:^
         version: link:../../internal/logs
@@ -782,6 +785,9 @@ importers:
 
   internal/lakehouse:
     dependencies:
+      '@unprice/error':
+        specifier: workspace:^
+        version: link:../error
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -989,6 +995,9 @@ importers:
       '@unprice/email':
         specifier: workspace:^
         version: link:../email
+      '@unprice/lakehouse':
+        specifier: workspace:^
+        version: link:../lakehouse
       '@unprice/logs':
         specifier: workspace:^
         version: link:../logs

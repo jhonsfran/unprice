@@ -4,7 +4,6 @@ import { getBrowserVisits } from "./getBrowserVisits"
 import { getCountryVisits } from "./getCountryVisits"
 import { getFailedIngestionEventPayload } from "./getFailedIngestionEventPayload"
 import { getIngestionStatus } from "./getIngestionStatus"
-import { getLatestEvents } from "./getLatestEvents"
 import { getOverviewStats } from "./getOverviewStats"
 import { getPagesOverview } from "./getPagesOverview"
 import { getPlanClickBySessionId } from "./getPlanClickBySessionId"
@@ -27,6 +26,5 @@ export const analyticsRouter = createTRPCRouter({
   getPlansStats: getPlansStats,
   getPagesOverview: getPagesOverview,
   getPlanClickBySessionId: getPlanClickBySessionId,
-  getLatestEvents: getLatestEvents,
   replayIngestionEvents: replayIngestionEvents,
 })

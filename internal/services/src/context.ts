@@ -1,3 +1,4 @@
+import { type BasinSql, createBasinSql } from "@unprice/lakehouse"
 import { env } from "../env"
 import { AnalyticsService } from "./analytics/service"
 import { ApiKeysService } from "./apikey/service"
@@ -76,6 +77,8 @@ export interface ServiceContext {
 export function createServiceContext(
   deps: ServiceDeps & {
     reservationFlushGateway?: BillingReservationFlushGateway
+    /** Web analytics reads. Roots that never read web analytics omit it and get NOT_CONFIGURED. */
+    basinSql?: BasinSql
   }
 ): ServiceContext {
   // 1. Leaf services (no service deps)
@@ -109,7 +112,7 @@ export function createServiceContext(
   const analytics = new AnalyticsService({
     db: deps.db,
     logger: deps.logger,
-    analytics: deps.analytics,
+    basinSql: deps.basinSql ?? createBasinSql({}),
     ledgerGateway: ledger,
   })
 

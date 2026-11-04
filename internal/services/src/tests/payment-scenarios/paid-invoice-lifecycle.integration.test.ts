@@ -2,6 +2,7 @@ import type { Analytics } from "@unprice/analytics"
 import { sql } from "@unprice/db"
 import type { Customer, Subscription } from "@unprice/db/validators"
 import { Err, Ok } from "@unprice/error"
+import type { WebEventsWriter } from "@unprice/lakehouse"
 import type { Logger } from "@unprice/logs"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { BillingService } from "../../billing/service"
@@ -37,6 +38,7 @@ import { processWebhookEvent } from "../../use-cases/payment-provider/process-we
 import { UnPriceWalletError, type WalletService } from "../../wallet"
 
 const db = createTestDatabaseConnection()
+const webEvents: WebEventsWriter = { send: async () => Ok({ sent: 0 }) }
 
 const fixtures = [
   "base-project.sql",
@@ -575,7 +577,6 @@ async function expectSubscriptionStatus(status: "active" | "past_due") {
 }
 
 async function processProviderWebhook({
-  analytics,
   eventId,
   eventType,
   logger,
@@ -585,7 +586,6 @@ async function processProviderWebhook({
   waitUntil,
   wallet = services.wallet,
 }: {
-  analytics: Analytics
   eventId: string
   eventType: string
   logger: Logger
@@ -607,7 +607,7 @@ async function processProviderWebhook({
         },
         db,
         logger,
-        analytics,
+        webEvents,
         waitUntil,
       },
       {
@@ -787,7 +787,7 @@ describe("paid invoice lifecycle integration", () => {
           },
           db,
           logger,
-          analytics,
+          webEvents,
           waitUntil,
         },
         {
@@ -817,7 +817,7 @@ describe("paid invoice lifecycle integration", () => {
           },
           db,
           logger,
-          analytics,
+          webEvents,
           waitUntil,
         },
         {
@@ -900,11 +900,10 @@ describe("paid invoice lifecycle integration", () => {
   it("processes a payment.failed webhook against real invoice, webhook, and subscription rows", async () => {
     const loggerErrors: unknown[] = []
     const runtime = createLifecycleRuntime(loggerErrors)
-    const { analytics, logger, provider, services, waitUntil } = runtime
+    const { logger, provider, services, waitUntil } = runtime
     const invoiceId = await prepareCollectedUnpaidInvoice(runtime)
 
     const failed = await processProviderWebhook({
-      analytics,
       eventId: "evt_failed_lifecycle",
       eventType: "invoice.payment_failed",
       logger,
@@ -1008,7 +1007,7 @@ describe("paid invoice lifecycle integration", () => {
           },
           db,
           logger,
-          analytics,
+          webEvents,
           waitUntil,
         },
         {
@@ -1058,7 +1057,7 @@ describe("paid invoice lifecycle integration", () => {
           },
           db,
           logger,
-          analytics,
+          webEvents,
           waitUntil,
         },
         {
@@ -1115,11 +1114,10 @@ describe("paid invoice lifecycle integration", () => {
   it("reverses a paid invoice and reinstates it on dispute reversal without duplicate settlement", async () => {
     const loggerErrors: unknown[] = []
     const runtime = createLifecycleRuntime(loggerErrors)
-    const { analytics, logger, provider, services, waitUntil } = runtime
+    const { logger, provider, services, waitUntil } = runtime
     const invoiceId = await prepareCollectedUnpaidInvoice(runtime)
 
     const paid = await processProviderWebhook({
-      analytics,
       eventId: "evt_paid_before_reversal",
       eventType: "invoice.paid",
       logger,
@@ -1135,7 +1133,6 @@ describe("paid invoice lifecycle integration", () => {
     expect(await getAccountBalance(customerAccountKeys(customerId).receivable)).toBe("0.00000000")
 
     const reversed = await processProviderWebhook({
-      analytics,
       eventId: "evt_reversed_lifecycle",
       eventType: "charge.refunded",
       logger,
@@ -1172,7 +1169,6 @@ describe("paid invoice lifecycle integration", () => {
     expect(await getAccountBalance(customerAccountKeys(customerId).receivable)).toBe("0.00000000")
 
     const disputeReversed = await processProviderWebhook({
-      analytics,
       eventId: "evt_dispute_reversed_lifecycle",
       eventType: "charge.dispute.funds_reinstated",
       logger,

@@ -108,21 +108,6 @@ export class CacheService {
         fresh: 1000 * 60, // 1 minute
         stale: 1000 * 60 * 5, // 5 minutes
       }),
-      pageCountryVisits: new Namespace<CacheNamespaces["pageCountryVisits"]>(this.context, {
-        ...defaultOpts,
-        fresh: CACHE_ANALYTICS_FRESHNESS_TIME_MS, // 30 seconds
-        stale: CACHE_ANALYTICS_STALENESS_TIME_MS, // revalidate 1 hour
-      }),
-      pageBrowserVisits: new Namespace<CacheNamespaces["pageBrowserVisits"]>(this.context, {
-        ...defaultOpts,
-        fresh: CACHE_ANALYTICS_FRESHNESS_TIME_MS, // 30 seconds
-        stale: CACHE_ANALYTICS_STALENESS_TIME_MS, // revalidate 1 hour
-      }),
-      getPagesOverview: new Namespace<CacheNamespaces["getPagesOverview"]>(this.context, {
-        ...defaultOpts,
-        fresh: CACHE_ANALYTICS_FRESHNESS_TIME_MS, // 30 seconds
-        stale: CACHE_ANALYTICS_STALENESS_TIME_MS, // revalidate 1 hour
-      }),
       getPlansStats: new Namespace<CacheNamespaces["getPlansStats"]>(this.context, {
         ...defaultOpts,
         fresh: CACHE_ANALYTICS_FRESHNESS_TIME_MS, // 30 seconds

@@ -10,6 +10,7 @@ import { auth } from "@unprice/auth/server"
 import { COOKIES_APP } from "@unprice/config"
 import type { Database } from "@unprice/db"
 import { newId } from "@unprice/db/utils"
+import { createBasinSql } from "@unprice/lakehouse"
 import type { Logger } from "@unprice/logs"
 import { createStandaloneRequestLogger } from "@unprice/observability"
 import { shouldEmitMetrics } from "@unprice/observability/env"
@@ -143,6 +144,11 @@ export const createInnerTRPCContext = (
     waitUntil: opts.waitUntil,
     cache: opts.cache,
     metrics: opts.metrics,
+    basinSql: createBasinSql({
+      accountId: env.BASIN_SQL_ACCOUNT_ID,
+      bucket: env.BASIN_SQL_BUCKET,
+      token: env.BASIN_SQL_TOKEN,
+    }),
   })
 
   return {

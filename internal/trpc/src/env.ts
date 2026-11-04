@@ -17,6 +17,10 @@ export const env = createEnv({
   server: {
     UNPRICE_API_KEY: z.string(),
     UNPRICE_API_URL: z.string().url().optional(),
+    // Basin SQL reads web analytics from R2 (an R2 API token with Basin SQL Read).
+    BASIN_SQL_ACCOUNT_ID: z.string().optional(),
+    BASIN_SQL_BUCKET: z.string().optional(),
+    BASIN_SQL_TOKEN: z.string().optional(),
   },
   runtimeEnv: process.env,
   skipValidation: !!process.env.SKIP_ENV_VALIDATION || process.env.npm_lifecycle_event === "lint",

@@ -126,6 +126,14 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
 
       STRIPE_API_KEY: z.string().optional(),
       STRIPE_CONNECT_WEBHOOK_SECRET: z.string().optional(),
+
+      // Web analytics: the web_events stream's HTTP ingest endpoint and a Pipelines Send token,
+      // and Basin SQL credentials for plan-click attribution at sign-up.
+      LAKEHOUSE_WEB_EVENTS_URL: z.string().url().optional(),
+      LAKEHOUSE_WEB_EVENTS_TOKEN: z.string().optional(),
+      BASIN_SQL_ACCOUNT_ID: z.string().optional(),
+      BASIN_SQL_BUCKET: z.string().optional(),
+      BASIN_SQL_TOKEN: z.string().optional(),
     },
     emptyStringAsUndefined: true,
     runtimeEnv: workerEnv as Record<string, string | number | boolean | undefined>,

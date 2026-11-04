@@ -39,6 +39,7 @@
     "@unprice/auth": "workspace:^",
     "@unprice/config": "workspace:^",
     "@unprice/db": "workspace:^",
+    "@unprice/lakehouse": "workspace:^",
     "@unprice/logs": "workspace:^",
     "@unprice/money": "workspace:^",
     "@unprice/observability": "workspace:^",

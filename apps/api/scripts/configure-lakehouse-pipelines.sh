@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 #
-# Configure Cloudflare Pipelines + R2 Data Catalog sink for the events lakehouse source.
+# Configure Cloudflare (Basin) Pipelines + R2 Data Catalog sinks for the lakehouse sources:
+#   events      usage ingestion audit rows, written by the API worker's PIPELINE_EVENTS binding
+#   web_events  page hits, plan views, plan clicks and sign-ups, written over the stream's HTTP
+#               ingest endpoint (LAKEHOUSE_WEB_EVENTS_URL + LAKEHOUSE_WEB_EVENTS_TOKEN) and read
+#               with Basin SQL (BASIN_SQL_ACCOUNT_ID, BASIN_SQL_BUCKET, BASIN_SQL_TOKEN)
 # Assumes R2 buckets already exist.
 #
 # Run from apps/api:
@@ -536,7 +540,7 @@ else
 fi
 
 echo "=== Environment: $ENV | Bucket: $BUCKET ==="
-echo "=== Resource name format: ${NAME_PREFIX}lakehouse_events_<stream|sink|pipeline>${NAME_SUFFIX} ==="
+echo "=== Resource name format: ${NAME_PREFIX}lakehouse_<events|web_events>_<stream|sink|pipeline>${NAME_SUFFIX} ==="
 if [[ "$DELETE_ONLY" != true && -n "$TOKEN_SOURCE" ]]; then
   echo "=== Using API token from: $TOKEN_SOURCE ==="
 fi
@@ -544,6 +548,7 @@ echo ""
 
 STREAM_SPECS=(
   "events:events:events"
+  "web_events:web_events:web_events"
 )
 
 print_pipeline_binding_hint() {
@@ -674,12 +679,18 @@ fi
 echo "=== Done. ==="
 echo ""
 echo "Created or ensured:"
-echo "  Stream:   ${NAME_PREFIX}lakehouse_events_stream${NAME_SUFFIX}"
-echo "  Sink:     ${NAME_PREFIX}lakehouse_events_sink${NAME_SUFFIX}"
-echo "  Pipeline: ${NAME_PREFIX}lakehouse_events_pipeline${NAME_SUFFIX}"
+for spec in "${STREAM_SPECS[@]}"; do
+  source="${spec%%:*}"
+  echo "  Stream:   $(resource_name "$source" "stream")"
+  echo "  Sink:     $(resource_name "$source" "sink")"
+  echo "  Pipeline: $(resource_name "$source" "pipeline")"
+done
 echo ""
 echo "Next steps:"
 echo "  - Get stream ingest endpoints: npx wrangler pipelines streams list"
-echo "  - Query R2 SQL: npx wrangler r2 sql query \"<WAREHOUSE>\" \"SELECT * FROM $NAMESPACE.events LIMIT 10\""
+echo "  - Set LAKEHOUSE_WEB_EVENTS_URL to the $(resource_name "web_events" "stream") HTTP endpoint and"
+echo "    LAKEHOUSE_WEB_EVENTS_TOKEN to a token with Pipelines Send (Vercel app and API worker)"
+echo "  - Set BASIN_SQL_ACCOUNT_ID, BASIN_SQL_BUCKET=$BUCKET and BASIN_SQL_TOKEN (Basin SQL Read)"
+echo "  - Query R2 SQL: npx wrangler r2 sql query \"<WAREHOUSE>\" \"SELECT * FROM $NAMESPACE.web_events LIMIT 10\""
 echo ""
 print_pipeline_binding_hint

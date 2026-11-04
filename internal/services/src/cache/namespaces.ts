@@ -1,10 +1,4 @@
-import type {
-  PageBrowserVisits,
-  PageCountryVisits,
-  PageOverview,
-  Stats,
-  Usage,
-} from "@unprice/analytics"
+import type { Stats, Usage } from "@unprice/analytics"
 import type { budgetRuns } from "@unprice/db/schema"
 import type {
   ApiKeyExtended,
@@ -84,9 +78,6 @@ export type CacheNamespaces = {
   workspaceGuard: WorkspaceGuardCache | null
   planVersionList: PlanVersionApi[] | null
   planVersion: PlanVersionApi | null
-  pageCountryVisits: PageCountryVisits | null
-  pageBrowserVisits: PageBrowserVisits | null
-  getPagesOverview: PageOverview | null
   getPlansStats: Stats | null
   getOverviewStats: Stats | null
   getUsage: Usage | null

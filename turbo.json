@@ -68,7 +68,12 @@
         "CLOUDFLARE_API_TOKEN_LAKEHOUSE",
         "CLOUDFLARE_LAKEHOUSE_ACCESS_KEY_ID",
         "ENABLE_EXPERIMENTAL_COREPACK",
-        "LAKEHOUSE_API_TOKEN"
+        "LAKEHOUSE_API_TOKEN",
+        "LAKEHOUSE_WEB_EVENTS_URL",
+        "LAKEHOUSE_WEB_EVENTS_TOKEN",
+        "BASIN_SQL_ACCOUNT_ID",
+        "BASIN_SQL_BUCKET",
+        "BASIN_SQL_TOKEN"
       ]
     },
     "fmt": {
@@ -118,7 +123,12 @@
         "UPSTASH_REDIS_REST_URL",
         "UPSTASH_REDIS_REST_TOKEN",
         "USERJOT_ID",
-        "USERJOT_SECRET"
+        "USERJOT_SECRET",
+        "LAKEHOUSE_WEB_EVENTS_URL",
+        "LAKEHOUSE_WEB_EVENTS_TOKEN",
+        "BASIN_SQL_ACCOUNT_ID",
+        "BASIN_SQL_BUCKET",
+        "BASIN_SQL_TOKEN"
       ]
     },
     "test": {

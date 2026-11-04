@@ -1,6 +1,7 @@
 import type { Database } from "@unprice/db"
 import { customers } from "@unprice/db/schema"
 import { Ok } from "@unprice/error"
+import { createWebEventsWriter } from "@unprice/lakehouse"
 import type { Logger } from "@unprice/logs"
 import { fromCurrencyMinor, toLedgerMinor } from "@unprice/money"
 import { describe, expect, it, vi } from "vitest"
@@ -56,7 +57,8 @@ describe("customer signUp payment provider guard", () => {
       {
         db: {} as Database,
         logger: createLogger(),
-        analytics: {} as never,
+        basinSql: { query: vi.fn() } as never,
+        webEvents: { send: vi.fn() } as never,
         waitUntil: vi.fn(),
         services: {
           customers: { getCustomerByExternalId },
@@ -90,7 +92,8 @@ describe("customer signUp payment provider guard", () => {
       {
         db: {} as Database,
         logger: createLogger(),
-        analytics: {} as never,
+        basinSql: { query: vi.fn() } as never,
+        webEvents: { send: vi.fn() } as never,
         waitUntil: vi.fn(),
         services: {
           customers: {
@@ -144,10 +147,8 @@ describe("customer signUp payment provider guard", () => {
       {
         db,
         logger: createLogger(),
-        analytics: {
-          getPlanClickBySessionId: vi.fn(),
-          ingestEvents: vi.fn(),
-        } as never,
+        basinSql: { query: vi.fn() } as never,
+        webEvents: { send: vi.fn().mockResolvedValue(Ok({ sent: 1 })) } as never,
         waitUntil: vi.fn(),
         services: {
           customers: {
@@ -228,15 +229,23 @@ describe("customer signUp payment provider guard", () => {
       .fn()
       .mockResolvedValue(Ok({ cyclesCreated: 1, phasesProcessed: 1 }))
 
+    const logger = createLogger()
+    const pending: Promise<unknown>[] = []
+    const failingStream = createWebEventsWriter({
+      url: "https://stream-id.ingest.cloudflare.com",
+      token: "<STREAM_TOKEN>",
+      fetch: (async () => new Response("unavailable", { status: 503 })) as typeof fetch,
+    })
+
     const result = await signUp(
       {
         db,
-        logger: createLogger(),
-        analytics: {
-          getPlanClickBySessionId: vi.fn(),
-          ingestEvents: vi.fn().mockResolvedValue(undefined),
-        } as never,
-        waitUntil: vi.fn(),
+        logger,
+        basinSql: { query: vi.fn() } as never,
+        webEvents: failingStream,
+        waitUntil: (promise) => {
+          pending.push(promise)
+        },
         services: {
           customers: {
             getCustomerByExternalId: vi.fn(),
@@ -270,6 +279,12 @@ describe("customer signUp payment provider guard", () => {
 
     expect(result.err).toBeUndefined()
     expect(result.val?.success).toBe(true)
+    await expect(Promise.all(pending)).resolves.toEqual([undefined])
+    expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({ code: "HTTP_ERROR" }), {
+      context: "web analytics events were not recorded",
+      code: "HTTP_ERROR",
+      kinds: ["signup"],
+    })
     expect(createSubscription).toHaveBeenCalled()
     expect(generateBillingPeriods).toHaveBeenCalledWith({
       subscriptionId: "sub_123",
@@ -346,10 +361,8 @@ describe("customer signUp payment provider guard", () => {
       {
         db,
         logger: createLogger(),
-        analytics: {
-          getPlanClickBySessionId: vi.fn(),
-          ingestEvents: vi.fn().mockResolvedValue(undefined),
-        } as never,
+        basinSql: { query: vi.fn() } as never,
+        webEvents: { send: vi.fn().mockResolvedValue(Ok({ sent: 1 })) } as never,
         waitUntil: vi.fn(),
         services: {
           customers: {
@@ -453,10 +466,8 @@ describe("customer signUp payment provider guard", () => {
     const deps = {
       db,
       logger: createLogger(),
-      analytics: {
-        getPlanClickBySessionId: vi.fn(),
-        ingestEvents: vi.fn().mockResolvedValue(undefined),
-      } as never,
+      basinSql: { query: vi.fn() } as never,
+      webEvents: { send: vi.fn().mockResolvedValue(Ok({ sent: 1 })) } as never,
       waitUntil: vi.fn(),
       services: {
         customers: {

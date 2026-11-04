@@ -1,8 +1,6 @@
 import { NoopTinybird, Tinybird } from "@jhonsfran/zod-bird"
 import { z } from "zod"
 import {
-  type AnalyticsEventAction,
-  analyticsEventSchema,
   billingPeriodUsageCoverageRowSchema,
   billingPeriodUsageRowSchema,
   entitlementMeterFactSchemaV1,
@@ -23,8 +21,6 @@ import {
   ingestionRejectionsQuerySchema,
   ingestionReplayPayloadQuerySchema,
   ingestionReplayPayloadRowSchema,
-  pageEventSchema,
-  schemaPlanClick,
   topConsumerRowSchema,
 } from "./validators"
 
@@ -72,160 +68,6 @@ export class Analytics {
       datasource: "unprice_ingestion_events",
       event: ingestionEventSchemaV1,
       wait: true,
-    })
-  }
-
-  public get ingestEvents() {
-    return this.writeClient.buildIngestEndpoint({
-      datasource: "unprice_events",
-      event: analyticsEventSchema,
-      // we need to wait for the ingestion to be done before returning
-      wait: true,
-    })
-  }
-
-  public get ingestPageEvents() {
-    return this.writeClient.buildIngestEndpoint({
-      datasource: "unprice_page_hits",
-      event: pageEventSchema,
-    })
-  }
-
-  // analytics pages
-  public get getPlanClickBySessionId() {
-    return this.readClient.buildPipe({
-      pipe: "v1_get_session_event",
-      parameters: z.object({
-        session_id: z.string(),
-        project_id: z.string(),
-        action: z.literal("plan_click"),
-        interval_days: z.number().optional(),
-      }),
-      data: z.object({
-        timestamp: z.coerce.date(),
-        session_id: z.string(),
-        payload: z.string().transform((payload) => schemaPlanClick.parse(JSON.parse(payload))),
-      }),
-      opts: {
-        cache: "no-store",
-        retries: 3,
-        timeout: 5000, // 5 seconds
-      },
-    })
-  }
-
-  public get getPlansConversion() {
-    return this.readClient.buildPipe({
-      pipe: "v1_get_plans_conversion",
-      parameters: z.object({
-        interval_days: z.number().optional(),
-        project_id: z.string().optional(),
-      }),
-      data: z.object({
-        page_id: z.string(),
-        plan_version_id: z.string(),
-        plan_views: z.number(),
-        plan_clicks: z.number(),
-        plan_signups: z.number(),
-        conversion: z.number(),
-      }),
-      opts: {
-        cache: "no-store",
-        retries: 3,
-        timeout: 5000,
-      },
-    })
-  }
-
-  // analytics events
-  public get getLatestEvents() {
-    return this.readClient.buildPipe({
-      pipe: "v1_get_latest_events",
-      parameters: z.object({
-        action: z.custom<AnalyticsEventAction>().optional(),
-        project_id: z.string().optional(),
-        interval_days: z.number().optional(),
-      }),
-      data: z.object({
-        timestamp: z.coerce.date(),
-        action: z.string(),
-        session_id: z.string(),
-        payload: z.string(),
-      }),
-    })
-  }
-
-  // analytics pages
-  public get getBrowserVisits() {
-    return this.readClient.buildPipe({
-      pipe: "v1_get_top_browsers",
-      parameters: z.object({
-        interval_days: z.number().optional(),
-        page_id: z.string().optional(),
-        project_id: z.string().optional(),
-      }),
-      data: z.object({
-        page_id: z.string(),
-        browser: z.string(),
-        visits: z.number(),
-        hits: z.number(),
-      }),
-      opts: {
-        retries: 3,
-        timeout: 5000, // 5 seconds
-        cache: "no-store",
-      },
-    })
-  }
-
-  // analytics pages
-  public get getCountryVisits() {
-    return this.readClient.buildPipe({
-      pipe: "v1_get_top_countries",
-      parameters: z.object({
-        interval_days: z.number().optional(),
-        page_id: z.string().optional(),
-        project_id: z.string().optional(),
-      }),
-      data: z.object({
-        page_id: z.string(),
-        country: z.string(),
-        visits: z.number(),
-        hits: z.number(),
-      }),
-      opts: {
-        retries: 3,
-        timeout: 5000, // 5 seconds
-        cache: "no-store",
-      },
-    })
-  }
-
-  public get getPagesOverview() {
-    return this.readClient.buildPipe({
-      pipe: "v1_get_pages_overview",
-      parameters: z.object({
-        interval_days: z.number().optional(),
-        page_id: z.string().optional(),
-        project_id: z.string().optional(),
-      }),
-      data: z.object({
-        date: z.coerce.date(),
-        page_id: z.string(),
-        desktop_visits: z.number(),
-        mobile_visits: z.number(),
-        other_visits: z.number(),
-        desktop_hits: z.number(),
-        mobile_hits: z.number(),
-        other_hits: z.number(),
-        total_visits: z.number(),
-        total_hits: z.number(),
-      }),
-      opts: {
-        cache: "no-store",
-        retries: 3,
-        timeout: 5000, // 5 seconds
-      },
     })
   }
 

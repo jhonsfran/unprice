@@ -2,6 +2,7 @@ import { CloudflareStore } from "@unkey/cache/stores"
 import { Analytics } from "@unprice/analytics"
 import { createConnection, createHttpConnection } from "@unprice/db"
 import { newId } from "@unprice/db/utils"
+import { createBasinSql, createWebEventsWriter } from "@unprice/lakehouse"
 import { shouldEmitMetrics } from "@unprice/observability/env"
 import { ApiKeysService } from "@unprice/services/apikey"
 import { CacheService } from "@unprice/services/cache"
@@ -207,6 +208,21 @@ export function init(): MiddlewareHandler<HonoEnv> {
     c.set("logger", logger)
     c.set("metrics", metrics)
     c.set("analytics", analytics)
+    c.set(
+      "webEvents",
+      createWebEventsWriter({
+        url: c.env.LAKEHOUSE_WEB_EVENTS_URL,
+        token: c.env.LAKEHOUSE_WEB_EVENTS_TOKEN,
+      })
+    )
+    c.set(
+      "basinSql",
+      createBasinSql({
+        accountId: c.env.BASIN_SQL_ACCOUNT_ID,
+        bucket: c.env.BASIN_SQL_BUCKET,
+        token: c.env.BASIN_SQL_TOKEN,
+      })
+    )
     c.set(
       "rawIngestionQueue",
       new CloudflareRawIngestionQueueClient({

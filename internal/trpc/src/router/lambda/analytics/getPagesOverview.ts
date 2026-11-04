@@ -1,10 +1,10 @@
-import type { Analytics } from "@unprice/analytics"
-import type { PageOverview } from "@unprice/analytics"
+import type { PageOverview } from "@unprice/services/analytics"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
+import { pageVisitsInputSchema } from "./web-analytics-input"
 
 export const getPagesOverview = protectedProjectProcedure
-  .input(z.custom<Parameters<Analytics["getPagesOverview"]>[0]>())
+  .input(pageVisitsInputSchema)
   .output(
     z.object({
       data: z.custom<PageOverview>(),

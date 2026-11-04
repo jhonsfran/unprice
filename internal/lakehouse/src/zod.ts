@@ -114,6 +114,9 @@ export const LAKEHOUSE_EVENT_ZOD_SCHEMAS: {
   events: buildLakehouseEventZodSchema("events") as unknown as z.ZodType<
     LakehouseEventForSource<"events">
   >,
+  web_events: buildLakehouseEventZodSchema("web_events") as unknown as z.ZodType<
+    LakehouseEventForSource<"web_events">
+  >,
 }
 
 export function getLakehouseSourceEventZodSchema<S extends LakehouseSource>(

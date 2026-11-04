@@ -1,11 +1,10 @@
-import type { Analytics } from "@unprice/analytics"
+import type { PageCountryVisits } from "@unprice/services/analytics"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
-
-export type PageCountryVisits = Awaited<ReturnType<Analytics["getCountryVisits"]>>["data"]
+import { pageVisitsInputSchema } from "./web-analytics-input"
 
 export const getCountryVisits = protectedProjectProcedure
-  .input(z.custom<Parameters<Analytics["getCountryVisits"]>[0]>())
+  .input(pageVisitsInputSchema)
   .output(
     z.object({
       data: z.custom<PageCountryVisits>(),

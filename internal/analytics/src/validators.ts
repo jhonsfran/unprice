@@ -1,6 +1,5 @@
 import { LEDGER_SCALE } from "@unprice/money"
 import * as z from "zod"
-import type { Analytics } from "./analytics"
 
 export type MaybeArray<T> = T | T[]
 
@@ -527,87 +526,6 @@ export const getUsageResponseSchema = z.object({
   spending: usageSpendingResponseSchema,
 })
 
-export const schemaPageHit = z.object({
-  page_id: z.string(),
-  plan_ids: z.string().optional(),
-  locale: z.string(),
-  referrer: z.string(),
-  pathname: z.string(),
-  url: z.string(),
-})
-
-export const schemaPlanClick = z.object({
-  plan_version_id: z.string(),
-  page_id: z.string(),
-})
-
-export const schemaSignUp = z.object({
-  customer_id: z.string(),
-  plan_version_id: z.string(),
-  page_id: z.string().nullable(),
-  status: z.enum(["waiting_payment_provider_setup", "signup_failed", "signup_success"]),
-})
-
-export const analyticsEventBaseSchema = z.object({
-  timestamp: z.string().datetime(),
-  session_id: z.string(),
-  project_id: z.string(),
-  version: z.string(),
-})
-
-export const analyticsEventSchema = z
-  .discriminatedUnion("action", [
-    z.object({
-      action: z.literal("signup"),
-      ...analyticsEventBaseSchema.shape,
-      payload: schemaSignUp,
-    }),
-    z.object({
-      action: z.literal("plan_click"),
-      ...analyticsEventBaseSchema.shape,
-      payload: schemaPlanClick,
-    }),
-    z.object({
-      action: z.literal("page_hit"),
-      ...analyticsEventBaseSchema.shape,
-      payload: schemaPageHit,
-    }),
-  ])
-  .transform((event) => {
-    return {
-      ...event,
-      payload: JSON.stringify(event.payload),
-    }
-  })
-
-export const pageEventSchema = z.object({
-  ...{ ...analyticsEventBaseSchema.shape, version: z.string().optional() },
-  page_id: z.string(),
-  plan_ids: z.array(z.string()).nullable(),
-  url: z.string(),
-  country: z.string(),
-  city: z.string(),
-  region: z.string(),
-  latitude: z.string(),
-  longitude: z.string(),
-  device: z.string(),
-  device_model: z.string(),
-  device_vendor: z.string(),
-  browser: z.string(),
-  browser_version: z.string(),
-  os: z.string(),
-  os_version: z.string(),
-  engine: z.string(),
-  engine_version: z.string(),
-  cpu_architecture: z.string(),
-  bot: z.boolean(),
-  referrer: z.string(),
-  referrer_url: z.string(),
-  ip: z.string(),
-  continent: z.string(),
-  locale: z.string(),
-})
-
 export const schemaPlanVersion = z.object({
   id: z.string(),
   project_id: z.string(),
@@ -647,9 +565,6 @@ export const schemaPlanVersionFeature = z.object({
   timestamp: z.string().datetime(),
 })
 
-export type PageAnalyticsEvent = z.infer<typeof pageEventSchema>
-export type AnalyticsEvent = z.infer<typeof analyticsEventSchema>
-export type AnalyticsEventAction = z.infer<typeof analyticsEventSchema>["action"]
 export type GetUsageResponse = z.infer<typeof getUsageResponseSchema>
 export type FeatureUsagePeriodRow = z.infer<typeof featureUsagePeriodRowSchema>
 export type ExplainChargeEventRow = z.infer<typeof explainChargeEventRowSchema>
@@ -665,21 +580,6 @@ export type AnalyticsUsage = z.infer<typeof featureUsageSchemaV1>
 export type AnalyticsEntitlementMeterFact = z.infer<typeof entitlementMeterFactSchemaV1>
 export type AnalyticsIngestionEvent = z.infer<typeof ingestionEventSchemaV1>
 
-// Plan conversion response schemas
-export const planConversionResponseSchema = z.object({
-  date: z.string(),
-  plan_id: z.string(),
-  plan_slug: z.string().nullable(),
-  plan_version: z.string().nullable(),
-  page_id: z.string().nullable(),
-  page_views: z.number(),
-  clicks: z.number(),
-  conversions: z.number(),
-  conversion_rate: z.number(),
-  click_through_rate: z.number(),
-  overall_conversion_rate: z.number(),
-})
-
 export const statsSchema = z.record(
   z.string(),
   z.object({
@@ -690,12 +590,6 @@ export const statsSchema = z.record(
   })
 )
 
-export type PlanConversionResponse = z.infer<typeof planConversionResponseSchema>
-
-export type PageCountryVisits = Awaited<ReturnType<Analytics["getCountryVisits"]>>["data"]
-export type PageBrowserVisits = Awaited<ReturnType<Analytics["getBrowserVisits"]>>["data"]
-export type PageOverview = Awaited<ReturnType<Analytics["getPagesOverview"]>>["data"]
-export type PlansConversion = Awaited<ReturnType<Analytics["getPlansConversion"]>>["data"]
 export type Usage = GetUsageResponse[]
 
 export type Stats = z.infer<typeof statsSchema>

@@ -90,7 +90,7 @@ export const registerProviderSignUpV1 = (app: App) =>
         },
         db: c.get("db"),
         logger: c.get("logger"),
-        analytics: c.get("analytics"),
+        webEvents: c.get("webEvents"),
         waitUntil: c.get("waitUntil"),
       },
       {

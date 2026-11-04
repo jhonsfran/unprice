@@ -1,13 +1,11 @@
-import { schemaPageHit, schemaPlanClick } from "@unprice/analytics"
-import { analytics } from "@unprice/analytics/client"
-import { EU_COUNTRY_CODES } from "@unprice/analytics/utils"
+import { type WebEventRow, createWebEventRow, createWebEventsWriter } from "@unprice/lakehouse"
 import type { Logger } from "@unprice/logs"
-import { geolocation, ipAddress } from "@vercel/functions"
+import { geolocation } from "@vercel/functions"
 import { type NextRequest, userAgent } from "next/server"
 import { z } from "zod"
 import { env } from "~/env"
 import { detectBot, getDomainWithoutWWW } from "~/lib/domains"
-import { LOCALHOST_GEO_DATA, LOCALHOST_IP } from "~/lib/localhost"
+import { LOCALHOST_GEO_DATA } from "~/lib/localhost"
 import { getRequestLoggers, withEvlog } from "~/lib/observability"
 import { checkTrackingRateLimit } from "~/lib/tracking-rate-limit"
 import { setCorsHeaders } from "../_enableCors"
@@ -15,12 +13,37 @@ import { setCorsHeaders } from "../_enableCors"
 export const runtime = "edge"
 export const maxDuration = 10
 
-/**
- * Post event to Tinybird HFI
- *
- * @param  { string } payload Event object
- * @return { Promise<string> } Tinybird HFI response
- */
+const webEvents = createWebEventsWriter({
+  url: env.LAKEHOUSE_WEB_EVENTS_URL,
+  token: env.LAKEHOUSE_WEB_EVENTS_TOKEN,
+})
+
+async function sendWebEvents(logger: Logger, rows: WebEventRow[]) {
+  const result = await webEvents.send(rows)
+  if (result.err) {
+    logger.warn(`web analytics events were not recorded: ${result.err.message}`, {
+      code: result.err.code,
+    })
+    return { error: result.err.code }
+  }
+  return result.val
+}
+
+const schemaPageHit = z.object({
+  page_id: z.string(),
+  plan_ids: z.string().optional(),
+  locale: z.string(),
+  referrer: z.string(),
+  pathname: z.string(),
+  url: z.string(),
+})
+
+const schemaPlanClick = z.object({
+  plan_version_id: z.string().min(1),
+  page_id: z.string().min(1),
+})
+
+/** A page hit plus one plan_view row per plan shown on the page, sent as one batch. */
 const trackPageHit = async (
   req: NextRequest,
   logger: Logger,
@@ -34,7 +57,7 @@ const trackPageHit = async (
     pathname: string
     url: string
   }
-): Promise<{ successful_rows: number; quarantined_rows: number } | null | string> => {
+): Promise<{ sent: number } | { error: string } | string> => {
   try {
     // validate payload
     const parsedPayload = schemaPageHit.safeParse(payload)
@@ -53,8 +76,6 @@ const trackPageHit = async (
       return "Bot detected"
     }
 
-    const ip = env.APP_ENV === "production" ? ipAddress(req) : LOCALHOST_IP
-
     // get continent, region & geolocation data
     // interesting, geolocation().region is Vercel's edge region – NOT the actual region
     // so we use the x-vercel-ip-country-region to get the actual region
@@ -68,24 +89,15 @@ const trackPageHit = async (
 
     const geo = env.VERCEL === "1" ? geolocation(req) : LOCALHOST_GEO_DATA
 
-    const isEuCountry = geo.country && EU_COUNTRY_CODES.includes(geo.country)
-
-    const event = {
-      timestamp: new Date(Date.now()).toISOString(),
+    const pageHit = createWebEventRow({
+      kind: "page_hit",
       session_id: payload.session_id,
       project_id: payload.project_id,
       page_id: payload.page_id,
-      ip:
-        // only record IP if it's a valid IP and not from a EU country
-        typeof ip === "string" && ip.trim().length > 0 && !isEuCountry ? ip : "",
-      plan_ids: payload.plan_ids?.split(",") || [],
       continent: continent || "",
       country: geo.country || "Unknown",
       region: region || "Unknown",
       city: geo.city || "Unknown",
-      latitude: geo.latitude || "Unknown",
-      longitude: geo.longitude || "Unknown",
-      vercel_region: geo.region || "",
       device: ua.device.type || "desktop",
       device_vendor: ua.device.vendor || "Unknown",
       device_model: ua.device.model || "Unknown",
@@ -102,11 +114,21 @@ const trackPageHit = async (
       locale: payload.locale,
       pathname: payload.pathname,
       url: payload.url,
-    }
+    })
 
-    // TODO: lets send to DO for bashing instead of Tinybird directly
-    const response = await analytics.ingestPageEvents(event)
-    return response
+    const planViews = (payload.plan_ids?.split(",") ?? [])
+      .filter((planVersionId) => planVersionId.length > 0)
+      .map((planVersionId) =>
+        createWebEventRow({
+          kind: "plan_view",
+          session_id: payload.session_id,
+          project_id: payload.project_id,
+          page_id: payload.page_id,
+          plan_version_id: planVersionId,
+        })
+      )
+
+    return await sendWebEvents(logger, [pageHit, ...planViews])
   } catch (error) {
     logger.error(error instanceof Error ? error : String(error))
     return `Error: ${JSON.stringify(error)}`
@@ -195,14 +217,15 @@ export const POST = withEvlog(async (req: NextRequest) => {
         return new Response(JSON.stringify({ error: parsedPayload.error.message }), { status: 400 })
       }
 
-      const result = await analytics.ingestEvents({
-        action: "plan_click",
-        session_id: parsedBody.data.session_id,
-        project_id: parsedBody.data.project_id,
-        payload: parsedPayload.data,
-        version: "1",
-        timestamp: new Date(Date.now()).toISOString(),
-      })
+      const result = await sendWebEvents(logger, [
+        createWebEventRow({
+          kind: "plan_click",
+          session_id: parsedBody.data.session_id,
+          project_id: parsedBody.data.project_id,
+          page_id: parsedPayload.data.page_id,
+          plan_version_id: parsedPayload.data.plan_version_id,
+        }),
+      ])
 
       const response = new Response(JSON.stringify(result))
       setCorsHeaders(response, req.headers.get("origin"))
