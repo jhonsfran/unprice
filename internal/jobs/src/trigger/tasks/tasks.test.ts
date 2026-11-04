@@ -132,10 +132,12 @@ describe("Trigger tasks", () => {
       now: 1_800_000_000_000,
     })
     expect(serviceCalls.renewSubscription).toHaveBeenCalledTimes(1)
+    // A job waits out open holds before the payer budget's pricing changes.
     expect(serviceCalls.renewSubscription).toHaveBeenCalledWith({
       subscriptionId: "sub_123",
       projectId: "proj_123",
       now: 1_800_000_000_000,
+      caller: "job",
     })
   })
 })

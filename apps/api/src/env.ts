@@ -130,13 +130,9 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
       STRIPE_API_KEY: z.string().optional(),
       STRIPE_CONNECT_WEBHOOK_SECRET: z.string().optional(),
 
-      // Web analytics: the web_events stream's HTTP ingest endpoint and a Pipelines Send token,
-      // and Basin SQL credentials for plan-click attribution at sign-up.
+      // Web analytics: the web_events stream's HTTP ingest endpoint and a Pipelines Send token.
       LAKEHOUSE_WEB_EVENTS_URL: z.string().url().optional(),
       LAKEHOUSE_WEB_EVENTS_TOKEN: z.string().optional(),
-      BASIN_SQL_ACCOUNT_ID: z.string().optional(),
-      BASIN_SQL_BUCKET: z.string().optional(),
-      BASIN_SQL_TOKEN: z.string().optional(),
     },
     emptyStringAsUndefined: true,
     runtimeEnv: workerEnv as Record<string, string | number | boolean | undefined>,
@@ -157,11 +153,6 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
   assertAllOrNoneConfigured({
     LAKEHOUSE_WEB_EVENTS_URL: parsedEnv.LAKEHOUSE_WEB_EVENTS_URL,
     LAKEHOUSE_WEB_EVENTS_TOKEN: parsedEnv.LAKEHOUSE_WEB_EVENTS_TOKEN,
-  })
-  assertAllOrNoneConfigured({
-    BASIN_SQL_ACCOUNT_ID: parsedEnv.BASIN_SQL_ACCOUNT_ID,
-    BASIN_SQL_BUCKET: parsedEnv.BASIN_SQL_BUCKET,
-    BASIN_SQL_TOKEN: parsedEnv.BASIN_SQL_TOKEN,
   })
 
   warnIfAxiomUnconfiguredOnce(parsedEnv)

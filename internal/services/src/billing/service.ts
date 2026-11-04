@@ -34,7 +34,11 @@ import { DrizzleSubscriptionRepository } from "../subscriptions/repository.drizz
 import { LockLostError, withLockedMachine } from "../subscriptions/withLockedMachine"
 import type { BillingReservationFlushGateway } from "../use-cases/billing/reservation-flush-gateway"
 import { settlePrepaidInvoiceToWallet } from "../use-cases/billing/settle-invoice"
-import type { PayerBudgetGateway } from "../use-cases/budgets/payer-budget-gateway"
+import {
+  type PayerBudgetGateway,
+  type PayerBudgetSyncCaller,
+  syncPayerBudgetWithRetry,
+} from "../use-cases/budgets/payer-budget-gateway"
 import type { WalletService } from "../wallet"
 import { UnPriceBillingError } from "./errors"
 import type { UpdateInvoiceInput } from "./repository"
@@ -406,12 +410,43 @@ export class BillingService {
    * Compiles the customer's subscription into its payer budget and registers its statements.
    * Never fails the caller: a failure is logged at error level and the next billing job, which
    * syncs again, retries it. Call it after the subscription change committed, outside any lock.
+   * A request syncs once; a job waits out open holds that refuse a pricing change.
    */
-  public async syncPayerBudget(input: { projectId: string; customerId: string }): Promise<void> {
+  public async syncPayerBudget(input: {
+    projectId: string
+    customerId: string
+    caller: PayerBudgetSyncCaller
+  }): Promise<void> {
     if (!this.payerBudgets) return
-    const synced = await this.payerBudgets.sync(input)
+    const { caller, ...target } = input
+    const synced = await syncPayerBudgetWithRetry(this.payerBudgets, target, { caller })
     if (synced.err) {
       this.logger.error(synced.err, { context: "payer budget sync failed", ...input })
+    } else if (synced.val.status === "reservations_open") {
+      this.logger.warn(
+        "payer budget pricing change waits for open holds; the next sync applies it",
+        {
+          ...input,
+        }
+      )
+    }
+  }
+
+  /** `syncPayerBudget` for the customer of a subscription. */
+  public async syncSubscriptionPayerBudget(input: {
+    projectId: string
+    subscriptionId: string
+    caller: PayerBudgetSyncCaller
+  }): Promise<void> {
+    if (!this.payerBudgets) return
+    const { projectId, subscriptionId, caller } = input
+    const subscription = await this.db.query.subscriptions.findFirst({
+      columns: { customerId: true },
+      where: (row, ops) =>
+        ops.and(ops.eq(row.id, subscriptionId), ops.eq(row.projectId, projectId)),
+    })
+    if (subscription) {
+      await this.syncPayerBudget({ projectId, customerId: subscription.customerId, caller })
     }
   }
 
@@ -477,6 +512,7 @@ export class BillingService {
     db,
     dryRun = false,
     lock,
+    caller = "request",
   }: {
     subscriptionId: string
     projectId: string
@@ -484,6 +520,8 @@ export class BillingService {
     db?: Database
     dryRun?: boolean
     lock?: boolean
+    /** Who syncs the payer budget after new periods: the period job waits out open holds. */
+    caller?: PayerBudgetSyncCaller
   }): Promise<Result<{ cyclesCreated: number; phasesProcessed: number }, UnPriceBillingError>> {
     try {
       const status = await this.withSubscriptionMachine({
@@ -508,15 +546,8 @@ export class BillingService {
       })
       // New periods are new statements. Inside a caller's transaction or lock the caller syncs
       // once it committed, so the API reads what it wrote and no lock waits on the budget.
-      if (!db && !dryRun && lock !== false) {
-        const subscription = await this.db.query.subscriptions.findFirst({
-          columns: { customerId: true },
-          where: (row, ops) =>
-            ops.and(ops.eq(row.id, subscriptionId), ops.eq(row.projectId, projectId)),
-        })
-        if (subscription) {
-          await this.syncPayerBudget({ projectId, customerId: subscription.customerId })
-        }
+      if (!db && !dryRun && lock !== false && status.cyclesCreated > 0) {
+        await this.syncSubscriptionPayerBudget({ projectId, subscriptionId, caller })
       }
       return Ok({ cyclesCreated: status.cyclesCreated, phasesProcessed: status.phasesProcessed })
     } catch (e) {

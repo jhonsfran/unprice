@@ -26,6 +26,7 @@ import type { LedgerGateway } from "../ledger"
 import type { Metrics } from "../metrics"
 import type { RatingService } from "../rating/service"
 import type { BillingReservationFlushGateway } from "../use-cases/billing/reservation-flush-gateway"
+import type { PayerBudgetSyncCaller } from "../use-cases/budgets/payer-budget-gateway"
 import type { WalletService } from "../wallet"
 import { UnPriceSubscriptionError } from "./errors"
 import type { SubscriptionMachine } from "./machine"
@@ -1116,23 +1117,38 @@ export class SubscriptionService {
       return Ok(phase)
     })
 
-    if (!result.err && !db && env.NODE_ENV !== "test") {
+    if (!result.err && !db) {
+      await this.afterPhaseChange({ subscriptionId, projectId })
+    }
+
+    return result
+  }
+
+  /**
+   * After a phase was created or changed outside a caller's transaction: generate its periods and
+   * sync the payer budget, which takes the phase's pricing, limits, and close even when no period
+   * was created. Period generation syncs by itself when it created one.
+   */
+  private async afterPhaseChange(input: { subscriptionId: string; projectId: string }) {
+    let synced = false
+    if (env.NODE_ENV !== "test") {
       const periodsResult = await this.billingService.generateBillingPeriods({
-        subscriptionId,
-        projectId,
+        ...input,
         now: Date.now(),
       })
 
       if (periodsResult.err) {
         this.logger.warn("subscription phase billing period generation failed", {
-          subscriptionId,
-          projectId,
+          ...input,
           error: periodsResult.err,
         })
+      } else {
+        synced = periodsResult.val.cyclesCreated > 0
       }
     }
-
-    return result
+    if (!synced) {
+      await this.billingService.syncSubscriptionPayerBudget({ ...input, caller: "request" })
+    }
   }
 
   public async removePhase({
@@ -1557,20 +1573,8 @@ export class SubscriptionService {
       return Ok(subscriptionPhase)
     })
 
-    if (!result.err && !db && env.NODE_ENV !== "test") {
-      const periodsResult = await this.billingService.generateBillingPeriods({
-        subscriptionId,
-        projectId,
-        now: Date.now(),
-      })
-
-      if (periodsResult.err) {
-        this.logger.warn("subscription phase billing period generation failed", {
-          subscriptionId,
-          projectId,
-          error: periodsResult.err,
-        })
-      }
+    if (!result.err && !db) {
+      await this.afterPhaseChange({ subscriptionId, projectId })
     }
 
     return result
@@ -1760,6 +1764,7 @@ export class SubscriptionService {
       await this.billingService.syncPayerBudget({
         projectId,
         customerId: subscriptionWithPhases.customerId,
+        caller: "request",
       })
     }
 
@@ -2017,10 +2022,13 @@ export class SubscriptionService {
     subscriptionId,
     projectId,
     now = Date.now(),
+    caller = "request",
   }: {
     subscriptionId: string
     projectId: string
     now?: number
+    /** Who syncs the payer budget after renewal: the renew job waits out open holds. */
+    caller?: PayerBudgetSyncCaller
   }): Promise<Result<{ status: SusbriptionMachineStatus }, UnPriceSubscriptionError>> {
     try {
       const status = await this.withSubscriptionMachine({
@@ -2034,17 +2042,7 @@ export class SubscriptionService {
         },
       })
       // Renewal generated the next periods inside the lock; their statements register now.
-      const subscription = await this.db.query.subscriptions.findFirst({
-        columns: { customerId: true },
-        where: (row, ops) =>
-          ops.and(ops.eq(row.id, subscriptionId), ops.eq(row.projectId, projectId)),
-      })
-      if (subscription) {
-        await this.billingService.syncPayerBudget({
-          projectId,
-          customerId: subscription.customerId,
-        })
-      }
+      await this.billingService.syncSubscriptionPayerBudget({ projectId, subscriptionId, caller })
       return Ok({ status })
     } catch (e) {
       return Err(e as UnPriceSubscriptionError)
@@ -2073,6 +2071,13 @@ export class SubscriptionService {
           if (result.err) throw result.err
           return result.val
         },
+      })
+      // Activation generated periods inside the lock, even when the wallet parked it; their
+      // statements register now.
+      await this.billingService.syncSubscriptionPayerBudget({
+        projectId,
+        subscriptionId,
+        caller: "request",
       })
 
       // The activating actor parks failed activations in `pending_activation`

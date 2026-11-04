@@ -15,20 +15,23 @@ import { type ExecuteBudgetCommandDeps, executeBudgetCommand } from "./execute-b
 export const syncPayerBudgetInputSchema = z.object({
   projectId: z.string().min(1),
   customerId: z.string().min(1),
-  /**
-   * How long a pricing change refused while holds are open is retried, in ms. Defaults to the
-   * payer budget's max hold TTL, by which every open hold has closed.
-   */
-  retryForMs: z.number().int().nonnegative().optional(),
 })
 
-export const syncPayerBudgetOutputSchema = z.object({
-  key: z.string(),
-  version: z.number().int(),
-  /** The config changes the upsert made; empty when the budget already matched. */
-  changes: z.array(z.string()),
-  statements: z.number().int().nonnegative(),
-})
+export const syncPayerBudgetOutputSchema = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("synced"),
+    key: z.string(),
+    version: z.number().int(),
+    /** The config changes the upsert made; empty when the budget already matched. */
+    changes: z.array(z.string()),
+    statements: z.number().int().nonnegative(),
+  }),
+  /**
+   * The pricing or unit change waits for open holds and leases (RESERVATIONS_OPEN); nothing was
+   * written. The caller retries, or leaves it to the next billing job.
+   */
+  z.object({ status: z.literal("reservations_open"), key: z.string() }),
+])
 
 export type SyncPayerBudgetInput = z.infer<typeof syncPayerBudgetInputSchema>
 export type SyncPayerBudgetOutput = z.infer<typeof syncPayerBudgetOutputSchema>
@@ -37,55 +40,45 @@ export type SyncPayerBudgetDeps = Omit<ExecuteBudgetCommandDeps, "services"> & {
   db: Database
   services: Pick<ServiceContext, "budgetCatalog" | "rateCards">
   logger: Logger
-  /** Waits between retries; tests pass a fake clock. */
-  sleep?: (ms: number) => Promise<void>
+  /** The compile's clock; tests pass a fake one. */
   now?: () => number
 }
-
-const FIRST_RETRY_MS = 500
-const MAX_RETRY_MS = 30_000
 
 /**
  * Compiles the customer's subscription into its payer budget and sends it straight to the budget
  * (ADR-0008 D1): the upsert sets pricing and may loosen, then the billing periods register as
- * statements. A pricing change refused while holds are open (RESERVATIONS_OPEN) is retried with
- * backoff until every hold has expired; a failure is logged at error level and left to the next
- * billing job, which syncs again.
+ * statements. One attempt: a pricing change refused while holds are open answers
+ * `reservations_open` and writes nothing, so the caller decides whether to wait
+ * (`syncPayerBudgetWithRetry`). Any other failure is logged at error level and returned.
  */
 export async function syncPayerBudget(
   deps: SyncPayerBudgetDeps,
   input: SyncPayerBudgetInput
 ): Promise<Result<SyncPayerBudgetOutput, UnPriceBudgetError | UnPricePayerBudgetError>> {
   const now = deps.now ?? Date.now
-  const sleep = deps.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)))
   const { projectId, customerId } = input
   const context = { projectId, customerId }
 
-  const compiled = compilePayerBudget(await loadPayerBudgetSource(deps, { ...input, now: now() }))
+  const source = await loadPayerBudgetSource(deps, { projectId, customerId, now: now() })
+  const compiled = compilePayerBudget(source)
   if (compiled.err) {
     deps.logger.error(compiled.err, { context: "payer budget compile failed", ...context })
     return compiled
   }
   const { budget, statements } = compiled.val
   const address = { projectId, key: budget.key }
-  const upsert = {
+  const upserted = await executeBudgetCommand(deps, {
     ...address,
     request: {
-      type: "upsert" as const,
+      type: "upsert",
       unit: budget.unit,
       config: budget.config,
       mayLoosen: true,
       setsPricing: true,
     },
-  }
-
-  const deadline = now() + (input.retryForMs ?? budget.config.holds.maxTtlMs)
-  let wait = FIRST_RETRY_MS
-  let upserted = await executeBudgetCommand(deps, upsert)
-  while (upserted.err?.rejection.code === "RESERVATIONS_OPEN" && now() + wait <= deadline) {
-    await sleep(wait)
-    wait = Math.min(wait * 2, MAX_RETRY_MS)
-    upserted = await executeBudgetCommand(deps, upsert)
+  })
+  if (upserted.err?.rejection.code === "RESERVATIONS_OPEN") {
+    return Ok({ status: "reservations_open", key: budget.key })
   }
   if (upserted.err) {
     deps.logger.error(upserted.err, { context: "payer budget upsert failed", ...context })
@@ -108,6 +101,7 @@ export async function syncPayerBudget(
 
   const { budget: stored, changes } = upserted.val
   return Ok({
+    status: "synced",
     key: budget.key,
     version: stored.version,
     changes: changes.map((change) => change.change),
@@ -147,7 +141,10 @@ async function loadPayerBudgetSource(
   })
 
   const phases: PayerBudgetSource["phases"] = []
-  for (const phase of subscriptions.flatMap((subscription) => subscription.phases)) {
+  const inForce = subscriptions.flatMap((subscription) =>
+    subscription.phases.map((phase) => ({ phase, subscriptionEndsAt: endOf(subscription) }))
+  )
+  for (const { phase, subscriptionEndsAt } of inForce) {
     const { currency } = phase.planVersion
     const card = await deps.services.rateCards.cardForPlanVersion(
       projectId,
@@ -158,6 +155,7 @@ async function loadPayerBudgetSource(
       id: phase.id,
       startAt: phase.startAt,
       endAt: phase.endAt,
+      subscriptionEndsAt,
       billingAnchor: phase.billingAnchor,
       creditLinePolicy: phase.creditLinePolicy,
       currency,
@@ -209,4 +207,19 @@ async function loadPayerBudgetSource(
   )
 
   return { projectId, customerId, now, phases, grants }
+}
+
+/**
+ * When a subscription stops: its end, or the time a cancel recorded, whichever comes first; null
+ * while it runs.
+ */
+function endOf(subscription: {
+  status: string
+  endAt: number | null
+  metadata: { dates?: { cancelAt?: number } } | null
+}): number | null {
+  const canceledAt =
+    subscription.status === "canceled" ? subscription.metadata?.dates?.cancelAt : undefined
+  const ends = [subscription.endAt, canceledAt].filter((at): at is number => typeof at === "number")
+  return ends.length === 0 ? null : Math.min(...ends)
 }

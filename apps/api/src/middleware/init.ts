@@ -2,17 +2,19 @@ import { CloudflareStore } from "@unkey/cache/stores"
 import { Analytics } from "@unprice/analytics"
 import { createConnection, createHttpConnection } from "@unprice/db"
 import { newId } from "@unprice/db/utils"
-import { createBasinSql, createWebEventsWriter } from "@unprice/lakehouse"
+import { createWebEventsWriter } from "@unprice/lakehouse"
 import { shouldEmitMetrics } from "@unprice/observability/env"
 import { ApiKeysService } from "@unprice/services/apikey"
 import { CacheService } from "@unprice/services/cache"
 import { createServiceContext } from "@unprice/services/context"
 import type { IngestionQueueMessage } from "@unprice/services/ingestion"
 import { LogdrainMetrics, NoopMetrics } from "@unprice/services/metrics"
+import { InProcessPayerBudgetGateway } from "@unprice/services/use-cases"
 import type { MiddlewareHandler } from "hono"
 import type { HonoEnv } from "~/hono/env"
 import { apiMetricsLogger, createApiLogger } from "~/observability"
 
+import { payerBudgetSyncDeps } from "~/ingestion/budget/payer-budget-sync"
 import { CloudflareRawIngestionQueueClient } from "~/ingestion/raw-queue-client"
 import { createIngestionService } from "~/ingestion/service"
 import { resolveSampleRate } from "~/sampling"
@@ -174,7 +176,8 @@ export function init(): MiddlewareHandler<HonoEnv> {
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
     const waitUntil = (promise: Promise<any>) => c.executionCtx.waitUntil(promise)
 
-    // Build the shared service graph from infrastructure deps.
+    // Build the shared service graph from infrastructure deps. Billing syncs a payer budget in
+    // process, next to its Durable Object, instead of calling this API over HTTP.
     const svcCtx = createServiceContext({
       db,
       logger,
@@ -182,15 +185,9 @@ export function init(): MiddlewareHandler<HonoEnv> {
       waitUntil,
       cache,
       metrics,
-      // The API reads Basin SQL only to resolve a sign-up's plan from its session, inside the
-      // request: a short per-attempt timeout and one retry keep a slow Basin from stalling it.
-      basinSql: createBasinSql({
-        accountId: c.env.BASIN_SQL_ACCOUNT_ID,
-        bucket: c.env.BASIN_SQL_BUCKET,
-        token: c.env.BASIN_SQL_TOKEN,
-        timeoutMs: 2_000,
-        retries: 1,
-      }),
+      payerBudgets: new InProcessPayerBudgetGateway(() =>
+        payerBudgetSyncDeps({ env: c.env, db, services: svcCtx, logger, waitUntil })
+      ),
     })
 
     const apikey = new ApiKeysService({
@@ -250,7 +247,6 @@ export function init(): MiddlewareHandler<HonoEnv> {
       wallet: svcCtx.wallet,
       billing: svcCtx.billing,
       rateCards: svcCtx.rateCards,
-      analytics: svcCtx.analytics,
       pages: svcCtx.pages,
     })
 

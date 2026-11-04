@@ -111,9 +111,6 @@ jobs:
             DATABASE_READ2_URL
             LAKEHOUSE_WEB_EVENTS_URL
             LAKEHOUSE_WEB_EVENTS_TOKEN
-            BASIN_SQL_ACCOUNT_ID
-            BASIN_SQL_BUCKET
-            BASIN_SQL_TOKEN
           )
 
           {
@@ -175,6 +172,3 @@ jobs:
           STRIPE_CONNECT_WEBHOOK_SECRET: ${{ env.STRIPE_CONNECT_WEBHOOK_SECRET }}
           LAKEHOUSE_WEB_EVENTS_URL: ${{ env.LAKEHOUSE_WEB_EVENTS_URL || '' }}
           LAKEHOUSE_WEB_EVENTS_TOKEN: ${{ env.LAKEHOUSE_WEB_EVENTS_TOKEN || '' }}
-          BASIN_SQL_ACCOUNT_ID: ${{ env.BASIN_SQL_ACCOUNT_ID || '' }}
-          BASIN_SQL_BUCKET: ${{ env.BASIN_SQL_BUCKET || '' }}
-          BASIN_SQL_TOKEN: ${{ env.BASIN_SQL_TOKEN || '' }}

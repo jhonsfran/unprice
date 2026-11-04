@@ -6,7 +6,7 @@ import {
   rateCards,
   versions,
 } from "@unprice/db/schema"
-import { Err, FetchError, Ok } from "@unprice/error"
+import { Err, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { UnPriceBudgetError } from "../../budgets"
@@ -24,11 +24,13 @@ import { seedTestDb } from "../../test-fixtures/seed-db"
 import {
   type BudgetClient,
   type BudgetVerbRequest,
+  InProcessPayerBudgetGateway,
+  type PayerBudgetSyncCaller,
   type SyncPayerBudgetDeps,
   executeBudgetCommand,
   payerBudgetKey,
   rateCardSource,
-  syncPayerBudget,
+  syncPayerBudgetWithRetry,
 } from "../../use-cases/budgets"
 import { FakeWallet } from "../../use-cases/budgets/fake-wallet.fixture"
 
@@ -86,18 +88,15 @@ function createHarness() {
   }
   const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {})
   let deps: SyncPayerBudgetDeps | null = null
+  const ready = () => {
+    if (!deps) throw new Error("harness not ready")
+    return deps
+  }
+  // As the API wires it: the sync runs in process.
+  const gateway = new InProcessPayerBudgetGateway(ready)
   const services: ServiceContext = createServiceContext({
     reservationFlushGateway,
-    // The API's internal route, run in process.
-    payerBudgets: {
-      async sync(input) {
-        if (!deps) throw new Error("harness not ready")
-        const synced = await syncPayerBudget(deps, input)
-        return synced.err
-          ? Err(new FetchError({ message: synced.err.message, retry: false }))
-          : Ok(synced.val)
-      },
-    },
+    payerBudgets: gateway,
     db,
     logger,
     analytics,
@@ -116,17 +115,9 @@ function createHarness() {
     logger,
     waitUntil: () => {},
     now: () => clock.now,
-    // A retry waits on the budget's clock, and the alarm sweeps what expired meanwhile.
-    sleep: async (ms) => {
-      sleeps.push(ms)
-      clock.now += ms
-      store.run({ type: "sweep" }, clock.now)
-    },
   }
-  const run = (request: BudgetVerbRequest) => {
-    if (!deps) throw new Error("harness not ready")
-    return executeBudgetCommand(deps, { projectId, key, request })
-  }
+  const run = (request: BudgetVerbRequest) =>
+    executeBudgetCommand(ready(), { projectId, key, request })
   const record = (idempotencyKey: string, events: number, occurredAt: number) =>
     run({
       type: "record",
@@ -134,10 +125,21 @@ function createHarness() {
       occurredAt,
       event: { slug: "completions", properties: { events } },
     })
-  const sync = (retryForMs?: number) => {
-    if (!deps) throw new Error("harness not ready")
-    return syncPayerBudget(deps, { projectId, customerId, retryForMs })
-  }
+  const sync = (caller: PayerBudgetSyncCaller) =>
+    syncPayerBudgetWithRetry(
+      gateway,
+      { projectId, customerId },
+      {
+        caller,
+        now: () => clock.now,
+        // A retry waits on the budget's clock, and the alarm sweeps what expired meanwhile.
+        sleep: async (ms) => {
+          sleeps.push(ms)
+          clock.now += ms
+          store.run({ type: "sweep" }, clock.now)
+        },
+      }
+    )
   return { store, clock, services, logger, record, run, sync, sleeps }
 }
 
@@ -255,7 +257,7 @@ describe("payer budget sync over Postgres", () => {
     await priceWithCard("pv_test_scale", "rc_test_scale", "0.0005")
     const { store, clock, services, logger, record } = createHarness()
 
-    await services.billing.syncPayerBudget({ projectId, customerId })
+    await services.billing.syncPayerBudget({ projectId, customerId, caller: "request" })
     const recorded = await record("r1", 300, jan10)
     expect(recorded.err).toBeUndefined()
     expect(eventsLimit(store, jan10).limit?.consumed).toBe(scaled("300"))
@@ -308,11 +310,12 @@ describe("payer budget sync over Postgres", () => {
         )
     `)
     const scalePeriodId = scalePeriod.rows[0]?.id
+    // Contiguous: the starter phase's last millisecond (jan16) is in its statement.
     expect(statementsOf(store)).toEqual([
       {
         periodId: "events:bp_test_arrear_events_jan",
         start: jan1,
-        end: jan16,
+        end: jan16 + 1,
         state: "open",
         events: 1,
         amount: scaled("0.3"),
@@ -331,7 +334,7 @@ describe("payer budget sync over Postgres", () => {
 
   it("closes the budget where a canceled subscription ends and cuts its statement there", async () => {
     const { store, clock, services, logger, record } = createHarness()
-    await services.billing.syncPayerBudget({ projectId, customerId })
+    await services.billing.syncPayerBudget({ projectId, customerId, caller: "request" })
     expect((await record("r1", 40, jan10)).err).toBeUndefined()
 
     const canceled = await services.subscriptions.cancelSubscription({
@@ -355,7 +358,7 @@ describe("payer budget sync over Postgres", () => {
       {
         periodId: "events:bp_test_arrear_events_jan",
         start: jan1,
-        end: jan20,
+        end: jan20 + 1,
         state: "open",
         events: 1,
         amount: scaled("0.04"),
@@ -363,9 +366,9 @@ describe("payer budget sync over Postgres", () => {
     ])
   })
 
-  it("retries a pricing change until open holds expire, and logs when they outlast the retry", async () => {
-    const { store, clock, logger, run, sync, sleeps } = createHarness()
-    expect((await sync()).err).toBeUndefined()
+  it("leaves a pricing change refused by open holds to a job, which waits them out", async () => {
+    const { store, clock, services, logger, run, sync, sleeps } = createHarness()
+    expect((await sync("request")).val?.status).toBe("synced")
     const hold = await run({
       type: "authorize",
       idempotencyKey: "job-1",
@@ -400,13 +403,18 @@ describe("payer budget sync over Postgres", () => {
       .set({ rateCardId: "rc_test_repriced" })
       .where(eq(planVersionRateCards.planVersionId, "pv_test_monthly_arrear"))
 
-    const refused = await sync(1_000)
-    expect(refused.err?.message).toContain("open")
-    expect(logger.error).toHaveBeenCalledTimes(1)
+    // A request syncs once and never waits: the budget keeps its pricing, and billing warns.
+    expect((await sync("request")).val).toEqual({ status: "reservations_open", key })
+    await services.billing.syncPayerBudget({ projectId, customerId, caller: "request" })
+    expect(sleeps).toEqual([])
+    expect([
+      vi.mocked(logger.error).mock.calls.length,
+      vi.mocked(logger.warn).mock.calls.length,
+    ]).toEqual([0, 1])
     expect(eventsLimit(store, clock.now).budget.pricing?.cards).toEqual({ base: "rc_test_starter" })
 
-    const synced = await sync()
-    expect(synced.err).toBeUndefined()
+    const synced = await sync("job")
+    expect(synced.val?.status).toBe("synced")
     expect(sleeps.reduce((sum, ms) => sum + ms, 0)).toBeGreaterThanOrEqual(60_000)
     expect(eventsLimit(store, clock.now).budget.pricing?.cards).toEqual({
       base: "rc_test_repriced",

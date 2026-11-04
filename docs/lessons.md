@@ -376,12 +376,13 @@ patterns. Keep it cheap to load and useful.
 - 2026-11-04: `BudgetDO.cacheCards` stores nothing for a key without a budget, so a priced upsert over
   RPC to a fresh key stays CARDS_STALE; workers tests seed the card cache inside `runInDurableObject` first.
 - 2026-11-04: Only `syncPayerBudget` writes `unprice:customer:<id>` (pure `compilePayerBudget`, then
-  `executeBudgetCommand`); tRPC and jobs reach it via `billing.syncPayerBudget` -> `/v1/internal/payer-budgets/sync`.
-  Call it after the subscription change commits, never inside a caller's transaction or the subscription lock.
-- 2026-11-04: A mid-cycle phase change truncates the old billing period; the budget shortens an open
-  statement only when its `lastEventAt` is before the new end. Phases end inclusively (the next starts 1 ms
-  later), and a `dayOfCreation` reset on the billing interval compiles from the phase's numeric
-  `billingAnchor`, so a plan change keeps the quantity counter.
+  `executeBudgetCommand`); the API runs it in process (`InProcessPayerBudgetGateway`), tRPC and jobs via
+  `/v1/internal/payer-budgets/sync`. Call `billing.syncPayerBudget` after the change commits, outside any lock,
+  with `caller: "request"` (one attempt) on request paths; only Trigger jobs pass `"job"` (waits out holds).
+- 2026-11-04: Phases and their last billing period end inclusively (the next starts 1 ms later);
+  statements are half-open, so compile ends a phase's last statement at `phase.endAt + 1`. Shortening an
+  open statement stops at `lastEventAt + 1`, and the next registration of the feature starts there.
+  A `dayOfCreation` reset on the billing interval compiles from the phase's numeric `billingAnchor`.
 - 2026-11-03: `apps/api` tsconfig excludes tests, so a core type change breaks DO and route tests only
   at runtime. Typecheck them with a scratch tsconfig that extends `./tsconfig.json`, includes
   `src/ingestion/budget` and `src/routes/budgets`, and adds `@cloudflare/vitest-pool-workers` types;

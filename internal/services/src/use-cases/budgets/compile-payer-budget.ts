@@ -60,7 +60,13 @@ const payerBillingPeriodSchema = z.object({
 const payerPhaseSchema = z.object({
   id: z.string().min(1),
   startAt: instantSchema,
+  /** The phase's last millisecond: phases end inclusively, the next starts 1 ms later. */
   endAt: instantSchema.nullable(),
+  /**
+   * When the phase's subscription was canceled or ends; null while it runs. A phase starting at or
+   * after it never takes effect, and none runs past it.
+   */
+  subscriptionEndsAt: instantSchema.nullable(),
   /** The numeric billing anchor the phase resolved at creation. */
   billingAnchor: z.number().int(),
   creditLinePolicy: creditLinePolicySchema,
@@ -154,21 +160,29 @@ function fail(issue: PayerBudgetIssue) {
 }
 
 /**
- * The payer budget of the phase in force at `now`, or else the next one, or else the last one:
+ * The payer budget of the phase in force at `now`, or else the next one, or else the last one
+ * (among the phases that take effect):
  * - unit: the plan version's card unit for the phase currency, else `money:<currency>`;
  * - one quantity limit per metered feature with a finite grant allowance, on its reset window;
  * - pricing: the card as base, every metered feature (priced when the plan has a card), required
  *   statements, and prepaid funding for a capped phase;
- * - closesAt: the phase's end when no phase follows it;
+ * - closesAt: the phase's end when no phase follows it, or the subscription's end once canceled;
  * - statements: the billing period of every metered item of every phase, unless it ended before a
- *   late record could still land in it, keyed `<featureSlug>:<billingPeriodId>`.
+ *   late record could still land in it, keyed `<featureSlug>:<billingPeriodId>`; a phase's last
+ *   period ends 1 ms past the phase, so consecutive statements leave no gap.
+ * Phases starting at or after their subscription's end are ignored. A source that fails its schema
+ * is INVALID_BUDGET.
  */
 export function compilePayerBudget(
   input: PayerBudgetSource
 ): Result<CompiledPayerBudget, UnPricePayerBudgetError> {
-  const source = payerBudgetSourceSchema.parse(input)
-  const { customerId, now } = source
-  const phase = phaseAt(source.phases, now)
+  const parsedSource = payerBudgetSourceSchema.safeParse(input)
+  if (!parsedSource.success) {
+    return fail({ code: "INVALID_BUDGET", message: parsedSource.error.message })
+  }
+  const { customerId, now, grants } = parsedSource.data
+  const phases = phasesInForce(parsedSource.data.phases)
+  const phase = phaseAt(phases, now)
   if (!phase) return fail({ code: "NO_PHASE", customerId })
 
   const unit = phase.card?.unit ?? `money:${phase.currency}`
@@ -189,7 +203,7 @@ export function compilePayerBudget(
       included: feature.included,
       priced: phase.card !== null,
     })
-    const allowance = allowanceOf(source.grants, feature.slug, now)
+    const allowance = allowanceOf(grants, feature.slug, now)
     if (allowance === null) continue
     const window = windowOf(feature, phase, now)
     if (window.err) return window
@@ -204,7 +218,7 @@ export function compilePayerBudget(
     })
   }
 
-  const followed = source.phases.some(
+  const followed = phases.some(
     (other) => phase.endAt !== null && other.id !== phase.id && other.startAt >= phase.endAt
   )
   const parsed = upsertBudgetInternalInputSchema.safeParse({
@@ -222,9 +236,22 @@ export function compilePayerBudget(
   })
   if (!parsed.success) return fail({ code: "INVALID_BUDGET", message: parsed.error.message })
 
-  const statements = statementsOf(source.phases, now)
+  const statements = statementsOf(phases, now)
   if (statements.err) return statements
   return Ok({ budget: parsed.data, statements: statements.val, phaseId: phase.id })
+}
+
+/**
+ * The phases that take effect: none starting at or after its subscription's end (a cancel leaves a
+ * scheduled phase in place), and each ending no later than it.
+ */
+function phasesInForce(phases: readonly Phase[]): Phase[] {
+  return phases.flatMap((phase) => {
+    const { subscriptionEndsAt: endsAt } = phase
+    if (endsAt === null) return [phase]
+    if (phase.startAt >= endsAt) return []
+    return [{ ...phase, endAt: phase.endAt === null ? endsAt : Math.min(phase.endAt, endsAt) }]
+  })
 }
 
 function phaseAt(phases: readonly Phase[], now: number): Phase | undefined {
@@ -335,13 +362,16 @@ function statementsOf(phases: readonly Phase[], now: number) {
     for (const { feature, billingPeriods } of phase.items) {
       if (meterOf(feature) === null) continue
       for (const period of billingPeriods) {
-        if (period.end <= now - RECORD_ACCEPT_WINDOW_MS) continue
+        // A period ends where the next starts, except the phase's last: it ends on the phase's
+        // inclusive last millisecond, so its statement (half-open) ends 1 ms later.
+        const end = phase.endAt !== null && period.end >= phase.endAt ? phase.endAt + 1 : period.end
+        if (end <= now - RECORD_ACCEPT_WINDOW_MS || end <= period.start) continue
         const parsed = budgetStatementRegistrationSchema.safeParse({
           periodId: `${feature.slug}:${period.id}`,
           statementKey: period.statementKey,
           featureSlug: feature.slug,
           start: period.start,
-          end: period.end,
+          end,
         })
         if (!parsed.success) return fail({ code: "INVALID_BUDGET", message: parsed.error.message })
         statements.push(parsed.data)

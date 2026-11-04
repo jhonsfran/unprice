@@ -1140,4 +1140,38 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
       updates: { subscriptionStatus: "canceled" },
     })
   })
+
+  it("syncs the payer budget after wallet activation generates periods, even when it parks", async () => {
+    for (const status of ["active", "pending_activation"]) {
+      const syncSubscriptionPayerBudget = vi.fn(async () => {})
+      const service = new SubscriptionService({
+        reservationFlushGateway: createBillingGatewayStub(),
+        db: {} as never,
+        repo: {} as never,
+        logger: { set: vi.fn(), error: vi.fn(), info: vi.fn(), warn: vi.fn() } as never,
+        analytics: {} as never,
+        waitUntil: () => {},
+        cache: {} as never,
+        metrics: {} as never,
+        customerService: {} as never,
+        entitlementService: {} as never,
+        billingService: { syncSubscriptionPayerBudget } as never,
+        ratingService: {} as never,
+        ledgerService: {} as never,
+        walletService: {} as never,
+      })
+      // The machine run is covered elsewhere; this pins what follows it.
+      vi.spyOn(
+        service as unknown as { withSubscriptionMachine: () => Promise<string> },
+        "withSubscriptionMachine"
+      ).mockResolvedValue(status)
+
+      const result = await service.activateWallet({ subscriptionId: "sub_1", projectId: "proj_1" })
+
+      expect(result?.err === undefined).toBe(status === "active")
+      expect(syncSubscriptionPayerBudget.mock.calls).toEqual([
+        [{ projectId: "proj_1", subscriptionId: "sub_1", caller: "request" }],
+      ])
+    }
+  })
 })

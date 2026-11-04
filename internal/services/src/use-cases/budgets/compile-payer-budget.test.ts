@@ -66,6 +66,7 @@ function phase(overrides: Partial<Phase>): Phase {
     id: "phase_1",
     startAt: NOV,
     endAt: null,
+    subscriptionEndsAt: null,
     billingAnchor: 1,
     creditLinePolicy: "uncapped",
     currency: "USD",
@@ -270,12 +271,14 @@ describe("compilePayerBudget", () => {
   it("compiles a mid-period plan change from the new phase and keeps the old period's statement", () => {
     const calls = (overrides: Partial<Feature> = {}) =>
       feature("api_calls", { meterConfig: count("api.call"), ...overrides })
+    // Phases end inclusively: the old one's last millisecond is the one before the new one starts,
+    // and its billing period was cut to that millisecond.
     const starter = phase({
       id: "phase_starter",
-      endAt: NOV_15,
+      endAt: NOV_15 - 1,
       card: { id: "rc_starter", unit: "money:USD" },
       items: [
-        item(calls(), [{ id: "bp_starter", statementKey: "sk_nov", start: NOV, end: NOV_15 }]),
+        item(calls(), [{ id: "bp_starter", statementKey: "sk_nov", start: NOV, end: NOV_15 - 1 }]),
       ],
     })
     const scale = phase({
@@ -302,6 +305,7 @@ describe("compilePayerBudget", () => {
     expect(changed.budget.config.limits.map(({ id, amount }) => [id, amount])).toEqual([
       [`api_calls:month:${FIRST_OF_MONTH}`, amount("20000")],
     ])
+    // Contiguous: the old statement covers the phase's last millisecond and ends where the next starts.
     expect(changed.statements).toEqual([
       statement("api_calls", "bp_starter", "sk_nov", NOV, NOV_15),
       statement("api_calls", "bp_scale", "sk_nov", NOV_15, DEC),
@@ -330,7 +334,48 @@ describe("compilePayerBudget", () => {
     const { budget, statements } = compiled(source([canceled]))
 
     expect(budget.config.closesAt).toBe(canceledAt)
-    expect(statements).toEqual([statement("api_calls", "bp_nov", "sk_nov", NOV, canceledAt)])
+    expect(statements).toEqual([statement("api_calls", "bp_nov", "sk_nov", NOV, canceledAt + 1)])
+  })
+
+  it("ignores a phase scheduled after a cancel and closes where the subscription ended", () => {
+    const calls = feature("api_calls", { meterConfig: count("api.call") })
+    const canceledAt = NOV + 20 * day
+    const current = phase({
+      id: "phase_current",
+      endAt: canceledAt,
+      subscriptionEndsAt: canceledAt,
+      card: { id: "rc_current", unit: "money:USD" },
+      items: [item(calls, [{ id: "bp_nov", statementKey: "sk_nov", start: NOV, end: DEC }])],
+    })
+    // A downgrade scheduled for December that the cancel left in place.
+    const scheduled = phase({
+      id: "phase_scheduled",
+      startAt: DEC,
+      subscriptionEndsAt: canceledAt,
+      currency: "EUR",
+      card: { id: "rc_scheduled", unit: "money:EUR" },
+      items: [
+        item(calls, [{ id: "bp_dec", statementKey: "sk_dec", start: DEC, end: DEC + 31 * day }]),
+      ],
+    })
+
+    for (const at of [NOW, canceledAt + hour]) {
+      const { phaseId, budget, statements } = compiled(source([current, scheduled], [], at))
+      expect([phaseId, budget.unit, budget.config.closesAt, budget.config.pricing?.cards]).toEqual([
+        "phase_current",
+        "money:USD",
+        canceledAt,
+        { base: "rc_current" },
+      ])
+      // The period not yet cut to the cancel still ends with it.
+      expect(statements).toEqual([statement("api_calls", "bp_nov", "sk_nov", NOV, canceledAt + 1)])
+    }
+  })
+
+  it("returns INVALID_BUDGET for a source that fails its schema instead of throwing", () => {
+    const result = compilePayerBudget({ ...source([phase({})]), now: -1 })
+    expect(result.err?.issue.code).toBe("INVALID_BUDGET")
+    expect(result.err?.issue).toMatchObject({ message: expect.stringContaining("now") })
   })
 
   it("refuses a meter the budget cannot count, and a customer without phases", () => {

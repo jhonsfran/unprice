@@ -45,6 +45,7 @@ export const renewTask = task({
         subscriptionId,
         projectId,
         now,
+        caller: "job",
       })
 
       if (renewResult.err) {

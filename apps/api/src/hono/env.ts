@@ -3,7 +3,6 @@ import type { Stats } from "@unprice/analytics/utils"
 import type { Database } from "@unprice/db"
 import type { WebEventsWriter } from "@unprice/lakehouse"
 import type { Logger } from "@unprice/logs"
-import type { AnalyticsService } from "@unprice/services/analytics"
 import type { ApiKeysService } from "@unprice/services/apikey"
 import type { BillingService } from "@unprice/services/billing"
 import type { BudgetCatalogService } from "@unprice/services/budget-catalog"
@@ -45,8 +44,6 @@ export type DomainServiceContext = {
   wallet: WalletService
   billing: BillingService
   rateCards: RateCardService
-  /** Web analytics reads (Basin SQL): plan-click attribution at sign-up. */
-  analytics: AnalyticsService
   pages: PageService
 }
 
