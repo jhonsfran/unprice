@@ -379,6 +379,13 @@ patterns. Keep it cheap to load and useful.
   `executeBudgetCommand`); the API runs it in process (`InProcessPayerBudgetGateway`), tRPC and jobs via
   `/v1/internal/payer-budgets/sync`. Call `billing.syncPayerBudget` after the change commits, outside any lock,
   with `caller: "request"` (one attempt) on request paths; only Trigger jobs pass `"job"` (waits out holds).
+- 2026-11-04: A trial period registers its statement with `free: true` (compile reads the billing
+  period's `type`); a prepaid close never captures a free statement, and `resolvePeriodCharge` throws
+  when a capped phase's non-trial usage is not captured in full. Recurring proration ends a phase's last
+  period at `phase.endAt + 1`, since `calculateProration` reads a half-open window.
+- 2026-11-04: Request paths never invoice: an immediate cancel only caps periods and syncs; the
+  invoicing job bills canceled and expired subscriptions through `billing.invoiceEndedSubscription`.
+  Payer statement completion in `billPeriod` is best effort and runs only when a group is metered.
 - 2026-11-04: Phases and their last billing period end inclusively (the next starts 1 ms later);
   statements are half-open, so compile ends a phase's last statement at `phase.endAt + 1`. Shortening an
   open statement stops at `lastEventAt + 1`, and the next registration of the feature starts there.

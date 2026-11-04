@@ -1755,49 +1755,31 @@ export class SubscriptionService {
           updates: { subscriptionStatus: "canceled" },
         })
       )
+      // A cancel that takes effect now caps the last periods where the subscription ended. The
+      // invoicing job bills them once their late-usage grace passes; the request never invoices.
+      if (cancelAt <= now) {
+        const capped = await this.billingService.generateBillingPeriods({
+          projectId,
+          subscriptionId,
+          now: cancelAt,
+        })
+        if (capped.err) {
+          this.logger.error(capped.err, {
+            context: "capping a canceled subscription's periods failed; the periods job retries it",
+            projectId,
+            subscriptionId,
+          })
+        }
+      }
       // The payer budget closes where the canceled phase ends.
       await this.billingService.syncPayerBudget({
         projectId,
         customerId: subscriptionWithPhases.customerId,
         caller: "request",
       })
-      if (cancelAt <= now) await this.invoiceCanceledNow({ projectId, subscriptionId, cancelAt })
     }
 
     return result
-  }
-
-  /**
-   * A cancel that takes effect now caps the last periods where the subscription ended, then seals
-   * and invoices their statements at the cancel time, without waiting for late usage. A failure is
-   * logged and left to the invoicing job, which invoices a canceled subscription the same way.
-   */
-  private async invoiceCanceledNow(input: {
-    projectId: string
-    subscriptionId: string
-    cancelAt: number
-  }): Promise<void> {
-    const { projectId, subscriptionId, cancelAt } = input
-    const capped = await this.billingService.generateBillingPeriods({
-      projectId,
-      subscriptionId,
-      now: cancelAt,
-    })
-    const invoiced = capped.err
-      ? capped
-      : await this.billingService.invoiceCanceledSubscription({
-          projectId,
-          subscriptionId,
-          now: cancelAt,
-          lateEventGraceMs: 0,
-        })
-    if (invoiced.err) {
-      this.logger.error(invoiced.err, {
-        context: "final invoice of a canceled subscription failed; the invoicing job retries it",
-        projectId,
-        subscriptionId,
-      })
-    }
   }
 
   public async createSubscription({
@@ -2156,9 +2138,10 @@ export class SubscriptionService {
       where: (row, ops) =>
         ops.and(ops.eq(row.id, subscriptionId), ops.eq(row.projectId, projectId)),
     })
-    // A canceled subscription's machine is final; its last statements still bill.
-    if (subscription?.status === "canceled") {
-      const invoiced = await this.billingService.invoiceCanceledSubscription({
+    // A canceled or expired subscription's machine is final; its last statements still bill.
+    if (subscription?.status === "canceled" || subscription?.status === "expired") {
+      const { status } = subscription
+      const invoiced = await this.billingService.invoiceEndedSubscription({
         projectId,
         subscriptionId,
         now,
@@ -2171,7 +2154,7 @@ export class SubscriptionService {
           })
         )
       }
-      return Ok({ status: "canceled" })
+      return Ok({ status })
     }
     try {
       const status = await this.withSubscriptionMachine({

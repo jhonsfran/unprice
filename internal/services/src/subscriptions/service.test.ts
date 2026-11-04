@@ -1068,7 +1068,8 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
     const generateBillingPeriods = vi
       .fn()
       .mockResolvedValue(Ok({ cyclesCreated: 0, phasesProcessed: 1 }))
-    const invoiceCanceledSubscription = vi.fn().mockResolvedValue(Ok({ phasesProcessed: 1 }))
+    const invoiceEndedSubscription = vi.fn().mockResolvedValue(Ok({ phasesProcessed: 1 }))
+    const syncPayerBudget = vi.fn().mockResolvedValue(undefined)
     const service = new SubscriptionService({
       invoicing: createInvoicingStub(),
       db,
@@ -1086,9 +1087,9 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
         expireCustomerEntitlement,
       } as never,
       billingService: {
-        syncPayerBudget: async () => {},
+        syncPayerBudget,
         generateBillingPeriods,
-        invoiceCanceledSubscription,
+        invoiceEndedSubscription,
       } as never,
       ledgerService: {} as never,
     })
@@ -1100,14 +1101,10 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
     })
 
     expect(result.err).toBeUndefined()
-    // An immediate cancel caps the last periods and invoices them at the cancel time.
+    // An immediate cancel caps the last periods and syncs the budget; the invoicing job bills them.
     expect(generateBillingPeriods).toHaveBeenCalledWith({ projectId, subscriptionId, now })
-    expect(invoiceCanceledSubscription).toHaveBeenCalledWith({
-      projectId,
-      subscriptionId,
-      now,
-      lateEventGraceMs: 0,
-    })
+    expect(syncPayerBudget).toHaveBeenCalledWith({ projectId, customerId, caller: "request" })
+    expect(invoiceEndedSubscription).not.toHaveBeenCalled()
     if (!result.err) {
       expect(result.val).toEqual(canceledSubscription)
     }
@@ -1147,6 +1144,41 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
       projectId,
       updates: { subscriptionStatus: "canceled" },
     })
+  })
+
+  it("invoices a canceled or expired subscription outside its final machine", async () => {
+    for (const status of ["canceled", "expired"] as const) {
+      const now = Date.parse("2026-05-02T12:00:00.000Z")
+      const findFirst = vi.fn().mockResolvedValue({ status })
+      const invoiceEndedSubscription = vi.fn().mockResolvedValue(Ok({ phasesProcessed: 1 }))
+      const service = new SubscriptionService({
+        invoicing: createInvoicingStub(),
+        db: { query: { subscriptions: { findFirst } } } as unknown as Database,
+        repo: {} as never,
+        logger: {} as never,
+        analytics: {} as never,
+        waitUntil: vi.fn(),
+        cache: {} as never,
+        metrics: {} as never,
+        customerService: {} as never,
+        entitlementService: {} as never,
+        billingService: { invoiceEndedSubscription } as never,
+        ledgerService: {} as never,
+      })
+
+      const result = await service.invoiceSubscription({
+        subscriptionId: "sub_123",
+        projectId: "proj_123",
+        now,
+      })
+
+      expect(result.val).toEqual({ status })
+      expect(invoiceEndedSubscription).toHaveBeenCalledWith({
+        projectId: "proj_123",
+        subscriptionId: "sub_123",
+        now,
+      })
+    }
   })
 
   it("syncs the payer budget after wallet activation generates periods, even when it parks", async () => {

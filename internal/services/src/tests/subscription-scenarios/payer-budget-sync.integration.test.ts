@@ -414,7 +414,7 @@ describe("payer budget sync over Postgres", () => {
     expect(statementsOf(store).map((statement) => statement.state)).toEqual(["completed"])
   })
 
-  it("seals and invoices the final statement at the cancel time when a cancel is immediate", async () => {
+  it("caps an immediate cancel's last statement on the request and invoices it from the job", async () => {
     const { store, clock, services, logger, record } = createHarness()
     await services.billing.syncPayerBudget({ projectId, customerId, caller: "request" })
     expect((await record("r1", 40, jan10 - hour)).err).toBeUndefined()
@@ -430,6 +430,21 @@ describe("payer budget sync over Postgres", () => {
 
     expect(canceled.err).toBeUndefined()
     expect(logger.error).not.toHaveBeenCalled()
+    // The request only caps and syncs: nothing is invoiced or sealed yet.
+    expect(await usageLines(services)).toEqual([])
+    expect(statementsOf(store)).toEqual([
+      expect.objectContaining({ end: jan10 + 1, state: "open", amount: scaled("0.04") }),
+    ])
+
+    // The invoicing job bills the canceled subscription once the late-usage grace passed.
+    clock.now = jan10 + 2 * hour
+    const invoiced = await services.subscriptions.invoiceSubscription({
+      subscriptionId,
+      projectId,
+      now: clock.now,
+    })
+
+    expect(invoiced.val).toEqual({ status: "canceled" })
     expect(await usageLines(services)).toEqual([
       { billingPeriodId: "bp_test_arrear_events_jan", amount: 4_000_000, quantity: 40 },
     ])

@@ -542,17 +542,15 @@ export class BillingService {
   }
 
   /**
-   * Invoices what a canceled subscription still owes: its last periods, capped where it ended,
-   * and the payer budget statements sealed at that time (ADR-0008 D4). The machine of a canceled
-   * subscription takes no more events, so this runs `billPeriod` under the subscription lock
-   * directly. A cancel passes a grace of 0 to invoice at once; the invoicing job retries with the
-   * usual late-event grace.
+   * Invoices what a canceled or expired subscription still owes: its last periods, capped where it
+   * ended, and the payer budget statements sealed at that time (ADR-0008 D4). Both are final machine
+   * states that take no more events, so the invoicing job runs `billPeriod` under the subscription
+   * lock directly, with the usual late-event grace.
    */
-  public async invoiceCanceledSubscription(input: {
+  public async invoiceEndedSubscription(input: {
     projectId: string
     subscriptionId: string
     now: number
-    lateEventGraceMs?: number
   }): Promise<Result<{ phasesProcessed: number }, UnPriceBillingError>> {
     const { projectId, subscriptionId, now } = input
     try {
@@ -573,10 +571,10 @@ export class BillingService {
               message: "Subscription not found",
             })
           }
-          if (subscription.status !== "canceled") {
+          if (subscription.status !== "canceled" && subscription.status !== "expired") {
             throw new UnPriceBillingError({
               code: "BILLING_OPERATION_FAILED",
-              message: "Only a canceled subscription is invoiced outside its machine",
+              message: "Only a canceled or expired subscription is invoiced outside its machine",
             })
           }
           const { customer, ...row } = subscription
@@ -596,9 +594,6 @@ export class BillingService {
             repo: new DrizzleSubscriptionRepository(this.db),
             ledgerService: this.ledgerService,
             invoicing: this.invoicing,
-            ...(input.lateEventGraceMs !== undefined && {
-              lateEventGraceMs: input.lateEventGraceMs,
-            }),
           })
           return billed.phasesProcessed
         },

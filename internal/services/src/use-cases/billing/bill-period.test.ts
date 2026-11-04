@@ -9,6 +9,7 @@ import {
   makeBillingPeriod,
   makeContext,
   makeDb,
+  makeFlatRow,
   makeInvoicing,
   makeLedgerService,
   makeLogger,
@@ -595,6 +596,197 @@ describe("billPeriod", () => {
     })
 
     expect(invoicing.payerBudgets.seal).not.toHaveBeenCalled()
+    expect(invoicing.payerBudgets.completeInvoiced).not.toHaveBeenCalled()
     expect(repositories.tx.createInvoice).toHaveBeenCalledTimes(1)
   })
+
+  it("invoices when completing statements fails, logging it for the next run to repair", async () => {
+    for (const failure of ["err", "throw"] as const) {
+      repositories.tx.createInvoice.mockClear()
+      const usage = meteredPeriod()
+      repositories.tx.listPendingPeriodsForStatement = vi.fn().mockResolvedValue([usage])
+      const invoicing = makeInvoicing({ sealed: [makeStatementLine({ amount: "4200000000" })] })
+      const error = new FetchError({ message: "budget unavailable", retry: true })
+      if (failure === "err") invoicing.payerBudgets.completeInvoiced.mockResolvedValue(Err(error))
+      else invoicing.payerBudgets.completeInvoiced.mockRejectedValue(error)
+      const logger = makeLogger()
+      const ledgerService = makeLedgerService({
+        getInvoiceLines: vi.fn().mockResolvedValue(Ok([])),
+      } as unknown as Partial<LedgerGateway>)
+
+      const result = await billPeriod({
+        context: makeContext(),
+        logger,
+        db: makeDb({ statementPeriods: [usage] }),
+        repo: makeRepo(),
+        invoicing,
+        ledgerService,
+      })
+
+      expect(result.phasesProcessed).toBe(1)
+      expect(repositories.tx.createInvoice).toHaveBeenCalledTimes(1)
+      expect(invoicing.payerBudgets.completeInvoiced).toHaveBeenCalledTimes(2)
+      expect(vi.mocked(logger.error).mock.calls).toEqual([
+        [error, expect.objectContaining({ projectId: "proj_1", customerId: "cust_1" })],
+        [error, expect.objectContaining({ projectId: "proj_1", customerId: "cust_1" })],
+      ])
+    }
+  })
+
+  it("completes statements once before and once after every group, never per group", async () => {
+    repositories.outer.listPendingPeriodGroups = vi
+      .fn()
+      .mockResolvedValue([
+        makePeriodGroup({ statementKey: "stmt_a" }),
+        makePeriodGroup({ statementKey: "stmt_b" }),
+      ])
+    const usage = meteredPeriod()
+    const invoicing = makeInvoicing()
+
+    await billPeriod({
+      context: makeContext(),
+      logger: makeLogger(),
+      db: makeDb({ statementPeriods: [usage] }),
+      repo: makeRepo(),
+      invoicing,
+      ledgerService: makeLedgerService({
+        getInvoiceLines: vi.fn().mockResolvedValue(Ok([])),
+      } as unknown as Partial<LedgerGateway>),
+    })
+
+    expect(invoicing.payerBudgets.seal).toHaveBeenCalledTimes(2)
+    expect(invoicing.payerBudgets.completeInvoiced).toHaveBeenCalledTimes(2)
+  })
+
+  it("invoices a capped phase's trial usage as free, with nothing captured", async () => {
+    const trial = meteredPeriod({ type: "trial" })
+    repositories.tx.listPendingPeriodsForStatement = vi.fn().mockResolvedValue([trial])
+    const invoicing = makeInvoicing({ sealed: [makeStatementLine({ amount: "4200000000" })] })
+    const ledgerService = makeLedgerService({
+      getInvoiceLines: vi.fn().mockResolvedValue(Ok([])),
+    } as unknown as Partial<LedgerGateway>)
+
+    const result = await billPeriod({
+      context: makeContext(),
+      logger: makeLogger(),
+      db: makeDb({ statementPeriods: [trial] }),
+      repo: makeRepo(makePhase({ creditLinePolicy: "capped" })),
+      invoicing,
+      ledgerService,
+    })
+
+    expect(result.phasesProcessed).toBe(1)
+    expect(ledgerService.createTransfer).not.toHaveBeenCalled()
+    expect(repositories.tx.updateInvoice.mock.calls[0]?.[0].data).toMatchObject({
+      grossAmount: 0,
+      amountDue: 0,
+    })
+    expect(repositories.tx.markPeriodsInvoiced).toHaveBeenCalledWith(
+      expect.objectContaining({ periodIds: ["bp_1"], invoiceId: "inv_1" })
+    )
+  })
+
+  it("refuses a capped phase's period whose wallet captures fall short of its usage", async () => {
+    const usage = meteredPeriod()
+    repositories.tx.listPendingPeriodsForStatement = vi.fn().mockResolvedValue([usage])
+    const capture = (amount: number) =>
+      Ok([
+        {
+          entryId: "ple_capture",
+          statementKey: "stmt_2026_04",
+          amount: dinero({ amount, currency: usd, scale: 8 }),
+          metadata: { billing_period_id: "bp_1", flow: "capture" },
+        },
+      ])
+    const bill = (captured: number) => {
+      const ledgerService = makeLedgerService({
+        getInvoiceLines: vi.fn().mockResolvedValue(capture(captured)),
+      } as unknown as Partial<LedgerGateway>)
+      const run = billPeriod({
+        context: makeContext(),
+        logger: makeLogger(),
+        db: makeDb({ statementPeriods: [usage] }),
+        repo: makeRepo(makePhase({ creditLinePolicy: "capped" })),
+        invoicing: makeInvoicing({ sealed: [makeStatementLine({ amount: "4200000000" })] }),
+        ledgerService,
+      })
+      return { run, ledgerService }
+    }
+
+    const short = bill(2_000_000_000)
+    await expect(short.run).rejects.toThrow(
+      "Billing period bp_1 of a capped phase captured 2000000000 of its 4200000000 usage"
+    )
+    expect(short.ledgerService.createTransfer).not.toHaveBeenCalled()
+
+    const covered = bill(4_200_000_000)
+    await covered.run
+    expect(covered.ledgerService.createTransfer).not.toHaveBeenCalled()
+    expect(repositories.tx.markPeriodsInvoiced).toHaveBeenCalledTimes(1)
+  })
+
+  it("bills a full flat fee for a phase's last period, which ends on its inclusive last ms", async () => {
+    const jan1 = Date.UTC(2026, 0, 1)
+    const feb1 = Date.UTC(2026, 1, 1)
+    // Capped to the phase's inclusive end, and still uncapped past it.
+    for (const cycleEndAt of [feb1 - 1, feb1]) {
+      const period = makeBillingPeriod({
+        cycleStartAt: jan1,
+        cycleEndAt,
+        subscriptionItem: {
+          id: "item_1",
+          units: 1,
+          featurePlanVersion: {
+            id: "fpv_1",
+            featureType: "flat",
+            billingConfig: {
+              name: "monthly",
+              billingInterval: "month",
+              billingIntervalCount: 1,
+              billingAnchor: 1,
+              planType: "recurring",
+            },
+            feature: { slug: "api-calls", title: "API Calls" },
+          },
+        },
+      })
+      repositories.tx.listPendingPeriodsForStatement = vi.fn().mockResolvedValue([period])
+      const ledgerService = makeLedgerService({
+        getInvoiceLines: vi.fn().mockResolvedValue(Ok([])),
+      } as unknown as Partial<LedgerGateway>)
+
+      await billPeriod({
+        context: makeContext(),
+        logger: makeLogger(),
+        db: makeDb({ statementPeriods: [period] }),
+        repo: makeRepo(makePhase({ startAt: jan1, endAt: feb1 - 1 })),
+        invoicing: makeInvoicing({
+          rows: [makeFlatRow({ price: { type: "flat", amount: BigInt(100_0000_0000) } })],
+        }),
+        ledgerService,
+      })
+
+      const transfer = vi.mocked(ledgerService.createTransfer).mock.calls[0]?.[0]
+      // $100 at the ledger scale; a 1 ms short window used to shave it to 9_999_999_996.
+      expect(transfer?.amount.toJSON().amount).toBe(10_000_000_000)
+      expect(transfer?.metadata).toMatchObject({ proration_factor: 1 })
+    }
+  })
 })
+
+/** The default `bp_1`, as a period of a metered item. */
+function meteredPeriod(overrides: Record<string, unknown> = {}) {
+  return makeBillingPeriod({
+    subscriptionItem: {
+      id: "item_1",
+      units: null,
+      featurePlanVersion: {
+        id: "fpv_1",
+        featureType: "usage",
+        billingConfig: {},
+        feature: { slug: "api-calls", title: "API Calls" },
+      },
+    },
+    ...overrides,
+  })
+}

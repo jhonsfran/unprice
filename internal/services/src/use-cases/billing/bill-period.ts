@@ -57,16 +57,28 @@ export async function billPeriod({
   const billingRepo = new DrizzleBillingRepository(db)
   const { payerBudgets } = invoicing
   // The budget may drop the statements of committed invoices, including any whose completion
-  // failed after an earlier commit.
+  // failed after an earlier commit. Best effort: an invoice never waits on it, and the next run
+  // repairs what this one left.
   const completeStatements = async () => {
     if (!payerBudgets) return
-    const completed = await payerBudgets.completeInvoiced({
+    const fields = {
+      context: "completing invoiced payer statements failed; the next invoicing run repairs it",
       projectId: subscription.projectId,
+      subscriptionId: subscription.id,
       customerId: context.customer.id,
-    })
-    if (completed.err) throw completed.err
+    }
+    try {
+      const completed = await payerBudgets.completeInvoiced({
+        projectId: subscription.projectId,
+        customerId: context.customer.id,
+      })
+      if (completed.err) logger.error(completed.err, fields)
+    } catch (error) {
+      logger.error(error instanceof Error ? error : new Error(String(error)), fields)
+    }
   }
-  await completeStatements()
+  // Set once a group has metered periods: only then does the run touch the payer budget.
+  let metered = false
 
   const periodItemsGroups = await billingRepo.listPendingPeriodGroups({
     lateEventGraceMs,
@@ -139,13 +151,22 @@ export async function billPeriod({
       continue
     }
 
+    const meteredPeriods = await pendingMeteredPeriods({
+      db,
+      projectId: phase.projectId,
+      group: periodItemGroup,
+    })
+    if (meteredPeriods.length > 0 && !metered) {
+      metered = true
+      await completeStatements()
+    }
     const statements = await sealStatements({
       payerBudgets,
       projectId: phase.projectId,
       customerId: phase.subscription.customerId,
       group: periodItemGroup,
+      metered: meteredPeriods,
       now,
-      db,
     })
     const rows = await recurringRows(invoicing.rateCards, phase)
 
@@ -450,8 +471,8 @@ export async function billPeriod({
         })
       }
     })
-    await completeStatements()
   }
+  if (metered) await completeStatements()
 
   return {
     phasesProcessed: periodItemsGroups.length,
@@ -459,21 +480,14 @@ export async function billPeriod({
   }
 }
 
-/**
- * Seals the payer budget's statements of the group's key (ADR-0008 D4) and answers the sealed
- * ones by billing period. The seal cuts off at the invoice time, and never before the end of a
- * metered period of the key, so each one's statement seals; a statement still open has not ended
- * for the budget yet, and invoicing waits for the next attempt. A group without metered periods
- * seals nothing.
- */
-async function sealStatements(input: {
-  payerBudgets: PayerBudgetGateway | null
-  projectId: string
-  customerId: string
-  group: { subscriptionId: string; subscriptionPhaseId: string; statementKey: string }
-  now: number
+type PeriodGroup = { subscriptionId: string; subscriptionPhaseId: string; statementKey: string }
+
+/** The group's pending periods of metered items: the ones the payer budget priced. */
+async function pendingMeteredPeriods(input: {
   db: Database
-}): Promise<Map<string, PayerStatementLine>> {
+  projectId: string
+  group: PeriodGroup
+}): Promise<Array<{ id: string; cycleEndAt: number }>> {
   const { group } = input
   const pending = await input.db.query.billingPeriods.findMany({
     columns: { id: true, cycleEndAt: true },
@@ -489,9 +503,27 @@ async function sealStatements(input: {
       subscriptionItem: { with: { featurePlanVersion: { columns: { featureType: true } } } },
     },
   })
-  const metered = pending.filter(
+  return pending.filter(
     (period) => period.subscriptionItem.featurePlanVersion.featureType === "usage"
   )
+}
+
+/**
+ * Seals the payer budget's statements of the group's key (ADR-0008 D4) and answers the sealed
+ * ones by billing period. The seal cuts off at the invoice time, and never before the end of a
+ * metered period of the key, so each one's statement seals; a statement still open has not ended
+ * for the budget yet, and invoicing waits for the next attempt. A group without metered periods
+ * seals nothing.
+ */
+async function sealStatements(input: {
+  payerBudgets: PayerBudgetGateway | null
+  projectId: string
+  customerId: string
+  group: PeriodGroup
+  metered: ReadonlyArray<{ id: string; cycleEndAt: number }>
+  now: number
+}): Promise<Map<string, PayerStatementLine>> {
+  const { group, metered } = input
   if (metered.length === 0) return new Map()
   if (!input.payerBudgets) {
     throw new Error(`Statement ${group.statementKey} has metered periods but no payer budget`)
