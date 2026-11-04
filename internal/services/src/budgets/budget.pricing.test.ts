@@ -978,6 +978,22 @@ describe("a payer budget keeps every amount it consumes on a statement", () => {
     ])
   })
 
+  it("lets the alarm close an expired estimate however long ago its cards were cached", () => {
+    const store = new MemoryBudgetStore()
+    const at = NOV + hour
+    store.cacheCardsAt(at, usdCard)
+    ok(store.run(pricedUpsert({ features: [images], statements: "none" }), at))
+    ok(
+      store.run(
+        { type: "authorize", idempotencyKey: "a1", event: image("1024"), ttlMs: 2 * minute },
+        at
+      )
+    )
+    ok(store.run({ type: "sweep" }, at + 10 * minute))
+    expect(store.ledger.held.amount).toBe(BigInt(0))
+    expect(lifetime(store)).toEqual({ amount: "0.04", quantities: { images: "1" } })
+  })
+
   it("refuses to price with a card cached five minutes ago or never, and writes nothing", () => {
     const store = new MemoryBudgetStore()
     const at = NOV + hour

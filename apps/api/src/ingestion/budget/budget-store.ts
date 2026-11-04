@@ -527,10 +527,16 @@ function bind(db: SqliteTx, configs: { last: ConfigCache }): BudgetStoreTx {
       }
 
       // Before the upserts: a row past its retention frees its key for the row that reuses it.
+      const backlog = schema.budgetJournalBacklog
       for (const operation of purged) {
-        db.delete(operations)
-          .where(eq(operations.id, storedId(operation)))
-          .run()
+        const id = storedId(operation)
+        // The journal still needs the row when its last write was not exported: keep that write.
+        db.run(
+          sql`INSERT INTO ${backlog} (${sql.raw("seq, stored_id, kind, status, data_json, written_at")})
+            SELECT ${operations.seq}, ${operations.id}, ${operations.kind}, ${operations.status}, ${operations.dataJson}, ${operations.writtenAt}
+            FROM ${operations} WHERE ${operations.id} = ${id} AND ${operations.seq} > ${exportedSeq}`
+        )
+        db.delete(operations).where(eq(operations.id, id)).run()
       }
       for (const operation of changed) {
         seq += 1
@@ -553,7 +559,7 @@ function bind(db: SqliteTx, configs: { last: ConfigCache }): BudgetStoreTx {
     },
 
     readUnexported(limit) {
-      return db
+      const live = db
         .select({
           id: operations.id,
           kind: operations.kind,
@@ -567,6 +573,24 @@ function bind(db: SqliteTx, configs: { last: ConfigCache }): BudgetStoreTx {
         .orderBy(asc(operations.seq))
         .limit(limit)
         .all()
+      const backlog = schema.budgetJournalBacklog
+      const deleted = db
+        .select({
+          id: backlog.storedId,
+          kind: backlog.kind,
+          status: backlog.status,
+          dataJson: backlog.dataJson,
+          seq: backlog.seq,
+          writtenAt: backlog.writtenAt,
+        })
+        .from(backlog)
+        .where(gt(backlog.seq, exportedSeq))
+        .orderBy(asc(backlog.seq))
+        .limit(limit)
+        .all()
+      return [...live, ...deleted]
+        .sort((a, b) => a.seq - b.seq)
+        .slice(0, limit)
         .map((row) => ({
           seq: row.seq,
           writtenAt: row.writtenAt,
@@ -581,6 +605,8 @@ function bind(db: SqliteTx, configs: { last: ConfigCache }): BudgetStoreTx {
         .set({ exportedSeq: sql`max(${schema.budgetLedger.exportedSeq}, ${seq})` })
         .where(eq(schema.budgetLedger.id, SINGLETON_ID))
         .run()
+      const backlog = schema.budgetJournalBacklog
+      db.delete(backlog).where(lte(backlog.seq, seq)).run()
     },
 
     purgeOperations(now, limit) {

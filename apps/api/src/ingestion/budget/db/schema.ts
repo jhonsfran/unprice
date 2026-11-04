@@ -136,3 +136,17 @@ export const budgetFunding = sqliteTable("budget_funding", {
   state: text("state", { enum: ["open", "closed"] }).notNull(),
   dataJson: text("data_json").notNull(),
 })
+
+/**
+ * Rows a command deleted to reuse their key before the journal received them. The export reads
+ * them beside `budget_operations`, so a key reused past its retention never leaves a hole.
+ */
+export const budgetJournalBacklog = sqliteTable("budget_journal_backlog", {
+  seq: integer("seq").primaryKey(),
+  /** The deleted row's stored id. */
+  storedId: text("stored_id").notNull(),
+  kind: text("kind", { enum: ["hold", "charge", "record", "lease"] }).notNull(),
+  status: text("status", { enum: ["open", "settled", "released", "done"] }).notNull(),
+  dataJson: text("data_json").notNull(),
+  writtenAt: integer("written_at").notNull(),
+})

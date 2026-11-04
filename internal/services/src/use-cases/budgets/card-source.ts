@@ -11,7 +11,11 @@ export function rateCardSource(rateCards: Pick<RateCardService, "getCard">): Car
       const cards: CardRows[] = []
       for (const cardId of new Set(cardIds)) {
         const read = await rateCards.getCard(projectId, cardId)
-        if (read.err) return Err(new UnPriceBudgetError({ code: "CARD_NOT_FOUND", cardId }))
+        if (read.err?.code === "CARD_NOT_FOUND") {
+          return Err(new UnPriceBudgetError({ code: "CARD_NOT_FOUND", cardId }))
+        }
+        // Anything else is the source failing, not a missing card: the caller may retry.
+        if (read.err) throw read.err
         cards.push(read.val)
       }
       return Ok(cards)

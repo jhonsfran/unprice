@@ -240,6 +240,39 @@ describe("BudgetDO journal", () => {
     })
   })
 
+  it("journals a row whose key a later command reused before the row was exported", async () => {
+    const key = "customer:journal-reused-key"
+    const stub = getBudgetStub(env, { projectId: "proj_1", key })
+    const t0 = midMonthAhead()
+    let now = t0
+    const journal = fakeJournal()
+    await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
+      await migrate(drizzle(state.storage), migrations)
+      const budget = processor(state, () => now, journal)
+      await budget.execute(upsert(key))
+      journal.failing = true
+      await budget.execute({ type: "charge", idempotencyKey: "k", usage: amountUsage(UNIT) })
+      // Past the key's retention, the same key charges again while the stream is still down.
+      now = t0 + 25 * HOUR
+      await budget.execute({
+        type: "charge",
+        idempotencyKey: "k",
+        usage: amountUsage(UNIT * BigInt(2)),
+      })
+
+      journal.failing = false
+      now += ALARM_RETRY_MS
+      await budget.alarm()
+      const amounts = journal.sent
+        .flat()
+        .map((row) => (row.data as { usage: { amount: string } }).usage.amount)
+      expect(amounts).toEqual(["1", "2"])
+      expect(
+        state.storage.sql.exec("SELECT count(*) AS n FROM budget_journal_backlog").one()
+      ).toEqual({ n: 0 })
+    })
+  })
+
   it("without a stream keeps every row and never spins the alarm on them", async () => {
     const key = "customer:journal-unbound"
     const stub = getBudgetStub(env, { projectId: "proj_1", key })

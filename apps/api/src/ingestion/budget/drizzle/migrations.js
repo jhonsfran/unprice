@@ -9,6 +9,7 @@ import m0007 from "./0007_reset_rows_before_usage_vectors.sql"
 import m0008 from "./0008_statements_positions_cards.sql"
 import m0009 from "./0009_operation_journal.sql"
 import m0010 from "./0010_budget_funding.sql"
+import m0011 from "./0011_journal_backlog.sql"
 import journal from "./meta/_journal.json"
 
 export default {
@@ -25,5 +26,6 @@ export default {
     m0008,
     m0009,
     m0010,
+    m0011,
   },
 }

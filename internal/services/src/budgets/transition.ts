@@ -134,7 +134,12 @@ export function loadView(
         : [],
     expired,
     cards: pricing && prices ? reader.readCards(cardIdsOf(pricing)) : {},
-    staleCards: pricing && prices ? staleCardsOf(reader, cardIdsOf(pricing), now) : [],
+    // The alarm's sweep cannot refresh cards. An expiry prices at its hold's createdAt, when the
+    // cards were fresh, and rows effective then were published before it (ADR-0008 D2 notice).
+    staleCards:
+      pricing && prices && command.type !== "sweep"
+        ? staleCardsOf(reader, cardIdsOf(pricing), now)
+        : [],
     reservationsOpen: repriced && reader.hasOpenReservations(),
     // Several expiries may read the same statement.
     statements: [...byPeriodId(statements).values()],

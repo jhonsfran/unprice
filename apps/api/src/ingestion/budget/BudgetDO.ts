@@ -12,6 +12,10 @@ import migrations from "./drizzle/migrations"
 import { type BudgetJournal, discardJournal, pipelineJournal } from "./journal"
 import { BudgetProcessor } from "./processor"
 
+function creates(request: BudgetRequest): boolean {
+  return request.type === "upsert" || ("ifMissing" in request && !!request.ifMissing)
+}
+
 /** How long cards cached for a key with no budget wait for the call that creates it. */
 const CARDS_ONLY_TTL_MS = 60_000
 
@@ -50,16 +54,19 @@ export class BudgetDO extends DurableObject {
   async execute(request: BudgetRequest): Promise<BudgetReply> {
     // Storage that holds no budget yet: a new key, or one whose cards were cached for its create.
     const fresh = !this.ready || this.cardsOnly
+    const wasPrepared = this.ready !== null
     if (!this.ready) {
-      const creates = request.type === "upsert" || ("ifMissing" in request && !!request.ifMissing)
-      if (!creates) return { ok: false, rejection: { code: "BUDGET_NOT_FOUND" } }
+      if (!creates(request)) return { ok: false, rejection: { code: "BUDGET_NOT_FOUND" } }
       this.ready = this.prepare()
     }
     await this.ready
     const reply = await this.processor.execute(request)
     // A first call that was refused left a schema and no budget: the storage a mistyped key must
     // not keep. Drop it, so the key reads as never upserted again.
-    if (fresh && !reply.ok && !this.processor.hasBudget()) await this.destroy()
+    // Cards cached for a create stay until that create is refused or their alarm drops them;
+    // another call refused on the key meanwhile leaves them.
+    const created = !wasPrepared || creates(request)
+    if (fresh && created && !reply.ok && !this.processor.hasBudget()) await this.destroy()
     else if (reply.ok) this.cardsOnly = false
     return reply
   }
