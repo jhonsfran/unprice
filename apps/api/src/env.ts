@@ -119,6 +119,12 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
       // Web analytics: the web_events stream's HTTP ingest endpoint and a Pipelines Send token.
       LAKEHOUSE_WEB_EVENTS_URL: z.string().url().optional(),
       LAKEHOUSE_WEB_EVENTS_TOKEN: z.string().optional(),
+
+      // Basin SQL: usage history from the budget journal (ADR-0008 D7). Without them the history
+      // routes answer NOT_CONFIGURED as a fetch error.
+      BASIN_SQL_ACCOUNT_ID: z.string().optional(),
+      BASIN_SQL_BUCKET: z.string().optional(),
+      BASIN_SQL_TOKEN: z.string().optional(),
     },
     emptyStringAsUndefined: true,
     runtimeEnv: workerEnv as Record<string, string | number | boolean | undefined>,

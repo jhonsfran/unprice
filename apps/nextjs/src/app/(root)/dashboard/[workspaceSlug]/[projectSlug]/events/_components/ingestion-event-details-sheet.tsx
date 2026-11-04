@@ -23,18 +23,21 @@ export function IngestionEventDetailsSheet({
   open: boolean
 }) {
   const trpc = useTRPC()
-  const hasReplayPayload = event?.state === "failed" && event.replayable
+  // A refused event keeps its payload and rejection in the budget journal.
+  const hasRejectedPayload = event?.state === "rejected"
   const {
     data: payloadData,
     isLoading: isPayloadLoading,
     error: payloadError,
   } = useQuery(
-    trpc.analytics.getFailedIngestionEventPayload.queryOptions(
+    trpc.analytics.getRejectedEventPayload.queryOptions(
       {
+        customerId: event?.customerId ?? "",
         canonicalAuditId: event?.canonicalAuditId ?? "",
+        handledAt: event?.handledAt ?? 0,
       },
       {
-        enabled: open && hasReplayPayload,
+        enabled: open && hasRejectedPayload,
       }
     )
   )
@@ -43,7 +46,7 @@ export function IngestionEventDetailsSheet({
     return null
   }
 
-  const issue = getIssueDetails(event, payloadData)
+  const issue = getIssueDetails(event)
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -102,9 +105,7 @@ export function IngestionEventDetailsSheet({
               <Field label="Rejection reason">{event.rejectionReason ?? "none"}</Field>
               <Field label="Failure stage">{event.failureStage ?? "none"}</Field>
               <Field label="Failure reason">{event.failureReason ?? "none"}</Field>
-              <Field label="Failure message">
-                {event.failureMessage ?? payloadData?.failureMessage ?? "none"}
-              </Field>
+              <Field label="Failure message">{event.failureMessage ?? "none"}</Field>
               <Field label="Replayable">{event.replayable ? "yes" : "no"}</Field>
             </dl>
           </Section>
@@ -117,7 +118,7 @@ export function IngestionEventDetailsSheet({
                 isLoading: isPayloadLoading,
                 error: payloadError ?? null,
               }}
-              canFetchPayload={hasReplayPayload}
+              canFetchPayload={hasRejectedPayload}
             />
           </Section>
         </div>
@@ -162,10 +163,7 @@ function formatWorkload(event: IngestionEventRow): string {
   return event.workloadType ?? event.workloadId ?? "none"
 }
 
-function getIssueDetails(
-  event: IngestionEventRow,
-  payload: PayloadQueryData | undefined
-): { message: string; title: string } | null {
+function getIssueDetails(event: IngestionEventRow): { message: string; title: string } | null {
   if (event.state === "rejected") {
     return {
       title: "Rejected",
@@ -178,7 +176,6 @@ function getIssueDetails(
       title: "Pipeline failure",
       message:
         event.failureMessage ??
-        payload?.failureMessage ??
         event.failureReason ??
         event.failureStage ??
         "No failure detail was recorded.",
@@ -197,17 +194,11 @@ function PayloadPanel({
   payload: PayloadQueryState
   canFetchPayload: boolean
 }) {
-  if (event.state !== "failed") {
+  if (event.state !== "rejected") {
     return (
       <MutedPanel>
-        Payload lookup is currently available for failed events only. This row is {event.state}.
+        Payload lookup is available for rejected events only. This row is {event.state}.
       </MutedPanel>
-    )
-  }
-
-  if (!event.replayable) {
-    return (
-      <MutedPanel>This failed event is not replayable, so no replay payload is stored.</MutedPanel>
     )
   }
 
@@ -220,7 +211,11 @@ function PayloadPanel({
   }
 
   if (!payload.data?.payloadJson) {
-    return <MutedPanel>No replay payload was found for this failed event.</MutedPanel>
+    return (
+      <MutedPanel>
+        The journal has no payload for this event yet; it lags the budget by a few minutes.
+      </MutedPanel>
+    )
   }
 
   return (
@@ -270,7 +265,6 @@ function formatJson(rawJson: string): string {
 }
 
 type PayloadQueryData = {
-  failureMessage: string | null
   payloadJson: string
 } | null
 

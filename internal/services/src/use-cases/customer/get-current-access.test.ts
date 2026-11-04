@@ -1,9 +1,13 @@
-import type { FeatureUsagePeriodRow } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import type { BillingConfig, MeterConfig, ResetConfig } from "@unprice/db/validators"
+import { Err, FetchError, Ok } from "@unprice/error"
 import { describe, expect, it, vi } from "vitest"
 import { computeGrantPeriodBucket } from "../../entitlements"
-import { type GetCustomerCurrentAccessDeps, getCustomerCurrentAccess } from "./get-current-access"
+import {
+  type CurrentEntitlementsReader,
+  type GetCustomerCurrentAccessDeps,
+  getCustomerCurrentAccess,
+} from "./get-current-access"
 
 const projectId = "proj_1"
 const customerId = "cus_1"
@@ -20,7 +24,7 @@ const resetEveryFiveMinutes = {
   planType: "recurring",
 } satisfies ResetConfig
 
-const resetEveryFifteenMinutes = {
+const _resetEveryFifteenMinutes = {
   name: "every-15-minutes",
   resetInterval: "minute",
   resetIntervalCount: 15,
@@ -36,7 +40,7 @@ const billingEveryFiveMinutes = {
   planType: "recurring",
 } satisfies BillingConfig
 
-const billingEveryFifteenMinutes = {
+const _billingEveryFifteenMinutes = {
   name: "every-15-minutes",
   billingInterval: "minute",
   billingIntervalCount: 15,
@@ -45,295 +49,101 @@ const billingEveryFifteenMinutes = {
 } satisfies BillingConfig
 
 describe("getCustomerCurrentAccess", () => {
-  it("loads active entitlement usage by entitlement period key, not exact cycle timestamps", async () => {
+  it("takes metered usage and its window live from the payer budget", async () => {
     const events = usageEntitlement({
       featureSlug: "events",
       featureTitle: "Events",
-      grantId: "grant_events",
+      grantId: "g_e",
     })
     const customers = usageEntitlement({
       id: "ce_customers",
       featureSlug: "customers",
       featureTitle: "Customers",
-      grantId: "grant_customers",
+      grantId: "g_c",
     })
-    const expectedPeriodKey = computeGrantPeriodBucket(
-      {
-        cadenceEffectiveAt: entitlementEffectiveAt,
-        cadenceExpiresAt: null,
-        effectiveAt: entitlementEffectiveAt,
-        expiresAt: null,
-        grantId: "grant_events",
-        resetConfig: resetEveryFiveMinutes,
-      },
-      now
-    )?.periodKey
-
-    expect(expectedPeriodKey).toBeDefined()
-
-    const { deps, analytics } = makeDeps({
-      entitlements: [events, customers],
-      periodRowsByPeriodKey: new Map([
-        [
-          expectedPeriodKey!,
-          [
-            periodRow({ feature_slug: "events", usage: 42 }),
-            periodRow({
-              customer_entitlement_id: "ce_customers",
-              feature_slug: "customers",
-              usage: 7,
-            }),
-          ],
+    const reader = vi.fn<CurrentEntitlementsReader>(async () =>
+      Ok({
+        customerId,
+        generatedAt: now,
+        entitlements: [
+          {
+            ...liveBase("ce_events", "events"),
+            status: "available" as const,
+            allowed: true,
+            limit: 10_000,
+            usage: 42,
+            quotaWindow: { periodKey: "lim_events", startAt: cycleStart, endAt: null },
+          },
+          { ...liveBase("ce_customers", "customers"), status: "unavailable" as const },
         ],
-      ]),
-    })
+      })
+    )
+    const { deps } = makeDeps({ entitlements: [events, customers], currentEntitlements: reader })
 
     const result = await getCustomerCurrentAccess(deps, { projectId, customerId })
 
-    expect(result.err).toBeUndefined()
-    expect(analytics.getFeaturesUsagePeriod).toHaveBeenCalledTimes(1)
-
-    const call = analytics.getFeaturesUsagePeriod.mock.calls[0]?.[0]
-    expect(call).toEqual({
-      project_id: projectId,
-      customer_id: customerId,
-      period_key: expectedPeriodKey,
-      feature_slugs: ["customers", "events"],
+    expect(reader).toHaveBeenCalledWith({ projectId, customerId })
+    expect(result.val?.usageUnavailable).toBe(false)
+    const byslug = new Map(result.val?.entitlements.map((row) => [row.featureSlug, row]))
+    expect(byslug.get("events")).toMatchObject({
+      currentUsage: 42,
+      usagePercent: 0.42,
+      usagePeriods: [{ periodKey: "lim_events", start: cycleStart, end: Number.MAX_SAFE_INTEGER }],
     })
-    expect(call).not.toHaveProperty("start")
-    expect(call).not.toHaveProperty("end")
-
-    expect(
-      result.val?.entitlements.find((entitlement) => entitlement.featureSlug === "events")
-        ?.currentUsage
-    ).toBe(42)
-    expect(
-      result.val?.entitlements.find((entitlement) => entitlement.featureSlug === "events")
-        ?.meterConfig
-    ).toEqual({
-      eventSlug: "events_used",
-      aggregationMethod: "sum",
-      aggregationField: "quantity",
-    })
-    expect(
-      result.val?.entitlements.find((entitlement) => entitlement.featureSlug === "customers")
-        ?.currentUsage
-    ).toBe(7)
-    expect(
-      result.val?.entitlements.find((entitlement) => entitlement.featureSlug === "customers")
-        ?.usagePeriods
-    ).toEqual([
-      expect.objectContaining({
-        periodKey: expectedPeriodKey,
-      }),
-    ])
-  })
-
-  it("loads each usage entitlement by its own current reset period", async () => {
-    const currentNow = Date.parse("2026-06-30T21:09:45.000Z")
-    const events = usageEntitlement({
-      featureSlug: "events",
-      featureTitle: "Events",
-      grantId: "grant_events",
-      resetConfig: resetEveryFiveMinutes,
-      billingConfig: billingEveryFiveMinutes,
-    })
-    const customers = usageEntitlement({
-      id: "ce_customers",
-      featureSlug: "customers",
-      featureTitle: "Customers",
-      grantId: "grant_customers",
-      resetConfig: resetEveryFifteenMinutes,
-      billingConfig: billingEveryFifteenMinutes,
-    })
-    const eventsPeriod = computeGrantPeriodBucket(
-      {
-        cadenceEffectiveAt: entitlementEffectiveAt,
-        cadenceExpiresAt: null,
-        effectiveAt: entitlementEffectiveAt,
-        expiresAt: null,
-        grantId: "grant_events",
-        resetConfig: resetEveryFiveMinutes,
-      },
-      currentNow
-    )
+    // Not answered live: no usage, and the grant's own period stays.
     const customersPeriod = computeGrantPeriodBucket(
       {
         cadenceEffectiveAt: entitlementEffectiveAt,
         cadenceExpiresAt: null,
         effectiveAt: entitlementEffectiveAt,
         expiresAt: null,
-        grantId: "grant_customers",
-        resetConfig: resetEveryFifteenMinutes,
-      },
-      currentNow
-    )
-
-    expect(eventsPeriod).toBeDefined()
-    expect(customersPeriod).toBeDefined()
-    expect(eventsPeriod?.periodKey).not.toBe(customersPeriod?.periodKey)
-
-    const { deps, analytics } = makeDeps({
-      entitlements: [events, customers],
-      nowAt: currentNow,
-      periodRowsByPeriodKey: new Map([
-        [eventsPeriod!.periodKey, [periodRow({ feature_slug: "events", usage: 4 })]],
-        [
-          customersPeriod!.periodKey,
-          [
-            periodRow({
-              customer_entitlement_id: "ce_customers",
-              feature_slug: "customers",
-              usage: 9,
-            }),
-          ],
-        ],
-      ]),
-    })
-
-    const result = await getCustomerCurrentAccess(deps, { projectId, customerId })
-
-    expect(result.err).toBeUndefined()
-    expect(analytics.getFeaturesUsagePeriod).toHaveBeenCalledTimes(2)
-    expect(analytics.getFeaturesUsagePeriod).toHaveBeenCalledWith({
-      project_id: projectId,
-      customer_id: customerId,
-      period_key: eventsPeriod!.periodKey,
-      feature_slugs: ["events"],
-    })
-    expect(analytics.getFeaturesUsagePeriod).toHaveBeenCalledWith({
-      project_id: projectId,
-      customer_id: customerId,
-      period_key: customersPeriod!.periodKey,
-      feature_slugs: ["customers"],
-    })
-
-    expect(
-      result.val?.entitlements.find((entitlement) => entitlement.featureSlug === "events")
-    ).toEqual(
-      expect.objectContaining({
-        currentUsage: 4,
-        usagePeriods: [
-          {
-            periodKey: eventsPeriod!.periodKey,
-            start: eventsPeriod!.start,
-            end: eventsPeriod!.end,
-          },
-        ],
-      })
-    )
-    expect(
-      result.val?.entitlements.find((entitlement) => entitlement.featureSlug === "customers")
-    ).toEqual(
-      expect.objectContaining({
-        currentUsage: 9,
-        usagePeriods: [
-          {
-            periodKey: customersPeriod!.periodKey,
-            start: customersPeriod!.start,
-            end: customersPeriod!.end,
-          },
-        ],
-      })
-    )
-  })
-
-  it("uses the active entitlement period even when the subscription cycle has not advanced", async () => {
-    const events = usageEntitlement({
-      featureSlug: "events",
-      featureTitle: "Events",
-      grantId: "grant_events",
-    })
-    const expectedPeriod = computeGrantPeriodBucket(
-      {
-        cadenceEffectiveAt: entitlementEffectiveAt,
-        cadenceExpiresAt: null,
-        effectiveAt: entitlementEffectiveAt,
-        expiresAt: null,
-        grantId: "grant_events",
+        grantId: "g_c",
         resetConfig: resetEveryFiveMinutes,
       },
       now
     )
-
-    expect(expectedPeriod).toBeDefined()
-
-    const { deps, analytics } = makeDeps({
-      entitlements: [events],
-      subscription: {
-        ...activeSubscription(),
-        currentCycleStartAt: Date.parse("2026-06-30T20:45:57.000Z"),
-        currentCycleEndAt: Date.parse("2026-06-30T21:00:57.000Z"),
-        renewAt: Date.parse("2026-06-30T21:00:57.000Z"),
-      },
-      periodRowsByPeriodKey: new Map([
-        [expectedPeriod!.periodKey, [periodRow({ feature_slug: "events", usage: 12 })]],
-      ]),
+    expect(byslug.get("customers")).toMatchObject({
+      currentUsage: null,
+      usagePeriods: [
+        {
+          periodKey: customersPeriod?.periodKey,
+          start: customersPeriod?.start,
+          end: customersPeriod?.end,
+        },
+      ],
     })
-
-    const result = await getCustomerCurrentAccess(deps, { projectId, customerId })
-
-    expect(result.err).toBeUndefined()
-    expect(analytics.getFeaturesUsagePeriod).toHaveBeenCalledWith({
-      project_id: projectId,
-      customer_id: customerId,
-      period_key: expectedPeriod!.periodKey,
-      feature_slugs: ["events"],
-    })
-    expect(
-      result.val?.entitlements.find((entitlement) => entitlement.featureSlug === "events")
-        ?.currentUsage
-    ).toBe(12)
   })
 
-  it("does not add usage from an expired entitlement with the same feature and reset period", async () => {
+  it("marks usage unavailable when the live read fails or is not wired", async () => {
     const events = usageEntitlement({
       featureSlug: "events",
       featureTitle: "Events",
-      grantId: "grant_events",
+      grantId: "g_e",
     })
-    const expectedPeriod = computeGrantPeriodBucket(
-      {
-        cadenceEffectiveAt: entitlementEffectiveAt,
-        cadenceExpiresAt: null,
-        effectiveAt: entitlementEffectiveAt,
-        expiresAt: null,
-        grantId: "grant_events",
-        resetConfig: resetEveryFiveMinutes,
-      },
-      now
-    )
-
-    expect(expectedPeriod).toBeDefined()
-
-    const { deps } = makeDeps({
+    const failing = makeDeps({
       entitlements: [events],
-      periodRowsByPeriodKey: new Map([
-        [
-          expectedPeriod!.periodKey,
-          [
-            periodRow({ customer_entitlement_id: "ce_events", usage: 2 }),
-            periodRow({ customer_entitlement_id: "ce_expired_events", usage: 3 }),
-          ],
-        ],
-      ]),
+      currentEntitlements: async () => Err(new FetchError({ message: "api down", retry: true })),
     })
+    const failed = await getCustomerCurrentAccess(failing.deps, { projectId, customerId })
+    expect(failed.val?.usageUnavailable).toBe(true)
+    expect(failed.val?.entitlements[0]?.currentUsage).toBeNull()
+    expect(failing.deps.logger.error).toHaveBeenCalled()
 
-    const result = await getCustomerCurrentAccess(deps, { projectId, customerId })
-
-    expect(result.err).toBeUndefined()
-    expect(result.val?.entitlements[0]?.currentUsage).toBe(2)
+    const unwired = await getCustomerCurrentAccess(makeDeps({ entitlements: [events] }).deps, {
+      projectId,
+      customerId,
+    })
+    expect(unwired.val?.usageUnavailable).toBe(true)
   })
 
-  it("does not call usage analytics when no measured usage entitlement is active", async () => {
-    const { deps, analytics } = makeDeps({
-      entitlements: [flatEntitlement()],
-    })
+  it("does not read live usage when no metered entitlement is active", async () => {
+    const reader = vi.fn<CurrentEntitlementsReader>()
+    const { deps } = makeDeps({ entitlements: [flatEntitlement()], currentEntitlements: reader })
 
     const result = await getCustomerCurrentAccess(deps, { projectId, customerId })
 
-    expect(result.err).toBeUndefined()
-    expect(analytics.getFeaturesUsagePeriod).not.toHaveBeenCalled()
+    expect(reader).not.toHaveBeenCalled()
+    expect(result.val?.usageUnavailable).toBe(false)
     expect(result.val?.entitlements[0]?.currentUsage).toBeNull()
     expect(result.val?.entitlements[0]?.meterConfig).toBeNull()
   })
@@ -395,12 +205,12 @@ function makeDeps({
   entitlements,
   nowAt = now,
   subscription = activeSubscription(),
-  periodRowsByPeriodKey = new Map<string, FeatureUsagePeriodRow[]>(),
+  currentEntitlements,
 }: {
   entitlements: unknown[]
   nowAt?: number
   subscription?: unknown
-  periodRowsByPeriodKey?: Map<string, FeatureUsagePeriodRow[]>
+  currentEntitlements?: CurrentEntitlementsReader
 }) {
   const db = {
     query: {
@@ -415,27 +225,28 @@ function makeDeps({
       },
     },
   } as unknown as Database
-  const analytics = {
-    getFeaturesUsagePeriod: vi.fn(
-      async (
-        params: Parameters<GetCustomerCurrentAccessDeps["analytics"]["getFeaturesUsagePeriod"]>[0]
-      ) => ({
-        data: periodRowsByPeriodKey.get(params.period_key ?? "") ?? [],
-      })
-    ),
-  } satisfies GetCustomerCurrentAccessDeps["analytics"]
   const logger = {
     error: vi.fn(),
   }
 
   return {
-    analytics,
     deps: {
       db,
-      analytics,
       logger,
+      ...(currentEntitlements && { currentEntitlements }),
       now: () => nowAt,
     } satisfies GetCustomerCurrentAccessDeps,
+  }
+}
+
+function liveBase(id: string, featureSlug: string) {
+  return {
+    id,
+    featureSlug,
+    featureTitle: featureSlug,
+    featureType: "usage" as const,
+    unitOfMeasure: "unit",
+    grantCount: 1,
   }
 }
 
@@ -565,18 +376,5 @@ function flatEntitlement() {
         expiresAt: null,
       },
     ],
-  }
-}
-
-function periodRow(overrides: Partial<FeatureUsagePeriodRow>): FeatureUsagePeriodRow {
-  return {
-    project_id: projectId,
-    customer_id: customerId,
-    customer_entitlement_id: "ce_events",
-    feature_slug: "events",
-    usage: 1,
-    amount_after: 0,
-    currency: "USD",
-    ...overrides,
   }
 }

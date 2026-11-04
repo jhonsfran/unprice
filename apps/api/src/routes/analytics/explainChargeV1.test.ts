@@ -152,8 +152,8 @@ describe("explainChargeV1 route", () => {
         },
         {
           type: "meter_fact",
-          id: "proj_123:cus_1:ce_1:grant_1:evt_1",
-          source: "tinybird",
+          id: "proj_123:cus_1:onetime:1700000000000:key_1",
+          source: "r2",
           timestamp: 1_700_000_000_000,
         },
       ],
@@ -282,9 +282,9 @@ function createTestApp() {
 
   app.use("*", async (c, next) => {
     c.set("db", {})
-    c.set("analytics", {})
     c.set("services", {
       ledger: {},
+      analytics: {},
     })
 
     await next()

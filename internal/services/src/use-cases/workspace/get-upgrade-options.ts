@@ -17,10 +17,7 @@ import {
   isMissingPaymentMethodError,
 } from "../../payment-provider/errors"
 import type { UnPriceSubscriptionError } from "../../subscriptions/errors"
-import {
-  type GetCustomerCurrentAccessAnalytics,
-  getCustomerCurrentAccess,
-} from "../customer/get-current-access"
+import { getCustomerCurrentAccess } from "../customer/get-current-access"
 import { checkPaymentProviderAvailability } from "../payment-provider/availability"
 import { paymentMethodRequiredReason, resolveWorkspaceBillingContext } from "./billing-context"
 import { getScheduledPlanChangeUnavailableReason } from "./scheduled-plan-change"
@@ -129,7 +126,6 @@ type ProviderState = {
 export type GetWorkspaceUpgradeOptionsDeps = {
   services: Pick<ServiceContext, "customers" | "plans" | "subscriptions">
   db: Database
-  analytics: GetCustomerCurrentAccessAnalytics
   logger: Logger
   now?: () => number
 }
@@ -200,7 +196,6 @@ export async function getWorkspaceUpgradeOptions(
     getCustomerCurrentAccess(
       {
         db: deps.db,
-        analytics: deps.analytics,
         logger: deps.logger,
         now: deps.now,
       },

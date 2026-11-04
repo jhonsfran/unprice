@@ -21,7 +21,6 @@ export const getIngestionStatusApiRequestSchema = z
     from_ts: z.number().int(),
     to_ts: z.number().int(),
     cursor: getIngestionStatusCursorSchema.nullish(),
-    source_id: z.string().optional(),
     event_slug: z.string().optional(),
     state: z.enum(["processed", "rejected", "failed"]).optional(),
     limit: z.number().int().min(1).max(100).optional().default(50),
@@ -81,7 +80,6 @@ export const registerGetIngestionStatusV1 = (app: App) =>
       from_ts: fromTs,
       to_ts: toTs,
       cursor,
-      source_id: sourceId,
       event_slug: eventSlug,
       state,
       limit,
@@ -97,7 +95,7 @@ export const registerGetIngestionStatusV1 = (app: App) =>
 
     const result = await getIngestionStatus(
       {
-        analytics: c.get("analytics"),
+        analytics: c.get("services").analytics,
       },
       {
         projectId: key.projectId,
@@ -108,7 +106,6 @@ export const registerGetIngestionStatusV1 = (app: App) =>
         },
         cursor,
         filter: {
-          ...(sourceId ? { sourceIds: [sourceId] } : {}),
           ...(eventSlug ? { eventSlugs: [eventSlug] } : {}),
           ...(state ? { states: [state] } : {}),
         },

@@ -2,7 +2,7 @@ import { CloudflareStore } from "@unkey/cache/stores"
 import { Analytics } from "@unprice/analytics"
 import { createConnection, createHttpConnection } from "@unprice/db"
 import { newId } from "@unprice/db/utils"
-import { createWebEventsWriter } from "@unprice/lakehouse"
+import { createBasinSql, createWebEventsWriter } from "@unprice/lakehouse"
 import { shouldEmitMetrics } from "@unprice/observability/env"
 import { ApiKeysService } from "@unprice/services/apikey"
 import { CacheService } from "@unprice/services/cache"
@@ -185,6 +185,11 @@ export function init(): MiddlewareHandler<HonoEnv> {
       payerBudgets: new InProcessPayerBudgetGateway(() =>
         payerBudgetSyncDeps({ env: c.env, db, services: svcCtx, logger, waitUntil })
       ),
+      basinSql: createBasinSql({
+        accountId: c.env.BASIN_SQL_ACCOUNT_ID,
+        bucket: c.env.BASIN_SQL_BUCKET,
+        token: c.env.BASIN_SQL_TOKEN,
+      }),
     })
 
     const apikey = new ApiKeysService({
@@ -213,6 +218,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
     c.set("waitUntil", waitUntil)
 
     c.set("services", {
+      analytics: svcCtx.analytics,
       budgetCatalog: svcCtx.budgetCatalog,
       subscription: svcCtx.subscriptions,
       entitlement: svcCtx.entitlements,

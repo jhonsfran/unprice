@@ -13,9 +13,8 @@ import {
   getUsageDashboard,
   getUsageDashboardOutputSchema,
 } from "../analytics/get-usage-dashboard"
-import type { GetUsageDashboardAnalytics } from "../analytics/get-usage-dashboard"
 import {
-  type GetCustomerCurrentAccessAnalytics,
+  type CurrentEntitlementsReader,
   getCustomerCurrentAccess,
   getCustomerCurrentAccessOutputSchema,
 } from "../customer/get-current-access"
@@ -105,9 +104,10 @@ export class GetWorkspaceBillingOverviewError extends DomainError<{
 }
 
 export type GetWorkspaceBillingOverviewDeps = {
-  services: Pick<ServiceContext, "customers" | "wallet">
+  services: Pick<ServiceContext, "customers" | "wallet" | "analytics">
   db: Database
-  analytics: GetCustomerCurrentAccessAnalytics & GetUsageDashboardAnalytics
+  /** Live metered usage from the payer budget, reached through the API. */
+  currentEntitlements: CurrentEntitlementsReader
   logger: Logger
   now?: () => number
 }
@@ -189,7 +189,7 @@ export async function getWorkspaceBillingOverview(
     getCustomerCurrentAccess(
       {
         db: deps.db,
-        analytics: deps.analytics,
+        currentEntitlements: deps.currentEntitlements,
         logger: deps.logger,
         now: deps.now,
       },
@@ -213,7 +213,7 @@ export async function getWorkspaceBillingOverview(
     ),
     getUsageDashboard(
       {
-        analytics: deps.analytics,
+        analytics: deps.services.analytics,
         db: deps.db,
         now: deps.now,
       },

@@ -24,7 +24,7 @@ export const getUsageDashboard = protectedProjectProcedure
     const topConsumersLimit = opts.input.topConsumersLimit
     // Isolate legacy empty entries without deleting a concurrent SWR refresh.
     const cacheKey = [
-      "usage-dashboard-v2",
+      "usage-dashboard-v3",
       projectId,
       customerId ?? "all",
       range,
@@ -34,7 +34,7 @@ export const getUsageDashboard = protectedProjectProcedure
     const { err, val: cached } = await opts.ctx.cache.getUsageDashboard.swr(cacheKey, async () => {
       const result = await getUsageDashboardUseCase(
         {
-          analytics: opts.ctx.analytics,
+          analytics: opts.ctx.services.analytics,
           db: opts.ctx.db,
         },
         {

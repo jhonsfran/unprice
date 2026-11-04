@@ -1,11 +1,11 @@
 import { createRoute } from "@hono/zod-openapi"
-import { explainChargeEventRowSchema } from "@unprice/analytics"
 import {
   ExplainChargeError,
   type ExplainChargeOutput,
   aiAnswerEnvelopeSchema,
   aiEvidenceSchema,
   explainCharge,
+  explainChargeEventSchema,
 } from "@unprice/services/use-cases"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
@@ -67,7 +67,7 @@ export const explainChargeApiResponseSchema = z.object({
       })
     ),
   }),
-  events: z.array(explainChargeEventRowSchema),
+  events: z.array(explainChargeEventSchema),
   answer: z.string(),
   confidence: aiAnswerEnvelopeSchema.shape.confidence,
   freshness: aiAnswerEnvelopeSchema.shape.freshness,
@@ -150,7 +150,7 @@ export const registerExplainChargeV1 = (app: App) =>
       {
         db: c.get("db"),
         ledger,
-        analytics: c.get("analytics"),
+        analytics: c.get("services").analytics,
       },
       {
         projectId,
@@ -280,14 +280,10 @@ function buildEvidence(result: ExplainChargeOutput): ExplainChargeApiResponse["e
       : []),
     ...result.events.map((event) => ({
       type: "meter_fact" as const,
-      id: [
-        result.scope.projectId,
-        result.scope.customerId,
-        event.customer_entitlement_id,
-        event.grant_id,
-        event.event_id,
-      ].join(":"),
-      source: "tinybird" as const,
+      id: [result.scope.projectId, result.scope.customerId, event.period_key, event.source_id].join(
+        ":"
+      ),
+      source: "r2" as const,
       timestamp: event.timestamp,
     })),
   ]

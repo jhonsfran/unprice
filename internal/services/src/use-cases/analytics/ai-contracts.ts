@@ -11,7 +11,8 @@ export const aiEvidenceSchema = z.object({
     "plan_version",
   ]),
   id: z.string(),
-  source: z.enum(["tinybird", "r2", "ledger", "postgres"]),
+  /** `r2`: the budget journal; `budget`: a payer budget's live state. */
+  source: z.enum(["r2", "budget", "ledger", "postgres"]),
   timestamp: z.number().int().nullable(),
 })
 

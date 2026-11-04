@@ -19,6 +19,7 @@ export {
   getCustomerCurrentAccessOutputSchema,
 } from "./customer/get-current-access"
 export type {
+  CurrentEntitlementsReader,
   GetCustomerCurrentAccessDeps,
   GetCustomerCurrentAccessInput,
   GetCustomerCurrentAccessOutput,
@@ -35,15 +36,15 @@ export type {
   GetCustomerCurrentEntitlementsOutput,
 } from "./customer/get-current-entitlements"
 export {
-  getFailedIngestionEventPayload,
-  getFailedIngestionEventPayloadInputSchema,
-  getFailedIngestionEventPayloadOutputSchema,
-} from "./analytics/get-failed-ingestion-event-payload"
+  getRejectedEventPayload,
+  getRejectedEventPayloadInputSchema,
+  getRejectedEventPayloadOutputSchema,
+} from "./analytics/get-rejected-event-payload"
 export type {
-  GetFailedIngestionEventPayloadDeps,
-  GetFailedIngestionEventPayloadInput,
-  GetFailedIngestionEventPayloadOutput,
-} from "./analytics/get-failed-ingestion-event-payload"
+  GetRejectedEventPayloadDeps,
+  GetRejectedEventPayloadInput,
+  GetRejectedEventPayloadOutput,
+} from "./analytics/get-rejected-event-payload"
 export {
   getIngestionStatus,
   getIngestionStatusCursorSchema,
@@ -56,7 +57,6 @@ export type {
   GetIngestionStatusOutput,
 } from "./analytics/get-ingestion-status"
 export {
-  BillingPeriodUsageCoverageError,
   getCurrentBillingPeriodUsage,
   getCurrentBillingPeriodUsageInputSchema,
   getCurrentBillingPeriodUsageOutputSchema,
@@ -90,6 +90,7 @@ export { activateSubscription } from "./billing/provision-period"
 export {
   ExplainChargeError,
   explainCharge,
+  explainChargeEventSchema,
   explainChargeInputSchema,
   explainChargeOutputSchema,
 } from "./billing/explain-charge"

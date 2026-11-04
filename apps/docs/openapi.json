@@ -16825,7 +16825,7 @@
                           },
                           "source": {
                             "type": "string",
-                            "enum": ["tinybird", "r2", "ledger", "postgres"]
+                            "enum": ["r2", "budget", "ledger", "postgres"]
                           },
                           "timestamp": {
                             "type": "integer",
@@ -17020,9 +17020,6 @@
                       }
                     },
                     "required": ["handledAt", "canonicalAuditId"]
-                  },
-                  "source_id": {
-                    "type": "string"
                   },
                   "event_slug": {
                     "type": "string"
@@ -17416,7 +17413,7 @@
                           },
                           "source": {
                             "type": "string",
-                            "enum": ["tinybird", "r2", "ledger", "postgres"]
+                            "enum": ["r2", "budget", "ledger", "postgres"]
                           },
                           "timestamp": {
                             "type": "integer",

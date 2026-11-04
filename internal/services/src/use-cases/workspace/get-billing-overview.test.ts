@@ -141,9 +141,10 @@ function createDeps(overrides?: { customer?: Customer | null }) {
     services: {
       customers: { getCustomerByIdAcrossProjects },
       wallet: {},
+      analytics: {},
     },
     db: {},
-    analytics: {},
+    currentEntitlements: vi.fn(),
     logger,
     now: () => now,
   }

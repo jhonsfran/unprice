@@ -9171,7 +9171,7 @@ export interface operations {
                 | "plan_version"
               id: string
               /** @enum {string} */
-              source: "tinybird" | "r2" | "ledger" | "postgres"
+              source: "r2" | "budget" | "ledger" | "postgres"
               timestamp: number | null
             }[]
             warnings: string[]
@@ -9285,7 +9285,6 @@ export interface operations {
             handledAt: number
             canonicalAuditId: string
           } | null
-          source_id?: string
           event_slug?: string
           /** @enum {string} */
           state?: "processed" | "rejected" | "failed"
@@ -9403,7 +9402,7 @@ export interface operations {
                 | "plan_version"
               id: string
               /** @enum {string} */
-              source: "tinybird" | "r2" | "ledger" | "postgres"
+              source: "r2" | "budget" | "ledger" | "postgres"
               timestamp: number | null
             }[]
             warnings: string[]
