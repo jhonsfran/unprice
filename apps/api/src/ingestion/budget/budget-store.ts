@@ -113,6 +113,13 @@ function storedId(operation: Operation): string {
 
 const leaseId = (leaseKey: string) => `l:${sha256HexSync(leaseKey)}`
 
+/**
+ * The first `seq` of a budget's journal: its first write's clock times 1,000. A key deleted and
+ * created again starts above every `seq` the deleted budget used, so `(budget key, seq)` stays
+ * unique while it writes fewer than 1,000 rows per millisecond it lived.
+ */
+const firstSeqAt = (now: number) => now * 1_000
+
 function statusOf(operation: Operation): (typeof schema.budgetOperations.$inferInsert)["status"] {
   if (operation.kind === "hold") return operation.state.status
   return operation.kind === "lease" && operation.state.status === "open" ? "open" : "done"
@@ -217,6 +224,7 @@ function bind(db: SqliteTx): BudgetStoreTx {
   }
 
   const terminal = sql`${operations.status} IN ('done', 'settled', 'released')`
+  const exportedSeq = sql`(SELECT ${schema.budgetLedger.exportedSeq} FROM ${schema.budgetLedger} WHERE ${schema.budgetLedger.id} = ${SINGLETON_ID})`
   const readOperationWhere = (where: SQL) => {
     const row = db
       .select({ id: operations.id, kind: operations.kind, dataJson: operations.dataJson })
@@ -424,10 +432,21 @@ function bind(db: SqliteTx): BudgetStoreTx {
         usageJson: encode(ledger.usage),
         operationsJson: encode(ledger.operations),
       }
-      db.insert(schema.budgetLedger)
-        .values({ id: SINGLETON_ID, ...ledgerRow })
-        .onConflictDoUpdate({ target: schema.budgetLedger.id, set: ledgerRow })
-        .run()
+      // The same write reserves a `seq` for each changed row: the last reserved comes back.
+      const reservedSeqs = changed.length
+      const ledgerTable = schema.budgetLedger
+      const lastSeq = sql`CASE WHEN ${ledgerTable.journalSeq} = 0 THEN ${firstSeqAt(now)} ELSE ${ledgerTable.journalSeq} END + ${reservedSeqs}`
+      const reserved = db
+        .insert(ledgerTable)
+        .values({ id: SINGLETON_ID, ...ledgerRow, journalSeq: firstSeqAt(now) + reservedSeqs })
+        .onConflictDoUpdate({
+          target: ledgerTable.id,
+          set: { ...ledgerRow, journalSeq: reservedSeqs === 0 ? ledgerTable.journalSeq : lastSeq },
+        })
+        .returning({ journalSeq: ledgerTable.journalSeq })
+        .get()
+      if (!reserved) throw new Error("the ledger write returned no row")
+      let seq = reserved.journalSeq - reservedSeqs
 
       // One statement per row: DO SQLite caps bound parameters at 100 per statement.
       const history = schema.budgetWindowHistory
@@ -462,10 +481,13 @@ function bind(db: SqliteTx): BudgetStoreTx {
           .run()
       }
       for (const operation of changed) {
+        seq += 1
         const row = {
           status: statusOf(operation),
           dueAt: alarmAt(operation),
           dataJson: encodeOperation(operation),
+          seq,
+          writtenAt: now,
         }
         const insert = db
           .insert(operations)
@@ -478,11 +500,42 @@ function bind(db: SqliteTx): BudgetStoreTx {
       }
     },
 
+    readUnexported(limit) {
+      return db
+        .select({
+          id: operations.id,
+          kind: operations.kind,
+          status: operations.status,
+          dataJson: operations.dataJson,
+          seq: operations.seq,
+          writtenAt: operations.writtenAt,
+        })
+        .from(operations)
+        .where(gt(operations.seq, exportedSeq))
+        .orderBy(asc(operations.seq))
+        .limit(limit)
+        .all()
+        .map((row) => ({
+          seq: row.seq,
+          writtenAt: row.writtenAt,
+          storedId: row.id,
+          status: row.status,
+          operation: decodeOperation(row),
+        }))
+    },
+
+    markExported(seq) {
+      db.update(schema.budgetLedger)
+        .set({ exportedSeq: sql`max(${schema.budgetLedger.exportedSeq}, ${seq})` })
+        .where(eq(schema.budgetLedger.id, SINGLETON_ID))
+        .run()
+    },
+
     purgeOperations(now, limit) {
       const expired = db
         .select({ id: operations.id })
         .from(operations)
-        .where(and(terminal, lte(operations.dueAt, now)))
+        .where(and(terminal, lte(operations.dueAt, now), lte(operations.seq, exportedSeq)))
         .orderBy(asc(operations.dueAt))
         .limit(limit)
       db.delete(operations).where(inArray(operations.id, expired)).run()
@@ -493,6 +546,7 @@ function bind(db: SqliteTx): BudgetStoreTx {
         db
           .select({ at: min(operations.dueAt) })
           .from(operations)
+          .where(or(eq(operations.status, "open"), lte(operations.seq, exportedSeq)))
           .get()?.at ?? null
       )
     },

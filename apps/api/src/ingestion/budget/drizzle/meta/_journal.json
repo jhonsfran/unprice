@@ -64,6 +64,13 @@
       "when": 1793806406172,
       "tag": "0008_statements_positions_cards",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1793806914673,
+      "tag": "0009_operation_journal",
+      "breakpoints": true
     }
   ]
 }

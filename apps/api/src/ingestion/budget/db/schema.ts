@@ -26,6 +26,10 @@ export const budgetLedger = sqliteTable("budget_ledger", {
   operationsJson: text("operations_json")
     .notNull()
     .default('{"upsert":0,"authorize":0,"settle":0,"release":0,"charge":0,"record":0}'),
+  /** The last `seq` given to a written operation row. */
+  journalSeq: integer("journal_seq").notNull().default(0),
+  /** Every row with `seq <= exported_seq` reached the journal stream; only those may be purged. */
+  exportedSeq: integer("exported_seq").notNull().default(0),
 })
 
 export const budgetOperations = sqliteTable(
@@ -42,9 +46,14 @@ export const budgetOperations = sqliteTable(
     dueAt: integer("due_at").notNull(),
     /** The operation without `kind` and `id`, with tagged bigints. */
     dataJson: text("data_json").notNull(),
+    /** Per-budget write sequence: every write of the row takes the next one (ADR-0008 D7). */
+    seq: integer("seq").notNull().default(0),
+    /** When this version of the row was written. */
+    writtenAt: integer("written_at").notNull().default(0),
   },
   (table) => ({
     inspection: index("budget_operations_inspection_idx").on(table.dueAt, table.id),
+    journal: index("budget_operations_journal_idx").on(table.seq),
     // Only holds: a charge or record is found by its id, the key's hash, so indexing its key too
     // would cost a row write on every one.
     holdKey: uniqueIndex("budget_operations_hold_key_idx")

@@ -13,6 +13,7 @@ import { getBudgetStub } from "~/ingestion/do-placement"
 import type { BudgetDO } from "./BudgetDO"
 import { BudgetSqliteStore } from "./budget-store"
 import * as schema from "./db/schema"
+import { discardJournal } from "./journal"
 import { BudgetProcessor } from "./processor"
 
 const UNIT = BigInt(100_000_000)
@@ -276,6 +277,7 @@ describe("BudgetDO measured work", () => {
       const clock = {
         now: Date.now() + 1_000,
         processor: new BudgetProcessor({
+          journal: discardJournal,
           runtime: { destroy: async () => {} },
           clock: { now: () => clock.now },
           logger: {
@@ -561,6 +563,7 @@ describe("BudgetDO measured work", () => {
           const clock = {
             now: start,
             processor: new BudgetProcessor({
+              journal: discardJournal,
               runtime: { destroy: async () => {} },
               clock: { now: () => clock.now },
               logger: {

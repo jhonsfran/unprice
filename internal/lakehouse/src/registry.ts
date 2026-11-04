@@ -609,6 +609,93 @@ export const lakehouseSourceSchemaRegistry = {
       },
     ],
   },
+  budget_journal: {
+    source: "budget_journal",
+    firstVersion: 1,
+    currentVersion: 1,
+    streamName: "lakehouse_budget_journal_stream",
+    schemaFile: "budget_journal.json",
+    sinkTable: "budget_journal",
+    frontendTable: "budget_journal",
+    tableAliases: ["budget_journal"],
+    partitionColumns: LAKEHOUSE_PARTITION_COLUMNS,
+    fields: [
+      {
+        name: "schema_version",
+        type: "int32",
+        required: true,
+        addedInVersion: 1,
+        defaultValue: 1,
+        description: "Schema version for this row.",
+      },
+      {
+        name: "project_id",
+        type: "string",
+        required: true,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "Project that owns the budget.",
+      },
+      {
+        name: "budget_key",
+        type: "string",
+        required: true,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "The budget's key within its project.",
+      },
+      {
+        name: "seq",
+        type: "int64",
+        required: true,
+        addedInVersion: 1,
+        defaultValue: null,
+        description:
+          "Per-budget write sequence. Readers deduplicate on (project_id, budget_key, seq) and keep an operation's highest seq.",
+      },
+      {
+        name: "operation_id",
+        type: "string",
+        required: true,
+        addedInVersion: 1,
+        defaultValue: null,
+        description:
+          "The row's id: h_<n> for a hold, o:<key hash> for a charge or record, l:<key hash> for a lease.",
+      },
+      {
+        name: "kind",
+        type: "string",
+        required: true,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "hold, charge, record, or lease.",
+      },
+      {
+        name: "status",
+        type: "string",
+        required: true,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "open, settled, released, or done.",
+      },
+      {
+        name: "timestamp",
+        type: "timestamp",
+        required: true,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "When the budget wrote this version of the row (RFC 3339, UTC).",
+      },
+      {
+        name: "data",
+        type: "json",
+        required: true,
+        addedInVersion: 1,
+        defaultValue: null,
+        description: "The operation row as the budget keeps it, amounts as decimal strings.",
+      },
+    ],
+  },
 } as const satisfies SourceSchemaMap
 
 const tableAliasToSource = new Map<string, LakehouseSource>()
@@ -755,6 +842,7 @@ export function buildCloudflareLakehousePipelineDefinitions(
     const suffixBySource: Record<LakehouseSource, string> = {
       events: "events",
       web_events: "web_events",
+      budget_journal: "budget_journal",
     }
     const suffix = suffixBySource[entry.source]
 
@@ -826,9 +914,14 @@ type WebEventsEventFromRegistry = LakehouseEventFromFields<
   (typeof lakehouseSourceSchemaRegistry)["web_events"]["fields"]
 >
 
+type BudgetJournalEventFromRegistry = LakehouseEventFromFields<
+  (typeof lakehouseSourceSchemaRegistry)["budget_journal"]["fields"]
+>
+
 export type LakehouseEventBySource = {
   events: EventsEventFromRegistry
   web_events: WebEventsEventFromRegistry
+  budget_journal: BudgetJournalEventFromRegistry
 }
 
 export type LakehouseEventForSource<S extends LakehouseSource> = LakehouseEventBySource[S]

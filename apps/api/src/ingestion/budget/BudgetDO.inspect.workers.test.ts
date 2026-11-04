@@ -16,6 +16,7 @@ import type { BudgetDO } from "./BudgetDO"
 import { BudgetSqliteStore } from "./budget-store"
 import * as schema from "./db/schema"
 import migrations from "./drizzle/migrations"
+import { discardJournal } from "./journal"
 import { BudgetProcessor } from "./processor"
 
 const UNIT = BigInt(100_000_000)
@@ -51,6 +52,7 @@ function inspection(reply: BudgetInspectReply) {
 async function clockedProcessor(state: DurableObjectState, now: () => number) {
   await migrate(drizzle(state.storage), migrations)
   return new BudgetProcessor({
+    journal: discardJournal,
     clock: { now },
     logger: { error: () => {} },
     runtime: { destroy: async () => {} },

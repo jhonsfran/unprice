@@ -18,6 +18,7 @@ import { timing } from "hono/timing"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { handleError, handleZodError } from "~/errors"
 import type { HonoEnv } from "~/hono/env"
+import { discardJournal } from "~/ingestion/budget/journal"
 import type { BudgetStore, BudgetStoreTx, Sync } from "~/ingestion/budget/ports"
 import { ALARM_CONTINUE_MS, BudgetProcessor } from "~/ingestion/budget/processor"
 import { registerAuthorizeBudgetV1 } from "./authorizeBudgetV1"
@@ -158,6 +159,9 @@ class MemoryBudgetStore implements BudgetStore {
         this.rows.set(row.id, structuredClone(row))
       }
     },
+    // Local mode keeps no journal: every row counts as exported.
+    readUnexported: () => [],
+    markExported: () => {},
     purgeOperations: (now, limit) => {
       const due = [...this.rows.values()]
         .map((row) => ({ row, at: dueAt(row) }))
@@ -184,6 +188,7 @@ function createBudgetObject(
   const failures: string[] = []
   let alarm: { at: number; timer: ReturnType<typeof setTimeout> } | null = null
   const processor: BudgetProcessor = new BudgetProcessor({
+    journal: discardJournal,
     clock: { now: () => Date.now() },
     logger: { error: (message, fields) => failures.push(`${message}: ${String(fields.error)}`) },
     runtime: {

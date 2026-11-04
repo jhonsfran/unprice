@@ -8,6 +8,7 @@ import { createDoLogger } from "~/observability"
 import { BudgetSqliteStore } from "./budget-store"
 import * as schema from "./db/schema"
 import migrations from "./drizzle/migrations"
+import { type BudgetJournal, discardJournal, pipelineJournal } from "./journal"
 import { BudgetProcessor } from "./processor"
 
 /** Cloudflare adapter; budget behavior lives in BudgetProcessor and the pure core. */
@@ -27,6 +28,7 @@ export class BudgetDO extends DurableObject {
 
     this.db = drizzle(this.ctx.storage, { schema, logger: false })
     this.processor = new BudgetProcessor({
+      journal: journalOf(env),
       clock: { now: () => Date.now() },
       logger: createDoLogger(this.ctx.id.toString()),
       runtime: { destroy: () => this.destroy() },
@@ -90,4 +92,13 @@ export class BudgetDO extends DurableObject {
         .toArray().length > 0
     )
   }
+}
+
+/**
+ * The journal stream when bound. Without one, local development discards rows so purges still
+ * run; elsewhere rows wait, unpurged, until the binding exists.
+ */
+function journalOf(env: Env): BudgetJournal | null {
+  if (env.PIPELINE_BUDGET_JOURNAL) return pipelineJournal(env.PIPELINE_BUDGET_JOURNAL)
+  return env.APP_ENV === "development" ? discardJournal : null
 }

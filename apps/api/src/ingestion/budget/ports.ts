@@ -1,5 +1,6 @@
 import type { BudgetReader, BudgetTransition, InspectReader } from "@unprice/services/budgets"
 import type { CardRows } from "@unprice/services/pricing"
+import type { BudgetJournal, JournalEntry } from "./journal"
 
 export type BudgetClock = { now(): number }
 
@@ -35,10 +36,17 @@ export type BudgetStoreTx = BudgetReader & {
   ): void
   /** Replaces the cached copy of each card with what the card source returned at `at`. */
   cacheCards(cards: readonly CardRows[], at: number): void
-  /** Deletes up to `limit` closed rows whose retention ended by `now`. */
+  /** Deletes up to `limit` exported closed rows whose retention ended by `now`. */
   purgeOperations(now: number, limit: number): void
-  /** The earliest `alarmAt` of any row: an open hold's expiry or a closed row's retention end. */
+  /**
+   * The earliest `alarmAt` of a row the alarm can act on: an open reservation's expiry, or an
+   * exported closed row's retention end. A row waiting for export wakes the alarm through export.
+   */
   nextDueAt(): number | null
+  /** Up to `limit` written row versions the journal has not received, by `seq`. */
+  readUnexported(limit: number): JournalEntry[]
+  /** The journal received every row up to `seq`. */
+  markExported(seq: number): void
 }
 
 export type Sync<T> = T extends PromiseLike<unknown> ? never : T
@@ -54,6 +62,8 @@ export type BudgetStore = {
 }
 
 export type BudgetProcessorDeps = {
+  /** Null when no stream is bound: rows wait, unpurged, until one is. */
+  journal: BudgetJournal | null
   clock: BudgetClock
   logger: BudgetLogger
   runtime: BudgetRuntime

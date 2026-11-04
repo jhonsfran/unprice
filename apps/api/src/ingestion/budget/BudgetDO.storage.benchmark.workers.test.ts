@@ -9,6 +9,7 @@ import { getBudgetStub } from "~/ingestion/do-placement"
 import type { BudgetDO } from "./BudgetDO"
 import { BudgetSqliteStore } from "./budget-store"
 import * as schema from "./db/schema"
+import { discardJournal } from "./journal"
 import { BudgetProcessor } from "./processor"
 
 const UNIT = BigInt(100_000_000)
@@ -115,6 +116,7 @@ function processor(state: DurableObjectState, now: number) {
   const clock = {
     now,
     processor: new BudgetProcessor({
+      journal: discardJournal,
       runtime: { destroy: async () => {} },
       clock: { now: () => clock.now },
       logger: {

@@ -8,7 +8,8 @@ import { getBudgetStub } from "~/ingestion/do-placement"
 import type { BudgetDO } from "./BudgetDO"
 import { BudgetSqliteStore } from "./budget-store"
 import * as schema from "./db/schema"
-import { BudgetProcessor } from "./processor"
+import { discardJournal } from "./journal"
+import { BudgetProcessor, JOURNAL_EXPORT_DELAY_MS } from "./processor"
 
 const UNIT = 100_000_000n
 const DAY = 86_400_000
@@ -21,6 +22,7 @@ function processor(
   setAlarm = (at: number) => state.storage.setAlarm(at)
 ) {
   return new BudgetProcessor({
+    journal: discardJournal,
     runtime: { destroy: async () => {} },
     clock: { now: () => now },
     logger: { error: () => {} },
@@ -90,7 +92,8 @@ describe("alarm scheduling recovery", () => {
         ok: true,
         outcome: { replayed: true, balance: { remaining: 98n * UNIT } },
       })
-      expect(await state.storage.getAlarm()).toBe(now + DAY)
+      // The written row's export comes first; the row's retention follows.
+      expect(await state.storage.getAlarm()).toBe(now + JOURNAL_EXPORT_DELAY_MS)
       expect(calls).toBe(2)
     })
   })
@@ -115,9 +118,9 @@ describe("alarm scheduling recovery", () => {
       await expect(evicted.execute(hold)).rejects.toThrow("evicted before setAlarm")
       expect(await state.storage.getAlarm()).toBe(later)
 
-      // The next instance wakes the alarm for the hold's expiry, not a month later.
+      // The next instance wakes the alarm to export the hold, ahead of its expiry, not a month later.
       await processor(state, now).initialize()
-      expect(await state.storage.getAlarm()).toBe(now + 60_000)
+      expect(await state.storage.getAlarm()).toBe(now + JOURNAL_EXPORT_DELAY_MS)
       expect(state.storage.sql.exec("SELECT status, due_at FROM budget_operations").one()).toEqual({
         status: "open",
         due_at: now + 60_000,
@@ -147,7 +150,8 @@ describe("alarm scheduling recovery", () => {
         ok: true,
         outcome: { replayed: true, balance: { remaining: 90n * UNIT } },
       })
-      expect(await state.storage.getAlarm()).toBe(now + DAY)
+      // The written row's export comes first; the row's retention follows.
+      expect(await state.storage.getAlarm()).toBe(now + JOURNAL_EXPORT_DELAY_MS)
       expect(calls).toBe(2)
       expect(
         state.storage.sql.exec("SELECT COUNT(*) AS count FROM budget_operations").one()

@@ -115,6 +115,8 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
       CLOUDFLARE_CACHE_DOMAIN: z.string().optional(),
       LOCAL_PIPELINE_URL: z.string().url().optional(),
       PIPELINE_EVENTS: cloudflarePipeline.optional(),
+      /** The budget journal stream (ADR-0008 D7); BudgetDO keeps unexported rows until it is bound. */
+      PIPELINE_BUDGET_JOURNAL: cloudflarePipeline.optional(),
       QUEUE_SHARD_0: cloudflareQueue,
       INGESTION_REPORTING_QUEUE: cloudflareQueue,
       // Fraction of typed metric emissions (cache/db/ratelimit) exported to

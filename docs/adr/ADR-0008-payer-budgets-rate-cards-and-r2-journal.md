@@ -118,7 +118,12 @@ settles under the pricing that estimated it. The compile retries a change refuse
 - The API worker sends rejected events to the same stream.
 - Dashboards read history from R2 with Basin SQL. Live balances and current-period usage read the
   budget.
-- Readers deduplicate on `(budget key, seq)`, because export is at least once.
+- Readers deduplicate on `(budget key, seq)`, because export is at least once. Every write of a
+  row takes a new `seq`, and the alarm sends only the latest write of each row since the last
+  export, so a reader keeps an operation's highest `seq`. A budget's first `seq` is its first
+  write's clock times 1,000, so a key deleted and created again never reuses one.
+- Without a `PIPELINE_BUDGET_JOURNAL` binding, outside local development, rows wait unpurged until
+  one is bound.
 
 ### D8. Tinybird is deleted
 

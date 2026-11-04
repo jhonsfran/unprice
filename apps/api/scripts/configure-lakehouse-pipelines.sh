@@ -5,6 +5,8 @@
 #   web_events  page hits, plan views, plan clicks and sign-ups, written over the stream's HTTP
 #               ingest endpoint (LAKEHOUSE_WEB_EVENTS_URL + LAKEHOUSE_WEB_EVENTS_TOKEN) and read
 #               with Basin SQL (BASIN_SQL_ACCOUNT_ID, BASIN_SQL_BUCKET, BASIN_SQL_TOKEN)
+#   budget_journal  every BudgetDO operation row, exported by the alarm through the API worker's
+#               PIPELINE_BUDGET_JOURNAL binding (ADR-0008 D7)
 # Assumes R2 buckets already exist.
 #
 # Run from apps/api:
@@ -540,7 +542,7 @@ else
 fi
 
 echo "=== Environment: $ENV | Bucket: $BUCKET ==="
-echo "=== Resource name format: ${NAME_PREFIX}lakehouse_<events|web_events>_<stream|sink|pipeline>${NAME_SUFFIX} ==="
+echo "=== Resource name format: ${NAME_PREFIX}lakehouse_<events|web_events|budget_journal>_<stream|sink|pipeline>${NAME_SUFFIX} ==="
 if [[ "$DELETE_ONLY" != true && -n "$TOKEN_SOURCE" ]]; then
   echo "=== Using API token from: $TOKEN_SOURCE ==="
 fi
@@ -549,19 +551,17 @@ echo ""
 STREAM_SPECS=(
   "events:events:events"
   "web_events:web_events:web_events"
+  "budget_journal:budget_journal:budget_journal"
 )
 
 print_pipeline_binding_hint() {
-  local pipeline_name
-  pipeline_name="$(resource_name "events" "pipeline")"
-
-  echo "Update wrangler pipeline binding for env '$ENV':"
+  echo "Update wrangler pipeline bindings for env '$ENV' with each stream's id"
+  echo "(npx wrangler pipelines streams list):"
   echo "  \"pipelines\": ["
-  echo "    {"
-  echo "      \"pipeline\": \"$pipeline_name\","
-  echo "      \"binding\": \"PIPELINE_EVENTS\""
-  echo "    }"
+  echo "    { \"stream\": \"<$(resource_name "events" "stream") id>\", \"binding\": \"PIPELINE_EVENTS\" },"
+  echo "    { \"stream\": \"<$(resource_name "budget_journal" "stream") id>\", \"binding\": \"PIPELINE_BUDGET_JOURNAL\" }"
   echo "  ]"
+  echo "Until PIPELINE_BUDGET_JOURNAL is bound, BudgetDO keeps every row it has not exported."
 }
 if [[ "$RECREATE" == true || "$DELETE_ONLY" == true ]]; then
   echo ">>> Cleanup mode: deleting existing pipelines/sinks/streams for this environment naming scheme"

@@ -28,7 +28,8 @@ import type { BudgetDO } from "./BudgetDO"
 import { BudgetSqliteStore } from "./budget-store"
 import * as schema from "./db/schema"
 import migrations from "./drizzle/migrations"
-import { ALARM_CONTINUE_MS, BudgetProcessor } from "./processor"
+import { discardJournal } from "./journal"
+import { ALARM_CONTINUE_MS, BudgetProcessor, JOURNAL_EXPORT_DELAY_MS } from "./processor"
 
 const UNIT = BigInt(100_000_000)
 const units = (value: number) => BigInt(Math.round(value * 100)) * (UNIT / BigInt(100))
@@ -82,6 +83,7 @@ function realStorageProcessor(
   destroyed: number[] = []
 ) {
   return new BudgetProcessor({
+    journal: discardJournal,
     clock: { now },
     logger: { error: (message, fields) => errors.push(`${message}: ${fields.error}`) },
     runtime: {
@@ -966,8 +968,8 @@ describe("BudgetDO alarm", () => {
           .exec("SELECT id, status, due_at FROM budget_operations WHERE kind = 'lease'")
           .toArray()
       ).toEqual([{ id: `l:${sha256HexSync("proc-1")}`, status: "done", due_at: t0 + 10 * MINUTE }])
-      // The refusal is a rejection, and it still lowers the alarm to its own purge.
-      await expect(state.storage.getAlarm()).resolves.toBe(t0 + 10 * MINUTE)
+      // The refusal is a rejection, and it is still written, so the alarm comes to export it.
+      await expect(state.storage.getAlarm()).resolves.toBe(t0 + JOURNAL_EXPORT_DELAY_MS)
 
       outcome(await processor.execute({ type: "release", holdId: "h_1" }), "release")
       now = t0 + 10 * MINUTE - 1
@@ -1071,8 +1073,13 @@ describe("BudgetDO alarm", () => {
         usage: amountUsage(units(1)),
       } as const
       outcome(await processor.execute(late), "record")
-      await expect(state.storage.getAlarm()).resolves.toBe(now + 25 * HOUR)
-      now += 25 * HOUR
+      const recordedAt = now
+      // The alarm first exports the row, then waits for its retention.
+      await expect(state.storage.getAlarm()).resolves.toBe(now + JOURNAL_EXPORT_DELAY_MS)
+      now += JOURNAL_EXPORT_DELAY_MS
+      await processor.alarm()
+      await expect(state.storage.getAlarm()).resolves.toBe(recordedAt + 25 * HOUR)
+      now = recordedAt + 25 * HOUR
       await processor.alarm()
       expect(state.storage.sql.exec("SELECT count(*) AS n FROM budget_operations").one()).toEqual({
         n: 0,
@@ -1226,6 +1233,7 @@ describe("BudgetDO alarm", () => {
   it("propagates a failed attempt to re-arm after a sweep error", async () => {
     const errors: string[] = []
     const processor = new BudgetProcessor({
+      journal: discardJournal,
       runtime: { destroy: async () => {} },
       clock: { now: () => Date.now() },
       logger: { error: (message) => errors.push(message) },
@@ -1254,6 +1262,7 @@ describe("BudgetDO alarm", () => {
       await instance.execute(upsert(key, fiftyPerMonth))
       const errors: string[] = []
       const processor = new BudgetProcessor({
+        journal: discardJournal,
         runtime: { destroy: async () => {} },
         clock: { now: () => t0 },
         logger: { error: (message, fields) => errors.push(`${message}: ${fields.error}`) },
