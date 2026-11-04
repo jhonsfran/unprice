@@ -99,9 +99,28 @@ export class MemoryBudgetStore implements BudgetReader {
     return row?.kind === "lease" ? row : null
   }
 
-  /** Caches cards the way a refresh would. */
+  /** When each card was cached; cards cached without a time never go stale. */
+  readonly cardsAt = new Map<string, number>()
+
+  /** Caches cards the way a refresh would, never going stale. */
   cacheCards(...cards: readonly CardRows[]) {
-    for (const card of cards) this.cards.set(card.card.id, card)
+    this.cacheCardsAt(Number.MAX_SAFE_INTEGER, ...cards)
+  }
+
+  cacheCardsAt(at: number, ...cards: readonly CardRows[]) {
+    for (const card of cards) {
+      this.cards.set(card.card.id, card)
+      this.cardsAt.set(card.card.id, at)
+    }
+  }
+
+  cardsRefreshedAt(cardIds: readonly string[]) {
+    return Object.fromEntries(
+      cardIds.flatMap((id) => {
+        const at = this.cardsAt.get(id)
+        return at === undefined ? [] : [[id, at] as const]
+      })
+    )
   }
 
   readCards(cardIds: readonly string[]) {

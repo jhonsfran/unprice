@@ -1,5 +1,6 @@
 import type { Result } from "@unprice/error"
 import type { BudgetCommand, BudgetOutcome, BudgetReply, UnPriceBudgetError } from "../../budgets"
+import type { CardRows } from "../../pricing"
 
 export type BudgetAddress = Readonly<{ projectId: string; key: string }>
 
@@ -13,4 +14,15 @@ export interface BudgetClient {
     address: BudgetAddress,
     request: BudgetRequest
   ): Promise<Result<BudgetOutcome, UnPriceBudgetError>>
+  /** Replaces the budget's cached copy of each card; the next command prices with it. */
+  cacheCards(address: BudgetAddress, cards: readonly CardRows[]): Promise<void>
+}
+
+/** Where budgets read rate cards: a project's cards, each with every row, ended or not. */
+export interface CardSource {
+  /** Every card named, or CARD_NOT_FOUND for the first the project does not have. */
+  read(
+    projectId: string,
+    cardIds: readonly string[]
+  ): Promise<Result<CardRows[], UnPriceBudgetError>>
 }

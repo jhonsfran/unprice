@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers"
 import type { BudgetInspectQuery, BudgetInspectReply } from "@unprice/services/budgets"
+import type { CardRows } from "@unprice/services/pricing"
 import type { BudgetReply, BudgetRequest } from "@unprice/services/use-cases"
 import { drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
@@ -63,6 +64,13 @@ export class BudgetDO extends DurableObject {
       await this.ctx.storage.deleteAll()
       this.ready = null
     })
+  }
+
+  /** Replaces the cached cards; a key with no budget keeps no storage for them. */
+  async cacheCards(cards: CardRows[]): Promise<void> {
+    if (!this.ready) return
+    await this.ready
+    this.processor.cacheCards(cards)
   }
 
   /** The dashboard's read beside the verbs. Like a verb, it creates no storage for an unknown key. */

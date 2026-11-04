@@ -328,6 +328,17 @@ function bind(db: SqliteTx, configs: { last: ConfigCache }): BudgetStoreTx {
       )
     },
 
+    cardsRefreshedAt(cardIds) {
+      if (cardIds.length === 0) return {}
+      const cards = schema.budgetCards
+      const rows = db
+        .select({ cardId: cards.cardId, refreshedAt: cards.refreshedAt })
+        .from(cards)
+        .where(sql`${cards.cardId} IN ${jsonList(cardIds)}`)
+        .all()
+      return Object.fromEntries(rows.map((row) => [row.cardId, row.refreshedAt]))
+    },
+
     readCards(cardIds) {
       if (cardIds.length === 0) return {}
       const cards = schema.budgetCards

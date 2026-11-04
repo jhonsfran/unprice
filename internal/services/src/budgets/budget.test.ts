@@ -1844,6 +1844,7 @@ describe("history does not slow the hot path", () => {
       history: [],
       expired: [],
       cards: {},
+      staleCards: [],
       reservationsOpen: false,
       statements: [],
     }

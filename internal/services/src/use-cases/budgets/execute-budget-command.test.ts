@@ -4,6 +4,7 @@ import {
   chargeBudgetInputSchema,
   leaseBudgetInputSchema,
   upsertBudgetInputSchema,
+  upsertBudgetInternalInputSchema,
 } from "@unprice/db/validators"
 import { Err, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
@@ -11,7 +12,8 @@ import { describe, expect, it } from "vitest"
 import type { BudgetCatalogService } from "../../budget-catalog"
 import { type BudgetCatalogFacts, UnPriceBudgetError } from "../../budgets"
 import { MemoryBudgetStore } from "../../budgets/memory-store.fixture"
-import type { BudgetClient } from "./budget-client"
+import { CARD_FROM, usdCard } from "../../pricing/fixtures"
+import type { BudgetClient, CardSource } from "./budget-client"
 import {
   type BudgetVerbRequest,
   type ExecuteBudgetCommandDeps,
@@ -22,12 +24,25 @@ const t0 = Date.parse("2026-10-14T10:00:00.000Z")
 
 function harness(record?: (facts: BudgetCatalogFacts) => Promise<void>) {
   const store = new MemoryBudgetStore()
+  const clock = { now: t0 }
   const budgets: BudgetClient = {
     async execute(_address, request) {
-      const result = store.run(request, t0)
+      const result = store.run(request, clock.now)
       if (result.err) return result
       if (!result.val.ok) return Err(new UnPriceBudgetError(result.val.rejection))
       return Ok(result.val.outcome)
+    },
+    async cacheCards(_address, cards) {
+      store.cacheCardsAt(clock.now, ...cards)
+    },
+  }
+  const reads: string[][] = []
+  const cards: CardSource = {
+    async read(_projectId, cardIds) {
+      reads.push([...cardIds])
+      const unknown = cardIds.find((id) => id !== usdCard.card.id)
+      if (unknown) return Err(new UnPriceBudgetError({ code: "CARD_NOT_FOUND", cardId: unknown }))
+      return Ok([usdCard])
     },
   }
   const written: { projectId: string; facts: BudgetCatalogFacts }[] = []
@@ -44,6 +59,7 @@ function harness(record?: (facts: BudgetCatalogFacts) => Promise<void>) {
   } as unknown as Logger
   const deps: ExecuteBudgetCommandDeps = {
     budgets,
+    cards,
     services: { budgetCatalog },
     waitUntil: (promise) => void pending.push(promise),
     logger,
@@ -63,10 +79,64 @@ function harness(record?: (facts: BudgetCatalogFacts) => Promise<void>) {
     return result
   }
 
-  return { execute, upsert, written, errors, flush, deps }
+  return { execute, upsert, written, errors, flush, deps, clock, reads }
 }
 
 const daily100 = { limits: [{ id: "daily", amount: "100", window: "day" as const }] }
+
+describe("executeBudgetCommand with rate cards", () => {
+  const priced = (cardId: string) =>
+    upsertBudgetInternalInputSchema.parse({
+      key: "customer:acme",
+      unit: "USD",
+      limits: [],
+      pricing: {
+        cards: { base: cardId },
+        features: [
+          {
+            slug: "images",
+            eventSlug: "image.generated",
+            dimensions: ["size"],
+            meterProperty: null,
+            included: null,
+            priced: true,
+          },
+        ],
+        statements: "none",
+      },
+    })
+  const image = { slug: "image.generated", properties: { size: "1024" } }
+
+  it("reads a card it has not cached, then again once five minutes have passed", async () => {
+    const { execute, clock, reads } = harness()
+    const { unit, config } = priced(usdCard.card.id)
+    const start = CARD_FROM + 86_400_000
+    clock.now = start
+
+    const created = await execute({ type: "upsert", unit, config, mayLoosen: true })
+    expect(created.err).toBeUndefined()
+    clock.now = start + 4 * 60_000
+    const fresh = await execute({ type: "charge", idempotencyKey: "c1", event: image })
+    clock.now = start + 5 * 60_000
+    const refreshed = await execute({ type: "charge", idempotencyKey: "c2", event: image })
+
+    expect([fresh.val?.usage.amount, refreshed.val?.usage.amount]).toEqual([
+      BigInt(4_000_000),
+      BigInt(4_000_000),
+    ])
+    expect(reads).toEqual([[usdCard.card.id], [usdCard.card.id]])
+  })
+
+  it("answers CARD_NOT_FOUND for a card the project does not have", async () => {
+    const { execute, reads } = harness()
+    const { unit, config } = priced("rc_missing")
+
+    const created = await execute({ type: "upsert", unit, config, mayLoosen: true })
+
+    expect(created.err?.rejection).toEqual({ code: "CARD_NOT_FOUND", cardId: "rc_missing" })
+    expect(reads).toEqual([["rc_missing"]])
+  })
+})
 
 describe("executeBudgetCommand", () => {
   it("records the created budget's facts once", async () => {
@@ -252,6 +322,7 @@ describe("executeBudgetCommand", () => {
       async execute() {
         return upserted
       },
+      async cacheCards() {},
     }
 
     await expect(execute(firstUseRequest("authorize"))).rejects.toThrow(

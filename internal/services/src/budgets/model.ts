@@ -299,6 +299,8 @@ export type BudgetView = Readonly<{
   expired: readonly ReservationOperation[]
   /** The rate cards the budget's pricing names, by card id, as the store cached them. */
   cards: Readonly<Record<string, CardRows>>
+  /** Cards the command needs that are not cached, or were cached CARD_REFRESH_MS or more ago. */
+  staleCards: readonly string[]
   /** For an upsert that changes an existing budget's pricing: whether a hold or lease is open. */
   reservationsOpen: boolean
   /**
@@ -606,6 +608,11 @@ export type BudgetRejection =
   | Readonly<{ code: "STATEMENT_NOT_SEALED"; periodId: string }>
   /** The budget's pricing names a card the store has not cached. */
   | Readonly<{ code: "CARD_NOT_FOUND"; cardId: string }>
+  /**
+   * The command prices with cards the store cached too long ago or never: the caller refreshes
+   * them from the card source and sends the command again. Nothing was written.
+   */
+  | Readonly<{ code: "CARDS_STALE"; cardIds: readonly string[] }>
   | Readonly<{ code: "UNIT_MISMATCH"; cardId: string; unit: string; cardUnit: string }>
   /** A card's rows break a rule for the features this budget meters (ADR-0008 D5). */
   | Readonly<{ code: "CARD_INCOMPATIBLE"; cardId: string; violations: readonly CardViolation[] }>
@@ -709,6 +716,8 @@ function rejectionMessage(rejection: BudgetRejection): string {
       return `Statement ${rejection.periodId} is open; seal it before completing it`
     case "CARD_NOT_FOUND":
       return `Rate card ${rejection.cardId} is not cached on this budget`
+    case "CARDS_STALE":
+      return `Rate cards ${rejection.cardIds.join(", ")} need a refresh before this budget prices`
     case "UNIT_MISMATCH":
       return `Rate card ${rejection.cardId} prices in ${rejection.cardUnit}, not the budget's ${rejection.unit}`
     case "CARD_INCOMPATIBLE":

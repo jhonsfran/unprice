@@ -23,20 +23,21 @@ import { type Change, balanceOf, decide, holdNumber, repricesBudget, upsertPrici
 import { type RowStep, checkTransition } from "./invariants"
 import { alarmAt, consume, dueAt, rollUsage, trackLimits } from "./ledger"
 import { cardIdsOf, featuresOf } from "./meter"
-import type {
-  BudgetBalance,
-  BudgetCommand,
-  BudgetOutcome,
-  BudgetReply,
-  BudgetView,
-  LeaseOperation,
-  LeaseView,
-  Ledger,
-  Operation,
-  ReservationOperation,
-  Statement,
-  UnPriceBudgetError,
-  WindowPeriod,
+import {
+  type BudgetBalance,
+  type BudgetCommand,
+  type BudgetOutcome,
+  type BudgetReply,
+  type BudgetView,
+  type LeaseOperation,
+  type LeaseView,
+  type Ledger,
+  type Operation,
+  type ReservationOperation,
+  type Statement,
+  type UnPriceBudgetError,
+  type WindowPeriod,
+  reject,
 } from "./model"
 import {
   type PositionWrite,
@@ -68,6 +69,8 @@ export type BudgetReader = {
   readExpired(now: number, limit: number): ReservationOperation[]
   /** Whether any hold or lease is open, expired or not. */
   hasOpenReservations(): boolean
+  /** When each of these cards was last cached; a card the store has not cached is absent. */
+  cardsRefreshedAt(cardIds: readonly string[]): Record<string, number>
   /** The cached rate cards with these ids; a card the store has not cached is absent. */
   readCards(cardIds: readonly string[]): Record<string, CardRows>
   /** The statements with these period ids. */
@@ -79,6 +82,12 @@ export type BudgetReader = {
   /** Every open and sealed statement. */
   readUnfinishedStatements(): Statement[]
 }
+
+/**
+ * How long a cached card prices before it must be read again (ADR-0008 D2): shorter than the
+ * notice a row change gives, so no budget prices with a row that has ended or misses a new one.
+ */
+export const CARD_REFRESH_MS = 5 * 60_000
 
 /** The most expired reservations one sweep closes; the alarm comes back at once for the rest. */
 export const EXPIRED_PER_SWEEP = 256
@@ -120,10 +129,19 @@ export function loadView(
         : [],
     expired,
     cards: pricing && prices ? reader.readCards(cardIdsOf(pricing)) : {},
+    staleCards: pricing && prices ? staleCardsOf(reader, cardIdsOf(pricing), now) : [],
     reservationsOpen: repriced && reader.hasOpenReservations(),
     // Several expiries may read the same statement.
     statements: [...byPeriodId(statements).values()],
   }
+}
+
+function staleCardsOf(reader: BudgetReader, cardIds: readonly string[], now: number): string[] {
+  const refreshedAt = reader.cardsRefreshedAt(cardIds)
+  return cardIds.filter((cardId) => {
+    const at = Object.hasOwn(refreshedAt, cardId) ? refreshedAt[cardId] : undefined
+    return at === undefined || now - at >= CARD_REFRESH_MS
+  })
 }
 
 /** The pricing the command runs under: an upsert's, else the budget's or the one it creates. */
@@ -303,6 +321,7 @@ export function transition(params: {
   const limits = view.budget?.config.limits ?? []
   const rolled = rollUsage(view.ledger.usage, now, limits)
   const rolledLedger: Ledger = { ...view.ledger, usage: rolled.usage }
+  if (view.staleCards.length > 0) return reject({ code: "CARDS_STALE", cardIds: view.staleCards })
 
   const decided = decide(
     command,

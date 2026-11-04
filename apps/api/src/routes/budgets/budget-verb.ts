@@ -20,6 +20,7 @@ import {
   type BudgetAddress,
   type BudgetVerbRequest,
   executeBudgetCommand,
+  rateCardSource,
 } from "@unprice/services/use-cases"
 import type { Context } from "hono"
 import { setMetric } from "hono/timing"
@@ -56,11 +57,12 @@ export async function runBudgetVerb<R extends BudgetVerbRequest>(
     })
   }
   const budgets = new CloudflareBudgetClient(c.env)
-  const { budgetCatalog } = c.get("services")
+  const { budgetCatalog, rateCards } = c.get("services")
   const result = await callBudget(c, request.type, () =>
     executeBudgetCommand(
       {
         budgets,
+        cards: rateCardSource(rateCards),
         services: { budgetCatalog },
         logger: c.get("logger"),
         waitUntil: c.get("waitUntil"),
@@ -314,6 +316,8 @@ function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): Unprice
     case "CARD_INCOMPATIBLE":
     case "INCLUDED_NOT_APPLICABLE":
     case "RESERVATIONS_OPEN":
+    // Reaches a caller only when the refresh before the retry was itself stale; a retry refreshes.
+    case "CARDS_STALE":
       return new UnpriceApiError({ code: "CONFLICT", message, cause: error })
     case "BUDGET_NOT_FOUND":
     case "HOLD_NOT_FOUND":

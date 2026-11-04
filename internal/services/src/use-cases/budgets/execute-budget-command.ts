@@ -8,7 +8,7 @@ import {
   isOutcomeOf,
 } from "../../budgets"
 import type { ServiceContext } from "../../context"
-import type { BudgetClient, BudgetRequest } from "./budget-client"
+import type { BudgetClient, BudgetRequest, CardSource } from "./budget-client"
 
 /** The budget a verb creates when its key has none, before the address is added to it. */
 export type BudgetDefinitionInput = Omit<BudgetDefinition, "key" | "projectId">
@@ -28,6 +28,7 @@ export type BudgetVerbRequest =
 
 export type ExecuteBudgetCommandDeps = {
   budgets: BudgetClient
+  cards: CardSource
   services: Pick<ServiceContext, "budgetCatalog">
   logger: Logger
   waitUntil: (promise: Promise<unknown>) => void
@@ -58,7 +59,15 @@ export async function executeBudgetCommand<R extends BudgetVerbRequest>(
 ): Promise<Result<OutcomeOf<R["type"]>, UnPriceBudgetError>> {
   const { projectId, key } = input
   const command = toCommand(input.request, projectId, key)
-  const result = await deps.budgets.execute({ projectId, key }, command)
+  const address = { projectId, key }
+  let result = await deps.budgets.execute(address, command)
+  // The budget priced nothing and wrote nothing: refresh its cards and send the command again.
+  if (result.err?.rejection.code === "CARDS_STALE") {
+    const cards = await deps.cards.read(projectId, result.err.rejection.cardIds)
+    if (cards.err) return cards
+    await deps.budgets.cacheCards(address, cards.val)
+    result = await deps.budgets.execute(address, command)
+  }
   if (result.err) return result
   // RPC erases the verb's type; the budget always answers with the outcome of the verb it ran.
   if (!isOutcomeOf(result.val, input.request.type)) {

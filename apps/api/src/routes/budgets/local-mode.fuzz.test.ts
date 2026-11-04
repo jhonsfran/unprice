@@ -117,6 +117,7 @@ class MemoryBudgetStore implements BudgetStore {
       [...this.rows.values()].some(
         (row) => (row.kind === "hold" || row.kind === "lease") && row.state.status === "open"
       ),
+    cardsRefreshedAt: () => ({}),
     readCards: () => ({}),
     cacheCards: () => {},
     readStatements: () => [],

@@ -978,6 +978,23 @@ describe("a payer budget keeps every amount it consumes on a statement", () => {
     ])
   })
 
+  it("refuses to price with a card cached five minutes ago or never, and writes nothing", () => {
+    const store = new MemoryBudgetStore()
+    const at = NOV + hour
+    store.cacheCardsAt(at, usdCard)
+    ok(store.run(pricedUpsert({ features: [images], statements: "none" }), at))
+    const charge = (key: string) =>
+      store.run({ type: "charge", idempotencyKey: key, event: image("1024") }, at + 5 * minute)
+    ok(
+      store.run({ type: "charge", idempotencyKey: "c0", event: image("1024") }, at + 5 * minute - 1)
+    )
+    expect(rejection(charge("c1"))).toEqual({ code: "CARDS_STALE", cardIds: [usdCard.card.id] })
+    expect(store.rows.size).toBe(1)
+    store.cards.clear()
+    store.cardsAt.clear()
+    expect(rejection(charge("c2"))).toEqual({ code: "CARDS_STALE", cardIds: [usdCard.card.id] })
+  })
+
   it("refuses a card that cannot take a feature's allowance, at upsert and at ingestion", () => {
     const store = new MemoryBudgetStore()
     store.cacheCards(usdCard)

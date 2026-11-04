@@ -793,6 +793,69 @@ describe("BudgetDO statements", () => {
   })
 })
 
+describe("BudgetDO card cache", () => {
+  it("asks for a refresh of a card cached five minutes ago, and caches nothing for an unknown key", async () => {
+    const unknown = stubFor("customer:no-budget")
+    await unknown.cacheCards([usdCard])
+    await runInDurableObject(unknown, (_instance: BudgetDO, state) => {
+      expect(
+        state.storage.sql
+          .exec("SELECT count(*) AS n FROM sqlite_master WHERE name = 'budget_cards'")
+          .one()
+      ).toEqual({ n: 0 })
+    })
+
+    const key = "customer:card-refresh"
+    const stub = stubFor(key)
+    const t0 = CARD_FROM + DAY
+    let now = t0
+    await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
+      await migrate(drizzle(state.storage), migrations)
+      const processor = realStorageProcessor(state, () => now)
+      processor.cacheCards([usdCard])
+      const parsed = upsertBudgetInternalInputSchema.parse({
+        key,
+        unit: "USD",
+        limits: [],
+        pricing: {
+          cards: { base: usdCard.card.id },
+          features: [
+            {
+              slug: "images",
+              eventSlug: "image.generated",
+              dimensions: ["size"],
+              meterProperty: null,
+              included: null,
+              priced: true,
+            },
+          ],
+          statements: "none",
+        },
+      })
+      outcome(
+        await processor.execute({
+          type: "upsert",
+          projectId: "proj_1",
+          ...parsed,
+          mayLoosen: true,
+        }),
+        "upsert"
+      )
+      const image = { slug: "image.generated", properties: { size: "1024" } }
+      now = t0 + 5 * MINUTE
+      expect(
+        rejection(await processor.execute({ type: "charge", idempotencyKey: "c1", event: image }))
+      ).toEqual({ code: "CARDS_STALE", cardIds: [usdCard.card.id] })
+      processor.cacheCards([usdCard])
+      const charged = outcome(
+        await processor.execute({ type: "charge", idempotencyKey: "c1", event: image }),
+        "charge"
+      )
+      expect(charged.usage.amount).toBe(units(0.04))
+    })
+  })
+})
+
 describe("BudgetDO alarm", () => {
   it("settles an expired hold at its full amount when its alarm fires", async () => {
     const key = "customer:uncertain"
