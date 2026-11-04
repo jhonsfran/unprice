@@ -59,9 +59,11 @@ settles under the pricing that estimated it. The compile retries a change refuse
 | Subscription | an optional overlay card, limit overrides, funding | the subscription |
 
 - A price row is immutable. A price change closes the row (`effectiveTo`) and inserts a successor.
-- Once a card has a live or scheduled row, every row published on it, and every row end, takes
-  effect at least 10 minutes after publish; only a card's first rows may start at once. A budget
-  refreshes its card at least every 5 minutes, so no budget prices with a stale card.
+- Once a card has any row, even one that has ended, every row published on it, and every row end,
+  takes effect at least 10 minutes after publish; only a card's first rows may start at once. A
+  budget refreshes its card at least every 5 minutes, so no budget prices with a stale card. A
+  publish may end other rows where its rows start, so a regrouped meter's rows follow the old
+  ones without a gap.
 - An overlay card's rows win over the base card's rows of the same specificity.
 - A plan version stores no price and no currency inside a feature.
 

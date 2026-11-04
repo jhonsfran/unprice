@@ -227,26 +227,47 @@ describe("RateCardService", () => {
         },
       })
       .where(eq(featuresTable.id, "ft_llm_tokens"))
-    const close = (effectiveTo: number) =>
+    const close = (effectiveTo: number, now: number) =>
       rateCards.closeRows({
         projectId,
         cardId: card.id,
         rowIds: [stale?.id ?? ""],
         effectiveTo,
-        now: NOW,
+        now,
       })
+    // Each call stamps its own now, as the tRPC procedures do with Date.now().
+    const regroup = (now: number) =>
+      publishRateRows(
+        { services },
+        {
+          projectId,
+          cardId: card.id,
+          rows: [{ ...gpt41("2.00", "8.00"), match: { model_id: "gpt-4.1" } }],
+          closeRowIds: [stale?.id ?? ""],
+          effectiveFrom: NOW + 11 * MINUTE,
+          now,
+        }
+      )
 
     const images = await value(publish(card.id, [image], NOW + 10 * MINUTE))
-    const early = await rejection(close(NOW + 9 * MINUTE))
-    const closed = await value(close(NOW + 10 * MINUTE))
-    const retried = await value(close(NOW + 10 * MINUTE))
-    const regrouped = await value(
+    const early = await rejection(close(NOW + 9 * MINUTE, NOW))
+    const mixed = await rejection(
       publish(
         card.id,
         [{ ...gpt41("2.00", "8.00"), match: { model_id: "gpt-4.1" } }],
-        NOW + 10 * MINUTE
+        NOW + 11 * MINUTE,
+        NOW + MINUTE
       )
     )
+    const regrouped = await value(regroup(NOW + MINUTE))
+    const retried = await value(regroup(NOW + 2 * MINUTE))
+    const closeRetried = await value(close(NOW + 11 * MINUTE, NOW + 3 * MINUTE))
+    const atSwitch = await rateCards.getEffectiveRows({
+      projectId,
+      cardIds: [card.id],
+      from: NOW + 11 * MINUTE - 1,
+      to: NOW + 11 * MINUTE + 1,
+    })
 
     expect(images.inserted.map((row) => row.featureSlug)).toEqual(["images"])
     expect(early).toEqual({
@@ -254,12 +275,23 @@ describe("RateCardService", () => {
       featureSlug: "llm_tokens",
       earliest: NOW + 10 * MINUTE,
     })
-    expect(closed).toEqual({
-      closed: [{ rowId: stale?.id, effectiveTo: NOW + 10 * MINUTE }],
-      unchanged: 0,
+    expect(mixed).toMatchObject({
+      code: "INVALID_CARD",
+      violations: [{ code: "MIXED_MATCH_KEYS", feature: "llm_tokens" }],
     })
-    expect(retried).toEqual({ closed: [], unchanged: 1 })
     expect(regrouped.inserted.map((row) => row.match)).toEqual([{ model_id: "gpt-4.1" }])
+    expect(regrouped.closed).toEqual([{ rowId: stale?.id, effectiveTo: NOW + 11 * MINUTE }])
+    expect([retried.inserted, retried.closed, retried.unchanged]).toEqual([[], [], 2])
+    expect(closeRetried).toEqual({ closed: [], unchanged: 1 })
+    // No gap: the old row ends at the instant the new one starts.
+    expect(
+      atSwitch
+        .filter((row) => row.featureSlug === "llm_tokens")
+        .map((row) => [row.match, row.effectiveFrom - NOW, row.effectiveTo])
+    ).toEqual([
+      [{ model: "gpt-4.1" }, 0, NOW + 11 * MINUTE],
+      [{ model_id: "gpt-4.1" }, 11 * MINUTE, null],
+    ])
     expect(
       (await cardRows(card.id)).map((row) => [
         row.featureSlug,
@@ -269,8 +301,8 @@ describe("RateCardService", () => {
       ])
     ).toEqual([
       ["images", { size: "1024" }, 10 * MINUTE, null],
-      ["llm_tokens", { model: "gpt-4.1" }, 0, 10 * MINUTE],
-      ["llm_tokens", { model_id: "gpt-4.1" }, 10 * MINUTE, null],
+      ["llm_tokens", { model: "gpt-4.1" }, 0, 11 * MINUTE],
+      ["llm_tokens", { model_id: "gpt-4.1" }, 11 * MINUTE, null],
     ])
   })
 

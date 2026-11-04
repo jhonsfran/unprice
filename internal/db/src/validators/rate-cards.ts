@@ -215,6 +215,11 @@ export const publishRateRowsInputSchema = z.object({
   cardId: z.string().min(1),
   rows: z.array(rateRowDraftSchema).min(1).max(500),
   effectiveFrom: epochMsSchema,
+  /**
+   * Open rows to end at `effectiveFrom` in the same publish, such as a regrouped feature's old
+   * rows, so its new rows follow them without a gap.
+   */
+  closeRowIds: z.array(z.string().min(1)).max(500).optional(),
 })
 
 /** Ends open rows, for instance rows a feature change left stale; an end is a price change too. */

@@ -1,4 +1,4 @@
-import { type ModelRate, rateRowSchema } from "@unprice/db/validators"
+import { type ModelRate, type RateRow, rateRowSchema } from "@unprice/db/validators"
 import { describe, expect, it } from "vitest"
 import { CARD_FROM, features, modelCosts, usdCard, usdCardWithFallback } from "../pricing/fixtures"
 import { catalogCosts, changedCosts } from "./model-costs"
@@ -144,7 +144,7 @@ describe("planPublish", () => {
     ])
   })
 
-  it("gives a new row the notice once the card has a live or scheduled row", () => {
+  it("gives a new row the notice once the card has any row, even an ended one", () => {
     const fallback = usdCardWithFallback.rows.filter((row) => row.id === "row_tokens_default")
     const gpt5 = { ...draft("6"), match: { model: "gpt-5" } }
     const publish = (rows: typeof fallback, effectiveFrom: number) =>
@@ -166,7 +166,111 @@ describe("planPublish", () => {
     })
     expect(publish(fallback, NOW + RATE_CHANGE_NOTICE_MS).val?.inserts.length).toBe(1)
     expect(publish([], NOW).val?.inserts.map((row) => row.effectiveFrom)).toEqual([NOW])
-    expect(publish(ended, NOW).val?.inserts.map((row) => row.effectiveFrom)).toEqual([NOW])
+    expect(publish(ended, NOW).err?.rejection).toEqual({
+      code: "NOTICE_TOO_SHORT",
+      featureSlug: "llm_tokens",
+      earliest: NOW + RATE_CHANGE_NOTICE_MS,
+    })
+    expect(publish(ended, NOW + RATE_CHANGE_NOTICE_MS).val?.inserts.length).toBe(1)
+  })
+
+  describe("regrouping a feature in one publish", () => {
+    const regrouped = { ...features.llmTokens, dimensions: ["model_id"] }
+    const stale = usdCard.rows.filter((row) => row.featureSlug === "llm_tokens")
+    const staleIds = stale.map((row) => row.id)
+    const gpt5 = { ...draft("6"), match: { model_id: "gpt-5" } }
+    const regroup = (
+      rows: readonly RateRow[],
+      closeRowIds: readonly string[] | undefined,
+      effectiveFrom: number,
+      now = NOW
+    ) =>
+      planPublish({
+        card,
+        rows,
+        drafts: [gpt5],
+        closeRowIds,
+        effectiveFrom,
+        now,
+        features: [regrouped],
+        newRowId: () => "row_gpt5",
+      })
+    const at = NOW + RATE_CHANGE_NOTICE_MS
+
+    it("ends the old rows exactly where the new ones start", () => {
+      const result = regroup(stale, staleIds, at)
+
+      expect(result.val?.closes).toEqual(staleIds.map((rowId) => ({ rowId, effectiveTo: at })))
+      expect(result.val?.inserts.map((row) => [row.id, row.match, row.effectiveFrom])).toEqual([
+        ["row_gpt5", { model_id: "gpt-5" }, at],
+      ])
+    })
+
+    it("refuses the new rows while the old ones stay open", () => {
+      expect(regroup(stale, undefined, at).err?.rejection).toEqual({
+        code: "INVALID_CARD",
+        violations: [
+          { code: "MIXED_MATCH_KEYS", feature: "llm_tokens", keySets: ["model", "model_id"] },
+        ],
+      })
+    })
+
+    it("writes nothing on a retry, even once the notice has passed", () => {
+      const done = regroup(stale, staleIds, at)
+      if (done.err) throw done.err
+      const rows = [...stale.map((row) => ({ ...row, effectiveTo: at })), ...done.val.inserts]
+
+      expect(regroup(rows, staleIds, at, at - 1).val).toEqual({
+        closes: [],
+        inserts: [],
+        unchanged: 4,
+      })
+    })
+
+    it("gives the ends the notice and refuses a row it cannot end", () => {
+      expect(regroup(stale, staleIds, at - 1).err?.rejection).toEqual({
+        code: "NOTICE_TOO_SHORT",
+        featureSlug: "llm_tokens",
+        earliest: at,
+      })
+      expect(regroup(stale, ["row_gpt41", "row_x"], at).err?.rejection).toEqual({
+        code: "ROW_NOT_FOUND",
+        rowIds: ["row_x"],
+      })
+    })
+  })
+
+  it("names why a feature the pricing core cannot read is refused", () => {
+    const meterConfig = {
+      eventId: "evt_1",
+      eventSlug: "tokens",
+      aggregationMethod: "sum" as const,
+      aggregationField: "#tokens",
+      groupBy: ["model"],
+    }
+    const parsed = featurePricingOf({ slug: "llm_tokens", meterConfig })
+    const unpriceable = parsed.ok ? [] : [parsed.unpriceable]
+
+    const result = planPublish({
+      card,
+      rows: [],
+      drafts: [draft("6")],
+      effectiveFrom: NOW,
+      now: NOW,
+      features: [],
+      unpriceable,
+      newRowId: () => "row_new",
+    })
+
+    expect(result.err?.rejection).toEqual({
+      code: "FEATURE_NOT_PRICEABLE",
+      features: [
+        {
+          slug: "llm_tokens",
+          reason: "meter aggregationField: a property name that does not start with #",
+        },
+      ],
+    })
   })
 })
 
@@ -237,12 +341,27 @@ describe("featurePricingOf", () => {
     }
 
     expect(featurePricingOf({ slug: "llm_tokens", meterConfig })).toEqual({
-      slug: "llm_tokens",
-      dimensions: ["model"],
-      meterProperty: "input_tokens",
-      included: null,
+      ok: true,
+      pricing: {
+        slug: "llm_tokens",
+        dimensions: ["model"],
+        meterProperty: "input_tokens",
+        included: null,
+      },
     })
-    expect(featurePricingOf({ slug: "Bad Slug", meterConfig: null })).toBeNull()
+    expect(featurePricingOf({ slug: "Bad Slug", meterConfig: null })).toEqual({
+      ok: false,
+      unpriceable: { slug: "Bad Slug", reason: "slug: a lowercase slug" },
+    })
+    expect(
+      featurePricingOf({ slug: "llm_tokens", meterConfig: { ...meterConfig, groupBy: ["#model"] } })
+    ).toEqual({
+      ok: false,
+      unpriceable: {
+        slug: "llm_tokens",
+        reason: "meter groupBy: a property name that does not start with #",
+      },
+    })
   })
 })
 

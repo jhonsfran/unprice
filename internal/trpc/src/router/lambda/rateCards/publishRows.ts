@@ -3,7 +3,10 @@ import { publishRateRows } from "@unprice/services/use-cases"
 import { domainErrorToTrpcError } from "#domain-error"
 import { protectedProjectProcedure } from "#trpc"
 
-/** Publishes price rows; a change to an open row starts at least 10 minutes from now. */
+/**
+ * Publishes price rows, and ends the rows of `closeRowIds` where they start, in one write; once
+ * the card has a row, every start and end is at least 10 minutes from now.
+ */
 export const publishRows = protectedProjectProcedure
   .input(publishRateRowsInputSchema)
   .mutation(async (opts) => {

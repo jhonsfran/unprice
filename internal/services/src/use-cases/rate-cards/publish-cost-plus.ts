@@ -26,5 +26,5 @@ export async function publishCostPlus(
 ): Promise<Result<PublishRowsResult, UnPriceRateCardError | FetchError>> {
   const features = await projectFeaturePricing(deps.services.features, input.projectId)
   if (features.err) return Err(features.err)
-  return deps.services.rateCards.publishCostPlus({ ...input, features: features.val })
+  return deps.services.rateCards.publishCostPlus({ ...input, ...features.val })
 }

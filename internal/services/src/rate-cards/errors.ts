@@ -1,10 +1,14 @@
 import { DomainError, type DomainErrorKind } from "../domain-error-kind"
 import type { CardViolation } from "../pricing"
 
+/** A project feature the pricing core cannot read, and the field of its meter that breaks it. */
+export type UnpriceableFeature = Readonly<{ slug: string; reason: string }>
+
 export type RateCardRejection =
   | Readonly<{ code: "CARD_NOT_FOUND"; cardId: string }>
   | Readonly<{ code: "CARD_NAME_TAKEN"; name: string }>
   | Readonly<{ code: "UNKNOWN_FEATURE"; features: readonly string[] }>
+  | Readonly<{ code: "FEATURE_NOT_PRICEABLE"; features: readonly UnpriceableFeature[] }>
   | Readonly<{ code: "NOTICE_TOO_SHORT"; featureSlug: string; earliest: number }>
   | Readonly<{ code: "SCHEDULE_CONFLICT"; featureSlug: string; scheduledFrom: number }>
   | Readonly<{ code: "INVALID_CARD"; violations: readonly CardViolation[] }>
@@ -20,6 +24,7 @@ const KIND: Record<RateCardErrorCode, DomainErrorKind> = {
   NOT_COST_PLUS: "precondition",
   CARD_NAME_TAKEN: "conflict",
   UNKNOWN_FEATURE: "bad_request",
+  FEATURE_NOT_PRICEABLE: "bad_request",
   NOTICE_TOO_SHORT: "bad_request",
   SCHEDULE_CONFLICT: "conflict",
   INVALID_CARD: "bad_request",
@@ -36,6 +41,10 @@ function message(rejection: RateCardRejection): string {
       return `A rate card named ${rejection.name} already exists`
     case "UNKNOWN_FEATURE":
       return `Unknown features: ${rejection.features.join(", ")}`
+    case "FEATURE_NOT_PRICEABLE":
+      return `Features the pricing core cannot read: ${rejection.features
+        .map((feature) => `${feature.slug} (${feature.reason})`)
+        .join(", ")}`
     case "NOTICE_TOO_SHORT":
       return `A price change for ${rejection.featureSlug} can start at ${new Date(rejection.earliest).toISOString()} at the earliest`
     case "SCHEDULE_CONFLICT":

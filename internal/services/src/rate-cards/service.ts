@@ -16,7 +16,7 @@ import { Err, Ok, type Result } from "@unprice/error"
 import { formatAmount } from "@unprice/money"
 import type { DbExecutor, Transaction } from "../deps"
 import { type CostPlusCard, type CostPlusDraft, costPlusRevision, writesRow } from "../pricing"
-import { UnPriceRateCardError } from "./errors"
+import { UnPriceRateCardError, type UnpriceableFeature } from "./errors"
 import { type RowDraft, planClose, planPublish } from "./publish"
 import { stableHash, toWire } from "./wire"
 
@@ -31,13 +31,17 @@ export type PublishRowsInput = {
   projectId: string
   cardId: string
   drafts: readonly RowDraft[]
+  /** Open rows to end where the drafts start, in the same transaction (a meter regroup). */
+  closeRowIds?: readonly string[]
   effectiveFrom: number
   now: number
   /** The project's features; a draft for any other slug is UNKNOWN_FEATURE. */
   features: readonly FeaturePricing[]
+  /** Project features the pricing core cannot read; a draft for one is FEATURE_NOT_PRICEABLE. */
+  unpriceable?: readonly UnpriceableFeature[]
 }
 
-export type PublishCostPlusInput = Omit<PublishRowsInput, "drafts"> & {
+export type PublishCostPlusInput = Omit<PublishRowsInput, "drafts" | "closeRowIds"> & {
   /** The `draftHash` of the preview the caller reviewed. */
   draftHash: string
 }
@@ -286,9 +290,11 @@ async function writePublish(
     card,
     rows,
     drafts,
+    closeRowIds: input.closeRowIds,
     effectiveFrom: input.effectiveFrom,
     now: input.now,
     features: input.features,
+    unpriceable: input.unpriceable,
     newRowId: () => newId("rate_card_row"),
   })
   if (plan.err) return Err(plan.err)

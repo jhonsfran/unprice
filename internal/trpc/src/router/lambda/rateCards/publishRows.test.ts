@@ -55,6 +55,28 @@ describe("rateCards.publishRows", () => {
     expect(published).toEqual([])
   })
 
+  it("hands the rows to close to the same publish", async () => {
+    const closed: unknown[] = []
+    const ctx = {
+      project: { id: "proj_1" },
+      verifyRole: () => undefined,
+      services: {
+        features: { listFeaturesByProject: async () => Ok([]) },
+        rateCards: {
+          publishRows: async (publish: { closeRowIds?: readonly string[] }) => {
+            closed.push(publish.closeRowIds)
+            return Ok({ inserted: [], closed: [], unchanged: 0 })
+          },
+        },
+      },
+    } as unknown as Context
+    const router = initTRPC.context<Context>().create().router({ publishRows })
+
+    await router.createCaller(ctx).publishRows({ ...input, closeRowIds: ["rr_old"] })
+
+    expect(closed).toEqual([["rr_old"]])
+  })
+
   it("maps each rejection to its tRPC code and keeps the violations in the message", async () => {
     const violation = {
       code: "OVERLAPPING_ROWS" as const,
@@ -66,6 +88,10 @@ describe("rateCards.publishRows", () => {
       [{ code: "NOTICE_TOO_SHORT", featureSlug: "llm_tokens", earliest: 0 }, "BAD_REQUEST"],
       [{ code: "SCHEDULE_CONFLICT", featureSlug: "llm_tokens", scheduledFrom: 0 }, "CONFLICT"],
       [{ code: "INVALID_CARD", violations: [violation] }, "BAD_REQUEST"],
+      [
+        { code: "FEATURE_NOT_PRICEABLE", features: [{ slug: "llm_tokens", reason: "slug: x" }] },
+        "BAD_REQUEST",
+      ],
     ]
 
     const codes = []
