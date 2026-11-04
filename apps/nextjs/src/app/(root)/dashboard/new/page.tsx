@@ -1,5 +1,4 @@
 import { getSession } from "@unprice/auth/server-rsc"
-import { COOKIES_APP } from "@unprice/config"
 import { attributionIdSchema } from "@unprice/db/validators"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
 import { cookies } from "next/headers"
@@ -19,30 +18,6 @@ import { api } from "~/trpc/server"
 import NewWorkspaceForm from "../_components/new-workspace-form"
 import Redirect from "./_components/redirect"
 
-/** /new renders without attribution rather than wait on Basin SQL longer than this. */
-const PLAN_CLICK_LOOKUP_TIMEOUT_MS = 3_000
-
-/**
- * The session's latest plan click, or null when there is none, the lookup fails, or it takes longer
- * than the timeout: attribution is optional, so it never blocks or breaks workspace creation.
- */
-async function findPlanClick(sessionId: string) {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const timeout = new Promise<null>((resolve) => {
-    timer = setTimeout(() => resolve(null), PLAN_CLICK_LOOKUP_TIMEOUT_MS)
-  })
-  const lookup = api.analytics
-    .getPlanClickBySessionId({ session_id: sessionId })
-    .then(({ planClick }) => planClick)
-    .catch(() => null)
-
-  try {
-    return await Promise.race([lookup, timeout])
-  } finally {
-    clearTimeout(timer)
-  }
-}
-
 export default async function NewPage(props: {
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
@@ -51,11 +26,8 @@ export default async function NewPage(props: {
   // A malformed id is dropped here: the workspace form would reject it with nothing to correct.
   const attributionId = (value: string | undefined) => attributionIdSchema.safeParse(value).data
   const planVersionId = attributionId(getSingleSearchParam(query.planVersionId))
-  const pageId = attributionId(getSingleSearchParam(query.pageId))
-  // A pricing CTA on another domain cannot set the app's cookie, so its query wins.
-  const sessionId = attributionId(
-    getSingleSearchParam(query.sessionId) || cookieStore.get(COOKIES_APP.SESSION)?.value
-  )
+  // A page is attribution for a picked plan only.
+  const pageId = planVersionId ? attributionId(getSingleSearchParam(query.pageId)) : undefined
   // The query carries the intent through auth; the signup cookie covers a round trip that lost it.
   const signupIntent = resolveSignupIntent(
     query.intent,
@@ -77,31 +49,14 @@ export default async function NewPage(props: {
     }
   }
 
-  // The pricing CTA carries the clicked plan version. Sign-up checks it belongs to the project;
-  // the plan-click lookup is only a fallback because analytics reach R2 minutes later.
-  if (planVersionId || !sessionId) {
-    return (
-      <Suspense fallback={<LayoutLoader />}>
-        <Content
-          workspaceId={workspace_id}
-          planVersionId={planVersionId}
-          pageId={planVersionId ? pageId : undefined}
-          sessionId={planVersionId ? sessionId : undefined}
-          intent={signupIntent}
-        />
-      </Suspense>
-    )
-  }
-
-  const planClick = await findPlanClick(sessionId)
-
+  // The pricing CTA carries the clicked plan version and page; sign-up checks both belong to the
+  // project.
   return (
     <Suspense fallback={<LayoutLoader />}>
       <Content
         workspaceId={workspace_id}
-        planVersionId={planClick?.payload.plan_version_id}
-        pageId={planClick?.payload.page_id}
-        sessionId={planClick ? sessionId : undefined}
+        planVersionId={planVersionId}
+        pageId={pageId}
         intent={signupIntent}
       />
     </Suspense>
@@ -112,13 +67,11 @@ async function Content({
   workspaceId,
   planVersionId,
   pageId,
-  sessionId,
   intent,
 }: {
   workspaceId?: string
   planVersionId?: string
   pageId?: string
-  sessionId?: string
   intent?: SignupIntent
 }) {
   if (!workspaceId || workspaceId === "") {
@@ -141,7 +94,6 @@ async function Content({
                   pageId,
                   successUrl: "",
                   cancelUrl: "",
-                  sessionId: sessionId,
                 }}
               />
             </CardContent>

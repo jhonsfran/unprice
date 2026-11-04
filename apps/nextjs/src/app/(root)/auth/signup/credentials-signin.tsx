@@ -20,7 +20,6 @@ export const SignupSchema = z
     password: z.string().min(6),
     confirmPassword: z.string().min(6),
     name: z.string().min(3),
-    sessionId: z.string().optional(),
     next: z.string().optional(),
     intent: signupIntentSchema.optional(),
   })
@@ -31,10 +30,9 @@ export const SignupSchema = z
 
 export function SignUpCredentials({
   className,
-  sessionId,
   next,
   intent,
-}: { className?: string; sessionId?: string; next?: string; intent?: SignupIntent }) {
+}: { className?: string; next?: string; intent?: SignupIntent }) {
   const router = useRouter()
   const [isLoading, setIsLoading] = useState(false)
   const form = useZodForm({
@@ -44,7 +42,6 @@ export function SignUpCredentials({
       password: "",
       name: "",
       confirmPassword: "",
-      sessionId,
       next,
       intent,
     },
@@ -64,7 +61,6 @@ export function SignUpCredentials({
     if (res.redirect) {
       router.push(
         buildAuthHref(AUTH_ROUTES.SIGNIN, {
-          sessionId: data.sessionId,
           intent: data.intent,
           next: data.next,
         })

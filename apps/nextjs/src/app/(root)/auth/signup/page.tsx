@@ -19,7 +19,6 @@ import {
 import { FunnelPageEvent } from "../_components/funnel-page-event"
 import { SignInGithub } from "../_components/github-signin"
 import { SignInGoogle } from "../_components/google-signin"
-import { UpdateMarketingCookie } from "../_components/update-marketing-cookie"
 import { SignUpCredentials } from "./credentials-signin"
 
 // This page reads the request's session and query string to select the authentication flow.
@@ -42,18 +41,15 @@ const INTENT_COPY: Record<SignupIntent, { title: string; description: string; fo
 
 export default async function AuthenticationPage(props: {
   searchParams: Promise<{
-    sessionId?: string | string[]
     intent?: string | string[]
     next?: string | string[]
     planVersionId?: string | string[]
     pageId?: string | string[]
   }>
 }) {
-  const { sessionId, intent, next, planVersionId, pageId } = await props.searchParams
-  const singleSessionId = getSingleSearchParam(sessionId)
+  const { intent, next, planVersionId, pageId } = await props.searchParams
   const signupIntent = getSignupIntent(intent)
   const plan = {
-    sessionId: singleSessionId,
     planVersionId: getSingleSearchParam(planVersionId),
     pageId: getSingleSearchParam(pageId),
   }
@@ -70,7 +66,6 @@ export default async function AuthenticationPage(props: {
 
   return (
     <div className={cn("flex flex-col gap-6")}>
-      <UpdateMarketingCookie sessionId={singleSessionId} />
       <Suspense fallback={null}>
         <FunnelPageEvent next={safeNext} />
       </Suspense>
@@ -93,17 +88,12 @@ export default async function AuthenticationPage(props: {
                   Or continue with
                 </span>
               </div>
-              <SignUpCredentials
-                intent={signupIntent}
-                next={safeNext ?? undefined}
-                sessionId={singleSessionId}
-              />
+              <SignUpCredentials intent={signupIntent} next={safeNext ?? undefined} />
 
               <div className="text-center text-sm">
                 Already have an account?{" "}
                 <a
                   href={buildAuthHref(AUTH_ROUTES.SIGNIN, {
-                    sessionId: singleSessionId,
                     intent: signupIntent,
                     next: safeNext,
                   })}

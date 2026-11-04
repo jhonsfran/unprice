@@ -36,21 +36,6 @@ export const authConfig: NextAuthConfig = {
     newUser: "/auth/new-user",
   },
   events: {
-    // signIn: async ({ user }) => {
-    //   const cookieStore = cookies()
-    //   const sessionId = cookieStore.get(COOKIES_APP.SESSION)?.value
-    //   if (sessionId) {
-    //     await analytics.ingestEvents({
-    //       action: "sign_in",
-    //       version: "1",
-    //       session_id: sessionId,
-    //       timestamp: new Date().toISOString(),
-    //       payload: {
-    //         user_id: user.id ?? "",
-    //       },
-    //     })
-    //   }
-    // },
     // createUser: async ({ user }) => {
     //   // send email to user
     // },

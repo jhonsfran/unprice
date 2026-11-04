@@ -74,7 +74,7 @@ export function getSafeNextPath(next: string | null | undefined): string | null 
 }
 
 /** The pricing CTA's attribution, which auth must hand to `/new` when the link named no `next`. */
-export type PlanAttribution = { sessionId?: string; planVersionId?: string; pageId?: string }
+export type PlanAttribution = { planVersionId?: string; pageId?: string }
 
 /**
  * Where auth continues: a safe `next` from the link; else `/new` carrying a picked plan; else the
@@ -92,7 +92,7 @@ export function authNextPath(
 
   if (plan.planVersionId) {
     const params = new URLSearchParams()
-    for (const key of ["sessionId", "planVersionId", "pageId"] as const) {
+    for (const key of ["planVersionId", "pageId"] as const) {
       const value = plan[key]
       if (value) {
         params.set(key, value)
@@ -123,13 +123,9 @@ export function signedInNextPath(
 
 export function buildAuthHref(
   route: AuthRoute,
-  { sessionId, intent, next }: { sessionId?: string; intent?: SignupIntent; next?: string | null }
+  { intent, next }: { intent?: SignupIntent; next?: string | null }
 ): string {
   const params = new URLSearchParams()
-
-  if (sessionId) {
-    params.set("sessionId", sessionId)
-  }
 
   if (intent) {
     params.set("intent", intent)
@@ -144,13 +140,10 @@ export function buildAuthHref(
   return query ? `${route}?${query}` : route
 }
 
-/**
- * The signup link for a marketing CTA. It names the intent and where auth continues even before a
- * click adds the conversion session, so an unhydrated, middle-clicked, or copied link keeps it.
- */
-export function acquisitionSignupHref(intent: SignupIntent, sessionId?: string): string {
+/** The signup link for a marketing CTA: it names the intent and where auth continues. */
+export function acquisitionSignupHref(intent: SignupIntent): string {
   return new URL(
-    buildAuthHref(AUTH_ROUTES.SIGNUP, { sessionId, intent, next: nextAfterAuth(intent) }),
+    buildAuthHref(AUTH_ROUTES.SIGNUP, { intent, next: nextAfterAuth(intent) }),
     APP_DOMAIN
   ).toString()
 }

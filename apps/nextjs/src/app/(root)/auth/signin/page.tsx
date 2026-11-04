@@ -17,7 +17,6 @@ import {
 } from "~/lib/signup-funnel"
 import { SignInGithub } from "../_components/github-signin"
 import { SignInGoogle } from "../_components/google-signin"
-import { UpdateMarketingCookie } from "../_components/update-marketing-cookie"
 import { SignInCredentials } from "./credentials-signin"
 
 // This page reads the request's session and query string to select the authentication flow.
@@ -25,18 +24,15 @@ export const dynamic = "force-dynamic"
 
 export default async function AuthenticationPage(props: {
   searchParams: Promise<{
-    sessionId?: string | string[]
     intent?: string | string[]
     next?: string | string[]
     planVersionId?: string | string[]
     pageId?: string | string[]
   }>
 }) {
-  const { sessionId, intent, next, planVersionId, pageId } = await props.searchParams
-  const singleSessionId = getSingleSearchParam(sessionId)
+  const { intent, next, planVersionId, pageId } = await props.searchParams
   const signupIntent = getSignupIntent(intent)
   const plan = {
-    sessionId: singleSessionId,
     planVersionId: getSingleSearchParam(planVersionId),
     pageId: getSingleSearchParam(pageId),
   }
@@ -53,7 +49,6 @@ export default async function AuthenticationPage(props: {
 
   return (
     <div className={cn("flex flex-col gap-6")}>
-      <UpdateMarketingCookie sessionId={singleSessionId} />
       <Card>
         <CardHeader className="text-center">
           <CardTitle className="text-xl">Welcome back</CardTitle>
@@ -86,7 +81,6 @@ export default async function AuthenticationPage(props: {
                 Don&apos;t have an account?{" "}
                 <a
                   href={buildAuthHref(AUTH_ROUTES.SIGNUP, {
-                    sessionId: singleSessionId,
                     intent: signupIntent,
                     next: safeNext,
                   })}

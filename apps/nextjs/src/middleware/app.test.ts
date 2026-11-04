@@ -74,33 +74,26 @@ describe("AppMiddleware", () => {
 describe("AppMiddleware pricing CTA attribution", () => {
   it("keeps the CTA query in next when a signed-out visitor opens /new", () => {
     const response = AppMiddleware(
-      createRequest(
-        "http://app.localhost:3000/new?sessionId=sess_1&planVersionId=pv_1&pageId=page_1"
-      )
+      createRequest("http://app.localhost:3000/new?planVersionId=pv_1&pageId=page_1")
     )
     const location = new URL(response.headers.get("location") ?? "")
 
     expect(location.pathname).toBe("/auth/signin")
-    expect(location.searchParams.get("next")).toBe(
-      "/new?sessionId=sess_1&planVersionId=pv_1&pageId=page_1"
-    )
+    expect(location.searchParams.get("next")).toBe("/new?planVersionId=pv_1&pageId=page_1")
   })
 
   it("rewrites a signed-in /new to the dashboard page with the CTA query intact", () => {
     const rewrite = vi.spyOn(NextResponse, "rewrite")
 
     AppMiddleware(
-      createRequest(
-        "http://app.localhost:3000/new?sessionId=sess_1&planVersionId=pv_1&pageId=page_1",
-        {
-          workspaces: [],
-        }
-      )
+      createRequest("http://app.localhost:3000/new?planVersionId=pv_1&pageId=page_1", {
+        workspaces: [],
+      })
     )
     const target = rewrite.mock.calls.at(-1)?.[0] as URL
 
     expect(`${target.pathname}${target.search}`).toBe(
-      "/dashboard/new?sessionId=sess_1&planVersionId=pv_1&pageId=page_1"
+      "/dashboard/new?planVersionId=pv_1&pageId=page_1"
     )
   })
 })

@@ -16,7 +16,6 @@ import { Separator } from "@unprice/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { Typography } from "@unprice/ui/typography"
 import { cn } from "@unprice/ui/utils"
-import Cookies from "js-cookie"
 import { pricingCtaHref, trackWebEvent } from "~/lib/pricing-cta"
 
 export interface MarketingPricingPlan {
@@ -212,7 +211,6 @@ export function MarketingPricingCard({
           variant={isPopular || isOnly ? "primary" : "default"}
           onClick={() => {
             const ctaLink = pricingCtaHref(plan.ctaLink, {
-              sessionId: Cookies.get("session-id"),
               planVersionId: plan.id,
               pageId: plan.pageId,
             })

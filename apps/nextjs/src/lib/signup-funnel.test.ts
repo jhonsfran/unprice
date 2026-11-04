@@ -58,30 +58,27 @@ describe("signup funnel URLs", () => {
   })
 
   it("rejects repeated query parameters before building auth URLs", () => {
-    const sessionId = getSingleSearchParam(["session_123", "session_456"])
+    const planVersionId = getSingleSearchParam(["pv_1", "pv_2"])
     const next = getSafeNextPath(getSingleSearchParam(["/acme/onboarding", "/other"]))
 
-    expect(getSingleSearchParam("session_123")).toBe("session_123")
-    expect(sessionId).toBeUndefined()
+    expect(getSingleSearchParam("pv_1")).toBe("pv_1")
+    expect(planVersionId).toBeUndefined()
     expect(next).toBeNull()
-    expect(buildAuthHref(AUTH_ROUTES.SIGNIN, { sessionId, next })).toBe(AUTH_ROUTES.SIGNIN)
+    expect(buildAuthHref(AUTH_ROUTES.SIGNIN, { next })).toBe(AUTH_ROUTES.SIGNIN)
   })
 
-  it("builds auth hrefs with a session and a safe next path", () => {
+  it("builds auth hrefs with a safe next path", () => {
     const href = buildAuthHref(AUTH_ROUTES.SIGNUP, {
-      sessionId: "session_123",
       next: "/acme/onboarding?step=project",
     })
     const url = new URL(href, "https://app.example")
 
     expect(url.pathname).toBe(AUTH_ROUTES.SIGNUP)
-    expect(url.searchParams.get("sessionId")).toBe("session_123")
     expect(url.searchParams.get("next")).toBe("/acme/onboarding?step=project")
   })
 
   it("preserves the paid-action intent across auth links", () => {
     const href = buildAuthHref(AUTH_ROUTES.SIGNUP, {
-      sessionId: "session_123",
       intent: "paid-action",
       next: "/acme/onboarding",
     })
@@ -116,26 +113,24 @@ describe("signup funnel URLs", () => {
   })
 
   it("hands a pricing CTA's plan to /new when the auth link names no next", () => {
-    const plan = { sessionId: "sess_1", planVersionId: "pv_1", pageId: "page_1" }
+    const plan = { planVersionId: "pv_1", pageId: "page_1" }
 
-    expect(authNextPath(undefined, undefined, plan)).toBe(
-      "/new?sessionId=sess_1&planVersionId=pv_1&pageId=page_1"
-    )
+    expect(authNextPath(undefined, undefined, plan)).toBe("/new?planVersionId=pv_1&pageId=page_1")
     expect(authNextPath(undefined, "budgets", plan)).toBe(
-      "/new?sessionId=sess_1&planVersionId=pv_1&pageId=page_1&intent=budgets"
+      "/new?planVersionId=pv_1&pageId=page_1&intent=budgets"
     )
     expect(authNextPath("/new?planVersionId=pv_2", undefined, plan)).toBe("/new?planVersionId=pv_2")
-    expect(authNextPath(undefined, undefined, { sessionId: "sess_1" })).toBeNull()
+    expect(authNextPath(undefined, undefined, { pageId: "page_1" })).toBeNull()
   })
 
   it("sends a signed-in visitor with a workspace to the app, not to a second workspace", () => {
-    const plan = { sessionId: "sess_1", planVersionId: "pv_1", pageId: "page_1" }
+    const plan = { planVersionId: "pv_1", pageId: "page_1" }
 
     expect(signedInNextPath(undefined, undefined, plan, true)).toBeNull()
     expect(signedInNextPath(undefined, "budgets", plan, true)).toBe("/new?intent=budgets")
     expect(signedInNextPath("/acme/settings", undefined, plan, true)).toBe("/acme/settings")
     expect(signedInNextPath(undefined, undefined, plan, false)).toBe(
-      "/new?sessionId=sess_1&planVersionId=pv_1&pageId=page_1"
+      "/new?planVersionId=pv_1&pageId=page_1"
     )
   })
 
@@ -161,17 +156,17 @@ describe("signup funnel URLs", () => {
 
   it("omits empty optional params", () => {
     expect(buildAuthHref(AUTH_ROUTES.SIGNIN, {})).toBe(AUTH_ROUTES.SIGNIN)
-    expect(buildAuthHref(AUTH_ROUTES.SIGNIN, { sessionId: "", next: "" })).toBe(AUTH_ROUTES.SIGNIN)
+    expect(buildAuthHref(AUTH_ROUTES.SIGNIN, { next: "" })).toBe(AUTH_ROUTES.SIGNIN)
   })
 
-  it("retains the session when next is rejected", () => {
+  it("retains the intent when next is rejected", () => {
     const href = buildAuthHref(AUTH_ROUTES.SIGNUP, {
-      sessionId: "session_123",
+      intent: "budgets",
       next: "https://evil.example",
     })
     const url = new URL(href, "https://app.example")
 
-    expect(url.searchParams.get("sessionId")).toBe("session_123")
+    expect(url.searchParams.get("intent")).toBe("budgets")
     expect(url.searchParams.has("next")).toBe(false)
   })
 })
@@ -180,27 +175,18 @@ describe("funnel page event claims", () => {
   it("claims each page URL once", () => {
     const claimFunnelPageEvent = createFunnelPageEventClaimer()
 
-    expect(claimFunnelPageEvent("/auth/signup?sessionId=session_123")).toBe(true)
-    expect(claimFunnelPageEvent("/auth/signup?sessionId=session_123")).toBe(false)
-    expect(claimFunnelPageEvent("/auth/signup?sessionId=session_456")).toBe(true)
+    expect(claimFunnelPageEvent("/auth/signup?intent=budgets")).toBe(true)
+    expect(claimFunnelPageEvent("/auth/signup?intent=budgets")).toBe(false)
+    expect(claimFunnelPageEvent("/auth/signup?intent=paid-action")).toBe(true)
   })
 })
 
 describe("Budgets signup intent", () => {
-  it("renders the Budgets CTA with its intent and next before any click", () => {
+  it("renders the Budgets CTA with its intent and next", () => {
     const href = new URL(acquisitionSignupHref("budgets"))
 
     expect(href.origin).toBe(new URL(APP_DOMAIN).origin)
     expect(href.pathname).toBe(AUTH_ROUTES.SIGNUP)
-    expect(href.searchParams.get("intent")).toBe("budgets")
-    expect(href.searchParams.get("next")).toBe("/new?intent=budgets")
-    expect(href.searchParams.has("sessionId")).toBe(false)
-  })
-
-  it("adds the conversion session on click without dropping the intent", () => {
-    const href = new URL(acquisitionSignupHref("budgets", "sess_1"))
-
-    expect(href.searchParams.get("sessionId")).toBe("sess_1")
     expect(href.searchParams.get("intent")).toBe("budgets")
     expect(href.searchParams.get("next")).toBe("/new?intent=budgets")
   })

@@ -18,15 +18,12 @@ export function trackWebEvent(
   }
 }
 
-/** A pricing CTA link carrying the clicked plan, so sign-up never waits for analytics to land. */
+/** A pricing CTA link carrying the clicked plan and page, the only sign-up attribution. */
 export function pricingCtaHref(
   ctaLink: string,
-  plan: { planVersionId: string; pageId: string; sessionId?: string }
+  plan: { planVersionId: string; pageId: string }
 ): string {
   const url = new URL(ctaLink)
-  if (plan.sessionId) {
-    url.searchParams.set("sessionId", plan.sessionId)
-  }
   url.searchParams.set("planVersionId", plan.planVersionId)
   url.searchParams.set("pageId", plan.pageId)
   return url.toString()
