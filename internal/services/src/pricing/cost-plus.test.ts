@@ -160,6 +160,62 @@ describe("costPlusRevision", () => {
     ).toEqual([["changed", "row_manual"]])
   })
 
+  it("leaves a row scheduled to end to retire instead of proposing it again", () => {
+    const retireAt = at + 24 * 60 * 60 * 1000
+    const rows = usdCard.rows.map((row) =>
+      row.id === "row_gpt41" ? { ...row, effectiveTo: retireAt } : row
+    )
+
+    const draft = costPlusRevision(usdCostPlusCard, costs, rows, at)
+    const afterRetirement = costPlusRevision(usdCostPlusCard, costs, rows, retireAt)
+
+    expect(
+      draft.changes.map((change) => [
+        change.type,
+        change.proposed.match.model,
+        change.type === "added" ? null : change.current.id,
+      ])
+    ).toEqual([
+      ["changed", "claude-sonnet-4", "row_claude_sonnet_4"],
+      ["retiring", "gpt-4.1", "row_gpt41"],
+    ])
+    expect(afterRetirement.changes.map((change) => change.type)).toEqual(["changed", "added"])
+  })
+
+  it("diffs against a successor that has not started yet, so a published revision is unchanged", () => {
+    const first = costPlusRevision(usdCostPlusCard, costs, usdCard.rows, at)
+    const startAt = at + 20 * 60 * 1000
+    const published = first.changes.map((change, index) => ({
+      ...asRow(change.proposed, `row_new_${index}`),
+      effectiveFrom: startAt,
+    }))
+    const replaced = new Set(
+      first.changes.flatMap((change) => (change.type === "changed" ? [change.current.id] : []))
+    )
+    const rows = [
+      ...usdCard.rows.map((row) => (replaced.has(row.id) ? { ...row, effectiveTo: startAt } : row)),
+      ...published,
+    ]
+
+    const retry = costPlusRevision(usdCostPlusCard, costs, rows, at + 60_000)
+
+    expect(retry.changes.map((change) => change.type)).toEqual(["unchanged", "unchanged"])
+  })
+
+  it("reads only the cost's own components, so a component named constructor is just missing", () => {
+    const card = {
+      ...usdCostPlusCard,
+      marginPolicy: {
+        ...usdCostPlusCard.marginPolicy,
+        componentMap: { input: "input_tokens", constructor: "x_tokens" },
+      },
+    }
+
+    const draft = costPlusRevision(card, [modelCosts.gpt41], [], at)
+
+    expect(summary(draft).map((change) => change.rates)).toEqual([["input_tokens=2.6/1000000"]])
+  })
+
   it("orders its changes by match, whatever order the costs arrive in", () => {
     const forward = costPlusRevision(usdCostPlusCard, costs, [], at)
     const reversed = costPlusRevision(usdCostPlusCard, [...costs].reverse(), [], at)

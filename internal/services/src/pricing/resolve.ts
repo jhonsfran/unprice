@@ -8,8 +8,11 @@ export function isEffective(row: RateRow, at: number): boolean {
   return row.effectiveFrom <= at && (row.effectiveTo === null || at < row.effectiveTo)
 }
 
-/** An event's own property; an inherited member such as `constructor` reads as missing. */
-export function ownProperty(properties: Readonly<Record<string, unknown>>, name: string): unknown {
+/** A record's own property; an inherited member such as `constructor` reads as missing. */
+export function ownProperty<T>(
+  properties: Readonly<Record<string, T>>,
+  name: string
+): T | undefined {
   return Object.hasOwn(properties, name) ? properties[name] : undefined
 }
 

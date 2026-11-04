@@ -310,6 +310,66 @@ describe("RateCardService", () => {
     expect(intervals(await cardRows(card.id))).toEqual(before)
   })
 
+  it("publishes a cost-plus revision past a model row scheduled to retire", async () => {
+    const day = 24 * 60 * MINUTE
+    const card = await createCard({
+      type: "costPlus",
+      featureSlug: "llm_tokens",
+      markup: "0.3",
+      roundTo: "0.01",
+      dimension: "model",
+      componentMap: { input: "input_tokens", output: "output_tokens" },
+    })
+    const claude = { ...gpt41("3.00", "15.00"), match: { model: "claude-sonnet-4" } }
+    const [gpt] = (await value(publish(card.id, [gpt41("2.60", "10.40"), claude], NOW))).inserted
+    await value(
+      rateCards.closeRows({
+        projectId,
+        cardId: card.id,
+        rowIds: [gpt?.id ?? ""],
+        effectiveTo: NOW + day,
+        now: NOW,
+      })
+    )
+    await rateCards.insertModelCosts([modelCosts.gpt41, modelCosts.claudeSonnet4])
+
+    const preview = await value(rateCards.previewCostPlus(projectId, card.id, NOW + MINUTE))
+    const published = await value(
+      publishCostPlus(
+        { services },
+        {
+          projectId,
+          cardId: card.id,
+          effectiveFrom: NOW + 20 * MINUTE,
+          draftHash: preview.draftHash,
+          now: NOW + MINUTE,
+        }
+      )
+    )
+
+    expect(preview.draft.changes.map((change) => [change.type, change.proposed.match])).toEqual([
+      ["changed", { model: "claude-sonnet-4" }],
+      ["retiring", { model: "gpt-4.1" }],
+    ])
+    expect([published.inserted.map((row) => row.match), published.unchanged]).toEqual([
+      [{ model: "claude-sonnet-4" }],
+      1,
+    ])
+    expect(
+      (await cardRows(card.id))
+        .map((row) => [
+          row.match.model,
+          row.effectiveFrom - NOW,
+          row.effectiveTo === null ? null : row.effectiveTo - NOW,
+        ])
+        .sort()
+    ).toEqual([
+      ["claude-sonnet-4", 0, 20 * MINUTE],
+      ["claude-sonnet-4", 20 * MINUTE, null],
+      ["gpt-4.1", 0, day],
+    ])
+  })
+
   it("imports only changed catalog costs and never touches a manual cost", async () => {
     const day = 24 * 60 * MINUTE
     await db.insert(modelCostsTable).values([
@@ -416,12 +476,26 @@ describe("RateCardService", () => {
         ["input_tokens=2.6", "output_tokens=10.4", "cached_input_tokens=0.65"],
       ],
     ])
+    const retried = await value(
+      publishCostPlus(
+        { services },
+        {
+          projectId,
+          cardId: card.id,
+          effectiveFrom: NOW + 12 * MINUTE,
+          draftHash: preview.draftHash,
+          now: NOW + 2 * MINUTE,
+        }
+      )
+    )
+
     expect(stale).toEqual({ code: "DRAFT_STALE", draftHash: preview.draftHash })
     expect(published.inserted.map((row) => [row.match.model, row.source, row.sourceRef])).toEqual([
       ["claude-sonnet-4", "catalog", costIds["claude-sonnet-4"]],
       ["gpt-4.1", "catalog", costIds["gpt-4.1"]],
     ])
     expect(published.closed.length).toBe(2)
+    expect(retried).toEqual({ inserted: [], closed: [], unchanged: 2 })
     expect(
       (await cardRows(card.id)).map((row) => [
         row.match.model,

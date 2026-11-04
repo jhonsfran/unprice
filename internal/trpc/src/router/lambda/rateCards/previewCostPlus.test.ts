@@ -17,7 +17,7 @@ afterEach(() => {
 })
 
 describe("rateCards.previewCostPlus", () => {
-  it("previews at the requested time, and at now when none is given", async () => {
+  it("previews at the requested time, and gives a publishable hash only for a preview at now", async () => {
     vi.useFakeTimers({ now: NOW })
     const calls: unknown[][] = []
     const ctx = {
@@ -26,19 +26,26 @@ describe("rateCards.previewCostPlus", () => {
         rateCards: {
           previewCostPlus: async (...args: unknown[]) => {
             calls.push(args)
-            return Ok({ draftHash: "h" })
+            return Ok({ draft: { cardId: "rc_1", at: args[2], changes: [] }, draftHash: "h" })
           },
         },
       },
     } as unknown as Context
     const router = initTRPC.context<Context>().create().router({ previewCostPlus })
 
-    await router.createCaller(ctx).previewCostPlus({ cardId: "rc_1", at: NOW + 3_600_000 })
-    await router.createCaller(ctx).previewCostPlus({ cardId: "rc_1" })
+    const whatIf = await router
+      .createCaller(ctx)
+      .previewCostPlus({ cardId: "rc_1", at: NOW + 3_600_000 })
+    const current = await router.createCaller(ctx).previewCostPlus({ cardId: "rc_1" })
 
     expect(calls).toEqual([
       ["proj_1", "rc_1", NOW + 3_600_000],
       ["proj_1", "rc_1", NOW],
     ])
+    expect(whatIf).toEqual({
+      draft: { cardId: "rc_1", at: NOW + 3_600_000, changes: [] },
+      draftHash: null,
+    })
+    expect(current).toEqual({ draft: { cardId: "rc_1", at: NOW, changes: [] }, draftHash: "h" })
   })
 })

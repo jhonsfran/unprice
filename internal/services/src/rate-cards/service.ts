@@ -15,7 +15,7 @@ import {
 import { Err, Ok, type Result } from "@unprice/error"
 import { formatAmount } from "@unprice/money"
 import type { DbExecutor, Transaction } from "../deps"
-import { type CostPlusCard, type CostPlusDraft, costPlusRevision } from "../pricing"
+import { type CostPlusCard, type CostPlusDraft, costPlusRevision, writesRow } from "../pricing"
 import { UnPriceRateCardError } from "./errors"
 import { type RowDraft, planClose, planPublish } from "./publish"
 import { stableHash, toWire } from "./wire"
@@ -147,8 +147,9 @@ export class RateCardService {
 
   /**
    * Publishes the added and changed rows of a card's cost-plus revision, recomputed at `now`
-   * under the card's lock. A draft that differs from the one the caller previewed is DRAFT_STALE
-   * and writes nothing.
+   * under the card's lock. A revision with nothing to write, such as a retry of a publish that
+   * succeeded, writes nothing and succeeds whatever hash it carries. Otherwise a draft that
+   * differs from the one the caller previewed is DRAFT_STALE and writes nothing.
    */
   async publishCostPlus(
     input: PublishCostPlusInput
@@ -156,17 +157,21 @@ export class RateCardService {
     return this.withLockedCard(input.projectId, input.cardId, async (tx, card, rows) => {
       const preview = await costPlusPreview(tx, card, rows, input.now)
       if (preview.err) return Err(preview.err)
+      const { changes } = preview.val.draft
+      const drafts: RowDraft[] = changes.filter(writesRow).map((change) => {
+        const { featureSlug, match, price, cost, source, sourceRef } = change.proposed
+        return { featureSlug, match: { ...match }, price, cost, source, sourceRef }
+      })
+      const skipped = changes.length - drafts.length
+      if (drafts.length === 0) return Ok({ inserted: [], closed: [], unchanged: skipped })
       if (preview.val.draftHash !== input.draftHash) {
         return Err(
           new UnPriceRateCardError({ code: "DRAFT_STALE", draftHash: preview.val.draftHash })
         )
       }
-      const drafts: RowDraft[] = preview.val.draft.changes.flatMap((change) => {
-        if (change.type === "unchanged") return []
-        const { featureSlug, match, price, cost, source, sourceRef } = change.proposed
-        return [{ featureSlug, match: { ...match }, price, cost, source, sourceRef }]
-      })
-      return writePublish(tx, input, card, rows, drafts)
+      const published = await writePublish(tx, input, card, rows, drafts)
+      if (published.err) return Err(published.err)
+      return Ok({ ...published.val, unchanged: published.val.unchanged + skipped })
     })
   }
 
@@ -187,8 +192,9 @@ export class RateCardService {
   }
 
   /**
-   * The cost-plus revision of a card at `at`, with a hash of its changes. Each proposed row's
-   * `sourceRef` is the id of the cost row it was priced from.
+   * The cost-plus revision of a card at `at`, with a hash of the rows it would write. Each proposed
+   * row's `sourceRef` is the id of the cost row it was priced from. `publishCostPlus` recomputes
+   * the revision at its own now, so only a preview at the current time is meant to be published.
    */
   async previewCostPlus(
     projectId: string,
@@ -357,17 +363,11 @@ type ModelCostRow = typeof modelCosts.$inferSelect
 /** Hashes what publishing the draft would write, so a stale preview cannot be published. */
 export function draftHash(draft: CostPlusDraft): string {
   return stableHash(
-    draft.changes.flatMap((change) =>
-      change.type === "unchanged"
-        ? []
-        : [
-            {
-              type: change.type,
-              current: change.type === "changed" ? change.current.id : null,
-              proposed: change.proposed,
-            },
-          ]
-    )
+    draft.changes.filter(writesRow).map((change) => ({
+      type: change.type,
+      current: change.type === "changed" ? change.current.id : null,
+      proposed: change.proposed,
+    }))
   )
 }
 
