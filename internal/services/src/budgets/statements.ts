@@ -21,8 +21,14 @@ const ZERO = BigInt(0)
 
 type StatementCommand = Extract<BudgetCommand, { type: StatementCommandType }>
 
+/** Whether billing waives both, or neither: a period's waiver is fixed when it is registered. */
+function sameWaiver(statement: Statement, registration: StatementRegistration): boolean {
+  return statement.free === (registration.free ?? false)
+}
+
 function sameRegistration(statement: Statement, registration: StatementRegistration): boolean {
   return (
+    sameWaiver(statement, registration) &&
     statement.statementKey === registration.statementKey &&
     statement.featureSlug === registration.featureSlug &&
     statement.start === registration.start &&
@@ -38,6 +44,7 @@ function sameRegistration(statement: Statement, registration: StatementRegistrat
 function shortens(statement: Statement, registration: StatementRegistration): boolean {
   return (
     statement.state === "open" &&
+    sameWaiver(statement, registration) &&
     statement.statementKey === registration.statementKey &&
     statement.featureSlug === registration.featureSlug &&
     statement.start === registration.start &&
@@ -61,6 +68,7 @@ function endKeepingEvents(statement: Statement, requested: number): number {
  */
 function registers(statement: Statement, registration: StatementRegistration): boolean {
   return (
+    sameWaiver(statement, registration) &&
     statement.statementKey === registration.statementKey &&
     statement.featureSlug === registration.featureSlug &&
     statement.start >= registration.start &&

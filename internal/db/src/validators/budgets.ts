@@ -212,6 +212,8 @@ export const budgetStatementRegistrationSchema = z
     featureSlug: featureSlugSchema,
     start: budgetInstantInputSchema,
     end: budgetInstantInputSchema,
+    /** Billing waives the period's usage (a trial): a prepaid close captures none of it. */
+    free: z.boolean().optional(),
   })
   .strict()
   .refine((statement) => statement.end > statement.start, {

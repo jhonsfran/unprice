@@ -212,6 +212,7 @@ export function emptyStatement(
 ): Statement {
   return {
     ...registration,
+    free: registration.free ?? false,
     state: "open",
     registeredAt,
     sealedAt: null,

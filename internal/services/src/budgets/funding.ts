@@ -260,8 +260,9 @@ function decideApplied(
 /**
  * Once every statement of the key is sealed, the reservation closes: a reservation the wallet
  * never opened closes here; an opened one gets a close intent capturing each statement's amount,
- * in period id order, up to the allocation. Usage past the allocation stays on the statements as
- * a receivable. Unchanged while anything is open on the key or an intent is pending.
+ * in period id order, up to the allocation. A free statement (a trial) captures nothing, so its
+ * share is released. Usage past the allocation stays on the statements as a receivable. Unchanged
+ * while anything is open on the key or an intent is pending.
  */
 function closing(row: Funding, own: readonly Statement[], now: number): Funding {
   if (row.state === "closed" || row.pending) return row
@@ -271,7 +272,8 @@ function closing(row: Funding, own: readonly Statement[], now: number): Funding 
   }
   let left = row.allocated
   const captures: FundingCapture[] = []
-  for (const statement of [...own].sort((a, b) => (a.periodId < b.periodId ? -1 : 1))) {
+  const billed = own.filter((statement) => !statement.free)
+  for (const statement of billed.sort((a, b) => (a.periodId < b.periodId ? -1 : 1))) {
     const amount = statement.amount < left ? statement.amount : left
     if (amount <= ZERO) continue
     captures.push({ periodId: statement.periodId, amount })
@@ -328,8 +330,8 @@ export function reserveAmount(required: Amount, available: SignedAmount): Amount
  * 2. A closed reservation never changes again and has nothing pending.
  * 3. `consumed` moves by exactly what the key's written statements moved; a new reservation
  *    starts at the sum of the key's statement amounts.
- * 4. A close captures only positive amounts, in total no more than the allocation and the key's
- *    statements.
+ * 4. A close captures only positive amounts of statements billing does not waive, in total no
+ *    more than the allocation and those statements.
  * 5. A prepaid charge or hold never leaves a key it bills lending more than it was allocated.
  */
 export function fundingViolations(params: {
@@ -363,7 +365,13 @@ export function fundingViolations(params: {
     }
     if (row.pending?.kind === "close") {
       const captured = row.pending.captures.reduce((sum, capture) => sum + capture.amount, ZERO)
-      const billed = own.reduce((sum, statement) => sum + statement.amount, ZERO)
+      const billed = own
+        .filter((statement) => !statement.free)
+        .reduce((sum, statement) => sum + statement.amount, ZERO)
+      const free = new Set(own.filter((s) => s.free).map((s) => s.periodId))
+      if (row.pending.captures.some((capture) => free.has(capture.periodId))) {
+        violations.push(`${at} captures a free statement`)
+      }
       if (row.pending.captures.some((capture) => capture.amount <= ZERO)) {
         violations.push(`${at} captures a non-positive amount`)
       }

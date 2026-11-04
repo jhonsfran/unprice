@@ -90,6 +90,8 @@ export const budgetStatements = sqliteTable(
     featureSlug: text("feature_slug").notNull(),
     start: integer("start").notNull(),
     end: integer("end").notNull(),
+    /** Billing waives the period's usage (a trial): a prepaid close captures none of it. */
+    free: integer("free", { mode: "boolean" }).notNull().default(false),
     state: text("state", { enum: ["open", "sealed", "completed"] }).notNull(),
     registeredAt: integer("registered_at").notNull(),
     sealedAt: integer("sealed_at"),

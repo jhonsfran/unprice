@@ -1,5 +1,6 @@
 import type { Dinero } from "@unprice/db/utils"
 import {
+  type CreditLinePolicy,
   type Currency,
   type RateRow,
   billingConfigSchema,
@@ -28,9 +29,15 @@ type ChargeInput = {
   currency: Currency
   /**
    * The phase's service window (its end is inclusive) and the anchor it resolved: a recurring
-   * charge prorates over the part of its period the phase covers.
+   * charge prorates over the part of its period the phase covers. A capped phase is prepaid: the
+   * wallet captures its usage.
    */
-  phase: { startAt: number; endAt: number | null; billingAnchor: number }
+  phase: {
+    startAt: number
+    endAt: number | null
+    billingAnchor: number
+    creditLinePolicy?: CreditLinePolicy
+  }
   /**
    * The sealed statement of a metered period, or null when the payer budget never registered it:
    * a budget that requires statements accepts no usage without one, so nothing was used.
@@ -89,10 +96,14 @@ function recurringCharge(input: ChargeInput): Omit<PeriodCharge, "collectableAmo
     return { ...free, grossChargeAmount: fromLedgerMinor(0, currency), prorationFactor: 0 }
   }
   const billingConfig = billingConfigSchema.parse(featurePlanVersion.billingConfig)
-  // A phase that ended before its periods were capped still bills only the time it served.
+  // A phase that ended before its periods were capped still bills only the time it served. Proration
+  // reads a half-open window, and the phase's last period ends on its inclusive last millisecond
+  // (capped or not), so that period's service ends 1 ms past the phase.
+  const serviceEnd =
+    phase.endAt !== null && period.cycleEndAt >= phase.endAt ? phase.endAt + 1 : period.cycleEndAt
   const { prorationFactor } = calculateProration({
     serviceStart: Math.max(period.cycleStartAt, phase.startAt),
-    serviceEnd: Math.min(period.cycleEndAt, phase.endAt ?? Number.POSITIVE_INFINITY),
+    serviceEnd,
     effectiveStartDate: phase.startAt,
     billingConfig: { ...billingConfig, billingAnchor: phase.billingAnchor },
   })
@@ -127,6 +138,18 @@ export function resolvePeriodCharge(input: ChargeInput): PeriodCharge {
     .reduce((sum, line) => sum + toLedgerMinor(line.amount), 0)
   if (!Number.isSafeInteger(captured) || captured > gross) {
     throw new Error(`Billing period ${period.id} wallet captures exceed its charge`)
+  }
+  // A capped phase is prepaid: the wallet covers all of its billed usage, so a shortfall is a
+  // funding bug to surface, never a due line. Trials capture nothing and bill nothing.
+  if (
+    metered &&
+    input.phase.creditLinePolicy === "capped" &&
+    period.type !== "trial" &&
+    captured !== gross
+  ) {
+    throw new Error(
+      `Billing period ${period.id} of a capped phase captured ${captured} of its ${gross} usage`
+    )
   }
   const covered = periodLines
     .filter(

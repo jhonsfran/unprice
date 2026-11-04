@@ -179,6 +179,7 @@ async function loadPayerBudgetSource(
               statementKey: period.statementKey,
               start: period.cycleStartAt,
               end: period.cycleEndAt,
+              trial: period.type === "trial",
             })),
         }
       }),

@@ -70,7 +70,7 @@ function message(rejection: RateCardRejection): string {
     case "PLAN_VERSION_PUBLISHED":
       return `Plan version ${rejection.planVersionId} is published; its cards are part of the package`
     case "CARD_UNIT_MISMATCH":
-      return `Rate card ${rejection.cardId} prices in ${rejection.unit}, so it cannot price ${rejection.currency}`
+      return `Rate card ${rejection.cardId} prices in ${rejection.unit}; a plan version invoiced in ${rejection.currency} needs money:${rejection.currency}`
   }
 }
 

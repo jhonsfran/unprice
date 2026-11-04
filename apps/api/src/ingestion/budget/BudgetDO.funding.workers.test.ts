@@ -176,13 +176,13 @@ describe("BudgetDO funding over RPC", () => {
 })
 
 describe("BudgetDO funding at statement seal", () => {
-  it("captures the statement and releases the reservation when its statement seals", async () => {
+  /** Two image charges on a prepaid November statement, sealed in SQLite; `free` marks a trial. */
+  async function sealNovember(key: string, free: boolean) {
     const NOV = CARD_FROM
     const DEC = Date.parse("2026-12-01T00:00:00.000Z")
-    const key = "unprice:customer:cus_seal"
     const stub = getBudgetStub(env, { projectId: "proj_1", key })
     let now = NOV + 3 * DAY
-    await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
+    return runInDurableObject(stub, async (_instance: BudgetDO, state) => {
       await migrate(drizzle(state.storage), migrations)
       const processor = new BudgetProcessor({
         journal: discardJournal,
@@ -212,6 +212,7 @@ describe("BudgetDO funding at statement seal", () => {
         featureSlug: "images",
         start: NOV,
         end: DEC,
+        ...(free && { free: true }),
       }
       await execute({ type: "registerStatements", statements: [period] })
       await execute({ type: "charge", idempotencyKey: "c1", event: image })
@@ -219,19 +220,39 @@ describe("BudgetDO funding at statement seal", () => {
 
       now = DEC + HOUR
       const sealed = await execute({ type: "sealStatements", statementKey: "inv_nov", at: DEC })
+      return {
+        statements: sealed.val?.statements.map((s) => [s.state, s.free, s.amount]),
+        calls: wallet.calls.map((call) => [call.kind, call.seq, call.amount]),
+        reservation: wallet.reservations.get("res_1"),
+        balance: wallet.balance,
+        rows: fundingRows(state),
+      }
+    })
+  }
 
-      expect(sealed.val?.statements.map((statement) => statement.state)).toEqual(["sealed"])
-      expect(wallet.calls.map((call) => [call.kind, call.seq, call.amount])).toEqual([
+  it("captures the statement and releases the reservation when its statement seals", async () => {
+    expect(await sealNovember("unprice:customer:cus_seal", false)).toEqual({
+      statements: [["sealed", false, BigInt(8_000_000)]],
+      calls: [
         ["reserve", 1, BigInt(104_000_000)],
         ["close", 2, BigInt(8_000_000)],
-      ])
-      expect(wallet.reservations.get("res_1")).toEqual({
-        allocated: BigInt(104_000_000),
-        captured: BigInt(8_000_000),
-        closed: true,
-      })
-      expect(wallet.balance).toBe(BigInt(992_000_000))
-      expect(fundingRows(state)).toEqual([{ statement_key: "inv_nov", state: "closed" }])
+      ],
+      reservation: { allocated: BigInt(104_000_000), captured: BigInt(8_000_000), closed: true },
+      balance: BigInt(992_000_000),
+      rows: [{ statement_key: "inv_nov", state: "closed" }],
+    })
+  })
+
+  it("captures nothing of a free (trial) statement and releases its whole reservation", async () => {
+    expect(await sealNovember("unprice:customer:cus_trial", true)).toEqual({
+      statements: [["sealed", true, BigInt(8_000_000)]],
+      calls: [
+        ["reserve", 1, BigInt(104_000_000)],
+        ["close", 2, BigInt(0)],
+      ],
+      reservation: { allocated: BigInt(104_000_000), captured: BigInt(0), closed: true },
+      balance: BigInt(1_000_000_000),
+      rows: [{ statement_key: "inv_nov", state: "closed" }],
     })
   })
 })

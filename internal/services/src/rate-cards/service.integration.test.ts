@@ -1,5 +1,9 @@
 import { eq } from "@unprice/db"
-import { features as featuresTable, modelCosts as modelCostsTable } from "@unprice/db/schema"
+import {
+  features as featuresTable,
+  modelCosts as modelCostsTable,
+  versions as versionsTable,
+} from "@unprice/db/schema"
 import {
   type RateRow,
   type RateRowDraft,
@@ -103,6 +107,61 @@ describe("RateCardService", () => {
         groupBy: ["model"],
       },
     })
+  })
+
+  it("refuses a credits card on a plan version, since its invoices are in money", async () => {
+    await seedTestDb({ db, fixtures: ["plan-monthly-arrear.sql"] })
+    const planVersionId = "pv_test_monthly_arrear"
+    await db
+      .update(versionsTable)
+      .set({ status: "draft" })
+      .where(eq(versionsTable.id, planVersionId))
+    const credits = await value(
+      rateCards.createCard(
+        projectId,
+        createRateCardInputSchema.parse({
+          name: "Credits",
+          unit: "credits:ai",
+          creditValueUsd: "0.01",
+          marginPolicy: { type: "manual" },
+        })
+      )
+    )
+    const euros = await value(
+      rateCards.createCard(
+        projectId,
+        createRateCardInputSchema.parse({
+          name: "Euros",
+          unit: "money:EUR",
+          marginPolicy: { type: "manual" },
+        })
+      )
+    )
+
+    const refused = await rejection(
+      rateCards.assignToPlanVersion(projectId, {
+        planVersionId,
+        currency: "EUR",
+        cardId: credits.id,
+      })
+    )
+    const assigned = await value(
+      rateCards.assignToPlanVersion(projectId, { planVersionId, currency: "EUR", cardId: euros.id })
+    )
+
+    expect(refused).toEqual({
+      code: "CARD_UNIT_MISMATCH",
+      cardId: credits.id,
+      unit: "credits:ai",
+      currency: "EUR",
+    })
+    expect(assigned).toEqual({
+      planVersionId,
+      currency: "EUR",
+      cardId: euros.id,
+      unit: "money:EUR",
+    })
+    expect(await rateCards.cardForPlanVersion(projectId, planVersionId, "EUR")).toEqual(assigned)
   })
 
   it("refuses a price change inside the notice and closes the old row at a change after it", async () => {

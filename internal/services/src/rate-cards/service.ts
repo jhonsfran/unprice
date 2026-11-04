@@ -124,7 +124,8 @@ export class RateCardService {
   /**
    * Prices a draft plan version in `currency` with a card (ADR-0008 D2), replacing the card it had
    * in that currency. A published version's cards are part of its package. A money card must be in
-   * the currency it prices; a credits card may price any currency.
+   * the currency it prices. A credits card is refused: invoices are in money, so billing could never
+   * invoice a subscription on it.
    */
   async assignToPlanVersion(
     projectId: string,
@@ -146,7 +147,7 @@ export class RateCardService {
       .from(rateCards)
       .where(and(eq(rateCards.projectId, projectId), eq(rateCards.id, cardId)))
     if (!card) return Err(new UnPriceRateCardError({ code: "CARD_NOT_FOUND", cardId }))
-    if (card.unit.startsWith("money:") && card.unit !== `money:${currency}`) {
+    if (card.unit !== `money:${currency}`) {
       return Err(
         new UnPriceRateCardError({ code: "CARD_UNIT_MISMATCH", cardId, unit: card.unit, currency })
       )

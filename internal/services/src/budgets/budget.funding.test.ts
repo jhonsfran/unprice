@@ -51,8 +51,8 @@ function pricing(funding?: object, statements: "required" | "none" = "required")
   }
 }
 
-/** A prepaid payer with one November statement per feature under KEY. */
-function prepaidStore() {
+/** A prepaid payer with one November statement per feature under KEY; `free` ones are trials. */
+function prepaidStore(free: readonly string[] = []) {
   const store = new MemoryBudgetStore()
   store.cacheCards(usdCard)
   const parsed = upsertBudgetInternalInputSchema.parse({
@@ -68,12 +68,13 @@ function prepaidStore() {
     featureSlug,
     start: NOV,
     end: DEC,
+    ...(free.includes(featureSlug) && { free: true }),
   }))
   ok(store.run({ type: "registerStatements", statements }, NOV + hour))
   return store
 }
 
-const charge = (key: string, event = image): BudgetCommand => ({
+const charge = (key: string, event: typeof image | typeof tokens = image): BudgetCommand => ({
   type: "charge",
   idempotencyKey: key,
   event,
@@ -225,6 +226,58 @@ describe("a prepaid budget lends only what the wallet reserved", () => {
       state: "closed",
       captured: BigInt(8_000_000),
       consumed: BigInt(8_000_000),
+      allocated: BigInt(10_000_000),
+    })
+  })
+
+  it("releases a free (trial) statement's usage at close and captures only billed statements", () => {
+    const store = prepaidStore(["images"])
+    ok(store.run(fund(4_000_000), NOV + 2 * hour))
+    ok(store.run(apply(1, reserved(10_000_000)), NOV + 2 * hour))
+    ok(store.run(charge("c1"), NOV + 3 * hour))
+    ok(store.run(charge("c2", tokens), NOV + 3 * hour))
+
+    const unwaived = store.run(
+      {
+        type: "registerStatements",
+        statements: [
+          {
+            periodId: "images:nov",
+            statementKey: KEY,
+            featureSlug: "images",
+            start: NOV,
+            end: DEC,
+          },
+        ],
+      },
+      NOV + 4 * hour
+    )
+    const sealed = ok(store.run({ type: "sealStatements", statementKey: KEY, at: DEC }, DEC + hour))
+    ok(store.run(apply(2, { kind: "closed" }), DEC + 2 * hour))
+
+    expect(rejection(unwaived)).toEqual({ code: "STATEMENT_CONFLICT", periodId: "images:nov" })
+    expect(sealed.outcome).toMatchObject({
+      type: "sealStatements",
+      funding: [
+        {
+          reservationId: "res_1",
+          intent: {
+            kind: "close",
+            seq: 2,
+            captures: [{ periodId: "llm_tokens:nov", amount: BigInt(2_000_000) }],
+          },
+        },
+      ],
+    })
+    expect(store.statements.get("images:nov")).toMatchObject({
+      free: true,
+      state: "sealed",
+      amount: BigInt(4_000_000),
+    })
+    expect(store.funding.get(KEY)).toMatchObject({
+      state: "closed",
+      captured: BigInt(2_000_000),
+      consumed: BigInt(6_000_000),
       allocated: BigInt(10_000_000),
     })
   })

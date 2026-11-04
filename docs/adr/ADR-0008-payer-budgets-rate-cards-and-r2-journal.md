@@ -163,6 +163,8 @@ budget is addressed, so a jurisdiction or a location hint can be added there lat
 - When a seal leaves a statement key with nothing open, the key's reservation gets a close intent:
   capture each statement's amount up to the allocation, then release the rest. A retried seal
   replays a close that failed. A closed budget keeps its storage while a reservation is open.
+- Trial usage is free. Billing registers a trial period's statement as `free`: its usage counts,
+  the close never captures it, and the invoice bills it at zero.
 
 ## What this changes in earlier decisions
 

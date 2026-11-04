@@ -254,6 +254,22 @@ describe("compilePayerBudget", () => {
     })
   })
 
+  it("registers a capped trial's statement as free, so its prepaid close captures none of it", () => {
+    const credits = feature("ai_credits", { meterConfig: sum("ai.call", "credits") })
+    const trial = { id: "bp_trial", statementKey: "sk_trial", start: NOV, end: NOV_15, trial: true }
+    const paid = { id: "bp_paid", statementKey: "sk_paid", start: NOV_15, end: DEC }
+    const prepaid = phase({
+      creditLinePolicy: "capped",
+      card: { id: "rc_usd", unit: "money:USD" },
+      items: [item(credits, [trial, paid])],
+    })
+
+    expect(compiled(source([prepaid])).statements).toEqual([
+      { ...statement("ai_credits", "bp_trial", "sk_trial", NOV, NOV_15), free: true },
+      statement("ai_credits", "bp_paid", "sk_paid", NOV_15, DEC),
+    ])
+  })
+
   it("budgets in credits when the plan's card prices in credits, and refuses to prepay them", () => {
     const credits = feature("ai_credits", { meterConfig: sum("ai.call", "credits") })
     const sold = phase({ card: { id: "rc_credits", unit: "credits:ai" }, items: [item(credits)] })

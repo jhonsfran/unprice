@@ -65,6 +65,8 @@ const payerBillingPeriodSchema = z.object({
   statementKey: z.string().min(1),
   start: instantSchema,
   end: instantSchema,
+  /** A trial period: its usage counts but is free, so no wallet captures it. */
+  trial: z.boolean().default(false),
 })
 
 const payerPhaseSchema = z.object({
@@ -179,7 +181,8 @@ function fail(issue: PayerBudgetIssue) {
  * - closesAt: the phase's end when no phase follows it, or the subscription's end once canceled;
  * - statements: the billing period of every metered item of every phase, unless it ended before a
  *   late record could still land in it, keyed `<featureSlug>:<billingPeriodId>`; a phase's last
- *   period ends 1 ms past the phase, so consecutive statements leave no gap.
+ *   period ends 1 ms past the phase, so consecutive statements leave no gap. A trial period's
+ *   statement is free: its usage counts, but a prepaid close captures none of it.
  * Phases starting at or after their subscription's end are ignored. A source that fails its schema
  * is INVALID_BUDGET.
  */
@@ -382,6 +385,7 @@ function statementsOf(phases: readonly Phase[], now: number) {
           featureSlug: feature.slug,
           start: period.start,
           end,
+          ...(period.trial && { free: true }),
         })
         if (!parsed.success) return fail({ code: "INVALID_BUDGET", message: parsed.error.message })
         statements.push(parsed.data)

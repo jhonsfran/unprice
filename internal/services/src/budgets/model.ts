@@ -135,6 +135,8 @@ export type Statement = Readonly<{
   featureSlug: string
   start: number
   end: number
+  /** Billing waives this period's usage (a trial): it still counts, but no wallet captures it. */
+  free: boolean
   state: "open" | "sealed" | "completed"
   registeredAt: number
   sealedAt: number | null
