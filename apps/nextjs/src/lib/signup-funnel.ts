@@ -73,12 +73,38 @@ export function getSafeNextPath(next: string | null | undefined): string | null 
   return next
 }
 
-/** Where auth continues: a safe `next` from the link, else the intent's own route through `/new`. */
+/** The pricing CTA's attribution, which auth must hand to `/new` when the link named no `next`. */
+export type PlanAttribution = { sessionId?: string; planVersionId?: string; pageId?: string }
+
+/**
+ * Where auth continues: a safe `next` from the link; else `/new` carrying a picked plan; else the
+ * intent's own route through `/new`.
+ */
 export function authNextPath(
   next: string | null | undefined,
-  intent?: SignupIntent
+  intent?: SignupIntent,
+  plan: PlanAttribution = {}
 ): string | null {
-  return getSafeNextPath(next) ?? (intent ? (nextAfterAuth(intent) ?? null) : null)
+  const safeNext = getSafeNextPath(next)
+  if (safeNext) {
+    return safeNext
+  }
+
+  if (plan.planVersionId) {
+    const params = new URLSearchParams()
+    for (const key of ["sessionId", "planVersionId", "pageId"] as const) {
+      const value = plan[key]
+      if (value) {
+        params.set(key, value)
+      }
+    }
+    if (intent) {
+      params.set("intent", intent)
+    }
+    return `/new?${params}`
+  }
+
+  return intent ? (nextAfterAuth(intent) ?? null) : null
 }
 
 export function buildAuthHref(

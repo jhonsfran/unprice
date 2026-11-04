@@ -8356,6 +8356,11 @@
                     "description": "The plan version the customer is signing up for",
                     "example": "pv_1234567890"
                   },
+                  "pageId": {
+                    "type": "string",
+                    "description": "The pricing page the plan version was picked on, for conversion analytics. Ignored unless the page belongs to the project and lists the plan version",
+                    "example": "page_1234567890"
+                  },
                   "config": {
                     "type": "array",
                     "items": {

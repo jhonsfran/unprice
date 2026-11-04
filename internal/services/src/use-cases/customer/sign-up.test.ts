@@ -531,7 +531,24 @@ describe("customer signUp plan attribution", () => {
     }
   }
 
-  function createDeps(opts: { versions: VersionRow[]; basinRows: unknown[] }) {
+  type PageRow = { id: string; projectId: string; selectedPlans: { id: string }[] }
+
+  function pagesTable(rows: PageRow[]) {
+    return {
+      findFirst: vi.fn(async ({ where }: { where: (...args: unknown[]) => unknown }) => {
+        const conditions = where(
+          { id: "id", projectId: "projectId" },
+          {
+            eq: (column: keyof PageRow, value: unknown) => [column, value],
+            and: (...clauses: unknown[]) => clauses.filter(Boolean),
+          }
+        ) as [keyof PageRow, unknown][]
+        return rows.find((row) => conditions.every(([column, value]) => row[column] === value))
+      }),
+    }
+  }
+
+  function createDeps(opts: { versions: VersionRow[]; basinRows: unknown[]; pages?: PageRow[] }) {
     const tx = {
       insert: vi.fn(() => ({
         values: vi.fn().mockReturnValue({
@@ -548,6 +565,7 @@ describe("customer signUp plan attribution", () => {
       db: {
         query: {
           versions: versionsTable(opts.versions),
+          pages: pagesTable(opts.pages ?? []),
           paymentProviderConfig: {
             findFirst: vi.fn().mockResolvedValue({
               id: "ppc_123",
@@ -667,6 +685,62 @@ describe("customer signUp plan attribution", () => {
         plan_version_id: "version_123",
       }),
     ])
+  })
+
+  it("records the CTA page when it belongs to the project and lists the plan version", async () => {
+    const { deps, send, pending } = createDeps({
+      versions: [createPlanVersion("sandbox")],
+      basinRows: [],
+      pages: [{ id: "page_1", projectId: "proj_123", selectedPlans: [{ id: "version_123" }] }],
+    })
+
+    const result = await signUp(deps, {
+      projectId: "proj_123",
+      input: { ...baseInput, planVersionId: "version_123", pageId: "page_1" } as never,
+    })
+    await Promise.all(pending)
+
+    expect(result.val?.success).toBe(true)
+    expect(send.mock.calls[0]?.[0]).toEqual([
+      expect.objectContaining({
+        kind: "signup",
+        page_id: "page_1",
+        plan_version_id: "version_123",
+      }),
+    ])
+  })
+
+  it("drops a CTA page that does not list the plan version, and still signs up", async () => {
+    const { deps, send, pending } = createDeps({
+      versions: [createPlanVersion("sandbox")],
+      basinRows: [],
+      pages: [
+        { id: "page_1", projectId: "proj_123", selectedPlans: [{ id: "version_other" }] },
+        { id: "page_2", projectId: "proj_other", selectedPlans: [{ id: "version_123" }] },
+      ],
+    })
+
+    const listed = await signUp(deps, {
+      projectId: "proj_123",
+      input: { ...baseInput, planVersionId: "version_123", pageId: "page_1" } as never,
+    })
+    const foreign = await signUp(deps, {
+      projectId: "proj_123",
+      input: { ...baseInput, planVersionId: "version_123", pageId: "page_2" } as never,
+    })
+    await Promise.all(pending)
+
+    expect(listed.val?.success).toBe(true)
+    expect(foreign.val?.success).toBe(true)
+    expect(send.mock.calls.map(([rows]) => rows[0].page_id)).toEqual([undefined, undefined])
+    expect(deps.logger.warn).toHaveBeenCalledWith("ignoring sign-up page attribution", {
+      page_id: "page_1",
+      reason: "plan version not on page",
+    })
+    expect(deps.logger.warn).toHaveBeenCalledWith("ignoring sign-up page attribution", {
+      page_id: "page_2",
+      reason: "page not in project",
+    })
   })
 
   it("keeps the session error when Basin has no plan click and no plan version was passed", async () => {

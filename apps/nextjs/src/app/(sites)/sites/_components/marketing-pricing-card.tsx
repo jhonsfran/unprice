@@ -38,6 +38,7 @@ export interface MarketingPricingPlan {
   >[]
   cta: string
   ctaLink: string
+  pageId: string
   currency: string
   billingPeriod: string
   version: string
@@ -214,6 +215,7 @@ export function MarketingPricingCard({
             ctaLink.searchParams.set("sessionId", sessionId ?? "")
             // the clicked plan travels with the link: sign-up must not wait for analytics to land
             ctaLink.searchParams.set("planVersionId", plan.id)
+            ctaLink.searchParams.set("pageId", plan.pageId)
 
             // @ts-ignore
             window.Unprice.trackEvent("plan_click", {

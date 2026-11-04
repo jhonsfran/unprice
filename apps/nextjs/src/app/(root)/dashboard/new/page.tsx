@@ -21,14 +21,15 @@ export default async function NewPage(props: {
   searchParams: Promise<{
     workspace_id?: string
     intent?: string | string[]
+    sessionId?: string
     planVersionId?: string
+    pageId?: string
   }>
 }) {
-  const [{ workspace_id, intent, planVersionId }, cookieStore] = await Promise.all([
-    props.searchParams,
-    cookies(),
-  ])
-  const sessionId = cookieStore.get(COOKIES_APP.SESSION)?.value
+  const [query, cookieStore] = await Promise.all([props.searchParams, cookies()])
+  const { workspace_id, intent, planVersionId, pageId } = query
+  // A pricing CTA on another domain cannot set the app's cookie, so its query wins.
+  const sessionId = query.sessionId || cookieStore.get(COOKIES_APP.SESSION)?.value
   // The query carries the intent through auth; the signup cookie covers a round trip that lost it.
   const signupIntent = resolveSignupIntent(intent, cookieStore.get(SIGNUP_INTENT_COOKIE)?.value)
 
@@ -55,6 +56,7 @@ export default async function NewPage(props: {
         <Content
           workspaceId={workspace_id}
           planVersionId={planVersionId}
+          pageId={planVersionId ? pageId : undefined}
           sessionId={planVersionId ? sessionId : undefined}
           intent={signupIntent}
         />
@@ -84,11 +86,13 @@ export default async function NewPage(props: {
 async function Content({
   workspaceId,
   planVersionId,
+  pageId,
   sessionId,
   intent,
 }: {
   workspaceId?: string
   planVersionId?: string
+  pageId?: string
   sessionId?: string
   intent?: SignupIntent
 }) {
@@ -109,6 +113,7 @@ async function Content({
                 defaultValues={{
                   name: "",
                   planVersionId,
+                  pageId,
                   successUrl: "",
                   cancelUrl: "",
                   sessionId: sessionId,

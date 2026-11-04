@@ -35,6 +35,7 @@ export const workspaceSignupSchema = workspaceInsertBase
     successUrl: z.string().url(),
     cancelUrl: z.string().url(),
     sessionId: z.string().optional(),
+    pageId: z.string().optional(),
   })
 
 export const listMembersSchema = membersSelectBase.extend({

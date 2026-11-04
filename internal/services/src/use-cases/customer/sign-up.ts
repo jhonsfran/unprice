@@ -134,6 +134,31 @@ async function getExternalIdReplay(
   })
 }
 
+/**
+ * The page a pricing CTA named, kept only when it belongs to the project and lists the plan version.
+ * Attribution never fails a sign-up: an unusable page id is logged and dropped.
+ */
+async function resolvePageAttribution(
+  deps: SignUpDeps,
+  opts: { projectId: string; pageId: string; planVersionId: string }
+): Promise<string | null> {
+  const page = await deps.db.query.pages.findFirst({
+    columns: { id: true, selectedPlans: true },
+    where: (table, { eq, and }) =>
+      and(eq(table.id, opts.pageId), eq(table.projectId, opts.projectId)),
+  })
+
+  if (page?.selectedPlans.some((plan) => plan.id === opts.planVersionId)) {
+    return page.id
+  }
+
+  deps.logger.warn("ignoring sign-up page attribution", {
+    page_id: opts.pageId,
+    reason: page ? "plan version not on page" : "page not in project",
+  })
+  return null
+}
+
 async function resolvePlanVersion(
   deps: SignUpDeps,
   opts: SignUpInput
@@ -171,6 +196,14 @@ async function resolvePlanVersion(
           message: "Plan version not found in this project",
         })
       )
+    }
+
+    if (input.pageId) {
+      pageId = await resolvePageAttribution(deps, {
+        projectId,
+        pageId: input.pageId,
+        planVersionId: planVersion.id,
+      })
     }
   } else if (sessionId) {
     deps.logger.set({

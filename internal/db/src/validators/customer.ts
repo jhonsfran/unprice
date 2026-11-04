@@ -83,6 +83,11 @@ export const customerSignUpSchema = z
       description: "The plan version the customer is signing up for",
       example: "pv_1234567890",
     }),
+    pageId: z.string().optional().openapi({
+      description:
+        "The pricing page the plan version was picked on, for conversion analytics. Ignored unless the page belongs to the project and lists the plan version",
+      example: "page_1234567890",
+    }),
     config: subscriptionItemsConfigSchema.optional().openapi({
       description:
         "The configuration of the subscription items. This is required if your features are quantity based when the customer needs to set them. Pass as empty if you want the system to automatically set the units from the plan defaults.",

@@ -79,6 +79,7 @@ export const registerSignUpV1 = (app: App) =>
       creditLineAmountMinor,
       metadata,
       sessionId,
+      pageId,
     } = c.req.valid("json")
     const { billing, customer, subscription, plans } = c.get("services")
 
@@ -117,6 +118,7 @@ export const registerSignUpV1 = (app: App) =>
           externalId,
           billingInterval,
           sessionId,
+          pageId,
           metadata: metadata,
         },
         projectId: key.projectId,

@@ -114,6 +114,19 @@ describe("signup funnel URLs", () => {
     expect(authNextPath(undefined)).toBeNull()
   })
 
+  it("hands a pricing CTA's plan to /new when the auth link names no next", () => {
+    const plan = { sessionId: "sess_1", planVersionId: "pv_1", pageId: "page_1" }
+
+    expect(authNextPath(undefined, undefined, plan)).toBe(
+      "/new?sessionId=sess_1&planVersionId=pv_1&pageId=page_1"
+    )
+    expect(authNextPath(undefined, "budgets", plan)).toBe(
+      "/new?sessionId=sess_1&planVersionId=pv_1&pageId=page_1&intent=budgets"
+    )
+    expect(authNextPath("/new?planVersionId=pv_2", undefined, plan)).toBe("/new?planVersionId=pv_2")
+    expect(authNextPath(undefined, undefined, { sessionId: "sess_1" })).toBeNull()
+  })
+
   it("lands the paid-action intent, and no intent, on the workspace itself", () => {
     expect(nextAfterAuth("paid-action")).toBeUndefined()
     expect(newWorkspacePath("paid-action")).toBe("/new?intent=paid-action")

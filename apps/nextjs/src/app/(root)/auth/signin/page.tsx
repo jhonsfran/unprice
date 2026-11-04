@@ -27,12 +27,18 @@ export default async function AuthenticationPage(props: {
     sessionId?: string | string[]
     intent?: string | string[]
     next?: string | string[]
+    planVersionId?: string | string[]
+    pageId?: string | string[]
   }>
 }) {
-  const { sessionId, intent, next } = await props.searchParams
+  const { sessionId, intent, next, planVersionId, pageId } = await props.searchParams
   const singleSessionId = getSingleSearchParam(sessionId)
   const signupIntent = getSignupIntent(intent)
-  const safeNext = authNextPath(getSingleSearchParam(next), signupIntent)
+  const safeNext = authNextPath(getSingleSearchParam(next), signupIntent, {
+    sessionId: singleSessionId,
+    planVersionId: getSingleSearchParam(planVersionId),
+    pageId: getSingleSearchParam(pageId),
+  })
   const [session, cookieStore] = await Promise.all([getSession(), cookies()])
   const lastUsedMethod = cookieStore.get("last-login-method")?.value
 

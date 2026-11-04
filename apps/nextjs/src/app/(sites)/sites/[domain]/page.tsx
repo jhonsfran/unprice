@@ -150,6 +150,7 @@ export default async function DomainPage(props: {
           detailedFeatures,
           cta: version.plan.enterprisePlan ? "Contact Us" : "Get Started",
           ctaLink: page.ctaLink,
+          pageId: page.id,
           isEnterprisePlan: version.plan.enterprisePlan || false,
           billingPeriod: version.billingConfig.billingInterval,
           contactEmail: page.project.contactEmail,
