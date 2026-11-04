@@ -10,7 +10,7 @@ import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
 import type { Metrics } from "../../metrics"
 import type { PaymentProviderService } from "../../payment-provider/service"
-import { RatingService } from "../../rating/service"
+import { RateCardService } from "../../rate-cards/service"
 import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
 import { billPeriod } from "../../use-cases/billing/bill-period"
 
@@ -144,7 +144,7 @@ async function loadSubscriptionContext(dbForContext: Database): Promise<Subscrip
 }
 
 async function createDraftInvoice() {
-  const { reservationFlushGateway } = createRecordedUsageFixture(db, {
+  const { payerBudgets } = createRecordedUsageFixture(db, {
     events: { quantity: 1200, amount: 12_000_000_000 },
   })
   const logger = createLogger()
@@ -153,15 +153,11 @@ async function createDraftInvoice() {
   expect(ensureAccounts.err).toBeUndefined()
 
   await billPeriod({
-    reservationFlushGateway,
+    invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
     context: await loadSubscriptionContext(db),
     logger,
     db,
     repo: new DrizzleSubscriptionRepository(db),
-    ratingService: new RatingService({
-      logger,
-      grantsManager: new GrantsManager({ db, logger }),
-    }),
     ledgerService: ledger,
   })
 
@@ -188,13 +184,13 @@ function createBillingService(
   errors: unknown[]
 ) {
   const logger = createLogger(errors)
-  const { analytics, reservationFlushGateway } = createRecordedUsageFixture(dbForWorker, {
+  const { analytics, payerBudgets } = createRecordedUsageFixture(dbForWorker, {
     events: { quantity: 1200, amount: 12_000_000_000 },
   })
   const ledger = new LedgerGateway({ db: dbForWorker, logger })
 
   return new BillingService({
-    reservationFlushGateway,
+    invoicing: { payerBudgets, rateCards: new RateCardService({ db: dbForWorker }) },
     db: dbForWorker,
     logger,
     analytics,
@@ -215,10 +211,6 @@ function createBillingService(
       ),
     } as unknown as CustomerService,
     grantsManager: new GrantsManager({ db: dbForWorker, logger }),
-    ratingService: new RatingService({
-      logger,
-      grantsManager: new GrantsManager({ db: dbForWorker, logger }),
-    }),
     ledgerService: ledger,
     walletService: {} as WalletService,
   })

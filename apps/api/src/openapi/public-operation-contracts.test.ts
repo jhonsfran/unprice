@@ -4,7 +4,6 @@ import { route as analyticsChargesExplainRoute } from "~/routes/analytics/explai
 import { route as analyticsCurrentBillingPeriodUsageRoute } from "~/routes/analytics/getCurrentBillingPeriodUsageV1"
 import { route as ingestionEventsStatusRoute } from "~/routes/analytics/getIngestionStatusV1"
 import { route as analyticsUsageRoute } from "~/routes/analytics/getUsageV1"
-import { route as billingReservationsFlushForInvoicingRoute } from "~/routes/billing/flushReservationsForInvoicingV1"
 import { route as budgetsAuthorizeRoute } from "~/routes/budgets/authorizeBudgetV1"
 import { route as budgetsChargeRoute } from "~/routes/budgets/chargeBudgetV1"
 import { route as budgetsGetRoute } from "~/routes/budgets/getBudgetV1"
@@ -100,7 +99,6 @@ const routes = [
   ingestionEventsStatusRoute,
   ingestionEventsReplayRoute,
   entitlementWindowsStatusRoute,
-  billingReservationsFlushForInvoicingRoute,
   paymentProviderCallbacksSignUpRoute,
   paymentProviderCallbacksSetupRoute,
   paymentProviderCallbacksWebhookRoute,
@@ -148,10 +146,6 @@ const expectedRoutes = new Map<string, string>([
   ["ingestionEvents.status", "POST /v1/ingestion-events/status"],
   ["ingestionEvents.replay", "POST /v1/ingestion-events/replay"],
   ["entitlementWindows.status", "GET /v1/internal/entitlement-windows/status"],
-  [
-    "billingReservations.flushForInvoicing",
-    "POST /v1/internal/billing-reservations/flush-for-invoicing",
-  ],
   [
     "paymentProviderCallbacks.signUp",
     "GET /v1/payment-provider-callbacks/{provider}/sign-up/{sessionId}/{projectId}",

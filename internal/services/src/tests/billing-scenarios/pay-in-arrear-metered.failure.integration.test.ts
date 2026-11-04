@@ -4,10 +4,9 @@ import { Err } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { toLedgerMinor } from "@unprice/money"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
-import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
 import { UnPriceLedgerError } from "../../ledger/errors"
-import { RatingService } from "../../rating/service"
+import { RateCardService } from "../../rate-cards/service"
 import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
 import { billPeriod } from "../../use-cases/billing/bill-period"
 
@@ -113,12 +112,8 @@ describe("P0-A pay_in_arrear metered billing failure injection", () => {
 
   it("rolls back invoice and ledger state when a mid-transaction ledger write fails", async () => {
     const logger = createLogger()
-    const { reservationFlushGateway } = createRecordedUsageFixture(db, {
+    const { payerBudgets } = createRecordedUsageFixture(db, {
       events: { quantity: 1200, amount: 12_000_000_000 },
-    })
-    const ratingService = new RatingService({
-      logger,
-      grantsManager: new GrantsManager({ db, logger }),
     })
     const failingLedger = new FailingLedgerGateway({ db, logger }, 2)
     const repo = new DrizzleSubscriptionRepository(db)
@@ -127,12 +122,11 @@ describe("P0-A pay_in_arrear metered billing failure injection", () => {
 
     await expect(
       billPeriod({
-        reservationFlushGateway,
+        invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
         context: await loadSubscriptionContext(),
         logger,
         db,
         repo,
-        ratingService,
         ledgerService: failingLedger,
       })
     ).rejects.toThrow("LEDGER_TRANSFER_FAILED")
@@ -141,21 +135,19 @@ describe("P0-A pay_in_arrear metered billing failure injection", () => {
 
     const ledger = new LedgerGateway({ db, logger })
     const retry = await billPeriod({
-      reservationFlushGateway,
+      invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
       context: await loadSubscriptionContext(),
       logger,
       db,
       repo,
-      ratingService,
       ledgerService: ledger,
     })
     const rerun = await billPeriod({
-      reservationFlushGateway,
+      invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
       context: await loadSubscriptionContext(),
       logger,
       db,
       repo,
-      ratingService,
       ledgerService: ledger,
     })
 

@@ -1,10 +1,5 @@
 import type { AnalyticsEntitlementMeterFact } from "@unprice/analytics"
 import type { MeterConfig } from "@unprice/db/validators"
-import type {
-  BillingUsageIdentity,
-  BillingUsageRegistration,
-  BillingUsageSnapshot,
-} from "../billing/usage-snapshot"
 import type { IngestionEntitlement, IngestionGrant } from "./entitlement-context"
 import { getMessageOutcomeKey } from "./fanout-outcomes"
 import type {
@@ -125,9 +120,6 @@ export type FlushReservationForInvoicingResult = {
 }
 
 export type EntitlementWindowController = {
-  registerBillingPeriods: (input: BillingUsageRegistration[]) => Promise<BillingUsageSnapshot[]>
-  sealBillingPeriods: (input: BillingUsageIdentity[]) => Promise<BillingUsageSnapshot[]>
-  completeBillingPeriods: (periodIds: string[]) => Promise<void>
   apply: (input: EntitlementWindowApplyInput) => Promise<EntitlementWindowApplyResult>
   applyBatch: (input: {
     customerId: string

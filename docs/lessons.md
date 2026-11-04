@@ -585,12 +585,12 @@ patterns. Keep it cheap to load and useful.
 - 2026-11-03: Tiers are graduated only (volume and `tierMode` removed, U1). A graduated config
   whose higher tier has a smaller flat fee still prices a positive usage delta negatively (the seeded
   plans do at 1000 -> 1001), so never assume tier cost deltas are non-negative.
-- 2026-11-02: Batch snapshot registration and completion by entitlement owner; completed snapshots must not be rewritten on retries.
-- 2026-11-02: Trial reporting must zero accepted prices, as BILL already does.
+- 2026-11-04 ([ADR-0008 D4](adr/ADR-0008-payer-budgets-rate-cards-and-r2-journal.md#d4-usage-is-priced-once-at-ingestion)): `billPeriod` seals the statement key through `PayerBudgetGateway.seal` at `max(now, period end + 1)` (a phase's last statement ends 1 ms past its inclusive end), bills each statement's amount as priced at ingestion, and prices recurring items from the plan card with `priceQuantity`, prorated over the period clipped to its phase. A metered period without a statement bills zero; one still open blocks the invoice for a retry.
+- 2026-11-04: `completeInvoiced` runs before and after every invoice and completes each sealed statement whose billing period is invoiced or voided, so a completion lost after a commit heals on the next run.
+- 2026-11-04: A canceled subscription's machine is final; invoice it with `BillingService.invoiceCanceledSubscription` (an immediate cancel passes grace 0, the invoicing job the usual grace). Billing-period capping only reaches phases that ended within the lookback, so proration also clips to the phase.
+- 2026-11-04: Service integration plans price recurring items only from rate cards: the plan seeds carry `card_test_arrear`/`card_test_advance`; a test that inserts a recurring feature must add its row, or it bills free.
 - 2026-11-02: Wallet quantity excludes free usage accepted before reservation allocation. A correction can cross that boundary; keep grant usage exact and floor the wallet quantity at zero while preserving captured and pending quantities.
 
-- 2026-10-27: Billing snapshot rollout uses fresh entitlement IDs, DO state, and billing periods;
-  register before acceptance and seal before wallet flush. Do not add legacy marker or recovery paths.
 - 2026-10-27: When collection succeeds, settle the receivable before saving `paid`; keep failed
   settlement eligible for retry with the existing invoice idempotency key.
 - 2026-10-27: When checking invoice readiness, include all pending rows for the statement across

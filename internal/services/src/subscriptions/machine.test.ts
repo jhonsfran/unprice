@@ -12,12 +12,11 @@ import type { Logger } from "@unprice/logs"
 import { type Dinero, dinero, toSnapshot } from "dinero.js"
 import * as dineroCurrencies from "dinero.js/currencies"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { createBillingGatewayStub } from "../test-fixtures/billing-gateway"
+import { createInvoicingStub, flatRateRow } from "../test-fixtures/billing-gateway"
 
 import type { BillingService } from "../billing/service"
 import type { CustomerService } from "../customers/service"
 import type { InvoiceLine, LedgerEntry, LedgerGateway } from "../ledger"
-import type { RatingService } from "../rating/service"
 import { db } from "../utils/db"
 import { UnPriceWalletError, type WalletService } from "../wallet"
 import { SubscriptionMachine } from "./machine"
@@ -155,6 +154,7 @@ function buildMockSubscription({
                 aggregationMethod: "sum",
                 config: { units: 1 },
                 billingConfig: {
+                  name: "monthly",
                   billingInterval: "month",
                   billingIntervalCount: 1,
                   planType: "recurring",
@@ -187,7 +187,6 @@ describe("SubscriptionMachine - comprehensive", () => {
   let mockCustomerService: CustomerService
   let mockLogger: Logger
   let mockDb: Database
-  let mockRatingService: RatingService
   let mockLedgerService: LedgerGateway
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   let dbMockData: Record<string, any>[] = []
@@ -227,40 +226,6 @@ describe("SubscriptionMachine - comprehensive", () => {
       transferId: string
     }
     const postedLedgerEntries = new Map<string, MockLedgerEntry>()
-
-    mockRatingService = {
-      rateBillingPeriod: vi
-        .fn()
-        .mockImplementation(async (input: { startAt: number; endAt: number }) => {
-          const usd = dineroCurrencies.USD
-          return Ok([
-            {
-              grantId: "grant_test",
-              price: {
-                unitPrice: {
-                  dinero: dinero({ amount: 100, currency: usd }),
-                  displayAmount: "$1",
-                },
-                subtotalPrice: {
-                  dinero: dinero({ amount: 100, currency: usd }),
-                  displayAmount: "$1",
-                },
-                totalPrice: {
-                  dinero: dinero({ amount: 100, currency: usd }),
-                  displayAmount: "$1",
-                },
-              },
-              prorate: 1,
-              cycleStartAt: input.startAt,
-              cycleEndAt: input.endAt,
-              usage: 1,
-              included: 0,
-              limit: 100,
-              isTrial: false,
-            },
-          ])
-        }),
-    } as unknown as RatingService
 
     const upsertEntry = (input: {
       projectId: string
@@ -592,6 +557,8 @@ describe("SubscriptionMachine - comprehensive", () => {
                     id: subscription.phases[0]!.items[0]!.featurePlanVersion.id,
                     featureType: "flat",
                     unitOfMeasure: "units",
+                    billingConfig:
+                      subscription.phases[0]!.items[0]!.featurePlanVersion.billingConfig,
                     feature: {
                       slug: "test-feature",
                       title: "Test Feature",
@@ -608,6 +575,10 @@ describe("SubscriptionMachine - comprehensive", () => {
             projectId: subscription.projectId,
             subscriptionId: subscription.id,
             paymentMethodId: subscription.phases[0]!.paymentMethodId,
+            planVersionId: subscription.phases[0]!.planVersion.id,
+            startAt: subscription.phases[0]!.startAt,
+            endAt: null,
+            billingAnchor: subscription.phases[0]!.billingAnchor,
             planVersion: subscription.phases[0]!.planVersion,
             subscription: {
               id: subscription.id,
@@ -655,14 +626,13 @@ describe("SubscriptionMachine - comprehensive", () => {
     billingService?: Pick<BillingService, "generateBillingPeriods">
   }) =>
     SubscriptionMachine.create({
-      reservationFlushGateway: createBillingGatewayStub(),
+      invoicing: createInvoicingStub({ rows: [flatRateRow("test-feature", "1")] }),
       subscriptionId: input.subscriptionId,
       projectId: input.projectId,
       analytics: mockAnalytics,
       logger: mockLogger,
       now: input.now ?? Date.now(),
       customer: mockCustomerService,
-      ratingService: mockRatingService,
       ledgerService: mockLedgerService,
       walletService: input.walletService,
       billingService:

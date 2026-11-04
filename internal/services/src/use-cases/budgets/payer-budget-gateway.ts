@@ -1,6 +1,18 @@
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
+import type { z } from "zod"
 import type { UnPriceBudgetError } from "../../budgets"
 import { PAYER_HOLDS, type UnPricePayerBudgetError } from "./compile-payer-budget"
+import {
+  type CompletePayerStatementsInput,
+  type CompletePayerStatementsOutput,
+  type InvoicePayerStatementsDeps,
+  type SealPayerStatementsInput,
+  type SealPayerStatementsOutput,
+  completeInvoicedPayerStatements,
+  completePayerStatementsOutputSchema,
+  sealPayerStatements,
+  sealPayerStatementsOutputSchema,
+} from "./invoice-payer-statements"
 import {
   type SyncPayerBudgetDeps,
   type SyncPayerBudgetInput,
@@ -10,27 +22,44 @@ import {
 } from "./sync-payer-budget"
 
 const SYNC_PATH = "/v1/internal/payer-budgets/sync"
+const SEAL_PATH = "/v1/internal/payer-budgets/seal"
+const COMPLETE_PATH = "/v1/internal/payer-budgets/complete"
 const DEFAULT_API_BASE_URL = "https://api.unprice.dev"
-/** One sync is a compile, an upsert, and a registration: well under this unless the API stalls. */
-const SYNC_TIMEOUT_MS = 20_000
+/** One call is a compile, an upsert, and a registration, or a seal and its wallet close. */
+const REQUEST_TIMEOUT_MS = 20_000
 
-export type PayerBudgetSyncError = FetchError | UnPriceBudgetError | UnPricePayerBudgetError
+export type PayerBudgetGatewayError = FetchError | UnPriceBudgetError | UnPricePayerBudgetError
 
 /**
- * How billing reaches a payer budget: one `syncPayerBudget` attempt next to the budget's Durable
- * Object. The API runs it in process; tRPC and Trigger jobs call the API's internal route.
+ * How billing reaches a payer budget next to its Durable Object: the compile (`sync`), and the
+ * invoice's seal and completion of its statements. The API runs them in process; tRPC and Trigger
+ * jobs call the API's internal routes.
  */
 export interface PayerBudgetGateway {
-  sync(input: SyncPayerBudgetInput): Promise<Result<SyncPayerBudgetOutput, PayerBudgetSyncError>>
+  sync(input: SyncPayerBudgetInput): Promise<Result<SyncPayerBudgetOutput, PayerBudgetGatewayError>>
+  seal(
+    input: SealPayerStatementsInput
+  ): Promise<Result<SealPayerStatementsOutput, PayerBudgetGatewayError>>
+  completeInvoiced(
+    input: CompletePayerStatementsInput
+  ): Promise<Result<CompletePayerStatementsOutput, PayerBudgetGatewayError>>
 }
 
-/** The API worker's gateway: runs the sync in the same request, with the request's deps. */
+/** The API worker's gateway: runs each use case in the same request, with the request's deps. */
 export class InProcessPayerBudgetGateway implements PayerBudgetGateway {
   /** `deps` is read on each call, so a composition root can wire it after the services exist. */
-  constructor(private readonly deps: () => SyncPayerBudgetDeps) {}
+  constructor(private readonly deps: () => SyncPayerBudgetDeps & InvoicePayerStatementsDeps) {}
 
   sync(input: SyncPayerBudgetInput) {
     return syncPayerBudget(this.deps(), input)
+  }
+
+  seal(input: SealPayerStatementsInput) {
+    return sealPayerStatements(this.deps(), input)
+  }
+
+  completeInvoiced(input: CompletePayerStatementsInput) {
+    return completeInvoicedPayerStatements(this.deps(), input)
   }
 }
 
@@ -51,18 +80,34 @@ export class HttpPayerBudgetGateway implements PayerBudgetGateway {
     this.baseUrl = (options.baseUrl ?? DEFAULT_API_BASE_URL).replace(/\/+$/, "")
     this.token = options.token
     this.fetch = options.fetch ?? fetch
-    this.timeoutMs = options.timeoutMs ?? SYNC_TIMEOUT_MS
+    this.timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS
   }
 
-  async sync(input: SyncPayerBudgetInput): Promise<Result<SyncPayerBudgetOutput, FetchError>> {
-    const context = { url: SYNC_PATH, method: "POST" }
+  sync(input: SyncPayerBudgetInput) {
+    return this.post(SYNC_PATH, input, syncPayerBudgetOutputSchema)
+  }
+
+  seal(input: SealPayerStatementsInput) {
+    return this.post(SEAL_PATH, input, sealPayerStatementsOutputSchema)
+  }
+
+  completeInvoiced(input: CompletePayerStatementsInput) {
+    return this.post(COMPLETE_PATH, input, completePayerStatementsOutputSchema)
+  }
+
+  private async post<T>(
+    path: string,
+    input: unknown,
+    schema: z.ZodType<T>
+  ): Promise<Result<T, FetchError>> {
+    const context = { url: path, method: "POST" }
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), this.timeoutMs)
     let response: Response
     let body: unknown
     try {
       response = await this.fetch(
-        new Request(`${this.baseUrl}${SYNC_PATH}`, {
+        new Request(`${this.baseUrl}${path}`, {
           method: "POST",
           headers: { authorization: `Bearer ${this.token}`, "content-type": "application/json" },
           body: JSON.stringify(input),
@@ -72,10 +117,10 @@ export class HttpPayerBudgetGateway implements PayerBudgetGateway {
       body = await response.json().catch(() => null)
     } catch (error) {
       const message = controller.signal.aborted
-        ? `${SYNC_PATH} timed out after ${this.timeoutMs} ms`
+        ? `${path} timed out after ${this.timeoutMs} ms`
         : error instanceof Error
           ? error.message
-          : `${SYNC_PATH} failed`
+          : `${path} failed`
       return Err(new FetchError({ message, retry: true, context }))
     } finally {
       clearTimeout(timer)
@@ -83,17 +128,17 @@ export class HttpPayerBudgetGateway implements PayerBudgetGateway {
     if (!response.ok) {
       return Err(
         new FetchError({
-          message: `${SYNC_PATH} failed with status ${response.status}: ${JSON.stringify(body)}`,
+          message: `${path} failed with status ${response.status}: ${JSON.stringify(body)}`,
           retry: response.status >= 500,
           context: { ...context, status: response.status },
         })
       )
     }
-    const parsed = syncPayerBudgetOutputSchema.safeParse(body)
+    const parsed = schema.safeParse(body)
     if (!parsed.success) {
       return Err(
         new FetchError({
-          message: `${SYNC_PATH} answered an unexpected body: ${parsed.error.message}`,
+          message: `${path} answered an unexpected body: ${parsed.error.message}`,
           retry: false,
           context: { ...context, status: response.status },
         })
@@ -125,7 +170,7 @@ export async function syncPayerBudgetWithRetry(
     now?: () => number
     sleep?: (ms: number) => Promise<void>
   }
-): Promise<Result<SyncPayerBudgetOutput, PayerBudgetSyncError>> {
+): Promise<Result<SyncPayerBudgetOutput, PayerBudgetGatewayError>> {
   const now = options.now ?? Date.now
   const sleep =
     options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))

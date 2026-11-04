@@ -23,10 +23,6 @@ import { RatingService } from "./rating/service"
 import { DrizzleSubscriptionRepository } from "./subscriptions/repository.drizzle"
 import { SubscriptionService } from "./subscriptions/service"
 import {
-  type BillingReservationFlushGateway,
-  HttpBillingReservationFlushGateway,
-} from "./use-cases/billing/reservation-flush-gateway"
-import {
   type BudgetOperatorGateway,
   HttpBudgetOperatorGateway,
 } from "./use-cases/budgets/operator-gateway"
@@ -80,8 +76,10 @@ export interface ServiceContext {
  */
 export function createServiceContext(
   deps: ServiceDeps & {
-    reservationFlushGateway?: BillingReservationFlushGateway
-    /** Payer budget sync; null turns it off. Defaults to the API's internal route, off in tests. */
+    /**
+     * Payer budget sync and invoicing; null turns it off. Defaults to the API's internal routes,
+     * off in tests.
+     */
     payerBudgets?: PayerBudgetGateway | null
     /** Web analytics reads. Roots that never read web analytics omit it and get NOT_CONFIGURED. */
     basinSql?: BasinSql
@@ -209,19 +207,13 @@ export function createServiceContext(
     ledgerGateway: ledger,
   })
 
-  const reservationFlushGateway =
-    deps.reservationFlushGateway ??
-    new HttpBillingReservationFlushGateway({
-      baseUrl: env.UNPRICE_API_URL,
-      token: env.UNPRICE_API_KEY,
-    })
-
   const payerBudgets =
     deps.payerBudgets !== undefined
       ? deps.payerBudgets
       : env.NODE_ENV === "test"
         ? null
         : new HttpPayerBudgetGateway({ baseUrl: env.UNPRICE_API_URL, token: env.UNPRICE_API_KEY })
+  const invoicing = { payerBudgets, rateCards }
 
   const billing = new BillingService({
     db: deps.db,
@@ -232,11 +224,9 @@ export function createServiceContext(
     metrics: deps.metrics,
     customerService: customers,
     grantsManager,
-    ratingService: rating,
     ledgerService: ledger,
     walletService: wallet,
-    reservationFlushGateway,
-    payerBudgets,
+    invoicing,
   })
 
   const entitlements = new EntitlementService({
@@ -262,10 +252,9 @@ export function createServiceContext(
     customerService: customers,
     entitlementService: entitlements,
     billingService: billing,
-    ratingService: rating,
     ledgerService: ledger,
     walletService: wallet,
-    reservationFlushGateway,
+    invoicing,
   })
 
   const budgetOperator = new HttpBudgetOperatorGateway({

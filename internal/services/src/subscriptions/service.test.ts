@@ -2,7 +2,7 @@ import type { Database } from "@unprice/db"
 import { Ok } from "@unprice/error"
 import { describe, expect, it, vi } from "vitest"
 import { DEFAULT_GRANT_PRIORITY } from "../entitlements/grants"
-import { createBillingGatewayStub } from "../test-fixtures/billing-gateway"
+import { createInvoicingStub } from "../test-fixtures/billing-gateway"
 import { SubscriptionService } from "./service"
 
 describe("SubscriptionService entitlement grant provisioning contract", () => {
@@ -12,7 +12,7 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
 
   it("rejects phase updates with an end date before the start date", async () => {
     const service = new SubscriptionService({
-      reservationFlushGateway: createBillingGatewayStub(),
+      invoicing: createInvoicingStub(),
       db: {} as Database,
       repo: {} as never,
       logger: {
@@ -29,7 +29,6 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
       customerService: {} as never,
       entitlementService: {} as never,
       billingService: { syncPayerBudget: async () => {} } as never,
-      ratingService: {} as never,
       ledgerService: {} as never,
     })
 
@@ -129,7 +128,7 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
       ),
     }
     const service = new SubscriptionService({
-      reservationFlushGateway: createBillingGatewayStub(),
+      invoicing: createInvoicingStub(),
       db,
       repo: repo as never,
       logger: logger as never,
@@ -140,7 +139,6 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
       customerService: customerService as never,
       entitlementService: {} as never,
       billingService: { syncPayerBudget: async () => {} } as never,
-      ratingService: {} as never,
       ledgerService: {} as never,
     })
 
@@ -330,7 +328,7 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
       debug: vi.fn(),
     }
     const service = new SubscriptionService({
-      reservationFlushGateway: createBillingGatewayStub(),
+      invoicing: createInvoicingStub(),
       db,
       repo: repo as never,
       logger: logger as never,
@@ -352,7 +350,6 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
         createCustomerEntitlement,
       } as never,
       billingService: { syncPayerBudget: async () => {} } as never,
-      ratingService: {} as never,
       ledgerService: {} as never,
     })
 
@@ -540,7 +537,7 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
       debug: vi.fn(),
     }
     const service = new SubscriptionService({
-      reservationFlushGateway: createBillingGatewayStub(),
+      invoicing: createInvoicingStub(),
       db,
       repo: repo as never,
       logger: logger as never,
@@ -556,7 +553,6 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
         createCustomerEntitlement,
       } as never,
       billingService: { syncPayerBudget: async () => {} } as never,
-      ratingService: {} as never,
       ledgerService: {} as never,
     })
 
@@ -664,7 +660,7 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
       debug: vi.fn(),
     }
     const service = new SubscriptionService({
-      reservationFlushGateway: createBillingGatewayStub(),
+      invoicing: createInvoicingStub(),
       db,
       repo: repo as never,
       logger: logger as never,
@@ -677,7 +673,6 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
         getPhaseOwnedEntitlements,
       } as never,
       billingService: { syncPayerBudget: async () => {} } as never,
-      ratingService: {} as never,
       ledgerService: {} as never,
     })
 
@@ -770,7 +765,7 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
       debug: vi.fn(),
     }
     const service = new SubscriptionService({
-      reservationFlushGateway: createBillingGatewayStub(),
+      invoicing: createInvoicingStub(),
       db,
       repo: repo as never,
       logger: logger as never,
@@ -783,7 +778,6 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
         getPhaseOwnedEntitlements,
       } as never,
       billingService: { syncPayerBudget: async () => {} } as never,
-      ratingService: {} as never,
       ledgerService: {} as never,
     })
 
@@ -897,7 +891,7 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
     }
     const getPhaseOwnedEntitlements = vi.fn().mockResolvedValue(Ok([]))
     const service = new SubscriptionService({
-      reservationFlushGateway: createBillingGatewayStub(),
+      invoicing: createInvoicingStub(),
       db,
       repo: repo as never,
       logger: {
@@ -916,7 +910,6 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
         getPhaseOwnedEntitlements,
       } as never,
       billingService: { syncPayerBudget: async () => {} } as never,
-      ratingService: {} as never,
       ledgerService: {} as never,
     })
 
@@ -1072,8 +1065,12 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
       warn: vi.fn(),
       debug: vi.fn(),
     }
+    const generateBillingPeriods = vi
+      .fn()
+      .mockResolvedValue(Ok({ cyclesCreated: 0, phasesProcessed: 1 }))
+    const invoiceCanceledSubscription = vi.fn().mockResolvedValue(Ok({ phasesProcessed: 1 }))
     const service = new SubscriptionService({
-      reservationFlushGateway: createBillingGatewayStub(),
+      invoicing: createInvoicingStub(),
       db,
       repo: repo as never,
       logger: logger as never,
@@ -1088,8 +1085,11 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
         getPhaseOwnedEntitlements,
         expireCustomerEntitlement,
       } as never,
-      billingService: { syncPayerBudget: async () => {} } as never,
-      ratingService: {} as never,
+      billingService: {
+        syncPayerBudget: async () => {},
+        generateBillingPeriods,
+        invoiceCanceledSubscription,
+      } as never,
       ledgerService: {} as never,
     })
 
@@ -1100,6 +1100,14 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
     })
 
     expect(result.err).toBeUndefined()
+    // An immediate cancel caps the last periods and invoices them at the cancel time.
+    expect(generateBillingPeriods).toHaveBeenCalledWith({ projectId, subscriptionId, now })
+    expect(invoiceCanceledSubscription).toHaveBeenCalledWith({
+      projectId,
+      subscriptionId,
+      now,
+      lateEventGraceMs: 0,
+    })
     if (!result.err) {
       expect(result.val).toEqual(canceledSubscription)
     }
@@ -1145,7 +1153,7 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
     for (const status of ["active", "pending_activation"]) {
       const syncSubscriptionPayerBudget = vi.fn(async () => {})
       const service = new SubscriptionService({
-        reservationFlushGateway: createBillingGatewayStub(),
+        invoicing: createInvoicingStub(),
         db: {} as never,
         repo: {} as never,
         logger: { set: vi.fn(), error: vi.fn(), info: vi.fn(), warn: vi.fn() } as never,
@@ -1156,7 +1164,6 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
         customerService: {} as never,
         entitlementService: {} as never,
         billingService: { syncSubscriptionPayerBudget } as never,
-        ratingService: {} as never,
         ledgerService: {} as never,
         walletService: {} as never,
       })

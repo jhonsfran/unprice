@@ -8,21 +8,19 @@ import type { CustomerService } from "../customers/service"
 import type { GrantsManager } from "../entitlements"
 import type { LedgerGateway } from "../ledger"
 import type { Metrics } from "../metrics"
-import type { RatingService } from "../rating/service"
-import { createBillingGatewayStub } from "../test-fixtures/billing-gateway"
+import { createInvoicingStub } from "../test-fixtures/billing-gateway"
 import type { WalletService } from "../wallet"
 import { BillingService } from "./service"
 
 describe("BillingService statement lines", () => {
   const buildBillingService = (
-    ratingService: RatingService,
     overrides: {
       db?: Database
       ledgerService?: LedgerGateway
     } = {}
   ) =>
     new BillingService({
-      reservationFlushGateway: createBillingGatewayStub(),
+      invoicing: createInvoicingStub(),
       db: overrides.db ?? ({} as Database),
       logger: {
         set: vi.fn(),
@@ -36,7 +34,6 @@ describe("BillingService statement lines", () => {
       metrics: {} as Metrics,
       customerService: {} as CustomerService,
       grantsManager: {} as GrantsManager,
-      ratingService,
       ledgerService: overrides.ledgerService ?? ({} as LedgerGateway),
       walletService: {} as WalletService,
     })
@@ -72,7 +69,7 @@ describe("BillingService statement lines", () => {
     const ledgerService = {
       getInvoiceLines: vi.fn().mockResolvedValue(Ok([])),
     } as unknown as LedgerGateway
-    const billingService = buildBillingService({} as RatingService, { db, ledgerService })
+    const billingService = buildBillingService({ db, ledgerService })
 
     const result = await billingService.getInvoiceStatementLines({
       projectId: "proj_1",

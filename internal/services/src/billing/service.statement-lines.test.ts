@@ -11,9 +11,8 @@ import type { GrantsManager } from "../entitlements"
 import type { LedgerGateway } from "../ledger"
 import { UnPriceLedgerError } from "../ledger/errors"
 import type { Metrics } from "../metrics"
-import type { RatingService } from "../rating/service"
 import type { SubscriptionMachine } from "../subscriptions/machine"
-import { createBillingGatewayStub } from "../test-fixtures/billing-gateway"
+import { createInvoicingStub } from "../test-fixtures/billing-gateway"
 import type { WalletService } from "../wallet"
 import { BillingService } from "./service"
 
@@ -60,7 +59,7 @@ function makeDbWithPeriods(periods: unknown[] = []) {
 
 function makeBillingService(db: Database) {
   return new BillingService({
-    reservationFlushGateway: createBillingGatewayStub(),
+    invoicing: createInvoicingStub(),
     db,
     logger: makeLogger(),
     analytics: {} as Analytics,
@@ -69,7 +68,6 @@ function makeBillingService(db: Database) {
     metrics: {} as Metrics,
     customerService: {} as CustomerService,
     grantsManager: {} as GrantsManager,
-    ratingService: {} as RatingService,
     ledgerService: ledgerMock as unknown as LedgerGateway,
     walletService: {} as WalletService,
   })

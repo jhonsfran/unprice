@@ -4,9 +4,8 @@ import type { Logger } from "@unprice/logs"
 import { toLedgerMinor } from "@unprice/money"
 import * as fc from "fast-check"
 import { afterAll, describe, expect, it, vi } from "vitest"
-import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
-import { RatingService } from "../../rating/service"
+import { RateCardService } from "../../rate-cards/service"
 import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
 import { billPeriod } from "../../use-cases/billing/bill-period"
 
@@ -96,35 +95,29 @@ async function runBillingPropertyCase(usage: number) {
   await seedTestDb({ db, fixtures })
 
   const logger = createLogger()
-  const { reservationFlushGateway } = createRecordedUsageFixture(db, {
+  const { payerBudgets } = createRecordedUsageFixture(db, {
     events: { quantity: usage, amount: expectedEventsAmount(usage) },
   })
   const ledger = new LedgerGateway({ db, logger })
-  const rating = new RatingService({
-    logger,
-    grantsManager: new GrantsManager({ db, logger }),
-  })
   const repo = new DrizzleSubscriptionRepository(db)
   const ensureAccounts = await ledger.ensureCustomerAccounts(customerId, "EUR")
   expect(ensureAccounts.err).toBeUndefined()
 
   const context = await loadSubscriptionContext()
   const firstRun = await billPeriod({
-    reservationFlushGateway,
+    invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
     context,
     logger,
     db,
     repo,
-    ratingService: rating,
     ledgerService: ledger,
   })
   const secondRun = await billPeriod({
-    reservationFlushGateway,
+    invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
     context,
     logger,
     db,
     repo,
-    ratingService: rating,
     ledgerService: ledger,
   })
 

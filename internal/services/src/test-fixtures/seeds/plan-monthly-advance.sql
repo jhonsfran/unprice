@@ -142,3 +142,68 @@ INSERT INTO "unprice_plan_versions_features" (
     '{"eventId":"evt_test_completions","eventSlug":"completions","aggregationMethod":"sum","aggregationField":"events"}'::json
   )
 ON CONFLICT DO NOTHING;
+
+-- The plan version's EUR rate card (ADR-0008 D2): a 99 EUR flat fee for access, and the graduated
+-- events price the payer budget charges at ingestion.
+INSERT INTO "unprice_rate_cards" ("id", "project_id", "name", "unit", "margin_policy") VALUES (
+  'card_test_advance',
+  'proj_test',
+  'PRO Advance EUR',
+  'money:EUR',
+  '{"type":"manual"}'::jsonb
+) ON CONFLICT DO NOTHING;
+
+INSERT INTO "unprice_rate_card_rows" (
+  "id",
+  "project_id",
+  "rate_card_id",
+  "feature_slug",
+  "match",
+  "price",
+  "cost",
+  "effective_from",
+  "effective_to",
+  "source",
+  "source_ref"
+) VALUES
+  (
+    'row_test_advance_access',
+    'proj_test',
+    'card_test_advance',
+    'access-pro',
+    '{}'::jsonb,
+    '{"type":"flat","amount":"99"}'::jsonb,
+    NULL,
+    0,
+    NULL,
+    'manual',
+    NULL
+  ),
+  (
+    'row_test_advance_events',
+    'proj_test',
+    'card_test_advance',
+    'events',
+    '{}'::jsonb,
+    '{"type":"graduated","property":"events","per":1,"tiers":[{"upTo":1000,"rate":"0.001","flat":"1"},{"upTo":null,"rate":"0.1","flat":"0"}]}'::jsonb,
+    NULL,
+    0,
+    NULL,
+    'manual',
+    NULL
+  )
+ON CONFLICT DO NOTHING;
+
+INSERT INTO "unprice_plan_version_rate_cards" (
+  "id",
+  "project_id",
+  "plan_version_id",
+  "currency",
+  "rate_card_id"
+) VALUES (
+  'pvrc_test_advance',
+  'proj_test',
+  'pv_test_monthly_advance',
+  'EUR',
+  'card_test_advance'
+) ON CONFLICT DO NOTHING;

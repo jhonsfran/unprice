@@ -75,11 +75,11 @@ function createCache(): Cache {
 function createServices(): { logger: Logger; services: ServiceContext } {
   const logger = createLogger()
 
-  const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {})
+  const { analytics, payerBudgets } = createRecordedUsageFixture(db, {})
   return {
     logger,
     services: createServiceContext({
-      reservationFlushGateway,
+      payerBudgets,
       db,
       logger,
       analytics,

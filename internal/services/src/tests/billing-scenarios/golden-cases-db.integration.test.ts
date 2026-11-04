@@ -3,12 +3,11 @@ import { toLedgerMinor } from "@unprice/money"
 import { afterAll, beforeEach, describe, expect, it } from "vitest"
 import type { Cache } from "../../cache"
 import { createServiceContext } from "../../context"
-import { RatingService } from "../../rating/service"
+import { RateCardService } from "../../rate-cards/service"
 import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
 import { billPeriod } from "../../use-cases/billing/bill-period"
 
 import { LATE_EVENT_GRACE_MS } from "../../entitlements"
-import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
 import type { Metrics } from "../../metrics"
 
@@ -185,11 +184,11 @@ describe("DB-backed billing golden cases", () => {
   it("cancellation at the renewal boundary bills the earned period and creates no future charge", async () => {
     const loggerErrors: unknown[] = []
     const logger = createLogger(loggerErrors)
-    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+    const { analytics, payerBudgets } = createRecordedUsageFixture(db, {
       events: { quantity: 1200, amount: 12_000_000_000 },
     })
     const services = createServiceContext({
-      reservationFlushGateway,
+      payerBudgets,
       db,
       logger,
       analytics,
@@ -230,15 +229,11 @@ describe("DB-backed billing golden cases", () => {
     const ensureAccounts = await ledger.ensureCustomerAccounts(customerId, "EUR")
     expect(ensureAccounts.err).toBeUndefined()
     const billed = await billPeriod({
-      reservationFlushGateway,
+      invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
       context: await loadSubscriptionContext(),
       logger,
       db,
       repo: new DrizzleSubscriptionRepository(db),
-      ratingService: new RatingService({
-        logger,
-        grantsManager: new GrantsManager({ db, logger }),
-      }),
       ledgerService: ledger,
     })
     expect(billed.phasesProcessed).toBe(1)
@@ -344,7 +339,7 @@ describe("DB-backed billing golden cases", () => {
 
   it("waits for the late-event grace window before invoicing an arrears statement", async () => {
     const logger = createLogger()
-    const { reservationFlushGateway } = createRecordedUsageFixture(db, {
+    const { payerBudgets } = createRecordedUsageFixture(db, {
       events: { quantity: 1200, amount: 12_000_000_000 },
     })
     const ledger = new LedgerGateway({ db, logger })
@@ -355,15 +350,11 @@ describe("DB-backed billing golden cases", () => {
       logger,
       db,
       repo: new DrizzleSubscriptionRepository(db),
-      ratingService: new RatingService({
-        logger,
-        grantsManager: new GrantsManager({ db, logger }),
-      }),
       ledgerService: ledger,
     }
 
     const tooEarly = await billPeriod({
-      reservationFlushGateway,
+      invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
       ...common,
       context: await loadSubscriptionContext(feb1 + LATE_EVENT_GRACE_MS - 1),
     })
@@ -382,7 +373,7 @@ describe("DB-backed billing golden cases", () => {
     ])
 
     const ready = await billPeriod({
-      reservationFlushGateway,
+      invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
       ...common,
       context: await loadSubscriptionContext(feb1 + LATE_EVENT_GRACE_MS),
     })
@@ -404,7 +395,7 @@ describe("DB-backed billing golden cases", () => {
 
   it("bills an annual DB statement as one yearly invoice with ledger-backed lines", async () => {
     const logger = createLogger()
-    const { reservationFlushGateway } = createRecordedUsageFixture(db, {
+    const { payerBudgets } = createRecordedUsageFixture(db, {
       events: { quantity: 1200, amount: 12_000_000_000 },
     })
     const ledger = new LedgerGateway({ db, logger })
@@ -414,15 +405,11 @@ describe("DB-backed billing golden cases", () => {
     await makeArrearSubscriptionAnnual()
 
     const billed = await billPeriod({
-      reservationFlushGateway,
+      invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
       context: await loadSubscriptionContext(nextYear + LATE_EVENT_GRACE_MS),
       logger,
       db,
       repo: new DrizzleSubscriptionRepository(db),
-      ratingService: new RatingService({
-        logger,
-        grantsManager: new GrantsManager({ db, logger }),
-      }),
       ledgerService: ledger,
     })
     expect(billed.phasesProcessed).toBe(1)

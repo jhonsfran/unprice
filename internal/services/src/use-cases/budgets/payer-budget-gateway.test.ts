@@ -29,6 +29,8 @@ function harness(openUntil: number) {
       calls.push(clock.now)
       return Ok(clock.now < openUntil ? open : synced)
     },
+    seal: async () => Ok({ sealed: [], open: [] }),
+    completeInvoiced: async () => Ok({ completed: [] }),
   }
   const options = {
     now: () => clock.now,
@@ -92,5 +94,41 @@ describe("HttpPayerBudgetGateway", () => {
       })
       expect((await gateway.sync(input)).val).toEqual(body)
     }
+  })
+
+  it("posts a seal to its internal route and parses the sealed statements", async () => {
+    const requests: Request[] = []
+    const answer = {
+      sealed: [
+        {
+          periodId: "events:bp_1",
+          billingPeriodId: "bp_1",
+          statementKey: "stmt_1",
+          featureSlug: "events",
+          start: 0,
+          end: 10,
+          amount: "4200000000",
+          quantity: "300000000",
+          cost: null,
+          events: 3,
+        },
+      ],
+      open: [],
+    }
+    const gateway = new HttpPayerBudgetGateway({
+      baseUrl: "https://api.test/",
+      token: "<API_KEY>",
+      fetch: async (request) => {
+        requests.push(request)
+        return Response.json(answer)
+      },
+    })
+
+    const result = await gateway.seal({ ...input, statementKey: "stmt_1", at: 10 })
+
+    expect(result.val).toEqual(answer)
+    expect(requests.map((request) => request.url)).toEqual([
+      "https://api.test/v1/internal/payer-budgets/seal",
+    ])
   })
 })

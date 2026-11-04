@@ -3,9 +3,8 @@ import type { Customer, Subscription } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logs"
 import { toLedgerMinor } from "@unprice/money"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
-import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
-import { RatingService } from "../../rating/service"
+import { RateCardService } from "../../rate-cards/service"
 import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
 import { billPeriod } from "../../use-cases/billing/bill-period"
 
@@ -74,25 +73,20 @@ async function loadSubscriptionContext(dbForContext: Database): Promise<Subscrip
 
 async function runBillPeriodWorker(dbForWorker: Database) {
   const logger = createLogger()
-  const { reservationFlushGateway } = createRecordedUsageFixture(dbForWorker, {
+  const { payerBudgets } = createRecordedUsageFixture(dbForWorker, {
     events: { quantity: 1200, amount: 12_000_000_000 },
   })
   const ledger = new LedgerGateway({ db: dbForWorker, logger })
-  const rating = new RatingService({
-    logger,
-    grantsManager: new GrantsManager({ db: dbForWorker, logger }),
-  })
   const repo = new DrizzleSubscriptionRepository(dbForWorker)
   const ensureAccounts = await ledger.ensureCustomerAccounts(customerId, "EUR")
   expect(ensureAccounts.err).toBeUndefined()
 
   return billPeriod({
-    reservationFlushGateway,
+    invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
     context: await loadSubscriptionContext(dbForWorker),
     logger,
     db: dbForWorker,
     repo,
-    ratingService: rating,
     ledgerService: ledger,
   })
 }

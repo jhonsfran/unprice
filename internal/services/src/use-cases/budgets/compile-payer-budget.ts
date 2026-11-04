@@ -31,6 +31,16 @@ export function payerBudgetKey(customerId: string): string {
   return `unprice:customer:${customerId}`
 }
 
+/** The statement of one billing period of a metered feature: `<featureSlug>:<billingPeriodId>`. */
+export function statementPeriodId(featureSlug: string, billingPeriodId: string): string {
+  return `${featureSlug}:${billingPeriodId}`
+}
+
+/** The billing period a payer statement belongs to; a feature slug never holds ":". */
+export function billingPeriodIdOf(periodId: string): string {
+  return periodId.slice(periodId.indexOf(":") + 1)
+}
+
 /**
  * Hold timing of every payer budget. A pricing change waits for open holds to close, so the max
  * TTL bounds how long the compile retries one (ADR-0008 D1).
@@ -367,7 +377,7 @@ function statementsOf(phases: readonly Phase[], now: number) {
         const end = phase.endAt !== null && period.end >= phase.endAt ? phase.endAt + 1 : period.end
         if (end <= now - RECORD_ACCEPT_WINDOW_MS || end <= period.start) continue
         const parsed = budgetStatementRegistrationSchema.safeParse({
-          periodId: `${feature.slug}:${period.id}`,
+          periodId: statementPeriodId(feature.slug, period.id),
           statementKey: period.statementKey,
           featureSlug: feature.slug,
           start: period.start,

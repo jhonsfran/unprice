@@ -1,4 +1,3 @@
-import { type BillingUsageSnapshot, billingUsageSnapshotSchema } from "@unprice/services/billing"
 import type { GrantConsumptionState } from "@unprice/services/entitlements"
 import { DO_IDEMPOTENCY_TTL_MS, computeGrantPeriodBucket } from "@unprice/services/entitlements"
 import { asc, desc, eq, inArray, lt, sql } from "drizzle-orm"
@@ -21,7 +20,6 @@ import {
   compactGrantConsumptionStateListSchema,
 } from "./contracts"
 import {
-  billingUsageSnapshotsTable,
   entitlementPeriodUsageTable,
   idempotencyKeyBatchesTable,
   meterStateTable,
@@ -123,42 +121,6 @@ export class EntitlementWindowStore implements EntitlementWindowStateStore {
   // Atomic command boundary
   // -------------------------------------------------------------------
 
-  readBillingUsageSnapshot(
-    periodId: string,
-    handle: SqliteHandle = this.db
-  ): BillingUsageSnapshot | null {
-    const row = handle
-      .select()
-      .from(billingUsageSnapshotsTable)
-      .where(eq(billingUsageSnapshotsTable.billingPeriodId, periodId))
-      .get()
-    return row ? billingUsageSnapshotSchema.parse(JSON.parse(row.snapshotJson)) : null
-  }
-
-  listBillingUsageSnapshots(handle: SqliteHandle = this.db): BillingUsageSnapshot[] {
-    return handle
-      .select()
-      .from(billingUsageSnapshotsTable)
-      .all()
-      .map((row) => billingUsageSnapshotSchema.parse(JSON.parse(row.snapshotJson)))
-  }
-
-  writeBillingUsageSnapshot(snapshot: BillingUsageSnapshot, handle: SqliteHandle = this.db): void {
-    const value = billingUsageSnapshotSchema.parse(snapshot)
-    const row = {
-      billingPeriodId: value.billingPeriodId,
-      state: value.state,
-      snapshotJson: JSON.stringify(value),
-      updatedAt:
-        value.completedAt ?? Math.max(value.cycleEndAt, value.sealedAt ?? value.registeredAt),
-    }
-    handle
-      .insert(billingUsageSnapshotsTable)
-      .values(row)
-      .onConflictDoUpdate({ target: billingUsageSnapshotsTable.billingPeriodId, set: row })
-      .run()
-  }
-
   atomically<T>(fn: (tx: EntitlementWindowStateOps) => T): T {
     try {
       return this.db.transaction((tx) => fn(this.bindOps(tx)))
@@ -170,9 +132,6 @@ export class EntitlementWindowStore implements EntitlementWindowStateStore {
 
   private bindOps(handle: SqliteHandle): EntitlementWindowStateOps {
     return {
-      readBillingUsageSnapshot: (id) => this.readBillingUsageSnapshot(id, handle),
-      writeBillingUsageSnapshot: (snapshot) => this.writeBillingUsageSnapshot(snapshot, handle),
-      listBillingUsageSnapshots: () => this.listBillingUsageSnapshots(handle),
       ensureMeterState: (params) => this.ensureMeterStateIn(handle, params),
       readMeterStateDraft: (meterKey, createdAt) =>
         this.readMeterStateDraftIn(handle, meterKey, createdAt),
@@ -615,11 +574,7 @@ export class EntitlementWindowStore implements EntitlementWindowStateStore {
       .get()?.at
     const lastEventAt = wallet?.lastEventAt ?? null
 
-    const newestBillingAt = this.db
-      .select({ at: sql<number | null>`max(${billingUsageSnapshotsTable.updatedAt})` })
-      .from(billingUsageSnapshotsTable)
-      .get()?.at
-    const candidates = [newestIdempotencyAt, newestMeterAt, lastEventAt, newestBillingAt].filter(
+    const candidates = [newestIdempotencyAt, newestMeterAt, lastEventAt].filter(
       (candidate): candidate is number =>
         typeof candidate === "number" && Number.isFinite(candidate)
     )

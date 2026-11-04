@@ -1,11 +1,6 @@
 import type { OverageStrategy } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logs"
 import { LEDGER_SCALE } from "@unprice/money"
-import type {
-  BillingUsageIdentity,
-  BillingUsageRegistration,
-  BillingUsageSnapshot,
-} from "@unprice/services/billing"
 import {
   AsyncMeterAggregationEngine,
   EventTimestampTooFarInFutureError,
@@ -41,13 +36,6 @@ import {
   createDeniedBatchOutcome,
   planWalletReservationSpend,
 } from "./batch-apply-helpers"
-import {
-  completeBillingPeriods,
-  planBillingEventSnapshot,
-  recordBillingEvent,
-  registerBillingPeriods,
-  sealBillingPeriods,
-} from "./billing-usage"
 import {
   type ActiveGrantInput,
   type ApplyBatchInput,
@@ -683,14 +671,7 @@ export class EntitlementWindowProcessor {
     const meterFacts = pricedFacts.map((pricedFact) =>
       buildMeterFactPayload({ createdAt, input: eventInput, meter: setup.meter, pricedFact })
     )
-    let billingSnapshot: BillingUsageSnapshot | null
     try {
-      billingSnapshot = planBillingEventSnapshot(
-        this.store,
-        eventInput,
-        meterFacts,
-        state.billingUsageSnapshots
-      )
       if (usesWalletReservation && state.wallet) {
         assertSupportedWalletCorrection({
           totalCost: pricedFacts.reduce((total, fact) => total + fact.amountMinor, 0),
@@ -709,8 +690,6 @@ export class EntitlementWindowProcessor {
       })
       return null
     }
-    if (billingSnapshot)
-      state.billingUsageSnapshots.set(billingSnapshot.billingPeriodId, billingSnapshot)
     state.meterStates.set(meterStateKey, eventMeterState)
     state.metrics.priced_fact_count += pricedFacts.length
     state.metrics.grant_allocation_count += touchedStates.size
@@ -1080,10 +1059,6 @@ export class EntitlementWindowProcessor {
 
       tx.writeGrantConsumptions(params.touchedGrantStates.values())
 
-      for (const { entry, timestamp } of params.events) {
-        if (!entry.allowed) continue
-        recordBillingEvent(tx, { ...params.input, event: { timestamp } }, entry.meterFacts)
-      }
       tx.writeBatchIdempotencyResults(idempotencyEntries)
 
       if (params.walletDirty && params.wallet) {
@@ -2081,7 +2056,6 @@ export class EntitlementWindowProcessor {
       denyMessage: null,
       meterFacts,
     }
-    recordBillingEvent(tx, params.input, meterFacts)
     tx.writeBatchIdempotencyResults([idempotencyEntry])
     metrics.idempotencyInsertCount = 1
     return idempotencyEntry
@@ -2279,23 +2253,6 @@ export class EntitlementWindowProcessor {
 
   public async requestDeletion(): Promise<void> {
     return this.alarms.requestDeletion()
-  }
-
-  public async registerBillingPeriods(
-    input: BillingUsageRegistration[]
-  ): Promise<BillingUsageSnapshot[]> {
-    const snapshots = this.store.atomically((tx) => registerBillingPeriods(tx, input))
-    this.alarms.schedulePostCommitAlarm()
-    return snapshots
-  }
-
-  public async sealBillingPeriods(input: BillingUsageIdentity[]): Promise<BillingUsageSnapshot[]> {
-    return this.store.atomically((tx) => sealBillingPeriods(tx, input, this.clock.now()))
-  }
-
-  public async completeBillingPeriods(input: string[]): Promise<void> {
-    this.store.atomically((tx) => completeBillingPeriods(tx, input, this.clock.now()))
-    this.alarms.schedulePostCommitAlarm()
   }
 
   public async flushReservationForInvoicing(

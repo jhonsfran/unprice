@@ -6,8 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { BillingService } from "../billing/service"
 import type { CustomerService } from "../customers/service"
 import type { LedgerGateway } from "../ledger"
-import type { RatingService } from "../rating/service"
-import { createBillingGatewayStub } from "../test-fixtures/billing-gateway"
+import { createInvoicingStub } from "../test-fixtures/billing-gateway"
 import type { SubscriptionRepository } from "./repository"
 import { LockLostError, withLockedMachine } from "./withLockedMachine"
 
@@ -164,7 +163,7 @@ describe("withLockedMachine", () => {
 
 function createDeps(projectId: string, subscriptionId: string, db: Database) {
   return {
-    reservationFlushGateway: createBillingGatewayStub(),
+    invoicing: createInvoicingStub(),
     analytics: {} as Analytics,
     billingService: {
       generateBillingPeriods: vi
@@ -177,7 +176,6 @@ function createDeps(projectId: string, subscriptionId: string, db: Database) {
     logger: createLogger(),
     now: 0,
     projectId,
-    ratingService: {} as RatingService,
     repo: {} as SubscriptionRepository,
     subscriptionId,
   }

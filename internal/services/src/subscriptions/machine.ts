@@ -20,13 +20,12 @@ import type { BillingService } from "../billing/service"
 import type { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
 import type { LedgerGateway } from "../ledger"
-import type { RatingService } from "../rating/service"
+import type { InvoicingPorts } from "../use-cases/billing/bill-period"
 import { deriveActivationInputsFromPlan } from "../use-cases/billing/derive-provision-inputs"
 import {
   type ActivateSubscriptionDeps,
   activateSubscription,
 } from "../use-cases/billing/provision-period"
-import type { BillingReservationFlushGateway } from "../use-cases/billing/reservation-flush-gateway"
 import type { WalletService } from "../wallet"
 import sendCustomerNotification, { logTransition, updateSubscription } from "./actions"
 import {
@@ -75,11 +74,10 @@ export class SubscriptionMachine {
   private now: number
   private customerService: CustomerService
   private grantService: GrantsManager
-  private ratingService: RatingService
   private ledgerService: LedgerGateway
   private walletService: WalletService | null
   private billingService: Pick<BillingService, "generateBillingPeriods">
-  private reservationFlushGateway: BillingReservationFlushGateway
+  private invoicing: InvoicingPorts
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private machine: any
   // Serializes event sends to this actor to avoid concurrent transitions/races.
@@ -94,10 +92,9 @@ export class SubscriptionMachine {
     analytics,
     logger,
     customer,
-    ratingService,
     ledgerService,
     walletService,
-    reservationFlushGateway,
+    invoicing,
     billingService,
     now,
     db,
@@ -108,10 +105,9 @@ export class SubscriptionMachine {
     analytics: Analytics
     logger: Logger
     customer: CustomerService
-    ratingService: RatingService
     ledgerService: LedgerGateway
     walletService?: WalletService
-    reservationFlushGateway: BillingReservationFlushGateway
+    invoicing: InvoicingPorts
     billingService: Pick<BillingService, "generateBillingPeriods">
     now: number
     db: Database
@@ -123,14 +119,13 @@ export class SubscriptionMachine {
     this.logger = logger
     this.now = now
     this.customerService = customer
-    this.ratingService = ratingService
     this.ledgerService = ledgerService
     // Nullable on purpose: older callers that don't wire wallet through
     // skip the `activating` state via a guard; once every caller passes
     // walletService this can become required. See `shouldActivate`.
     this.walletService = walletService ?? null
     this.billingService = billingService
-    this.reservationFlushGateway = reservationFlushGateway
+    this.invoicing = invoicing
     this.db = db
     this.repo = repo
     this.machine = this.createMachineSubscription()
@@ -186,9 +181,8 @@ export class SubscriptionMachine {
               logger: Logger
               db: Database
               repo: SubscriptionRepository
-              ratingService: RatingService
               ledgerService: LedgerGateway
-              reservationFlushGateway: BillingReservationFlushGateway
+              invoicing: InvoicingPorts
             }
           }) => {
             const result = await invoiceSubscription({
@@ -196,9 +190,8 @@ export class SubscriptionMachine {
               logger: input.logger,
               db: input.db,
               repo: input.repo,
-              ratingService: input.ratingService,
               ledgerService: input.ledgerService,
-              reservationFlushGateway: input.reservationFlushGateway,
+              invoicing: input.invoicing,
             })
 
             return result
@@ -571,9 +564,8 @@ export class SubscriptionMachine {
               logger: this.logger,
               db: this.db,
               repo: this.repo,
-              ratingService: this.ratingService,
               ledgerService: this.ledgerService,
-              reservationFlushGateway: this.reservationFlushGateway,
+              invoicing: this.invoicing,
             }),
             onDone: {
               target: "activating",
@@ -1053,10 +1045,9 @@ export class SubscriptionMachine {
     analytics: Analytics
     logger: Logger
     customer: CustomerService
-    ratingService: RatingService
     ledgerService: LedgerGateway
     walletService?: WalletService
-    reservationFlushGateway: BillingReservationFlushGateway
+    invoicing: InvoicingPorts
     billingService: Pick<BillingService, "generateBillingPeriods">
     now: number
     db: Database

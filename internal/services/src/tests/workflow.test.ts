@@ -12,9 +12,9 @@ import { EntitlementService } from "../entitlements/service"
 import { LedgerGateway } from "../ledger"
 import type { Metrics } from "../metrics"
 import { PaymentProviderResolver } from "../payment-provider/resolver"
-import { RatingService } from "../rating/service"
 import { DrizzleSubscriptionRepository } from "../subscriptions/repository.drizzle"
 import { SubscriptionService } from "../subscriptions/service"
+import { createInvoicingStub } from "../test-fixtures/billing-gateway"
 import { createClock } from "../test-utils"
 import { WalletService } from "../wallet"
 
@@ -299,7 +299,6 @@ describe("Workflow - Billing and Subscriptions", () => {
     })
     const customerService = new CustomerService({ ...serviceDeps, paymentProviderResolver })
     const grantsManager = new GrantsManager({ db: mockDb, logger: mockLogger })
-    const ratingService = new RatingService({ ...serviceDeps, grantsManager })
     const ledgerService = new LedgerGateway({
       db: mockDb,
       logger: mockLogger,
@@ -313,9 +312,9 @@ describe("Workflow - Billing and Subscriptions", () => {
       ...serviceDeps,
       customerService,
       grantsManager,
-      ratingService,
       ledgerService,
       walletService,
+      invoicing: createInvoicingStub(),
     })
     const phaseEntitlements: CustomerEntitlement[] = []
     vi.spyOn(EntitlementService.prototype, "getPhaseOwnedEntitlements").mockImplementation(
@@ -395,8 +394,8 @@ describe("Workflow - Billing and Subscriptions", () => {
       customerService,
       entitlementService,
       billingService: _billingService,
-      ratingService,
       ledgerService,
+      invoicing: createInvoicingStub(),
     })
   })
 

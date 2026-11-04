@@ -6,9 +6,8 @@ import * as fc from "fast-check"
 import { afterAll, describe, expect, it, vi } from "vitest"
 import type { ServiceContext } from "../../context"
 import { LATE_EVENT_GRACE_MS } from "../../entitlements"
-import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
-import { RatingService } from "../../rating/service"
+import { RateCardService } from "../../rate-cards/service"
 import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
 import { billPeriod } from "../../use-cases/billing/bill-period"
 
@@ -112,12 +111,8 @@ async function runAdvanceCappedPropertyCase(usage: number) {
   const logger = createLogger()
   const ledger = new LedgerGateway({ db, logger })
   const wallet = new WalletService({ db, logger, ledgerGateway: ledger })
-  const { reservationFlushGateway } = createRecordedUsageFixture(db, {
+  const { payerBudgets } = createRecordedUsageFixture(db, {
     events: { quantity: usage, amount: expectedEventsAmount(usage) },
-  })
-  const rating = new RatingService({
-    logger,
-    grantsManager: new GrantsManager({ db, logger }),
   })
   const repo = new DrizzleSubscriptionRepository(db)
   const services = {
@@ -152,12 +147,11 @@ async function runAdvanceCappedPropertyCase(usage: number) {
   })
 
   const startRun = await billPeriod({
-    reservationFlushGateway,
+    invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
     context: await loadSubscriptionContext(jan1),
     logger,
     db,
     repo,
-    ratingService: rating,
     ledgerService: ledger,
   })
   expect(startRun.phasesProcessed).toBe(1)
@@ -232,21 +226,19 @@ async function runAdvanceCappedPropertyCase(usage: number) {
   })
 
   const usageRun = await billPeriod({
-    reservationFlushGateway,
+    invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
     context: await loadSubscriptionContext(feb1 + LATE_EVENT_GRACE_MS),
     logger,
     db,
     repo,
-    ratingService: rating,
     ledgerService: ledger,
   })
   const rerun = await billPeriod({
-    reservationFlushGateway,
+    invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
     context: await loadSubscriptionContext(feb1 + LATE_EVENT_GRACE_MS),
     logger,
     db,
     repo,
-    ratingService: rating,
     ledgerService: ledger,
   })
   expect(usageRun.phasesProcessed).toBe(1)

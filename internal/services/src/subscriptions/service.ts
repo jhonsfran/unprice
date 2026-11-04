@@ -24,8 +24,7 @@ import { GrantsManager } from "../entitlements/grants"
 import type { EntitlementService } from "../entitlements/service"
 import type { LedgerGateway } from "../ledger"
 import type { Metrics } from "../metrics"
-import type { RatingService } from "../rating/service"
-import type { BillingReservationFlushGateway } from "../use-cases/billing/reservation-flush-gateway"
+import type { InvoicingPorts } from "../use-cases/billing/bill-period"
 import type { PayerBudgetSyncCaller } from "../use-cases/budgets/payer-budget-gateway"
 import type { WalletService } from "../wallet"
 import { UnPriceSubscriptionError } from "./errors"
@@ -99,10 +98,9 @@ export class SubscriptionService {
   private readonly customerService: CustomerService
   private readonly entitlementService: EntitlementService
   private readonly billingService: BillingService
-  private readonly ratingService: RatingService
   private readonly ledgerService: LedgerGateway
   private readonly walletService: WalletService | undefined
-  private readonly reservationFlushGateway: BillingReservationFlushGateway
+  private readonly invoicing: InvoicingPorts
 
   constructor({
     db,
@@ -115,10 +113,9 @@ export class SubscriptionService {
     customerService,
     entitlementService,
     billingService,
-    ratingService,
     ledgerService,
     walletService,
-    reservationFlushGateway,
+    invoicing,
   }: {
     db: Database
     repo: SubscriptionRepository
@@ -131,10 +128,9 @@ export class SubscriptionService {
     customerService: CustomerService
     entitlementService: EntitlementService
     billingService: BillingService
-    ratingService: RatingService
     ledgerService: LedgerGateway
     walletService?: WalletService
-    reservationFlushGateway: BillingReservationFlushGateway
+    invoicing: InvoicingPorts
   }) {
     this.db = db
     this.repo = repo
@@ -145,10 +141,9 @@ export class SubscriptionService {
     this.customerService = customerService
     this.entitlementService = entitlementService
     this.billingService = billingService
-    this.ratingService = ratingService
     this.ledgerService = ledgerService
     this.walletService = walletService
-    this.reservationFlushGateway = reservationFlushGateway
+    this.invoicing = invoicing
   }
 
   private setLockContext(context: {
@@ -1766,9 +1761,43 @@ export class SubscriptionService {
         customerId: subscriptionWithPhases.customerId,
         caller: "request",
       })
+      if (cancelAt <= now) await this.invoiceCanceledNow({ projectId, subscriptionId, cancelAt })
     }
 
     return result
+  }
+
+  /**
+   * A cancel that takes effect now caps the last periods where the subscription ended, then seals
+   * and invoices their statements at the cancel time, without waiting for late usage. A failure is
+   * logged and left to the invoicing job, which invoices a canceled subscription the same way.
+   */
+  private async invoiceCanceledNow(input: {
+    projectId: string
+    subscriptionId: string
+    cancelAt: number
+  }): Promise<void> {
+    const { projectId, subscriptionId, cancelAt } = input
+    const capped = await this.billingService.generateBillingPeriods({
+      projectId,
+      subscriptionId,
+      now: cancelAt,
+    })
+    const invoiced = capped.err
+      ? capped
+      : await this.billingService.invoiceCanceledSubscription({
+          projectId,
+          subscriptionId,
+          now: cancelAt,
+          lateEventGraceMs: 0,
+        })
+    if (invoiced.err) {
+      this.logger.error(invoiced.err, {
+        context: "final invoice of a canceled subscription failed; the invoicing job retries it",
+        projectId,
+        subscriptionId,
+      })
+    }
   }
 
   public async createSubscription({
@@ -1999,11 +2028,10 @@ export class SubscriptionService {
         logger: this.logger,
         analytics: this.analytics,
         customer: this.customerService,
-        ratingService: this.ratingService,
         ledgerService: this.ledgerService,
         walletService: this.walletService,
         billingService: this.billingService,
-        reservationFlushGateway: this.reservationFlushGateway,
+        invoicing: this.invoicing,
         setLockContext: (ctx: Parameters<typeof this.setLockContext>[0]) =>
           this.setLockContext(ctx),
       })
@@ -2123,6 +2151,28 @@ export class SubscriptionService {
       UnPriceSubscriptionError
     >
   > {
+    const subscription = await this.db.query.subscriptions.findFirst({
+      columns: { status: true },
+      where: (row, ops) =>
+        ops.and(ops.eq(row.id, subscriptionId), ops.eq(row.projectId, projectId)),
+    })
+    // A canceled subscription's machine is final; its last statements still bill.
+    if (subscription?.status === "canceled") {
+      const invoiced = await this.billingService.invoiceCanceledSubscription({
+        projectId,
+        subscriptionId,
+        now,
+      })
+      if (invoiced.err) {
+        return Err(
+          new UnPriceSubscriptionError({
+            code: "SUBSCRIPTION_OPERATION_FAILED",
+            message: invoiced.err.message,
+          })
+        )
+      }
+      return Ok({ status: "canceled" })
+    }
     try {
       const status = await this.withSubscriptionMachine({
         subscriptionId,

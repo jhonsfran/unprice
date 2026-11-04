@@ -21,7 +21,7 @@ import type {
   VerifiedProviderWebhook,
 } from "../../payment-provider/interface"
 import type { PaymentProviderService } from "../../payment-provider/service"
-import { RatingService } from "../../rating/service"
+import { RateCardService } from "../../rate-cards/service"
 import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
 import { billPeriod } from "../../use-cases/billing/bill-period"
 
@@ -323,29 +323,23 @@ async function loadSubscriptionContext(): Promise<SubscriptionContext> {
 }
 
 async function createDraftInvoice({
-  reservationFlushGateway,
+  payerBudgets,
   ledger,
   logger,
 }: {
-  reservationFlushGateway: ReturnType<typeof createRecordedUsageFixture>["reservationFlushGateway"]
+  payerBudgets: ReturnType<typeof createRecordedUsageFixture>["payerBudgets"]
   ledger: LedgerGateway
   logger: Logger
 }) {
   const ensureAccounts = await ledger.ensureCustomerAccounts(customerId, "EUR")
   expect(ensureAccounts.err).toBeUndefined()
 
-  const rating = new RatingService({
-    logger,
-    grantsManager: new GrantsManager({ db, logger }),
-  })
-
   const result = await billPeriod({
-    reservationFlushGateway,
+    invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
     context: await loadSubscriptionContext(),
     logger,
     db,
     repo: new DrizzleSubscriptionRepository(db),
-    ratingService: rating,
     ledgerService: ledger,
   })
   expect(result.phasesProcessed).toBe(1)
@@ -393,21 +387,21 @@ function customerServiceFor(provider: AsyncWebhookPaymentProvider): CustomerServ
 
 function createBillingService({
   analytics,
-  reservationFlushGateway,
+  payerBudgets,
   ledger,
   logger,
   provider,
   wallet,
 }: {
   analytics: Analytics
-  reservationFlushGateway: ReturnType<typeof createRecordedUsageFixture>["reservationFlushGateway"]
+  payerBudgets: ReturnType<typeof createRecordedUsageFixture>["payerBudgets"]
   ledger: LedgerGateway
   logger: Logger
   provider: AsyncWebhookPaymentProvider
   wallet: WalletService
 }) {
   return new BillingService({
-    reservationFlushGateway,
+    invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
     db,
     logger,
     analytics,
@@ -418,10 +412,6 @@ function createBillingService({
     metrics: {} as Metrics,
     customerService: customerServiceFor(provider),
     grantsManager: new GrantsManager({ db, logger }),
-    ratingService: new RatingService({
-      logger,
-      grantsManager: new GrantsManager({ db, logger }),
-    }),
     ledgerService: ledger,
     walletService: wallet,
   })
@@ -624,14 +614,14 @@ async function processProviderWebhook({
 
 function createLifecycleRuntime(loggerErrors: unknown[] = []) {
   const logger = createLogger(loggerErrors)
-  const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+  const { analytics, payerBudgets } = createRecordedUsageFixture(db, {
     events: { quantity: 1200, amount: 12_000_000_000 },
   })
   const waitUntil = vi.fn((promise: Promise<unknown>) => {
     void promise
   })
   const services = createServiceContext({
-    reservationFlushGateway,
+    payerBudgets,
     db,
     logger,
     analytics,
@@ -642,24 +632,24 @@ function createLifecycleRuntime(loggerErrors: unknown[] = []) {
   const provider = new AsyncWebhookPaymentProvider()
   const billing = createBillingService({
     analytics,
-    reservationFlushGateway,
+    payerBudgets,
     ledger: services.ledger,
     logger,
     provider,
     wallet: services.wallet,
   })
 
-  return { analytics, reservationFlushGateway, billing, logger, provider, services, waitUntil }
+  return { analytics, payerBudgets, billing, logger, provider, services, waitUntil }
 }
 
 async function prepareCollectedUnpaidInvoice({
-  reservationFlushGateway,
+  payerBudgets,
   billing,
   logger,
   services,
 }: ReturnType<typeof createLifecycleRuntime>) {
   const invoiceId = await createDraftInvoice({
-    reservationFlushGateway,
+    payerBudgets,
     ledger: services.ledger,
     logger,
   })
@@ -701,14 +691,14 @@ describe("paid invoice lifecycle integration", () => {
   it("bills, finalizes, collects asynchronously, processes the paid webhook, settles receivables, and dedupes replay", async () => {
     const loggerErrors: unknown[] = []
     const logger = createLogger(loggerErrors)
-    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+    const { analytics, payerBudgets } = createRecordedUsageFixture(db, {
       events: { quantity: 1200, amount: 12_000_000_000 },
     })
     const waitUntil = vi.fn((promise: Promise<unknown>) => {
       void promise
     })
     const services = createServiceContext({
-      reservationFlushGateway,
+      payerBudgets,
       db,
       logger,
       analytics,
@@ -719,14 +709,14 @@ describe("paid invoice lifecycle integration", () => {
     const provider = new AsyncWebhookPaymentProvider()
     const billing = createBillingService({
       analytics,
-      reservationFlushGateway,
+      payerBudgets,
       ledger: services.ledger,
       logger,
       provider,
       wallet: services.wallet,
     })
     const invoiceId = await createDraftInvoice({
-      reservationFlushGateway,
+      payerBudgets,
       ledger: services.ledger,
       logger,
     })
@@ -947,14 +937,14 @@ describe("paid invoice lifecycle integration", () => {
   it("persists a failed webhook attempt when settlement fails, then recovers on provider replay", async () => {
     const loggerErrors: unknown[] = []
     const logger = createLogger(loggerErrors)
-    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+    const { analytics, payerBudgets } = createRecordedUsageFixture(db, {
       events: { quantity: 1200, amount: 12_000_000_000 },
     })
     const waitUntil = vi.fn((promise: Promise<unknown>) => {
       void promise
     })
     const services = createServiceContext({
-      reservationFlushGateway,
+      payerBudgets,
       db,
       logger,
       analytics,
@@ -966,14 +956,14 @@ describe("paid invoice lifecycle integration", () => {
     const flakyWallet = walletWithFirstSettlementFailure(services.wallet)
     const billing = createBillingService({
       analytics,
-      reservationFlushGateway,
+      payerBudgets,
       ledger: services.ledger,
       logger,
       provider,
       wallet: services.wallet,
     })
     const invoiceId = await createDraftInvoice({
-      reservationFlushGateway,
+      payerBudgets,
       ledger: services.ledger,
       logger,
     })

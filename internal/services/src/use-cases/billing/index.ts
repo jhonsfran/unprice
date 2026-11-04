@@ -10,11 +10,12 @@
  * |---------------|----------------------------------------------------------|
  * | PROVISION     | `provision-period.ts` + `derive-provision-inputs.ts`     |
  * |               | (issued grants per period; XState `activating` actor)    |
- * | METER         | `ingestion/*` + `entitlements/EntitlementWindowDO`       |
- * |               | (event ingest + DO buffering — no use case)              |
- * | RATE          | `rating/service.ts ::rateBillingPeriod` (pure pricing)   |
+ * | METER + RATE  | the payer budget (`BudgetDO`) prices usage at ingestion  |
+ * |               | into per-period statements (ADR-0008 D4)                 |
  * | RESERVE/DRAW  | `wallet/service.ts ::createReservation, capture/extend/release` |
- * | BILL          | `bill-period.ts` (XState `invoicing` actor)              |
+ * | BILL          | `bill-period.ts` (XState `invoicing` actor): seals the   |
+ * |               | statement key, bills each statement and the card's       |
+ * |               | recurring rows, completes the statements                 |
  * | SETTLE        | `settle-invoice.ts` (webhook + sync paths)               |
  * | RENEW         | `renew-period.ts` (XState `renewing` actor)              |
  *
@@ -46,24 +47,3 @@ export {
 export type { ExplainChargeDeps, ExplainChargeInput, ExplainChargeOutput } from "./explain-charge"
 export { renewPeriod } from "./renew-period"
 export { settlePrepaidInvoiceToWallet } from "./settle-invoice"
-export {
-  billingUsageOperationSchema,
-  billingUsageOperationOutputSchema,
-  processBillingUsageSnapshots,
-} from "./usage-snapshots"
-export { HttpBillingReservationFlushGateway } from "./reservation-flush-gateway"
-export type { BillingReservationFlushGateway } from "./reservation-flush-gateway"
-export {
-  FlushReservationsForInvoicingError,
-  flushReservationsForInvoicing,
-  flushReservationsForInvoicingErrorReasonSchema,
-  flushReservationsForInvoicingInputSchema,
-  flushReservationsForInvoicingOutputSchema,
-} from "./flush-reservations-for-invoicing"
-export type {
-  FlushReservationsForInvoicingDeps,
-  FlushReservationsForInvoicingErrorReason,
-  FlushReservationsForInvoicingInput,
-  FlushReservationsForInvoicingOutput,
-  InvoicingEntitlementWindowClient,
-} from "./flush-reservations-for-invoicing"

@@ -3,21 +3,19 @@ import { dinero } from "dinero.js"
 import { describe, expect, it, vi } from "vitest"
 import type { LedgerGateway } from "../../ledger"
 import { UnPriceLedgerError } from "../../ledger/errors"
-import { UnPriceRatingError } from "../../rating/errors"
-import type { RatingService } from "../../rating/service"
 import type { SubscriptionRepository } from "../../subscriptions/repository"
-import { createBillingGatewayStub } from "../../test-fixtures/billing-gateway"
 import { billPeriod } from "./bill-period"
 import {
   makeBillingPeriod,
   makeContext,
   makeDb,
+  makeInvoicing,
   makeLedgerService,
   makeLogger,
   makePeriodGroup,
   makePhase,
-  makeRatingService,
   makeRepo,
+  makeStatementLine,
   repositories,
   usd,
 } from "./bill-period.test-fixture"
@@ -32,23 +30,22 @@ vi.mock("../../billing/repository.drizzle", () => ({
 describe("billPeriod", () => {
   it("happy path: single period group with one flat-fee period — rates, posts, creates invoice, marks invoiced", async () => {
     const db = makeDb()
-    const ratingService = makeRatingService()
+    const invoicing = makeInvoicing()
     const ledgerService = makeLedgerService()
     const repo = makeRepo()
     const logger = makeLogger()
 
     const result = await billPeriod({
-      reservationFlushGateway: createBillingGatewayStub(),
       context: makeContext(),
       logger,
       db,
       repo,
-      ratingService,
+      invoicing,
       ledgerService,
     })
 
     expect(result.phasesProcessed).toBe(1)
-    expect(ratingService.rateBillingPeriod).toHaveBeenCalledTimes(1)
+    expect(invoicing.rateCards.getEffectiveRows).toHaveBeenCalledTimes(1)
     expect(ledgerService.createTransfer).toHaveBeenCalledTimes(1)
     expect(repositories.tx.createInvoice).toHaveBeenCalledTimes(1)
     expect(repositories.tx.updateInvoice).toHaveBeenCalledTimes(1)
@@ -95,22 +92,21 @@ describe("billPeriod", () => {
     } as unknown as Partial<LedgerGateway>)
 
     const db = makeDb()
-    const ratingService = makeRatingService()
+    const invoicing = makeInvoicing()
     const repo = makeRepo()
     const logger = makeLogger()
 
     const result = await billPeriod({
-      reservationFlushGateway: createBillingGatewayStub(),
       context: makeContext(),
       logger,
       db,
       repo,
-      ratingService,
+      invoicing,
       ledgerService,
     })
 
     expect(result.phasesProcessed).toBe(1)
-    expect(ratingService.rateBillingPeriod).toHaveBeenCalledTimes(2)
+    expect(invoicing.rateCards.getEffectiveRows).toHaveBeenCalledTimes(1)
     expect(ledgerService.createTransfer).toHaveBeenCalledTimes(2)
     expect(repositories.tx.createInvoice).toHaveBeenCalledTimes(1)
     expect(repositories.tx.updateInvoice).toHaveBeenCalledTimes(1)
@@ -131,21 +127,7 @@ describe("billPeriod", () => {
     const trialPeriod = makeBillingPeriod({ type: "trial" })
     repositories.tx.listPendingPeriodsForStatement = vi.fn().mockResolvedValue([trialPeriod])
 
-    // Rating returns zero amount
-    const ratingService = {
-      rateBillingPeriod: vi.fn().mockResolvedValue(
-        Ok([
-          {
-            price: {
-              totalPrice: { dinero: dinero({ amount: 0, currency: usd, scale: 8 }) },
-              unitPrice: { dinero: dinero({ amount: 0, currency: usd, scale: 8 }) },
-            },
-            usage: 0,
-            prorate: 0,
-          },
-        ])
-      ),
-    } as unknown as RatingService
+    const invoicing = makeInvoicing()
 
     // No lines since nothing was posted
     const ledgerService = makeLedgerService({
@@ -157,12 +139,11 @@ describe("billPeriod", () => {
     const logger = makeLogger()
 
     const result = await billPeriod({
-      reservationFlushGateway: createBillingGatewayStub(),
       context: makeContext(),
       logger,
       db,
       repo,
-      ratingService,
+      invoicing,
       ledgerService,
     })
 
@@ -176,52 +157,47 @@ describe("billPeriod", () => {
     repositories.tx.listPendingPeriodsForStatement = vi.fn().mockResolvedValue([])
 
     const db = makeDb()
-    const ratingService = makeRatingService()
+    const invoicing = makeInvoicing()
     const ledgerService = makeLedgerService()
     const repo = makeRepo()
     const logger = makeLogger()
 
     const result = await billPeriod({
-      reservationFlushGateway: createBillingGatewayStub(),
       context: makeContext(),
       logger,
       db,
       repo,
-      ratingService,
+      invoicing,
       ledgerService,
     })
 
     expect(result.phasesProcessed).toBe(1)
-    expect(ratingService.rateBillingPeriod).not.toHaveBeenCalled()
+    expect(invoicing.payerBudgets.seal).not.toHaveBeenCalled()
     expect(ledgerService.createTransfer).not.toHaveBeenCalled()
     expect(repositories.tx.createInvoice).not.toHaveBeenCalled()
     expect(repositories.tx.markPeriodsInvoiced).not.toHaveBeenCalled()
   })
 
-  it("rating failure aborts the transaction (throws), no invoice created", async () => {
-    const ratingError = new UnPriceRatingError({ message: "Rating engine unavailable" })
-    const ratingService = {
-      rateBillingPeriod: vi.fn().mockResolvedValue(Err(ratingError)),
-    } as unknown as RatingService
-
-    const db = makeDb()
-    const ledgerService = makeLedgerService()
-    const repo = makeRepo()
-    const logger = makeLogger()
+  it("refuses to invoice money from a card priced in credits", async () => {
+    const invoicing = makeInvoicing()
+    invoicing.rateCards.cardForPlanVersion.mockResolvedValue({
+      planVersionId: "pv_1",
+      currency: "USD",
+      cardId: "card_credits",
+      unit: "credits:ai",
+    })
 
     await expect(
       billPeriod({
-        reservationFlushGateway: createBillingGatewayStub(),
         context: makeContext(),
-        logger,
-        db,
-        repo,
-        ratingService,
-        ledgerService,
+        logger: makeLogger(),
+        db: makeDb(),
+        repo: makeRepo(),
+        invoicing,
+        ledgerService: makeLedgerService(),
       })
-    ).rejects.toThrow(ratingError)
+    ).rejects.toThrow(/prices in credits:ai/)
 
-    expect(ledgerService.createTransfer).not.toHaveBeenCalled()
     expect(repositories.tx.createInvoice).not.toHaveBeenCalled()
   })
 
@@ -232,18 +208,17 @@ describe("billPeriod", () => {
     } as unknown as Partial<LedgerGateway>)
 
     const db = makeDb()
-    const ratingService = makeRatingService()
+    const invoicing = makeInvoicing()
     const repo = makeRepo()
     const logger = makeLogger()
 
     await expect(
       billPeriod({
-        reservationFlushGateway: createBillingGatewayStub(),
         context: makeContext(),
         logger,
         db,
         repo,
-        ratingService,
+        invoicing,
         ledgerService,
       })
     ).rejects.toThrow("LEDGER_TRANSFER_FAILED")
@@ -256,23 +231,22 @@ describe("billPeriod", () => {
 
     const futureInvoiceAt = 1_700_100_000_000
     const db = makeDb({ nextPendingPeriod: [{ invoiceAt: futureInvoiceAt }] })
-    const ratingService = makeRatingService()
+    const invoicing = makeInvoicing()
     const ledgerService = makeLedgerService()
     const repo = makeRepo()
     const logger = makeLogger()
 
     await expect(
       billPeriod({
-        reservationFlushGateway: createBillingGatewayStub(),
         context: makeContext(),
         logger,
         db,
         repo,
-        ratingService,
+        invoicing,
         ledgerService,
       })
     ).rejects.toThrow("Cannot invoice subscription, next invoice date is at")
-    expect(ratingService.rateBillingPeriod).not.toHaveBeenCalled()
+    expect(invoicing.payerBudgets.seal).not.toHaveBeenCalled()
     expect(ledgerService.createTransfer).not.toHaveBeenCalled()
   })
 
@@ -280,23 +254,22 @@ describe("billPeriod", () => {
     repositories.outer.listPendingPeriodGroups = vi.fn().mockResolvedValue([])
 
     const db = makeDb({ nextPendingPeriod: [{ invoiceAt: 1_699_999_999_999 }] })
-    const ratingService = makeRatingService()
+    const invoicing = makeInvoicing()
     const ledgerService = makeLedgerService()
     const repo = makeRepo()
     const logger = makeLogger()
 
     const result = await billPeriod({
-      reservationFlushGateway: createBillingGatewayStub(),
       context: makeContext(),
       logger,
       db,
       repo,
-      ratingService,
+      invoicing,
       ledgerService,
     })
 
     expect(result.phasesProcessed).toBe(0)
-    expect(ratingService.rateBillingPeriod).not.toHaveBeenCalled()
+    expect(invoicing.payerBudgets.seal).not.toHaveBeenCalled()
     expect(ledgerService.createTransfer).not.toHaveBeenCalled()
   })
 
@@ -304,25 +277,24 @@ describe("billPeriod", () => {
     repositories.outer.listPendingPeriodGroups = vi.fn().mockResolvedValue([])
 
     const db = makeDb({ nextPendingPeriod: [] })
-    const ratingService = makeRatingService()
+    const invoicing = makeInvoicing()
     const ledgerService = makeLedgerService()
     const repo = makeRepo()
     const logger = makeLogger()
 
     await expect(
       billPeriod({
-        reservationFlushGateway: createBillingGatewayStub(),
         context: makeContext(),
         logger,
         db,
         repo,
-        ratingService,
+        invoicing,
         ledgerService,
       })
     ).rejects.toThrow(
       "Cannot invoice subscription, there are no pending billing periods to invoice"
     )
-    expect(ratingService.rateBillingPeriod).not.toHaveBeenCalled()
+    expect(invoicing.payerBudgets.seal).not.toHaveBeenCalled()
     expect(ledgerService.createTransfer).not.toHaveBeenCalled()
   })
 
@@ -330,40 +302,38 @@ describe("billPeriod", () => {
     repositories.outer.listPendingPeriodGroups = vi.fn().mockResolvedValue([])
 
     const db = makeDb({ invoicedPeriod: [{ id: "bp_1" }] })
-    const ratingService = makeRatingService()
+    const invoicing = makeInvoicing()
     const ledgerService = makeLedgerService()
     const repo = makeRepo()
     const logger = makeLogger()
 
     const result = await billPeriod({
-      reservationFlushGateway: createBillingGatewayStub(),
       context: makeContext(),
       logger,
       db,
       repo,
-      ratingService,
+      invoicing,
       ledgerService,
     })
 
     expect(result.phasesProcessed).toBe(0)
-    expect(ratingService.rateBillingPeriod).not.toHaveBeenCalled()
+    expect(invoicing.payerBudgets.seal).not.toHaveBeenCalled()
     expect(ledgerService.createTransfer).not.toHaveBeenCalled()
   })
 
   it("advisory lock SQL uses correct key format: bill:{projectId}:{statementKey}", async () => {
     const db = makeDb()
-    const ratingService = makeRatingService()
+    const invoicing = makeInvoicing()
     const ledgerService = makeLedgerService()
     const repo = makeRepo()
     const logger = makeLogger()
 
     await billPeriod({
-      reservationFlushGateway: createBillingGatewayStub(),
       context: makeContext(),
       logger,
       db,
       repo,
-      ratingService,
+      invoicing,
       ledgerService,
     })
 
@@ -377,69 +347,166 @@ describe("billPeriod", () => {
     expect(lockCall).toBeDefined()
   })
 
-  it("negative amount period — logs warning and skips ledger posting", async () => {
-    // Rating returns a negative amount (credit scenario)
-    const ratingService = {
-      rateBillingPeriod: vi.fn().mockResolvedValue(
-        Ok([
-          {
-            price: {
-              totalPrice: { dinero: dinero({ amount: -500_0000_00, currency: usd, scale: 8 }) },
-              unitPrice: { dinero: dinero({ amount: -50_0000_00, currency: usd, scale: 8 }) },
-            },
-            usage: 10,
-            prorate: 1,
-          },
-        ])
-      ),
-    } as unknown as RatingService
-
-    // No lines since posting is skipped
+  it("bills a metered period with the amount its statement priced at ingestion", async () => {
+    const usage = makeBillingPeriod({
+      subscriptionItem: {
+        id: "item_1",
+        units: null,
+        featurePlanVersion: {
+          id: "fpv_1",
+          featureType: "usage",
+          billingConfig: {},
+          feature: { slug: "api-calls", title: "API Calls" },
+        },
+      },
+    })
+    repositories.tx.listPendingPeriodsForStatement = vi.fn().mockResolvedValue([usage])
+    const invoicing = makeInvoicing({ sealed: [makeStatementLine({ amount: "4200000000" })] })
     const ledgerService = makeLedgerService({
       getInvoiceLines: vi.fn().mockResolvedValue(Ok([])),
     } as unknown as Partial<LedgerGateway>)
 
-    const db = makeDb()
-    const repo = makeRepo()
-    const logger = makeLogger()
-
-    const result = await billPeriod({
-      reservationFlushGateway: createBillingGatewayStub(),
+    await billPeriod({
       context: makeContext(),
-      logger,
-      db,
-      repo,
-      ratingService,
+      logger: makeLogger(),
+      db: makeDb({ statementPeriods: [usage] }),
+      repo: makeRepo(),
+      invoicing,
       ledgerService,
     })
 
-    expect(result.phasesProcessed).toBe(1)
-    // Negative amount should skip the ledger transfer
+    expect(invoicing.payerBudgets.seal).toHaveBeenCalledWith({
+      projectId: "proj_1",
+      customerId: "cust_1",
+      statementKey: "stmt_2026_04",
+      at: usage.cycleEndAt + 1,
+    })
+    const transfer = vi.mocked(ledgerService.createTransfer).mock.calls[0]?.[0]
+    expect(transfer?.amount.toJSON().amount).toBe(4_200_000_000)
+    expect(transfer?.metadata).toMatchObject({
+      kind: "usage",
+      quantity: 12,
+      feature_slug: "api-calls",
+    })
+    expect(invoicing.payerBudgets.completeInvoiced).toHaveBeenCalledTimes(2)
+  })
+
+  it("bills nothing for a metered period whose statement was never registered", async () => {
+    const usage = makeBillingPeriod({
+      subscriptionItem: {
+        id: "item_1",
+        units: null,
+        featurePlanVersion: {
+          id: "fpv_1",
+          featureType: "usage",
+          billingConfig: {},
+          feature: { slug: "api-calls", title: "API Calls" },
+        },
+      },
+    })
+    repositories.tx.listPendingPeriodsForStatement = vi.fn().mockResolvedValue([usage])
+    const ledgerService = makeLedgerService({
+      getInvoiceLines: vi.fn().mockResolvedValue(Ok([])),
+    } as unknown as Partial<LedgerGateway>)
+
+    await billPeriod({
+      context: makeContext(),
+      logger: makeLogger(),
+      db: makeDb({ statementPeriods: [usage] }),
+      repo: makeRepo(),
+      invoicing: makeInvoicing(),
+      ledgerService,
+    })
+
     expect(ledgerService.createTransfer).not.toHaveBeenCalled()
-    // But invoice should still be created (empty) and periods marked
-    expect(repositories.tx.createInvoice).toHaveBeenCalledTimes(1)
     expect(repositories.tx.markPeriodsInvoiced).toHaveBeenCalledTimes(1)
-    // Logger should have warned about the negative amount
-    expect(logger.warn).toHaveBeenCalled()
+  })
+
+  it("waits while a metered period's statement is still open", async () => {
+    const usage = makeBillingPeriod({
+      subscriptionItem: {
+        id: "item_1",
+        units: null,
+        featurePlanVersion: {
+          id: "fpv_1",
+          featureType: "usage",
+          billingConfig: {},
+          feature: { slug: "api-calls", title: "API Calls" },
+        },
+      },
+    })
+    const invoicing = makeInvoicing({ open: ["api-calls:bp_1"] })
+
+    await expect(
+      billPeriod({
+        context: makeContext(),
+        logger: makeLogger(),
+        db: makeDb({ statementPeriods: [usage] }),
+        repo: makeRepo(),
+        invoicing,
+        ledgerService: makeLedgerService(),
+      })
+    ).rejects.toThrow(/still has open usage for bp_1/)
+
+    expect(repositories.tx.createInvoice).not.toHaveBeenCalled()
+  })
+
+  it("prorates a recurring row over a period shorter than its cycle", async () => {
+    const period = makeBillingPeriod({
+      cycleStartAt: Date.UTC(2026, 0, 1),
+      cycleEndAt: Date.UTC(2026, 0, 16),
+      subscriptionItem: {
+        id: "item_1",
+        units: 1,
+        featurePlanVersion: {
+          id: "fpv_1",
+          featureType: "flat",
+          billingConfig: {
+            name: "monthly",
+            billingInterval: "month",
+            billingIntervalCount: 1,
+            billingAnchor: 1,
+            planType: "recurring",
+          },
+          feature: { slug: "api-calls", title: "API Calls" },
+        },
+      },
+    })
+    repositories.tx.listPendingPeriodsForStatement = vi.fn().mockResolvedValue([period])
+    const ledgerService = makeLedgerService({
+      getInvoiceLines: vi.fn().mockResolvedValue(Ok([])),
+    } as unknown as Partial<LedgerGateway>)
+
+    await billPeriod({
+      context: makeContext(),
+      logger: makeLogger(),
+      db: makeDb({ statementPeriods: [period] }),
+      repo: makeRepo(makePhase({ startAt: Date.UTC(2026, 0, 1) })),
+      invoicing: makeInvoicing(),
+      ledgerService,
+    })
+
+    const transfer = vi.mocked(ledgerService.createTransfer).mock.calls[0]?.[0]
+    // 15 of January's 31 days of a $1000 fee.
+    expect(transfer?.amount.toJSON().amount).toBe(Math.round(1000_0000_0000 * (15 / 31)))
   })
 
   it("invoice upsert returns null — throws and aborts transaction", async () => {
     repositories.tx.createInvoice = vi.fn().mockResolvedValue(null)
 
     const db = makeDb()
-    const ratingService = makeRatingService()
+    const invoicing = makeInvoicing()
     const ledgerService = makeLedgerService()
     const repo = makeRepo()
     const logger = makeLogger()
 
     await expect(
       billPeriod({
-        reservationFlushGateway: createBillingGatewayStub(),
         context: makeContext(),
         logger,
         db,
         repo,
-        ratingService,
+        invoicing,
         ledgerService,
       })
     ).rejects.toThrow(/Invoice upsert returned no row/)
@@ -462,17 +529,16 @@ describe("billPeriod", () => {
     } as unknown as SubscriptionRepository
 
     const db = makeDb()
-    const ratingService = makeRatingService()
+    const invoicing = makeInvoicing()
     const ledgerService = makeLedgerService()
     const logger = makeLogger()
 
     const result = await billPeriod({
-      reservationFlushGateway: createBillingGatewayStub(),
       context: makeContext(),
       logger,
       db,
       repo,
-      ratingService,
+      invoicing,
       ledgerService,
     })
 
@@ -483,76 +549,52 @@ describe("billPeriod", () => {
     expect(repositories.tx.createInvoice).toHaveBeenCalledTimes(1)
   })
 
-  it("blocks invoicing when reservation flush gateway fails", async () => {
-    const db = makeDb()
-    const ratingService = makeRatingService()
+  it("blocks invoicing when the seal fails", async () => {
+    const usage = makeBillingPeriod({
+      subscriptionItem: {
+        id: "item_1",
+        units: null,
+        featurePlanVersion: {
+          id: "fpv_1",
+          featureType: "usage",
+          billingConfig: {},
+          feature: { slug: "api-calls", title: "API Calls" },
+        },
+      },
+    })
+    const invoicing = makeInvoicing()
+    invoicing.payerBudgets.seal.mockResolvedValue(
+      Err(new FetchError({ message: "seal failed", retry: true }))
+    )
     const ledgerService = makeLedgerService()
-    const repo = makeRepo()
-    const logger = makeLogger()
-    const reservationFlushGateway = {
-      registerPeriods: vi.fn().mockResolvedValue(Ok(undefined)),
-      completeForInvoicing: vi.fn().mockResolvedValue(Ok(undefined)),
-      flushForInvoicing: vi.fn().mockResolvedValue(
-        Err(
-          new FetchError({
-            message: "reservation flush deferred",
-            retry: true,
-            context: {
-              url: "/v1/internal/billing-reservations/flush-for-invoicing",
-              method: "POST",
-            },
-          })
-        )
-      ),
-    }
 
     await expect(
       billPeriod({
         context: makeContext(),
-        logger,
-        db,
-        repo,
-        ratingService,
+        logger: makeLogger(),
+        db: makeDb({ statementPeriods: [usage] }),
+        repo: makeRepo(),
+        invoicing,
         ledgerService,
-        reservationFlushGateway,
       })
-    ).rejects.toThrow("reservation flush deferred")
+    ).rejects.toThrow("seal failed")
 
-    // Rating and ledger should not have been reached
-    expect(ratingService.rateBillingPeriod).not.toHaveBeenCalled()
     expect(ledgerService.createTransfer).not.toHaveBeenCalled()
   })
 
-  it("proceeds with invoicing when reservation flush gateway succeeds", async () => {
-    const db = makeDb()
-    const ratingService = makeRatingService()
-    const ledgerService = makeLedgerService()
-    const repo = makeRepo()
-    const logger = makeLogger()
-    const reservationFlushGateway = {
-      registerPeriods: vi.fn().mockResolvedValue(Ok(undefined)),
-      completeForInvoicing: vi.fn().mockResolvedValue(Ok(undefined)),
-      flushForInvoicing: vi.fn().mockResolvedValue(Ok({ snapshots: [], flushed: 0, skipped: 0 })),
-    }
+  it("seals nothing for a statement without metered periods", async () => {
+    const invoicing = makeInvoicing()
 
-    const result = await billPeriod({
+    await billPeriod({
       context: makeContext(),
-      logger,
-      db,
-      repo,
-      ratingService,
-      ledgerService,
-      reservationFlushGateway,
+      logger: makeLogger(),
+      db: makeDb(),
+      repo: makeRepo(),
+      invoicing,
+      ledgerService: makeLedgerService(),
     })
 
-    expect(result.phasesProcessed).toBe(1)
-    expect(reservationFlushGateway.flushForInvoicing).toHaveBeenCalledWith({
-      projectId: "proj_1",
-      customerId: "cust_1",
-      subscriptionId: "sub_1",
-      subscriptionPhaseId: "phase_1",
-      statementKey: "stmt_2026_04",
-    })
+    expect(invoicing.payerBudgets.seal).not.toHaveBeenCalled()
     expect(repositories.tx.createInvoice).toHaveBeenCalledTimes(1)
   })
 })

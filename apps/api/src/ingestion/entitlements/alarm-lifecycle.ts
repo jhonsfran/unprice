@@ -5,7 +5,6 @@ import {
   type ReservationPolicy,
   updateSpendVelocity,
 } from "@unprice/services/wallet/reservation-sizing"
-import { hasRetainedBillingUsage } from "./billing-usage"
 import { FLUSH_INTERVAL_MS, IDEMPOTENCY_CLEANUP_INTERVAL_MS } from "./constants"
 import type {
   CloseReservationOptions,
@@ -581,7 +580,6 @@ export class AlarmLifecycle {
   // The reservation stays open so new events continue being tracked.
 
   private isCleanupComplete(window: WalletReservationSnapshot): boolean {
-    if (hasRetainedBillingUsage(this.store, this.clock.now())) return false
     return !window?.reservationId && !window?.recoveryRequired && !hasPendingWalletFlush(window)
   }
 

@@ -86,7 +86,7 @@ function createHarness() {
       store.cacheCardsAt(clock.now, ...cards)
     },
   }
-  const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {})
+  const { analytics } = createRecordedUsageFixture(db, {})
   let deps: SyncPayerBudgetDeps | null = null
   const ready = () => {
     if (!deps) throw new Error("harness not ready")
@@ -95,7 +95,6 @@ function createHarness() {
   // As the API wires it: the sync runs in process.
   const gateway = new InProcessPayerBudgetGateway(ready)
   const services: ServiceContext = createServiceContext({
-    reservationFlushGateway,
     payerBudgets: gateway,
     db,
     logger,
@@ -165,13 +164,24 @@ async function priceWithCard(planVersionId: string, cardId: string, rate: string
     source: "manual",
     sourceRef: null,
   })
-  await db.insert(planVersionRateCards).values({
-    id: `pvrc_${planVersionId}`,
-    projectId,
-    planVersionId,
-    currency: "EUR",
-    rateCardId: cardId,
-  })
+  // The seeded plan already prices with its own card; this one replaces it.
+  await db
+    .insert(planVersionRateCards)
+    .values({
+      id: `pvrc_${planVersionId}`,
+      projectId,
+      planVersionId,
+      currency: "EUR",
+      rateCardId: cardId,
+    })
+    .onConflictDoUpdate({
+      target: [
+        planVersionRateCards.projectId,
+        planVersionRateCards.planVersionId,
+        planVersionRateCards.currency,
+      ],
+      set: { rateCardId: cardId },
+    })
 }
 
 /**
@@ -228,6 +238,31 @@ function eventsLimit(store: MemoryBudgetStore, clockMs: number) {
   const { budget } = result.val.outcome
   const limit = budget.balance.limits.find((row) => row.measure.type === "quantity")
   return { budget, limit }
+}
+
+/** The usage lines of the subscription's invoices: what each sealed statement billed. */
+async function usageLines(services: ServiceContext) {
+  const invoices = await db.query.invoices.findMany({
+    where: (row, ops) =>
+      ops.and(ops.eq(row.projectId, projectId), ops.eq(row.subscriptionId, subscriptionId)),
+  })
+  const lines = []
+  for (const invoice of invoices) {
+    const ledger = await services.ledger.getInvoiceLines({
+      projectId,
+      statementKey: invoice.statementKey,
+    })
+    if (ledger.err) throw ledger.err
+    for (const line of ledger.val) {
+      if (line.metadata?.kind !== "usage") continue
+      lines.push({
+        billingPeriodId: line.metadata.billing_period_id,
+        amount: Number(line.amount.toJSON().amount),
+        quantity: line.metadata.quantity,
+      })
+    }
+  }
+  return lines
 }
 
 /** A decimal at the ledger scale, as budget amounts and quantities are held. */
@@ -363,6 +398,43 @@ describe("payer budget sync over Postgres", () => {
         events: 1,
         amount: scaled("0.04"),
       },
+    ])
+
+    // The invoicing job bills the canceled subscription's last statement once its grace passed.
+    expect((await services.ledger.ensureCustomerAccounts(customerId, "EUR")).err).toBeUndefined()
+    const invoiced = await services.subscriptions.invoiceSubscription({
+      subscriptionId,
+      projectId,
+      now: clock.now,
+    })
+    expect(invoiced.err).toBeUndefined()
+    expect(await usageLines(services)).toEqual([
+      { billingPeriodId: "bp_test_arrear_events_jan", amount: 4_000_000, quantity: 40 },
+    ])
+    expect(statementsOf(store).map((statement) => statement.state)).toEqual(["completed"])
+  })
+
+  it("seals and invoices the final statement at the cancel time when a cancel is immediate", async () => {
+    const { store, clock, services, logger, record } = createHarness()
+    await services.billing.syncPayerBudget({ projectId, customerId, caller: "request" })
+    expect((await record("r1", 40, jan10 - hour)).err).toBeUndefined()
+    expect((await services.ledger.ensureCustomerAccounts(customerId, "EUR")).err).toBeUndefined()
+
+    // The budget's clock runs a moment past the request that canceled.
+    clock.now = jan10 + 1_000
+    const canceled = await services.subscriptions.cancelSubscription({
+      subscriptionId,
+      projectId,
+      now: jan10,
+    })
+
+    expect(canceled.err).toBeUndefined()
+    expect(logger.error).not.toHaveBeenCalled()
+    expect(await usageLines(services)).toEqual([
+      { billingPeriodId: "bp_test_arrear_events_jan", amount: 4_000_000, quantity: 40 },
+    ])
+    expect(statementsOf(store)).toEqual([
+      expect.objectContaining({ end: jan10 + 1, state: "completed", amount: scaled("0.04") }),
     ])
   })
 

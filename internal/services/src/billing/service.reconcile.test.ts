@@ -10,9 +10,8 @@ import type { GrantsManager } from "../entitlements"
 import type { LedgerGateway } from "../ledger"
 import type { Metrics } from "../metrics"
 import type { PaymentProviderService } from "../payment-provider/service"
-import type { RatingService } from "../rating/service"
 import type { SubscriptionMachine } from "../subscriptions/machine"
-import { createBillingGatewayStub } from "../test-fixtures/billing-gateway"
+import { createInvoicingStub } from "../test-fixtures/billing-gateway"
 import type { WalletService } from "../wallet"
 import { BillingService } from "./service"
 
@@ -83,7 +82,7 @@ function makeBillingService(provider: Partial<PaymentProviderService>) {
   } as unknown as Logger
 
   const billing = new BillingService({
-    reservationFlushGateway: createBillingGatewayStub(),
+    invoicing: createInvoicingStub(),
     db: {} as Database,
     logger,
     analytics: {} as Analytics,
@@ -92,7 +91,6 @@ function makeBillingService(provider: Partial<PaymentProviderService>) {
     metrics: {} as Metrics,
     customerService,
     grantsManager: {} as GrantsManager,
-    ratingService: {} as RatingService,
     ledgerService: {} as LedgerGateway,
     walletService: {} as WalletService,
   })

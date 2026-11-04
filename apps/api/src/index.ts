@@ -19,10 +19,9 @@ import { registerExplainChargeV1 } from "./routes/analytics/explainChargeV1"
 import { registerGetCurrentBillingPeriodUsageV1 } from "./routes/analytics/getCurrentBillingPeriodUsageV1"
 import { registerGetIngestionStatusV1 } from "./routes/analytics/getIngestionStatusV1"
 import { registerGetAnalyticsUsageV1 } from "./routes/analytics/getUsageV1"
-import { registerFlushReservationsForInvoicingV1 } from "./routes/billing/flushReservationsForInvoicingV1"
-import { registerUsageSnapshotsV1 } from "./routes/billing/usageSnapshotsV1"
 import { registerAuthorizeBudgetV1 } from "./routes/budgets/authorizeBudgetV1"
 import { registerChargeBudgetV1 } from "./routes/budgets/chargeBudgetV1"
+import { registerCompletePayerStatementsInternalV1 } from "./routes/budgets/completePayerStatementsInternalV1"
 import { registerGetBudgetV1 } from "./routes/budgets/getBudgetV1"
 import { registerInspectBudgetInternalV1 } from "./routes/budgets/inspectBudgetInternalV1"
 import { registerLeaseBudgetV1 } from "./routes/budgets/leaseBudgetV1"
@@ -31,6 +30,7 @@ import { registerRecordBudgetV1 } from "./routes/budgets/recordBudgetV1"
 import { registerReleaseBudgetInternalV1 } from "./routes/budgets/releaseBudgetInternalV1"
 import { registerReleaseBudgetV1 } from "./routes/budgets/releaseBudgetV1"
 import { registerReportBudgetV1 } from "./routes/budgets/reportBudgetV1"
+import { registerSealPayerStatementsInternalV1 } from "./routes/budgets/sealPayerStatementsInternalV1"
 import { registerSettleBudgetV1 } from "./routes/budgets/settleBudgetV1"
 import { registerSyncPayerBudgetInternalV1 } from "./routes/budgets/syncPayerBudgetInternalV1"
 import { registerUpsertBudgetV1 } from "./routes/budgets/upsertBudgetV1"
@@ -207,9 +207,9 @@ registerReportBudgetV1(app)
 registerModelsBudgetV1(app)
 
 // Billing routes
-registerFlushReservationsForInvoicingV1(app)
-registerUsageSnapshotsV1(app)
 registerSyncPayerBudgetInternalV1(app)
+registerSealPayerStatementsInternalV1(app)
+registerCompletePayerStatementsInternalV1(app)
 
 // Dashboard routes
 registerInspectBudgetInternalV1(app)

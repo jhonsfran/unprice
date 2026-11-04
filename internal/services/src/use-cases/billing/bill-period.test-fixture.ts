@@ -1,14 +1,16 @@
 import type { Database } from "@unprice/db"
 import type { Customer, Subscription } from "@unprice/db/validators"
+import type { RateRow } from "@unprice/db/validators"
 import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { dinero } from "dinero.js"
 import * as dineroCurrencies from "dinero.js/currencies"
 import { beforeEach, vi } from "vitest"
 import type { LedgerGateway } from "../../ledger"
-import type { RatingService } from "../../rating/service"
 import type { SubscriptionRepository } from "../../subscriptions/repository"
 import type { SubscriptionContext } from "../../subscriptions/types"
+import type { PayerStatementLine } from "../budgets/invoice-payer-statements"
+import type { InvoicingPorts } from "./bill-period"
 
 type RepoInstance = {
   listPendingPeriodGroups: ReturnType<typeof vi.fn>
@@ -77,6 +79,10 @@ export function makePhase(overrides: Record<string, unknown> = {}) {
     subscriptionId: "sub_1",
     paymentMethodId: "pm_1",
     paymentProvider: "stripe",
+    planVersionId: "pv_1",
+    startAt: 1_700_000_000_000,
+    endAt: null,
+    billingAnchor: 1,
     planVersion: {
       whenToBill: "pay_in_advance",
       billingConfig: { billingInterval: "month" },
@@ -111,6 +117,13 @@ export function makeBillingPeriod(overrides: Record<string, unknown> = {}) {
       featurePlanVersion: {
         id: "fpv_1",
         featureType: "flat",
+        billingConfig: {
+          name: "monthly",
+          billingInterval: "onetime",
+          billingIntervalCount: 1,
+          billingAnchor: "dayOfCreation",
+          planType: "onetime",
+        },
         feature: { slug: "api-calls", title: "API Calls" },
       },
     },
@@ -120,22 +133,18 @@ export function makeBillingPeriod(overrides: Record<string, unknown> = {}) {
 
 export function makeDb(
   opts: {
-    entitlementRows?: Array<{ id: string; effectiveAt?: number; expiresAt?: number | null }>
     invoicedPeriod?: Array<{ id: string }>
     nextPendingPeriod?: Array<{ invoiceAt: number }>
+    /** Pending periods of the statement the seal looks up; flat ones seal nothing. */
+    statementPeriods?: unknown[]
   } = {}
 ): MockBillPeriodDb {
-  const entitlementRows = (opts.entitlementRows ?? [{ id: "ent_1" }]).map((row) => ({
-    effectiveAt: 0,
-    expiresAt: null,
-    ...row,
-  }))
   const invoicedPeriod = opts.invoicedPeriod ?? []
   const nextPendingPeriod = opts.nextPendingPeriod ?? []
   const txExecute = vi.fn().mockResolvedValue(undefined)
   const txSelectChain = {
     from: vi.fn().mockReturnThis(),
-    where: vi.fn().mockResolvedValue(entitlementRows),
+    where: vi.fn().mockResolvedValue([]),
   }
   const txSelect = vi.fn().mockReturnValue(txSelectChain)
   const tx = { execute: txExecute, select: txSelect, billingRepository: repositories.tx }
@@ -160,27 +169,68 @@ export function makeDb(
     billingRepository: repositories.outer,
     tx,
     select: dbSelect,
+    query: {
+      billingPeriods: {
+        findMany: vi.fn().mockResolvedValue(opts.statementPeriods ?? [makeBillingPeriod()]),
+      },
+    },
     invoicedPeriod,
     nextPendingPeriod,
   } as unknown as MockBillPeriodDb
 }
 
-export function makeRatingService(result?: unknown): RatingService {
+/** The plan card's $1000 flat row for the default `api-calls` item. */
+export function makeFlatRow(overrides: Partial<RateRow> = {}): RateRow {
   return {
-    rateBillingPeriod: vi.fn().mockResolvedValue(
-      result ??
-        Ok([
-          {
-            price: {
-              totalPrice: { dinero: dinero({ amount: 1000_0000_00, currency: usd, scale: 8 }) },
-              unitPrice: { dinero: dinero({ amount: 100_0000_00, currency: usd, scale: 8 }) },
-            },
-            usage: 10,
-            prorate: 1,
-          },
-        ])
-    ),
-  } as unknown as RatingService
+    id: "row_flat",
+    rateCardId: "card_1",
+    featureSlug: "api-calls",
+    match: {},
+    price: { type: "flat", amount: BigInt(1000_0000_0000) },
+    cost: null,
+    effectiveFrom: 0,
+    effectiveTo: null,
+    source: "manual",
+    sourceRef: null,
+    ...overrides,
+  }
+}
+
+/** A sealed statement of `bp_1` that priced `amount` at ingestion. */
+export function makeStatementLine(overrides: Partial<PayerStatementLine> = {}): PayerStatementLine {
+  return {
+    periodId: "api-calls:bp_1",
+    billingPeriodId: "bp_1",
+    statementKey: "stmt_2026_04",
+    featureSlug: "api-calls",
+    start: 1_700_000_000_000,
+    end: 1_702_000_000_000,
+    amount: "4200000000",
+    quantity: "1200000000",
+    cost: null,
+    events: 3,
+    ...overrides,
+  }
+}
+
+export function makeInvoicing(
+  opts: { rows?: RateRow[]; sealed?: PayerStatementLine[]; open?: string[] } = {}
+) {
+  const payerBudgets = {
+    sync: vi.fn(),
+    seal: vi.fn().mockResolvedValue(Ok({ sealed: opts.sealed ?? [], open: opts.open ?? [] })),
+    completeInvoiced: vi.fn().mockResolvedValue(Ok({ completed: [] })),
+  }
+  const rateCards = {
+    cardForPlanVersion: vi.fn().mockResolvedValue({
+      planVersionId: "pv_1",
+      currency: "USD",
+      cardId: "card_1",
+      unit: "money:USD",
+    }),
+    getEffectiveRows: vi.fn().mockResolvedValue(opts.rows ?? [makeFlatRow()]),
+  }
+  return { payerBudgets, rateCards } satisfies InvoicingPorts
 }
 
 export function makeLedgerService(overrides: Partial<LedgerGateway> = {}): LedgerGateway {

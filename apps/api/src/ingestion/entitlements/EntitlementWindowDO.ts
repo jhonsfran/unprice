@@ -1,18 +1,12 @@
 import { DurableObject } from "cloudflare:workers"
 import { createConnection } from "@unprice/db"
 import type { Logger } from "@unprice/logs"
-import type {
-  BillingUsageIdentity,
-  BillingUsageRegistration,
-  BillingUsageSnapshot,
-} from "@unprice/services/billing"
 import { LedgerGateway } from "@unprice/services/ledger"
 import { WalletService } from "@unprice/services/wallet"
 import { drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
 import type { Env } from "~/env"
 import { createDoLogger, runDoOperation } from "~/observability"
-import { hasRetainedBillingUsage } from "./billing-usage"
 import type {
   ApplyBatchInput,
   ApplyBatchResultRow,
@@ -91,9 +85,6 @@ export class EntitlementWindowDO extends DurableObject {
         instanceId: requestId,
         waitUntil: (promise) => this.ctx.waitUntil(promise),
         destroyWindow: async () => {
-          if (hasRetainedBillingUsage(this.store, Date.now())) {
-            throw new Error("Billing usage snapshots must complete before window deletion")
-          }
           await this.ctx.storage.deleteAlarm()
           await this.ctx.storage.deleteAll()
         },
@@ -165,23 +156,6 @@ export class EntitlementWindowDO extends DurableObject {
     await this.ready
 
     return this.processor.requestDeletion()
-  }
-
-  public async registerBillingPeriods(
-    input: BillingUsageRegistration[]
-  ): Promise<BillingUsageSnapshot[]> {
-    await this.ready
-    return this.processor.registerBillingPeriods(input)
-  }
-
-  public async sealBillingPeriods(input: BillingUsageIdentity[]): Promise<BillingUsageSnapshot[]> {
-    await this.ready
-    return this.processor.sealBillingPeriods(input)
-  }
-
-  public async completeBillingPeriods(input: string[]): Promise<void> {
-    await this.ready
-    return this.processor.completeBillingPeriods(input)
   }
 
   public async flushReservationForInvoicing(

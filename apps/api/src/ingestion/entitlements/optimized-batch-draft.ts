@@ -1,4 +1,3 @@
-import type { BillingUsageSnapshot } from "@unprice/services/billing"
 import type { GrantConsumptionState } from "@unprice/services/entitlements"
 import type { ReservationCloseReason } from "@unprice/services/wallet"
 import type {
@@ -39,7 +38,6 @@ export type StagedBatchEvent = {
 }
 
 export type OptimizedBatchDraft = {
-  billingUsageSnapshots: Map<string, BillingUsageSnapshot>
   grantStates: GrantConsumptionState[]
   meterStates: Map<string, MeterStateDraft>
   readMeterState(meterKey: string): MeterStateDraft
@@ -64,7 +62,6 @@ export function createOptimizedBatchDraft(params: {
   const stagedResultsByKey = new Map<string, BatchIdempotencyEntry>()
   const events: StagedBatchEvent[] = []
   const draft: OptimizedBatchDraft = {
-    billingUsageSnapshots: new Map(),
     grantStates: params.grantStates.map((state) => ({ ...state })),
     meterStates: new Map([...params.meterStates].map(([key, state]) => [key, { ...state }])),
     readMeterState(meterKey) {
