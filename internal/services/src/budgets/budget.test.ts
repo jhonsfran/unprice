@@ -2008,3 +2008,110 @@ describe("create on first use", () => {
     )
   })
 })
+
+describe("unit change (ADR-0008 D1)", () => {
+  const metered: BudgetConfigInput = {
+    limits: [
+      { amount: "100", window: "month" },
+      { feature: "images", amount: "50", window: "day" },
+    ],
+  }
+  const images = (n: number, units: number): Usage => ({
+    amount: $(units),
+    quantities: { images: $(n) },
+  })
+  /** Billing's upsert: it sets pricing, so it may move the unit. */
+  const billing = (unit: string): BudgetCommand => {
+    const command = upsert(metered, unit)
+    if (command.type !== "upsert") throw new Error("not an upsert")
+    return { ...command, setsPricing: true }
+  }
+
+  it("moves money:USD to money:EUR, restarting amounts and keeping quantities", () => {
+    const store = budgetWith(metered)
+    ok(store.run(charge("c1", images(20, 30)), t0))
+
+    const moved = ok(store.run(billing("money:EUR"), t0))
+    expect(moved.outcome).toMatchObject({
+      changes: [{ change: "unit", from: "money:USD", to: "money:EUR" }],
+      budget: { unit: "money:EUR", version: 2 },
+    })
+    expect(remaining(moved)).toEqual([
+      ["month", $(100)],
+      ["images:day", $(30)],
+    ])
+    expect([store.ledger.usage.month.consumed, store.ledger.usage.day.consumed]).toEqual([
+      { amount: $(0), quantities: { images: $(20) } },
+      { amount: $(0), quantities: { images: $(20) } },
+    ])
+
+    // The next charge counts in EUR from zero; the day keeps its images.
+    const charged = ok(store.run(charge("c2", images(5, 7)), t0))
+    expect(remaining(charged)).toEqual([
+      ["month", $(93)],
+      ["images:day", $(25)],
+    ])
+  })
+
+  it("moves money to credits", () => {
+    const store = budgetWith(metered)
+    ok(store.run(charge("c1", images(2, 40)), t0))
+
+    const moved = ok(store.run(billing("credits:tokens"), t0))
+    expect(moved.outcome).toMatchObject({
+      changes: [{ change: "unit", from: "money:USD", to: "credits:tokens" }],
+      budget: { unit: "credits:tokens" },
+    })
+    expect(remaining(moved)).toEqual([
+      ["month", $(100)],
+      ["images:day", $(48)],
+    ])
+  })
+
+  it("refuses while a hold is open and writes nothing, then moves once it settles", () => {
+    const store = budgetWith(metered)
+    ok(store.run(authorize("k1", images(3, 10)), t0))
+    const writes = store.writes
+
+    expect(rejection(store.run(billing("money:EUR"), t0))).toEqual({ code: "RESERVATIONS_OPEN" })
+    expect(store.writes).toBe(writes)
+
+    ok(store.run(settle("h_1", images(3, 10)), t0))
+    expect(ok(store.run(billing("money:EUR"), t0)).outcome).toMatchObject({
+      budget: { unit: "money:EUR" },
+    })
+  })
+
+  it("keeps the unit immutable for a caller that does not set pricing", () => {
+    const store = budgetWith(metered)
+    expect(rejection(store.run(upsert(metered, "money:EUR"), t0))).toEqual({
+      code: "UNIT_IMMUTABLE",
+      current: "money:USD",
+      requested: "money:EUR",
+    })
+  })
+
+  it("flags a unit change that kept an amount or happened while holding", () => {
+    const before = {
+      ...emptyLedger,
+      held: usd(1),
+      usage: consume(emptyLedger.usage, images(2, 5)),
+    }
+    expect(
+      checkTransition({
+        before,
+        after: before,
+        limits: [],
+        resultingLimits: [],
+        steps: [],
+        periods: [],
+        unitChanged: true,
+      })
+    ).toEqual(
+      expect.arrayContaining([
+        `unit changed while holding amount ${$(1)}`,
+        `day counted amount ${$(5)}, images ${$(2)}, expected amount 0, images ${$(2)}`,
+      ])
+    )
+  })
+})

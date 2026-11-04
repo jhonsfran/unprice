@@ -47,10 +47,55 @@ function shortens(statement: Statement, registration: StatementRegistration): bo
 }
 
 /**
+ * Where a statement ends when billing registers `requested` as its end: never at or before an event
+ * it counted, so usage recorded before billing cut the period short stays in it.
+ */
+function endKeepingEvents(statement: Statement, requested: number): number {
+  return statement.lastEventAt === null ? requested : Math.max(requested, statement.lastEventAt + 1)
+}
+
+/**
+ * Whether a stored statement is what `registration` registers: the same fields, except that its
+ * end may stand past the registered one to keep the events it counted before billing cut it short,
+ * and its start may stand later to follow a predecessor's tail (`afterTail`).
+ */
+function registers(statement: Statement, registration: StatementRegistration): boolean {
+  return (
+    statement.statementKey === registration.statementKey &&
+    statement.featureSlug === registration.featureSlug &&
+    statement.start >= registration.start &&
+    statement.start < registration.end &&
+    (statement.end === registration.end ||
+      (statement.end > registration.end &&
+        statement.end === endKeepingEvents(statement, registration.end)))
+  )
+}
+
+/**
+ * The statement of the same feature whose end was held past its registered end by an event it
+ * counted (an extended tail), when it alone overlaps `registration` and only at its start.
+ */
+function tailBefore(
+  registration: StatementRegistration,
+  overlapping: readonly Statement[]
+): Statement | null {
+  const [other] = overlapping
+  if (overlapping.length !== 1 || !other) return null
+  const extended =
+    other.lastEventAt !== null &&
+    other.end === other.lastEventAt + 1 &&
+    other.start < registration.start &&
+    other.end < registration.end
+  return extended ? other : null
+}
+
+/**
  * The statements to create or cut short. A period id registered with the same fields replays; an
- * earlier end shortens an open statement whose events all fell before it; anything else conflicts.
- * A new statement must not overlap another of its feature. `known` holds every stored statement
- * with one of the period ids, and every one of each feature that is open or overlaps.
+ * earlier end shortens an open statement to it, or to just past its last event when an event
+ * already landed past it (`endKeepingEvents`); a stored statement that already took either cut
+ * replays; anything else conflicts. A new statement must not overlap another of its feature, except
+ * the tail such a cut kept: it then starts where that statement ends. `known` holds every stored
+ * statement with one of the period ids, and every one of each feature that is open or overlaps.
  */
 export function decideRegister(
   registrations: readonly StatementRegistration[],
@@ -66,9 +111,10 @@ export function decideRegister(
     }
     const existing = byId.get(periodId)
     if (existing) {
-      if (sameRegistration(existing, registration)) continue
-      if (!shortens(existing, registration)) return reject({ code: "STATEMENT_CONFLICT", periodId })
-      const shortened = { ...existing, end }
+      if (registers(existing, registration)) continue
+      const cut = { ...registration, end: endKeepingEvents(existing, end) }
+      if (!shortens(existing, cut)) return reject({ code: "STATEMENT_CONFLICT", periodId })
+      const shortened = { ...existing, end: cut.end }
       byId.set(periodId, shortened)
       created.push(shortened)
       continue
@@ -77,17 +123,22 @@ export function decideRegister(
     if (periodId.startsWith("#") || registration.statementKey.startsWith("#")) {
       return reject({ code: "STATEMENT_CONFLICT", periodId })
     }
-    const overlapping = [...byId.values()].find(
+    const overlapping = [...byId.values()].filter(
       (other) =>
         other.featureSlug === registration.featureSlug &&
         !isPerpetual(other) &&
         other.start < end &&
         start < other.end
     )
-    if (overlapping) {
-      return reject({ code: "STATEMENT_OVERLAP", periodId, overlaps: overlapping.periodId })
+    const tail = tailBefore(registration, overlapping)
+    const [overlap] = overlapping
+    if (overlap && !tail) {
+      return reject({ code: "STATEMENT_OVERLAP", periodId, overlaps: overlap.periodId })
     }
-    const statement = emptyStatement(registration, now)
+    const statement = emptyStatement(
+      tail ? { ...registration, start: tail.end } : registration,
+      now
+    )
     byId.set(periodId, statement)
     created.push(statement)
   }

@@ -628,11 +628,33 @@ describe("a payer budget prices usage events at ingestion", () => {
     ok(store.run(register(nov), NOV + hour))
     ok(store.run(charge("c1", image("1024")), NOV + 10 * day))
 
+    // Billing cut the period an hour before an event already counted: it ends just past that event.
     const changeAt = NOV + 10 * day - hour
-    expect(rejection(store.run(register({ ...nov, end: changeAt }), NOV + 10 * day))).toEqual({
-      code: "STATEMENT_CONFLICT",
-      periodId: "images:inv_2026-11",
-    })
+    const next = { ...month("images", changeAt, DEC), periodId: "images:inv_2026-11b" }
+    ok(store.run(register({ ...nov, end: changeAt }, next), NOV + 10 * day))
+    const listed = ok(store.run({ type: "statements" }, NOV + 10 * day))
+    if (listed.outcome.type !== "statements") throw new Error("not a listing")
+    expect(listed.outcome.statements.map((s) => [s.periodId, s.start, s.end, s.events])).toEqual([
+      ["images:inv_2026-11", NOV, NOV + 10 * day + 1, 1],
+      ["images:inv_2026-11b", NOV + 10 * day + 1, DEC, 0],
+    ])
+    // The same batch again replays, and usage after the tail lands in the next period.
+    const writes = store.writes
+    ok(store.run(register({ ...nov, end: changeAt }, next), NOV + 10 * day))
+    expect(store.writes).toBe(writes)
+    ok(store.run(charge("c2", image("1024")), NOV + 11 * day))
+    expect(
+      [store.statements.get("images:inv_2026-11"), store.statements.get("images:inv_2026-11b")].map(
+        (s) => s?.events
+      )
+    ).toEqual([1, 1])
+  })
+
+  it("cuts an open period short at the registered end when its events fell before it", () => {
+    const store = pricedStore({ features: [images] })
+    const nov = month("images", NOV, DEC)
+    ok(store.run(register(nov), NOV + hour))
+    ok(store.run(charge("c1", image("1024")), NOV + 10 * day))
     const cutAt = NOV + 12 * day
     const after = { ...month("images", cutAt, DEC), periodId: "images:inv_2026-11b" }
     ok(store.run(register({ ...nov, end: cutAt }, after), NOV + 12 * day))

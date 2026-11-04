@@ -13,12 +13,14 @@ import type {
   WindowPeriod,
   WindowUsage,
 } from "./model"
-import { NO_USAGE, type Usage, addUsage, amountUsage, isNoUsage } from "./usage"
+import { NO_USAGE, type Usage, addUsage, amountUsage, isNoUsage, usageOf } from "./usage"
 import { type WindowId, windowBounds, windowIdOf, windowSpecOf } from "./windows"
 
 export function countersOf(usage: WindowCounters): Array<[WindowId, WindowUsage]> {
   return Object.entries(usage) as Array<[WindowId, WindowUsage]>
 }
+
+const ZERO = BigInt(0)
 
 /** The calendar counters are always present, so a map built from a ledger's counters is complete. */
 function countersFrom(entries: Iterable<[WindowId, WindowUsage]>): WindowCounters {
@@ -70,6 +72,19 @@ export function trackLimits(
       { start: windowBounds(limit, at).start, consumed: NO_USAGE },
     ])
   return added.length === 0 ? usage : countersFrom([...countersOf(usage), ...added])
+}
+
+/**
+ * After a unit change (ADR-0008 D1): every counter's amount restarts at zero in its current window,
+ * because it counted another unit; quantities carry over.
+ */
+export function restartAmounts(usage: WindowCounters): WindowCounters {
+  return countersFrom(
+    countersOf(usage).map(([id, counter]): [WindowId, WindowUsage] => [
+      id,
+      { start: counter.start, consumed: usageOf(ZERO, counter.consumed.quantities) },
+    ])
+  )
 }
 
 /** Adds the whole vector to every counter. */

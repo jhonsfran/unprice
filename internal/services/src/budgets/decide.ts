@@ -22,7 +22,7 @@ import {
   loosening,
   samePricing,
 } from "./config"
-import { consume, exposureOf } from "./ledger"
+import { consume, exposureOf, restartAmounts } from "./ledger"
 import { type Metered, cardsOf, meterEvent, sameEvent } from "./meter"
 import {
   type Blocked,
@@ -315,9 +315,23 @@ export function upsertPricing(
   return budget && !command.setsPricing ? budget.config.pricing : command.config.pricing
 }
 
-/** Whether an upsert creates the budget with pricing or changes the pricing it has. */
+/**
+ * Whether billing's upsert moves the budget to another unit (ADR-0008 D1). Any other caller that
+ * names another unit is refused with UNIT_IMMUTABLE.
+ */
+export function changesUnit(command: UpsertCommand, budget: BudgetRecord | null): boolean {
+  return budget !== null && command.setsPricing === true && budget.unit !== command.unit
+}
+
+/**
+ * Whether an upsert creates the budget with pricing, changes the pricing it has, or moves it to
+ * another unit, which prices every amount anew.
+ */
 export function repricesBudget(command: UpsertCommand, budget: BudgetRecord | null): boolean {
-  return !samePricing(budget?.config.pricing, upsertPricing(command, budget))
+  return (
+    changesUnit(command, budget) ||
+    !samePricing(budget?.config.pricing, upsertPricing(command, budget))
+  )
 }
 
 function decideUpsert(
@@ -348,11 +362,13 @@ function decideUpsert(
       `budget ${budget.projectId}/${budget.key} received upsert for ${projectId}/${key}`
     )
   }
-  if (budget.unit !== unit) {
+  const unitChanged = changesUnit(command, budget)
+  if (budget.unit !== unit && !unitChanged) {
     return reject({ code: "UNIT_IMMUTABLE", current: budget.unit, requested: unit })
   }
   if (unpriceable?.err) return unpriceable
-  // An open hold settles under the pricing that estimated it; a lease never reaches a statement.
+  // An open hold settles under the pricing, and in the unit, that estimated it; a lease never
+  // reaches a statement.
   if (view.reservationsOpen && repricesBudget(command, budget)) {
     return reject({ code: "RESERVATIONS_OPEN" })
   }
@@ -389,12 +405,17 @@ function decideUpsert(
     })
   }
   const next = command.mayLoosen ? config : closeNoEarlierThanNow(budget.config, config, now)
-  const changes = diffConfig(budget.config, next)
+  const changes: ConfigChange[] = [
+    ...(unitChanged ? [{ change: "unit" as const, from: budget.unit, to: unit }] : []),
+    ...diffConfig(budget.config, next),
+  ]
   if (changes.length === 0) return Ok(unchanged(null))
   const loosened = command.mayLoosen ? null : loosening(budget.config, next)
   if (loosened) return reject({ code: "LOOSENING_FORBIDDEN", change: loosened })
-  const updated = { ...budget, version: budget.version + 1, config: next }
-  const balance = balanceOf({ budget: updated, ledger }, now)
+  const updated = { ...budget, unit, version: budget.version + 1, config: next }
+  // Counters as `transition` leaves them: a new unit restarts every amount at zero.
+  const counted = unitChanged ? { ...ledger, usage: restartAmounts(ledger.usage) } : ledger
+  const balance = balanceOf({ budget: updated, ledger: counted }, now)
   for (const limit of balance.limits) {
     // A record may already have passed a hard limit; an upsert may keep or raise it, never tighten.
     const before = previous.get(limit.id)

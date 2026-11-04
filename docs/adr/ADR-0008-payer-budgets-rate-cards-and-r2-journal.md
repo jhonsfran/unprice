@@ -45,8 +45,17 @@ A budget with pricing takes events only: an amount, a usage vector, or a lease i
 `EVENT_REQUIRED`, because nothing would bill it. Until the event routes ship (U11), the public API
 can only read a payer budget. An upsert keeps a budget's pricing unless the caller sets it, and
 only billing's compile sets it. Pricing changes only while no hold or lease is open: an open hold
-settles under the pricing that estimated it. The compile retries a change refused with
-`RESERVATIONS_OPEN`; a hold lives at most its TTL.
+settles under the pricing that estimated it. A request path (sign-up, change-plan, cancel, wallet
+activation) syncs once and leaves a change refused with `RESERVATIONS_OPEN` to the next sync; a
+billing job (renewal, period generation) retries it for up to the max hold TTL, since a hold lives
+at most its TTL.
+
+The unit is immutable except to billing's compile: an upsert that sets pricing may move the budget
+to another unit (another currency, or credits instead of money) while no hold or lease is open, and
+is refused with `RESERVATIONS_OPEN` otherwise. Every other caller gets `UNIT_IMMUTABLE`. On a unit
+change, each window's amount counter restarts at zero, because it counted the old unit, and each
+quantity counter carries over. Statements keep their own amounts: each belongs to one period, and a
+period's usage was priced in the unit in force when it landed.
 
 ### D2. A rate card owns every price; a plan version owns the package
 

@@ -22,7 +22,7 @@ import {
 import { type Change, balanceOf, decide, holdNumber, repricesBudget, upsertPricing } from "./decide"
 import { decideFunding, fundingViolations, prepaidPayer } from "./funding"
 import { type RowStep, checkTransition } from "./invariants"
-import { alarmAt, consume, dueAt, rollUsage, trackLimits } from "./ledger"
+import { alarmAt, consume, dueAt, restartAmounts, rollUsage, trackLimits } from "./ledger"
 import { cardIdsOf, featuresOf } from "./meter"
 import {
   type BudgetBalance,
@@ -114,6 +114,7 @@ export function loadView(
   const expired =
     command.type === "sweep" && budget ? reader.readExpired(now, EXPIRED_PER_SWEEP) : []
   const prices = pricing !== undefined && willPrice(command, budget, target, expired, now)
+  // A pricing or unit change waits for open reservations (ADR-0008 D1).
   const repriced = command.type === "upsert" && budget !== null && repricesBudget(command, budget)
   const statements = statementsOf(
     reader,
@@ -374,9 +375,12 @@ export function transition(params: {
   const change = decided.val
 
   const budget = change.configured?.budget ?? view.budget
+  // A new unit restarts every amount counter; quantities carry over (ADR-0008 D1).
+  const unitChanged = view.budget !== null && budget !== null && budget.unit !== view.budget.unit
+  const counters = unitChanged ? restartAmounts(rolledLedger.usage) : rolledLedger.usage
   const usage = change.configured
-    ? trackLimits(rolledLedger.usage, change.configured.budget.config.limits, now)
-    : rolledLedger.usage
+    ? trackLimits(counters, change.configured.budget.config.limits, now)
+    : counters
   const ledger: Ledger = {
     lastAt: now,
     holdSeq: change.rows.reduce(
@@ -417,6 +421,7 @@ export function transition(params: {
       resultingLimits: budget?.config.limits ?? [],
       steps,
       periods,
+      unitChanged,
     }),
     ...statementViolations({
       steps: statements.map((s) => [priorStatements.get(s.periodId), s] as const),

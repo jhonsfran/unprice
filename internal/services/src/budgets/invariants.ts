@@ -59,6 +59,11 @@ export type CheckedTransition = Readonly<{
   /** Every operation row changed by the command. */
   steps: readonly RowStep[]
   periods: readonly WindowPeriod[]
+  /**
+   * The budget moved to another unit (ADR-0008 D1): only while nothing is held, and every counter's
+   * amount restarts at zero, so a counter that kept its period carries only its quantities.
+   */
+  unitChanged?: boolean
 }>
 
 /**
@@ -91,6 +96,9 @@ export function checkTransition(transition: CheckedTransition): string[] {
   }
   const negativeHeld = negativeOf(after.held)
   if (negativeHeld) violations.push(`ledger held ${negativeHeld} is negative`)
+  if (transition.unitChanged && !isNoUsage(before.held)) {
+    violations.push(`unit changed while holding ${show(before.held)}`)
+  }
   violations.push(...counterViolations(transition, consumed))
   for (const limit of transition.resultingLimits) {
     if (limit.enforce !== "hard") continue
@@ -98,7 +106,8 @@ export function checkTransition(transition: CheckedTransition): string[] {
     const current = after.usage[id]
     const previous = before.usage[id]
     const on = (usage: Usage | undefined) => (usage ? measured(usage, limit.measure) : ZERO)
-    const priorConsumed = previous?.start === current?.start ? on(previous?.consumed) : ZERO
+    const kept = previous !== undefined && previous.start === current?.start
+    const priorConsumed = kept ? on(carried(previous.consumed, transition.unitChanged)) : ZERO
     const priorExposure = priorConsumed + on(before.held)
     const exposure = on(current?.consumed) + on(after.held) - on(recorded)
     const increasesHardLimitExcess = exposure > limit.amount && exposure > priorExposure
@@ -133,8 +142,13 @@ function stepViolations(prior: Operation | undefined, row: Operation): string[] 
   return []
 }
 
+/** What a counter that keeps its period carries into the transition: its amount restarts on a unit change. */
+function carried(consumed: Usage, unitChanged: boolean | undefined): Usage {
+  return unitChanged ? subtractUsage(consumed, amountUsage(consumed.amount)) : consumed
+}
+
 function counterViolations(
-  { before, after, limits, periods }: CheckedTransition,
+  { before, after, limits, periods, unitChanged }: CheckedTransition,
   consumed: Usage
 ): string[] {
   const violations: string[] = []
@@ -157,7 +171,7 @@ function counterViolations(
     const prior = before.usage[id]
     const period = reported.get(id)
     if (prior && counter.start === prior.start) {
-      const expected = addUsage(prior.consumed, consumed)
+      const expected = addUsage(carried(prior.consumed, unitChanged), consumed)
       if (!sameUsage(counter.consumed, expected)) {
         violations.push(`${id} counted ${show(counter.consumed)}, expected ${show(expected)}`)
       }

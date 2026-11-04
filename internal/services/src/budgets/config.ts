@@ -72,6 +72,8 @@ export type ConfigChange =
   | Readonly<{ change: "holds" }>
   | Readonly<{ change: "closesAt" }>
   | Readonly<{ change: "pricing" }>
+  /** Only billing's compile moves a budget to another unit (ADR-0008 D1). */
+  | Readonly<{ change: "unit"; from: string; to: string }>
 
 export function diffConfig(prev: BudgetConfig, next: BudgetConfig): ConfigChange[] {
   const changes: ConfigChange[] = []
