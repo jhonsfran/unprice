@@ -34,6 +34,7 @@ import type {
   UnPriceBudgetError,
   WindowPeriod,
 } from "./model"
+import { addUsage, subtractUsage } from "./usage"
 import { type WindowId, windowIdOf } from "./windows"
 
 const ZERO = BigInt(0)
@@ -171,7 +172,7 @@ export function transition(params: {
       (seq, row) => (row.kind === "hold" ? Math.max(seq, holdNumber(row.id)) : seq),
       rolledLedger.holdSeq
     ),
-    held: rolledLedger.held + change.held,
+    held: addUsage(rolledLedger.held, change.held),
     usage: consume(usage, change.consumed),
     operations: countCall(rolledLedger.operations, command, change),
   }
@@ -304,8 +305,8 @@ function outcomeOf(command: BudgetCommand, params: OutcomeParams): BudgetOutcome
       }
     case "authorize": {
       if (row?.kind !== "hold") throw new Error("authorize produced no hold row")
-      const { id: holdId, amount, expiresAt } = row
-      return { type: "authorize", holdId, amount, expiresAt, replayed, balance, created }
+      const { id: holdId, reserved, expiresAt } = row
+      return { type: "authorize", holdId, reserved, expiresAt, replayed, balance, created }
     }
     case "charge":
     case "record": {
@@ -313,7 +314,7 @@ function outcomeOf(command: BudgetCommand, params: OutcomeParams): BudgetOutcome
         throw new Error(`${command.type} produced no ${command.type} row`)
       return {
         type: command.type,
-        amount: row.amount,
+        usage: row.usage,
         crossed: row.crossed,
         replayed,
         balance,
@@ -324,7 +325,7 @@ function outcomeOf(command: BudgetCommand, params: OutcomeParams): BudgetOutcome
       if (row?.kind !== "hold" || row.state.status !== "released") {
         throw new Error(`release of ${command.holdId} produced no released row`)
       }
-      return { type: "release", holdId: row.id, released: row.amount, replayed, balance }
+      return { type: "release", holdId: row.id, released: row.reserved, replayed, balance }
     }
     case "settle": {
       if (row?.kind !== "hold" || row.state.status !== "settled") {
@@ -335,7 +336,7 @@ function outcomeOf(command: BudgetCommand, params: OutcomeParams): BudgetOutcome
         type: "settle",
         holdId: row.id,
         actual,
-        released: row.amount - actual,
+        released: subtractUsage(row.reserved, actual),
         expired: closedAt >= row.expiresAt,
         crossed,
         replayed,

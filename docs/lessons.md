@@ -352,6 +352,12 @@ patterns. Keep it cheap to load and useful.
 - 2026-10-15: When reviewing run hierarchy, trace funding through `RunBudgetProcessor` and
   `WalletService.lockCustomer`; separate run DOs share customer funds, while `parentRunId` alone
   does not enforce a recursive parent budget.
+- 2026-11-03: Budget usage is a vector (`Usage` in `budgets/usage.ts`: the amount plus quantities per
+  feature); a limit reads one measure. The public wire still carries amounts: route adapters convert
+  with `amountUsage` and project back with the `*ToWire` helpers in `routes/budgets/budget-verb.ts`.
+- 2026-11-03: `apps/api` tsconfig excludes tests, so a core type change breaks DO and route tests only
+  at runtime. Typecheck them with a scratch tsconfig that extends `./tsconfig.json`, includes
+  `src/ingestion/budget` and `src/routes/budgets`, and adds `@cloudflare/vitest-pool-workers` types.
 - 2026-10-15: When reviewing run expiry, distinguish retryable captures from abandoned captures;
   `closeRunInStorage` can release funds after abandonment and mark reconciliation needed.
 - 2026-05-08: Tiny-tools usage discovery reads `featurePlanVersion.meterConfig` from

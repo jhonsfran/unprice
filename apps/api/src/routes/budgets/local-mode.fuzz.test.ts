@@ -425,12 +425,14 @@ async function runScenario(scenario: Scenario) {
 
   /** Hard limits whose consumed + held passed their amount, read from the server's ledger. */
   const overLimit = () => {
-    const { usage, held } = object.store.ledger
+    const { usage, held: heldUsage } = object.store.ledger
+    const held = heldUsage.amount
+    const never = usage.never.consumed.amount
     const now = Date.now()
-    const hour = usage.hour.start === now - (now % HOUR) ? usage.hour.consumed : ZERO
+    const hour = usage.hour.start === now - (now % HOUR) ? usage.hour.consumed.amount : ZERO
     const over: string[] = []
-    if (usage.never.consumed + held > cents(scenario.limits.never)) {
-      over.push(`never: ${usage.never.consumed} consumed, ${held} held`)
+    if (never + held > cents(scenario.limits.never)) {
+      over.push(`never: ${never} consumed, ${held} held`)
     }
     if (scenario.limits.hour !== undefined && hour + held > cents(scenario.limits.hour)) {
       over.push(`hour: ${hour} consumed, ${held} held`)
@@ -615,7 +617,7 @@ async function runScenario(scenario: Scenario) {
   expect(overLimit()).toEqual([])
 
   const { store } = object
-  const consumed = store.ledger.usage.never.consumed
+  const consumed = store.ledger.usage.never.consumed.amount
   const spent = confirmed + full + sum(actors.flatMap((a) => a.holds.map((h) => cents(h.cents))))
   // What the server may count beyond the clients: the unreported rest of every lease that expired.
   const unreported = sum([...store.expired.values()].map((l) => l.granted - l.reported))
@@ -632,7 +634,7 @@ async function runScenario(scenario: Scenario) {
     return owner === undefined || !actors[owner]?.crashed
   })
   expect(orphans.map((lease) => lease.leaseKey)).toEqual([])
-  expect(store.ledger.held).toBe(ZERO)
+  expect(store.ledger.held.amount).toBe(ZERO)
   expect(consumed).toBeGreaterThanOrEqual(spent)
   expect(consumed).toBeLessThanOrEqual(spent + unreported)
   // With no lease expired, every lease ended in a final report, so the count is exact.

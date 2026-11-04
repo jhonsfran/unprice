@@ -32,7 +32,15 @@ describe("budgets API", () => {
           key: "customer:acme",
           unit: "money:USD",
           version: 1,
-          limits: [{ id: "month", amount: usd(50), window: "month", enforce: "soft" }],
+          limits: [
+            {
+              id: "month",
+              amount: usd(50),
+              window: "month",
+              enforce: "soft",
+              measure: { type: "amount" },
+            },
+          ],
           holds: { defaultTtlMs: 900_000, maxTtlMs: 86_400_000 },
           onUnavailable: "deny",
           closesAt: null,
@@ -71,7 +79,15 @@ describe("budgets created on first use", () => {
     key: "customer:acme",
     unit: "money:USD",
     version: 1,
-    limits: [{ id: "month", amount: usd(5), window: "month", enforce: "hard" }],
+    limits: [
+      {
+        id: "month",
+        amount: usd(5),
+        window: "month",
+        enforce: "hard",
+        measure: { type: "amount" },
+      },
+    ],
     holds: { defaultTtlMs: 900_000, maxTtlMs: 86_400_000 },
     onUnavailable: "deny",
     closesAt: null,
@@ -86,7 +102,7 @@ describe("budgets created on first use", () => {
       Ok({
         type: "authorize",
         holdId: "h_1",
-        amount: usd(1),
+        reserved: { amount: usd(1), quantities: {} },
         expiresAt: 1_796_083_260_000,
         replayed: false,
         created: snapshot,
@@ -105,14 +121,22 @@ describe("budgets created on first use", () => {
       { projectId: "proj_123", key: "customer:acme" },
       {
         type: "authorize",
-        amount: usd(1),
+        usage: { amount: usd(1), quantities: {} },
         idempotencyKey: "a1",
         ifMissing: {
           key: "customer:acme",
           projectId: "proj_123",
           unit: "money:USD",
           config: {
-            limits: [{ id: "month", amount: usd(5), window: "month", enforce: "hard" }],
+            limits: [
+              {
+                id: "month",
+                amount: usd(5),
+                window: "month",
+                enforce: "hard",
+                measure: { type: "amount" },
+              },
+            ],
             holds: { defaultTtlMs: 900_000, maxTtlMs: 86_400_000 },
             onUnavailable: "deny",
             closesAt: null,
@@ -139,7 +163,7 @@ describe("budgets created on first use", () => {
     mocks.execute.mockResolvedValue(
       Ok({
         type: "charge",
-        amount: usd(1),
+        usage: { amount: usd(1), quantities: {} },
         crossed: [],
         replayed: false,
         created: null,

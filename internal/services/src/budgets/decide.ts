@@ -39,6 +39,18 @@ import {
   type UnPriceBudgetError,
   reject,
 } from "./model"
+import {
+  NO_USAGE,
+  type Usage,
+  addUsage,
+  amountUsage,
+  exceededMeasure,
+  measured,
+  sameMeasure,
+  sameUsage,
+  subtractUsage,
+  usageOf,
+} from "./usage"
 import { windowBounds, windowIdOf } from "./windows"
 
 const ZERO = BigInt(0)
@@ -47,26 +59,31 @@ type Funded = Readonly<{ budget: BudgetRecord; ledger: Ledger }>
 
 // Reads
 
-/** Pure read at `now` (clamped to `lastAt`). Windows roll virtually; nothing is written. */
+/**
+ * Pure read at `now` (clamped to `lastAt`). Windows roll virtually; nothing is written. Each limit
+ * reads its own measure of the counter and of what is held.
+ */
 export function balanceOf(state: Funded, now: number): BudgetBalance {
   const { ledger } = state
   const at = Math.max(now, ledger.lastAt)
   let remaining: SignedAmount | null = null
   const limits = state.budget.config.limits.map((limit): LimitBalance => {
+    const { measure } = limit
     const bounds = windowBounds(limit, at)
     const usage = ledger.usage[windowIdOf(limit)]
-    const consumed = !usage || bounds.start > usage.start ? ZERO : usage.consumed
-    const limitRemaining = limit.amount - consumed - ledger.held
-    if (limit.enforce === "hard" && (remaining === null || limitRemaining < remaining)) {
-      remaining = limitRemaining
-    }
+    const consumed = !usage || bounds.start > usage.start ? ZERO : measured(usage.consumed, measure)
+    const held = measured(ledger.held, measure)
+    const limitRemaining = limit.amount - consumed - held
+    const counts = limit.enforce === "hard" && measure.type === "amount"
+    if (counts && (remaining === null || limitRemaining < remaining)) remaining = limitRemaining
     return {
       id: limit.id,
       window: limit.window,
       enforce: limit.enforce,
+      measure,
       amount: limit.amount,
       consumed,
-      held: ledger.held,
+      held,
       remaining: limitRemaining,
       resetsAt: bounds.end,
     }
@@ -74,10 +91,19 @@ export function balanceOf(state: Funded, now: number): BudgetBalance {
   return { remaining, held: ledger.held, limits, asOf: at }
 }
 
-/** What would deny a request for `amount` at this balance; null when it fits every hard limit. */
-export function blockingLimit(balance: BudgetBalance, amount: Amount): Blocked | null {
+/** The balance a lease sees: quantity limits ignore leases, which reserve the amount only. */
+function amountLimitsOf(balance: BudgetBalance): BudgetBalance {
+  return { ...balance, limits: balance.limits.filter((limit) => limit.measure.type === "amount") }
+}
+
+/**
+ * What would deny a request for `request` at this balance; null when it fits every hard limit on
+ * that limit's measure.
+ */
+export function blockingLimit(balance: BudgetBalance, request: Usage): Blocked | null {
+  const need = (limit: LimitBalance) => measured(request, limit.measure)
   const failing = balance.limits.filter(
-    (limit) => limit.enforce === "hard" && limit.remaining < amount
+    (limit) => limit.enforce === "hard" && limit.remaining < need(limit)
   )
   let blocking: LimitBalance | undefined = failing[0]
   if (!blocking) return null
@@ -85,15 +111,15 @@ export function blockingLimit(balance: BudgetBalance, amount: Amount): Blocked |
     if (resetsLater(limit.resetsAt, blocking.resetsAt)) blocking = limit
   }
   let remedy: BlockedRemedy = "raise_limit"
-  if (failing.every((limit) => limit.consumed + amount <= limit.amount)) {
+  if (failing.every((limit) => limit.consumed + need(limit) <= limit.amount)) {
     remedy = "release_holds"
   } else if (
-    failing.every((limit) => limit.resetsAt !== null && limit.held + amount <= limit.amount)
+    failing.every((limit) => limit.resetsAt !== null && limit.held + need(limit) <= limit.amount)
   ) {
     remedy = "wait_for_reset"
   }
   if (remedy === "raise_limit")
-    blocking = failing.find((limit) => amount > limit.amount) ?? blocking
+    blocking = failing.find((limit) => need(limit) > limit.amount) ?? blocking
   return {
     limitId: blocking.id,
     window: blocking.window,
@@ -108,17 +134,20 @@ export function blockingLimit(balance: BudgetBalance, amount: Amount): Blocked |
 export function admissionRejection(
   config: Pick<BudgetConfig, "closesAt">,
   balance: BudgetBalance,
-  amount: Amount,
+  request: Usage,
   now: number
 ): Extract<BudgetRejection, { code: "BUDGET_CLOSED" | "LIMIT_EXCEEDED" }> | null {
   if (config.closesAt !== null && isClosed(config, now)) {
     return { code: "BUDGET_CLOSED", closedAt: config.closesAt }
   }
-  const blocked = blockingLimit(balance, amount)
+  const blocked = blockingLimit(balance, request)
   return blocked ? { code: "LIMIT_EXCEEDED", blocked, balance } : null
 }
 
-/** What fits under every hard limit at this balance, never negative; null with no hard limit. */
+/**
+ * The amount that fits under every hard amount limit at this balance, never negative; null with no
+ * hard amount limit.
+ */
 function roomOf(balance: BudgetBalance): Amount | null {
   if (balance.remaining === null) return null
   return balance.remaining > ZERO ? balance.remaining : ZERO
@@ -130,15 +159,15 @@ function resetsLater(a: number | null, b: number | null): boolean {
 }
 
 /**
- * Limits whose consumed amount first exceeds their amount, after `prior` more was consumed since
- * `balance` was read. A hard limit gets there only after recorded usage took the room its holds
- * and charges were checked against.
+ * Limits whose consumption first exceeds their amount on their measure, after `prior` more was
+ * consumed since `balance` was read. A hard limit gets there only after recorded usage took the
+ * room its holds and charges were checked against.
  */
-function crossings(balance: BudgetBalance, amount: Amount, prior = ZERO): string[] {
+function crossings(balance: BudgetBalance, consumed: Usage, prior = NO_USAGE): string[] {
   return balance.limits
     .filter((limit) => {
-      const consumed = limit.consumed + prior
-      return consumed <= limit.amount && consumed + amount > limit.amount
+      const before = limit.consumed + measured(prior, limit.measure)
+      return before <= limit.amount && before + measured(consumed, limit.measure) > limit.amount
     })
     .map((limit) => limit.id)
 }
@@ -153,11 +182,19 @@ export type Change = Readonly<{
   configured?: Readonly<{ budget: BudgetRecord; changes: readonly ConfigChange[] }>
   rows: readonly Operation[]
   row: Operation | null
-  held: SignedAmount
-  consumed: Amount
+  /** Signed on every measure: a reservation adds, a close removes. */
+  held: Usage
+  consumed: Usage
 }>
 
-const unchanged = (row: Operation | null): Change => ({ rows: [], row, held: ZERO, consumed: ZERO })
+const unchanged = (row: Operation | null): Change => ({
+  rows: [],
+  row,
+  held: NO_USAGE,
+  consumed: NO_USAGE,
+})
+
+const negated = (usage: Usage) => subtractUsage(NO_USAGE, usage)
 
 /**
  * Policy for one command against a view rolled to the clamped clock.
@@ -247,12 +284,22 @@ function decideUpsert(
   if (budget.unit !== unit) {
     return reject({ code: "UNIT_IMMUTABLE", current: budget.unit, requested: unit })
   }
-  const windows = new Map(budget.config.limits.map((limit) => [limit.id, windowIdOf(limit)]))
+  const previous = new Map(budget.config.limits.map((limit) => [limit.id, limit]))
   for (const limit of config.limits) {
-    const current = windows.get(limit.id)
+    const before = previous.get(limit.id)
+    if (!before) continue
+    const current = windowIdOf(before)
     const requested = windowIdOf(limit)
-    if (current !== undefined && current !== requested) {
+    if (current !== requested) {
       return reject({ code: "LIMIT_WINDOW_IMMUTABLE", limitId: limit.id, current, requested })
+    }
+    if (!sameMeasure(before.measure, limit.measure)) {
+      return reject({
+        code: "LIMIT_MEASURE_IMMUTABLE",
+        limitId: limit.id,
+        current: before.measure,
+        requested: limit.measure,
+      })
     }
   }
   // A removed limit's anchored counter stays until its period ends, so it counts against the bound
@@ -276,7 +323,6 @@ function decideUpsert(
   if (loosened) return reject({ code: "LOOSENING_FORBIDDEN", change: loosened })
   const updated = { ...budget, version: budget.version + 1, config: next }
   const balance = balanceOf({ budget: updated, ledger }, now)
-  const previous = new Map(budget.config.limits.map((limit) => [limit.id, limit]))
   for (const limit of balance.limits) {
     // A record may already have passed a hard limit; an upsert may keep or raise it, never tighten.
     const before = previous.get(limit.id)
@@ -301,32 +347,35 @@ function decideUpsert(
  */
 function decideSweep(state: Funded, expired: readonly ReservationOperation[], now: number): Change {
   const balance = balanceOf(state, now)
-  let consumed = ZERO
+  let consumed = NO_USAGE
   const rows = expired.map((row): ReservationOperation => {
     if (row.state.status !== "open" || row.expiresAt > now) {
       throw new Error(`${row.kind} ${row.id} is not open past its expiry`)
     }
     const exposure = exposureOf(row)
     const prior = consumed
-    consumed += exposure
+    consumed = addUsage(consumed, exposure)
     if (row.kind === "lease") {
       return { ...row, captured: row.granted, state: { status: "expired", closedAt: now } }
     }
     const crossed = crossings(balance, exposure, prior)
     return {
       ...row,
-      state: { status: "settled", closedAt: now, actual: row.amount, crossed, byExpiry: true },
+      state: { status: "settled", closedAt: now, actual: row.reserved, crossed, byExpiry: true },
     }
   })
-  return { rows, row: null, held: -consumed, consumed }
+  return { rows, row: null, held: negated(consumed), consumed }
 }
 
-/** A keyed command repeats its row when the verb, the amount, and (for a hold) the TTL match. */
+/**
+ * A keyed command repeats its row when the verb, the usage on every measure, and (for a hold) the
+ * TTL match.
+ */
 function sameRequest(
   row: HoldOperation | ChargeOperation,
   command: Extract<BudgetCommand, { type: "authorize" | "charge" | "record" }>
 ): boolean {
-  if (row.amount !== command.amount) return false
+  if (!sameUsage(row.kind === "hold" ? row.reserved : row.usage, command.usage)) return false
   if (command.type !== "authorize") return row.kind === command.type
   return row.kind === "hold" && row.ttlMs === (command.ttlMs ?? null)
 }
@@ -337,7 +386,8 @@ function decideKeyed(
   target: Operation | null,
   now: number
 ): Result<Change, UnPriceBudgetError> {
-  const { amount, idempotencyKey } = command
+  const { idempotencyKey } = command
+  const usage = usageOf(command.usage.amount, command.usage.quantities)
   if (target) {
     if (target.kind === "lease" || target.idempotencyKey !== idempotencyKey) {
       throw new Error(`target ${target.id} is not the row for key ${idempotencyKey}`)
@@ -375,7 +425,7 @@ function decideKeyed(
   const balance = balanceOf(state, now)
   // Recorded work already ran: refusing it would lose the count, not the spend.
   const rejection =
-    command.type === "record" ? null : admissionRejection(config, balance, amount, now)
+    command.type === "record" ? null : admissionRejection(config, balance, usage, now)
   if (rejection) return reject(rejection)
 
   if (command.type === "authorize") {
@@ -384,23 +434,23 @@ function decideKeyed(
       kind: "hold",
       id: `h_${state.ledger.holdSeq + 1}`,
       idempotencyKey,
-      amount,
+      reserved: usage,
       ttlMs: command.ttlMs ?? null,
       createdAt: now,
       expiresAt,
       state: { status: "open" },
     }
-    return Ok({ rows: [hold], row: hold, held: amount, consumed: ZERO })
+    return Ok({ rows: [hold], row: hold, held: usage, consumed: NO_USAGE })
   }
   const row: Operation = {
     kind: command.type,
     id: `o:${idempotencyKey}`,
     idempotencyKey,
-    amount,
+    usage,
     createdAt: now,
-    crossed: crossings(balance, amount),
+    crossed: crossings(balance, usage),
   }
-  return Ok({ rows: [row], row, held: ZERO, consumed: amount })
+  return Ok({ rows: [row], row, held: NO_USAGE, consumed: usage })
 }
 
 /** A hold's or a lease's TTL: from MIN_HOLD_TTL_MS up to the budget's `holds.maxTtlMs`. */
@@ -410,10 +460,10 @@ function invalidTtl(ttlMs: number, maxTtlMs: number) {
 }
 
 /**
- * Debits first, against every hard limit, like an authorize, and grants what fits: near a limit
- * less than asked for. Nothing fitting is written as a refused lease: a lease key's first answer is
- * final, so a late copy of a refused request cannot take capacity no process holds. The same key,
- * amount, and TTL replay the grant or the refusal.
+ * Debits first, against every hard amount limit, like an authorize, and grants what fits: near a
+ * limit less than asked for. Nothing fitting is written as a refused lease: a lease key's first
+ * answer is final, so a late copy of a refused request cannot take capacity no process holds. The
+ * same key, amount, and TTL replay the grant or the refusal.
  */
 function decideLease(
   command: Extract<BudgetCommand, { type: "lease" }>,
@@ -436,7 +486,8 @@ function decideLease(
   const balance = balanceOf(state, now)
   const room = roomOf(balance)
   const granted = room === null || room >= amount ? amount : room
-  const blocked = granted === ZERO ? blockingLimit(balance, amount) : null
+  const blocked =
+    granted === ZERO ? blockingLimit(amountLimitsOf(balance), amountUsage(amount)) : null
   const lease: LeaseOperation = {
     kind: "lease",
     id: `l:${leaseKey}`,
@@ -450,7 +501,7 @@ function decideLease(
     expiresAt: now + ttlMs,
     state: blocked ? { status: "refused", closedAt: now, blocked } : { status: "open" },
   }
-  return Ok({ rows: [lease], row: lease, held: granted, consumed: ZERO })
+  return Ok({ rows: [lease], row: lease, held: amountUsage(granted), consumed: NO_USAGE })
 }
 
 function sameReport(a: LeaseReportRequest, b: LeaseReportRequest): boolean {
@@ -500,7 +551,7 @@ function decideReport(
   }
 
   const balance = balanceOf(state, now)
-  const delta = captured - lease.captured
+  const delta = amountUsage(captured - lease.captured)
   const crossed = crossings(balance, delta)
   if (request.final) {
     const row: LeaseOperation = {
@@ -509,17 +560,24 @@ function decideReport(
       last: { seq, request, extended: ZERO, denied: null, crossed },
       state: { status: "closed", closedAt: now },
     }
-    return Ok({ rows: [row], row, held: lease.captured - lease.granted, consumed: delta })
+    const held = amountUsage(lease.captured - lease.granted)
+    return Ok({ rows: [row], row, held, consumed: delta })
   }
 
   // The extension is judged after the capture it travels with.
   const { ledger } = state
-  const afterCapture = balanceOf(
-    {
-      ...state,
-      ledger: { ...ledger, held: ledger.held - delta, usage: consume(ledger.usage, delta) },
-    },
-    now
+  const afterCapture = amountLimitsOf(
+    balanceOf(
+      {
+        ...state,
+        ledger: {
+          ...ledger,
+          held: subtractUsage(ledger.held, delta),
+          usage: consume(ledger.usage, delta),
+        },
+      },
+      now
+    )
   )
   const { config } = state.budget
   const closedAt = config.closesAt !== null && isClosed(config, now) ? config.closesAt : null
@@ -529,7 +587,7 @@ function decideReport(
   if (extended < request.extend && closedAt !== null) {
     denied = { code: "BUDGET_CLOSED", closedAt }
   } else if (extended < request.extend) {
-    const blocked = blockingLimit(afterCapture, request.extend)
+    const blocked = blockingLimit(afterCapture, amountUsage(request.extend))
     if (!blocked) throw new Error(`lease ${leaseKey} extended short with no blocking limit`)
     denied = { code: "LIMIT_EXCEEDED", blocked }
   }
@@ -541,7 +599,12 @@ function decideReport(
     last: { seq, request, extended, denied, crossed },
     expiresAt: renew ? now + lease.ttlMs : lease.expiresAt,
   }
-  return Ok({ rows: [row], row, held: extended - delta, consumed: delta })
+  return Ok({
+    rows: [row],
+    row,
+    held: subtractUsage(amountUsage(extended), delta),
+    consumed: delta,
+  })
 }
 
 /** The lease a lease or report addresses; the store found it by the command's lease key. */
@@ -560,26 +623,35 @@ function decideSettle(
 ): Result<Change, UnPriceBudgetError> {
   const hold = holdOf(target, command.holdId, state.ledger)
   if (hold.err) return hold
-  const { holdId, amount: actual } = command
-  const { amount, state: holdState } = hold.val
+  const { holdId } = command
+  const actual = usageOf(command.actual.amount, command.actual.quantities)
+  const { reserved, state: holdState } = hold.val
 
   switch (holdState.status) {
     case "settled":
-      if (holdState.actual === actual) return Ok(unchanged(hold.val))
+      if (sameUsage(holdState.actual, actual)) return Ok(unchanged(hold.val))
       return reject({ code: "HOLD_CLOSED", holdId, status: closedStatus(hold.val) })
     case "released":
       return reject({ code: "HOLD_CLOSED", holdId, status: "released" })
     case "open": {
-      // A hard cap holds only if usage never exceeds what was reserved before the work ran.
-      if (actual > amount) {
-        return reject({ code: "HOLD_AMOUNT_EXCEEDED", holdId, maximum: amount, actual })
+      // A hard cap holds only if usage never exceeds, on any measure, what was reserved before
+      // the work ran.
+      const measure = exceededMeasure(actual, reserved)
+      if (measure) {
+        return reject({
+          code: "HOLD_AMOUNT_EXCEEDED",
+          holdId,
+          measure,
+          maximum: measured(reserved, measure),
+          actual: measured(actual, measure),
+        })
       }
       const crossed = crossings(balanceOf(state, now), actual)
       const row: HoldOperation = {
         ...hold.val,
         state: { status: "settled", closedAt: now, actual, crossed },
       }
-      return Ok({ rows: [row], row, held: -amount, consumed: actual })
+      return Ok({ rows: [row], row, held: negated(reserved), consumed: actual })
     }
   }
 }
@@ -602,7 +674,7 @@ function decideRelease(
       return reject({ code: "HOLD_CLOSED", holdId: command.holdId, status: closedStatus(hold.val) })
     case "open": {
       const row: HoldOperation = { ...hold.val, state: { status: "released", closedAt: now } }
-      return Ok({ rows: [row], row, held: -hold.val.amount, consumed: ZERO })
+      return Ok({ rows: [row], row, held: negated(hold.val.reserved), consumed: NO_USAGE })
     }
   }
 }

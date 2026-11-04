@@ -16,6 +16,7 @@ import type {
   WindowPeriod,
 } from "./model"
 import type { BudgetReader } from "./transition"
+import { NO_USAGE, type Usage, addUsage, amountUsage } from "./usage"
 
 /** Rows one `expiringNext` page examines, of any status. */
 export const INSPECT_SCAN_LIMIT = 1_000
@@ -35,7 +36,7 @@ export type BudgetInspectQuery = Readonly<{
   /** Resume the expiring-next walk after this row ("Scan further"). */
   after?: InspectCursor
   find?: InspectFind
-  /** An amount checked against the live balance with the same rule authorize uses. */
+  /** An amount, with no quantities, checked against the live balance with the rule authorize uses. */
   probe?: Amount
 }>
 
@@ -51,7 +52,7 @@ export type BudgetInspection = Readonly<{
     next: InspectCursor | null
   }>
   /** Sum of `exposureOf` over `expiringNext.rows`. Compare with `budget.balance.held`. */
-  listed: Amount
+  listed: Usage
   /** Closed in the last hour, newest first, at most INSPECT_CLOSED_LIMIT. */
   closedRecently: readonly Operation[]
   /** Present only when the query had `find`; null = not found (denied, never sent, or purged). */
@@ -101,7 +102,7 @@ export function inspect(
       examined: walk.examined,
       next: walk.examined < INSPECT_SCAN_LIMIT ? null : walk.last,
     },
-    listed: walk.rows.reduce((sum, row) => sum + exposureOf(row), BigInt(0)),
+    listed: walk.rows.reduce((sum, row) => addUsage(sum, exposureOf(row)), NO_USAGE),
     closedRecently: closedRecently(reader, now),
   }
   const { find, probe } = query
@@ -111,7 +112,7 @@ export function inspect(
     ...(probe !== undefined && {
       probe: {
         amount: probe,
-        rejection: admissionRejection(read.budget, read.budget.balance, probe, now),
+        rejection: admissionRejection(read.budget, read.budget.balance, amountUsage(probe), now),
       },
     }),
   }

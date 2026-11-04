@@ -1,7 +1,7 @@
 import { reset, runInDurableObject } from "cloudflare:test"
 import { env } from "cloudflare:workers"
 import { RECORD_DEDUPE_MS, upsertBudgetInputSchema } from "@unprice/db/validators"
-import { type BudgetInspectReply, isOutcomeOf } from "@unprice/services/budgets"
+import { type BudgetInspectReply, amountUsage, isOutcomeOf } from "@unprice/services/budgets"
 import type { BudgetReply, BudgetRequest } from "@unprice/services/use-cases"
 import { drizzle } from "drizzle-orm/durable-sqlite"
 import { afterEach, describe, expect, it } from "vitest"
@@ -152,7 +152,7 @@ describe("BudgetDO storage work", () => {
             await instance.execute({
               type: "record",
               idempotencyKey: requestKey(i, keyLength),
-              amount: UNIT,
+              usage: amountUsage(UNIT),
               occurredAt: Date.now(),
             })
           )
@@ -173,14 +173,14 @@ describe("BudgetDO storage work", () => {
           const request: BudgetRequest = {
             type: "record",
             idempotencyKey: requestKey(replay ? i : HISTORY + i, keyLength),
-            amount: UNIT,
+            usage: amountUsage(UNIT),
             occurredAt: Date.now(),
           }
           const started = performance.now()
           const result = accepted(await stub.execute(request))
           rpcMs.push(performance.now() - started)
           expect(isOutcomeOf(result, "record") && result.replayed).toBe(replay)
-          expect(isOutcomeOf(result, "record") && result.amount).toBe(UNIT)
+          expect(isOutcomeOf(result, "record") && result.usage).toEqual(amountUsage(UNIT))
           samples.push(
             await runInDurableObject(stub, (_instance: BudgetDO, state) =>
               measure(state.storage.sql)
@@ -194,7 +194,7 @@ describe("BudgetDO storage work", () => {
           await stub.execute({
             type: "charge",
             idempotencyKey: requestKey(0, keyLength),
-            amount: UNIT,
+            usage: amountUsage(UNIT),
           })
         )
       ).toEqual({ code: "IDEMPOTENCY_CONFLICT", idempotencyKey: requestKey(0, keyLength) })
@@ -223,7 +223,7 @@ describe("BudgetDO storage work", () => {
             await clock.processor.execute({
               type: "record",
               idempotencyKey: `backlog_${i}`,
-              amount: BigInt(0),
+              usage: amountUsage(BigInt(0)),
               occurredAt: start,
             })
           )
@@ -234,7 +234,7 @@ describe("BudgetDO storage work", () => {
               await clock.processor.execute({
                 type: "record",
                 idempotencyKey: requestKey(second * perSecond + i, 36),
-                amount: BigInt(0),
+                usage: amountUsage(BigInt(0)),
                 occurredAt: clock.now,
               })
             )
@@ -246,7 +246,7 @@ describe("BudgetDO storage work", () => {
             await clock.processor.execute({
               type: "authorize",
               idempotencyKey: `open_${i}`,
-              amount: UNIT,
+              usage: amountUsage(UNIT),
             })
           )
         observe(state.storage.sql)
@@ -284,7 +284,9 @@ describe("BudgetDO storage work", () => {
         const clock = clocks.get(state.storage.sql)
         if (!clock) throw new Error("missing clock")
         const current = accepted(await clock.processor.execute({ type: "get" }))
-        expect(isOutcomeOf(current, "get") && current.budget.balance.held).toBe(BigInt(512) * UNIT)
+        expect(isOutcomeOf(current, "get") && current.budget.balance.held).toEqual(
+          amountUsage(BigInt(512) * UNIT)
+        )
         expect(
           state.storage.sql
             .exec("SELECT count(*) AS n FROM budget_operations WHERE status = 'open'")
@@ -340,9 +342,11 @@ describe("BudgetDO storage work", () => {
              CASE WHEN i % 1000 = 0 THEN 'open' ELSE 'done' END,
              base + i,
              CASE WHEN i % 1000 = 0
-               THEN json_object('idempotencyKey', 'hold_' || i, 'amount', json_object('$bigint', ?),
+               THEN json_object('idempotencyKey', 'hold_' || i,
+                 'reserved', json_object('amount', json_object('$bigint', ?), 'quantities', json_object()),
                  'ttlMs', NULL, 'createdAt', now, 'expiresAt', base + i, 'state', json_object('status', 'open'))
-               ELSE json_object('idempotencyKey', 'evt_' || i, 'amount', json_object('$bigint', '1'),
+               ELSE json_object('idempotencyKey', 'evt_' || i,
+                 'usage', json_object('amount', json_object('$bigint', '1'), 'quantities', json_object()),
                  'createdAt', base + i - dedupe, 'crossed', json_array())
              END
            FROM seq, p`,
@@ -356,7 +360,10 @@ describe("BudgetDO storage work", () => {
       }
       state.storage.sql.exec(
         "UPDATE budget_ledger SET held = ?, hold_seq = ?",
-        (BigInt(rows / 1000) * UNIT).toString(),
+        JSON.stringify({
+          amount: { $bigint: (BigInt(rows / 1000) * UNIT).toString() },
+          quantities: {},
+        }),
         rows / 1000
       )
       observe(state.storage.sql)
@@ -396,8 +403,8 @@ describe("BudgetDO storage work", () => {
         objectMs: distribution(objectMs),
         seedMs,
         closedRecently: inspection.closedRecently.length,
-        listed: inspection.listed.toString(),
-        held: inspection.budget.balance.held.toString(),
+        listed: inspection.listed.amount.toString(),
+        held: inspection.budget.balance.held.amount.toString(),
         found: inspection.found?.id ?? null,
         transport: "rpcMs via the stub; objectMs and SQL inside the object",
       })

@@ -12,14 +12,13 @@ import type {
   BudgetRecord,
   ConfigChange,
 } from "./config"
+import { type BudgetMeasure, NO_USAGE, type Usage, measureName } from "./usage"
 import type { AnchoredWindowId, BudgetWindow, WindowId } from "./windows"
-
-const ZERO = BigInt(0)
 
 // Projections
 
 /** One usage counter: consumption since `start`, the start of the period it is in. */
-export type WindowUsage = Readonly<{ start: number; consumed: Amount }>
+export type WindowUsage = Readonly<{ start: number; consumed: Usage }>
 
 /**
  * The five calendar counters always, and one per anchored window id a limit references. An
@@ -35,7 +34,7 @@ export type WindowPeriod = Readonly<{
   windowId: WindowId
   start: number
   end: number
-  consumed: Amount
+  consumed: Usage
 }>
 /**
  * The aggregate and the authoritative balance: one row, rewritten by every accepted command, O(1)
@@ -43,17 +42,17 @@ export type WindowPeriod = Readonly<{
  * - `lastAt` is the budget's clock: when it last wrote. `transition` clamps to it, so windows only
  *   roll forward and nothing is purged ahead of a later command's clock.
  * - `holdSeq` counts holds ever placed. `h_<n>` with n <= holdSeq was minted.
- * - `held` = what open reservations count: each open hold's `amount` and each open lease's
- *   `granted - captured`, including expired ones the alarm has not closed yet.
+ * - `held` = what open reservations count: each open hold's `reserved` and each open lease's
+ *   `granted - captured` (an amount), including expired ones the alarm has not closed yet.
  * - `usage` has all five canonical windows plus anchored ones; `usage.never.consumed` is lifetime
- *   consumption. Every consumption adds to every counter.
+ *   consumption. Every consumption adds its whole vector to every counter.
  * - `operations` counts the accepted calls that changed the budget, per verb. It rides on the row
  *   every such call rewrites anyway, so counting costs no write.
  */
 export type Ledger = Readonly<{
   lastAt: number
   holdSeq: number
-  held: Amount
+  held: Usage
   usage: WindowCounters
   operations: BudgetOperations
 }>
@@ -61,13 +60,13 @@ export type Ledger = Readonly<{
 export const emptyLedger: Ledger = {
   lastAt: 0,
   holdSeq: 0,
-  held: ZERO,
+  held: NO_USAGE,
   usage: {
-    hour: { start: 0, consumed: ZERO },
-    day: { start: 0, consumed: ZERO },
-    week: { start: 0, consumed: ZERO },
-    month: { start: 0, consumed: ZERO },
-    never: { start: 0, consumed: ZERO },
+    hour: { start: 0, consumed: NO_USAGE },
+    day: { start: 0, consumed: NO_USAGE },
+    week: { start: 0, consumed: NO_USAGE },
+    month: { start: 0, consumed: NO_USAGE },
+    never: { start: 0, consumed: NO_USAGE },
   },
   operations: {
     upsert: 0,
@@ -83,19 +82,19 @@ export const emptyLedger: Ledger = {
 
 /**
  * A hold stays open until it is settled or released, or until `expiresAt` passes: the alarm then
- * settles it at its full amount, because a timer cannot prove the work stopped. Counting all of it
+ * settles it at all it reserved, because a timer cannot prove the work stopped. Counting all of it
  * keeps the cap, and the capacity returns when the window rolls instead of never.
- * Per state: open counts `amount`; settled consumed `actual` (at most `amount`) and returned the
- * rest; released returned `amount`.
+ * Per state: open counts `reserved`; settled consumed `actual` (at most `reserved` on every
+ * measure) and returned the rest; released returned `reserved`.
  */
 export type HoldState =
   | Readonly<{ status: "open" }>
   | Readonly<{
       status: "settled"
       closedAt: number
-      actual: Amount
+      actual: Usage
       crossed: readonly string[]
-      /** The alarm settled it at `amount` once `expiresAt` passed; the caller never did. */
+      /** The alarm settled it at `reserved` once `expiresAt` passed; the caller never did. */
       byExpiry?: true
     }>
   | Readonly<{ status: "released"; closedAt: number }>
@@ -108,7 +107,7 @@ export type HoldOperation = Readonly<{
   kind: "hold"
   id: string
   idempotencyKey: string
-  amount: Amount
+  reserved: Usage
   /** As requested; null took the budget's default, so a retry must omit it too. */
   ttlMs: number | null
   createdAt: number
@@ -124,7 +123,7 @@ export type ChargeOperation = Readonly<{
   kind: "charge" | "record"
   id: string
   idempotencyKey: string
-  amount: Amount
+  usage: Usage
   createdAt: number
   crossed: readonly string[]
 }>
@@ -165,7 +164,8 @@ export type LeaseState =
   | Readonly<{ status: "refused"; closedAt: number; blocked: Blocked }>
 
 /**
- * Capacity debited up front for a process to spend in its own memory (B10 `local`). Its id is
+ * Capacity debited up front for a process to spend in its own memory (B10 `local`). Amounts only:
+ * a lease reserves and consumes the amount measure, and quantity limits ignore it. Its id is
  * `l:<lease key>`; the SQLite store keys the row by the key's hash instead. `granted` and
  * `captured` only grow, and `captured <= granted`. Its seq is `last?.seq ?? 0`.
  */
@@ -238,26 +238,27 @@ export type BudgetCommand =
   | Readonly<{
       type: "authorize"
       idempotencyKey: string
-      amount: Amount
+      /** The most the work may consume, on every measure. */
+      usage: Usage
       ttlMs?: number
       ifMissing?: BudgetDefinition
     }>
-  | Readonly<{ type: "settle"; holdId: string; amount: Amount }>
+  | Readonly<{ type: "settle"; holdId: string; actual: Usage }>
   | Readonly<{ type: "release"; holdId: string; holdCreatedAt?: number }>
   | Readonly<{
       type: "charge"
       idempotencyKey: string
-      amount: Amount
+      usage: Usage
       ifMissing?: BudgetDefinition
     }>
   | Readonly<{
       type: "record"
       idempotencyKey: string
-      amount: Amount
+      usage: Usage
       /** Epoch ms the usage happened. Bounds acceptance only; usage counts when it arrives. */
       occurredAt: number
     }>
-  /** Debits `min(amount, room)` under every hard limit for a process to spend locally. */
+  /** Debits `min(amount, room)` under every hard amount limit for a process to spend locally. */
   | Readonly<{
       type: "lease"
       leaseKey: string
@@ -271,10 +272,12 @@ export type BudgetCommand =
 
 // Outcomes
 
+/** One limit at the clock; every number is on the limit's own measure. */
 export type LimitBalance = Readonly<{
   id: string
   window: BudgetWindow
   enforce: BudgetLimit["enforce"]
+  measure: BudgetMeasure
   amount: Amount
   consumed: Amount
   held: Amount
@@ -284,9 +287,9 @@ export type LimitBalance = Readonly<{
 }>
 
 export type BudgetBalance = Readonly<{
-  /** Minimum over hard limits; null when the budget has no hard limit. */
+  /** Minimum over hard amount limits; null when the budget has none. */
   remaining: SignedAmount | null
-  held: Amount
+  held: Usage
   limits: readonly LimitBalance[]
   asOf: number
 }>
@@ -335,7 +338,7 @@ export type BudgetOutcome =
   | Readonly<{
       type: "authorize"
       holdId: string
-      amount: Amount
+      reserved: Usage
       expiresAt: number
       replayed: boolean
       balance: BudgetBalance
@@ -345,9 +348,9 @@ export type BudgetOutcome =
   | Readonly<{
       type: "settle"
       holdId: string
-      actual: Amount
-      /** The unused part of the hold, returned: amount - actual. */
-      released: Amount
+      actual: Usage
+      /** The unused part of the hold, returned: reserved - actual. */
+      released: Usage
       /** Settled at or after `expiresAt`. */
       expired: boolean
       crossed: readonly string[]
@@ -357,13 +360,13 @@ export type BudgetOutcome =
   | Readonly<{
       type: "release"
       holdId: string
-      released: Amount
+      released: Usage
       replayed: boolean
       balance: BudgetBalance
     }>
   | Readonly<{
       type: "charge" | "record"
-      amount: Amount
+      usage: Usage
       crossed: readonly string[]
       replayed: boolean
       balance: BudgetBalance
@@ -412,7 +415,14 @@ export type BudgetRejection =
   | Readonly<{ code: "LIMIT_EXCEEDED"; blocked: Blocked; balance: BudgetBalance }>
   | Readonly<{ code: "HOLD_NOT_FOUND"; holdId: string }>
   | Readonly<{ code: "HOLD_CLOSED"; holdId: string; status: "settled" | "released" | "expired" }>
-  | Readonly<{ code: "HOLD_AMOUNT_EXCEEDED"; holdId: string; maximum: Amount; actual: Amount }>
+  /** `actual` passes the hold on `measure`; both numbers are on that measure. */
+  | Readonly<{
+      code: "HOLD_AMOUNT_EXCEEDED"
+      holdId: string
+      measure: BudgetMeasure
+      maximum: Amount
+      actual: Amount
+    }>
   | Readonly<{ code: "LIMIT_BELOW_USAGE"; limitId: string; minimum: Amount; requested: Amount }>
   /** Minted, but its row was purged after retention, so its outcome is no longer known. */
   | Readonly<{ code: "HOLD_RETIRED"; holdId: string }>
@@ -424,6 +434,13 @@ export type BudgetRejection =
       limitId: string
       current: WindowId
       requested: WindowId
+    }>
+  /** A limit id names its measure for good: moving it would drop the cap it enforced. */
+  | Readonly<{
+      code: "LIMIT_MEASURE_IMMUTABLE"
+      limitId: string
+      current: BudgetMeasure
+      requested: BudgetMeasure
     }>
   /** Authorize and charge from `closesAt` on; record from `closesAt + OPERATION_RETENTION_MS`. */
   | Readonly<{ code: "BUDGET_CLOSED"; closedAt: number }>
@@ -481,8 +498,11 @@ function rejectionMessage(rejection: BudgetRejection): string {
       return rejection.status === "expired"
         ? `Hold ${rejection.holdId} expired and was settled at its full amount`
         : `Hold ${rejection.holdId} is already ${rejection.status}`
-    case "HOLD_AMOUNT_EXCEEDED":
-      return `Hold ${rejection.holdId} permits ${formatAmount(rejection.maximum)}, not ${formatAmount(rejection.actual)}`
+    case "HOLD_AMOUNT_EXCEEDED": {
+      const { measure } = rejection
+      const of = measure.type === "amount" ? "" : ` of ${measureName(measure)}`
+      return `Hold ${rejection.holdId} permits ${formatAmount(rejection.maximum)}${of}, not ${formatAmount(rejection.actual)}`
+    }
     case "LIMIT_BELOW_USAGE":
       return `Limit ${rejection.limitId} must cover ${formatAmount(rejection.minimum)} consumed or held`
     case "HOLD_RETIRED":
@@ -493,6 +513,8 @@ function rejectionMessage(rejection: BudgetRejection): string {
       return `Budget unit is ${rejection.current} and cannot change to ${rejection.requested}`
     case "LIMIT_WINDOW_IMMUTABLE":
       return `Limit ${rejection.limitId} counts over ${rejection.current} and cannot change to ${rejection.requested}; add a limit with a new id instead`
+    case "LIMIT_MEASURE_IMMUTABLE":
+      return `Limit ${rejection.limitId} caps ${measureName(rejection.current)} and cannot change to ${measureName(rejection.requested)}; add a limit with a new id instead`
     case "BUDGET_CLOSED":
       return `Budget closed at ${new Date(rejection.closedAt).toISOString()}`
     case "LOOSENING_FORBIDDEN":

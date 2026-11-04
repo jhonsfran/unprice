@@ -1,20 +1,8 @@
 import { sql } from "drizzle-orm"
-import {
-  customType,
-  index,
-  integer,
-  primaryKey,
-  sqliteTable,
-  text,
-  uniqueIndex,
-} from "drizzle-orm/sqlite-core"
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core"
 
-/** DO SQLite cannot bind bigint, and the store never sums in SQL, so amounts are TEXT. */
-const amount = customType<{ data: bigint; driverData: string }>({
-  dataType: () => "text",
-  toDriver: (value) => value.toString(),
-  fromDriver: (value) => BigInt(value),
-})
+// DO SQLite cannot bind bigint, and the store never sums in SQL, so a usage vector (the amount
+// and a quantity per feature) is JSON with tagged bigints in a TEXT column.
 
 /** Singleton row (id = 1); absent until the first upsert. */
 export const budgetRecord = sqliteTable("budget", {
@@ -32,7 +20,8 @@ export const budgetLedger = sqliteTable("budget_ledger", {
   id: integer("id").primaryKey(),
   lastAt: integer("last_at").notNull(),
   holdSeq: integer("hold_seq").notNull(),
-  held: amount("held").notNull(),
+  /** What open holds and leases reserve, a usage vector. */
+  heldJson: text("held").notNull(),
   usageJson: text("usage_json").notNull(),
   operationsJson: text("operations_json")
     .notNull()
@@ -74,7 +63,8 @@ export const budgetWindowHistory = sqliteTable(
     windowId: text("window_id").notNull(),
     start: integer("start").notNull(),
     end: integer("end").notNull(),
-    consumed: amount("consumed").notNull(),
+    /** The period's usage vector. */
+    consumedJson: text("consumed").notNull(),
   },
   (table) => ({ pk: primaryKey({ columns: [table.windowId, table.start] }) })
 )

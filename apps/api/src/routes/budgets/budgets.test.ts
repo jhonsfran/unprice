@@ -57,7 +57,13 @@ describe("budgets API", () => {
   })
 
   it("returns settlement maximum and actual on an over-reservation conflict", async () => {
-    rejectWith({ code: "HOLD_AMOUNT_EXCEEDED", holdId: "h_1", maximum: usd(10), actual: usd(11) })
+    rejectWith({
+      code: "HOLD_AMOUNT_EXCEEDED",
+      holdId: "h_1",
+      measure: { type: "amount" },
+      maximum: usd(10),
+      actual: usd(11),
+    })
     const response = await call("/v1/budgets/settle", { key: "k", holdId: "h_1", amount: "11" })
     expect(response.status).toBe(409)
     expect(await response.json()).toEqual(
@@ -193,7 +199,7 @@ describe("budgets API", () => {
       Ok({
         type: "authorize",
         holdId: "h_1",
-        amount: usd(10),
+        reserved: { amount: usd(10), quantities: {} },
         expiresAt: 1_796_084_100_000,
         replayed: false,
         created: null,
@@ -209,7 +215,12 @@ describe("budgets API", () => {
 
     expect(mocks.execute).toHaveBeenCalledWith(
       { projectId: "proj_123", key: "customer:acme/run:1" },
-      { type: "authorize", idempotencyKey: "a1", ttlMs: undefined, amount: usd(10) }
+      {
+        type: "authorize",
+        idempotencyKey: "a1",
+        ttlMs: undefined,
+        usage: { amount: usd(10), quantities: {} },
+      }
     )
     expect(response.status).toBe(200)
     expect(response.headers.get("Unprice-Budget-Remaining")).toBe("40")
@@ -245,7 +256,7 @@ describe("budgets API", () => {
       Ok({
         type: "authorize",
         holdId: "h_1",
-        amount: usd(10),
+        reserved: { amount: usd(10), quantities: {} },
         expiresAt: 1_796_084_100_000,
         replayed: false,
         created: null,
@@ -422,7 +433,7 @@ describe("budgets API", () => {
         type: "record",
         idempotencyKey: "r1",
         occurredAt: 1_796_083_200_000,
-        amount: usd(1),
+        usage: { amount: usd(1), quantities: {} },
       }
     )
   })
@@ -436,7 +447,16 @@ describe("budgets API", () => {
           key: "customer:acme",
           unit: "money:USD",
           version: 2,
-          limits: [{ id: "billing", amount: usd(50), window: "month", anchor, enforce: "hard" }],
+          limits: [
+            {
+              id: "billing",
+              amount: usd(50),
+              window: "month",
+              anchor,
+              enforce: "hard",
+              measure: { type: "amount" },
+            },
+          ],
           holds: { defaultTtlMs: 900_000, maxTtlMs: 86_400_000 },
           onUnavailable: "deny",
           closesAt: 1_798_761_600_000,
@@ -449,7 +469,7 @@ describe("budgets API", () => {
             windowId: "month@2026-10-15T00:00:00.000Z",
             start: Date.parse("2026-09-15T00:00:00.000Z"),
             end: anchor,
-            consumed: usd(12),
+            consumed: { amount: usd(12), quantities: {} },
           },
         ],
       })

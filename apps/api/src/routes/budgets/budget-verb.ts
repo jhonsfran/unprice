@@ -6,9 +6,14 @@ import {
   type BudgetBalance,
   type BudgetInspectQuery,
   type BudgetOutcome,
+  type BudgetRejection,
   type BudgetSnapshot,
+  type Operation,
   type OutcomeOf,
+  type ReservationOperation,
   type UnPriceBudgetError,
+  type Usage,
+  type WindowPeriod,
   formatBudgetConfig,
 } from "@unprice/services/budgets"
 import {
@@ -115,6 +120,49 @@ function wire(value: unknown): unknown {
   return value
 }
 
+// The public wire carries amounts only. The core counts a usage vector (the amount and a quantity
+// per feature), so every vector projects to its amount here, and a limit that caps a quantity names
+// its `feature`, as `formatBudgetConfig` does.
+
+export function amountToWire(usage: Usage): string {
+  return formatAmount(usage.amount)
+}
+
+export function balanceToWire({ remaining, held, limits, asOf }: BudgetBalance) {
+  return {
+    remaining: remaining === null ? null : formatAmount(remaining),
+    held: amountToWire(held),
+    limits: limits.map(({ measure, ...limit }) => ({
+      ...toWire(limit),
+      ...(measure.type === "quantity" && { feature: measure.feature }),
+    })),
+    asOf,
+  }
+}
+
+export function periodToWire({ consumed, ...period }: WindowPeriod) {
+  return { ...period, consumed: amountToWire(consumed) }
+}
+
+/** A hold or lease row as the dashboard's inspection reads it. */
+export function reservationToWire(row: ReservationOperation) {
+  if (row.kind === "lease") return toWire(row)
+  const { reserved, state, ...hold } = row
+  return {
+    ...hold,
+    amount: amountToWire(reserved),
+    state:
+      state.status === "settled" ? { ...toWire(state), actual: amountToWire(state.actual) } : state,
+  }
+}
+
+/** An operation row as the dashboard's inspection reads it. */
+export function operationToWire(row: Operation) {
+  if (row.kind === "hold" || row.kind === "lease") return reservationToWire(row)
+  const { usage, ...operation } = row
+  return { ...toWire(operation), amount: amountToWire(usage) }
+}
+
 /**
  * A budget on the wire: its config with every default filled, amounts as decimals, and closesAt in
  * epoch ms, as `formatBudgetConfig` returns it.
@@ -122,14 +170,40 @@ function wire(value: unknown): unknown {
 export function budgetToWire(budget: BudgetSnapshot) {
   const { key, unit, version, closed, balance, operations } = budget
   const config = formatBudgetConfig(budget)
-  return { key, unit, version, ...config, closed, balance: toWire(balance), operations }
+  return { key, unit, version, ...config, closed, balance: balanceToWire(balance), operations }
 }
 
 const exceededDetails = (blocked: Blocked, balance: BudgetBalance) => ({
   kind: "budget_exceeded" as const,
   blocked: toWire(blocked),
-  balance: toWire(balance),
+  balance: balanceToWire(balance),
 })
+
+export function releaseToWire({
+  released,
+  balance,
+  ...outcome
+}: Omit<OutcomeOf<"release">, "type">) {
+  return { ...toWire(outcome), released: amountToWire(released), balance: balanceToWire(balance) }
+}
+
+/** A charge or record: the amount it consumed. */
+export function consumedToWire({
+  usage,
+  balance,
+  ...outcome
+}: Omit<OutcomeOf<"charge"> | OutcomeOf<"record">, "type" | "created">) {
+  return { ...toWire(outcome), amount: amountToWire(usage), balance: balanceToWire(balance) }
+}
+
+/** An admission rejection as `details` carries it, with its code instead of a kind. */
+export function admissionToWire(
+  rejection: Extract<BudgetRejection, { code: "BUDGET_CLOSED" | "LIMIT_EXCEEDED" }>
+) {
+  if (rejection.code === "BUDGET_CLOSED") return rejection
+  const { kind: _, ...details } = exceededDetails(rejection.blocked, rejection.balance)
+  return { code: rejection.code, ...details }
+}
 
 const closedDetails = (closedAt: number) => ({ kind: "budget_closed" as const, closedAt })
 
@@ -212,6 +286,7 @@ function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): Unprice
     case "HOLD_RETIRED":
     case "UNIT_IMMUTABLE":
     case "LIMIT_WINDOW_IMMUTABLE":
+    case "LIMIT_MEASURE_IMMUTABLE":
     case "TOO_LATE":
     case "LEASE_CLOSED":
     case "LEASE_SEQ_CONFLICT":

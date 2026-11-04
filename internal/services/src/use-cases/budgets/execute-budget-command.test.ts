@@ -162,8 +162,12 @@ describe("executeBudgetCommand", () => {
       return { type, ...request }
     }
     const schema = type === "authorize" ? authorizeBudgetInputSchema : chargeBudgetInputSchema
-    const { key: _, ...request } = schema.parse({ ...body, idempotencyKey: "first" })
-    return { type, ...request }
+    const {
+      key: _,
+      amount: parsed,
+      ...request
+    } = schema.parse({ ...body, idempotencyKey: "first" })
+    return { type, ...request, usage: { amount: parsed, quantities: {} } }
   }
 
   it.each(["authorize", "charge", "lease"] as const)(

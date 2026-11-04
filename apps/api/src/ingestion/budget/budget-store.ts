@@ -10,6 +10,7 @@ import {
   type ReservationOperation,
   WINDOW_HISTORY_PERIODS,
   type WindowId,
+  type WindowPeriod,
   alarmAt,
   emptyLedger,
 } from "@unprice/services/budgets"
@@ -22,7 +23,10 @@ type SqliteHandle = DrizzleSqliteDODatabase<typeof schema>
 
 const SINGLETON_ID = 1
 
-/** JSON with bigints tagged, so amounts in the config, counters, and rows round-trip exactly. */
+/**
+ * JSON with bigints tagged as decimal strings, so amounts in the config, usage vectors, counters,
+ * and rows round-trip exactly.
+ */
 function encode(value: unknown): string {
   return JSON.stringify(value, (_key: string, item: unknown) =>
     typeof item === "bigint" ? { $bigint: item.toString() } : item
@@ -57,7 +61,7 @@ function decodeOperation(
   if (row.kind === "lease" && "leaseKey" in payload) {
     return { ...payload, kind: "lease", id: `l:${payload.leaseKey}` }
   }
-  if (row.kind === "hold" && "amount" in payload && "state" in payload) {
+  if (row.kind === "hold" && "reserved" in payload && "state" in payload) {
     return { ...payload, kind: "hold", id: row.id }
   }
   if ((row.kind === "charge" || row.kind === "record") && "crossed" in payload) {
@@ -187,7 +191,7 @@ function bind(db: SqliteTx): BudgetStoreTx {
       return {
         lastAt: row.lastAt,
         holdSeq: row.holdSeq,
-        held: row.held,
+        held: decode<Ledger["held"]>(row.heldJson),
         usage: decode<Ledger["usage"]>(row.usageJson),
         operations: decode<Ledger["operations"]>(row.operationsJson),
       }
@@ -237,7 +241,11 @@ function bind(db: SqliteTx): BudgetStoreTx {
           .orderBy(desc(history.start))
           .limit(limit)
           .all()
-          .map((row) => ({ ...row, windowId: row.windowId as WindowId }))
+          .map(({ consumedJson, ...row }) => ({
+            ...row,
+            windowId: row.windowId as WindowId,
+            consumed: decode<WindowPeriod["consumed"]>(consumedJson),
+          }))
       )
     },
 
@@ -260,7 +268,7 @@ function bind(db: SqliteTx): BudgetStoreTx {
       const ledgerRow = {
         lastAt: ledger.lastAt,
         holdSeq: ledger.holdSeq,
-        held: ledger.held,
+        heldJson: encode(ledger.held),
         usageJson: encode(ledger.usage),
         operationsJson: encode(ledger.operations),
       }
@@ -278,9 +286,11 @@ function bind(db: SqliteTx): BudgetStoreTx {
           )
           .run()
       }
-      for (const period of periods) {
+      for (const { consumed, ...period } of periods) {
         const ofWindow = eq(history.windowId, period.windowId)
-        db.insert(history).values(period).run()
+        db.insert(history)
+          .values({ ...period, consumedJson: encode(consumed) })
+          .run()
         // Keep what `get` can return and no more.
         const kept = db
           .select({ start: history.start })

@@ -18,7 +18,8 @@ import {
 } from "./budgets"
 
 // The dashboard's inspection of one budget, through the internal inspect route. Operation rows
-// travel as the budget core keeps them, amounts as decimals.
+// travel as the budget core keeps them, amounts as decimals, except that each usage vector (a
+// hold's reservation, a settle's actual, a charge's usage) travels as its amount.
 
 const budgetSettledHoldStateSchema = z.object({
   status: z.literal("settled"),

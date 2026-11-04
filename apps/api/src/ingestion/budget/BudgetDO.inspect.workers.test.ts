@@ -5,6 +5,7 @@ import {
   type BudgetInspectQuery,
   type BudgetInspectReply,
   INSPECT_SCAN_LIMIT,
+  amountUsage,
 } from "@unprice/services/budgets"
 import type { BudgetRequest } from "@unprice/services/use-cases"
 import { drizzle } from "drizzle-orm/durable-sqlite"
@@ -78,7 +79,7 @@ describe("BudgetDO.inspect", () => {
         ) INSERT INTO budget_operations (id, kind, status, due_at, data_json)
           SELECT printf('o:event-%06d', i), 'record', 'done', ?,
             json_object('idempotencyKey', printf('event-%06d', i),
-              'amount', json_object('$bigint', '1'), 'createdAt', ?, 'crossed', json_array())
+              'usage', json_object('amount', json_object('$bigint', '1'), 'quantities', json_object()), 'createdAt', ?, 'crossed', json_array())
           FROM seq`,
         dueAt,
         dueAt - DAY
@@ -133,9 +134,9 @@ describe("BudgetDO.inspect", () => {
       ["a2", 4],
       ["a3", 7],
     ] as const) {
-      await stub.execute({ type: "authorize", idempotencyKey, amount: units(amount) })
+      await stub.execute({ type: "authorize", idempotencyKey, usage: amountUsage(units(amount)) })
     }
-    await stub.execute({ type: "settle", holdId: "h_2", amount: units(3) })
+    await stub.execute({ type: "settle", holdId: "h_2", actual: amountUsage(units(3)) })
     await stub.execute({ type: "lease", leaseKey: "proc-1", amount: units(20), ttlMs: MINUTE })
     await stub.execute({
       type: "report",
@@ -146,8 +147,8 @@ describe("BudgetDO.inspect", () => {
 
     const read = inspection(await stub.inspect({}))
 
-    expect(read.budget.balance.held).toBe(units(10 + 7 + 15))
-    expect(read.listed).toBe(read.budget.balance.held)
+    expect(read.budget.balance.held).toEqual(amountUsage(units(10 + 7 + 15)))
+    expect(read.listed).toEqual(read.budget.balance.held)
     expect(read.expiringNext.rows.map((row) => row.id).sort()).toEqual(["h_1", "h_3", "l:proc-1"])
     expect([read.expiringNext.examined, read.expiringNext.next]).toEqual([4, null])
     expect(read.history).toEqual([])
@@ -176,13 +177,13 @@ describe("BudgetDO.inspect", () => {
             ? await processor.execute({
                 type: "authorize",
                 idempotencyKey: `hold_${i}`,
-                amount: units(1),
+                usage: amountUsage(units(1)),
                 ttlMs: DAY,
               })
             : await processor.execute({
                 type: "charge",
                 idempotencyKey: `charge_${i}`,
-                amount: units(0.01),
+                usage: amountUsage(units(0.01)),
               })
         if (!reply.ok) throw new Error(reply.rejection.code)
       }
@@ -198,15 +199,15 @@ describe("BudgetDO.inspect", () => {
 
     const [first] = pages
     if (!first) throw new Error("no page")
-    const held = first.budget.balance.held
+    const held = first.budget.balance.held.amount
     expect(held).toBe(units(1_000))
     expect(first.expiringNext.examined).toBe(INSPECT_SCAN_LIMIT)
     expect(first.expiringNext.next).not.toBeNull()
-    expect(first.listed < held).toBe(true)
+    expect(first.listed.amount < held).toBe(true)
     const ids = pages.flatMap((page) => page.expiringNext.rows.map((row) => row.id))
     expect(new Set(ids).size).toBe(ids.length)
     expect(ids.length).toBe(1_000)
-    expect(pages.reduce((sum, page) => sum + page.listed, BigInt(0))).toBe(held)
+    expect(pages.reduce((sum, page) => sum + page.listed.amount, BigInt(0))).toBe(held)
     expect(pages.reduce((sum, page) => sum + page.expiringNext.examined, 0)).toBe(5_000)
   }, 120_000)
 
@@ -214,8 +215,8 @@ describe("BudgetDO.inspect", () => {
     const key = "customer:find"
     const stub = stubFor(key)
     await stub.execute(upsert(key, roomy))
-    await stub.execute({ type: "authorize", idempotencyKey: "job-1", amount: units(5) })
-    await stub.execute({ type: "settle", holdId: "h_1", amount: units(2) })
+    await stub.execute({ type: "authorize", idempotencyKey: "job-1", usage: amountUsage(units(5)) })
+    await stub.execute({ type: "settle", holdId: "h_1", actual: amountUsage(units(2)) })
     await stub.execute({ type: "lease", leaseKey: "proc-1", amount: units(3), ttlMs: MINUTE })
 
     const byHold = inspection(await stub.inspect({ find: { by: "hold", holdId: "h_1" } })).found
@@ -231,8 +232,8 @@ describe("BudgetDO.inspect", () => {
       kind: "hold",
       id: "h_1",
       idempotencyKey: "job-1",
-      amount: units(5),
-      state: { status: "settled", actual: units(2) },
+      reserved: amountUsage(units(5)),
+      state: { status: "settled", actual: amountUsage(units(2)) },
     })
     expect(byKey).toEqual(byHold)
     expect(lease).toMatchObject({ kind: "lease", leaseKey: "proc-1", granted: units(3) })
@@ -250,11 +251,15 @@ describe("BudgetDO.inspect", () => {
         ],
       })
     )
-    await stub.execute({ type: "authorize", idempotencyKey: "a1", amount: units(15) })
+    await stub.execute({ type: "authorize", idempotencyKey: "a1", usage: amountUsage(units(15)) })
 
     const query: BudgetInspectQuery = { probe: units(8) }
     const probed = inspection(await stub.inspect(query)).probe
-    const real = await stub.execute({ type: "authorize", idempotencyKey: "a2", amount: units(8) })
+    const real = await stub.execute({
+      type: "authorize",
+      idempotencyKey: "a2",
+      usage: amountUsage(units(8)),
+    })
 
     if (real.ok || real.rejection.code !== "LIMIT_EXCEEDED") throw new Error("expected a 402")
     expect(probed).toMatchObject({
@@ -296,17 +301,29 @@ describe("BudgetDO.inspect", () => {
     const read = await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
       const processor = await clockedProcessor(state, () => now)
       await processor.execute(upsert(key, roomy))
-      await processor.execute({ type: "charge", idempotencyKey: "old", amount: units(1) })
+      await processor.execute({
+        type: "charge",
+        idempotencyKey: "old",
+        usage: amountUsage(units(1)),
+      })
       now = t0 + 2 * HOUR
-      await processor.execute({ type: "authorize", idempotencyKey: "a1", amount: units(5) })
-      await processor.execute({ type: "authorize", idempotencyKey: "a2", amount: units(5) })
+      await processor.execute({
+        type: "authorize",
+        idempotencyKey: "a1",
+        usage: amountUsage(units(5)),
+      })
+      await processor.execute({
+        type: "authorize",
+        idempotencyKey: "a2",
+        usage: amountUsage(units(5)),
+      })
       now += 1_000
-      await processor.execute({ type: "settle", holdId: "h_1", amount: units(2) })
+      await processor.execute({ type: "settle", holdId: "h_1", actual: amountUsage(units(2)) })
       now += 1_000
       await processor.execute({
         type: "record",
         idempotencyKey: "evt-1",
-        amount: units(1),
+        usage: amountUsage(units(1)),
         occurredAt: now,
       })
       now += 1_000
