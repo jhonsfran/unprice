@@ -84,6 +84,7 @@ describe("getIngestionStatus", () => {
           { facet: "event_slug", value: "tokens", events: 4 },
           { facet: "budget_key", value: "unprice:customer:cus_1", events: 4 },
           { facet: "rejection_reason", value: "LIMIT_EXCEEDED", events: 1 },
+          { facet: "kind", value: "charge", events: 1 },
         ],
       })
     )
@@ -140,7 +141,7 @@ describe("getIngestionStatus", () => {
         { value: "rejected", count: 1 },
       ],
       eventSlugs: [{ value: "tokens", count: 4 }],
-      sourceTypes: [],
+      sourceTypes: [{ value: "charge", count: 1 }],
       rejectionReasons: [{ value: "LIMIT_EXCEEDED", count: 1 }],
       customers: [{ value: "cus_1", count: 4 }],
     })
@@ -163,15 +164,34 @@ describe("getIngestionStatus", () => {
     })
   })
 
-  it("answers nothing for a failed-only filter: no event fails in the journal", async () => {
-    const { analytics } = journalAnalytics(
+  it("answers nothing for a failed-only filter without reading the journal", async () => {
+    const { analytics, queries } = journalAnalytics(
       answer({ totals: [{ state: "processed", events: 2, last_seen_at: null }] })
     )
     const result = await getIngestionStatus(
       { analytics, now: () => now },
-      input({ filter: { states: ["failed"] } })
+      input({ includeFacets: true, filter: { states: ["failed"] } })
     )
+    expect(queries).toEqual([])
     expect(result.val?.totals).toEqual({ processed: 0, rejected: 0, failed: 0, total: 0 })
+    expect(result.val?.live).toEqual([])
+    expect(result.val?.rejections).toEqual([])
+    expect(result.val?.recentEvents).toEqual([])
+    expect(result.val?.nextCursor).toBeNull()
+    expect(result.val?.facets).toEqual({
+      states: [],
+      eventSlugs: [],
+      sourceTypes: [],
+      rejectionReasons: [],
+      customers: [],
+    })
+    expect(result.val?.freshness).toEqual({
+      generatedAt: now,
+      dataFrom: from,
+      dataTo: to,
+      latestHandledAt: null,
+      secondsSinceLatest: null,
+    })
     expect(result.val?.confidence).toBe("low")
   })
 

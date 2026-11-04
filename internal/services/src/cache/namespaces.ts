@@ -75,7 +75,7 @@ export type CacheNamespaces = {
   planVersion: PlanVersionApi | null
   getPlansStats: Stats | null
   getOverviewStats: Stats | null
-  getUsage: Usage | null
+  getUsage: { usage: Usage; truncated_events: number } | null
   getUsageDashboard: GetUsageDashboardOutput | null
 }
 

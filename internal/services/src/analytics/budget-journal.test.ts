@@ -8,6 +8,7 @@ import {
   buildRecentEventsSql,
   buildRejectedEventSql,
   buildRejectionsSql,
+  buildStatementEventCountSql,
   buildStatementEventsSql,
   buildTopPayersSql,
   customerOfKey,
@@ -16,6 +17,7 @@ import {
   parseSignedDecimal,
   recentEventSqlRowSchema,
   rejectedEventSqlRowSchema,
+  statementEventCountSqlRowSchema,
   statementEventSqlRowSchema,
   topPayersSqlRowSchema,
 } from "./budget-journal"
@@ -224,6 +226,11 @@ facets AS (
   FROM events
   WHERE budget_key IS NOT NULL
   GROUP BY budget_key
+  UNION ALL
+  SELECT 'kind' AS facet, kind AS value, COUNT(*) AS events
+  FROM events
+  WHERE kind IS NOT NULL
+  GROUP BY kind
 )
 SELECT facet, value, events
 FROM facets
@@ -250,7 +257,26 @@ WHERE project_id = 'proj_1'
 LIMIT 1`)
   })
 
-  it("builds the events of one statement", () => {
+  const statement = `${latest(onePayer, "'charge', 'record', 'hold'", false)},
+consumed AS (
+  SELECT operation_id, timestamp, data, COALESCE(json_get_json(data, 'priced', 'features'), json_get_json(data, 'state', 'priced', 'features')) AS features
+  FROM latest
+  WHERE ((kind IN ('charge', 'record') AND status = 'done') OR (kind = 'hold' AND status = 'settled'))
+),
+statement AS (
+  SELECT operation_id, timestamp, data
+  FROM consumed
+  WHERE (json_get_str(features, 0, 'periodId') = 'tokens:bp_1'
+    OR json_get_str(features, 1, 'periodId') = 'tokens:bp_1'
+    OR json_get_str(features, 2, 'periodId') = 'tokens:bp_1'
+    OR json_get_str(features, 3, 'periodId') = 'tokens:bp_1'
+    OR json_get_str(features, 4, 'periodId') = 'tokens:bp_1'
+    OR json_get_str(features, 5, 'periodId') = 'tokens:bp_1'
+    OR json_get_str(features, 6, 'periodId') = 'tokens:bp_1'
+    OR json_get_str(features, 7, 'periodId') = 'tokens:bp_1')
+)`
+
+  it("builds a page of one statement's events, settled holds included", () => {
     expect(
       buildStatementEventsSql({
         projectId: "proj_1",
@@ -260,20 +286,25 @@ LIMIT 1`)
         limit: 100,
         offset: 20,
       })
-    ).toBe(`${latest(onePayer, "'charge', 'record'", false)}
-SELECT operation_id, timestamp, data, COUNT(*) OVER () AS total
-FROM latest
-WHERE (json_get_str(data, 'priced', 'features', 0, 'periodId') = 'tokens:bp_1'
-  OR json_get_str(data, 'priced', 'features', 1, 'periodId') = 'tokens:bp_1'
-  OR json_get_str(data, 'priced', 'features', 2, 'periodId') = 'tokens:bp_1'
-  OR json_get_str(data, 'priced', 'features', 3, 'periodId') = 'tokens:bp_1'
-  OR json_get_str(data, 'priced', 'features', 4, 'periodId') = 'tokens:bp_1'
-  OR json_get_str(data, 'priced', 'features', 5, 'periodId') = 'tokens:bp_1'
-  OR json_get_str(data, 'priced', 'features', 6, 'periodId') = 'tokens:bp_1'
-  OR json_get_str(data, 'priced', 'features', 7, 'periodId') = 'tokens:bp_1')
+    ).toBe(`${statement}
+SELECT operation_id, timestamp, data
+FROM statement
 ORDER BY timestamp DESC, operation_id DESC
 LIMIT 100
 OFFSET 20`)
+  })
+
+  it("counts one statement's events apart from any page", () => {
+    expect(
+      buildStatementEventCountSql({
+        projectId: "proj_1",
+        customerId: "cus_1",
+        periodId: "tokens:bp_1",
+        window,
+      })
+    ).toBe(`${statement}
+SELECT COUNT(*) AS events
+FROM statement`)
   })
 })
 
@@ -347,9 +378,9 @@ describe("budget journal rows", () => {
         operation_id: "o:1",
         timestamp: "2026-11-03T10:00:00.000Z",
         data: "{}",
-        total: "12",
-      }).total
-    ).toBe(12)
+      })
+    ).toEqual({ operation_id: "o:1", timestamp: new Date("2026-11-03T10:00:00.000Z"), data: "{}" })
+    expect(statementEventCountSqlRowSchema.parse({ events: "12" })).toEqual({ events: 12 })
   })
 
   it("reads the customer of a payer budget key only", () => {

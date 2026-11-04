@@ -17,7 +17,6 @@ function journalRow(opts: {
   amount: string
   periodId?: string
   lines?: number
-  total?: number
 }) {
   const data = {
     kind: "record",
@@ -26,38 +25,78 @@ function journalRow(opts: {
     usage: { amount: opts.amount, quantities: { tokens: opts.quantity } },
     createdAt: opts.at + 5,
     crossed: [],
-    priced: {
-      slug: "tokens.used",
-      properties: { tokens: Number(opts.quantity) },
-      at: opts.at,
-      features: [
-        {
-          featureSlug: "tokens",
-          periodId: opts.periodId ?? "tokens:bp_1",
-          late: false,
-          cardId: "card_1",
-          rowId: "row_1",
-          lines: Array.from({ length: opts.lines ?? 1 }, () => ({
-            positionKey: '["tokens","",null]',
-            property: null,
-            before: "0",
-            after: opts.quantity,
-            amount: opts.amount,
-            cost: null,
-          })),
-          meterQuantity: opts.quantity,
-          amount: opts.amount,
-          cost: null,
-        },
-      ],
-    },
+    priced: pricedEvent(opts),
   }
   return {
     operation_id: `o:hash_${opts.key}`,
     timestamp: new Date(opts.at + 5).toISOString(),
     data: JSON.stringify(data),
-    total: String(opts.total ?? 2),
   }
+}
+
+/** A settled hold as the budget exported it: its priced event on the state, not on the row. */
+function settledHoldRow(opts: { key: string; at: number; quantity: string; amount: string }) {
+  const data = {
+    kind: "hold",
+    id: "h_7",
+    idempotencyKey: opts.key,
+    reserved: { amount: "10", quantities: {} },
+    ttlMs: null,
+    createdAt: opts.at,
+    expiresAt: opts.at + 60_000,
+    state: {
+      status: "settled",
+      closedAt: opts.at + 30_000,
+      actual: { amount: opts.amount, quantities: { tokens: opts.quantity } },
+      crossed: [],
+      priced: pricedEvent(opts),
+    },
+  }
+  return {
+    operation_id: "h_7",
+    timestamp: new Date(opts.at + 30_000).toISOString(),
+    data: JSON.stringify(data),
+  }
+}
+
+function pricedEvent(opts: {
+  at: number
+  quantity: string
+  amount: string
+  periodId?: string
+  lines?: number
+}) {
+  return {
+    slug: "tokens.used",
+    properties: { tokens: Number(opts.quantity) },
+    at: opts.at,
+    features: [
+      {
+        featureSlug: "tokens",
+        periodId: opts.periodId ?? "tokens:bp_1",
+        late: false,
+        cardId: "card_1",
+        rowId: "row_1",
+        lines: Array.from({ length: opts.lines ?? 1 }, () => ({
+          positionKey: '["tokens","",null]',
+          property: null,
+          before: "0",
+          after: opts.quantity,
+          amount: opts.amount,
+          cost: null,
+        })),
+        meterQuantity: opts.quantity,
+        amount: opts.amount,
+        cost: null,
+      },
+    ],
+  }
+}
+
+/** Basin's answer: the page for the events query, `total` for the count query. */
+function statementJournal(page: unknown[], total: number | string = page.length) {
+  return (sql: string) =>
+    sql.endsWith("SELECT COUNT(*) AS events\nFROM statement") ? [{ events: total }] : page
 }
 
 const defaultJournal = [
@@ -68,16 +107,17 @@ const defaultJournal = [
 describe("explainCharge", () => {
   it("explains a metered line from its billed statement and the journal's events", async () => {
     const { db, ledger } = makeDeps({ lineMetadata: { ...usageMetadata(), cost_usd: 120_000_000 } })
-    const { analytics, queries } = journalAnalytics(() => defaultJournal)
+    const { analytics, queries } = journalAnalytics(statementJournal(defaultJournal))
 
     const result = await explainCharge({ db, ledger, analytics, now: () => now }, input())
 
-    expect(queries).toHaveLength(1)
-    expect(queries[0]).toContain("AND budget_key = 'unprice:customer:cus_1'")
-    expect(queries[0]).toContain(
-      "json_get_str(data, 'priced', 'features', 0, 'periodId') = 'tokens:bp_1'"
-    )
-    expect(queries[0]).toContain("AND timestamp >= '2023-11-14T22:13:20.000Z'")
+    expect(queries).toHaveLength(2)
+    for (const sql of queries) {
+      expect(sql).toContain("AND budget_key = 'unprice:customer:cus_1'")
+      expect(sql).toContain("AND kind IN ('charge', 'record', 'hold')")
+      expect(sql).toContain("json_get_str(features, 0, 'periodId') = 'tokens:bp_1'")
+      expect(sql).toContain("AND timestamp >= '2023-11-14T22:13:20.000Z'")
+    }
     expect(result.err).toBeUndefined()
     expect(result.val?.scope).toMatchObject({
       featureSlug: "tokens",
@@ -146,7 +186,7 @@ describe("explainCharge", () => {
         }),
       ],
     })
-    const { analytics } = journalAnalytics(() => defaultJournal)
+    const { analytics } = journalAnalytics(statementJournal(defaultJournal))
 
     const result = await explainCharge(
       { db, ledger, analytics, now: () => now },
@@ -160,24 +200,94 @@ describe("explainCharge", () => {
 
   it("skips journal rows that do not carry the statement's feature", async () => {
     const { db, ledger } = makeDeps()
-    const { analytics } = journalAnalytics(() => [
-      journalRow({ key: "evt_x", at: 1, quantity: "1", amount: "1", periodId: "tokens:bp_other" }),
-    ])
+    const { analytics } = journalAnalytics(
+      statementJournal([
+        journalRow({
+          key: "evt_x",
+          at: 1,
+          quantity: "1",
+          amount: "1",
+          periodId: "tokens:bp_other",
+        }),
+      ])
+    )
     const result = await explainCharge({ db, ledger, analytics, now: () => now }, input())
     expect(result.val?.events).toEqual([])
   })
 
-  it("reports more pages from the journal's total", async () => {
+  it("explains a settled hold from the priced event on its state", async () => {
     const { db, ledger } = makeDeps()
-    const { analytics } = journalAnalytics(() =>
-      defaultJournal.map((row) => ({ ...row, total: "3" }))
+    const { analytics } = journalAnalytics(
+      statementJournal([
+        settledHoldRow({ key: "run_1", at: 1_700_050_000_000, quantity: "40", amount: "0.4" }),
+      ])
     )
+    const result = await explainCharge({ db, ledger, analytics, now: () => now }, input())
+    expect(result.val?.summary.eventCount).toBe(1)
+    expect(result.val?.events).toEqual([
+      {
+        event_id: "run_1",
+        idempotency_key: "run_1",
+        customer_entitlement_id: "ce_1",
+        grant_id: "",
+        feature_plan_version_id: "fpv_1",
+        feature_slug: "tokens",
+        period_key: "tokens:bp_1",
+        event_slug: "tokens.used",
+        aggregation_method: "sum",
+        timestamp: 1_700_050_000_000,
+        created_at: 1_700_050_000_000,
+        delta: 40,
+        value_after: 40,
+        amount: 40_000_000,
+        amount_after: 40_000_000,
+        amount_scale: 8,
+        currency: "USD",
+        priced_at: 1_700_050_000_000,
+        tier_index: null,
+        pricing_component_count: 1,
+        source_type: "api_key",
+        source_id: "h_7",
+      },
+    ])
+  })
+
+  it("skips a journal row whose data is not valid JSON", async () => {
+    const { db, ledger } = makeDeps()
+    const [good] = defaultJournal
+    const { analytics } = journalAnalytics(
+      statementJournal(
+        [{ operation_id: "o:broken", timestamp: good?.timestamp, data: "{not json" }, good],
+        2
+      )
+    )
+    const result = await explainCharge({ db, ledger, analytics, now: () => now }, input())
+    expect(result.err).toBeUndefined()
+    expect(result.val?.events.map((event) => event.event_id)).toEqual(["evt_2"])
+  })
+
+  it("reports more pages from the journal's count", async () => {
+    const { db, ledger } = makeDeps()
+    const { analytics } = journalAnalytics(statementJournal(defaultJournal, "3"))
     const result = await explainCharge(
       { db, ledger, analytics, now: () => now },
       input({ limit: 2 })
     )
     expect(result.val?.summary.eventCount).toBe(3)
     expect(result.val?.pagination.hasMore).toBe(true)
+  })
+
+  it("keeps the count on a page past the last event", async () => {
+    const { db, ledger } = makeDeps()
+    const { analytics, queries } = journalAnalytics(statementJournal([], 3))
+    const result = await explainCharge(
+      { db, ledger, analytics, now: () => now },
+      input({ limit: 2, offset: 4 })
+    )
+    expect(queries[0]).toContain("LIMIT 2\nOFFSET 4")
+    expect(result.val?.events).toEqual([])
+    expect(result.val?.summary.eventCount).toBe(3)
+    expect(result.val?.pagination).toEqual({ limit: 2, offset: 4, hasMore: false })
   })
 
   it("explains a non-metered line without reading the journal", async () => {

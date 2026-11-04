@@ -53,7 +53,9 @@ export async function getRejectedEventPayload(
   if (row.err) return Err(row.err)
   if (!row.val) return Ok(null)
 
-  const data: unknown = JSON.parse(row.val.data)
+  // A row whose export is not valid JSON has no payload to show: not found, not a 500.
+  const data = parseJson(row.val.data)
+  if (data === undefined) return Ok(null)
   const parsed = rejectedDataSchema.safeParse(data)
   return Ok(
     getRejectedEventPayloadOutputSchema.parse({
@@ -65,4 +67,12 @@ export async function getRejectedEventPayload(
       handledAt: row.val.timestamp.getTime(),
     })
   )
+}
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return undefined
+  }
 }

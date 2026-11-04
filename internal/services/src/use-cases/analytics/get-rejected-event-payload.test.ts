@@ -42,6 +42,20 @@ describe("getRejectedEventPayload", () => {
     expect((await getRejectedEventPayload({ analytics }, input)).val).toBeNull()
   })
 
+  it("answers null for a row whose data is not valid JSON", async () => {
+    const { analytics } = journalAnalytics(() => [
+      {
+        budget_key: "unprice:customer:cus_1",
+        operation_id: "r:evt_1",
+        timestamp: "2026-11-03T10:00:00.000Z",
+        data: "{not json",
+      },
+    ])
+    const result = await getRejectedEventPayload({ analytics }, input)
+    expect(result.err).toBeUndefined()
+    expect(result.val).toBeNull()
+  })
+
   it("returns a journal failure", async () => {
     const { analytics } = journalAnalytics(() => new Error("basin down"))
     expect((await getRejectedEventPayload({ analytics }, input)).err).toBeInstanceOf(FetchError)

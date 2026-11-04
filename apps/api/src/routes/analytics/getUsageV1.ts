@@ -5,7 +5,7 @@ import {
   prepareInterval,
 } from "@unprice/analytics"
 import { formatAmount, formatMoney } from "@unprice/money"
-import { type FeatureUsageRow, customerOfKey } from "@unprice/services/analytics"
+import { FEATURE_SLOTS, type FeatureUsageRow, customerOfKey } from "@unprice/services/analytics"
 import { endTime, startTime } from "hono/timing"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import * as HttpStatusCodes from "~/util/http-status-codes"
@@ -55,6 +55,14 @@ export const route = createRoute(
         [HttpStatusCodes.OK]: jsonContent(
           z.object({
             usage: getUsageResponseSchema.array(),
+            truncated_events: z
+              .number()
+              .int()
+              .nonnegative()
+              .openapi({
+                description: `Events that fed more than ${FEATURE_SLOTS} features. Their features past the ${FEATURE_SLOTS}th are not in usage; 0 when every event is counted in full.`,
+                example: 0,
+              }),
           }),
           "The result of the get usage"
         ),
@@ -135,7 +143,7 @@ export const registerGetAnalyticsUsageV1 = (app: App) =>
       })
     }
 
-    const cacheKey = `journal:${projectID}:${customerId}:${range}`
+    const cacheKey = `journal:v2:${projectID}:${customerId}:${range}`
 
     // Usage history from the budget journal (ADR-0008 D7), one row per customer and feature.
     const { err, val: data } = await cache.getUsage.swr(cacheKey, async () => {
@@ -159,11 +167,17 @@ export const registerGetAnalyticsUsageV1 = (app: App) =>
         throw rows.err
       }
 
-      return rows.val
-        .filter(
-          (row): row is FeatureUsageRow & { feature_slug: string } => row.feature_slug !== null
-        )
-        .map((row) => formatUsageResponse(row, projectID, currency))
+      // A null feature slug counts the events that fed more than FEATURE_SLOTS features.
+      return {
+        usage: rows.val
+          .filter(
+            (row): row is FeatureUsageRow & { feature_slug: string } => row.feature_slug !== null
+          )
+          .map((row) => formatUsageResponse(row, projectID, currency)),
+        truncated_events: rows.val
+          .filter((row) => row.feature_slug === null)
+          .reduce((sum, row) => sum + row.events, 0),
+      }
     })
 
     endTime(c, "getUsage")
@@ -172,5 +186,5 @@ export const registerGetAnalyticsUsageV1 = (app: App) =>
       throw toUnpriceApiError(err)
     }
 
-    return c.json({ usage: data ?? [] }, HttpStatusCodes.OK)
+    return c.json(data ?? { usage: [], truncated_events: 0 }, HttpStatusCodes.OK)
   })

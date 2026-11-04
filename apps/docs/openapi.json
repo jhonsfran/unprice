@@ -17640,9 +17640,15 @@
                         },
                         "required": ["project_id", "feature_slug", "usage", "spending"]
                       }
+                    },
+                    "truncated_events": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Events that fed more than 8 features. Their features past the 8th are not in usage; 0 when every event is counted in full.",
+                      "example": 0
                     }
                   },
-                  "required": ["usage"]
+                  "required": ["usage", "truncated_events"]
                 }
               }
             }

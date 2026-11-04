@@ -366,7 +366,7 @@ export async function explainCharge(
       return Err(journal.err)
     }
 
-    events = journal.val.flatMap((row) => {
+    events = journal.val.events.flatMap((row) => {
       const event = toExplainChargeEvent({
         data: row.data,
         operationId: row.operation_id,
@@ -380,7 +380,7 @@ export async function explainCharge(
     const times = events.map((event) => event.timestamp)
     summary = {
       ...statementSummary,
-      eventCount: journal.val[0]?.total ?? 0,
+      eventCount: journal.val.total,
       firstEventAt: times.length > 0 ? Math.min(...times) : null,
       lastEventAt: times.length > 0 ? Math.max(...times) : null,
       multiComponentEventCount: events.filter((event) => event.pricing_component_count > 1).length,
@@ -556,8 +556,9 @@ function readIntegerMetadata(metadata: Record<string, unknown> | null, key: stri
 }
 
 /**
- * A journaled charge or record as one rated event of the statement: its entry for the statement's
- * feature. Null when the row is not one (a malformed export, or the statement's feature missing).
+ * A journaled charge, record, or settled hold as one rated event of the statement: its entry for
+ * the statement's feature. Null when the row is not one (a malformed export, or the statement's
+ * feature missing).
  */
 function toExplainChargeEvent(opts: {
   data: string
@@ -567,8 +568,8 @@ function toExplainChargeEvent(opts: {
   customerEntitlementId: string
   featurePlanVersionId: string
 }): ExplainChargeEvent | null {
-  const parsed = journalChargeDataSchema.safeParse(JSON.parse(opts.data))
-  const priced = parsed.success ? parsed.data.priced : undefined
+  const parsed = journalChargeDataSchema.safeParse(parseJson(opts.data))
+  const priced = parsed.success ? (parsed.data.priced ?? parsed.data.state?.priced) : undefined
   const feature = priced?.features.find((entry) => entry.periodId === opts.periodId)
   if (!parsed.success || !priced || !feature) {
     return null
@@ -608,6 +609,15 @@ function toExplainChargeEvent(opts: {
     pricing_component_count: feature.lines?.length ?? 0,
     source_type: "api_key",
     source_id: opts.operationId,
+  }
+}
+
+/** A journal `data` column as JSON; undefined when the export is not valid JSON. */
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return undefined
   }
 }
 

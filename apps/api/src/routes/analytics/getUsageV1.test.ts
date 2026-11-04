@@ -63,6 +63,13 @@ describe("getUsageV1 route", () => {
         quantity: null,
         amount: null,
       },
+      {
+        budget_key: "unprice:customer:cus_456",
+        feature_slug: null,
+        events: "2",
+        quantity: null,
+        amount: null,
+      },
     ])
 
     const response = await app.fetch(
@@ -82,6 +89,7 @@ describe("getUsageV1 route", () => {
           spending: { amount: "1.5", currency: "EUR", display_amount: formatMoney("1.5", "EUR") },
         },
       ],
+      truncated_events: 3,
     })
     expect(queries[0]).toContain("WHERE project_id = 'proj_123'")
     expect(queries[0]).toContain("AND budget_key = 'unprice:customer:cus_123'")

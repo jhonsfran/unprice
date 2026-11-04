@@ -9542,6 +9542,11 @@ export interface operations {
                 display_amount: string
               }
             }[]
+            /**
+             * @description Events that fed more than 8 features. Their features past the 8th are not in usage; 0 when every event is counted in full.
+             * @example 0
+             */
+            truncated_events: number
           }
         }
       }

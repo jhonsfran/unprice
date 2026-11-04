@@ -5,6 +5,11 @@ import {
   type JournalEventFilter,
   type JournalEventScope,
   customerOfKey,
+  type eventFacetSqlRowSchema,
+  type eventTimelineSqlRowSchema,
+  type eventTotalsSqlRowSchema,
+  type recentEventSqlRowSchema,
+  type rejectionsSqlRowSchema,
 } from "../../analytics/budget-journal"
 import { aiEvidenceSchema } from "./ai-contracts"
 
@@ -176,7 +181,22 @@ export async function getIngestionStatus(
     window: { from: new Date(input.window.from), to: new Date(input.window.to) },
     filter: journalFilter(input.filter),
   }
-  const failedOnly = input.filter.states?.length === 1 && input.filter.states[0] === "failed"
+  // No event fails in the journal, so a filter on `failed` alone matches nothing: answer without
+  // reading it. Dropping `failed` from the filter would read every state instead.
+  const states = input.filter.states ?? []
+  if (states.length > 0 && states.every((state) => state === "failed")) {
+    return Ok(
+      buildOutput({
+        input,
+        now: deps.now?.() ?? Date.now(),
+        totals: [],
+        timeline: [],
+        rejections: [],
+        recent: [],
+        facets: [],
+      })
+    )
+  }
 
   const [totals, timeline, rejections, recent, facets] = await Promise.all([
     deps.analytics.getEventTotals(scope),
@@ -200,9 +220,40 @@ export async function getIngestionStatus(
     throw new Error("unreachable: every journal read succeeded")
   }
 
+  return Ok(
+    buildOutput({
+      input,
+      now: deps.now?.() ?? Date.now(),
+      totals: totals.val,
+      timeline: timeline.val,
+      rejections: rejections.val,
+      recent: recent.val,
+      facets: facets.val,
+    })
+  )
+}
+
+/** The output from the journal's rows; every list empty answers an empty window. */
+function buildOutput({
+  input,
+  now,
+  totals,
+  timeline,
+  rejections,
+  recent,
+  facets,
+}: {
+  input: GetIngestionStatusInput
+  now: number
+  totals: readonly z.infer<typeof eventTotalsSqlRowSchema>[]
+  timeline: readonly z.infer<typeof eventTimelineSqlRowSchema>[]
+  rejections: readonly z.infer<typeof rejectionsSqlRowSchema>[]
+  recent: readonly z.infer<typeof recentEventSqlRowSchema>[]
+  facets: readonly z.infer<typeof eventFacetSqlRowSchema>[]
+}): GetIngestionStatusOutput {
   const counts = { processed: 0, rejected: 0 }
   let latestHandledAt: number | null = null
-  for (const row of failedOnly ? [] : totals.val) {
+  for (const row of totals) {
     counts[row.state] += row.events
     const seen = row.last_seen_at?.getTime() ?? null
     if (seen !== null && (latestHandledAt === null || seen > latestHandledAt)) {
@@ -213,39 +264,36 @@ export async function getIngestionStatus(
   const outputTotals = { ...counts, failed: 0, total }
   const successRate = total === 0 ? 0 : counts.processed / total
 
-  const recentRows = failedOnly ? [] : recent.val
-  const recentEvents = recentRows
-    .slice(0, input.limit)
-    .map((row): Output["recentEvents"][number] => ({
-      eventId: row.idempotency_key ?? row.operation_id,
-      canonicalAuditId: row.operation_id,
-      customerId: customerOfKey(row.budget_key) ?? row.budget_key,
-      eventSlug: row.event_slug ?? "",
-      sourceType: row.kind,
-      sourceId: row.budget_key,
-      ingestionMode: null,
-      runId: null,
-      traceId: null,
-      parentRunId: null,
-      workloadType: null,
-      workloadId: null,
-      state: row.state,
-      rejectionReason: row.rejection_reason,
-      failureStage: null,
-      failureReason: null,
-      failureMessage: null,
-      replayable: false,
-      timestamp: row.occurred_at ?? row.timestamp.getTime(),
-      receivedAt: row.timestamp.getTime(),
-      handledAt: row.timestamp.getTime(),
-    }))
-  const lastVisible = recentRows.length > input.limit ? recentRows[input.limit - 1] : undefined
+  const recentEvents = recent.slice(0, input.limit).map((row): Output["recentEvents"][number] => ({
+    eventId: row.idempotency_key ?? row.operation_id,
+    canonicalAuditId: row.operation_id,
+    customerId: customerOfKey(row.budget_key) ?? row.budget_key,
+    eventSlug: row.event_slug ?? "",
+    sourceType: row.kind,
+    sourceId: row.budget_key,
+    ingestionMode: null,
+    runId: null,
+    traceId: null,
+    parentRunId: null,
+    workloadType: null,
+    workloadId: null,
+    state: row.state,
+    rejectionReason: row.rejection_reason,
+    failureStage: null,
+    failureReason: null,
+    failureMessage: null,
+    replayable: false,
+    timestamp: row.occurred_at ?? row.timestamp.getTime(),
+    receivedAt: row.timestamp.getTime(),
+    handledAt: row.timestamp.getTime(),
+  }))
+  const lastVisible = recent.length > input.limit ? recent[input.limit - 1] : undefined
   const nextCursor = lastVisible
     ? { handledAt: lastVisible.timestamp.getTime(), canonicalAuditId: lastVisible.operation_id }
     : null
 
-  const live = foldTimeline(failedOnly ? [] : timeline.val)
-  const outputRejections = (failedOnly ? [] : rejections.val).map((row) => ({
+  const live = foldTimeline(timeline)
+  const outputRejections = rejections.map((row) => ({
     rejectionReason: row.rejection_reason,
     eventSlug: row.event_slug ?? "",
     sourceId: row.kind,
@@ -254,7 +302,6 @@ export async function getIngestionStatus(
     lastSeenAt: row.last_seen_at.getTime(),
   }))
 
-  const now = deps.now?.() ?? Date.now()
   const output: GetIngestionStatusOutput = {
     window: input.window,
     totals: outputTotals,
@@ -270,7 +317,7 @@ export async function getIngestionStatus(
     live,
     rejections: outputRejections,
     recentEvents,
-    facets: foldFacets(facets.val, outputTotals),
+    facets: foldFacets(facets, outputTotals),
     nextCursor,
     answer: buildAnswer({
       projectId: input.projectId,
@@ -285,7 +332,7 @@ export async function getIngestionStatus(
     nextActions: buildNextActions(outputTotals, outputRejections),
   }
 
-  return Ok(getIngestionStatusOutputSchema.parse(output))
+  return getIngestionStatusOutputSchema.parse(output)
 }
 
 function journalFilter(filter: GetIngestionStatusInput["filter"]): JournalEventFilter {
@@ -330,11 +377,7 @@ function foldTimeline(
 }
 
 function foldFacets(
-  rows: readonly {
-    facet: "event_slug" | "rejection_reason" | "budget_key"
-    value: string
-    events: number
-  }[],
+  rows: readonly z.infer<typeof eventFacetSqlRowSchema>[],
   totals: Output["totals"]
 ): Output["facets"] {
   const facets: Output["facets"] = {
@@ -350,6 +393,8 @@ function foldFacets(
     const option = { value: row.value, count: row.events }
     if (row.facet === "event_slug") facets.eventSlugs.push(option)
     if (row.facet === "rejection_reason") facets.rejectionReasons.push(option)
+    // The usage verb, the value `filter.sourceTypes` matches.
+    if (row.facet === "kind") facets.sourceTypes.push(option)
     if (row.facet === "budget_key") {
       const customerId = customerOfKey(row.value)
       if (customerId) facets.customers.push({ ...option, value: customerId })

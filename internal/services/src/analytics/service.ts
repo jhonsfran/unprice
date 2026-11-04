@@ -14,6 +14,7 @@ import {
   type JournalEventCursor,
   type JournalEventScope,
   type JournalWindow,
+  type StatementScope,
   buildEventFacetsSql,
   buildEventTimelineSql,
   buildEventTotalsSql,
@@ -21,6 +22,7 @@ import {
   buildRecentEventsSql,
   buildRejectedEventSql,
   buildRejectionsSql,
+  buildStatementEventCountSql,
   buildStatementEventsSql,
   buildTopPayersSql,
   eventFacetSqlRowSchema,
@@ -30,6 +32,7 @@ import {
   recentEventSqlRowSchema,
   rejectedEventSqlRowSchema,
   rejectionsSqlRowSchema,
+  statementEventCountSqlRowSchema,
   statementEventSqlRowSchema,
   topPayersSqlRowSchema,
 } from "./budget-journal"
@@ -463,20 +466,27 @@ export class AnalyticsService {
     return Ok(rows.val[0] ?? null)
   }
 
-  /** The accepted events one statement counted, newest first. */
-  public async getStatementEvents(opts: {
-    projectId: string
-    customerId: string
-    periodId: string
-    window: JournalWindow
-    limit: number
-    offset: number
-  }) {
-    return this.query(buildStatementEventsSql(opts), statementEventSqlRowSchema, {
+  /**
+   * A page of the events one statement counted, newest first, and how many it counted in all: a
+   * separate count, so a page past the last event still reports the total.
+   */
+  public async getStatementEvents(
+    opts: StatementScope & { limit: number; offset: number }
+  ): Promise<
+    Result<{ events: z.infer<typeof statementEventSqlRowSchema>[]; total: number }, FetchError>
+  > {
+    const logFields = {
       context: "failed to read statement events from the budget journal",
       projectId: opts.projectId,
       periodId: opts.periodId,
-    })
+    }
+    const [events, count] = await Promise.all([
+      this.query(buildStatementEventsSql(opts), statementEventSqlRowSchema, logFields),
+      this.query(buildStatementEventCountSql(opts), statementEventCountSqlRowSchema, logFields),
+    ])
+    if (events.err) return Err(events.err)
+    if (count.err) return Err(count.err)
+    return Ok({ events: events.val, total: count.val[0]?.events ?? 0 })
   }
 
   private async getPageDimensionVisits<D extends PageDimension>({
