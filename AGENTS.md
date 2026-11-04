@@ -59,7 +59,7 @@ contain compatible background; keep them aligned when changing architecture rule
   when orchestration needs to be reused.
 - Services do not construct peer services. Add service wiring in `createServiceContext` or the
   relevant composition root.
-- Keep infrastructure primitives (`db`, `logger`, `analytics`, `waitUntil`, `cache`, `metrics`)
+- Keep infrastructure primitives (`db`, `logger`, `waitUntil`, `cache`, `metrics`)
   explicit and separate from the domain-service bag.
 - Dependency bags should use only what is needed, for example
   `services: Pick<ServiceContext, "plans" | "customers">`, plus `db` only for transactions and

@@ -92,7 +92,7 @@ Unprice uses:
 - **Cloudflare Workers**
 - **shadcn/ui** and **Tailwind CSS**
 - **Stripe** payments today
-- **Tinybird** for analytics
+- **Cloudflare Pipelines, R2, and Basin SQL** for analytics
 
 ## Get started
 

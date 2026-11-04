@@ -77,7 +77,6 @@ patterns. Keep it cheap to load and useful.
 
 ## Cloudflare, API, And Ingestion
 
-- 2026-11-03: Tinybird meter-fact fixtures must use the existing 2099 timeline; past event timestamps can be removed by the 90-day TTL during test ingestion. Keep fixture dates and endpoint test windows aligned.
 
 - 2026-10-19: The API's `c.get("services")` is its own `DomainServiceContext` (`hono/env.ts`), filled
   in `middleware/init.ts`; a service added to `createServiceContext` must be added there too, and to
@@ -125,10 +124,6 @@ patterns. Keep it cheap to load and useful.
   stays caller-selected: single-event wallet bootstrap defers it to apply, batch/sync uses ambient
   `Date.now()`, and async uses its injected clock.
 
-- 2026-06-06: `bin/startup.dev` builds/deploys analytics with `tb --local`; use
-  `TB_VERSION_WARNING=0 tb --local --output=json info | jq -r ".local.token"` for the app token,
-  because `tb --local token copy "workspace admin token"` can return a static token rejected by
-  Tinybird Local API requests.
 - 2026-06-06: Local dev startup must override `DATABASE_READ1_URL` and `DATABASE_READ2_URL`
   alongside `DATABASE_URL`; `apps/api/dev.sh` regenerates `.dev.vars` from non-empty parent env
   values and otherwise preserves stale preview read-replica secrets.
@@ -142,26 +137,6 @@ patterns. Keep it cheap to load and useful.
   entitlement metadata.
 - 2026-05-17: `entitlement/verify` is read-only for wallet reservations; use apply/alarm paths
   for reservation close and release.
-- 2026-05-08: `/v1/usage/get` returns raw usage/spend from Tinybird; Hono formats display money.
-- 2026-05-08: Keep Tinybird response parsers tolerant during endpoint rollouts; old cloud
-  shapes can lag local code.
-- 2026-05-31: Tinybird `AggregateFunction` state migrations that change `argMax` version type
-  cannot direct-`CAST` old states; `FORWARD_QUERY` must `finalizeAggregation` the old value and
-  `initializeAggregation('argMaxState', value, new_version)` for the new state.
-- 2026-06-23: Tinybird deploy can reject rollup backfills when a modified raw datasource has a
-  shorter TTL than existing materialized targets; preserve history with `FORWARD_QUERY` on the
-  rollup datasources instead of shortening their TTLs.
-- 2026-06-30: When Tinybird endpoints, datasources, materializations, or fixtures change, add or
-  update the matching `internal/analytics/tests/*.yaml` coverage and run `tb build` plus
-  `tb test run` so existing endpoint expectations still pass.
-- 2026-08-02: When a raw datasource migration backfills unchanged materialized descendants,
-  their temporary `FORWARD_QUERY` must be `SELECT *`; replace stale type-migration projections
-  and remove all temporary forward queries after promotion.
-- 2026-08-07: Tinybird Cloud rejects stale `FORWARD_QUERY` projections even when local
-  `tb build` passes; remove them after promotion so nullable-column additions use `ALTER` and
-  unchanged rollups are not backfilled.
-- 2026-07-01: Tinybird endpoints that `UNION ALL` per-group buckets need a final outer
-  `ORDER BY`; subquery order only limits each bucket and does not make the combined output stable.
 - 2026-05-08: `entitlement_meter_facts` needs no synthetic `id`; use `amount` for event spend
   and `amount_after` for cumulative spend.
 - 2026-05-08: Sync ingest idempotency must re-enter entitlement apply replay, not synthesize a
@@ -374,14 +349,6 @@ patterns. Keep it cheap to load and useful.
 - 2026-06-13: Dashboard-to-API project overrides should pass `project_id` through the public SDK
   body and use `validateIsAllowedToAccessProject`; do not add parallel internal auth headers when
   API-key admin/root access already models the permission.
-- 2026-06-13: Ingestion replay uses Tinybird failed rows as the recovery index and `payload_json`
-  as the immediate replay source; R2 remains write-once audit storage.
-- 2026-07-05: `unprice_ingestion_events` keeps 60 days in Tinybird for operator visibility, but
-  replay remains bounded by the 30-day ingestion event-age window unless idempotency retention is
-  widened too.
-- 2026-06-12: Ingestion event table pagination should use a composite Tinybird cursor
-  (`handled_at`, `canonical_audit_id`); `handled_at` alone can skip rows when many events share a
-  timestamp.
 - 2026-07-11: Subscription phase scheduling must normalize stale `currentCycleEndAt` values to a future boundary; otherwise `updatePhase` clamps the old end to `now` and `createPhase` reports a false overlap.
 - 2026-07-11: Subscription creation must return a conflict when a customer already has an active subscription; explain the one-subscription invariant and direct callers to update the existing subscription.
 - 2026-07-11: Subscription creation checks customer activity before duplicate-subscription handling; map inactive customers to a visible precondition instead of `SUBSCRIPTION_OPERATION_FAILED`, which becomes a generic internal error.
@@ -482,9 +449,6 @@ patterns. Keep it cheap to load and useful.
 - 2026-07-03: Customer current-access usage is a per-feature entitlement-period view, not the
   last-30-days evidence view; compute/query each active usage entitlement by its current grant
   `period_key` and keep the UI on realtime polling so reset-specific windows update in place.
-- 2026-07-10: Usage dashboard Tinybird reads query bucketed rollups; floor rolling interval
-  starts to the rollup bucket boundary before sending `start/end`, or first-bucket usage can be
-  hidden while entitlement `period_key` reads still show it.
 - 2026-07-03: Workspace billing overview is self-reflective customer reporting; resolve
   `workspace.unPriceCustomerId` to the customer owning project before calling customer
   current-access, wallet, or usage-dashboard queries.
@@ -493,9 +457,6 @@ patterns. Keep it cheap to load and useful.
 - 2026-07-03: Dialog forms rendered from inside another React form can still bubble submit events
   through the React tree even when Radix portals the dialog content; stop propagation on the dialog
   form submit when the inner action must not save the parent form.
-- 2026-06-30: Customer current-access entitlement usage should query Tinybird with computed grant
-  `period_key` values; exact subscription `start/end` windows can drop hourly rollup buckets and
-  hide fresh usage for short entitlement periods.
 - 2026-06-13: Public `generateStaticParams` paths must not call session helpers or live database
   queries; return `[]` for dynamic ISR routes so `next build` does not depend on request scope or
   preview database reachability.
@@ -591,8 +552,6 @@ patterns. Keep it cheap to load and useful.
 - 2026-06-07: `createPhase` status decisions must use the resolved/stamped
   `paymentMethodIdToUse`; sandbox defaults can be discovered during phase creation and should
   not park direct signup in `pending_payment`.
-- 2026-06-07: Wallet-backed usage invoices should project wallet capture ledger lines; do not
-  re-rate capped wallet captures through Tinybird during BILL or they can zero/duplicate invoices.
 - 2026-06-07: Wallet capture ledger metadata must include `feature_slug` and `quantity`; invoice
   read models should consume ledger-projected descriptions/quantities instead of looking up usage
   feature labels from billing periods.
@@ -611,9 +570,6 @@ patterns. Keep it cheap to load and useful.
 - 2026-06-07: When signup or provider-completion use cases materialize billing periods, wire
   `billing` through API route service bags and `apps/api/src/hono/env.ts`; missing adapter wiring
   can return signup `success=false` with a hidden `generateBillingPeriods` error.
-- 2026-06-06: `explainCharge` treats invoice rows as grouped buckets: use ledger totals for the
-  line amount, query Tinybird by period key when available, and fall back to the billing window
-  when the key cannot be derived.
 - 2026-06-06: Draft plan-version billing changes should cascade feature billing/reset cadences
   unless `metadata.billingCadenceOverride` or `metadata.resetCadenceOverride` is true; missing
   override flags mean the feature follows the plan. Usage feature billing may be shorter or longer
@@ -795,7 +751,7 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   query input timestamp on each poll; refetching a frozen `{ from, to }` window only reloads old
   data.
 - 2026-06-15: Customer-visible relative usage dashboards should poll on the same 30s cadence as
-  the analytics SWR freshness window and display payload `freshness.generatedAt`; keep Tinybird
+  the analytics SWR freshness window and display payload `freshness.generatedAt`; keep Basin SQL
   throttling in the tRPC cache instead of bypassing it from the UI.
 - 2026-06-15: Usage dashboard money must reconcile after currency-minor rounding; header totals,
   feature rows, and top consumers should share the same rounded allocation source instead of each
@@ -1086,4 +1042,8 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-11-04: `vi.clearAllMocks()` keeps queued `mockResolvedValueOnce` answers, so a test that fails before the call leaks them into the next test. Route tests that queue answers use `vi.resetAllMocks()` and re-arm the mocks in `beforeEach`.
 - 2026-11-04 (ADR-0008 D7): Usage history reads `budget_journal` through `AnalyticsService` (builders in `services/src/analytics/budget-journal.ts`); every query keeps the latest `seq` per `(budget_key, operation_id)` with `QUALIFY ROW_NUMBER()`. Basin SQL has no UNNEST, so `priced.features[]` is read by index up to `FEATURE_SLOTS`; report the overflow row (null `feature_slug`) instead of dropping it.
 - 2026-11-04: Test journal-backed use cases and routes with `journalAnalytics` (`@unprice/services/analytics/journal-fixture`): a real `AnalyticsService` over a fake Basin port that parses literal rows with the production row schemas.
+- 2026-11-04 (ADR-0008 D8): Tinybird is gone. Dashboard interval, stat-card and usage-row contracts
+  (`prepareInterval`, `analyticsIntervalSchema`, `statsSchema`, `getUsageResponseSchema`) live in
+  `@unprice/db/validators`; `ServiceDeps` has no `analytics` client. Analytics reads go through
+  `AnalyticsService` over Basin SQL only.
 - 2026-11-04: `generate:openapi` needs only a booting worker: a `.dev.vars` copied from the example with `APP_ENV=development`, placeholder `DATABASE_*_URL`s, and every empty key filled serves `/openapi.json` on 8787 without real secrets.
