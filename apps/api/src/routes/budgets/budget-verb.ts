@@ -73,7 +73,7 @@ export async function runBudgetVerb<R extends BudgetVerbRequest>(
     )
   )
   if (result.err) throw budgetApiError(c, result.err)
-  setRemaining(c, result.val)
+  setBudgetRemaining(c, result.val)
   return result.val
 }
 
@@ -239,12 +239,22 @@ export function extensionToWire(
   return { ...wire, denied: details }
 }
 
-function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): UnpriceApiError {
+/** The HTTP error a budget rejection maps to; a denial also sets the remaining header. */
+export function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): UnpriceApiError {
+  if (error.rejection.code === "LIMIT_EXCEEDED") setBudgetRemaining(c, error.rejection)
+  return budgetRejectionError(error)
+}
+
+/**
+ * The HTTP error a budget rejection maps to: a denial (LIMIT_EXCEEDED, WALLET_EMPTY) is 402, a
+ * request the budget cannot take as sent is 400, a missing budget or record 404, and a state
+ * conflict (TOO_LATE, PERIOD_CLOSED, NO_STATEMENT, IDEMPOTENCY_CONFLICT, BUDGET_CLOSED) 409.
+ */
+export function budgetRejectionError(error: UnPriceBudgetError): UnpriceApiError {
   const { rejection } = error
   const message = error.message
   switch (rejection.code) {
     case "LIMIT_EXCEEDED":
-      setRemaining(c, rejection)
       return new UnpriceApiError({
         code: "BUDGET_EXCEEDED",
         message,
@@ -343,7 +353,10 @@ function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): Unprice
   }
 }
 
-function setRemaining(c: Context<HonoEnv>, carrier: BudgetOutcome | { balance: BudgetBalance }) {
+export function setBudgetRemaining(
+  c: Context<HonoEnv>,
+  carrier: BudgetOutcome | { balance: BudgetBalance }
+) {
   const balance =
     "budget" in carrier ? carrier.budget.balance : "balance" in carrier ? carrier.balance : null
   if (!balance) return

@@ -296,18 +296,17 @@ test("sync-ingestion: ingest and verify usage delta", async () => {
   const ingestResult = await unprice.usage.consume({
     customerId: CUSTOMER_ID,
     eventSlug: usageFeature.eventSlug,
-    featureSlug: usageFeature.featureSlug,
     properties: props!,
     idempotencyKey: randomUUID(),
   })
 
-  assert(!ingestResult.error, `ingestSync error: ${ingestResult.error?.message}`)
-  const rejectionReason = ingestResult.result?.rejectionReason as string | undefined
-  if (ingestResult.result?.allowed === false && rejectionReason === "WALLET_EMPTY") {
-    ingestionUnavailableReason = `sync ingestion rejected: ${rejectionReason}`
+  // A denial (a limit or an empty prepaid wallet) is a 402.
+  if (ingestResult.error?.code === "BUDGET_EXCEEDED") {
+    ingestionUnavailableReason = `sync ingestion denied: ${ingestResult.error.message}`
     skip(ingestionUnavailableReason)
   }
-  assert(ingestResult.result?.allowed === true, `ingestSync rejected: ${rejectionReason}`)
+  assert(!ingestResult.error, `ingestSync error: ${ingestResult.error?.message}`)
+  assert(ingestResult.result?.allowed === true, "ingestSync should be allowed")
 
   // 4. Verify after ingestion — usage should have changed
   const after = await unprice.access.check({
@@ -364,14 +363,19 @@ test("async-ingestion: ingest and poll for eventual consistency", async () => {
   assert(props !== null, "could not build ingestion properties")
 
   const ingestResult = await unprice.usage.record({
-    customerId: CUSTOMER_ID,
-    eventSlug: usageFeature.eventSlug,
-    properties: props!,
-    idempotencyKey: randomUUID(),
+    events: [
+      {
+        customerId: CUSTOMER_ID,
+        eventSlug: usageFeature.eventSlug,
+        properties: props!,
+        idempotencyKey: randomUUID(),
+        occurredAt: Date.now(),
+      },
+    ],
   })
 
   assert(!ingestResult.error, `async ingest error: ${ingestResult.error?.message}`)
-  assert(ingestResult.result?.accepted === true, "async event should be accepted")
+  assert(ingestResult.result?.accepted === 1, "async event should be accepted")
 
   // 3. Poll until usage reflects the change (max 10s)
   let usageAfter = usageBefore
@@ -436,7 +440,6 @@ test("idempotency: duplicate key is deduplicated", async () => {
   const first = await unprice.usage.consume({
     customerId: CUSTOMER_ID,
     eventSlug: usageFeature.eventSlug,
-    featureSlug: usageFeature.featureSlug,
     properties: props!,
     idempotencyKey,
   })
@@ -445,7 +448,6 @@ test("idempotency: duplicate key is deduplicated", async () => {
   const second = await unprice.usage.consume({
     customerId: CUSTOMER_ID,
     eventSlug: usageFeature.eventSlug,
-    featureSlug: usageFeature.featureSlug,
     properties: props!,
     idempotencyKey,
   })
@@ -512,16 +514,13 @@ test("limit-enforcement: sync ingest rejects when limit exceeded", async () => {
       const res = await unprice.usage.consume({
         customerId: CUSTOMER_ID,
         eventSlug: usageFeature.eventSlug,
-        featureSlug: usageFeature.featureSlug,
         properties: props,
         idempotencyKey: randomUUID(),
       })
 
-      assert(!res.error, `usage.consume error: ${res.error?.message}`)
-      assert(res.result?.allowed === false, "expected rejection when limit already reached")
       assert(
-        res.result?.rejectionReason === "LIMIT_EXCEEDED",
-        `expected LIMIT_EXCEEDED, got ${res.result?.rejectionReason}`
+        res.error?.code === "BUDGET_EXCEEDED",
+        `expected a 402 when the limit is already reached, got ${res.error?.code ?? "success"}`
       )
     }
 
@@ -549,18 +548,15 @@ test("limit-enforcement: sync ingest rejects when limit exceeded", async () => {
   const res = await unprice.usage.consume({
     customerId: CUSTOMER_ID,
     eventSlug: usageFeature.eventSlug,
-    featureSlug: usageFeature.featureSlug,
     properties: props!,
     idempotencyKey: randomUUID(),
   })
 
-  assert(!res.error, `usage.consume error: ${res.error?.message}`)
-
-  // depending on overage strategy this might be allowed (last-call) or rejected
-  if (res.result?.allowed === false) {
+  // depending on overage strategy this might be allowed (a soft limit) or denied with a 402
+  if (res.error) {
     assert(
-      res.result?.rejectionReason === "LIMIT_EXCEEDED",
-      `expected LIMIT_EXCEEDED, got ${res.result?.rejectionReason}`
+      res.error.code === "BUDGET_EXCEEDED",
+      `expected BUDGET_EXCEEDED, got ${res.error.code}: ${res.error.message}`
     )
     console.info(`    ingestion rejected at limit (${currentUsage}/${limit})`)
   } else {
@@ -610,8 +606,8 @@ test("verification: non-existent feature returns proper error", async () => {
     `fake feature should not be allowed, got allowed=${result.allowed}`
   )
   assert(
-    result.rejectionReason === "NO_MATCHING_ENTITLEMENT",
-    `expected NO_MATCHING_ENTITLEMENT, got ${result.rejectionReason ?? "unknown"}`
+    result.rejectionReason === "NO_ENTITLEMENT",
+    `expected NO_ENTITLEMENT, got ${result.rejectionReason ?? "unknown"}`
   )
 
   console.info(`    correctly denied: rejectionReason=${result.rejectionReason}`)
@@ -632,8 +628,8 @@ test("verification: non-existent customer returns proper error", async () => {
   assert(!!result, "result should exist")
   assert(result?.allowed === false, "fake customer should not be allowed")
   assert(
-    result.rejectionReason === "CUSTOMER_NOT_FOUND",
-    `expected CUSTOMER_NOT_FOUND, got ${result.rejectionReason ?? "unknown"}`
+    result.rejectionReason === "NO_ENTITLEMENT",
+    `expected NO_ENTITLEMENT, got ${result.rejectionReason ?? "unknown"}`
   )
 
   console.info(`    correctly denied: rejectionReason=${result.rejectionReason}`)

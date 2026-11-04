@@ -1,14 +1,12 @@
 import { describe, expect, it, vi } from "vitest"
 import { INGESTION_MAX_EVENT_AGE_MS } from "../entitlements"
 import type { FanoutMessageOutcome } from "./fanout-outcomes"
-import type { IngestionOutcome } from "./interface"
 import type { IngestionQueueMessage } from "./message"
 import {
   IngestionMessageOutcomes,
   ackMessage,
   mapOutcomesToAckResults,
   retryMessage,
-  toSyncResult,
 } from "./message-outcomes"
 
 const TEST_NOW = Date.UTC(2026, 2, 20, 12, 0, 0)
@@ -130,30 +128,6 @@ describe("message disposition helpers", () => {
         action: "retry",
         retryAfterSeconds: 30,
       },
-    })
-  })
-
-  it("builds sync results from ingestion outcomes", () => {
-    const outcome: IngestionOutcome = {
-      state: "rejected",
-      rejectionReason: "LIMIT_EXCEEDED",
-    }
-
-    expect(toSyncResult({ allowed: false, message: "limit reached", outcome })).toEqual({
-      allowed: false,
-      idempotencyStatus: "new",
-      message: "limit reached",
-      rejectionReason: "LIMIT_EXCEEDED",
-      state: "rejected",
-    })
-
-    expect(
-      toSyncResult({ allowed: false, idempotencyStatus: "already_reported", outcome })
-    ).toEqual({
-      allowed: false,
-      idempotencyStatus: "already_reported",
-      rejectionReason: "LIMIT_EXCEEDED",
-      state: "rejected",
     })
   })
 })

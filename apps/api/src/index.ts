@@ -40,8 +40,6 @@ import { registerGetCurrentEntitlementsV1 } from "./routes/entitlements/getCurre
 import { registerGetEntitlementWindowStatusV1 } from "./routes/entitlements/getEntitlementWindowStatusV1"
 import { registerGetEntitlementsV1 } from "./routes/entitlements/getEntitlementsV1"
 import { registerVerifyV1 } from "./routes/entitlements/verifyV1"
-import { registerIngestEventsSyncV1 } from "./routes/events/ingestEventsSyncV1"
-import { registerIngestEventsV1 } from "./routes/events/ingestEventsV1"
 import { registerReplayIngestionEventsV1 } from "./routes/events/replayIngestionEventsV1"
 import { registerGetFeaturesV1 } from "./routes/features/getFeaturesV1"
 import { registerApplyMonetizationV1 } from "./routes/monetization/applyMonetizationV1"
@@ -60,6 +58,8 @@ import { registerGetRunV1 } from "./routes/runs/getRunV1"
 import { registerSettleRunV1 } from "./routes/runs/settleRunV1"
 import { registerStartRunV1 } from "./routes/runs/startRunV1"
 import { registerGetSubscriptionV1 } from "./routes/subscriptions/getSubscriptionV1"
+import { registerConsumeUsageV1 } from "./routes/usage/consumeUsageV1"
+import { registerRecordUsageV1 } from "./routes/usage/recordUsageV1"
 
 import { env } from "cloudflare:workers"
 import type { IngestionQueueMessage, IngestionReportingEnvelope } from "@unprice/services/ingestion"
@@ -224,9 +224,11 @@ registerGetEntitlementsV1(app)
 registerGetCurrentEntitlementsV1(app)
 registerVerifyV1(app)
 
+// Usage routes: every event goes to its customer's payer budget (ADR-0008 D6)
+registerRecordUsageV1(app)
+registerConsumeUsageV1(app)
+
 // Event routes
-registerIngestEventsV1(app)
-registerIngestEventsSyncV1(app)
 registerReplayIngestionEventsV1(app)
 registerGetEntitlementWindowStatusV1(app)
 
@@ -255,7 +257,7 @@ registerListPlanVersionsV1(app)
 // Subscription routes
 registerGetSubscriptionV1(app)
 
-// Usage routes
+// Usage analytics routes
 registerExplainChargeV1(app)
 registerGetIngestionStatusV1(app)
 registerGetAnalyticsUsageV1(app)

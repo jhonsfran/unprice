@@ -387,15 +387,17 @@ describe("Unprice client", () => {
       requests.push(request.clone())
       return createJsonResponse({
         allowed: true,
-        idempotencyStatus: "already_reported",
-        state: "processed",
+        customerId: "cus_123",
+        amount: "0.42",
+        crossed: [],
+        replayed: true,
+        balance: { remaining: null, held: "0", limits: [], asOf: 0 },
       })
     })
 
     const { result, error } = await client.usage.consume({
       customerId: "cus_123",
       eventSlug: "tokens_used",
-      featureSlug: "tokens",
       idempotencyKey: "idem_123",
       properties: {
         amount: 42,
@@ -404,13 +406,12 @@ describe("Unprice client", () => {
 
     expect(error).toBeUndefined()
     expect(result?.allowed).toBe(true)
-    expect(result?.idempotencyStatus).toBe("already_reported")
+    expect(result?.replayed).toBe(true)
     expect(requests[0]?.method).toBe("POST")
     expect(requests[0]?.url).toBe("https://example.com/v1/usage/consume")
     await expect(requests[0]?.json()).resolves.toEqual({
       customerId: "cus_123",
       eventSlug: "tokens_used",
-      featureSlug: "tokens",
       idempotencyKey: "idem_123",
       properties: {
         amount: 42,
@@ -649,24 +650,24 @@ describe("Unprice client", () => {
           )
         }
 
-        return createJsonResponse(
-          {
-            accepted: true,
-          },
-          { status: 202 }
-        )
+        return createJsonResponse({ accepted: 1, rejected: 0, results: [] })
       },
     })
 
     const { result, error } = await client.usage.record({
-      idempotencyKey: "idem_123",
-      eventSlug: "tokens",
-      customerId: "cus_123",
-      properties: {},
+      events: [
+        {
+          idempotencyKey: "idem_123",
+          eventSlug: "tokens",
+          customerId: "cus_123",
+          occurredAt: 1_792_000_000_000,
+          properties: {},
+        },
+      ],
     })
 
     expect(error).toBeUndefined()
-    expect(result?.accepted).toBe(true)
+    expect(result?.accepted).toBe(1)
     expect(calls).toBe(2)
   })
 })

@@ -19,8 +19,6 @@ import { route as accessEntitlementsCurrentRoute } from "~/routes/entitlements/g
 import { route as entitlementWindowsStatusRoute } from "~/routes/entitlements/getEntitlementWindowStatusV1"
 import { route as accessEntitlementsListRoute } from "~/routes/entitlements/getEntitlementsV1"
 import { route as accessCheckRoute } from "~/routes/entitlements/verifyV1"
-import { route as usageConsumeRoute } from "~/routes/events/ingestEventsSyncV1"
-import { route as usageRecordRoute } from "~/routes/events/ingestEventsV1"
 import { route as ingestionEventsReplayRoute } from "~/routes/events/replayIngestionEventsV1"
 import { route as featuresListRoute } from "~/routes/features/getFeaturesV1"
 import { route as invoicesGetRoute } from "~/routes/invoices/getInvoiceV1"
@@ -40,6 +38,8 @@ import { route as runsGetRoute } from "~/routes/runs/getRunV1"
 import { route as runsSettleRoute } from "~/routes/runs/settleRunV1"
 import { route as runsStartRoute } from "~/routes/runs/startRunV1"
 import { route as subscriptionsGetRoute } from "~/routes/subscriptions/getSubscriptionV1"
+import { route as usageConsumeRoute } from "~/routes/usage/consumeUsageV1"
+import { route as usageRecordRoute } from "~/routes/usage/recordUsageV1"
 import {
   walletBalanceRoute,
   walletCreditBalanceRoute,

@@ -33,9 +33,11 @@ type _RunsConsumeInputCheck = AssertAssignable<
 type _UsageRecordInputCheck = AssertAssignable<
   OperationInput<"usage.record">,
   {
-    idempotencyKey: string
-    eventSlug: string
-    properties: Record<string, unknown>
+    events: {
+      idempotencyKey: string
+      eventSlug: string
+      occurredAt: number
+    }[]
   }
 >
 

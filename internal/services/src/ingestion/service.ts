@@ -10,19 +10,13 @@ import {
   EntitlementWindowApplier,
   type EntitlementWindowClient,
 } from "./entitlement-window-applier"
-import { IngestionFeatureVerifier } from "./feature-verification"
-import type {
-  FeatureVerificationResult,
-  IngestionMessageProcessingResult,
-  IngestionSyncResult,
-} from "./interface"
+import type { IngestionMessageProcessingResult } from "./interface"
 import type { IngestionQueueMessage } from "./message"
 import { IngestionMessageOutcomes } from "./message-outcomes"
 import { IngestionPreparedMessageProcessor } from "./prepared-message-processor"
 import type { IngestionReportingQueueClient } from "./reporting"
 import { IngestionReportingDispatcher } from "./reporting-dispatcher"
 import { IngestionSubscriptionCatchUp } from "./subscription-catchup"
-import { IngestionSyncProcessor } from "./sync-processor"
 
 const noopReportingClient: IngestionReportingQueueClient = {
   send: async () => {},
@@ -30,8 +24,6 @@ const noopReportingClient: IngestionReportingQueueClient = {
 
 export class IngestionService {
   private readonly customerGroupProcessor: IngestionCustomerGroupProcessor
-  private readonly featureVerifier: IngestionFeatureVerifier
-  private readonly syncProcessor: IngestionSyncProcessor
 
   constructor(opts: {
     cache: Pick<Cache, "ingestionPreparedGrantContext">
@@ -60,11 +52,6 @@ export class IngestionService {
       entitlementService: opts.entitlementService,
       logger: opts.logger,
     })
-    this.featureVerifier = new IngestionFeatureVerifier({
-      entitlementContext,
-      entitlementWindowClient: opts.entitlementWindowClient,
-      logger: opts.logger,
-    })
     const messageOutcomes = new IngestionMessageOutcomes({
       logger: opts.logger,
       now,
@@ -86,15 +73,6 @@ export class IngestionService {
           subscriptions: opts.subscriptions,
         })
       : undefined
-    this.syncProcessor = new IngestionSyncProcessor({
-      entitlementContext,
-      entitlementRouter,
-      entitlementWindowApplier,
-      messageOutcomes,
-      now,
-      reportingDispatcher,
-      subscriptionCatchUp,
-    })
     this.customerGroupProcessor = new IngestionCustomerGroupProcessor({
       entitlementContext,
       enableTestFailureInjection: opts.enableTestFailureInjection,
@@ -104,22 +82,6 @@ export class IngestionService {
       reportingDispatcher,
       subscriptionCatchUp,
     })
-  }
-
-  public async ingestFeatureSync(params: {
-    featureSlug: string
-    message: IngestionQueueMessage
-  }): Promise<IngestionSyncResult> {
-    return this.syncProcessor.ingestFeatureSync(params)
-  }
-
-  public async verifyFeatureStatus(params: {
-    customerId: string
-    featureSlug: string
-    projectId: string
-    timestamp: number
-  }): Promise<FeatureVerificationResult> {
-    return this.featureVerifier.verifyFeatureStatus(params)
   }
 
   public async processCustomerGroup(params: {

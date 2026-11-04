@@ -349,27 +349,21 @@ async function trySelectUsageFeature(
 async function ingestUsageAmounts(usageAmounts: number[], label: string): Promise<void> {
   assert(selectedUsageFeature, "usage feature should be selected before ingestion")
 
-  const timestampBase = Date.now()
   for (const [index, usageAmount] of usageAmounts.entries()) {
     const properties = buildIngestionProperties(usageAmount, selectedUsageFeature)
     const idempotencyKey = randomUUID()
     const { result, error } = await unprice.usage.consume({
       customerId: CUSTOMER_ID,
       eventSlug: selectedUsageFeature.eventSlug,
-      featureSlug: selectedUsageFeature.featureSlug,
       properties,
-      timestamp: timestampBase + index,
       idempotencyKey,
     })
 
-    assert(!error, `${label} usage.consume error: ${error?.message}`)
-    assert(!!result, `${label} usage.consume result should exist`)
     assert(
-      result.allowed === true,
-      `${label} usage.consume rejected at event ${index + 1}/${usageAmounts.length}: ${
-        result.rejectionReason ?? "unknown reason"
-      }`
+      !error,
+      `${label} usage.consume rejected at event ${index + 1}/${usageAmounts.length}: ${error?.code} ${error?.message}`
     )
+    assert(!!result, `${label} usage.consume result should exist`)
 
     ingestedEvents++
   }

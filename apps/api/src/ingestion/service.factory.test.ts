@@ -38,10 +38,12 @@ describe("createIngestionService", () => {
       } as never,
     })
 
-    const rawService = service as unknown as {
-      syncProcessor: {
-        entitlementWindowApplier: {
-          entitlementWindowClient: unknown
+    const { customerGroupProcessor } = service as unknown as {
+      customerGroupProcessor: {
+        preparedMessageProcessor: {
+          entitlementWindowApplier: {
+            entitlementWindowClient: unknown
+          }
         }
         reportingDispatcher: {
           reportingClient: unknown
@@ -50,9 +52,10 @@ describe("createIngestionService", () => {
     }
 
     expect(
-      rawService.syncProcessor.entitlementWindowApplier.entitlementWindowClient
+      customerGroupProcessor.preparedMessageProcessor.entitlementWindowApplier
+        .entitlementWindowClient
     ).toBeInstanceOf(CloudflareEntitlementWindowClient)
-    expect(rawService.syncProcessor.reportingDispatcher.reportingClient).toBeInstanceOf(
+    expect(customerGroupProcessor.reportingDispatcher.reportingClient).toBeInstanceOf(
       CloudflareReportingQueueClient
     )
   })

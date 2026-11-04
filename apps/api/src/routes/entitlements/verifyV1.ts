@@ -1,91 +1,53 @@
 import { createRoute } from "@hono/zod-openapi"
-import { LEDGER_SCALE } from "@unprice/money"
-import { INGESTION_REJECTION_REASONS, quotaWindowSchema } from "@unprice/services/ingestion"
-import { endTime } from "hono/timing"
-import { startTime } from "hono/timing"
+import { UnPriceBudgetError } from "@unprice/services/budgets"
+import {
+  PAYER_ACCESS_DENIALS,
+  checkPayerAccess,
+  checkPayerAccessOutputSchema,
+  payerQuotaWindowSchema,
+} from "@unprice/services/use-cases"
+import { endTime, startTime } from "hono/timing"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
 import { keyAuth, resolveContextProjectId, resolveCustomerIdForApiKeyOrThrow } from "~/auth/key"
+import { toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import { CloudflareBudgetClient } from "~/ingestion/budget/client"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
-import { validateEventTimestampOrThrow } from "../events/validate-event-timestamp"
+import { budgetApiError } from "../budgets/budget-verb"
 
 const tags = ["access"]
 
-const quotaWindowResponseSchema = quotaWindowSchema
-  .extend({
-    periodKey: quotaWindowSchema.shape.periodKey.openapi({
-      description: "The active reset-window key used by quota enforcement",
-      example: "day:1774051200000",
-    }),
-    startAt: quotaWindowSchema.shape.startAt.openapi({
-      description: "Inclusive Unix-millisecond start of the active quota window",
-      example: Date.UTC(2026, 2, 21, 0, 0, 0),
-    }),
-    endAt: quotaWindowSchema.shape.endAt.openapi({
-      description:
-        "Exclusive Unix-millisecond end of the active quota window. Null for an open-ended quota window.",
-      example: Date.UTC(2026, 2, 22, 0, 0, 0),
-    }),
-  })
-  .nullable()
-  .optional()
-  .openapi({
-    description:
-      "The single reset window represented by usage and limit. Null when active grants use different windows.",
-  })
-
-const verifyFeatureStatusSchema = z.object({
+const accessCheckResponseSchema = checkPayerAccessOutputSchema.extend({
+  featureSlug: z.string().openapi({ description: "The feature slug that was checked" }),
   allowed: z.boolean().openapi({
-    description: "Whether the feature is currently usable for the requested customer and timestamp",
+    description: "Whether the customer may use the feature now",
     example: true,
   }),
-  featureSlug: z.string().openapi({
-    description: "The feature slug that was verified",
-    example: "tokens",
-  }),
-  rejectionReason: z.enum(INGESTION_REJECTION_REASONS).optional().openapi({
-    description: "Why the feature is not usable. Omitted when allowed is true.",
+  rejectionReason: z.enum(PAYER_ACCESS_DENIALS).optional().openapi({
+    description:
+      "Why the feature is not usable: NO_ENTITLEMENT (the customer's plan has no such feature, or its subscription budget does not exist yet), LIMIT_EXCEEDED (a hard limit has no room), or BUDGET_CLOSED (the subscription ended). Omitted when allowed is true.",
     example: "LIMIT_EXCEEDED",
   }),
+  metered: z.boolean().openapi({
+    description:
+      "True when the customer's subscription budget meters the feature: usage and limit are live",
+  }),
   usage: z.number().optional().openapi({
-    description: "Current usage in the active meter window. Present for usage features.",
+    description:
+      "Quantity used in the limit's current window. Present for a limited metered feature.",
     example: 42,
   }),
-  limit: z.number().nullable().optional().openapi({
+  limit: z.number().nullable().openapi({
     description:
-      "Configured limit. For usage features this is the active meter-window limit; for tier/package features this is the subscribed quantity limit.",
+      "The feature's quantity limit, or the subscribed quantity of a seat or package feature; null when unlimited",
     example: 100,
   }),
-  quotaWindow: quotaWindowResponseSchema,
-  spending: z
-    .object({
-      ledgerAmount: z.number().int().openapi({
-        description: "Current priced usage spend in ledger scale units",
-        example: 4_200_000_000,
-      }),
-      currency: z.string().length(3).openapi({
-        description: "ISO currency code for the spending amount",
-        example: "USD",
-      }),
-      displayAmount: z.string().openapi({
-        description: "Ready-to-render localized spending amount",
-        example: "$42",
-      }),
-      scale: z.literal(LEDGER_SCALE).openapi({
-        description: "Decimal scale for ledgerAmount",
-        example: LEDGER_SCALE,
-      }),
-    })
-    .optional()
-    .openapi({
-      description: "Current priced usage spend for usage-based features",
-    }),
-  message: z.string().optional().openapi({
-    description: "Optional detail about the verification result",
-    example: "Unable to resolve the current meter window for this feature",
+  quotaWindow: payerQuotaWindowSchema.nullable().openapi({
+    description:
+      "The window the limit counts in: periodKey is the limit id, endAt (exclusive) is when it resets, null for a limit that never resets",
   }),
 })
 
@@ -94,9 +56,9 @@ export const route = createRoute(
     {
       path: "/v1/access/check",
       operationId: "access.check",
-      summary: "get current feature status",
+      summary: "check whether a customer may use a feature",
       description:
-        "Resolve whether a feature is usable for a customer. Usage features return current usage, limit, and priced spend; tier/package features return the subscribed quantity limit.",
+        "Answer whether a feature is usable for a customer now. A metered feature answers from the customer's subscription budget with its live usage and limit; a flat, seat, or package feature answers from the customer's plan.",
       method: "post",
       tags,
       request: {
@@ -106,43 +68,16 @@ export const route = createRoute(
               description: "The unprice customer ID",
               example: "cus_1H7KQFLr7RepUyQBKdnvY",
             }),
-            // externalId: z
-            //   .string()
-            //   .openapi({
-            //     description: "The external customer ID provided at sign up",
-            //     example: "user_123",
-            //   })
-            //   .optional(),
             featureSlug: z.string().openapi({
               description: "The feature slug",
               example: "tokens",
             }),
-            timestamp: z
-              .number()
-              .openapi({
-                description:
-                  "Optional timestamp to inspect a recent point-in-time state. Defaults to the request start time.",
-                example: Date.UTC(2026, 2, 21, 12, 0, 0),
-              })
-              .optional(),
           }),
-          // .superRefine((data, ctx) => {
-          //   if (!data.customerId && !data.externalId) {
-          //     ctx.addIssue({
-          //       code: z.ZodIssueCode.custom,
-          //       message: "Either customerId or externalId is required",
-          //       path: ["customerId", "externalId"],
-          //     })
-          //   }
-          // }),
           "Body of the request"
         ),
       },
       responses: {
-        [HttpStatusCodes.OK]: jsonContent(
-          verifyFeatureStatusSchema,
-          "The current feature verification status"
-        ),
+        [HttpStatusCodes.OK]: jsonContent(accessCheckResponseSchema, "The feature's access now"),
         ...openApiErrorResponses,
       },
     },
@@ -168,12 +103,7 @@ export type VerifyResponse = z.infer<
 
 export const registerVerifyV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const body = c.req.valid("json")
-    const { customerId: inputCustomerId, featureSlug } = body
-    const { ingestion } = c.get("services")
-    const requestStartedAt = c.get("requestStartedAt")
-    const timestamp = body.timestamp ?? requestStartedAt
-
+    const { customerId: inputCustomerId, featureSlug } = c.req.valid("json")
     const key = await keyAuth(c)
     const customerId = resolveCustomerIdForApiKeyOrThrow({
       explicitCustomerId: inputCustomerId,
@@ -181,18 +111,20 @@ export const registerVerifyV1 = (app: App) =>
     })
     const projectId = await resolveContextProjectId(c, key.projectId, customerId)
 
-    validateEventTimestampOrThrow(timestamp, requestStartedAt)
-
     startTime(c, "verify")
-
-    const result = await ingestion.verifyFeatureStatus({
-      customerId,
-      featureSlug,
-      projectId,
-      timestamp,
-    })
-
+    const result = await checkPayerAccess(
+      {
+        budgets: new CloudflareBudgetClient(c.env),
+        entitlements: c.get("services").entitlement,
+      },
+      { projectId, customerId, featureSlug, now: c.get("requestStartedAt") }
+    )
     endTime(c, "verify")
 
-    return c.json(result, HttpStatusCodes.OK)
+    if (result.err) {
+      throw result.err instanceof UnPriceBudgetError
+        ? budgetApiError(c, result.err)
+        : toUnpriceApiError(result.err)
+    }
+    return c.json(result.val, HttpStatusCodes.OK)
   })

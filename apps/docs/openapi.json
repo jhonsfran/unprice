@@ -182,6 +182,11 @@
                                   "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                   "example": "hard"
                                 },
+                                "feature": {
+                                  "type": "string",
+                                  "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                  "description": "The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount"
+                                },
                                 "amount": {
                                   "type": "string",
                                   "description": "The limit"
@@ -515,6 +520,11 @@
                                   "enum": ["hard", "soft"],
                                   "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                   "example": "hard"
+                                },
+                                "feature": {
+                                  "type": "string",
+                                  "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                  "description": "The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount"
                                 },
                                 "amount": {
                                   "type": "string",
@@ -850,6 +860,11 @@
                                   "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                   "example": "hard"
                                 },
+                                "feature": {
+                                  "type": "string",
+                                  "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                  "description": "The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount"
+                                },
                                 "amount": {
                                   "type": "string",
                                   "description": "The limit"
@@ -1183,6 +1198,11 @@
                                   "enum": ["hard", "soft"],
                                   "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                   "example": "hard"
+                                },
+                                "feature": {
+                                  "type": "string",
+                                  "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                  "description": "The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount"
                                 },
                                 "amount": {
                                   "type": "string",
@@ -1518,6 +1538,11 @@
                                   "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                   "example": "hard"
                                 },
+                                "feature": {
+                                  "type": "string",
+                                  "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                  "description": "The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount"
+                                },
                                 "amount": {
                                   "type": "string",
                                   "description": "The limit"
@@ -1851,6 +1876,11 @@
                                   "enum": ["hard", "soft"],
                                   "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                   "example": "hard"
+                                },
+                                "feature": {
+                                  "type": "string",
+                                  "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                  "description": "The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount"
                                 },
                                 "amount": {
                                   "type": "string",
@@ -2186,6 +2216,11 @@
                                   "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                   "example": "hard"
                                 },
+                                "feature": {
+                                  "type": "string",
+                                  "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                  "description": "The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount"
+                                },
                                 "amount": {
                                   "type": "string",
                                   "description": "The limit"
@@ -2519,6 +2554,11 @@
                                   "enum": ["hard", "soft"],
                                   "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                   "example": "hard"
+                                },
+                                "feature": {
+                                  "type": "string",
+                                  "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                  "description": "The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount"
                                 },
                                 "amount": {
                                   "type": "string",
@@ -2854,6 +2894,11 @@
                                   "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                   "example": "hard"
                                 },
+                                "feature": {
+                                  "type": "string",
+                                  "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                  "description": "The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount"
+                                },
                                 "amount": {
                                   "type": "string",
                                   "description": "The limit"
@@ -3187,6 +3232,11 @@
                                   "enum": ["hard", "soft"],
                                   "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                   "example": "hard"
+                                },
+                                "feature": {
+                                  "type": "string",
+                                  "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                  "description": "The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount"
                                 },
                                 "amount": {
                                   "type": "string",
@@ -3827,6 +3877,7 @@
               "example": "brun_123"
             },
             "required": true,
+            "description": "The run ID",
             "name": "runId",
             "in": "path"
           }
@@ -4091,6 +4142,7 @@
               "example": "brun_123"
             },
             "required": true,
+            "description": "The run ID",
             "name": "runId",
             "in": "path"
           }
@@ -4367,6 +4419,7 @@
               "example": "brun_123"
             },
             "required": true,
+            "description": "The run ID",
             "name": "runId",
             "in": "path"
           }
@@ -4588,6 +4641,7 @@
               "example": "brun_123"
             },
             "required": true,
+            "description": "The run ID",
             "name": "runId",
             "in": "path"
           },
@@ -4597,6 +4651,7 @@
               "description": "Project override for main/internal dashboard keys"
             },
             "required": false,
+            "description": "Project override for main/internal dashboard keys",
             "name": "project_id",
             "in": "query"
           }
@@ -4779,7 +4834,7 @@
       "post": {
         "operationId": "budgets.upsert",
         "summary": "create or update a budget",
-        "description": "Create the budget at a key, or replace its definition. Every upsert sends the whole definition: a field it leaves out takes its default, so an omitted closesAt reopens a closing budget and omitted hold TTLs return to their defaults. Sending the same definition again changes nothing. The unit cannot change after creation. A hard cap below current consumption plus outstanding reservations returns 409. A runtime key can create a budget or tighten it; raising or removing a hard limit, making it soft, or clearing or postponing closesAt needs a config key and otherwise returns 403, so whoever spends under a cap cannot lift it.",
+        "description": "Create the budget at a key, or replace its definition. Every upsert sends the whole definition: a field it leaves out takes its default, so an omitted closesAt reopens a closing budget and omitted hold TTLs return to their defaults. Sending the same definition again changes nothing. The unit cannot change after creation. A hard cap below current consumption plus outstanding reservations returns 409. A runtime key can create a budget or tighten it; raising or removing a hard limit, making it soft, or clearing or postponing closesAt needs a config key and otherwise returns 403, so whoever spends under a cap cannot lift it. Keys starting with unprice: are written by Unprice (a customer's subscription budget) and return 403.",
         "tags": ["budgets"],
         "x-unprice": {
           "audience": "public",
@@ -4970,6 +5025,11 @@
                                 "enum": ["hard", "soft"],
                                 "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                 "example": "hard"
+                              },
+                              "feature": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                "description": "The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount"
                               }
                             },
                             "required": ["id", "amount", "window", "enforce"]
@@ -5031,6 +5091,11 @@
                                     "enum": ["hard", "soft"],
                                     "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                     "example": "hard"
+                                  },
+                                  "feature": {
+                                    "type": "string",
+                                    "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                    "description": "The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount"
                                   },
                                   "amount": {
                                     "type": "string",
@@ -5442,6 +5507,11 @@
                                 "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                 "example": "hard"
                               },
+                              "feature": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                "description": "The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount"
+                              },
                               "amount": {
                                 "type": "string",
                                 "description": "The limit"
@@ -5723,6 +5793,11 @@
                                 "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                 "example": "hard"
                               },
+                              "feature": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                "description": "The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount"
+                              },
                               "amount": {
                                 "type": "string",
                                 "description": "The limit"
@@ -5967,6 +6042,11 @@
                                 "enum": ["hard", "soft"],
                                 "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                 "example": "hard"
+                              },
+                              "feature": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                "description": "The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount"
                               },
                               "amount": {
                                 "type": "string",
@@ -6306,6 +6386,11 @@
                                 "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                 "example": "hard"
                               },
+                              "feature": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                "description": "The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount"
+                              },
                               "amount": {
                                 "type": "string",
                                 "description": "The limit"
@@ -6572,6 +6657,11 @@
                                 "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                 "example": "hard"
                               },
+                              "feature": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                "description": "The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount"
+                              },
                               "amount": {
                                 "type": "string",
                                 "description": "The limit"
@@ -6737,6 +6827,7 @@
               "example": "customer:acme"
             },
             "required": true,
+            "description": "The budget's key, chosen by you and unique within the project. Up to 128 letters, digits, and `: / _ . @ -`, starting with a letter or digit.",
             "name": "key",
             "in": "query"
           }
@@ -6791,6 +6882,11 @@
                                 "enum": ["hard", "soft"],
                                 "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                 "example": "hard"
+                              },
+                              "feature": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                "description": "The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount"
                               }
                             },
                             "required": ["id", "amount", "window", "enforce"]
@@ -6852,6 +6948,11 @@
                                     "enum": ["hard", "soft"],
                                     "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                     "example": "hard"
+                                  },
+                                  "feature": {
+                                    "type": "string",
+                                    "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                    "description": "The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount"
                                   },
                                   "amount": {
                                     "type": "string",
@@ -7324,6 +7425,11 @@
                                 "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                 "example": "hard"
                               },
+                              "feature": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                "description": "The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount"
+                              },
                               "amount": {
                                 "type": "string",
                                 "description": "The limit"
@@ -7742,6 +7848,11 @@
                                             "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                             "example": "hard"
                                           },
+                                          "feature": {
+                                            "type": "string",
+                                            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                            "description": "The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount"
+                                          },
                                           "amount": {
                                             "type": "string",
                                             "description": "The limit"
@@ -7852,6 +7963,11 @@
                                 "enum": ["hard", "soft"],
                                 "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
                                 "example": "hard"
+                              },
+                              "feature": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                "description": "The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount"
                               },
                               "amount": {
                                 "type": "string",
@@ -8026,6 +8142,7 @@
               "example": "openai/gpt-5,anthropic/claude-sonnet-4-5"
             },
             "required": true,
+            "description": "Comma-separated provider/model ids, for example openai/gpt-5",
             "name": "ids",
             "in": "query"
           }
@@ -8423,8 +8540,7 @@
                   "creditLineAmountMinor": {
                     "type": "integer",
                     "nullable": true,
-                    "minimum": -9007199254740991,
-                    "maximum": 9007199254740991,
+                    "minimum": 0,
                     "description": "Optional capped usage credit amount in the currency's minor unit. For USD/EUR, 10000 means 100.00. Leave null or omit to derive from finite usage limits when creditLinePolicy is capped.",
                     "example": 10000
                   },
@@ -8641,8 +8757,7 @@
                   "creditLineAmountMinor": {
                     "type": "integer",
                     "nullable": true,
-                    "minimum": -9007199254740991,
-                    "maximum": 9007199254740991,
+                    "minimum": 0,
                     "description": "Optional replacement-phase credit cap in currency minor units. For USD/EUR, 1000 means $10.00.",
                     "example": 1000
                   }
@@ -8849,10 +8964,14 @@
                         "maxLength": 36
                       },
                       "createdAtM": {
-                        "type": "number"
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
                       },
                       "updatedAtM": {
-                        "type": "number"
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
                       },
                       "customerId": {
                         "type": "string",
@@ -8878,11 +8997,15 @@
                         "maxLength": 36
                       },
                       "effectiveAt": {
-                        "type": "number"
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
                       },
                       "expiresAt": {
-                        "type": "number",
-                        "nullable": true
+                        "type": "integer",
+                        "nullable": true,
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
                       },
                       "overageStrategy": {
                         "type": "string",
@@ -8904,9 +9027,6 @@
                             },
                             {
                               "nullable": true
-                            },
-                            {
-                              "nullable": true
                             }
                           ]
                         }
@@ -8923,10 +9043,14 @@
                             "maxLength": 36
                           },
                           "createdAtM": {
-                            "type": "number"
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
                           },
                           "updatedAtM": {
-                            "type": "number"
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
                           },
                           "planVersionId": {
                             "type": "string",
@@ -9951,7 +10075,9 @@
                             "description": "Additional feature settings including real-time tracking, notifications, and visibility options"
                           },
                           "order": {
-                            "type": "number"
+                            "type": "number",
+                            "minimum": -140737488355328,
+                            "maximum": 140737488355327
                           },
                           "defaultQuantity": {
                             "type": "integer",
@@ -9963,6 +10089,12 @@
                             "type": "integer",
                             "nullable": true,
                             "description": "Maximum allowed usage for this feature per billing period. Null or undefined means unlimited. Example: 10000 for 10,000 API calls/month"
+                          },
+                          "included": {
+                            "type": "string",
+                            "nullable": true,
+                            "pattern": "^\\d{1,19}(\\.\\d{1,8})?$",
+                            "description": "Units free per statement period. Usage up to this quantity costs nothing; the rate card prices the rest. Only for usage features whose meter has no dimensions. Example: '1000'"
                           },
                           "meterConfig": {
                             "type": "object",
@@ -10017,16 +10149,22 @@
                                 "maxLength": 36
                               },
                               "createdAtM": {
-                                "type": "number"
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
                               },
                               "updatedAtM": {
-                                "type": "number"
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
                               },
                               "slug": {
                                 "type": "string"
                               },
                               "code": {
-                                "type": "number"
+                                "type": "integer",
+                                "minimum": -2147483648,
+                                "maximum": 2147483647
                               },
                               "unitOfMeasure": {
                                 "type": "string",
@@ -10109,6 +10247,7 @@
                           "billingConfig",
                           "metadata",
                           "order",
+                          "included",
                           "feature"
                         ]
                       },
@@ -10126,10 +10265,14 @@
                               "maxLength": 36
                             },
                             "createdAtM": {
-                              "type": "number"
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
                             },
                             "updatedAtM": {
-                              "type": "number"
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
                             },
                             "customerEntitlementId": {
                               "type": "string",
@@ -10140,7 +10283,9 @@
                               "enum": ["subscription", "manual", "promotion", "trial", "addon"]
                             },
                             "priority": {
-                              "type": "number"
+                              "type": "integer",
+                              "minimum": -2147483648,
+                              "maximum": 2147483647
                             },
                             "allowanceUnits": {
                               "type": "integer",
@@ -10148,11 +10293,15 @@
                               "minimum": 0
                             },
                             "effectiveAt": {
-                              "type": "number"
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
                             },
                             "expiresAt": {
-                              "type": "number",
-                              "nullable": true
+                              "type": "integer",
+                              "nullable": true,
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
                             },
                             "metadata": {
                               "type": "object",
@@ -10167,9 +10316,6 @@
                                   },
                                   {
                                     "type": "boolean"
-                                  },
-                                  {
-                                    "nullable": true
                                   },
                                   {
                                     "nullable": true
@@ -10323,7 +10469,7 @@
       "post": {
         "operationId": "access.entitlements.current",
         "summary": "get current customer entitlements",
-        "description": "Get all active customer entitlements. Metered entitlements include live usage state from their entitlement windows.",
+        "description": "Get all active customer entitlements. Metered entitlements include their live limit, usage, and billing-period spend from the customer's subscription budget.",
         "tags": ["access"],
         "x-unprice": {
           "audience": "public",
@@ -10426,10 +10572,10 @@
                                     "type": "string"
                                   },
                                   "startAt": {
-                                    "type": "number"
+                                    "type": "integer"
                                   },
                                   "endAt": {
-                                    "type": "number",
+                                    "type": "integer",
                                     "nullable": true
                                   }
                                 },
@@ -10438,23 +10584,14 @@
                               "spending": {
                                 "type": "object",
                                 "properties": {
-                                  "currency": {
-                                    "type": "string",
-                                    "minLength": 3,
-                                    "maxLength": 3
-                                  },
-                                  "displayAmount": {
+                                  "unit": {
                                     "type": "string"
                                   },
-                                  "ledgerAmount": {
-                                    "type": "integer"
-                                  },
-                                  "scale": {
-                                    "type": "number",
-                                    "enum": [8]
+                                  "amount": {
+                                    "type": "string"
                                   }
                                 },
-                                "required": ["currency", "displayAmount", "ledgerAmount", "scale"]
+                                "required": ["unit", "amount"]
                               }
                             },
                             "required": [
@@ -10612,8 +10749,8 @@
     "/v1/access/check": {
       "post": {
         "operationId": "access.check",
-        "summary": "get current feature status",
-        "description": "Resolve whether a feature is usable for a customer. Usage features return current usage, limit, and priced spend; tier/package features return the subscribed quantity limit.",
+        "summary": "check whether a customer may use a feature",
+        "description": "Answer whether a feature is usable for a customer now. A metered feature answers from the customer's subscription budget with its live usage and limit; a flat, seat, or package feature answers from the customer's plan.",
         "tags": ["access"],
         "x-unprice": {
           "audience": "public",
@@ -10642,11 +10779,6 @@
                     "type": "string",
                     "description": "The feature slug",
                     "example": "tokens"
-                  },
-                  "timestamp": {
-                    "type": "number",
-                    "description": "Optional timestamp to inspect a recent point-in-time state. Defaults to the request start time.",
-                    "example": 1774094400000
                   }
                 },
                 "required": ["customerId", "featureSlug"]
@@ -10656,111 +10788,62 @@
         },
         "responses": {
           "200": {
-            "description": "The current feature verification status",
+            "description": "The feature's access now",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "allowed": {
-                      "type": "boolean",
-                      "description": "Whether the feature is currently usable for the requested customer and timestamp",
-                      "example": true
-                    },
                     "featureSlug": {
                       "type": "string",
-                      "description": "The feature slug that was verified",
-                      "example": "tokens"
+                      "description": "The feature slug that was checked"
+                    },
+                    "allowed": {
+                      "type": "boolean",
+                      "description": "Whether the customer may use the feature now",
+                      "example": true
                     },
                     "rejectionReason": {
                       "type": "string",
-                      "enum": [
-                        "CUSTOMER_NOT_FOUND",
-                        "EVENT_TOO_OLD",
-                        "INVALID_ENTITLEMENT_CONFIGURATION",
-                        "INVALID_AGGREGATION_PROPERTIES",
-                        "LIMIT_EXCEEDED",
-                        "LATE_EVENT_CLOSED_PERIOD",
-                        "NO_MATCHING_ENTITLEMENT",
-                        "RUN_BUDGET_EXCEEDED",
-                        "UNROUTABLE_EVENT",
-                        "WALLET_EMPTY"
-                      ],
-                      "description": "Why the feature is not usable. Omitted when allowed is true.",
+                      "enum": ["NO_ENTITLEMENT", "LIMIT_EXCEEDED", "BUDGET_CLOSED"],
+                      "description": "Why the feature is not usable: NO_ENTITLEMENT (the customer's plan has no such feature, or its subscription budget does not exist yet), LIMIT_EXCEEDED (a hard limit has no room), or BUDGET_CLOSED (the subscription ended). Omitted when allowed is true.",
                       "example": "LIMIT_EXCEEDED"
+                    },
+                    "metered": {
+                      "type": "boolean",
+                      "description": "True when the customer's subscription budget meters the feature: usage and limit are live"
                     },
                     "usage": {
                       "type": "number",
-                      "description": "Current usage in the active meter window. Present for usage features.",
+                      "description": "Quantity used in the limit's current window. Present for a limited metered feature.",
                       "example": 42
                     },
                     "limit": {
                       "type": "number",
                       "nullable": true,
-                      "description": "Configured limit. For usage features this is the active meter-window limit; for tier/package features this is the subscribed quantity limit.",
+                      "description": "The feature's quantity limit, or the subscribed quantity of a seat or package feature; null when unlimited",
                       "example": 100
                     },
                     "quotaWindow": {
                       "type": "object",
                       "nullable": true,
                       "properties": {
-                        "endAt": {
-                          "type": "number",
-                          "nullable": true,
-                          "description": "Exclusive Unix-millisecond end of the active quota window. Null for an open-ended quota window.",
-                          "example": 1774137600000
-                        },
                         "periodKey": {
-                          "type": "string",
-                          "description": "The active reset-window key used by quota enforcement",
-                          "example": "day:1774051200000"
+                          "type": "string"
                         },
                         "startAt": {
-                          "type": "number",
-                          "description": "Inclusive Unix-millisecond start of the active quota window",
-                          "example": 1774051200000
-                        }
-                      },
-                      "required": ["endAt", "periodKey", "startAt"],
-                      "description": "The single reset window represented by usage and limit. Null when active grants use different windows."
-                    },
-                    "spending": {
-                      "type": "object",
-                      "properties": {
-                        "ledgerAmount": {
+                          "type": "integer"
+                        },
+                        "endAt": {
                           "type": "integer",
-                          "description": "Current priced usage spend in ledger scale units",
-                          "example": 4200000000
-                        },
-                        "currency": {
-                          "type": "string",
-                          "minLength": 3,
-                          "maxLength": 3,
-                          "description": "ISO currency code for the spending amount",
-                          "example": "USD"
-                        },
-                        "displayAmount": {
-                          "type": "string",
-                          "description": "Ready-to-render localized spending amount",
-                          "example": "$42"
-                        },
-                        "scale": {
-                          "type": "number",
-                          "enum": [8],
-                          "description": "Decimal scale for ledgerAmount",
-                          "example": 8
+                          "nullable": true
                         }
                       },
-                      "required": ["ledgerAmount", "currency", "displayAmount", "scale"],
-                      "description": "Current priced usage spend for usage-based features"
-                    },
-                    "message": {
-                      "type": "string",
-                      "description": "Optional detail about the verification result",
-                      "example": "Unable to resolve the current meter window for this feature"
+                      "required": ["periodKey", "startAt", "endAt"],
+                      "description": "The window the limit counts in: periodKey is the limit id, endAt (exclusive) is when it resets, null for a limit that never resets"
                     }
                   },
-                  "required": ["allowed", "featureSlug"]
+                  "required": ["featureSlug", "allowed", "metered", "limit", "quotaWindow"]
                 }
               }
             }
@@ -10861,8 +10944,8 @@
     "/v1/usage/record": {
       "post": {
         "operationId": "usage.record",
-        "summary": "ingest raw event",
-        "description": "Ingest a raw events. All ingested events are reported and a notification will be triggered when the limit is hit.",
+        "summary": "record usage that already happened",
+        "description": "Record up to 100 usage events. Each goes to its customer's subscription budget, which prices it at ingestion into the billing period that contains its occurredAt. Recorded usage always counts, even past a limit, because the work already ran; the limits it crossed come back in crossed. Events at most 1 day old are accepted. The answer has one result per event, in request order: a refused event carries the error a single call would return, and the others still count. A retry with the same idempotency key replays the first answer.",
         "tags": ["usage"],
         "x-unprice": {
           "audience": "public",
@@ -10875,70 +10958,194 @@
           }
         },
         "requestBody": {
-          "description": "The raw event ingestion payload",
+          "description": "The usage events",
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
                 "properties": {
-                  "id": {
-                    "type": "string",
-                    "description": "Optional event id. If omitted, the API will generate an internal event id for processing.",
-                    "example": "evt_123"
-                  },
-                  "idempotencyKey": {
-                    "type": "string",
-                    "description": "Logical idempotency key for deduplicating raw events",
-                    "example": "idem_123"
-                  },
-                  "eventSlug": {
-                    "type": "string",
-                    "description": "The event slug",
-                    "example": "tokens_used"
-                  },
-                  "customerId": {
-                    "type": "string",
-                    "description": "The unprice customer id",
-                    "example": "cus_123"
-                  },
-                  "timestamp": {
-                    "type": "number",
-                    "description": "Event timestamp in epoch milliseconds, if not provided will use the time of the request",
-                    "example": 1741454800000
-                  },
-                  "properties": {
-                    "type": "object",
-                    "additionalProperties": {
-                      "nullable": true
+                  "events": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "customerId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 36,
+                          "description": "The customer whose payer budget takes the event. Defaults to the API key's customer; required otherwise.",
+                          "example": "cus_1H7KQFLr7RepUyQBKdnvY"
+                        },
+                        "idempotencyKey": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256,
+                          "description": "Up to 256 characters, usually the event id. A retry with the same key and the same event replays the first answer; the same key with another event is rejected with IDEMPOTENCY_CONFLICT.",
+                          "example": "evt_01J9Z3"
+                        },
+                        "eventSlug": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64,
+                          "pattern": "^[a-z0-9._-]+$",
+                          "description": "The event slug a metered feature of the customer's plan listens to",
+                          "example": "llm_completion"
+                        },
+                        "properties": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "maxLength": 1024
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "nullable": true
+                              }
+                            ]
+                          },
+                          "default": {},
+                          "description": "The event's properties: flat strings, numbers, booleans, or null, at most 128 keys and 4 KB serialized. The meter reads the quantity and the dimensions (a model, a region) from them.",
+                          "example": {
+                            "model": "gpt-4o",
+                            "input_tokens": 1200,
+                            "output_tokens": 300
+                          }
+                        },
+                        "occurredAt": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "When the usage happened, in epoch milliseconds: the event's own time, not the time of the call, so a retry replays. At most 1 day old and 5 minutes ahead. The usage counts in the billing period that contains it, or in the next open one when that period is already sealed.",
+                          "example": 1792000000000
+                        }
+                      },
+                      "required": ["idempotencyKey", "eventSlug", "occurredAt"],
+                      "additionalProperties": false
                     },
-                    "description": "Arbitrary event properties",
-                    "example": {
-                      "amount": 1
-                    }
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "description": "1 to 100 events"
                   }
                 },
-                "required": ["idempotencyKey", "eventSlug", "properties"]
+                "required": ["events"],
+                "additionalProperties": false
               }
             }
           }
         },
         "responses": {
-          "202": {
-            "description": "The raw event was accepted for asynchronous processing",
+          "200": {
+            "description": "One result per event",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
                     "accepted": {
-                      "type": "boolean",
-                      "enum": [true],
-                      "description": "The raw event was accepted for asynchronous processing",
-                      "example": true
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Events accepted or replayed"
+                    },
+                    "rejected": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Events refused"
+                    },
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "status": {
+                                "type": "string",
+                                "enum": ["accepted"]
+                              },
+                              "customerId": {
+                                "type": "string"
+                              },
+                              "idempotencyKey": {
+                                "type": "string"
+                              },
+                              "amount": {
+                                "type": "string",
+                                "description": "What the event costs, in the budget's unit, as priced at ingestion"
+                              },
+                              "crossed": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "description": "Limit ids whose consumed amount first exceeded the limit's amount. A hard limit crosses only after recorded usage took its room. Reservations do not trigger crossings. Replays preserve the original result."
+                              },
+                              "replayed": {
+                                "type": "boolean",
+                                "description": "True when this answer replays an earlier request instead of applying it again"
+                              }
+                            },
+                            "required": [
+                              "status",
+                              "customerId",
+                              "idempotencyKey",
+                              "amount",
+                              "crossed",
+                              "replayed"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "status": {
+                                "type": "string",
+                                "enum": ["rejected"]
+                              },
+                              "customerId": {
+                                "type": "string"
+                              },
+                              "idempotencyKey": {
+                                "type": "string"
+                              },
+                              "error": {
+                                "type": "object",
+                                "properties": {
+                                  "code": {
+                                    "type": "string",
+                                    "description": "The API error code a single call returns: BAD_REQUEST, NOT_FOUND, or CONFLICT",
+                                    "example": "BAD_REQUEST"
+                                  },
+                                  "status": {
+                                    "type": "integer",
+                                    "description": "The HTTP status a single call returns",
+                                    "example": 400
+                                  },
+                                  "reason": {
+                                    "type": "string",
+                                    "description": "Why the budget refused the event: NOT_PRICED (no rate row matches it), UNKNOWN_EVENT (no metered feature takes the slug), PERIOD_CLOSED (its billing period is sealed and none is open), NO_STATEMENT (no billing period covers it), TOO_LATE or INVALID_OCCURRED_AT (outside the accepted window), IDEMPOTENCY_CONFLICT, BUDGET_CLOSED, or BUDGET_NOT_FOUND (the customer has no subscription budget yet)",
+                                    "example": "NOT_PRICED"
+                                  },
+                                  "message": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["code", "status", "reason", "message"]
+                              }
+                            },
+                            "required": ["status", "customerId", "idempotencyKey", "error"]
+                          }
+                        ]
+                      },
+                      "description": "One result per event, in request order"
                     }
                   },
-                  "required": ["accepted"]
+                  "required": ["accepted", "rejected", "results"]
                 }
               }
             }
@@ -11039,8 +11246,8 @@
     "/v1/usage/consume": {
       "post": {
         "operationId": "usage.consume",
-        "summary": "ingest raw event synchronously for a feature",
-        "description": "Validate and synchronously ingest a raw event for one feature slug. This is useful when you want to enforce exact limits from a ingestion.",
+        "summary": "consume usage if it fits",
+        "description": "Price one usage event in the customer's subscription budget and count it only if it fits every hard limit, before the work runs. A denial returns 402 with the limit that blocked it, or without details when a prepaid wallet cannot fund it. An event no rate matches returns 400 (NOT_PRICED), as does an event no metered feature takes (UNKNOWN_EVENT). A retry with the same idempotency key replays the first answer.",
         "tags": ["usage"],
         "x-unprice": {
           "audience": "public",
@@ -11053,62 +11260,72 @@
           }
         },
         "requestBody": {
-          "description": "The synchronous raw event ingestion payload",
+          "description": "The usage event",
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
                 "properties": {
-                  "id": {
+                  "customerId": {
                     "type": "string",
-                    "description": "Optional event id. If omitted, the API will generate an internal event id for processing.",
-                    "example": "evt_123"
+                    "minLength": 1,
+                    "maxLength": 36,
+                    "description": "The customer whose payer budget takes the event. Defaults to the API key's customer; required otherwise.",
+                    "example": "cus_1H7KQFLr7RepUyQBKdnvY"
                   },
                   "idempotencyKey": {
                     "type": "string",
-                    "description": "Logical idempotency key for deduplicating raw events",
-                    "example": "idem_123"
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "description": "Up to 256 characters, usually the event id. A retry with the same key and the same event replays the first answer; the same key with another event is rejected with IDEMPOTENCY_CONFLICT.",
+                    "example": "evt_01J9Z3"
                   },
                   "eventSlug": {
                     "type": "string",
-                    "description": "The event slug",
-                    "example": "tokens_used"
-                  },
-                  "customerId": {
-                    "type": "string",
-                    "description": "The unprice customer id",
-                    "example": "cus_123"
-                  },
-                  "timestamp": {
-                    "type": "number",
-                    "description": "Event timestamp in epoch milliseconds, if not provided will use the time of the request",
-                    "example": 1741454800000
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[a-z0-9._-]+$",
+                    "description": "The event slug a metered feature of the customer's plan listens to",
+                    "example": "llm_completion"
                   },
                   "properties": {
                     "type": "object",
                     "additionalProperties": {
-                      "nullable": true
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "maxLength": 1024
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "nullable": true
+                        }
+                      ]
                     },
-                    "description": "Arbitrary event properties",
+                    "default": {},
+                    "description": "The event's properties: flat strings, numbers, booleans, or null, at most 128 keys and 4 KB serialized. The meter reads the quantity and the dimensions (a model, a region) from them.",
                     "example": {
-                      "amount": 1
+                      "model": "gpt-4o",
+                      "input_tokens": 1200,
+                      "output_tokens": 300
                     }
-                  },
-                  "featureSlug": {
-                    "type": "string",
-                    "description": "The feature slug to verify and ingest synchronously",
-                    "example": "tokens"
                   }
                 },
-                "required": ["idempotencyKey", "eventSlug", "properties", "featureSlug"]
+                "required": ["idempotencyKey", "eventSlug"],
+                "additionalProperties": false
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "The synchronous ingestion result for the targeted feature",
+            "description": "The consumed usage",
             "content": {
               "application/json": {
                 "schema": {
@@ -11116,45 +11333,106 @@
                   "properties": {
                     "allowed": {
                       "type": "boolean",
-                      "description": "Whether the event was accepted and synchronously ingested for the feature",
-                      "example": true
+                      "enum": [true]
                     },
-                    "state": {
-                      "type": "string",
-                      "enum": ["processed", "rejected"],
-                      "description": "Synchronous ingestion lifecycle state for the targeted feature",
-                      "example": "processed"
+                    "customerId": {
+                      "type": "string"
                     },
-                    "idempotencyStatus": {
+                    "amount": {
                       "type": "string",
-                      "enum": ["new", "already_reported"],
-                      "description": "Whether this request applied a new idempotency key or replayed a previously reported event",
-                      "example": "already_reported"
+                      "description": "What the event costs, in the budget's unit, as priced at ingestion"
                     },
-                    "rejectionReason": {
-                      "type": "string",
-                      "enum": [
-                        "CUSTOMER_NOT_FOUND",
-                        "EVENT_TOO_OLD",
-                        "INVALID_ENTITLEMENT_CONFIGURATION",
-                        "INVALID_AGGREGATION_PROPERTIES",
-                        "LIMIT_EXCEEDED",
-                        "LATE_EVENT_CLOSED_PERIOD",
-                        "NO_MATCHING_ENTITLEMENT",
-                        "RUN_BUDGET_EXCEEDED",
-                        "UNROUTABLE_EVENT",
-                        "WALLET_EMPTY"
-                      ],
-                      "description": "Business rejection reason when the event could not be ingested",
-                      "example": "LIMIT_EXCEEDED"
+                    "crossed": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Limit ids whose consumed amount first exceeded the limit's amount. A hard limit crosses only after recorded usage took its room. Reservations do not trigger crossings. Replays preserve the original result."
                     },
-                    "message": {
-                      "type": "string",
-                      "description": "Optional details about the synchronous ingestion result",
-                      "example": "Limit exceeded for meter meter_123"
+                    "replayed": {
+                      "type": "boolean",
+                      "description": "True when this answer replays an earlier request instead of applying it again"
+                    },
+                    "balance": {
+                      "type": "object",
+                      "properties": {
+                        "remaining": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "The least remaining over hard limits; null when the budget has no hard limit"
+                        },
+                        "held": {
+                          "type": "string",
+                          "description": "The sum of open holds and the unreported part of open leases"
+                        },
+                        "limits": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "window": {
+                                "type": "string",
+                                "enum": ["hour", "day", "week", "month", "never"],
+                                "description": "The period a limit counts over. hour, day, week (ISO, from Monday), and month are UTC calendar periods unless anchored; never counts for the life of the budget.",
+                                "example": "month"
+                              },
+                              "enforce": {
+                                "type": "string",
+                                "enum": ["hard", "soft"],
+                                "description": "hard denies authorize and charge that would exceed the limit; soft never denies. Either kind is reported in `crossed` once usage passes it, and only a record can pass a hard limit.",
+                                "example": "hard"
+                              },
+                              "feature": {
+                                "type": "string",
+                                "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                "description": "The feature whose quantity the limit caps, in that feature's units; absent when the limit caps the budget's amount"
+                              },
+                              "amount": {
+                                "type": "string",
+                                "description": "The limit"
+                              },
+                              "consumed": {
+                                "type": "string",
+                                "description": "Used in the current period"
+                              },
+                              "held": {
+                                "type": "string",
+                                "description": "Held by open holds and leases"
+                              },
+                              "remaining": {
+                                "type": "string",
+                                "description": "amount - consumed - held; negative for a soft limit, or a hard limit a record passed"
+                              },
+                              "resetsAt": {
+                                "type": "integer",
+                                "nullable": true,
+                                "description": "When the limit's current period ends, in epoch milliseconds; null for never"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "window",
+                              "enforce",
+                              "amount",
+                              "consumed",
+                              "held",
+                              "remaining",
+                              "resetsAt"
+                            ]
+                          }
+                        },
+                        "asOf": {
+                          "type": "integer",
+                          "description": "When this balance was computed, in epoch milliseconds"
+                        }
+                      },
+                      "required": ["remaining", "held", "limits", "asOf"]
                     }
                   },
-                  "required": ["allowed", "state", "idempotencyStatus"]
+                  "required": ["allowed", "customerId", "amount", "crossed", "replayed", "balance"]
                 }
               }
             }
@@ -11175,6 +11453,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrUnauthorized"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "The request does not fit the budget. `details.blocked` names the limit that blocked it and the remedy that would let it through.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrBudgetExceeded"
                 }
               }
             }
@@ -11448,7 +11736,9 @@
                             "type": "string"
                           },
                           "code": {
-                            "type": "number"
+                            "type": "integer",
+                            "minimum": -2147483648,
+                            "maximum": 2147483647
                           },
                           "unitOfMeasure": {
                             "type": "string",
@@ -11638,6 +11928,7 @@
               "example": "inv_1H7KQFLr7RepUyQBKdnvY"
             },
             "required": true,
+            "description": "The invoice ID",
             "name": "invoiceId",
             "in": "path"
           }
@@ -11802,7 +12093,14 @@
                           "wallet_credit_source": {
                             "type": "string",
                             "nullable": true,
-                            "enum": ["promo", "plan_included", "trial", "manual", "credit_line"]
+                            "enum": [
+                              "promo",
+                              "plan_included",
+                              "trial",
+                              "manual",
+                              "credit_line",
+                              null
+                            ]
                           },
                           "wallet_id": {
                             "type": "string",
@@ -12007,8 +12305,8 @@
                           "properties": {
                             "slug": {
                               "type": "string",
-                              "minLength": 1,
-                              "description": "URL-friendly unique identifier for the feature. Must be lowercase with hyphens only. Used for API lookups and references. Example: 'api-calls', 'storage-gb', 'team-members'"
+                              "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                              "description": "Unique identifier for the feature: lowercase letters, digits, hyphens and underscores, at most 64 characters. Used for API lookups, rate card rows, and budget limits. Example: 'api-calls', 'storage_gb', 'team-members'"
                             },
                             "title": {
                               "type": "string",
@@ -12023,7 +12321,6 @@
                             },
                             "unitOfMeasure": {
                               "type": "string",
-                              "default": "units",
                               "description": "Unit of measurement for the feature. Describes what is being counted or measured. Examples: 'calls', 'GB', 'seats', 'tokens', 'requests', 'minutes'. Defaults to 'units' if not specified"
                             }
                           },
@@ -12104,7 +12401,7 @@
                                     "properties": {
                                       "featureSlug": {
                                         "type": "string",
-                                        "minLength": 1,
+                                        "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
                                         "description": "Slug of a feature declared in this document"
                                       },
                                       "featureType": {
@@ -12162,8 +12459,7 @@
                                                 "firstUnit",
                                                 "lastUnit"
                                               ],
-                                              "additionalProperties": false,
-                                              "description": "Configuration for a single pricing tier defining unit ranges and associated pricing"
+                                              "additionalProperties": false
                                             },
                                             "description": "Pricing tiers, decimal strings"
                                           },
@@ -12585,8 +12881,8 @@
                             "properties": {
                               "slug": {
                                 "type": "string",
-                                "minLength": 1,
-                                "description": "URL-friendly unique identifier for the feature. Must be lowercase with hyphens only. Used for API lookups and references. Example: 'api-calls', 'storage-gb', 'team-members'"
+                                "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                                "description": "Unique identifier for the feature: lowercase letters, digits, hyphens and underscores, at most 64 characters. Used for API lookups, rate card rows, and budget limits. Example: 'api-calls', 'storage_gb', 'team-members'"
                               },
                               "title": {
                                 "type": "string",
@@ -12601,7 +12897,6 @@
                               },
                               "unitOfMeasure": {
                                 "type": "string",
-                                "default": "units",
                                 "description": "Unit of measurement for the feature. Describes what is being counted or measured. Examples: 'calls', 'GB', 'seats', 'tokens', 'requests', 'minutes'. Defaults to 'units' if not specified"
                               }
                             },
@@ -12689,7 +12984,7 @@
                                       "properties": {
                                         "featureSlug": {
                                           "type": "string",
-                                          "minLength": 1,
+                                          "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
                                           "description": "Slug of a feature declared in this document"
                                         },
                                         "featureType": {
@@ -12747,8 +13042,7 @@
                                                   "firstUnit",
                                                   "lastUnit"
                                                 ],
-                                                "additionalProperties": false,
-                                                "description": "Configuration for a single pricing tier defining unit ranges and associated pricing"
+                                                "additionalProperties": false
                                               },
                                               "description": "Pricing tiers, decimal strings"
                                             },
@@ -13500,6 +13794,7 @@
               "example": "pv_1H7KQFLr7RepUyQBKdnvY"
             },
             "required": true,
+            "description": "The plan version id",
             "name": "planVersionId",
             "in": "path"
           }
@@ -13524,10 +13819,14 @@
                           "maxLength": 36
                         },
                         "createdAtM": {
-                          "type": "number"
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
                         },
                         "updatedAtM": {
-                          "type": "number"
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
                         },
                         "planId": {
                           "type": "string",
@@ -13559,11 +13858,13 @@
                         "status": {
                           "type": "string",
                           "nullable": true,
-                          "enum": ["draft", "published"]
+                          "enum": ["draft", "published", null]
                         },
                         "publishedAt": {
-                          "type": "number",
-                          "nullable": true
+                          "type": "integer",
+                          "nullable": true,
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
                         },
                         "publishedBy": {
                           "type": "string",
@@ -13575,8 +13876,10 @@
                           "nullable": true
                         },
                         "archivedAt": {
-                          "type": "number",
-                          "nullable": true
+                          "type": "integer",
+                          "nullable": true,
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
                         },
                         "archivedBy": {
                           "type": "string",
@@ -13646,14 +13949,18 @@
                           "enum": ["pay_in_advance", "pay_in_arrear"]
                         },
                         "gracePeriod": {
-                          "type": "number"
+                          "type": "integer",
+                          "minimum": -2147483648,
+                          "maximum": 2147483647
                         },
                         "collectionMethod": {
                           "type": "string",
                           "enum": ["charge_automatically", "send_invoice"]
                         },
                         "trialUnits": {
-                          "type": "number"
+                          "type": "integer",
+                          "minimum": -2147483648,
+                          "maximum": 2147483647
                         },
                         "autoRenew": {
                           "type": "boolean"
@@ -13680,7 +13987,9 @@
                           "type": "boolean"
                         },
                         "version": {
-                          "type": "number"
+                          "type": "integer",
+                          "minimum": -2147483648,
+                          "maximum": 2147483647
                         },
                         "configHash": {
                           "type": "string",
@@ -13698,10 +14007,14 @@
                               "maxLength": 36
                             },
                             "createdAtM": {
-                              "type": "number"
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
                             },
                             "updatedAtM": {
-                              "type": "number"
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
                             },
                             "slug": {
                               "type": "string"
@@ -13766,10 +14079,14 @@
                                 "maxLength": 36
                               },
                               "createdAtM": {
-                                "type": "number"
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
                               },
                               "updatedAtM": {
-                                "type": "number"
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
                               },
                               "planVersionId": {
                                 "type": "string",
@@ -14794,7 +15111,9 @@
                                 "description": "Additional feature settings including real-time tracking, notifications, and visibility options"
                               },
                               "order": {
-                                "type": "number"
+                                "type": "number",
+                                "minimum": -140737488355328,
+                                "maximum": 140737488355327
                               },
                               "defaultQuantity": {
                                 "type": "integer",
@@ -14806,6 +15125,12 @@
                                 "type": "integer",
                                 "nullable": true,
                                 "description": "Maximum allowed usage for this feature per billing period. Null or undefined means unlimited. Example: 10000 for 10,000 API calls/month"
+                              },
+                              "included": {
+                                "type": "string",
+                                "nullable": true,
+                                "pattern": "^\\d{1,19}(\\.\\d{1,8})?$",
+                                "description": "Units free per statement period. Usage up to this quantity costs nothing; the rate card prices the rest. Only for usage features whose meter has no dimensions. Example: '1000'"
                               },
                               "meterConfig": {
                                 "type": "object",
@@ -14864,16 +15189,22 @@
                                     "maxLength": 36
                                   },
                                   "createdAtM": {
-                                    "type": "number"
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
                                   },
                                   "updatedAtM": {
-                                    "type": "number"
+                                    "type": "integer",
+                                    "minimum": -9007199254740991,
+                                    "maximum": 9007199254740991
                                   },
                                   "slug": {
                                     "type": "string"
                                   },
                                   "code": {
-                                    "type": "number"
+                                    "type": "integer",
+                                    "minimum": -2147483648,
+                                    "maximum": 2147483647
                                   },
                                   "unitOfMeasure": {
                                     "type": "string",
@@ -14957,6 +15288,7 @@
                               "billingConfig",
                               "metadata",
                               "order",
+                              "included",
                               "displayFeatureText",
                               "feature"
                             ]
@@ -15190,10 +15522,14 @@
                             "maxLength": 36
                           },
                           "createdAtM": {
-                            "type": "number"
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
                           },
                           "updatedAtM": {
-                            "type": "number"
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
                           },
                           "planId": {
                             "type": "string",
@@ -15225,11 +15561,13 @@
                           "status": {
                             "type": "string",
                             "nullable": true,
-                            "enum": ["draft", "published"]
+                            "enum": ["draft", "published", null]
                           },
                           "publishedAt": {
-                            "type": "number",
-                            "nullable": true
+                            "type": "integer",
+                            "nullable": true,
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
                           },
                           "publishedBy": {
                             "type": "string",
@@ -15241,8 +15579,10 @@
                             "nullable": true
                           },
                           "archivedAt": {
-                            "type": "number",
-                            "nullable": true
+                            "type": "integer",
+                            "nullable": true,
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
                           },
                           "archivedBy": {
                             "type": "string",
@@ -15312,14 +15652,18 @@
                             "enum": ["pay_in_advance", "pay_in_arrear"]
                           },
                           "gracePeriod": {
-                            "type": "number"
+                            "type": "integer",
+                            "minimum": -2147483648,
+                            "maximum": 2147483647
                           },
                           "collectionMethod": {
                             "type": "string",
                             "enum": ["charge_automatically", "send_invoice"]
                           },
                           "trialUnits": {
-                            "type": "number"
+                            "type": "integer",
+                            "minimum": -2147483648,
+                            "maximum": 2147483647
                           },
                           "autoRenew": {
                             "type": "boolean"
@@ -15346,7 +15690,9 @@
                             "type": "boolean"
                           },
                           "version": {
-                            "type": "number"
+                            "type": "integer",
+                            "minimum": -2147483648,
+                            "maximum": 2147483647
                           },
                           "configHash": {
                             "type": "string",
@@ -15364,10 +15710,14 @@
                                 "maxLength": 36
                               },
                               "createdAtM": {
-                                "type": "number"
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
                               },
                               "updatedAtM": {
-                                "type": "number"
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
                               },
                               "slug": {
                                 "type": "string"
@@ -15432,10 +15782,14 @@
                                   "maxLength": 36
                                 },
                                 "createdAtM": {
-                                  "type": "number"
+                                  "type": "integer",
+                                  "minimum": -9007199254740991,
+                                  "maximum": 9007199254740991
                                 },
                                 "updatedAtM": {
-                                  "type": "number"
+                                  "type": "integer",
+                                  "minimum": -9007199254740991,
+                                  "maximum": 9007199254740991
                                 },
                                 "planVersionId": {
                                   "type": "string",
@@ -16460,7 +16814,9 @@
                                   "description": "Additional feature settings including real-time tracking, notifications, and visibility options"
                                 },
                                 "order": {
-                                  "type": "number"
+                                  "type": "number",
+                                  "minimum": -140737488355328,
+                                  "maximum": 140737488355327
                                 },
                                 "defaultQuantity": {
                                   "type": "integer",
@@ -16472,6 +16828,12 @@
                                   "type": "integer",
                                   "nullable": true,
                                   "description": "Maximum allowed usage for this feature per billing period. Null or undefined means unlimited. Example: 10000 for 10,000 API calls/month"
+                                },
+                                "included": {
+                                  "type": "string",
+                                  "nullable": true,
+                                  "pattern": "^\\d{1,19}(\\.\\d{1,8})?$",
+                                  "description": "Units free per statement period. Usage up to this quantity costs nothing; the rate card prices the rest. Only for usage features whose meter has no dimensions. Example: '1000'"
                                 },
                                 "meterConfig": {
                                   "type": "object",
@@ -16530,16 +16892,22 @@
                                       "maxLength": 36
                                     },
                                     "createdAtM": {
-                                      "type": "number"
+                                      "type": "integer",
+                                      "minimum": -9007199254740991,
+                                      "maximum": 9007199254740991
                                     },
                                     "updatedAtM": {
-                                      "type": "number"
+                                      "type": "integer",
+                                      "minimum": -9007199254740991,
+                                      "maximum": 9007199254740991
                                     },
                                     "slug": {
                                       "type": "string"
                                     },
                                     "code": {
-                                      "type": "number"
+                                      "type": "integer",
+                                      "minimum": -2147483648,
+                                      "maximum": 2147483647
                                     },
                                     "unitOfMeasure": {
                                       "type": "string",
@@ -16623,6 +16991,7 @@
                                 "billingConfig",
                                 "metadata",
                                 "order",
+                                "included",
                                 "displayFeatureText",
                                 "feature"
                               ]
@@ -16827,10 +17196,14 @@
                       "maxLength": 36
                     },
                     "createdAtM": {
-                      "type": "number"
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
                     },
                     "updatedAtM": {
-                      "type": "number"
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
                     },
                     "customerId": {
                       "type": "string",
@@ -16856,18 +17229,26 @@
                       "minLength": 1
                     },
                     "currentCycleStartAt": {
-                      "type": "number"
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
                     },
                     "currentCycleEndAt": {
-                      "type": "number"
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
                     },
                     "renewAt": {
-                      "type": "number",
-                      "nullable": true
+                      "type": "integer",
+                      "nullable": true,
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
                     },
                     "endAt": {
-                      "type": "number",
-                      "nullable": true
+                      "type": "integer",
+                      "nullable": true,
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
                     },
                     "timezone": {
                       "type": "string",
@@ -16953,10 +17334,14 @@
                           "maxLength": 36
                         },
                         "createdAtM": {
-                          "type": "number"
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
                         },
                         "updatedAtM": {
-                          "type": "number"
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
                         },
                         "subscriptionId": {
                           "type": "string",
@@ -16991,18 +17376,26 @@
                           "default": 0
                         },
                         "billingAnchor": {
-                          "type": "number"
+                          "type": "integer",
+                          "minimum": -2147483648,
+                          "maximum": 2147483647
                         },
                         "trialEndsAt": {
-                          "type": "number",
-                          "nullable": true
+                          "type": "integer",
+                          "nullable": true,
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
                         },
                         "startAt": {
-                          "type": "number"
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
                         },
                         "endAt": {
-                          "type": "number",
-                          "nullable": true
+                          "type": "integer",
+                          "nullable": true,
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
                         },
                         "metadata": {
                           "type": "object",
@@ -17054,14 +17447,20 @@
                                 "maxLength": 36
                               },
                               "createdAtM": {
-                                "type": "number"
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
                               },
                               "updatedAtM": {
-                                "type": "number"
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
                               },
                               "units": {
-                                "type": "number",
-                                "nullable": true
+                                "type": "integer",
+                                "nullable": true,
+                                "minimum": -2147483648,
+                                "maximum": 2147483647
                               },
                               "featurePlanVersionId": {
                                 "type": "string",
@@ -17100,10 +17499,14 @@
                               "maxLength": 36
                             },
                             "createdAtM": {
-                              "type": "number"
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
                             },
                             "updatedAtM": {
-                              "type": "number"
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
                             },
                             "planId": {
                               "type": "string",
@@ -17135,11 +17538,13 @@
                             "status": {
                               "type": "string",
                               "nullable": true,
-                              "enum": ["draft", "published"]
+                              "enum": ["draft", "published", null]
                             },
                             "publishedAt": {
-                              "type": "number",
-                              "nullable": true
+                              "type": "integer",
+                              "nullable": true,
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
                             },
                             "publishedBy": {
                               "type": "string",
@@ -17151,8 +17556,10 @@
                               "nullable": true
                             },
                             "archivedAt": {
-                              "type": "number",
-                              "nullable": true
+                              "type": "integer",
+                              "nullable": true,
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
                             },
                             "archivedBy": {
                               "type": "string",
@@ -17222,14 +17629,18 @@
                               "enum": ["pay_in_advance", "pay_in_arrear"]
                             },
                             "gracePeriod": {
-                              "type": "number"
+                              "type": "integer",
+                              "minimum": -2147483648,
+                              "maximum": 2147483647
                             },
                             "collectionMethod": {
                               "type": "string",
                               "enum": ["charge_automatically", "send_invoice"]
                             },
                             "trialUnits": {
-                              "type": "number"
+                              "type": "integer",
+                              "minimum": -2147483648,
+                              "maximum": 2147483647
                             },
                             "autoRenew": {
                               "type": "boolean"
@@ -17256,7 +17667,9 @@
                               "type": "boolean"
                             },
                             "version": {
-                              "type": "number"
+                              "type": "integer",
+                              "minimum": -2147483648,
+                              "maximum": 2147483647
                             },
                             "configHash": {
                               "type": "string",
@@ -18171,7 +18584,7 @@
                           "ingestionMode": {
                             "type": "string",
                             "nullable": true,
-                            "enum": ["async", "sync", "run"]
+                            "enum": ["async", "sync", "run", null]
                           },
                           "runId": {
                             "type": "string",
@@ -18188,7 +18601,7 @@
                           "workloadType": {
                             "type": "string",
                             "nullable": true,
-                            "enum": ["agent", "workflow", "job", "tool", "custom"]
+                            "enum": ["agent", "workflow", "job", "tool", "custom", null]
                           },
                           "workloadId": {
                             "type": "string",
@@ -18934,6 +19347,7 @@
               "example": "cus_1H7KQFLr7RepUyQBKdnvY"
             },
             "required": true,
+            "description": "The customer ID",
             "name": "customerId",
             "in": "query"
           },
@@ -18944,6 +19358,7 @@
               "example": "prj_1H7KQFLr7RepUyQBKdnvY"
             },
             "required": false,
+            "description": "The project ID",
             "name": "projectId",
             "in": "query"
           }
@@ -19195,6 +19610,7 @@
               "example": "wcr_1H7KQFLr7RepUyQBKdnvY"
             },
             "required": true,
+            "description": "The wallet credit ID returned in the wallet balance credits array",
             "name": "walletId",
             "in": "path"
           },
@@ -19205,6 +19621,7 @@
               "example": "cus_1H7KQFLr7RepUyQBKdnvY"
             },
             "required": true,
+            "description": "The customer ID",
             "name": "customerId",
             "in": "query"
           },
@@ -19215,6 +19632,7 @@
               "example": "prj_1H7KQFLr7RepUyQBKdnvY"
             },
             "required": false,
+            "description": "The project ID",
             "name": "projectId",
             "in": "query"
           }

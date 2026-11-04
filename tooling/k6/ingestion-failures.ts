@@ -61,11 +61,15 @@ export async function setup(): Promise<{ target: UsageEventTarget }> {
 
 export default async function ({ target }: { target: UsageEventTarget }): Promise<void> {
   const result = await getFailureSdk().usage.record({
-    customerId: CUSTOMER_ID,
-    eventSlug: target.eventSlug,
-    id: nextEventId(),
-    idempotencyKey: nextIdempotencyKey(target.eventSlug),
-    properties: buildProperties(target.propertyFields),
+    events: [
+      {
+        customerId: CUSTOMER_ID,
+        eventSlug: target.eventSlug,
+        idempotencyKey: nextIdempotencyKey(target.eventSlug),
+        occurredAt: Date.now(),
+        properties: buildProperties(target.propertyFields),
+      },
+    ],
   })
 
   if (result.error) {
@@ -74,15 +78,11 @@ export default async function ({ target }: { target: UsageEventTarget }): Promis
 
   if (
     check(result, {
-      "failure-test event is accepted": (res) => !res.error && res.result?.accepted === true,
+      "failure-test event is accepted": (res) => !res.error && res.result?.accepted === 1,
     })
   ) {
     failureEventsAccepted.add(1)
   }
-}
-
-function nextEventId(): string {
-  return `evt_k6_failure_${Date.now()}_${__VU}_${__ITER}_${randomInteger(100000, 999999)}`
 }
 
 function nextIdempotencyKey(eventSlug: string): string {

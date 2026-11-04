@@ -191,10 +191,15 @@ export async function warmCheck(data: BenchData): Promise<void> {
 export async function usageRecord(data: BenchData): Promise<void> {
   const result = await timeSdkCall(recordDuration, () =>
     getSdk().usage.record({
-      customerId: CUSTOMER_ID,
-      eventSlug: data.usageEvent.eventSlug,
-      idempotencyKey: uniqueKey("lat-record"),
-      properties: buildProperties(data.usageEvent.propertyFields),
+      events: [
+        {
+          customerId: CUSTOMER_ID,
+          eventSlug: data.usageEvent.eventSlug,
+          idempotencyKey: uniqueKey("lat-record"),
+          occurredAt: Date.now(),
+          properties: buildProperties(data.usageEvent.propertyFields),
+        },
+      ],
     })
   )
 
@@ -205,7 +210,6 @@ export async function usageConsume(data: BenchData): Promise<void> {
   const result = await timeSdkCall(consumeDuration, () =>
     getSdk().usage.consume({
       customerId: CUSTOMER_ID,
-      featureSlug: data.usageEvent.featureSlug,
       eventSlug: data.usageEvent.eventSlug,
       idempotencyKey: uniqueKey("lat-consume"),
       properties: buildProperties(data.usageEvent.propertyFields),

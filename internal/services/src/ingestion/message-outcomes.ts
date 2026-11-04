@@ -3,11 +3,9 @@ import { INGESTION_MAX_EVENT_AGE_MS } from "../entitlements"
 import type { FanoutMessageOutcome as MessageOutcome } from "./fanout-outcomes"
 import type {
   IngestionFailureStage,
-  IngestionIdempotencyStatus,
   IngestionMessageProcessingResult,
   IngestionOutcome,
   IngestionRejectionReason,
-  IngestionSyncResult,
 } from "./interface"
 import type { IngestionQueueMessage } from "./message"
 
@@ -182,20 +180,4 @@ export function retryMessage(
 
 export function serializeReplayPayload(message: IngestionQueueMessage): string {
   return JSON.stringify(message)
-}
-
-export function toSyncResult(params: {
-  allowed: boolean
-  idempotencyStatus?: IngestionIdempotencyStatus
-  message?: string
-  outcome: Extract<IngestionOutcome, { state: "processed" | "rejected" }>
-}): IngestionSyncResult {
-  const { allowed, idempotencyStatus = "new", message, outcome } = params
-  return {
-    allowed,
-    state: outcome.state,
-    idempotencyStatus,
-    message,
-    rejectionReason: outcome.state === "rejected" ? outcome.rejectionReason : undefined,
-  }
 }

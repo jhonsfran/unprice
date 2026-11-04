@@ -1,11 +1,19 @@
 import type { CustomerEntitlementExtended } from "@unprice/db/validators"
 import { type FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import { LEDGER_SCALE, formatMoney, fromLedgerMinor, toDecimal } from "@unprice/money"
+import { formatAmount } from "@unprice/money"
 import { z } from "zod"
+import { type BudgetSnapshot, type Statement, isOutcomeOf } from "../../budgets"
 import { type EntitlementService, resolveEntitlementLimit } from "../../entitlements"
-import type { EntitlementWindowClient, EntitlementWindowState } from "../../ingestion"
-import { toIngestionEntitlement } from "../../ingestion"
+import type { BudgetClient } from "../budgets/budget-client"
+import { payerBudgetKey } from "../budgets/compile-payer-budget"
+import {
+  meteredAccessOf,
+  payerQuotaWindowSchema,
+  quantity,
+  statementAt,
+  statementWindow,
+} from "../budgets/payer-access"
 
 const currentEntitlementBaseShape = {
   id: z.string(),
@@ -23,20 +31,14 @@ const availableCurrentEntitlementSchema = z.object({
   limit: z.number().nullable(),
   usage: z.number().optional(),
   usagePercent: z.number().nullable().optional(),
-  quotaWindow: z
-    .object({
-      periodKey: z.string(),
-      startAt: z.number(),
-      endAt: z.number().nullable(),
-    })
-    .nullable()
-    .optional(),
+  quotaWindow: payerQuotaWindowSchema.nullable().optional(),
+  /** What the current billing period's usage costs so far, priced at ingestion. */
   spending: z
     .object({
-      currency: z.string().length(3),
-      displayAmount: z.string(),
-      ledgerAmount: z.number().int(),
-      scale: z.literal(LEDGER_SCALE),
+      /** The payer budget's unit: money:<code>, credits:<id>, or units:<slug>. */
+      unit: z.string(),
+      /** A decimal amount in that unit. */
+      amount: z.string(),
     })
     .optional(),
 })
@@ -71,11 +73,20 @@ export type GetCustomerCurrentEntitlementsOutput = z.infer<
 
 export type GetCustomerCurrentEntitlementsDeps = {
   entitlements: Pick<EntitlementService, "getCustomerEntitlementsForCustomer">
-  entitlementWindowClient: EntitlementWindowClient
+  budgets: BudgetClient
   logger: Pick<Logger, "error">
   now?: () => number
 }
 
+/** The payer budget and its statements, read once for every metered entitlement. */
+type PayerBudgetView = Readonly<{ budget: BudgetSnapshot; statements: readonly Statement[] }>
+
+/**
+ * The customer's entitlements in force, each metered one with its live state from the payer budget
+ * at `unprice:customer:<customerId>` (ADR-0008 D1): its quantity limit, the usage in that limit's
+ * window (or in the open billing period when it has none), and what that period costs so far. A
+ * metered entitlement the budget cannot answer for is `unavailable`.
+ */
 export async function getCustomerCurrentEntitlements(
   deps: GetCustomerCurrentEntitlementsDeps,
   rawInput: GetCustomerCurrentEntitlementsInput
@@ -92,15 +103,12 @@ export async function getCustomerCurrentEntitlements(
     return entitlementsResult
   }
 
-  const rows = await Promise.all(
-    entitlementsResult.val.map((entitlement) =>
-      resolveCurrentEntitlement({
-        deps,
-        entitlement,
-        generatedAt,
-        input,
-      })
-    )
+  const metered = entitlementsResult.val.some(
+    (entitlement) => entitlement.featurePlanVersion.featureType === "usage"
+  )
+  const payer = metered ? await readPayerBudget(deps, input) : null
+  const rows = entitlementsResult.val.map((entitlement) =>
+    resolveCurrentEntitlement({ entitlement, generatedAt, payer })
   )
 
   return Ok(
@@ -112,13 +120,43 @@ export async function getCustomerCurrentEntitlements(
   )
 }
 
-async function resolveCurrentEntitlement(params: {
-  deps: GetCustomerCurrentEntitlementsDeps
+/** Null when the customer has no payer budget yet, or it could not be read. */
+async function readPayerBudget(
+  deps: GetCustomerCurrentEntitlementsDeps,
+  input: GetCustomerCurrentEntitlementsInput
+): Promise<PayerBudgetView | null> {
+  const address = { projectId: input.projectId, key: payerBudgetKey(input.customerId) }
+  const context = {
+    context: "payer budget read failed",
+    customer_id: input.customerId,
+    project_id: input.projectId,
+  }
+  try {
+    const [got, statements] = await Promise.all([
+      deps.budgets.execute(address, { type: "get" }),
+      deps.budgets.execute(address, { type: "statements" }),
+    ])
+    if (got.err || statements.err) {
+      const error = got.err ?? statements.err
+      if (error && error.rejection.code !== "BUDGET_NOT_FOUND") deps.logger.error(error, context)
+      return null
+    }
+    if (!isOutcomeOf(got.val, "get") || !isOutcomeOf(statements.val, "statements")) {
+      throw new Error("payer budget answered another verb")
+    }
+    return { budget: got.val.budget, statements: statements.val.statements }
+  } catch (error) {
+    deps.logger.error(error instanceof Error ? error : new Error(String(error)), context)
+    return null
+  }
+}
+
+function resolveCurrentEntitlement(params: {
   entitlement: CustomerEntitlementExtended
   generatedAt: number
-  input: GetCustomerCurrentEntitlementsInput
-}): Promise<z.infer<typeof customerCurrentEntitlementSchema>> {
-  const { deps, entitlement, generatedAt, input } = params
+  payer: PayerBudgetView | null
+}): z.infer<typeof customerCurrentEntitlementSchema> {
+  const { entitlement, generatedAt, payer } = params
   const base = {
     id: entitlement.id,
     featureSlug: entitlement.featurePlanVersion.feature.slug,
@@ -127,9 +165,8 @@ async function resolveCurrentEntitlement(params: {
     unitOfMeasure: entitlement.featurePlanVersion.unitOfMeasure,
     grantCount: entitlement.grants?.length ?? 0,
   }
-  const isMetered = entitlement.featurePlanVersion.featureType === "usage"
 
-  if (!isMetered) {
+  if (entitlement.featurePlanVersion.featureType !== "usage") {
     return {
       ...base,
       status: "available",
@@ -142,66 +179,26 @@ async function resolveCurrentEntitlement(params: {
     }
   }
 
-  const ingestionEntitlement = toIngestionEntitlement(entitlement)
-  if (!ingestionEntitlement.meterConfig) {
+  const access = payer ? meteredAccessOf(payer.budget, base.featureSlug) : null
+  if (!payer || !access) {
     return { ...base, status: "unavailable" }
   }
 
-  let state: EntitlementWindowState
-
-  try {
-    state = await deps.entitlementWindowClient
-      .getEntitlementWindowStub({
-        customerEntitlementId: entitlement.id,
-        customerId: input.customerId,
-        projectId: input.projectId,
-      })
-      .getEnforcementState({
-        entitlement: {
-          ...ingestionEntitlement,
-          meterConfig: ingestionEntitlement.meterConfig,
-        },
-        grants: ingestionEntitlement.grants,
-        now: generatedAt,
-      })
-  } catch (error) {
-    deps.logger.error(error instanceof Error ? error : new Error(String(error)), {
-      context: "current entitlement durable object read failed",
-      customer_id: input.customerId,
-      project_id: input.projectId,
-      customer_entitlement_id: entitlement.id,
-      feature_slug: base.featureSlug,
-    })
-
-    return { ...base, status: "unavailable" }
-  }
-
-  return toAvailableMeteredEntitlement(base, state)
-}
-
-function toAvailableMeteredEntitlement(
-  base: Omit<z.infer<typeof unavailableCurrentEntitlementSchema>, "status">,
-  state: EntitlementWindowState
-): z.infer<typeof availableCurrentEntitlementSchema> {
-  const usagePercent =
-    state.limit !== null && state.limit > 0
-      ? Math.min(100, (state.usage / state.limit) * 100)
-      : null
-  const amount = toDecimal(fromLedgerMinor(state.spending.ledgerAmount, state.spending.currency))
-
+  const statement = statementAt(payer.statements, base.featureSlug, generatedAt)
+  const usage = access.usage ?? (statement ? quantity(statement.quantity) : 0)
   return {
     ...base,
     status: "available",
-    allowed: !state.isLimitReached,
-    limit: state.limit,
-    usage: state.usage,
-    usagePercent,
-    quotaWindow: state.quotaWindow,
-    spending: {
-      currency: state.spending.currency,
-      displayAmount: formatMoney(amount, state.spending.currency),
-      ledgerAmount: state.spending.ledgerAmount,
-      scale: state.spending.scale,
-    },
+    allowed: access.allowed,
+    limit: access.limit,
+    usage,
+    usagePercent:
+      access.limit !== null && access.limit > 0
+        ? Math.min(100, (usage / access.limit) * 100)
+        : null,
+    quotaWindow: access.quotaWindow ?? (statement ? statementWindow(statement) : null),
+    ...(statement && {
+      spending: { unit: payer.budget.unit, amount: formatAmount(statement.amount) },
+    }),
   }
 }

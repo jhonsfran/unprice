@@ -22,9 +22,7 @@ export const INGESTION_REJECTION_REASONS = [
 
 export type IngestionRejectionReason = (typeof INGESTION_REJECTION_REASONS)[number]
 
-export const INGESTION_IDEMPOTENCY_STATUSES = ["new", "already_reported"] as const
-
-export type IngestionIdempotencyStatus = (typeof INGESTION_IDEMPOTENCY_STATUSES)[number]
+export type IngestionIdempotencyStatus = "new" | "already_reported"
 
 export const INGESTION_FAILURE_STAGES = [
   "raw_ingestion",
@@ -50,14 +48,6 @@ export type IngestionOutcome =
       state: "failed"
     }
 
-export type IngestionSyncResult = {
-  allowed: boolean
-  state: "processed" | "rejected"
-  idempotencyStatus: IngestionIdempotencyStatus
-  message?: string
-  rejectionReason?: IngestionRejectionReason
-}
-
 export type IngestionMessageDisposition =
   | {
       action: "ack"
@@ -79,22 +69,6 @@ export const quotaWindowSchema = z.object({
 })
 
 export type QuotaWindow = z.infer<typeof quotaWindowSchema>
-
-export type FeatureVerificationResult = {
-  allowed: boolean
-  featureSlug: string
-  limit?: number | null
-  message?: string
-  quotaWindow?: QuotaWindow | null
-  rejectionReason?: IngestionRejectionReason
-  spending?: {
-    currency: string
-    displayAmount: string
-    ledgerAmount: number
-    scale: typeof LEDGER_SCALE
-  }
-  usage?: number
-}
 
 export type EntitlementWindowState = {
   isLimitReached: boolean

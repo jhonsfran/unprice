@@ -1,244 +1,193 @@
 import { OpenAPIHono } from "@hono/zod-openapi"
+import { Err, FetchError, Ok } from "@unprice/error"
+import { type BudgetSnapshot, UnPriceBudgetError } from "@unprice/services/budgets"
 import type { ExecutionContext } from "hono"
-import { timing } from "hono/timing"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { UnpriceApiError } from "~/errors"
+import { handleError, handleZodError } from "~/errors"
 import type { HonoEnv } from "~/hono/env"
 
-const authMocks = vi.hoisted(() => ({
+const mocks = vi.hoisted(() => ({
   keyAuth: vi.fn(),
   resolveContextProjectId: vi.fn(),
+  execute: vi.fn(),
+  getCustomerEntitlementsForCustomer: vi.fn(),
 }))
 
-vi.mock("~/auth/key", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("~/auth/key")>()
+vi.mock("~/auth/key", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("~/auth/key")>()),
+  keyAuth: mocks.keyAuth,
+  resolveContextProjectId: mocks.resolveContextProjectId,
+}))
 
-  return {
-    ...actual,
-    keyAuth: authMocks.keyAuth,
-    resolveContextProjectId: authMocks.resolveContextProjectId,
-  }
-})
+vi.mock("~/ingestion/budget/client", () => ({
+  CloudflareBudgetClient: class {
+    execute = mocks.execute
+  },
+}))
 
 import { registerVerifyV1 } from "./verifyV1"
 
-const verifiedKey = {
-  id: "key_123",
-  projectId: "proj_123",
-  project: {
-    id: "proj_123",
-    workspaceId: "ws_123",
-    isInternal: false,
-    isMain: false,
-    workspace: {
-      unPriceCustomerId: null,
+const NOW = Date.UTC(2026, 10, 4, 12, 0, 0)
+const ONE = BigInt(100_000_000)
+const NOV = Date.UTC(2026, 10, 1)
+const DEC = Date.UTC(2026, 11, 1)
+
+/** A payer budget metering `images` under a hard monthly limit of 10 with `consumed` used. */
+function payerBudget(consumed: number, closed = false) {
+  const limit = {
+    id: "images:month",
+    window: "month",
+    enforce: "hard",
+    measure: { type: "quantity", feature: "images" },
+    amount: BigInt(10) * ONE,
+    consumed: BigInt(consumed) * ONE,
+    held: BigInt(0),
+    remaining: BigInt(10 - consumed) * ONE,
+    resetsAt: DEC,
+  }
+  return {
+    key: "unprice:customer:cus_a",
+    unit: "money:USD",
+    closed,
+    limits: [{ id: "images:month", window: "month", enforce: "hard", amount: limit.amount }],
+    pricing: {
+      features: [{ slug: "images", eventSlug: "image.generated", priced: true }],
+      statements: "required",
     },
-  },
+    balance: { remaining: null, held: { amount: BigInt(0) }, limits: [limit], asOf: NOW },
+  } as unknown as BudgetSnapshot
 }
 
+const got = (budget: BudgetSnapshot) => Ok({ type: "get", budget, history: [] })
+
 beforeEach(() => {
-  authMocks.keyAuth.mockResolvedValue(verifiedKey)
-  authMocks.resolveContextProjectId.mockImplementation(
-    async (_c: unknown, defaultProjectId: string) => defaultProjectId
+  mocks.keyAuth.mockResolvedValue({ id: "key_1", projectId: "proj_123", defaultCustomerId: null })
+  mocks.resolveContextProjectId.mockImplementation(
+    async (_c: unknown, projectId: string) => projectId
   )
+  mocks.getCustomerEntitlementsForCustomer.mockResolvedValue(Ok([]))
 })
 
 afterEach(() => {
-  vi.clearAllMocks()
-  vi.useRealTimers()
+  vi.resetAllMocks()
 })
 
-describe("verifyV1 route", () => {
-  it("returns the current usage state for a usage feature", async () => {
-    vi.useFakeTimers()
-    const requestStartedAt = Date.UTC(2026, 2, 21, 12, 0, 0)
-    vi.setSystemTime(new Date(requestStartedAt))
-
-    const { app, env, executionCtx, verifyFeatureStatus } = createTestApp()
-
-    const response = await app.fetch(
-      buildRequest({
-        customerId: "cus_123",
-        featureSlug: "api_calls",
-        timestamp: requestStartedAt,
-      }),
-      env,
-      executionCtx
-    )
-
-    expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toEqual({
-      allowed: true,
-      featureSlug: "api_calls",
-      limit: 100,
-      quotaWindow: {
-        endAt: Date.now() + 86_400_000,
-        periodKey: `day:${Date.now()}`,
-        startAt: Date.now(),
-      },
-      spending: {
-        currency: "USD",
-        displayAmount: "$42",
-        ledgerAmount: 4_200_000_000,
-        scale: 8,
-      },
-      usage: 42,
-    })
-    expect(verifyFeatureStatus).toHaveBeenCalledWith({
-      customerId: "cus_123",
-      featureSlug: "api_calls",
-      projectId: "proj_123",
-      timestamp: requestStartedAt,
-    })
-  })
-
-  it("falls back to the request start time when timestamp is omitted", async () => {
-    vi.useFakeTimers()
-    const requestStartedAt = Date.UTC(2026, 2, 21, 12, 0, 0)
-    vi.setSystemTime(new Date(requestStartedAt))
-
-    const { app, env, executionCtx, verifyFeatureStatus } = createTestApp()
-
-    const response = await app.fetch(
-      buildRequest({
-        customerId: "cus_123",
-        featureSlug: "api_calls",
-      }),
-      env,
-      executionCtx
-    )
-
-    expect(response.status).toBe(200)
-    expect(verifyFeatureStatus).toHaveBeenCalledWith({
-      customerId: "cus_123",
-      featureSlug: "api_calls",
-      projectId: "proj_123",
-      timestamp: requestStartedAt,
-    })
-  })
-
-  it("returns null for an open-ended quota window", async () => {
-    const { app, env, executionCtx } = createTestApp({
-      verifyFeatureStatus: vi.fn().mockResolvedValue({
-        allowed: true,
-        featureSlug: "api_calls",
-        limit: null,
-        quotaWindow: {
-          endAt: null,
-          periodKey: "onetime:1774051200000",
-          startAt: 1774051200000,
-        },
-        usage: 0,
-      }),
-    })
-
-    const response = await app.fetch(
-      buildRequest({
-        customerId: "cus_123",
-        featureSlug: "api_calls",
-      }),
-      env,
-      executionCtx
-    )
-
-    expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toEqual({
-      allowed: true,
-      featureSlug: "api_calls",
-      limit: null,
-      quotaWindow: {
-        endAt: null,
-        periodKey: "onetime:1774051200000",
-        startAt: 1774051200000,
-      },
-      usage: 0,
-    })
-  })
-})
-
-function createTestApp(
-  options: {
-    resolveCustomerId?: ReturnType<typeof vi.fn>
-    verifyFeatureStatus?: ReturnType<typeof vi.fn>
-  } = {}
-) {
-  const app = new OpenAPIHono<HonoEnv>()
-  const verifyFeatureStatus =
-    options.verifyFeatureStatus ??
-    vi.fn().mockResolvedValue({
-      allowed: true,
-      featureSlug: "api_calls",
-      limit: 100,
-      quotaWindow: {
-        endAt: Date.now() + 86_400_000,
-        periodKey: `day:${Date.now()}`,
-        startAt: Date.now(),
-      },
-      spending: {
-        currency: "USD",
-        displayAmount: "$42",
-        ledgerAmount: 4_200_000_000,
-        scale: 8,
-      },
-      usage: 42,
-    })
-  const resolveCustomerId =
-    options.resolveCustomerId ??
-    vi.fn().mockResolvedValue({
-      val: {
-        customerId: "cus_123",
-        projectId: "proj_123",
-      },
-    })
-
-  app.use(timing())
-
-  app.onError((error, c) => {
-    if (error instanceof UnpriceApiError) {
-      const status = error.code === "RATE_LIMITED" ? 429 : 400
-      return c.json({ code: error.code, message: error.message }, status)
-    }
-
-    throw error
-  })
-
+function check(featureSlug: string) {
+  const app = new OpenAPIHono<HonoEnv>({ defaultHook: handleZodError })
+  app.onError(handleError)
   app.use("*", async (c, next) => {
-    c.set("requestId", "req_123")
-    c.set("requestStartedAt", Date.now())
+    c.set("requestId", "req_test")
+    c.set("requestStartedAt", NOW)
+    c.set("logger", { set: vi.fn() } as unknown as HonoEnv["Variables"]["logger"])
     c.set("services", {
-      customer: {
-        resolveCustomerId,
+      entitlement: {
+        getCustomerEntitlementsForCustomer: mocks.getCustomerEntitlementsForCustomer,
       },
-      ingestion: {
-        verifyFeatureStatus,
-      },
-    })
-
+    } as unknown as HonoEnv["Variables"]["services"])
     await next()
   })
-
   registerVerifyV1(app)
-
-  const env = {
-    APP_ENV: "development",
-    MAIN_PROJECT_ID: undefined,
-  }
-
-  const executionCtx = {
-    passThroughOnException: vi.fn(),
-    waitUntil: vi.fn(),
-  } as unknown as ExecutionContext
-
-  return { app, env, executionCtx, resolveCustomerId, verifyFeatureStatus }
+  return app.fetch(
+    new Request("https://example.com/v1/access/check", {
+      method: "POST",
+      headers: { authorization: "Bearer key", "content-type": "application/json" },
+      body: JSON.stringify({ customerId: "cus_a", featureSlug }),
+    }),
+    { APP_ENV: "development" },
+    { passThroughOnException: vi.fn(), waitUntil: vi.fn() } as unknown as ExecutionContext
+  )
 }
 
-function buildRequest(body: Record<string, unknown>) {
-  return new Request("https://example.com/v1/access/check", {
-    method: "POST",
-    headers: {
-      authorization: "Bearer sk_test",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify(body),
+describe("POST /v1/access/check", () => {
+  it("answers a metered feature from the customer's payer budget", async () => {
+    mocks.execute.mockResolvedValue(got(payerBudget(4)))
+
+    const response = await check("images")
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      featureSlug: "images",
+      allowed: true,
+      metered: true,
+      usage: 4,
+      limit: 10,
+      quotaWindow: { periodKey: "images:month", startAt: NOV, endAt: DEC },
+    })
+    expect(mocks.execute).toHaveBeenCalledWith(
+      { projectId: "proj_123", key: "unprice:customer:cus_a" },
+      { type: "get" }
+    )
+    expect(mocks.getCustomerEntitlementsForCustomer).not.toHaveBeenCalled()
   })
-}
+
+  it("denies a metered feature whose hard limit is used up", async () => {
+    mocks.execute.mockResolvedValue(got(payerBudget(10)))
+
+    const response = await check("images")
+
+    expect(await response.json()).toMatchObject({
+      allowed: false,
+      rejectionReason: "LIMIT_EXCEEDED",
+      usage: 10,
+      limit: 10,
+    })
+  })
+
+  it("denies every metered feature once the budget has closed", async () => {
+    mocks.execute.mockResolvedValue(got(payerBudget(0, true)))
+
+    expect(await (await check("images")).json()).toMatchObject({
+      allowed: false,
+      rejectionReason: "BUDGET_CLOSED",
+    })
+  })
+
+  it("answers a flat feature from the customer's plan when the budget does not meter it", async () => {
+    mocks.execute.mockResolvedValue(got(payerBudget(0)))
+    mocks.getCustomerEntitlementsForCustomer.mockResolvedValue(
+      Ok([
+        {
+          featurePlanVersion: { featureType: "flat", limit: null, feature: { slug: "sso" } },
+          grants: [{ allowanceUnits: 1 }],
+        },
+      ])
+    )
+
+    const response = await check("sso")
+
+    expect(await response.json()).toEqual({
+      featureSlug: "sso",
+      allowed: true,
+      metered: false,
+      limit: 1,
+      quotaWindow: null,
+    })
+    expect(mocks.getCustomerEntitlementsForCustomer).toHaveBeenCalledWith({
+      customerId: "cus_a",
+      projectId: "proj_123",
+      now: NOW,
+    })
+  })
+
+  it("denies a feature the customer does not have, even without a payer budget", async () => {
+    mocks.execute.mockResolvedValue(Err(new UnPriceBudgetError({ code: "BUDGET_NOT_FOUND" })))
+
+    expect(await (await check("images")).json()).toEqual({
+      featureSlug: "images",
+      allowed: false,
+      rejectionReason: "NO_ENTITLEMENT",
+      metered: false,
+      limit: null,
+      quotaWindow: null,
+    })
+  })
+
+  it("maps a failed entitlement read to a 500", async () => {
+    mocks.execute.mockResolvedValue(Err(new UnPriceBudgetError({ code: "BUDGET_NOT_FOUND" })))
+    mocks.getCustomerEntitlementsForCustomer.mockResolvedValue(
+      Err(new FetchError({ message: "database unavailable", retry: true }))
+    )
+
+    expect((await check("sso")).status).toBe(500)
+  })
+})
