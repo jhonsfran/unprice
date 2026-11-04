@@ -125,15 +125,23 @@ function statusOf(operation: Operation): (typeof schema.budgetOperations.$inferI
   return operation.kind === "lease" && operation.state.status === "open" ? "open" : "done"
 }
 
+/**
+ * The last config decoded, by its stored text. A priced config embeds every metered feature, and
+ * decoding it on every command cost about 120 µs at 64 features; it changes only on an upsert.
+ */
+type ConfigCache = { json: string; config: BudgetRecord["config"] } | null
+
 export class BudgetSqliteStore implements BudgetStore {
+  private readonly configs: { last: ConfigCache } = { last: null }
+
   constructor(private readonly db: SqliteHandle) {}
 
   atomically<T>(fn: (tx: BudgetStoreTx) => Sync<T>): T {
-    return this.db.transaction((tx) => fn(bind(tx)))
+    return this.db.transaction((tx) => fn(bind(tx, this.configs)))
   }
 
   inspecting<T>(fn: (tx: BudgetStoreTx & InspectReader) => Sync<T>): T {
-    return this.db.transaction((tx) => fn({ ...bind(tx), ...bindInspect(tx) }))
+    return this.db.transaction((tx) => fn({ ...bind(tx, this.configs), ...bindInspect(tx) }))
   }
 }
 
@@ -196,7 +204,7 @@ type StatementTotals = Pick<Statement, "quantity" | "amount" | "cost">
 const jsonList = (values: readonly string[]) =>
   sql`(SELECT value FROM json_each(${JSON.stringify(values)}))`
 
-function bind(db: SqliteTx): BudgetStoreTx {
+function bind(db: SqliteTx, configs: { last: ConfigCache }): BudgetStoreTx {
   const operations = schema.budgetOperations
   const statements = schema.budgetStatements
   const positions = schema.budgetPositions
@@ -234,6 +242,13 @@ function bind(db: SqliteTx): BudgetStoreTx {
     return row ? decodeOperation(row) : null
   }
 
+  const configOf = (json: string) => {
+    if (configs.last?.json !== json) {
+      configs.last = { json, config: decode<BudgetRecord["config"]>(json) }
+    }
+    return configs.last.config
+  }
+
   return {
     readBudget() {
       const row = db
@@ -247,7 +262,7 @@ function bind(db: SqliteTx): BudgetStoreTx {
         projectId: row.projectId,
         unit: row.unit,
         version: row.version,
-        config: decode<BudgetRecord["config"]>(row.configJson),
+        config: configOf(row.configJson),
       }
     },
 
