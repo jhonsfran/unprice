@@ -174,11 +174,45 @@ describe("BudgetDO runtime assumptions", () => {
         JSON.stringify({ ...hold, createdAt: expiresAt - MINUTE, state: { status: "open" } })
       )
 
-      await migrate(db, migrations)
+      const through0006 = migrations.journal.entries.filter((entry) => entry.idx < 7)
+      await migrate(db, { ...migrations, journal: { ...migrations.journal, entries: through0006 } })
 
       expect(state.storage.sql.exec("SELECT due_at FROM budget_operations").one()).toEqual({
         due_at: expiresAt,
       })
+    })
+  })
+
+  it("clears rows stored before usage vectors, so the next upsert creates the budget anew", async () => {
+    const key = "customer:legacy"
+    const stub = stubFor(key)
+    await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
+      const db = drizzle(state.storage)
+      const entries = migrations.journal.entries.filter((entry) => entry.idx < 7)
+      await migrate(db, { ...migrations, journal: { ...migrations.journal, entries } })
+      const sql = state.storage.sql
+      sql.exec(
+        "INSERT INTO budget (id, key, project_id, unit, version, config_json, updated_at) VALUES (1, ?, 'proj_1', 'money:USD', 1, ?, 0)",
+        key,
+        '{"limits":[{"id":"month","window":"month","enforce":"hard","amount":{"$bigint":"5000000000"}}]}'
+      )
+      sql.exec(
+        "INSERT INTO budget_ledger (id, last_at, hold_seq, held, usage_json) VALUES (1, 0, 1, '0', '{}')"
+      )
+      sql.exec(
+        "INSERT INTO budget_operations (id, kind, status, due_at, data_json) VALUES ('h_1', 'hold', 'open', 0, ?)",
+        JSON.stringify({ idempotencyKey: "legacy", amount: "1", state: { status: "open" } })
+      )
+
+      await migrate(db, migrations)
+
+      const count = (table: string) =>
+        sql.exec(`SELECT count(*) AS n FROM ${table}`).one() as { n: number }
+      expect(
+        ["budget", "budget_ledger", "budget_operations", "budget_window_history"].map(
+          (table) => count(table).n
+        )
+      ).toEqual([0, 0, 0, 0])
     })
   })
 
