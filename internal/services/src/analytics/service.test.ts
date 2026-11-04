@@ -252,4 +252,36 @@ describe("AnalyticsService web analytics reads", () => {
       "failed to fetch plans conversion: Basin SQL query timed out after 10000ms"
     )
   })
+
+  it("answers the page-less selections without a query", async () => {
+    const { basinSql, queries } = fakeBasinSql([])
+    const service = createService(basinSql)
+
+    for (const pageId of ["_", "all", undefined]) {
+      expect(await service.getBrowserVisits({ projectId: "proj_1", pageId })).toEqual({
+        val: { data: [], error: "Page ID is required" },
+      })
+    }
+    expect(queries).toEqual([])
+  })
+
+  it("warns about missing Basin credentials once instead of logging an error per poll", async () => {
+    const basinSql: BasinSql = {
+      query: async () =>
+        Err(new BasinSqlError({ code: "NOT_CONFIGURED", message: "credentials are required" })),
+    }
+    const logger = createLogger()
+    const service = new AnalyticsService({
+      db: {} as Database,
+      logger,
+      basinSql,
+      ledgerGateway: {} as never,
+    })
+
+    await service.getPlansConversion({ projectId: "proj_1" })
+    await service.getPlansConversion({ projectId: "proj_1" })
+
+    expect(logger.error).not.toHaveBeenCalled()
+    expect(logger.warn).toHaveBeenCalledTimes(1)
+  })
 })

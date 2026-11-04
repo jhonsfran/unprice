@@ -1,6 +1,7 @@
 import { type StandardSchemaV1, createEnv } from "@t3-oss/env-core"
 import { env as authEnv } from "@unprice/auth/env"
 import { env as dbEnv } from "@unprice/db/env"
+import { assertAllOrNoneConfigured } from "@unprice/lakehouse"
 import { env as stripeEnv } from "@unprice/stripe/env"
 import { env as trpcEnv } from "@unprice/trpc/env"
 import { z } from "zod"
@@ -46,3 +47,11 @@ export const env = createEnv({
     throw new Error("Invalid environment variables in NextJS")
   },
 })
+
+// Server variables cannot be read in the browser bundle.
+if (typeof window === "undefined") {
+  assertAllOrNoneConfigured({
+    LAKEHOUSE_WEB_EVENTS_URL: env.LAKEHOUSE_WEB_EVENTS_URL,
+    LAKEHOUSE_WEB_EVENTS_TOKEN: env.LAKEHOUSE_WEB_EVENTS_TOKEN,
+  })
+}

@@ -2,6 +2,7 @@ import type { Pipeline } from "cloudflare:pipelines"
 import { type StandardSchemaV1, createEnv } from "@t3-oss/env-core"
 import { env as envAnalytics } from "@unprice/analytics/env"
 import { env as envDb } from "@unprice/db/env"
+import { assertAllOrNoneConfigured } from "@unprice/lakehouse"
 import { env as envObservability } from "@unprice/observability/env"
 import { env as envServices } from "@unprice/services/env"
 import { z } from "zod"
@@ -152,6 +153,16 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
   if (parsedEnv.APP_ENV !== "development" && !parsedEnv.PIPELINE_EVENTS) {
     throw new Error("PIPELINE_EVENTS binding is required outside development")
   }
+
+  assertAllOrNoneConfigured({
+    LAKEHOUSE_WEB_EVENTS_URL: parsedEnv.LAKEHOUSE_WEB_EVENTS_URL,
+    LAKEHOUSE_WEB_EVENTS_TOKEN: parsedEnv.LAKEHOUSE_WEB_EVENTS_TOKEN,
+  })
+  assertAllOrNoneConfigured({
+    BASIN_SQL_ACCOUNT_ID: parsedEnv.BASIN_SQL_ACCOUNT_ID,
+    BASIN_SQL_BUCKET: parsedEnv.BASIN_SQL_BUCKET,
+    BASIN_SQL_TOKEN: parsedEnv.BASIN_SQL_TOKEN,
+  })
 
   warnIfAxiomUnconfiguredOnce(parsedEnv)
 

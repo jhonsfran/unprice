@@ -1,7 +1,7 @@
 import type { PlansConversion } from "@unprice/services/analytics"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
-import { intervalDaysSchema } from "./web-analytics-input"
+import { WEB_ANALYTICS_UNAVAILABLE, intervalDaysSchema } from "./web-analytics-input"
 
 export const getPlansConversion = protectedProjectProcedure
   .input(z.object({ interval_days: intervalDaysSchema }))
@@ -18,7 +18,7 @@ export const getPlansConversion = protectedProjectProcedure
     })
 
     if (err) {
-      return { data: [], error: err.message }
+      return { data: [], error: WEB_ANALYTICS_UNAVAILABLE }
     }
 
     return val

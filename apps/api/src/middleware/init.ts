@@ -182,6 +182,15 @@ export function init(): MiddlewareHandler<HonoEnv> {
       waitUntil,
       cache,
       metrics,
+      // The API reads Basin SQL only to resolve a sign-up's plan from its session, inside the
+      // request: a short per-attempt timeout and one retry keep a slow Basin from stalling it.
+      basinSql: createBasinSql({
+        accountId: c.env.BASIN_SQL_ACCOUNT_ID,
+        bucket: c.env.BASIN_SQL_BUCKET,
+        token: c.env.BASIN_SQL_TOKEN,
+        timeoutMs: 2_000,
+        retries: 1,
+      }),
     })
 
     const apikey = new ApiKeysService({
@@ -216,14 +225,6 @@ export function init(): MiddlewareHandler<HonoEnv> {
       })
     )
     c.set(
-      "basinSql",
-      createBasinSql({
-        accountId: c.env.BASIN_SQL_ACCOUNT_ID,
-        bucket: c.env.BASIN_SQL_BUCKET,
-        token: c.env.BASIN_SQL_TOKEN,
-      })
-    )
-    c.set(
       "rawIngestionQueue",
       new CloudflareRawIngestionQueueClient({
         logger,
@@ -249,6 +250,8 @@ export function init(): MiddlewareHandler<HonoEnv> {
       wallet: svcCtx.wallet,
       billing: svcCtx.billing,
       rateCards: svcCtx.rateCards,
+      analytics: svcCtx.analytics,
+      pages: svcCtx.pages,
     })
 
     await next()

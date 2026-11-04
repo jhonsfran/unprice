@@ -1,8 +1,9 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Stats } from "@unprice/analytics/utils"
 import type { Database } from "@unprice/db"
-import type { BasinSql, WebEventsWriter } from "@unprice/lakehouse"
+import type { WebEventsWriter } from "@unprice/lakehouse"
 import type { Logger } from "@unprice/logs"
+import type { AnalyticsService } from "@unprice/services/analytics"
 import type { ApiKeysService } from "@unprice/services/apikey"
 import type { BillingService } from "@unprice/services/billing"
 import type { BudgetCatalogService } from "@unprice/services/budget-catalog"
@@ -15,6 +16,7 @@ import type { FeatureService } from "@unprice/services/features"
 import type { RawIngestionQueueClient } from "@unprice/services/ingestion"
 import type { LedgerGateway } from "@unprice/services/ledger"
 import type { Metrics } from "@unprice/services/metrics"
+import type { PageService } from "@unprice/services/pages"
 import type { PlanService } from "@unprice/services/plans"
 import type { ProjectService } from "@unprice/services/projects"
 import type { RateCardService } from "@unprice/services/rate-cards"
@@ -43,6 +45,9 @@ export type DomainServiceContext = {
   wallet: WalletService
   billing: BillingService
   rateCards: RateCardService
+  /** Web analytics reads (Basin SQL): plan-click attribution at sign-up. */
+  analytics: AnalyticsService
+  pages: PageService
 }
 
 /**
@@ -69,9 +74,8 @@ export type HonoEnv = EvlogVariables & {
     logger: Logger
     metrics: Metrics
     analytics: Analytics
-    /** Web analytics: sign-up rows go to the web_events stream; plan-click attribution reads it. */
+    /** Web analytics: sign-up rows go to the web_events stream. */
     webEvents: WebEventsWriter
-    basinSql: BasinSql
     rawIngestionQueue: RawIngestionQueueClient
     // biome-ignore lint/suspicious/noExplicitAny: platform-specific promise handler
     waitUntil: (promise: Promise<any>) => void

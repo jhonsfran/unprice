@@ -2,11 +2,11 @@ import type { Database } from "@unprice/db"
 import { customerProviderIds, customerSessions, customers } from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
 import type { CustomerSignUp, Plan, PlanVersion, Project } from "@unprice/db/validators"
-import { Err, type FetchError, Ok, type Result } from "@unprice/error"
-import { type BasinSql, type WebEventsWriter, createWebEventRow } from "@unprice/lakehouse"
+import { Err, FetchError, Ok, type Result } from "@unprice/error"
+import { type WebEventsWriter, recordWebEvents } from "@unprice/lakehouse"
 import type { Logger } from "@unprice/logs"
 import { fromCurrencyMinor, toLedgerMinor } from "@unprice/money"
-import { findLatestPlanClick, recordWebEvents } from "../../analytics/web-analytics"
+import { signupWebEventRow } from "../../analytics/web-analytics"
 import type { ServiceContext } from "../../context"
 import { UnPriceCustomerError } from "../../customers/errors"
 import { getPaymentProviderCapabilities } from "../../payment-provider/service"
@@ -14,10 +14,12 @@ import { checkPaymentProviderAvailability } from "../payment-provider/availabili
 import { activateWalletIfSubscriptionIsActive } from "../subscription/activate-wallet-if-active"
 
 type SignUpDeps = {
-  services: Pick<ServiceContext, "plans" | "customers" | "subscriptions" | "billing">
+  services: Pick<
+    ServiceContext,
+    "plans" | "customers" | "subscriptions" | "billing" | "analytics" | "pages"
+  >
   db: Database
   logger: Logger
-  basinSql: BasinSql
   webEvents: WebEventsWriter
   waitUntil: (promise: Promise<unknown>) => void
 }
@@ -135,18 +137,26 @@ async function getExternalIdReplay(
 }
 
 /**
- * The page a pricing CTA named, kept only when it belongs to the project and lists the plan version.
- * Attribution never fails a sign-up: an unusable page id is logged and dropped.
+ * The page a pricing CTA or plan click named, kept only when it belongs to the project and lists the
+ * plan version. Attribution never fails a sign-up: an unusable page id or a failed read is logged
+ * and dropped.
  */
 async function resolvePageAttribution(
   deps: SignUpDeps,
   opts: { projectId: string; pageId: string; planVersionId: string }
 ): Promise<string | null> {
-  const page = await deps.db.query.pages.findFirst({
-    columns: { id: true, selectedPlans: true },
-    where: (table, { eq, and }) =>
-      and(eq(table.id, opts.pageId), eq(table.projectId, opts.projectId)),
+  const { err, val: page } = await deps.services.pages.getPageById({
+    projectId: opts.projectId,
+    pageId: opts.pageId,
   })
+
+  if (err) {
+    deps.logger.warn("ignoring sign-up page attribution", {
+      page_id: opts.pageId,
+      reason: "page lookup failed",
+    })
+    return null
+  }
 
   if (page?.selectedPlans.some((plan) => plan.id === opts.planVersionId)) {
     return page.id
@@ -163,7 +173,10 @@ async function resolvePlanVersion(
   deps: SignUpDeps,
   opts: SignUpInput
 ): Promise<
-  Result<{ planVersion: PlanVersionWithProject; pageId: string | null }, UnPriceCustomerError>
+  Result<
+    { planVersion: PlanVersionWithProject; pageId: string | null },
+    UnPriceCustomerError | FetchError
+  >
 > {
   const { input, projectId } = opts
   const { planVersionId, defaultCurrency, planSlug, sessionId, billingInterval } = input
@@ -213,28 +226,32 @@ async function resolvePlanVersion(
       },
     })
 
-    const planClick = await findLatestPlanClick(deps.basinSql, {
+    // The plan click reaches R2 3-7 minutes after it happens, so a miss or a failed read is
+    // retryable: the same request can succeed later. The analytics service logs a failed read.
+    const planClick = await deps.services.analytics.getPlanClickBySessionId({
       projectId,
       sessionId,
-      now: Date.now(),
     })
 
     if (planClick.err) {
-      deps.logger.warn("plan click lookup failed", { error: planClick.err.message })
-    }
-
-    const session = planClick.val ?? null
-
-    if (!session) {
       return Err(
-        new UnPriceCustomerError({
-          code: "PLAN_VERSION_NOT_FOUND",
-          message: "Session not found",
+        new FetchError({
+          message: `plan click lookup failed: ${planClick.err.message}`,
+          retry: true,
         })
       )
     }
 
-    pageId = session.payload.page_id
+    const session = planClick.val
+
+    if (!session) {
+      return Err(
+        new FetchError({
+          message: "No plan click recorded for this session yet; retry later or pass planVersionId",
+          retry: true,
+        })
+      )
+    }
 
     planVersion = await deps.db.query.versions
       .findFirst({
@@ -246,6 +263,14 @@ async function resolvePlanVersion(
           and(eq(version.id, session.payload.plan_version_id), eq(version.projectId, projectId)),
       })
       .then((data) => data ?? null)
+
+    if (planVersion) {
+      pageId = await resolvePageAttribution(deps, {
+        projectId,
+        pageId: session.payload.page_id,
+        planVersionId: planVersion.id,
+      })
+    }
   } else if (planSlug) {
     const plan = await deps.db.query.plans
       .findFirst({
@@ -361,6 +386,17 @@ async function resolvePlanVersion(
     )
   }
 
+  // Enterprise plans are sold through a conversation, not self-serve sign-up, whichever way the
+  // plan version was picked.
+  if (planVersion.plan.enterprisePlan) {
+    return Err(
+      new UnPriceCustomerError({
+        code: "PLAN_VERSION_ENTERPRISE",
+        message: "Enterprise plan versions cannot be signed up for directly",
+      })
+    )
+  }
+
   const planProject = planVersion.project
   const currency = defaultCurrency ?? planProject.defaultCurrency
   const defaultBillingInterval = billingInterval ?? planVersion.billingConfig.billingInterval
@@ -431,6 +467,7 @@ async function handlePaymentRequiredFlow(
       },
       planVersion: {
         id: planVersion.id,
+        planId: planVersion.planId,
         projectId: projectId,
         config: config,
         creditLinePolicy: phaseCreditLine.creditLinePolicy,
@@ -486,15 +523,13 @@ async function handlePaymentRequiredFlow(
 
   deps.waitUntil(
     recordWebEvents(deps, [
-      createWebEventRow({
-        kind: "signup",
-        session_id: input.sessionId ?? "",
-        project_id: projectId,
-        customer_id: customerId,
-        plan_id: planVersion.planId,
-        plan_version_id: planVersion.id,
-        page_id: pageId ?? undefined,
-        signup_status: "waiting_payment_provider_setup",
+      signupWebEventRow({
+        projectId,
+        customerId,
+        planVersion,
+        sessionId: input.sessionId,
+        pageId,
+        status: "waiting_payment_provider_setup",
       }),
     ])
   )
@@ -641,15 +676,13 @@ async function handleDirectProvisioningFlow(
 
     deps.waitUntil(
       recordWebEvents(deps, [
-        createWebEventRow({
-          kind: "signup",
-          session_id: input.sessionId ?? "",
-          project_id: projectId,
-          customer_id: customerId,
-          plan_id: planVersion.planId,
-          plan_version_id: planVersion.id,
-          page_id: pageId ?? undefined,
-          signup_status: "signup_success",
+        signupWebEventRow({
+          projectId,
+          customerId,
+          planVersion,
+          sessionId: input.sessionId,
+          pageId,
+          status: "signup_success",
         }),
       ])
     )

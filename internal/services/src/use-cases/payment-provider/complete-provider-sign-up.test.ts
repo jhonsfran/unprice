@@ -111,6 +111,19 @@ describe("completeProviderSignUp", () => {
       })
     )
     expect(waitUntil).toHaveBeenCalledTimes(1)
+    await waitUntil.mock.calls[0]?.[0]
+    expect(webEvents.send).toHaveBeenCalledWith([
+      expect.objectContaining({
+        kind: "signup",
+        session_id: "session_1",
+        project_id: "proj_1",
+        customer_id: "cus_unprice_1",
+        plan_id: "plan_1",
+        plan_version_id: "pv_1",
+        page_id: "page_1",
+        signup_status: "signup_success",
+      }),
+    ])
   })
 })
 
@@ -129,6 +142,7 @@ function createReplayDb() {
     },
     planVersion: {
       id: "pv_1",
+      planId: "plan_1",
       projectId: "proj_1",
       config: [],
       creditLinePolicy: "uncapped",

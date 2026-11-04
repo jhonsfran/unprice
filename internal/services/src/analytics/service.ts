@@ -3,7 +3,7 @@ import { type Database, and, between, count, eq } from "@unprice/db"
 import { features, plans, subscriptions, versions } from "@unprice/db/schema"
 import type { Currency } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
-import type { BasinSql } from "@unprice/lakehouse"
+import type { BasinSql, BasinSqlError } from "@unprice/lakehouse"
 import type { Logger } from "@unprice/logs"
 import { currencySymbol } from "@unprice/money"
 import { toDecimal } from "dinero.js"
@@ -35,6 +35,12 @@ type VisitsPayload<T> = {
   data: T
   error?: string
 }
+
+/**
+ * Basin SQL without credentials is a deployment state, not a failure: the dashboard polls the
+ * analytics cards, so it is logged once per process at warn instead of at error on every poll.
+ */
+let warnedBasinSqlNotConfigured = false
 
 export class AnalyticsService {
   private readonly db: Database
@@ -371,7 +377,7 @@ export class AnalyticsService {
       now: Date.now(),
     })
     if (result.err) {
-      this.logger.error(result.err, { context: "failed to fetch plan click", projectId })
+      this.logReadFailure(result.err, { context: "failed to fetch plan click", projectId })
       return Err(new FetchError({ message: result.err.message, retry: result.err.retry }))
     }
     return Ok(result.val)
@@ -393,7 +399,8 @@ export class AnalyticsService {
       FetchError
     >
   > {
-    if (!pageId || pageId === "_") {
+    // "_" and "all" are the dashboard's no-page selections; these cards need one page.
+    if (!pageId || pageId === "_" || pageId === "all") {
       return Ok({ data: [], error: "Page ID is required" })
     }
 
@@ -457,7 +464,7 @@ export class AnalyticsService {
   ): Promise<Result<T[], FetchError>> {
     const result = await this.basinSql.query(sql, row)
     if (result.err) {
-      this.logger.error(result.err, logFields)
+      this.logReadFailure(result.err, logFields)
       return Err(
         new FetchError({
           message: `${logFields.context}: ${result.err.message}`,
@@ -466,5 +473,19 @@ export class AnalyticsService {
       )
     }
     return Ok(result.val)
+  }
+
+  private logReadFailure(
+    error: BasinSqlError,
+    logFields: { context: string } & Record<string, unknown>
+  ): void {
+    if (error.code !== "NOT_CONFIGURED") {
+      this.logger.error(error, logFields)
+      return
+    }
+    if (!warnedBasinSqlNotConfigured) {
+      warnedBasinSqlNotConfigured = true
+      this.logger.warn(`web analytics reads are disabled: ${error.message}`, logFields)
+    }
   }
 }

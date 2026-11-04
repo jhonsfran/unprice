@@ -30,6 +30,17 @@ export const subjectTypeSchema = z.enum(SUBJECT_TYPES)
 export const grantTypeSchema = z.enum(GRANT_TYPES)
 export const paymentProviderSchema = z.enum(PAYMENT_PROVIDERS)
 export const currencySchema = z.enum(CURRENCIES)
+
+/**
+ * An id that pricing-page analytics carry from the browser: a track.js session id, a page id, or a
+ * plan version id. 1-128 characters of letters, digits, `_`, `-`, `.` and `:`, so no control
+ * character (a NUL breaks the Basin SQL literal it is compared in) or whitespace reaches a query.
+ */
+export const attributionIdSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[A-Za-z0-9_.:-]+$/, "must be 1-128 letters, digits, '_', '-', '.' or ':'")
 export const typeFeatureSchema = z.enum(FEATURE_TYPES)
 export const billingPeriodStatusSchema = z.enum(BILLING_PERIOD_STATUS)
 export const billingPeriodTypeSchema = z.enum(BILLING_PERIOD_TYPE)
@@ -127,6 +138,7 @@ export const deniedReasonSchema = z.enum([
   "CUSTOMER_DISABLED",
   "PLAN_VERSION_NOT_PUBLISHED",
   "PLAN_VERSION_NOT_ACTIVE",
+  "PLAN_VERSION_ENTERPRISE",
   "PAYMENT_PROVIDER_CONFIG_NOT_FOUND",
   "ENTITLEMENT_EXPIRED",
   "ENTITLEMENT_NOT_ACTIVE",

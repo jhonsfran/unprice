@@ -115,11 +115,13 @@ describe("web events writer", () => {
     )
   })
 
-  it("returns an error instead of throwing when the endpoint fails", async () => {
+  it("returns an error instead of throwing when the endpoint keeps failing", async () => {
+    const fetchMock = vi.fn(async () => new Response("unavailable", { status: 503 }))
     const writer = createWebEventsWriter({
       url: "https://stream-id.ingest.cloudflare.com",
       token: "<STREAM_TOKEN>",
-      fetch: (async () => new Response("unavailable", { status: 503 })) as typeof fetch,
+      backoffMs: 0,
+      fetch: fetchMock as unknown as typeof fetch,
     })
 
     const result = await writer.send([pageHit])
@@ -127,6 +129,41 @@ describe("web events writer", () => {
     expect(result.err?.code).toBe("HTTP_ERROR")
     expect(result.err?.message).toBe("web events stream returned 503: unavailable")
     expect(result.err?.retry).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it("retries a retryable failure with the same rows and succeeds", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("connection reset"))
+      .mockResolvedValueOnce(new Response("slow down", { status: 429 }))
+      .mockResolvedValueOnce(new Response('{"success":true}', { status: 200 }))
+    const writer = createWebEventsWriter({
+      url: "https://stream-id.ingest.cloudflare.com",
+      token: "<STREAM_TOKEN>",
+      backoffMs: 0,
+      fetch: fetchMock as unknown as typeof fetch,
+    })
+
+    expect(await writer.send([pageHit])).toEqual({ val: { sent: 1 } })
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    const bodies = fetchMock.mock.calls.map((call) => (call[1] as RequestInit).body)
+    expect(new Set(bodies).size).toBe(1)
+  })
+
+  it("does not retry a rejected batch", async () => {
+    const fetchMock = vi.fn(async () => new Response("bad request", { status: 400 }))
+    const writer = createWebEventsWriter({
+      url: "https://stream-id.ingest.cloudflare.com",
+      token: "<STREAM_TOKEN>",
+      backoffMs: 0,
+      fetch: fetchMock as unknown as typeof fetch,
+    })
+
+    const result = await writer.send([pageHit])
+
+    expect(result.err?.retry).toBe(false)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it("does not send a batch that holds an invalid row", async () => {

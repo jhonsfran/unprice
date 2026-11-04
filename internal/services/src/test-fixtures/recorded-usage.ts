@@ -1,7 +1,6 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import { Ok } from "@unprice/error"
-import { vi } from "vitest"
 import {
   type BillingUsageSnapshot,
   ownsBillingUsagePeriod,
@@ -12,9 +11,8 @@ import type { BillingReservationFlushGateway } from "../use-cases/billing/reserv
 type AcceptedUsage = Readonly<Record<string, Pick<BillingUsageSnapshot, "amount" | "quantity">>>
 
 export function createRecordedUsageFixture(db: Database, acceptedUsage: AcceptedUsage) {
-  const analytics = {
-    ingestEvents: vi.fn(),
-  } as unknown as Analytics
+  // Billing never sends analytics; web events go through their own writer, not this client.
+  const analytics = {} as Analytics
   const snapshots = new Map<string, BillingUsageSnapshot>()
   const reservationFlushGateway: BillingReservationFlushGateway = {
     registerPeriods: async ({ registrations }) => {

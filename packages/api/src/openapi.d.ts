@@ -5461,12 +5461,12 @@ export interface operations {
            */
           planSlug?: string
           /**
-           * @description The session id of the customer. This is used to track conversion from pricing pages
+           * @description The pricing page session id (from track.js), used for conversion analytics. Prefer passing planVersionId: without it, the plan is resolved from the session's latest plan click, which reaches analytics storage only minutes after the click (eventually consistent). Until then the sign-up fails with a retryable 5xx error; retry later or pass planVersionId.
            * @example sess_1234567890
            */
           sessionId?: string
           /**
-           * @description The plan version the customer is signing up for
+           * @description The plan version the customer is signing up for. Preferred over resolving the plan from sessionId. Enterprise plan versions are refused.
            * @example pv_1234567890
            */
           planVersionId?: string

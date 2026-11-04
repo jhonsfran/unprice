@@ -1219,5 +1219,7 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-10-27: Metering batches must preserve a persisted pending flush payload under its sequence. Coalesce only new draft flush intent.
 - 2026-10-27: Billing integration fixtures must declare accepted usage independently from wallet captures and pass their gateway explicitly.
 - 2026-10-27: Use classes for Vitest constructor mocks. `pnpm validate` can convert anonymous function mocks to non-constructible arrows.
-- 2026-11-03: Web analytics rows go through `createWebEventsWriter` (validates with `webEventRowSchema`); a Pipelines stream accepts an invalid row and drops it silently.
+- 2026-11-03 ([ADR-0008 D8](adr/ADR-0008-payer-budgets-rate-cards-and-r2-journal.md#d8-tinybird-is-deleted)): Web analytics rows go through `createWebEventsWriter` (validates with `webEventRowSchema`); a Pipelines stream accepts an invalid row and drops it silently.
 - 2026-11-03: Web analytics reads are SQL builders in `services/src/analytics/web-analytics.ts` run by the `BasinSql` port. Escape every value with `sqlString`/`sqlTimestamp`; test with literal SQL and a fake port.
+- 2026-11-04: An unauthenticated beacon (`/api/tracking`) parses its payload into its own object with `~/lib/web-tracking` schemas; never spread payload keys next to validated envelope ids, and bound every id with `attributionIdSchema`.
+- 2026-11-04: A sign-up that names only `sessionId` depends on a plan click Basin exposes minutes later: a miss or a Basin failure is a retryable `FetchError`, never a precondition failure.

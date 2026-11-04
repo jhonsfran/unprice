@@ -9,6 +9,7 @@ import LayoutLoader from "~/components/layout/layout-loader"
 import {
   SIGNUP_INTENT_COOKIE,
   type SignupIntent,
+  getSingleSearchParam,
   intentLanding,
   resolveSignupIntent,
   workspaceLanding,
@@ -17,21 +18,45 @@ import { api } from "~/trpc/server"
 import NewWorkspaceForm from "../_components/new-workspace-form"
 import Redirect from "./_components/redirect"
 
+/** /new renders without attribution rather than wait on Basin SQL longer than this. */
+const PLAN_CLICK_LOOKUP_TIMEOUT_MS = 3_000
+
+/**
+ * The session's latest plan click, or null when there is none, the lookup fails, or it takes longer
+ * than the timeout: attribution is optional, so it never blocks or breaks workspace creation.
+ */
+async function findPlanClick(sessionId: string) {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), PLAN_CLICK_LOOKUP_TIMEOUT_MS)
+  })
+  const lookup = api.analytics
+    .getPlanClickBySessionId({ session_id: sessionId })
+    .then(({ planClick }) => planClick)
+    .catch(() => null)
+
+  try {
+    return await Promise.race([lookup, timeout])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 export default async function NewPage(props: {
-  searchParams: Promise<{
-    workspace_id?: string
-    intent?: string | string[]
-    sessionId?: string
-    planVersionId?: string
-    pageId?: string
-  }>
+  searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const [query, cookieStore] = await Promise.all([props.searchParams, cookies()])
-  const { workspace_id, intent, planVersionId, pageId } = query
+  const workspace_id = getSingleSearchParam(query.workspace_id)
+  const planVersionId = getSingleSearchParam(query.planVersionId)
+  const pageId = getSingleSearchParam(query.pageId)
   // A pricing CTA on another domain cannot set the app's cookie, so its query wins.
-  const sessionId = query.sessionId || cookieStore.get(COOKIES_APP.SESSION)?.value
+  const sessionId =
+    getSingleSearchParam(query.sessionId) || cookieStore.get(COOKIES_APP.SESSION)?.value
   // The query carries the intent through auth; the signup cookie covers a round trip that lost it.
-  const signupIntent = resolveSignupIntent(intent, cookieStore.get(SIGNUP_INTENT_COOKIE)?.value)
+  const signupIntent = resolveSignupIntent(
+    query.intent,
+    cookieStore.get(SIGNUP_INTENT_COOKIE)?.value
+  )
 
   // A visitor whose intent has its own landing and who already runs a workspace goes there, not
   // to another workspace. Only a workspace they own or administer: an invited member cannot set up
@@ -64,19 +89,15 @@ export default async function NewPage(props: {
     )
   }
 
-  const { planClick } = await api.analytics.getPlanClickBySessionId({
-    session_id: sessionId,
-    action: "plan_click",
-  })
-
-  const session = planClick?.at(0) ?? null
+  const planClick = await findPlanClick(sessionId)
 
   return (
     <Suspense fallback={<LayoutLoader />}>
       <Content
         workspaceId={workspace_id}
-        planVersionId={session?.payload.plan_version_id}
-        sessionId={session ? sessionId : undefined}
+        planVersionId={planClick?.payload.plan_version_id}
+        pageId={planClick?.payload.page_id}
+        sessionId={planClick ? sessionId : undefined}
         intent={signupIntent}
       />
     </Suspense>

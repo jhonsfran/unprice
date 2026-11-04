@@ -372,7 +372,8 @@ export const lakehouseSourceSchemaRegistry = {
         required: true,
         addedInVersion: 1,
         defaultValue: null,
-        description: "Unique row identifier (UUID). Readers deduplicate on it.",
+        description:
+          "Unique row identifier (UUID), kept across write retries. Readers count rows as COUNT(DISTINCT event_id).",
       },
       {
         name: "kind",

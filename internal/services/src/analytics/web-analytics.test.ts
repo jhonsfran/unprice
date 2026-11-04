@@ -26,7 +26,7 @@ describe("web analytics SQL builders", () => {
         dimension: "country",
         window,
       })
-    ).toBe(`SELECT page_id, country, COUNT(DISTINCT session_id) AS visits, COUNT(*) AS hits
+    ).toBe(`SELECT page_id, country, COUNT(DISTINCT session_id) AS visits, COUNT(DISTINCT event_id) AS hits
 FROM lakehouse.web_events
 WHERE project_id = 'proj_1'
   AND kind = 'page_hit'
@@ -47,7 +47,7 @@ LIMIT 50`)
         dimension: "browser",
         window,
       })
-    ).toBe(`SELECT page_id, browser, COUNT(DISTINCT session_id) AS visits, COUNT(*) AS hits
+    ).toBe(`SELECT page_id, browser, COUNT(DISTINCT session_id) AS visits, COUNT(DISTINCT event_id) AS hits
 FROM lakehouse.web_events
 WHERE project_id = 'proj_1'
   AND kind = 'page_hit'
@@ -67,7 +67,7 @@ LIMIT 50`)
         bucket: "hour",
         window: webAnalyticsWindow(now, 1),
       })
-    ).toBe(`SELECT date_trunc('hour', timestamp) AS bucket, page_id, device, COUNT(DISTINCT session_id) AS visits, COUNT(*) AS hits
+    ).toBe(`SELECT date_trunc('hour', timestamp) AS bucket, page_id, device, COUNT(DISTINCT session_id) AS visits, COUNT(DISTINCT event_id) AS hits
 FROM lakehouse.web_events
 WHERE project_id = 'proj_1'
   AND kind = 'page_hit'
@@ -75,7 +75,7 @@ WHERE project_id = 'proj_1'
   AND timestamp >= '2026-11-02T00:00:00.000Z'
   AND timestamp <= '2026-11-03T10:30:00.000Z'
 GROUP BY date_trunc('hour', timestamp), page_id, device
-ORDER BY bucket
+ORDER BY bucket DESC
 LIMIT 10000`)
   })
 
@@ -93,7 +93,7 @@ WHERE project_id = 'proj_1'
   AND timestamp >= '2026-10-27T00:00:00.000Z'
   AND timestamp <= '2026-11-03T10:30:00.000Z'
 GROUP BY plan_version_id, page_id
-ORDER BY plan_views DESC
+ORDER BY plan_signups DESC, plan_clicks DESC, plan_views DESC
 LIMIT 1000`)
   })
 

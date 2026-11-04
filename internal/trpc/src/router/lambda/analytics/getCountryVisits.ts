@@ -1,7 +1,7 @@
 import type { PageCountryVisits } from "@unprice/services/analytics"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
-import { pageVisitsInputSchema } from "./web-analytics-input"
+import { WEB_ANALYTICS_UNAVAILABLE, pageVisitsInputSchema } from "./web-analytics-input"
 
 export const getCountryVisits = protectedProjectProcedure
   .input(pageVisitsInputSchema)
@@ -23,7 +23,7 @@ export const getCountryVisits = protectedProjectProcedure
     })
 
     if (err) {
-      return { data: [], error: err.message }
+      return { data: [], error: WEB_ANALYTICS_UNAVAILABLE }
     }
 
     return val

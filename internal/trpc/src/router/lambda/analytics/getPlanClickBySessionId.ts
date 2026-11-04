@@ -1,21 +1,18 @@
-import type { PlanClick } from "@unprice/services/analytics"
+import { attributionIdSchema } from "@unprice/db/validators"
+import { planClickSchema } from "@unprice/services/analytics"
 import { z } from "zod"
 import { protectedProcedure } from "#trpc"
 import { intervalDaysSchema } from "./web-analytics-input"
 
 const getPlanClickBySessionIdInputSchema = z.object({
-  session_id: z.string(),
-  action: z.literal("plan_click"),
+  session_id: attributionIdSchema,
   interval_days: intervalDaysSchema,
 })
 
+/** The session's latest plan click on Unprice's own pricing page, or null. */
 export const getPlanClickBySessionId = protectedProcedure
   .input(getPlanClickBySessionIdInputSchema)
-  .output(
-    z.object({
-      planClick: z.custom<PlanClick[]>(),
-    })
-  )
+  .output(z.object({ planClick: planClickSchema.nullable() }))
   .query(async (opts) => {
     const input = opts.input
 
@@ -29,7 +26,7 @@ export const getPlanClickBySessionId = protectedProcedure
         context: "getPlanClickBySessionId main project lookup failed",
       })
 
-      return { planClick: [] }
+      return { planClick: null }
     }
 
     const { err, val } = await opts.ctx.services.analytics.getPlanClickBySessionId({
@@ -39,8 +36,8 @@ export const getPlanClickBySessionId = protectedProcedure
     })
 
     if (err) {
-      return { planClick: [] }
+      return { planClick: null }
     }
 
-    return { planClick: val ? [val] : [] }
+    return { planClick: val }
   })

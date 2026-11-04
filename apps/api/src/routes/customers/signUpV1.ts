@@ -81,7 +81,7 @@ export const registerSignUpV1 = (app: App) =>
       sessionId,
       pageId,
     } = c.req.valid("json")
-    const { billing, customer, subscription, plans } = c.get("services")
+    const { billing, customer, subscription, plans, analytics, pages } = c.get("services")
 
     // validate the request
     const key = await keyAuth(c)
@@ -95,10 +95,11 @@ export const registerSignUpV1 = (app: App) =>
           subscriptions: subscription,
           billing,
           plans,
+          analytics,
+          pages,
         },
         db: c.get("db"),
         logger: c.get("logger"),
-        basinSql: c.get("basinSql"),
         webEvents: c.get("webEvents"),
         waitUntil: c.get("waitUntil"),
       },

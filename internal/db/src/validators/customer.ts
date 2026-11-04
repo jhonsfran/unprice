@@ -3,6 +3,7 @@ import { createInsertSchema, createSelectSchema } from "drizzle-zod"
 import { z } from "zod"
 import * as schema from "../schema"
 import {
+  attributionIdSchema,
   billingIntervalSchema,
   creditLinePolicySchema,
   currencySchema,
@@ -74,16 +75,17 @@ export const customerSignUpSchema = z
         "If provided, the system will intelligently pick the latest plan version for that slug and sign up the customer for it. If omitted with planVersionId, the default plan is used.",
       example: "PRO",
     }),
-    sessionId: z.string().optional().openapi({
+    sessionId: attributionIdSchema.optional().openapi({
       description:
-        "The session id of the customer. This is used to track conversion from pricing pages",
+        "The pricing page session id (from track.js), used for conversion analytics. Prefer passing planVersionId: without it, the plan is resolved from the session's latest plan click, which reaches analytics storage only minutes after the click (eventually consistent). Until then the sign-up fails with a retryable 5xx error; retry later or pass planVersionId.",
       example: "sess_1234567890",
     }),
-    planVersionId: z.string().optional().openapi({
-      description: "The plan version the customer is signing up for",
+    planVersionId: attributionIdSchema.optional().openapi({
+      description:
+        "The plan version the customer is signing up for. Preferred over resolving the plan from sessionId. Enterprise plan versions are refused.",
       example: "pv_1234567890",
     }),
-    pageId: z.string().optional().openapi({
+    pageId: attributionIdSchema.optional().openapi({
       description:
         "The pricing page the plan version was picked on, for conversion analytics. Ignored unless the page belongs to the project and lists the plan version",
       example: "page_1234567890",
@@ -211,6 +213,8 @@ export const customerSetUpSchema = z.object({
 
 export const customerSessionPlanVersionSchema = z.object({
   id: z.string().min(1, "Plan version id is required"),
+  /** The version's plan, for the signup web event recorded when the provider flow completes. */
+  planId: z.string().optional(),
   projectId: z.string().min(1, "Project id is required"),
   config: subscriptionItemsConfigSchema.optional(),
   creditLinePolicy: creditLinePolicySchema.default("uncapped"),

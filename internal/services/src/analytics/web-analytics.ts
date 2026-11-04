@@ -5,12 +5,11 @@ import {
   WEB_EVENTS_TABLE,
   type WebEventKind,
   type WebEventRow,
-  type WebEventsWriter,
+  createWebEventRow,
   sqlInteger,
   sqlString,
   sqlTimestamp,
 } from "@unprice/lakehouse"
-import type { Logger } from "@unprice/logs"
 import { z } from "zod"
 
 const HOUR_MS = 3_600_000
@@ -78,7 +77,10 @@ export type PageBrowserVisits = z.infer<typeof pageBrowserVisitSchema>[]
 export const PAGE_DIMENSIONS = ["country", "browser"] as const
 export type PageDimension = (typeof PAGE_DIMENSIONS)[number]
 
-/** Visits are distinct sessions, hits are page_hit rows, per page and dimension value. */
+/**
+ * Visits are distinct sessions, hits are distinct page_hit rows (by `event_id`, so a retried write
+ * counts once), per page and dimension value.
+ */
 export function buildPageDimensionSql(opts: {
   projectId: string
   pageId: string
@@ -87,7 +89,7 @@ export function buildPageDimensionSql(opts: {
   limit?: number
 }): string {
   return [
-    `SELECT page_id, ${opts.dimension}, COUNT(DISTINCT session_id) AS visits, COUNT(*) AS hits`,
+    `SELECT page_id, ${opts.dimension}, COUNT(DISTINCT session_id) AS visits, COUNT(DISTINCT event_id) AS hits`,
     `FROM ${WEB_EVENTS_TABLE}`,
     webEventsWhere({
       projectId: opts.projectId,
@@ -150,7 +152,7 @@ export function buildPagesOverviewSql(opts: {
 }): string {
   const bucket = `date_trunc(${sqlString(opts.bucket)}, timestamp)`
   return [
-    `SELECT ${bucket} AS bucket, page_id, device, COUNT(DISTINCT session_id) AS visits, COUNT(*) AS hits`,
+    `SELECT ${bucket} AS bucket, page_id, device, COUNT(DISTINCT session_id) AS visits, COUNT(DISTINCT event_id) AS hits`,
     `FROM ${WEB_EVENTS_TABLE}`,
     webEventsWhere({
       projectId: opts.projectId,
@@ -159,7 +161,8 @@ export function buildPagesOverviewSql(opts: {
       pageId: opts.pageId,
     }),
     `GROUP BY ${bucket}, page_id, device`,
-    "ORDER BY bucket",
+    // Newest first, so a window that overflows the limit loses its oldest buckets, not today.
+    "ORDER BY bucket DESC",
     "LIMIT 10000",
   ].join("\n")
 }
@@ -252,7 +255,9 @@ export type PlansConversion = z.infer<typeof planConversionSchema>[]
 /**
  * Views and clicks are distinct sessions. Sign-ups are distinct customers with a `signup_success`
  * row: the Tinybird pipe merged the latest status per (plan version, page), so it counted at most
- * one sign-up per plan version and page.
+ * one sign-up per plan version and page. Groups are ordered by sign-ups, then clicks, then views:
+ * the beacon is unauthenticated, so groups made of forged views alone must not push real plans
+ * past the limit.
  */
 export function buildPlansConversionSql(opts: {
   projectId: string
@@ -270,7 +275,7 @@ export function buildPlansConversionSql(opts: {
       window: opts.window,
     }),
     "GROUP BY plan_version_id, page_id",
-    "ORDER BY plan_views DESC",
+    "ORDER BY plan_signups DESC, plan_clicks DESC, plan_views DESC",
     "LIMIT 1000",
   ].join("\n")
 }
@@ -376,19 +381,26 @@ export async function findLatestPlanClick(
 
 // ---- writes ----
 
-/** Sends rows to the web events stream and logs a failure; never rejects. */
-export async function recordWebEvents(
-  deps: { webEvents: WebEventsWriter; logger: Logger },
-  rows: WebEventRow[]
-): Promise<void> {
-  const result = await deps.webEvents.send(rows)
-  if (!result.err) {
-    return
-  }
-  const fields = { code: result.err.code, kinds: rows.map((row) => row.kind) }
-  if (result.err.code === "NOT_CONFIGURED") {
-    deps.logger.warn(`web analytics events were not recorded: ${result.err.message}`, fields)
-    return
-  }
-  deps.logger.error(result.err, { context: "web analytics events were not recorded", ...fields })
+export type SignupWebEventStatus = "signup_success" | "waiting_payment_provider_setup"
+
+/** The `signup` row every sign-up path records, so each carries the same attribution fields. */
+export function signupWebEventRow(opts: {
+  projectId: string
+  customerId: string
+  /** `planId` is absent only on a customer session stored before sessions carried it. */
+  planVersion: { id: string; planId?: string }
+  sessionId?: string | null
+  pageId?: string | null
+  status: SignupWebEventStatus
+}): WebEventRow {
+  return createWebEventRow({
+    kind: "signup",
+    session_id: opts.sessionId ?? "",
+    project_id: opts.projectId,
+    customer_id: opts.customerId,
+    plan_id: opts.planVersion.planId,
+    plan_version_id: opts.planVersion.id,
+    page_id: opts.pageId ?? undefined,
+    signup_status: opts.status,
+  })
 }

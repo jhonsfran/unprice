@@ -86,20 +86,89 @@ describe("Basin SQL client", () => {
     expect(result.err?.code).toBe("INVALID_RESPONSE")
   })
 
-  it("times out a query that does not answer", async () => {
+  it("times out a query that does not answer, and retries it", async () => {
+    const fetchMock = vi.fn(
+      (_url: string, init: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () => reject(init.signal?.reason))
+        })
+    )
     const basinSql = createBasinSql({
       ...config,
       timeoutMs: 20,
-      fetch: ((_url: string, init: RequestInit) =>
-        new Promise((_resolve, reject) => {
-          init.signal?.addEventListener("abort", () => reject(init.signal?.reason))
-        })) as unknown as typeof fetch,
+      retries: 1,
+      backoffMs: 0,
+      fetch: fetchMock as unknown as typeof fetch,
     })
 
     const result = await basinSql.query("SELECT 1", rowSchema)
 
     expect(result.err?.code).toBe("TIMEOUT")
     expect(result.err?.message).toBe("Basin SQL query timed out after 20ms")
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it("classifies a timeout while reading the body as a retryable TIMEOUT", async () => {
+    const fetchMock = vi.fn(
+      async (_url: string, init: RequestInit) =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              init.signal?.addEventListener("abort", () => controller.error(init.signal?.reason))
+            },
+          })
+        )
+    )
+    const basinSql = createBasinSql({
+      ...config,
+      timeoutMs: 20,
+      retries: 0,
+      fetch: fetchMock as unknown as typeof fetch,
+    })
+
+    const result = await basinSql.query("SELECT 1", rowSchema)
+
+    expect(result.err?.code).toBe("TIMEOUT")
+    expect(result.err?.retry).toBe(true)
+  })
+
+  it("retries a 5xx that is not a Basin envelope, then answers the rows", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("<html>bad gateway</html>", { status: 502 }))
+      .mockResolvedValueOnce(Response.json({ error: "upstream" }, { status: 503 }))
+      .mockResolvedValueOnce(
+        Response.json({ result: { rows: [{ country: "DE", visits: 1 }] }, success: true })
+      )
+    const basinSql = createBasinSql({
+      ...config,
+      backoffMs: 0,
+      fetch: fetchMock as unknown as typeof fetch,
+    })
+
+    const result = await basinSql.query("SELECT 1", rowSchema)
+
+    expect(result).toEqual({ val: [{ country: "DE", visits: 1 }] })
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it("does not retry a query error", async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json(
+        { result: null, success: false, errors: [{ code: 40003, message: "bad" }] },
+        { status: 400 }
+      )
+    )
+    const basinSql = createBasinSql({
+      ...config,
+      backoffMs: 0,
+      fetch: fetchMock as unknown as typeof fetch,
+    })
+
+    const result = await basinSql.query("SELECT 1", rowSchema)
+
+    expect(result.err?.retry).toBe(false)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it("answers NOT_CONFIGURED without credentials", async () => {

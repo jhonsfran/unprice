@@ -1,6 +1,7 @@
 import { BaseError, Err, Ok, type Result } from "@unprice/error"
 import { z } from "zod"
 import { type LakehouseEventForSource, getLakehouseSourceSchema } from "./registry"
+import { type RetryPolicy, isAbortError, withRetries } from "./retry"
 import { buildLakehouseEventZodSchema } from "./zod"
 
 export const WEB_EVENT_KINDS = ["page_hit", "plan_view", "plan_click", "signup"] as const
@@ -83,20 +84,66 @@ export interface WebEventsWriter {
 /**
  * Writes web analytics rows to the `web_events` Basin Pipelines stream over its HTTP ingest
  * endpoint (`https://<stream-id>.ingest.cloudflare.com`, bearer token with Pipelines Send). Next.js
- * on Vercel has no Worker binding, so the API worker uses the same path. Never throws.
+ * on Vercel has no Worker binding, so the API worker uses the same path. A retryable failure (429,
+ * 5xx, network, timeout) is retried `retries` times with exponential backoff. Never throws.
  */
-export function createWebEventsWriter(config: {
-  url?: string
-  token?: string
-  fetch?: typeof fetch
-  timeoutMs?: number
-}): WebEventsWriter {
+export function createWebEventsWriter(
+  config: {
+    url?: string
+    token?: string
+    fetch?: typeof fetch
+    timeoutMs?: number
+  } & Partial<RetryPolicy>
+): WebEventsWriter {
   const fetchImpl = config.fetch ?? fetch
   const timeoutMs = config.timeoutMs ?? 5_000
+  const policy: RetryPolicy = { retries: config.retries ?? 2, backoffMs: config.backoffMs ?? 200 }
+
+  async function attempt(
+    url: string,
+    token: string,
+    body: string,
+    sent: number
+  ): Promise<Result<{ sent: number }, WebEventsWriteError>> {
+    try {
+      const response = await fetchImpl(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body,
+        signal: AbortSignal.timeout(timeoutMs),
+      })
+
+      if (!response.ok) {
+        return Err(
+          new WebEventsWriteError({
+            code: "HTTP_ERROR",
+            message: `web events stream returned ${response.status}: ${await response.text()}`,
+            retry: response.status === 429 || response.status >= 500,
+          })
+        )
+      }
+
+      return Ok({ sent })
+    } catch (error) {
+      return Err(
+        new WebEventsWriteError({
+          code: "NETWORK",
+          message: isAbortError(error)
+            ? `web events stream request timed out after ${timeoutMs}ms`
+            : `web events stream request failed: ${error instanceof Error ? error.message : String(error)}`,
+          retry: true,
+        })
+      )
+    }
+  }
 
   return {
     async send(rows) {
-      if (!config.url || !config.token) {
+      const { url, token } = config
+      if (!url || !token) {
         return Err(
           new WebEventsWriteError({
             code: "NOT_CONFIGURED",
@@ -123,37 +170,37 @@ export function createWebEventsWriter(config: {
         parsed.push(result.data)
       }
 
-      try {
-        const response = await fetchImpl(config.url, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${config.token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(parsed),
-          signal: AbortSignal.timeout(timeoutMs),
-        })
-
-        if (!response.ok) {
-          return Err(
-            new WebEventsWriteError({
-              code: "HTTP_ERROR",
-              message: `web events stream returned ${response.status}: ${await response.text()}`,
-              retry: response.status === 429 || response.status >= 500,
-            })
-          )
-        }
-
-        return Ok({ sent: parsed.length })
-      } catch (error) {
-        return Err(
-          new WebEventsWriteError({
-            code: "NETWORK",
-            message: `web events stream request failed: ${error instanceof Error ? error.message : String(error)}`,
-            retry: true,
-          })
-        )
-      }
+      // Rows carry their event_id, so a retry after an ambiguous failure duplicates at most by
+      // event_id, which the readers count distinct.
+      const body = JSON.stringify(parsed)
+      return withRetries(() => attempt(url, token, body, parsed.length), policy)
     },
   }
+}
+
+/** The two logger methods `recordWebEvents` uses; `@unprice/logs` loggers satisfy it. */
+export type WebEventsLogger = {
+  warn(message: string, fields?: Record<string, unknown>): void
+  error(message: unknown, fields?: Record<string, unknown>): void
+}
+
+/**
+ * Sends rows to the web events stream and logs a failure; never rejects. A missing configuration
+ * is a warning, every other failure an error.
+ */
+export async function recordWebEvents(
+  deps: { webEvents: WebEventsWriter; logger: WebEventsLogger },
+  rows: WebEventRow[]
+): Promise<Result<{ sent: number }, WebEventsWriteError>> {
+  const result = await deps.webEvents.send(rows)
+  if (!result.err) {
+    return result
+  }
+  const fields = { code: result.err.code, kinds: rows.map((row) => row.kind) }
+  if (result.err.code === "NOT_CONFIGURED") {
+    deps.logger.warn(`web analytics events were not recorded: ${result.err.message}`, fields)
+  } else {
+    deps.logger.error(result.err, { context: "web analytics events were not recorded", ...fields })
+  }
+  return result
 }
