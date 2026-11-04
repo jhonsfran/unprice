@@ -139,18 +139,8 @@ export function resolvePeriodCharge(input: ChargeInput): PeriodCharge {
   if (!Number.isSafeInteger(captured) || captured > gross) {
     throw new Error(`Billing period ${period.id} wallet captures exceed its charge`)
   }
-  // A capped phase is prepaid: the wallet covers all of its billed usage, so a shortfall is a
-  // funding bug to surface, never a due line. Trials capture nothing and bill nothing.
-  if (
-    metered &&
-    input.phase.creditLinePolicy === "capped" &&
-    period.type !== "trial" &&
-    captured !== gross
-  ) {
-    throw new Error(
-      `Billing period ${period.id} of a capped phase captured ${captured} of its ${gross} usage`
-    )
-  }
+  // A capped phase's wallet covers what it admitted; usage recorded past its allocation (a late
+  // record, a settle, an expiry) stays on the statement and is billed here (ADR-0008 D10).
   const covered = periodLines
     .filter(
       (line) =>

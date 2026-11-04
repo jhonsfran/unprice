@@ -97,6 +97,15 @@ const reserved = (granted: number): FundingResult => ({
 })
 
 describe("a prepaid budget lends only what the wallet reserved", () => {
+  it("admits trial usage without funds, and still asks funds for billed usage", () => {
+    const store = prepaidStore(["images"])
+
+    ok(store.run(charge("c1"), NOV + 2 * hour))
+    expect(rejection(store.run(charge("c2", tokens), NOV + 2 * hour))).toMatchObject({
+      code: "FUNDING_REQUIRED",
+    })
+  })
+
   it("refuses a charge with FUNDING_REQUIRED and writes nothing", () => {
     const store = prepaidStore()
     const writes = store.writes
@@ -277,7 +286,8 @@ describe("a prepaid budget lends only what the wallet reserved", () => {
     expect(store.funding.get(KEY)).toMatchObject({
       state: "closed",
       captured: BigInt(2_000_000),
-      consumed: BigInt(6_000_000),
+      // The free statement's 4_000_000 never consumed the allocation.
+      consumed: BigInt(2_000_000),
       allocated: BigInt(10_000_000),
     })
   })

@@ -686,7 +686,7 @@ describe("billPeriod", () => {
     )
   })
 
-  it("refuses a capped phase's period whose wallet captures fall short of its usage", async () => {
+  it("bills a capped phase's usage past its wallet captures as a receivable", async () => {
     const usage = meteredPeriod()
     repositories.tx.listPendingPeriodsForStatement = vi.fn().mockResolvedValue([usage])
     const capture = (amount: number) =>
@@ -714,15 +714,15 @@ describe("billPeriod", () => {
     }
 
     const short = bill(2_000_000_000)
-    await expect(short.run).rejects.toThrow(
-      "Billing period bp_1 of a capped phase captured 2000000000 of its 4200000000 usage"
+    await short.run
+    expect(JSON.stringify(vi.mocked(short.ledgerService.createTransfer).mock.calls)).toContain(
+      "2200000000"
     )
-    expect(short.ledgerService.createTransfer).not.toHaveBeenCalled()
 
     const covered = bill(4_200_000_000)
     await covered.run
     expect(covered.ledgerService.createTransfer).not.toHaveBeenCalled()
-    expect(repositories.tx.markPeriodsInvoiced).toHaveBeenCalledTimes(1)
+    expect(repositories.tx.markPeriodsInvoiced).toHaveBeenCalledTimes(2)
   })
 
   it("bills a full flat fee for a phase's last period, which ends on its inclusive last ms", async () => {

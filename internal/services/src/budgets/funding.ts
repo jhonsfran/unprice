@@ -111,9 +111,14 @@ export function decideFunding(input: FundingInput): Result<FundingStep, UnPriceB
 }
 
 /** How much each statement key's statements moved, by key. */
+/**
+ * What each key's billed statements moved. A free (trial) statement bills nothing and its close
+ * captures nothing, so it never consumes the key's allocation.
+ */
 function statementDeltas(change: Change, prior: Map<string, Statement>): Map<string, Amount> {
   const deltas = new Map<string, Amount>()
   for (const statement of change.statements ?? []) {
+    if (statement.free) continue
     const before = prior.get(statement.periodId)?.amount ?? ZERO
     const key = statement.statementKey
     deltas.set(key, (deltas.get(key) ?? ZERO) + statement.amount - before)
@@ -135,10 +140,10 @@ function requiredByKey(input: FundingInput): Map<string, Amount> {
   if (command.type === "charge") keys = [...deltas.keys()]
   if (command.type === "authorize" && change.row?.kind === "hold") {
     const hold = change.row
-    keys = (hold.estimate?.features ?? []).map((feature) => {
+    keys = (hold.estimate?.features ?? []).flatMap((feature) => {
       const statement = statements.get(feature.periodId)
       if (!statement) throw new Error(`hold ${hold.id} priced on ${feature.periodId}, not read`)
-      return statement.statementKey
+      return statement.free ? [] : [statement.statementKey]
     })
   }
   const held = change.held.amount
@@ -188,7 +193,7 @@ function decideFund(
     customerId: payer,
     reservationId: null,
     allocated: ZERO,
-    consumed: own.reduce((sum, statement) => sum + statement.amount, ZERO),
+    consumed: own.reduce((sum, statement) => (statement.free ? sum : sum + statement.amount), ZERO),
     seq: 0,
     pending: null,
     state: "open" as const,

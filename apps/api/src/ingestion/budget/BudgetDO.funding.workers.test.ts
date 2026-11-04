@@ -243,16 +243,13 @@ describe("BudgetDO funding at statement seal", () => {
     })
   })
 
-  it("captures nothing of a free (trial) statement and releases its whole reservation", async () => {
+  it("prices trial usage without touching the wallet", async () => {
     expect(await sealNovember("unprice:customer:cus_trial", true)).toEqual({
       statements: [["sealed", true, BigInt(8_000_000)]],
-      calls: [
-        ["reserve", 1, BigInt(104_000_000)],
-        ["close", 2, BigInt(0)],
-      ],
-      reservation: { allocated: BigInt(104_000_000), captured: BigInt(0), closed: true },
+      calls: [],
+      reservation: undefined,
       balance: BigInt(1_000_000_000),
-      rows: [{ statement_key: "inv_nov", state: "closed" }],
+      rows: [],
     })
   })
 })
