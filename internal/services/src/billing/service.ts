@@ -34,6 +34,7 @@ import { DrizzleSubscriptionRepository } from "../subscriptions/repository.drizz
 import { LockLostError, withLockedMachine } from "../subscriptions/withLockedMachine"
 import type { BillingReservationFlushGateway } from "../use-cases/billing/reservation-flush-gateway"
 import { settlePrepaidInvoiceToWallet } from "../use-cases/billing/settle-invoice"
+import type { PayerBudgetGateway } from "../use-cases/budgets/payer-budget-gateway"
 import type { WalletService } from "../wallet"
 import { UnPriceBillingError } from "./errors"
 import type { UpdateInvoiceInput } from "./repository"
@@ -353,6 +354,7 @@ export class BillingService {
   private readonly ledgerService: LedgerGateway
   private readonly walletService: WalletService
   private readonly reservationFlushGateway: BillingReservationFlushGateway
+  private readonly payerBudgets: PayerBudgetGateway | null
 
   constructor({
     db,
@@ -367,6 +369,7 @@ export class BillingService {
     ledgerService,
     walletService,
     reservationFlushGateway,
+    payerBudgets,
   }: {
     db: Database
     logger: Logger
@@ -381,6 +384,8 @@ export class BillingService {
     ledgerService: LedgerGateway
     walletService: WalletService
     reservationFlushGateway: BillingReservationFlushGateway
+    /** Where a subscription's payer budget is compiled (ADR-0008 D1); null where none is reached. */
+    payerBudgets?: PayerBudgetGateway | null
   }) {
     this.db = db
     this.logger = logger
@@ -394,6 +399,20 @@ export class BillingService {
     this.ledgerService = ledgerService
     this.walletService = walletService
     this.reservationFlushGateway = reservationFlushGateway
+    this.payerBudgets = payerBudgets ?? null
+  }
+
+  /**
+   * Compiles the customer's subscription into its payer budget and registers its statements.
+   * Never fails the caller: a failure is logged at error level and the next billing job, which
+   * syncs again, retries it. Call it after the subscription change committed, outside any lock.
+   */
+  public async syncPayerBudget(input: { projectId: string; customerId: string }): Promise<void> {
+    if (!this.payerBudgets) return
+    const synced = await this.payerBudgets.sync(input)
+    if (synced.err) {
+      this.logger.error(synced.err, { context: "payer budget sync failed", ...input })
+    }
   }
 
   private setLockContext(context: {
@@ -487,6 +506,18 @@ export class BillingService {
           return s1.val
         },
       })
+      // New periods are new statements. Inside a caller's transaction or lock the caller syncs
+      // once it committed, so the API reads what it wrote and no lock waits on the budget.
+      if (!db && !dryRun && lock !== false) {
+        const subscription = await this.db.query.subscriptions.findFirst({
+          columns: { customerId: true },
+          where: (row, ops) =>
+            ops.and(ops.eq(row.id, subscriptionId), ops.eq(row.projectId, projectId)),
+        })
+        if (subscription) {
+          await this.syncPayerBudget({ projectId, customerId: subscription.customerId })
+        }
+      }
       return Ok({ cyclesCreated: status.cyclesCreated, phasesProcessed: status.phasesProcessed })
     } catch (e) {
       return Err(e as UnPriceBillingError)

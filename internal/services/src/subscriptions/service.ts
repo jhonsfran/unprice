@@ -1756,6 +1756,11 @@ export class SubscriptionService {
           updates: { subscriptionStatus: "canceled" },
         })
       )
+      // The payer budget closes where the canceled phase ends.
+      await this.billingService.syncPayerBudget({
+        projectId,
+        customerId: subscriptionWithPhases.customerId,
+      })
     }
 
     return result
@@ -2028,6 +2033,18 @@ export class SubscriptionService {
           return s1.val
         },
       })
+      // Renewal generated the next periods inside the lock; their statements register now.
+      const subscription = await this.db.query.subscriptions.findFirst({
+        columns: { customerId: true },
+        where: (row, ops) =>
+          ops.and(ops.eq(row.id, subscriptionId), ops.eq(row.projectId, projectId)),
+      })
+      if (subscription) {
+        await this.billingService.syncPayerBudget({
+          projectId,
+          customerId: subscription.customerId,
+        })
+      }
       return Ok({ status })
     } catch (e) {
       return Err(e as UnPriceSubscriptionError)

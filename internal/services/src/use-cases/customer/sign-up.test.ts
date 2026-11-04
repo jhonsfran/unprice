@@ -258,6 +258,7 @@ describe("customer signUp payment provider guard", () => {
           },
           billing: {
             generateBillingPeriods,
+            syncPayerBudget: async () => {},
           },
           plans: {},
         } as never,
@@ -377,6 +378,7 @@ describe("customer signUp payment provider guard", () => {
           },
           billing: {
             generateBillingPeriods,
+            syncPayerBudget: async () => {},
           },
           plans: {},
         } as never,
@@ -481,6 +483,7 @@ describe("customer signUp payment provider guard", () => {
         },
         billing: {
           generateBillingPeriods,
+          syncPayerBudget: async () => {},
         },
         plans: {},
       } as never,
@@ -601,6 +604,7 @@ describe("customer signUp plan attribution", () => {
           generateBillingPeriods: vi
             .fn()
             .mockResolvedValue(Ok({ cyclesCreated: 1, phasesProcessed: 1 })),
+          syncPayerBudget: async () => {},
         },
         plans: {},
         pages: new PageService({ db, logger }),

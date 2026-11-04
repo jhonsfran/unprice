@@ -30,6 +30,10 @@ import {
   type BudgetOperatorGateway,
   HttpBudgetOperatorGateway,
 } from "./use-cases/budgets/operator-gateway"
+import {
+  HttpPayerBudgetGateway,
+  type PayerBudgetGateway,
+} from "./use-cases/budgets/payer-budget-gateway"
 import { WalletService } from "./wallet"
 import { WorkspaceService } from "./workspaces/service"
 
@@ -77,6 +81,8 @@ export interface ServiceContext {
 export function createServiceContext(
   deps: ServiceDeps & {
     reservationFlushGateway?: BillingReservationFlushGateway
+    /** Payer budget sync; null turns it off. Defaults to the API's internal route, off in tests. */
+    payerBudgets?: PayerBudgetGateway | null
     /** Web analytics reads. Roots that never read web analytics omit it and get NOT_CONFIGURED. */
     basinSql?: BasinSql
   }
@@ -210,6 +216,13 @@ export function createServiceContext(
       token: env.UNPRICE_API_KEY,
     })
 
+  const payerBudgets =
+    deps.payerBudgets !== undefined
+      ? deps.payerBudgets
+      : env.NODE_ENV === "test"
+        ? null
+        : new HttpPayerBudgetGateway({ baseUrl: env.UNPRICE_API_URL, token: env.UNPRICE_API_KEY })
+
   const billing = new BillingService({
     db: deps.db,
     logger: deps.logger,
@@ -223,6 +236,7 @@ export function createServiceContext(
     ledgerService: ledger,
     walletService: wallet,
     reservationFlushGateway,
+    payerBudgets,
   })
 
   const entitlements = new EntitlementService({

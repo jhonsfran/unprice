@@ -32,6 +32,7 @@ import { registerReleaseBudgetInternalV1 } from "./routes/budgets/releaseBudgetI
 import { registerReleaseBudgetV1 } from "./routes/budgets/releaseBudgetV1"
 import { registerReportBudgetV1 } from "./routes/budgets/reportBudgetV1"
 import { registerSettleBudgetV1 } from "./routes/budgets/settleBudgetV1"
+import { registerSyncPayerBudgetInternalV1 } from "./routes/budgets/syncPayerBudgetInternalV1"
 import { registerUpsertBudgetV1 } from "./routes/budgets/upsertBudgetV1"
 import { registerChangePlanV1 } from "./routes/customers/changePlanV1"
 import { registerSignUpV1 } from "./routes/customers/signUpV1"
@@ -208,6 +209,7 @@ registerModelsBudgetV1(app)
 // Billing routes
 registerFlushReservationsForInvoicingV1(app)
 registerUsageSnapshotsV1(app)
+registerSyncPayerBudgetInternalV1(app)
 
 // Dashboard routes
 registerInspectBudgetInternalV1(app)

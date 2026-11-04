@@ -612,6 +612,9 @@ async function handleDirectProvisioningFlow(
         "customer signup wallet activation failed; subscription parked in pending_activation",
     })
 
+    // The periods generated inside the transaction register as the payer budget's statements.
+    await deps.services.billing.syncPayerBudget({ projectId, customerId })
+
     deps.waitUntil(
       recordWebEvents(deps, [
         signupWebEventRow({

@@ -244,6 +244,7 @@ function createDeps(overrides?: {
       },
       billing: {
         generateBillingPeriods,
+        syncPayerBudget: async () => {},
       },
     },
   } as const

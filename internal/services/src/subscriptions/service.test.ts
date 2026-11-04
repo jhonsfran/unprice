@@ -28,7 +28,7 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
       metrics: {} as never,
       customerService: {} as never,
       entitlementService: {} as never,
-      billingService: {} as never,
+      billingService: { syncPayerBudget: async () => {} } as never,
       ratingService: {} as never,
       ledgerService: {} as never,
     })
@@ -139,7 +139,7 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
       metrics: {} as never,
       customerService: customerService as never,
       entitlementService: {} as never,
-      billingService: {} as never,
+      billingService: { syncPayerBudget: async () => {} } as never,
       ratingService: {} as never,
       ledgerService: {} as never,
     })
@@ -351,7 +351,7 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
         getPhaseOwnedEntitlements,
         createCustomerEntitlement,
       } as never,
-      billingService: {} as never,
+      billingService: { syncPayerBudget: async () => {} } as never,
       ratingService: {} as never,
       ledgerService: {} as never,
     })
@@ -555,7 +555,7 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
         getPhaseOwnedEntitlements,
         createCustomerEntitlement,
       } as never,
-      billingService: {} as never,
+      billingService: { syncPayerBudget: async () => {} } as never,
       ratingService: {} as never,
       ledgerService: {} as never,
     })
@@ -676,7 +676,7 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
       entitlementService: {
         getPhaseOwnedEntitlements,
       } as never,
-      billingService: {} as never,
+      billingService: { syncPayerBudget: async () => {} } as never,
       ratingService: {} as never,
       ledgerService: {} as never,
     })
@@ -782,7 +782,7 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
       entitlementService: {
         getPhaseOwnedEntitlements,
       } as never,
-      billingService: {} as never,
+      billingService: { syncPayerBudget: async () => {} } as never,
       ratingService: {} as never,
       ledgerService: {} as never,
     })
@@ -915,7 +915,7 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
       entitlementService: {
         getPhaseOwnedEntitlements,
       } as never,
-      billingService: {} as never,
+      billingService: { syncPayerBudget: async () => {} } as never,
       ratingService: {} as never,
       ledgerService: {} as never,
     })
@@ -1088,7 +1088,7 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
         getPhaseOwnedEntitlements,
         expireCustomerEntitlement,
       } as never,
-      billingService: {} as never,
+      billingService: { syncPayerBudget: async () => {} } as never,
       ratingService: {} as never,
       ledgerService: {} as never,
     })
