@@ -410,13 +410,16 @@ class ReferenceBudget {
       .map((l) => l.id)
   }
 
-  /** The hard limit that denies `usage`; a lease asks only the amount limits. */
-  block(now: number, usage: Vec, amountOnly = false): { limitId: string; remedy: string } | null {
+  /**
+   * The hard limit that denies `usage`: an amount limit always, a quantity limit only when `usage`
+   * carries its feature.
+   */
+  block(now: number, usage: Vec): { limitId: string; remedy: string } | null {
     const need = (l: ModelLimit) => on(usage, measureOf(l))
     const failing = this.balance(now).limits.filter(
       (l) =>
         l.enforce === "hard" &&
-        (!amountOnly || l.feature === undefined) &&
+        (l.feature === undefined || need(l) > ZERO) &&
         l.remaining - need(l) < ZERO
     )
     if (failing.length === 0) return null
@@ -480,7 +483,7 @@ class ReferenceBudget {
     if (config.closesAt !== null && now >= config.closesAt) return { error: "BUDGET_CLOSED" }
     const room = this.room(now)
     const granted = room === null || room >= amount ? amount : room
-    const blocked = granted === ZERO ? this.block(now, amountVec(amount), true) : null
+    const blocked = granted === ZERO ? this.block(now, amountVec(amount)) : null
     const lease: ModelLease = {
       requested: amount,
       ttlMs,
@@ -545,7 +548,7 @@ class ReferenceBudget {
       if (extended < extend) {
         denied = closed
           ? { code: "BUDGET_CLOSED" }
-          : { code: "LIMIT_EXCEEDED", ...this.block(now, amountVec(extend), true) }
+          : { code: "LIMIT_EXCEEDED", ...this.block(now, amountVec(extend)) }
       }
       lease.granted += extended
       if (2 * (lease.expiresAt - now) < lease.ttlMs) lease.expiresAt = now + lease.ttlMs
@@ -1295,15 +1298,20 @@ describe("budget core against a reference model", () => {
                   ? outcome.budget.balance
                   : null
             const reference = model.balance(now)
-            // Only a record passes a hard limit, so admitted gated spend always fits. A lease
-            // answers to the amount limits only.
+            // Only a record passes a hard limit, so admitted spend fits every limit that gates it:
+            // each amount limit, and each quantity limit whose feature the request carries.
             const admitted =
               (outcome.type === "authorize" ||
                 outcome.type === "charge" ||
                 outcome.type === "lease") &&
               !outcome.replayed
             for (const limit of admitted ? (balance?.limits ?? []) : []) {
-              const gated = outcome.type !== "lease" || limit.measure.type === "amount"
+              const { measure } = limit
+              const carried =
+                "usage" in command && measure.type === "quantity"
+                  ? (command.usage.quantities[measure.feature] ?? ZERO)
+                  : ZERO
+              const gated = measure.type === "amount" || carried > ZERO
               if (limit.enforce === "hard" && gated)
                 expect(limit.consumed + limit.held <= limit.amount).toBe(true)
             }

@@ -1536,6 +1536,24 @@ describe("quantity limits", () => {
     })
   })
 
+  it("gates only requests that carry the feature of a quantity limit past its cap", () => {
+    const store = budgetWith(metered)
+    ok(store.run(record("r1", images(60, 10)), t0))
+
+    const tokens = (n: number, dollars: number): Usage => ({
+      amount: $(dollars),
+      quantities: { tokens: $(n) },
+    })
+    expect(ok(store.run(authorize("k1", usd(5)), t0)).outcome).toMatchObject({ holdId: "h_1" })
+    expect(ok(store.run(authorize("k2", tokens(1000, 5)), t0)).outcome).toMatchObject({
+      holdId: "h_2",
+    })
+    expect(rejection(store.run(authorize("k3", images(1, 1)), t0))).toMatchObject({
+      code: "LIMIT_EXCEEDED",
+      blocked: { limitId: "images:day", remaining: -$(10), remedy: "wait_for_reset" },
+    })
+  })
+
   it("leaves leases to the amount limits", () => {
     const store = budgetWith(metered)
     ok(store.run(record("r1", images(60, 10)), t0))

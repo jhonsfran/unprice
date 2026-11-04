@@ -97,13 +97,15 @@ function amountLimitsOf(balance: BudgetBalance): BudgetBalance {
 }
 
 /**
- * What would deny a request for `request` at this balance; null when it fits every hard limit on
- * that limit's measure.
+ * What would deny a request for `request` at this balance; null when it fits every hard limit that
+ * gates it, on that limit's measure.
  */
 export function blockingLimit(balance: BudgetBalance, request: Usage): Blocked | null {
   const need = (limit: LimitBalance) => measured(request, limit.measure)
+  // A quantity limit gates only requests that carry its feature; an amount limit gates every one.
+  const gates = (limit: LimitBalance) => limit.measure.type === "amount" || need(limit) > ZERO
   const failing = balance.limits.filter(
-    (limit) => limit.enforce === "hard" && limit.remaining < need(limit)
+    (limit) => limit.enforce === "hard" && gates(limit) && limit.remaining < need(limit)
   )
   let blocking: LimitBalance | undefined = failing[0]
   if (!blocking) return null
