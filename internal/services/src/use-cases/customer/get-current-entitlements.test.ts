@@ -219,6 +219,7 @@ function entitlement(options: {
     updatedAtM: now - 1_000,
     subscriptionPhase: { creditLinePolicy: "uncapped" },
     featurePlanVersion: {
+      included: null,
       id: `fpv_${options.featureSlug}`,
       projectId,
       planVersionId: "pv_123",

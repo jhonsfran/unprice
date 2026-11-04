@@ -94,6 +94,7 @@ describe("RatingService", () => {
             createdAtM: effectiveAt,
             updatedAtM: effectiveAt,
             featurePlanVersion: {
+              included: null,
               id: "fv_123",
               projectId: "proj_123",
               planVersionId: "pv_123",
@@ -200,6 +201,7 @@ describe("RatingService", () => {
             createdAtM: effectiveAt,
             updatedAtM: effectiveAt,
             featurePlanVersion: {
+              included: null,
               id: "fv_123",
               projectId: "proj_123",
               planVersionId: "pv_123",

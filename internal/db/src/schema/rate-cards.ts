@@ -13,6 +13,8 @@ import { pgTableProject } from "../utils/_table"
 import { cuid } from "../utils/fields"
 import { projectID } from "../utils/sql"
 import type { ModelCostInput, RateCardInput, RateRowInput } from "../validators/rate-cards"
+import { currencyEnum } from "./enums"
+import { versions } from "./planVersions"
 import { projects } from "./projects"
 
 /**
@@ -67,6 +69,44 @@ export const rateCardRows = pgTableProject(
       foreignColumns: [rateCards.id, rateCards.projectId],
       name: "rate_card_rows_rate_card_id_fkey",
     }).onDelete("cascade"),
+  })
+)
+
+/**
+ * The rate card a plan version prices with in one currency (ADR-0008 D2): one card per currency.
+ * A subscription in that currency compiles its payer budget from this card. The card's unit is the
+ * budget's unit: `money:<currency>`, or `credits:<id>` for a plan sold in credits.
+ */
+export const planVersionRateCards = pgTableProject(
+  "plan_version_rate_cards",
+  {
+    ...projectID,
+    planVersionId: cuid("plan_version_id").notNull(),
+    currency: currencyEnum("currency").notNull(),
+    rateCardId: cuid("rate_card_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(sql`now()`),
+  },
+  (table) => ({
+    primary: primaryKey({
+      columns: [table.id, table.projectId],
+      name: "plan_version_rate_cards_pkey",
+    }),
+    versionCurrencyIdx: uniqueIndex("plan_version_rate_cards_version_currency_idx").on(
+      table.projectId,
+      table.planVersionId,
+      table.currency
+    ),
+    versionfk: foreignKey({
+      columns: [table.planVersionId, table.projectId],
+      foreignColumns: [versions.id, versions.projectId],
+      name: "plan_version_rate_cards_plan_version_id_fkey",
+    }).onDelete("cascade"),
+    cardfk: foreignKey({
+      columns: [table.rateCardId, table.projectId],
+      foreignColumns: [rateCards.id, rateCards.projectId],
+      name: "plan_version_rate_cards_rate_card_id_fkey",
+    }),
   })
 )
 

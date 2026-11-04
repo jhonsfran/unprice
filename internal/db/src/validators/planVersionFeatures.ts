@@ -1,4 +1,4 @@
-import { LEDGER_SCALE } from "@unprice/money"
+import { AMOUNT_PATTERN, LEDGER_SCALE } from "@unprice/money"
 import { dinero } from "dinero.js"
 import * as currencies from "dinero.js/currencies"
 import { createInsertSchema, createSelectSchema } from "drizzle-zod"
@@ -129,6 +129,18 @@ export const dineroSchema = z
       return z.NEVER
     }
   })
+
+/**
+ * Units of a usage feature free per statement period (ADR-0008 D5), a non-negative decimal string;
+ * null when nothing is included. Rating charges price(max(0, total - included)).
+ */
+export const includedUnitsSchema = z
+  .string()
+  .regex(AMOUNT_PATTERN, "a non-negative decimal string with at most 8 decimal places")
+  .nullable()
+  .describe(
+    "Units free per statement period. Usage up to this quantity costs nothing; the rate card prices the rest. Only for usage features whose meter has no dimensions. Example: '1000'"
+  )
 
 export const planVersionFeatureMetadataSchema = z
   .object({
@@ -547,6 +559,7 @@ export const planVersionFeatureSelectBaseSchema = createSelectSchema(planVersion
     billingConfigSchema.describe(
       "Billing cycle configuration including interval (month/year), billing anchor date, and plan type (recurring/onetime)"
     ),
+  included: () => includedUnitsSchema,
 })
 
 export const parseFeaturesConfig = (feature: PlanVersionFeature) => {
@@ -613,6 +626,7 @@ const planVersionFeatureMutationBaseObject = createInsertSchema(planVersionFeatu
       .describe(
         "Maximum usage allowed per billing period. Leave undefined for unlimited. Example: 10000 for max 10,000 API calls"
       ),
+  included: () => includedUnitsSchema.optional(),
   type: () =>
     featureConfigType
       .optional()
@@ -688,6 +702,7 @@ const validatePlanVersionFeatureMutation = ({
     featureType?: z.infer<typeof typeFeatureSchema>
     meterConfig?: z.infer<typeof meterConfigSchema> | null
     config?: z.infer<typeof configFeatureSchema>
+    included?: string | null
   }
   ctx: z.RefinementCtx
   validateConfigWithoutFeatureType?: boolean
@@ -702,6 +717,31 @@ const validatePlanVersionFeatureMutation = ({
     })
 
     return false
+  }
+
+  // ADR-0008 D5: an allowance needs one quantity and no dimensions; across models it is a grant.
+  if (data.included !== undefined && data.included !== null) {
+    if (data.featureType && data.featureType !== FEATURE_TYPES_MAPS.usage.code) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Included units are only supported for usage features",
+        path: ["included"],
+        fatal: true,
+      })
+
+      return false
+    }
+
+    if ((data.meterConfig?.groupBy?.length ?? 0) > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Included units need a meter without dimensions; use a money or credit grant",
+        path: ["included"],
+        fatal: true,
+      })
+
+      return false
+    }
   }
 
   if (

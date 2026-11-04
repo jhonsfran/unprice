@@ -49,6 +49,7 @@ export const prefixes = {
   budget_audit: "bga",
   rate_card: "rc",
   rate_card_row: "rr",
+  plan_version_rate_card: "pvrc",
   model_cost: "mc",
 } as const
 

@@ -1,15 +1,24 @@
 import { type Database, and, asc, desc, eq, gt, inArray, isNull, lt, lte, or } from "@unprice/db"
-import { modelCosts, rateCardRows, rateCards } from "@unprice/db/schema"
+import {
+  modelCosts,
+  planVersionRateCards,
+  rateCardRows,
+  rateCards,
+  versions,
+} from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
 import {
+  type AssignPlanVersionCardInput,
   type CloseRateRowsInput,
   type CreateRateCardInput,
   type FeaturePricing,
   type ModelCost,
+  type PlanVersionCard,
   type RateCard,
   type RateRow,
   modelCostSchema,
   rateCardSchema,
+  rateCardUnitSchema,
   rateRowSchema,
 } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
@@ -110,6 +119,83 @@ export class RateCardService {
       card: toRateCard(card),
       rows: await this.cardRows(this.deps.db, projectId, cardId),
     })
+  }
+
+  /**
+   * Prices a draft plan version in `currency` with a card (ADR-0008 D2), replacing the card it had
+   * in that currency. A published version's cards are part of its package. A money card must be in
+   * the currency it prices; a credits card may price any currency.
+   */
+  async assignToPlanVersion(
+    projectId: string,
+    input: AssignPlanVersionCardInput
+  ): Promise<Result<PlanVersionCard, UnPriceRateCardError>> {
+    const { planVersionId, currency, cardId } = input
+    const [version] = await this.deps.db
+      .select({ status: versions.status })
+      .from(versions)
+      .where(and(eq(versions.projectId, projectId), eq(versions.id, planVersionId)))
+    if (!version) {
+      return Err(new UnPriceRateCardError({ code: "PLAN_VERSION_NOT_FOUND", planVersionId }))
+    }
+    if (version.status === "published") {
+      return Err(new UnPriceRateCardError({ code: "PLAN_VERSION_PUBLISHED", planVersionId }))
+    }
+    const [card] = await this.deps.db
+      .select({ unit: rateCards.unit })
+      .from(rateCards)
+      .where(and(eq(rateCards.projectId, projectId), eq(rateCards.id, cardId)))
+    if (!card) return Err(new UnPriceRateCardError({ code: "CARD_NOT_FOUND", cardId }))
+    if (card.unit.startsWith("money:") && card.unit !== `money:${currency}`) {
+      return Err(
+        new UnPriceRateCardError({ code: "CARD_UNIT_MISMATCH", cardId, unit: card.unit, currency })
+      )
+    }
+    await this.deps.db
+      .insert(planVersionRateCards)
+      .values({
+        id: newId("plan_version_rate_card"),
+        projectId,
+        planVersionId,
+        currency,
+        rateCardId: cardId,
+      })
+      .onConflictDoUpdate({
+        target: [
+          planVersionRateCards.projectId,
+          planVersionRateCards.planVersionId,
+          planVersionRateCards.currency,
+        ],
+        set: { rateCardId: cardId, updatedAt: new Date() },
+      })
+    return Ok({ planVersionId, currency, cardId, unit: rateCardUnitSchema.parse(card.unit) })
+  }
+
+  /** The card a plan version prices with in `currency`, or null when it has none. */
+  async cardForPlanVersion(
+    projectId: string,
+    planVersionId: string,
+    currency: PlanVersionCard["currency"]
+  ): Promise<PlanVersionCard | null> {
+    const [row] = await this.deps.db
+      .select({ cardId: planVersionRateCards.rateCardId, unit: rateCards.unit })
+      .from(planVersionRateCards)
+      .innerJoin(
+        rateCards,
+        and(
+          eq(rateCards.projectId, planVersionRateCards.projectId),
+          eq(rateCards.id, planVersionRateCards.rateCardId)
+        )
+      )
+      .where(
+        and(
+          eq(planVersionRateCards.projectId, projectId),
+          eq(planVersionRateCards.planVersionId, planVersionId),
+          eq(planVersionRateCards.currency, currency)
+        )
+      )
+    if (!row) return null
+    return { planVersionId, currency, cardId: row.cardId, unit: rateCardUnitSchema.parse(row.unit) }
   }
 
   /** The rows of `cardIds` whose interval overlaps [from, to). */

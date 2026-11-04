@@ -351,7 +351,11 @@ describe("featurePricingOf", () => {
     })
     expect(featurePricingOf({ slug: "Bad Slug", meterConfig: null })).toEqual({
       ok: false,
-      unpriceable: { slug: "Bad Slug", reason: "slug: a lowercase slug" },
+      unpriceable: {
+        slug: "Bad Slug",
+        reason:
+          "slug: a lowercase slug: letters, digits, - and _, starting with a letter or digit, at most 64 characters",
+      },
     })
     expect(
       featurePricingOf({ slug: "llm_tokens", meterConfig: { ...meterConfig, groupBy: ["#model"] } })

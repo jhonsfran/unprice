@@ -1,6 +1,7 @@
 import { AMOUNT_PATTERN } from "@unprice/money"
 import { z } from "zod"
 import { toAmount } from "./budget-shared"
+import { currencySchema, featureSlugSchema } from "./shared"
 
 // The rate card contract (ADR-0008 D2 to D5). Decimals arrive as strings and parse into
 // `@unprice/money` amounts (bigint base units at LEDGER_SCALE), so `@unprice/services/pricing`
@@ -21,9 +22,6 @@ const positiveIntSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGE
 
 /** Epoch milliseconds up to 8.64e15, the last instant a `Date` can represent. */
 const epochMsSchema = z.number().int().nonnegative().max(8.64e15)
-
-/** Feature slugs are `[a-z0-9-]+` today; "_" is allowed, "|" never, because positions key on it. */
-const featureSlugSchema = z.string().regex(/^[a-z0-9][a-z0-9_-]*$/, "a lowercase slug")
 
 /**
  * An event property name. "#" starts reserved names. `__proto__` is refused because Zod records
@@ -242,6 +240,21 @@ export const publishCostPlusInputSchema = z.object({
   draftHash: z.string().min(1),
 })
 
+/** Prices a draft plan version in one currency with a card (ADR-0008 D2: one card per currency). */
+export const assignPlanVersionCardInputSchema = z.object({
+  planVersionId: z.string().min(1),
+  currency: currencySchema,
+  cardId: z.string().min(1),
+})
+
+/** The card a plan version prices with in one currency. */
+export const planVersionCardSchema = z.object({
+  planVersionId: z.string(),
+  currency: currencySchema,
+  cardId: z.string(),
+  unit: rateCardUnitSchema,
+})
+
 export type RateComponent = z.infer<typeof rateComponentSchema>
 export type RateTier = z.infer<typeof rateTierSchema>
 export type RatePrice = z.infer<typeof ratePriceSchema>
@@ -258,3 +271,5 @@ export type FeaturePricingInput = z.input<typeof featurePricingSchema>
 export type CreateRateCardInput = z.infer<typeof createRateCardInputSchema>
 export type RateRowDraft = z.infer<typeof rateRowDraftSchema>
 export type CloseRateRowsInput = z.infer<typeof closeRateRowsInputSchema>
+export type AssignPlanVersionCardInput = z.infer<typeof assignPlanVersionCardInputSchema>
+export type PlanVersionCard = z.infer<typeof planVersionCardSchema>

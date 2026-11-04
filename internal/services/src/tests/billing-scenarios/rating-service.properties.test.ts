@@ -68,6 +68,7 @@ function buildUsageGrant(input: { unitPriceCents: number; allowanceUnits: number
       createdAtM: periodStart,
       updatedAtM: periodStart,
       featurePlanVersion: {
+        included: null,
         id: "fv_test",
         projectId,
         planVersionId: "pv_test",

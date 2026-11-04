@@ -16,6 +16,9 @@ export type RateCardRejection =
   | Readonly<{ code: "NOT_COST_PLUS"; cardId: string }>
   | Readonly<{ code: "ROW_NOT_FOUND"; rowIds: readonly string[] }>
   | Readonly<{ code: "ROW_CLOSED"; rowId: string; effectiveTo: number }>
+  | Readonly<{ code: "PLAN_VERSION_NOT_FOUND"; planVersionId: string }>
+  | Readonly<{ code: "PLAN_VERSION_PUBLISHED"; planVersionId: string }>
+  | Readonly<{ code: "CARD_UNIT_MISMATCH"; cardId: string; unit: string; currency: string }>
 
 export type RateCardErrorCode = RateCardRejection["code"]
 
@@ -31,6 +34,9 @@ const KIND: Record<RateCardErrorCode, DomainErrorKind> = {
   DRAFT_STALE: "conflict",
   ROW_NOT_FOUND: "not_found",
   ROW_CLOSED: "conflict",
+  PLAN_VERSION_NOT_FOUND: "not_found",
+  PLAN_VERSION_PUBLISHED: "precondition",
+  CARD_UNIT_MISMATCH: "bad_request",
 }
 
 function message(rejection: RateCardRejection): string {
@@ -59,6 +65,12 @@ function message(rejection: RateCardRejection): string {
       return `Rate rows not found: ${rejection.rowIds.join(", ")}`
     case "ROW_CLOSED":
       return `Rate row ${rejection.rowId} already ends at ${new Date(rejection.effectiveTo).toISOString()}`
+    case "PLAN_VERSION_NOT_FOUND":
+      return `Plan version ${rejection.planVersionId} not found`
+    case "PLAN_VERSION_PUBLISHED":
+      return `Plan version ${rejection.planVersionId} is published; its cards are part of the package`
+    case "CARD_UNIT_MISMATCH":
+      return `Rate card ${rejection.cardId} prices in ${rejection.unit}, so it cannot price ${rejection.currency}`
   }
 }
 

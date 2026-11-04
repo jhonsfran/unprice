@@ -325,6 +325,7 @@ describe("calculateFlatPricePlan", () => {
       configHash: null,
       planFeatures: [
         {
+          included: null,
           id: "fv_4HsTVDfaaTtnAkq5sKB1Raj4tgaG",
           featureType: "flat",
           unitOfMeasure: "units",
@@ -366,6 +367,7 @@ describe("calculateFlatPricePlan", () => {
           resetConfig: null,
         },
         {
+          included: null,
           id: "fv_4HsTVDfaaTtnAkq5sKB1Raj4tg23G",
           featureType: "flat",
           unitOfMeasure: "units",
