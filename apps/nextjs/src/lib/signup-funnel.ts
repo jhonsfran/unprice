@@ -107,6 +107,20 @@ export function authNextPath(
   return intent ? (nextAfterAuth(intent) ?? null) : null
 }
 
+/**
+ * Where an auth page sends a visitor who is already signed in. A picked plan only routes to `/new`
+ * for a visitor without a workspace: one who has a workspace goes to the app, as before plan
+ * attribution existed, instead of to a second workspace.
+ */
+export function signedInNextPath(
+  next: string | null | undefined,
+  intent: SignupIntent | undefined,
+  plan: PlanAttribution,
+  hasWorkspace: boolean
+): string | null {
+  return authNextPath(next, intent, hasWorkspace ? {} : plan)
+}
+
 export function buildAuthHref(
   route: AuthRoute,
   { sessionId, intent, next }: { sessionId?: string; intent?: SignupIntent; next?: string | null }

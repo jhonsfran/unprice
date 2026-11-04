@@ -13,6 +13,7 @@ import {
   buildAuthHref,
   getSignupIntent,
   getSingleSearchParam,
+  signedInNextPath,
 } from "~/lib/signup-funnel"
 import { SignInGithub } from "../_components/github-signin"
 import { SignInGoogle } from "../_components/google-signin"
@@ -34,16 +35,20 @@ export default async function AuthenticationPage(props: {
   const { sessionId, intent, next, planVersionId, pageId } = await props.searchParams
   const singleSessionId = getSingleSearchParam(sessionId)
   const signupIntent = getSignupIntent(intent)
-  const safeNext = authNextPath(getSingleSearchParam(next), signupIntent, {
+  const plan = {
     sessionId: singleSessionId,
     planVersionId: getSingleSearchParam(planVersionId),
     pageId: getSingleSearchParam(pageId),
-  })
+  }
+  const safeNext = authNextPath(getSingleSearchParam(next), signupIntent, plan)
   const [session, cookieStore] = await Promise.all([getSession(), cookies()])
   const lastUsedMethod = cookieStore.get("last-login-method")?.value
 
   if (session?.user?.id) {
-    redirect(safeNext ?? APP_DOMAIN)
+    const hasWorkspace = (session.user.workspaces?.length ?? 0) > 0
+    redirect(
+      signedInNextPath(getSingleSearchParam(next), signupIntent, plan, hasWorkspace) ?? APP_DOMAIN
+    )
   }
 
   return (

@@ -17,7 +17,7 @@ import { useMemo } from "react"
 import { useIntervalFilter, usePageFilter } from "~/hooks/use-filter"
 import { useQueryInvalidation } from "~/hooks/use-query-invalidation"
 import { useTRPC } from "~/trpc/client"
-import { ANALYTICS_CONFIG_REALTIME } from "~/trpc/shared"
+import { WEB_ANALYTICS_QUERY_CONFIG } from "~/trpc/shared"
 
 const chartConfig = {
   country: {
@@ -87,7 +87,7 @@ export function Countries() {
       },
       {
         enabled: pageFilter.isSelected,
-        ...ANALYTICS_CONFIG_REALTIME,
+        ...WEB_ANALYTICS_QUERY_CONFIG,
       }
     )
   )

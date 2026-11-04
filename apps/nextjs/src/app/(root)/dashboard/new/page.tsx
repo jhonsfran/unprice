@@ -1,5 +1,6 @@
 import { getSession } from "@unprice/auth/server-rsc"
 import { COOKIES_APP } from "@unprice/config"
+import { attributionIdSchema } from "@unprice/db/validators"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
 import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
@@ -47,11 +48,14 @@ export default async function NewPage(props: {
 }) {
   const [query, cookieStore] = await Promise.all([props.searchParams, cookies()])
   const workspace_id = getSingleSearchParam(query.workspace_id)
-  const planVersionId = getSingleSearchParam(query.planVersionId)
-  const pageId = getSingleSearchParam(query.pageId)
+  // A malformed id is dropped here: the workspace form would reject it with nothing to correct.
+  const attributionId = (value: string | undefined) => attributionIdSchema.safeParse(value).data
+  const planVersionId = attributionId(getSingleSearchParam(query.planVersionId))
+  const pageId = attributionId(getSingleSearchParam(query.pageId))
   // A pricing CTA on another domain cannot set the app's cookie, so its query wins.
-  const sessionId =
+  const sessionId = attributionId(
     getSingleSearchParam(query.sessionId) || cookieStore.get(COOKIES_APP.SESSION)?.value
+  )
   // The query carries the intent through auth; the signup cookie covers a round trip that lost it.
   const signupIntent = resolveSignupIntent(
     query.intent,

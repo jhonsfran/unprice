@@ -14,6 +14,7 @@ import {
   buildAuthHref,
   getSignupIntent,
   getSingleSearchParam,
+  signedInNextPath,
 } from "~/lib/signup-funnel"
 import { FunnelPageEvent } from "../_components/funnel-page-event"
 import { SignInGithub } from "../_components/github-signin"
@@ -51,16 +52,20 @@ export default async function AuthenticationPage(props: {
   const { sessionId, intent, next, planVersionId, pageId } = await props.searchParams
   const singleSessionId = getSingleSearchParam(sessionId)
   const signupIntent = getSignupIntent(intent)
-  const safeNext = authNextPath(getSingleSearchParam(next), signupIntent, {
+  const plan = {
     sessionId: singleSessionId,
     planVersionId: getSingleSearchParam(planVersionId),
     pageId: getSingleSearchParam(pageId),
-  })
+  }
+  const safeNext = authNextPath(getSingleSearchParam(next), signupIntent, plan)
   const session = await getSession()
   const copy = signupIntent ? INTENT_COPY[signupIntent] : null
 
   if (session?.user?.id) {
-    redirect(safeNext ?? APP_DOMAIN)
+    const hasWorkspace = (session.user.workspaces?.length ?? 0) > 0
+    redirect(
+      signedInNextPath(getSingleSearchParam(next), signupIntent, plan, hasWorkspace) ?? APP_DOMAIN
+    )
   }
 
   return (

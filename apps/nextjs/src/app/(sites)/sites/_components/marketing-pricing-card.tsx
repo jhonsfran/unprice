@@ -17,6 +17,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { Typography } from "@unprice/ui/typography"
 import { cn } from "@unprice/ui/utils"
 import Cookies from "js-cookie"
+import { pricingCtaHref, trackWebEvent } from "~/lib/pricing-cta"
 
 export interface MarketingPricingPlan {
   name: string
@@ -210,17 +211,13 @@ export function MarketingPricingCard({
           })}
           variant={isPopular || isOnly ? "primary" : "default"}
           onClick={() => {
-            const ctaLink = new URL(plan.ctaLink)
-            const sessionId = Cookies.get("session-id")
-            ctaLink.searchParams.set("sessionId", sessionId ?? "")
-            // the clicked plan travels with the link: sign-up must not wait for analytics to land
-            ctaLink.searchParams.set("planVersionId", plan.id)
-            ctaLink.searchParams.set("pageId", plan.pageId)
-
-            // @ts-ignore
-            window.Unprice.trackEvent("plan_click", {
-              plan_version_id: plan.id,
+            const ctaLink = pricingCtaHref(plan.ctaLink, {
+              sessionId: Cookies.get("session-id"),
+              planVersionId: plan.id,
+              pageId: plan.pageId,
             })
+
+            trackWebEvent("plan_click", { plan_version_id: plan.id })
 
             // if enterprise we need email
             if (plan.isEnterprisePlan) {
@@ -230,7 +227,7 @@ export function MarketingPricingCard({
               const body = `I'm interested in the ${plan.name} (enterprise plan). Please contact me.`
               window.open(`mailto:${plan.contactEmail}?subject=${subject}&body=${body}`, "_blank")
             } else {
-              window.open(ctaLink.toString(), "_blank")
+              window.open(ctaLink, "_blank")
             }
           }}
         >

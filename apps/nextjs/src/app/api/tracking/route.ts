@@ -1,13 +1,18 @@
-import { type WebEventRow, createWebEventRow, createWebEventsWriter } from "@unprice/lakehouse"
+import {
+  type WebEventRow,
+  createWebEventRow,
+  createWebEventsWriter,
+  recordWebEvents,
+} from "@unprice/lakehouse"
 import type { Logger } from "@unprice/logs"
 import { geolocation } from "@vercel/functions"
 import { type NextRequest, userAgent } from "next/server"
-import { z } from "zod"
 import { env } from "~/env"
 import { detectBot, getDomainWithoutWWW } from "~/lib/domains"
 import { LOCALHOST_GEO_DATA } from "~/lib/localhost"
 import { getRequestLoggers, withEvlog } from "~/lib/observability"
 import { checkTrackingRateLimit } from "~/lib/tracking-rate-limit"
+import { type TrackingRequest, parseTrackingRequest, planViewRows } from "~/lib/web-tracking"
 import { setCorsHeaders } from "../_enableCors"
 
 export const runtime = "edge"
@@ -19,128 +24,66 @@ const webEvents = createWebEventsWriter({
 })
 
 async function sendWebEvents(logger: Logger, rows: WebEventRow[]) {
-  const result = await webEvents.send(rows)
-  if (result.err) {
-    logger.warn(`web analytics events were not recorded: ${result.err.message}`, {
-      code: result.err.code,
-    })
-    return { error: result.err.code }
-  }
-  return result.val
+  const result = await recordWebEvents({ webEvents, logger }, rows)
+  return result.err ? { error: result.err.code } : result.val
 }
-
-const schemaPageHit = z.object({
-  page_id: z.string(),
-  plan_ids: z.string().optional(),
-  locale: z.string(),
-  referrer: z.string(),
-  pathname: z.string(),
-  url: z.string(),
-})
-
-const schemaPlanClick = z.object({
-  plan_version_id: z.string().min(1),
-  page_id: z.string().min(1),
-})
 
 /** A page hit plus one plan_view row per plan shown on the page, sent as one batch. */
-const trackPageHit = async (
+async function trackPageHit(
   req: NextRequest,
   logger: Logger,
-  payload: {
-    session_id: string
-    page_id: string
-    project_id: string
-    plan_ids: string | null
-    locale: string
-    referrer: string
-    pathname: string
-    url: string
+  hit: Extract<TrackingRequest, { action: "page_hit" }>
+): Promise<{ sent: number } | { error: string } | string> {
+  // don't track bots
+  if (detectBot(req)) {
+    return "Bot detected"
   }
-): Promise<{ sent: number } | { error: string } | string> => {
-  try {
-    // validate payload
-    const parsedPayload = schemaPageHit.safeParse(payload)
 
-    if (!parsedPayload.success) {
-      logger.error(parsedPayload.error)
-      return `Invalid payload: ${JSON.stringify(parsedPayload.error)}`
-    }
+  const ua = userAgent(req)
 
-    // get user agent
-    const ua = userAgent(req)
-    const isBot = detectBot(req)
+  // get continent, region & geolocation data
+  // interesting, geolocation().region is Vercel's edge region – NOT the actual region
+  // so we use the x-vercel-ip-country-region to get the actual region
+  const { continent, region } =
+    env.VERCEL === "1"
+      ? {
+          continent: req.headers.get("x-vercel-ip-continent"),
+          region: req.headers.get("x-vercel-ip-country-region"),
+        }
+      : LOCALHOST_GEO_DATA
 
-    // don't track bots
-    if (isBot) {
-      return "Bot detected"
-    }
+  const geo = env.VERCEL === "1" ? geolocation(req) : LOCALHOST_GEO_DATA
+  const { referrer } = hit.payload
 
-    // get continent, region & geolocation data
-    // interesting, geolocation().region is Vercel's edge region – NOT the actual region
-    // so we use the x-vercel-ip-country-region to get the actual region
-    const { continent, region } =
-      env.VERCEL === "1"
-        ? {
-            continent: req.headers.get("x-vercel-ip-continent"),
-            region: req.headers.get("x-vercel-ip-country-region"),
-          }
-        : LOCALHOST_GEO_DATA
+  const pageHit = createWebEventRow({
+    kind: "page_hit",
+    session_id: hit.session_id,
+    project_id: hit.project_id,
+    page_id: hit.payload.page_id,
+    continent: continent || "",
+    country: geo.country || "Unknown",
+    region: region || "Unknown",
+    city: geo.city || "Unknown",
+    device: ua.device.type || "desktop",
+    device_vendor: ua.device.vendor || "Unknown",
+    device_model: ua.device.model || "Unknown",
+    browser: ua.browser.name || "Unknown",
+    browser_version: ua.browser.version || "Unknown",
+    engine: ua.engine.name || "Unknown",
+    engine_version: ua.engine.version || "Unknown",
+    os: ua.os.name || "Unknown",
+    os_version: ua.os.version || "Unknown",
+    cpu_architecture: ua.cpu?.architecture || "Unknown",
+    bot: ua.isBot,
+    referrer: referrer ? getDomainWithoutWWW(referrer) || "(direct)" : "(direct)",
+    referrer_url: referrer || "(direct)",
+    locale: hit.payload.locale ?? "",
+    pathname: hit.payload.pathname,
+    url: hit.payload.url,
+  })
 
-    const geo = env.VERCEL === "1" ? geolocation(req) : LOCALHOST_GEO_DATA
-
-    const pageHit = createWebEventRow({
-      kind: "page_hit",
-      session_id: payload.session_id,
-      project_id: payload.project_id,
-      page_id: payload.page_id,
-      continent: continent || "",
-      country: geo.country || "Unknown",
-      region: region || "Unknown",
-      city: geo.city || "Unknown",
-      device: ua.device.type || "desktop",
-      device_vendor: ua.device.vendor || "Unknown",
-      device_model: ua.device.model || "Unknown",
-      browser: ua.browser.name || "Unknown",
-      browser_version: ua.browser.version || "Unknown",
-      engine: ua.engine.name || "Unknown",
-      engine_version: ua.engine.version || "Unknown",
-      os: ua.os.name || "Unknown",
-      os_version: ua.os.version || "Unknown",
-      cpu_architecture: ua.cpu?.architecture || "Unknown",
-      bot: ua.isBot,
-      referrer: payload.referrer ? getDomainWithoutWWW(payload.referrer) || "(direct)" : "(direct)",
-      referrer_url: payload.referrer || "(direct)",
-      locale: payload.locale,
-      pathname: payload.pathname,
-      url: payload.url,
-    })
-
-    const planViews = (payload.plan_ids?.split(",") ?? [])
-      .filter((planVersionId) => planVersionId.length > 0)
-      .map((planVersionId) =>
-        createWebEventRow({
-          kind: "plan_view",
-          session_id: payload.session_id,
-          project_id: payload.project_id,
-          page_id: payload.page_id,
-          plan_version_id: planVersionId,
-        })
-      )
-
-    return await sendWebEvents(logger, [pageHit, ...planViews])
-  } catch (error) {
-    logger.error(error instanceof Error ? error : String(error))
-    return `Error: ${JSON.stringify(error)}`
-  }
+  return sendWebEvents(logger, [pageHit, ...planViewRows(hit)])
 }
-
-const bodySchema = z.object({
-  action: z.enum(["page_hit", "plan_click"]),
-  session_id: z.string().min(1).max(128),
-  project_id: z.string().min(1).max(64),
-  payload: z.string().max(8_192),
-})
 
 const MAX_TRACKING_BODY_BYTES = 16_384
 
@@ -171,13 +114,17 @@ export const POST = withEvlog(async (req: NextRequest) => {
     return new Response(JSON.stringify({ error: "Invalid JSON body" }), { status: 400 })
   }
 
-  const parsedBody = bodySchema.safeParse(body)
+  const parsed = parseTrackingRequest(body)
 
-  if (!parsedBody.success) {
-    return new Response(JSON.stringify({ error: parsedBody.error.message }), { status: 400 })
+  if (!parsed.success) {
+    const response = new Response(JSON.stringify({ error: parsed.error }), { status: 400 })
+    setCorsHeaders(response, req.headers.get("origin"))
+    return response
   }
 
-  const rateLimit = await checkTrackingRateLimit({ req, action: parsedBody.data.action })
+  const request = parsed.data
+
+  const rateLimit = await checkTrackingRateLimit({ req, action: request.action })
   if (rateLimit.limited) {
     const response = new Response(JSON.stringify({ error: "Too many requests" }), {
       status: 429,
@@ -187,21 +134,9 @@ export const POST = withEvlog(async (req: NextRequest) => {
     return response
   }
 
-  // biome-ignore lint/suspicious/noExplicitAny: shape is validated downstream by schemaPageHit/schemaPlanClick
-  let payload: any
-  try {
-    payload = JSON.parse(parsedBody.data.payload)
-  } catch {
-    return new Response(JSON.stringify({ error: "Invalid payload JSON" }), { status: 400 })
-  }
-
-  switch (parsedBody.data.action) {
+  switch (request.action) {
     case "page_hit": {
-      const result = await trackPageHit(req, logger, {
-        session_id: parsedBody.data.session_id,
-        project_id: parsedBody.data.project_id,
-        ...payload,
-      })
+      const result = await trackPageHit(req, logger, request)
 
       const response = new Response(JSON.stringify(result))
       setCorsHeaders(response, req.headers.get("origin"))
@@ -209,21 +144,13 @@ export const POST = withEvlog(async (req: NextRequest) => {
     }
 
     case "plan_click": {
-      // validate payload
-      const parsedPayload = schemaPlanClick.safeParse(payload)
-
-      if (!parsedPayload.success) {
-        logger.error(parsedPayload.error)
-        return new Response(JSON.stringify({ error: parsedPayload.error.message }), { status: 400 })
-      }
-
       const result = await sendWebEvents(logger, [
         createWebEventRow({
           kind: "plan_click",
-          session_id: parsedBody.data.session_id,
-          project_id: parsedBody.data.project_id,
-          page_id: parsedPayload.data.page_id,
-          plan_version_id: parsedPayload.data.plan_version_id,
+          session_id: request.session_id,
+          project_id: request.project_id,
+          page_id: request.payload.page_id,
+          plan_version_id: request.payload.plan_version_id,
         }),
       ])
 

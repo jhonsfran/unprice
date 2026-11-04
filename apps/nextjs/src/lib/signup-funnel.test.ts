@@ -19,6 +19,7 @@ import {
   newWorkspacePath,
   nextAfterAuth,
   resolveSignupIntent,
+  signedInNextPath,
   signupIntentSchema,
   workspaceLanding,
 } from "./signup-funnel"
@@ -125,6 +126,17 @@ describe("signup funnel URLs", () => {
     )
     expect(authNextPath("/new?planVersionId=pv_2", undefined, plan)).toBe("/new?planVersionId=pv_2")
     expect(authNextPath(undefined, undefined, { sessionId: "sess_1" })).toBeNull()
+  })
+
+  it("sends a signed-in visitor with a workspace to the app, not to a second workspace", () => {
+    const plan = { sessionId: "sess_1", planVersionId: "pv_1", pageId: "page_1" }
+
+    expect(signedInNextPath(undefined, undefined, plan, true)).toBeNull()
+    expect(signedInNextPath(undefined, "budgets", plan, true)).toBe("/new?intent=budgets")
+    expect(signedInNextPath("/acme/settings", undefined, plan, true)).toBe("/acme/settings")
+    expect(signedInNextPath(undefined, undefined, plan, false)).toBe(
+      "/new?sessionId=sess_1&planVersionId=pv_1&pageId=page_1"
+    )
   })
 
   it("lands the paid-action intent, and no intent, on the workspace itself", () => {

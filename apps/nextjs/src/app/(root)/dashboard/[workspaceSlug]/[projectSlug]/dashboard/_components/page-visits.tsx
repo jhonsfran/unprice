@@ -20,7 +20,7 @@ import { SuperLink } from "~/components/super-link"
 import { useIntervalFilter, usePageFilter } from "~/hooks/use-filter"
 import { useQueryInvalidation } from "~/hooks/use-query-invalidation"
 import { useTRPC } from "~/trpc/client"
-import { ANALYTICS_CONFIG_REALTIME } from "~/trpc/shared"
+import { WEB_ANALYTICS_QUERY_CONFIG } from "~/trpc/shared"
 
 const chartConfig = {
   desktop_visits: {
@@ -131,7 +131,7 @@ export function PageVisits({ pageId }: { pageId?: string } = {}) {
       },
       {
         enabled: isSelected,
-        ...ANALYTICS_CONFIG_REALTIME,
+        ...WEB_ANALYTICS_QUERY_CONFIG,
       }
     )
   )
