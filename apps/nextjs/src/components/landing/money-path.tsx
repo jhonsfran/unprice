@@ -39,7 +39,7 @@ import { Leader } from "./station"
 // and the loop never starts, but the sequence's final chip still lights so the
 // diagram never rests on nothing; otherwise it starts when scrolled into view.
 //
-// The hero uses `reservations.reserve` because the first frame must show the
+// The hero uses `budget.authorize` because the first frame must show the
 // economic control, not a read-only check. The full trace uses `usage.consume`
 // to show the known-cost path through wallet, ledger, and invoice evidence.
 
@@ -176,7 +176,7 @@ function RequestDecisionRail({
           {/* The compact render reserves variable-cost work. The full trace
               shows the atomic known-cost path. */}
           <span className="whitespace-nowrap font-mono text-[11px] text-info-text">
-            {compact ? "reservations.reserve" : "usage.consume"}
+            {compact ? "budget.authorize" : "usage.consume"}
           </span>
         </div>
         {compact ? null : (

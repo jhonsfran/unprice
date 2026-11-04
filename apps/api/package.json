@@ -3,7 +3,6 @@
   "license": "AGPL-3.0-only",
   "private": true,
   "scripts": {
-    "scripts:queues": "./scripts/configure-queues.sh",
     "scripts:r2-delete-bucket": "./scripts/delete-r2-bucket.sh",
     "scripts:r2-lifecycle": "./scripts/setup-r2.sh",
     "scripts:r2-pipelines": "./scripts/configure-lakehouse-pipelines.sh",
@@ -20,11 +19,9 @@
     "test:file": "vitest run \"$@\"",
     "gentypes": "wrangler types",
     "clean": "rm -rf .turbo node_modules dist .wrangler",
-    "db:generate": "pnpm db:generate:ingestion:entitlements",
-    "db:generate:ingestion:entitlements": "drizzle-kit generate --config=drizzle.ingestion.entitlements.config.ts",
-    "db:generate:ingestion:run-budget": "drizzle-kit generate --config=drizzle.ingestion.run-budget.config.ts",
+    "db:generate": "pnpm db:generate:ingestion:budget",
     "db:generate:ingestion:budget": "drizzle-kit generate --config=drizzle.ingestion.budget.config.ts",
-    "db:check:ingestion:migrations": "pnpm db:generate:ingestion:entitlements && pnpm db:generate:ingestion:run-budget && pnpm db:generate:ingestion:budget && git diff --exit-code -- src/ingestion/entitlements/drizzle src/ingestion/run-budget/drizzle src/ingestion/budget/drizzle",
+    "db:check:ingestion:migrations": "pnpm db:generate:ingestion:budget && git diff --exit-code -- src/ingestion/budget/drizzle",
     "type-check": "pnpm exec tsc --noEmit",
     "type-check:full": "pnpm exec wrangler types && pnpm exec tsc --noEmit"
   },

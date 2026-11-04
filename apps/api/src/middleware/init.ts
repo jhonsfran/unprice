@@ -7,7 +7,6 @@ import { shouldEmitMetrics } from "@unprice/observability/env"
 import { ApiKeysService } from "@unprice/services/apikey"
 import { CacheService } from "@unprice/services/cache"
 import { createServiceContext } from "@unprice/services/context"
-import type { IngestionQueueMessage } from "@unprice/services/ingestion"
 import { LogdrainMetrics, NoopMetrics } from "@unprice/services/metrics"
 import { InProcessPayerBudgetGateway } from "@unprice/services/use-cases"
 import type { MiddlewareHandler } from "hono"
@@ -15,8 +14,6 @@ import type { HonoEnv } from "~/hono/env"
 import { apiMetricsLogger, createApiLogger } from "~/observability"
 
 import { payerBudgetSyncDeps } from "~/ingestion/budget/payer-budget-sync"
-import { CloudflareRawIngestionQueueClient } from "~/ingestion/raw-queue-client"
-import { createIngestionService } from "~/ingestion/service"
 import { resolveSampleRate } from "~/sampling"
 
 /**
@@ -201,15 +198,6 @@ export function init(): MiddlewareHandler<HonoEnv> {
       hashCache,
     })
 
-    const ingestion = createIngestionService({
-      cache,
-      db,
-      entitlementService: svcCtx.entitlements,
-      subscriptionService: svcCtx.subscriptions,
-      logger,
-      env: c.env,
-    })
-
     c.set("cache", cache)
     c.set("logger", logger)
     c.set("metrics", metrics)
@@ -221,22 +209,13 @@ export function init(): MiddlewareHandler<HonoEnv> {
         token: c.env.LAKEHOUSE_WEB_EVENTS_TOKEN,
       })
     )
-    c.set(
-      "rawIngestionQueue",
-      new CloudflareRawIngestionQueueClient({
-        logger,
-        queues: [c.env.QUEUE_SHARD_0 as Queue<IngestionQueueMessage>],
-      })
-    )
     c.set("db", db)
     c.set("waitUntil", waitUntil)
 
     c.set("services", {
-      budgetRuns: svcCtx.budgetRuns,
       budgetCatalog: svcCtx.budgetCatalog,
       subscription: svcCtx.subscriptions,
       entitlement: svcCtx.entitlements,
-      ingestion,
       project: svcCtx.projects,
       apikey,
       customer: svcCtx.customers,

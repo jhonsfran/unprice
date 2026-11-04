@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 #
 # Configure Cloudflare (Basin) Pipelines + R2 Data Catalog sinks for the lakehouse sources:
-#   events      usage ingestion audit rows, written by the API worker's PIPELINE_EVENTS binding
 #   web_events  page hits, plan views, plan clicks and sign-ups, written over the stream's HTTP
 #               ingest endpoint (LAKEHOUSE_WEB_EVENTS_URL + LAKEHOUSE_WEB_EVENTS_TOKEN) and read
 #               with Basin SQL (BASIN_SQL_ACCOUNT_ID, BASIN_SQL_BUCKET, BASIN_SQL_TOKEN)
@@ -542,14 +541,13 @@ else
 fi
 
 echo "=== Environment: $ENV | Bucket: $BUCKET ==="
-echo "=== Resource name format: ${NAME_PREFIX}lakehouse_<events|web_events|budget_journal>_<stream|sink|pipeline>${NAME_SUFFIX} ==="
+echo "=== Resource name format: ${NAME_PREFIX}lakehouse_<web_events|budget_journal>_<stream|sink|pipeline>${NAME_SUFFIX} ==="
 if [[ "$DELETE_ONLY" != true && -n "$TOKEN_SOURCE" ]]; then
   echo "=== Using API token from: $TOKEN_SOURCE ==="
 fi
 echo ""
 
 STREAM_SPECS=(
-  "events:events:events"
   "web_events:web_events:web_events"
   "budget_journal:budget_journal:budget_journal"
 )
@@ -558,7 +556,6 @@ print_pipeline_binding_hint() {
   echo "Update wrangler pipeline bindings for env '$ENV' with each stream's id"
   echo "(npx wrangler pipelines streams list):"
   echo "  \"pipelines\": ["
-  echo "    { \"stream\": \"<$(resource_name "events" "stream") id>\", \"binding\": \"PIPELINE_EVENTS\" },"
   echo "    { \"stream\": \"<$(resource_name "budget_journal" "stream") id>\", \"binding\": \"PIPELINE_BUDGET_JOURNAL\" }"
   echo "  ]"
   echo "Until PIPELINE_BUDGET_JOURNAL is bound, BudgetDO keeps every row it has not exported."

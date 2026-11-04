@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { newApiKeySecret, newId, randomId } from "./id"
+import { newApiKeySecret, randomId } from "./id"
 
 describe("randomId", () => {
   it("generates distinct edge-safe owner tokens", () => {
@@ -20,12 +20,6 @@ describe("randomId", () => {
     const unique = new Set(tokens)
 
     expect(unique.size).toBe(burstSize)
-  })
-})
-
-describe("newId budget_run prefix", () => {
-  it("generates sortable ids for budget runs", () => {
-    expect(newId("budget_run")).toMatch(/^brun_[1-9A-HJ-NP-Za-km-z]{22}$/)
   })
 })
 

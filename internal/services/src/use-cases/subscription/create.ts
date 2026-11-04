@@ -176,8 +176,8 @@ export async function createSubscription(
   //                        on first paid invoice/topup; that transition
   //                        runs through `activating` and issues grants.
   //
-  // Reservations are never opened here: EntitlementWindowDO opens them
-  // lazily on first priced usage event.
+  // No usage hold is opened here: the payer budget (BudgetDO) prices usage
+  // as it lands.
   const subscription = result.val
   // The activating XState actor parks failed activations in
   // `pending_activation`; the machine subscriber has already persisted that

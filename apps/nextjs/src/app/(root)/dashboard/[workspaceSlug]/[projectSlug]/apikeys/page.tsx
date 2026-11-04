@@ -70,7 +70,7 @@ export default async function ApiKeysPage(props: {
             emptyState={{
               title: "No API keys",
               description:
-                "Create an API key before your application checks access, records usage, consumes usage, or starts budgeted runs.",
+                "Create an API key before your application checks access, records usage, or consumes usage.",
               action: <NewApiKeyDialog />,
             }}
             hidePaginationWhenEmpty

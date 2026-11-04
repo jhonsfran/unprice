@@ -66,7 +66,7 @@ export function CustomerActions({
         <ResponsiveDialogHeader>
           <ResponsiveDialogTitle>Customer details</ResponsiveDialogTitle>
           <ResponsiveDialogDescription>
-            Update the economic actor that holds subscriptions, wallet credits, runs, and invoices.
+            Update the economic actor that holds subscriptions, wallet credits, and invoices.
           </ResponsiveDialogDescription>
         </ResponsiveDialogHeader>
         <CustomerForm defaultValues={customer} />

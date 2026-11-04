@@ -5,7 +5,6 @@ import { ApiKeysService } from "./apikey/service"
 import { BillingService } from "./billing/service"
 import { BudgetAuditService } from "./budget-audit/service"
 import { BudgetCatalogService } from "./budget-catalog/service"
-import { BudgetRunService } from "./budget-runs/service"
 import { CustomerService } from "./customers/service"
 import type { ServiceDeps } from "./deps"
 import { DomainService } from "./domains/service"
@@ -39,7 +38,6 @@ import { WorkspaceService } from "./workspaces/service"
  * no service creates its own child services.
  */
 export interface ServiceContext {
-  budgetRuns: BudgetRunService
   budgetCatalog: BudgetCatalogService
   budgetAudit: BudgetAuditService
   /** The dashboard's operator calls on budgets, through the API's internal routes. */
@@ -84,13 +82,6 @@ export function createServiceContext(
   }
 ): ServiceContext {
   // 1. Leaf services (no service deps)
-  const budgetRuns = new BudgetRunService({
-    db: deps.db,
-    logger: deps.logger,
-    cache: deps.cache,
-    waitUntil: deps.waitUntil,
-  })
-
   const budgetCatalog = new BudgetCatalogService({
     db: deps.db,
     logger: deps.logger,
@@ -256,7 +247,6 @@ export function createServiceContext(
   })
 
   return {
-    budgetRuns,
     budgetCatalog,
     budgetAudit,
     budgetOperator,

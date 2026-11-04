@@ -6,7 +6,6 @@
   "exports": {
     ".": "./src/index.ts",
     "./budget-catalog": "./src/budget-catalog/index.ts",
-    "./budget-runs": "./src/budget-runs/index.ts",
     "./budgets": "./src/budgets/index.ts",
     "./budgets/memory-store": "./src/budgets/memory-store.fixture.ts",
     "./budgets/fake-wallet": "./src/use-cases/budgets/fake-wallet.fixture.ts",
@@ -29,7 +28,6 @@
     "./payment-provider": "./src/payment-provider/index.ts",
     "./cache": "./src/cache/index.ts",
     "./projects": "./src/projects/index.ts",
-    "./ingestion": "./src/ingestion/index.ts",
     "./apikey": "./src/apikey/index.ts",
     "./billing": "./src/billing/index.ts",
     "./rate-cards": "./src/rate-cards/index.ts",

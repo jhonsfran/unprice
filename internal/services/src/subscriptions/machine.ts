@@ -246,7 +246,7 @@ export class SubscriptionMachine {
             }
 
             // Activation issues period grants only.
-            // - Reservations: lazy in EntitlementWindowDO on first priced event.
+            // - Usage: priced by the payer budget (BudgetDO) as it lands.
             // - Base fees / usage: settled by `invoiceSubscription` at period
             //   boundaries.
             // - Trial credits: issued at `trialing` entry, not here.
@@ -535,7 +535,7 @@ export class SubscriptionMachine {
         pending_payment: {
           tags: ["subscription"],
           description:
-            "Pay-in-advance plan waiting on the first payment provider webhook before the subscription becomes active. Customer cannot consume usage yet — the EntitlementWindowDO denies events while the wallet is empty.",
+            "Pay-in-advance plan waiting on the first payment provider webhook before the subscription becomes active. Customer cannot consume usage yet — the payer budget denies events while the wallet is empty.",
           on: {
             // First successful payment of the bootstrap invoice settles the
             // wallet topup; the webhook fires PAYMENT_SUCCESS, which moves us

@@ -44,7 +44,6 @@ export const prefixes = {
   entitlement_reservation_funding_leg: "erfl",
   wallet_topup: "wtup",
   wallet_credit: "wcr",
-  budget_run: "brun",
   budget: "bgt",
   budget_audit: "bga",
   rate_card: "rc",

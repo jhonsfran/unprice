@@ -21,15 +21,6 @@ type _WalletCreditsBalanceInputCheck = AssertAssignable<
   }
 >
 
-type _RunsConsumeInputCheck = AssertAssignable<
-  OperationInput<"runs.consume">,
-  {
-    runId: string
-    featureSlug: string
-    idempotencyKey: string
-  }
->
-
 type _UsageRecordInputCheck = AssertAssignable<
   OperationInput<"usage.record">,
   {

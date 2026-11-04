@@ -2,10 +2,9 @@
 
 import { useQuery } from "@tanstack/react-query"
 import { Badge } from "@unprice/ui/badge"
-import { Button } from "@unprice/ui/button"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@unprice/ui/sheet"
 import { Skeleton } from "@unprice/ui/skeleton"
-import { CheckCircle2, Loader2, RotateCcw, TriangleAlert } from "lucide-react"
+import { TriangleAlert } from "lucide-react"
 import type { ReactNode } from "react"
 import { formatDate } from "~/lib/dates"
 import { useTRPC } from "~/trpc/client"
@@ -16,22 +15,15 @@ import {
 
 export function IngestionEventDetailsSheet({
   event,
-  isReplayQueued,
-  isReplayPending,
   onOpenChange,
-  onReplay,
   open,
 }: {
   event: IngestionEventRow | null
-  isReplayQueued: boolean
-  isReplayPending: boolean
   onOpenChange: (open: boolean) => void
-  onReplay: (canonicalAuditId: string) => Promise<void>
   open: boolean
 }) {
   const trpc = useTRPC()
   const hasReplayPayload = event?.state === "failed" && event.replayable
-  const canReplay = hasReplayPayload && !isReplayQueued
   const {
     data: payloadData,
     isLoading: isPayloadLoading,
@@ -65,38 +57,11 @@ export function IngestionEventDetailsSheet({
               {event.state}
             </Badge>
           </div>
-          <div className="flex items-end justify-between gap-4">
-            <div className="min-w-0 space-y-1">
-              <FieldLabel>Audit ID</FieldLabel>
-              <SheetDescription className="break-all font-mono text-background-text text-xs">
-                {event.canonicalAuditId}
-              </SheetDescription>
-            </div>
-            {hasReplayPayload ? (
-              <Button
-                type="button"
-                variant="default"
-                size="sm"
-                disabled={isReplayPending || isReplayQueued}
-                className="shrink-0"
-                onClick={() => {
-                  if (!canReplay) {
-                    return
-                  }
-
-                  void onReplay(event.canonicalAuditId).catch(() => undefined)
-                }}
-              >
-                {isReplayQueued ? (
-                  <CheckCircle2 className="mr-1.5 size-3.5 text-success-text" />
-                ) : isReplayPending ? (
-                  <Loader2 className="mr-1.5 size-3.5 animate-spin" />
-                ) : (
-                  <RotateCcw className="mr-1.5 size-3.5" />
-                )}
-                {isReplayQueued ? "Replay queued" : "Replay"}
-              </Button>
-            ) : null}
+          <div className="min-w-0 space-y-1">
+            <FieldLabel>Audit ID</FieldLabel>
+            <SheetDescription className="break-all font-mono text-background-text text-xs">
+              {event.canonicalAuditId}
+            </SheetDescription>
           </div>
         </SheetHeader>
 

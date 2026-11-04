@@ -10,7 +10,6 @@ import { getPlansConversion } from "./getPlansConversion"
 import { getPlansStats } from "./getPlansStats"
 import { getUsage } from "./getUsage"
 import { getUsageDashboard } from "./getUsageDashboard"
-import { replayIngestionEvents } from "./replayIngestionEvents"
 
 export const analyticsRouter = createTRPCRouter({
   explainCharge: explainCharge,
@@ -24,5 +23,4 @@ export const analyticsRouter = createTRPCRouter({
   getPlansConversion: getPlansConversion,
   getPlansStats: getPlansStats,
   getPagesOverview: getPagesOverview,
-  replayIngestionEvents: replayIngestionEvents,
 })

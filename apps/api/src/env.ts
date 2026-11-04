@@ -7,8 +7,6 @@ import { env as envObservability } from "@unprice/observability/env"
 import { env as envServices } from "@unprice/services/env"
 import { z } from "zod"
 import type { BudgetDO } from "~/ingestion/budget/BudgetDO"
-import type { EntitlementWindowDO } from "~/ingestion/entitlements/EntitlementWindowDO"
-import type { RunBudgetDO } from "~/ingestion/run-budget/RunBudgetDO"
 import type { DurableObjectProject } from "./project/do"
 
 export const cloudflareRatelimiter = z.custom<{
@@ -24,10 +22,6 @@ function isCloudflarePipeline(value: unknown): value is Pipeline {
 }
 
 export const cloudflarePipeline = z.custom<Pipeline>(isCloudflarePipeline)
-export const cloudflareQueue = z.custom<Queue<unknown>>(
-  (queue) =>
-    !!queue && typeof queue === "object" && "send" in queue && typeof queue.send === "function"
-)
 
 function readOptionalStringBinding(workerEnv: Record<string, unknown>, key: string) {
   const value = workerEnv[key]
@@ -103,10 +97,6 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
       projectdo: z.custom<DurableObjectNamespace<DurableObjectProject>>(
         (ns) => typeof ns === "object"
       ),
-      entitlementwindow: z.custom<DurableObjectNamespace<EntitlementWindowDO>>(
-        (ns) => typeof ns === "object"
-      ),
-      runbudget: z.custom<DurableObjectNamespace<RunBudgetDO>>((ns) => typeof ns === "object"),
       budget: z.custom<DurableObjectNamespace<BudgetDO>>((ns) => typeof ns === "object"),
       RL_FREE_1000_60s: cloudflareRatelimiter,
       RL_FREE_6000_60s: cloudflareRatelimiter,
@@ -114,12 +104,8 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
       CLOUDFLARE_API_TOKEN: z.string().optional(),
       CLOUDFLARE_ACCOUNT_ID: z.string(),
       CLOUDFLARE_CACHE_DOMAIN: z.string().optional(),
-      LOCAL_PIPELINE_URL: z.string().url().optional(),
-      PIPELINE_EVENTS: cloudflarePipeline.optional(),
       /** The budget journal stream (ADR-0008 D7); BudgetDO keeps unexported rows until it is bound. */
       PIPELINE_BUDGET_JOURNAL: cloudflarePipeline.optional(),
-      QUEUE_SHARD_0: cloudflareQueue,
-      INGESTION_REPORTING_QUEUE: cloudflareQueue,
       // Fraction of typed metric emissions (cache/db/ratelimit) exported to
       // the log drain. Wide events are sampled separately by evlog.
       METRICS_SAMPLE_RATE: z.coerce.number().optional(),
@@ -145,10 +131,6 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
       throw new Error(`Invalid environment variables in API: ${JSON.stringify(issues, null, 2)}`)
     },
   })
-
-  if (parsedEnv.APP_ENV !== "development" && !parsedEnv.PIPELINE_EVENTS) {
-    throw new Error("PIPELINE_EVENTS binding is required outside development")
-  }
 
   assertAllOrNoneConfigured({
     LAKEHOUSE_WEB_EVENTS_URL: parsedEnv.LAKEHOUSE_WEB_EVENTS_URL,

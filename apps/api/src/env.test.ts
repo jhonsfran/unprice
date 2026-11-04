@@ -110,7 +110,6 @@ describe("createRuntimeEnv", () => {
       APP_ENV: "production",
       AUTH_SECRET: authSecret,
       REALTIME_TICKET_SECRET: realtimeSecret,
-      PIPELINE_EVENTS: { send: vi.fn() },
       AXIOM_DATASET: "api",
     }
 

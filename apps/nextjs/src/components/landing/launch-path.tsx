@@ -14,11 +14,11 @@ const RESERVATION_SNIPPET = `import { generateText } from "ai"
 import { Unprice } from "@unprice/api"
 
 const unprice = new Unprice({ token: process.env.UNPRICE_TOKEN })
+const budget = unprice.budget(\`customer:\${customerId}\`)
 
-// 1. Reserve the most this model call may cost.
-const { result: reservation, error } = await unprice.reservations.reserve({
-  customerId,
-  maximumAmountMinor: 10, // $0.10 ceiling, held against the customer's budget
+// 1. Hold the most this model call may cost.
+const { result: authorization, error } = await budget.authorize({
+  amount: "0.10", // $0.10 ceiling, held against the customer's budget
   idempotencyKey: messageId,
 })
 
@@ -26,27 +26,19 @@ const { result: reservation, error } = await unprice.reservations.reserve({
 if (error) {
   return new Response("Customer budget unavailable", { status: 402 })
 }
-if (!reservation.allowed) {
+if (!authorization.allowed) {
   return new Response("Customer budget unavailable", { status: 402 })
 }
 
-// 2. Spend only after the reservation succeeds.
+// 2. Spend only after the hold succeeds.
 const generation = await generateText({
   model,
   prompt,
   maxOutputTokens: 2_000,
 })
 
-// 3. Capture actual usage and release the unused amount.
-const settlement = await reservation.settle({
-  featureSlug: "ai-output-tokens",
-  eventSlug: "completions",
-  id: messageId,
-  properties: {
-    inputTokens: generation.usage.inputTokens,
-    outputTokens: generation.usage.outputTokens,
-  },
-})
+// 3. Settle the actual cost and release the unused amount.
+const settlement = await authorization.hold.settle({ amount: costOf(generation.usage) })
 
 if (settlement.error) throw settlement.error
 

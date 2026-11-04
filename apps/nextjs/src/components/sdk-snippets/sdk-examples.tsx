@@ -8,9 +8,7 @@ import { cn } from "@unprice/ui/utils"
 import {
   Activity,
   ChartColumn,
-  CirclePlay,
   CirclePlus,
-  CircleStop,
   CreditCard,
   Gauge,
   Layers,
@@ -21,7 +19,6 @@ import {
   ShieldCheck,
   UserPlus,
   Wallet,
-  Zap,
 } from "lucide-react"
 import { useState } from "react"
 import { CodeEditor } from "../landing/code-editor"
@@ -45,9 +42,6 @@ export type method =
   | "getPaymentMethods"
   | "createPaymentMethod"
   | "listPlanVersions"
-  | "startBudgetedRun"
-  | "applyRunUsage"
-  | "endBudgetedRun"
   | "explainCharge"
 
 type Framework = "sdk" | "fetch" | "curl"
@@ -201,12 +195,12 @@ function queryString(fields: SnippetField[]): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Spec table — one entry per method. `startBudgetedRun` and `listPlanVersions`
-// are inherently irregular (a multi-call lifecycle / a param-driven body with a
-// follow-up), so they render through dedicated builders below.
+// Spec table — one entry per method. `listPlanVersions` is irregular (a
+// param-driven body with a follow-up), so it renders through a dedicated builder
+// below.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type RegularMethod = Exclude<method, "startBudgetedRun" | "listPlanVersions">
+type RegularMethod = Exclude<method, "listPlanVersions">
 
 type Spec = {
   sdkCall: string
@@ -334,28 +328,6 @@ const SPECS: Record<RegularMethod, Spec> = {
       field("successUrl", str("http://your-app.com/dashboard")),
       field("cancelUrl", str("http://your-app.com/failed")),
     ],
-  },
-  applyRunUsage: {
-    sdkCall: "runs.consume",
-    httpVerb: "POST",
-    path: "/v1/runs/consume",
-    pathParam: { key: "runId", value: "run_1GTzSGrapiBW1QwCL3Fcn" },
-    comment: "// Apply usage to a running budgeted run.",
-    body: () => [
-      field("featureSlug", str("tokens")),
-      field("eventSlug", str("tokens_used")),
-      field("idempotencyKey", idem("run-usage-example-1")),
-      field("properties", obj([field("tokens", num(3842))])),
-    ],
-    sdkTail: () => "\nif (!result.accepted) {\n  throw new Error(result.reason)\n}\n",
-  },
-  endBudgetedRun: {
-    sdkCall: "runs.end",
-    httpVerb: "POST",
-    path: "/v1/runs/end",
-    pathParam: { key: "runId", value: "run_1GTzSGrapiBW1QwCL3Fcn" },
-    comment: "// End a budgeted run and release unused reservation funds.",
-    body: () => [field("status", str("completed"))],
   },
   explainCharge: {
     sdkCall: "analytics.charges.explain",
@@ -551,153 +523,7 @@ const featureSlugs =
 `
 }
 
-function renderStartBudgetedRun(framework: Framework, params?: SDKExampleParams): string {
-  const customerId = getCustomerId(params)
-
-  if (framework === "curl") {
-    return curlPost(
-      "/v1/runs/start",
-      `{
-  "customerId": ${JSON.stringify(customerId)},
-  "budgetAmountMinor": 5000,
-  "idempotencyKey": "run-example-1",
-  "workloadType": "workflow",
-  "workloadId": "daily-report"
-}`,
-      params
-    )
-  }
-
-  if (framework === "sdk") {
-    return `import { Unprice } from "@unprice/api"
-
-const unprice = new Unprice({
-  token: ${sdkToken(params)},
-  baseUrl: ${JSON.stringify(API_BASE_URL)},
-})
-
-// Start a budgeted run before the workload creates cost,
-// then consume usage and end the run.
-const { result: run, error: startError } = await unprice.runs.start({
-  customerId: ${JSON.stringify(customerId)},
-  budgetAmountMinor: 5000,
-  idempotencyKey: crypto.randomUUID(),
-  workloadType: "workflow",
-  workloadId: "daily-report",
-})
-
-if (startError) {
-  console.error(startError.message)
-  return
-}
-
-let finalStatus: "completed" | "failed" = "completed"
-
-try {
-  // Run your workload here, then report the usage it created.
-  const { result: usage, error: consumeError } = await unprice.runs.consume({
-    runId: run.runId,
-    featureSlug: "tokens",
-    eventSlug: "tokens_used",
-    idempotencyKey: crypto.randomUUID(),
-    properties: {
-      tokens: 3842,
-    },
-  })
-
-  if (consumeError) {
-    throw new Error(consumeError.message)
-  }
-
-  if (!usage.accepted) {
-    throw new Error(usage.reason)
-  }
-} catch (error) {
-  finalStatus = "failed"
-  throw error
-} finally {
-  // End the run so unused reservation funds are released.
-  const { error: endError } = await unprice.runs.end({
-    runId: run.runId,
-    status: finalStatus,
-  })
-
-  if (endError) {
-    console.error(endError.message)
-  }
-}
-`
-  }
-
-  return `${fetchPreamble(params)}
-
-const startResponse = await fetch(baseUrl + "/v1/runs/start", {
-  method: "POST",
-  headers: {
-    Authorization: ${fetchAuthorization(params)},
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify({
-    customerId: ${JSON.stringify(customerId)},
-    budgetAmountMinor: 5000,
-    idempotencyKey: crypto.randomUUID(),
-    workloadType: "workflow",
-    workloadId: "daily-report",
-  }),
-})
-
-if (!startResponse.ok) {
-  throw new Error(await startResponse.text())
-}
-
-const run = await startResponse.json()
-let finalStatus = "completed"
-
-try {
-  const consumeResponse = await fetch(baseUrl + "/v1/runs/consume/" + run.runId, {
-    method: "POST",
-    headers: {
-      Authorization: ${fetchAuthorization(params)},
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      featureSlug: "tokens",
-      eventSlug: "tokens_used",
-      idempotencyKey: crypto.randomUUID(),
-      properties: {
-        tokens: 3842,
-      },
-    }),
-  })
-
-  if (!consumeResponse.ok) {
-    throw new Error(await consumeResponse.text())
-  }
-
-  const usage = await consumeResponse.json()
-
-  if (!usage.accepted) {
-    throw new Error(usage.reason)
-  }
-} catch (error) {
-  finalStatus = "failed"
-  throw error
-} finally {
-  await fetch(baseUrl + "/v1/runs/end/" + run.runId, {
-    method: "POST",
-    headers: {
-      Authorization: ${fetchAuthorization(params)},
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      status: finalStatus,
-    }),
-  })
-}`
-}
-
 function getCodeExample(framework: Framework, currentMethod: method, params?: SDKExampleParams) {
-  if (currentMethod === "startBudgetedRun") return renderStartBudgetedRun(framework, params)
   if (currentMethod === "listPlanVersions") return renderListPlanVersions(framework, params)
 
   const spec = SPECS[currentMethod]
@@ -722,9 +548,6 @@ const METHOD_ORDER: method[] = [
   "getPaymentMethods",
   "createPaymentMethod",
   "listPlanVersions",
-  "startBudgetedRun",
-  "applyRunUsage",
-  "endBudgetedRun",
   "explainCharge",
 ]
 
@@ -740,9 +563,6 @@ const methodLabels: Record<method, string> = {
   getPaymentMethods: "List payment methods",
   createPaymentMethod: "Create payment method",
   listPlanVersions: "List plan versions",
-  startBudgetedRun: "Start budgeted run",
-  applyRunUsage: "Apply run usage",
-  endBudgetedRun: "End budgeted run",
   explainCharge: "Explain charge",
 }
 
@@ -758,9 +578,6 @@ const methodIcons: Record<method, LucideIcon> = {
   getPaymentMethods: CreditCard,
   createPaymentMethod: CirclePlus,
   listPlanVersions: Layers,
-  startBudgetedRun: CirclePlay,
-  applyRunUsage: Zap,
-  endBudgetedRun: CircleStop,
   explainCharge: Receipt,
 }
 

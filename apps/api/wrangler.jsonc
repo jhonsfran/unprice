@@ -22,48 +22,6 @@
         "pattern": "api.unprice.dev",
         "custom_domain": true
       },
-      "queues": {
-        "producers": [
-          {
-            "binding": "QUEUE_SHARD_0",
-            "queue": "unprice-api-ingestion-shard-0-prod"
-          },
-          {
-            "binding": "INGESTION_REPORTING_QUEUE",
-            "queue": "unprice-api-ingestion-reporting-prod"
-          }
-        ],
-        "consumers": [
-          {
-            "queue": "unprice-api-ingestion-shard-0-prod",
-            "max_batch_size": 50,
-            "max_batch_timeout": 20,
-            "max_retries": 3,
-            "retry_delay": 60,
-            "dead_letter_queue": "unprice-api-ingestion-dlq-prod"
-          },
-          {
-            "queue": "unprice-api-ingestion-reporting-prod",
-            "max_batch_size": 100,
-            "max_batch_timeout": 5,
-            "max_retries": 3,
-            "retry_delay": 60,
-            "dead_letter_queue": "unprice-api-ingestion-reporting-dlq-prod"
-          },
-          {
-            "queue": "unprice-api-ingestion-dlq-prod",
-            "max_batch_size": 25,
-            "max_batch_timeout": 10,
-            "max_retries": 3
-          },
-          {
-            "queue": "unprice-api-ingestion-reporting-dlq-prod",
-            "max_batch_size": 25,
-            "max_batch_timeout": 10,
-            "max_retries": 3
-          }
-        ]
-      },
       "unsafe": {
         "bindings": [
           {
@@ -86,25 +44,11 @@
           }
         ]
       },
-      "pipelines": [
-        {
-          "pipeline": "a37a2645ecad43c7bc85d6981bcc8a09",
-          "binding": "PIPELINE_EVENTS"
-        }
-      ],
       "durable_objects": {
         "bindings": [
           {
             "name": "projectdo",
             "class_name": "DurableObjectProject"
-          },
-          {
-            "name": "entitlementwindow",
-            "class_name": "EntitlementWindowDO"
-          },
-          {
-            "name": "runbudget",
-            "class_name": "RunBudgetDO"
           },
           {
             "name": "budget",
@@ -136,6 +80,10 @@
         {
           "tag": "v7",
           "new_sqlite_classes": ["BudgetDO"]
+        },
+        {
+          "tag": "v8",
+          "deleted_classes": ["EntitlementWindowDO", "RunBudgetDO"]
         }
       ]
     },
@@ -155,48 +103,6 @@
         "pattern": "preview-api.unprice.dev",
         "custom_domain": true
       },
-      "queues": {
-        "producers": [
-          {
-            "binding": "QUEUE_SHARD_0",
-            "queue": "unprice-api-ingestion-shard-0-preview"
-          },
-          {
-            "binding": "INGESTION_REPORTING_QUEUE",
-            "queue": "unprice-api-ingestion-reporting-preview"
-          }
-        ],
-        "consumers": [
-          {
-            "queue": "unprice-api-ingestion-shard-0-preview",
-            "max_batch_size": 50,
-            "max_batch_timeout": 20,
-            "max_retries": 3,
-            "retry_delay": 60,
-            "dead_letter_queue": "unprice-api-ingestion-dlq-preview"
-          },
-          {
-            "queue": "unprice-api-ingestion-reporting-preview",
-            "max_batch_size": 100,
-            "max_batch_timeout": 5,
-            "max_retries": 3,
-            "retry_delay": 60,
-            "dead_letter_queue": "unprice-api-ingestion-reporting-dlq-preview"
-          },
-          {
-            "queue": "unprice-api-ingestion-dlq-preview",
-            "max_batch_size": 25,
-            "max_batch_timeout": 10,
-            "max_retries": 3
-          },
-          {
-            "queue": "unprice-api-ingestion-reporting-dlq-preview",
-            "max_batch_size": 25,
-            "max_batch_timeout": 10,
-            "max_retries": 3
-          }
-        ]
-      },
       "unsafe": {
         // # Limit: the number of tokens allowed within a given period in a single
         // # Cloudflare location
@@ -222,25 +128,11 @@
           }
         ]
       },
-      "pipelines": [
-        {
-          "pipeline": "7e6f523d3e5e48568f8e471daca1e6bd",
-          "binding": "PIPELINE_EVENTS"
-        }
-      ],
       "durable_objects": {
         "bindings": [
           {
             "name": "projectdo",
             "class_name": "DurableObjectProject"
-          },
-          {
-            "name": "entitlementwindow",
-            "class_name": "EntitlementWindowDO"
-          },
-          {
-            "name": "runbudget",
-            "class_name": "RunBudgetDO"
           },
           {
             "name": "budget",
@@ -272,51 +164,15 @@
         {
           "tag": "v7",
           "new_sqlite_classes": ["BudgetDO"]
+        },
+        {
+          "tag": "v8",
+          "deleted_classes": ["EntitlementWindowDO", "RunBudgetDO"]
         }
       ]
     },
     "dev": {
       "workers_dev": true,
-      "queues": {
-        "producers": [
-          {
-            "binding": "QUEUE_SHARD_0",
-            "queue": "unprice-api-ingestion-shard-0-dev"
-          },
-          {
-            "binding": "INGESTION_REPORTING_QUEUE",
-            "queue": "unprice-api-ingestion-reporting-dev"
-          }
-        ],
-        "consumers": [
-          {
-            "queue": "unprice-api-ingestion-shard-0-dev",
-            "max_batch_size": 100,
-            "max_batch_timeout": 1, // to avoid wait in dev
-            "max_retries": 3,
-            "dead_letter_queue": "unprice-api-ingestion-dlq-dev"
-          },
-          {
-            "queue": "unprice-api-ingestion-reporting-dev",
-            "max_batch_size": 100,
-            "max_batch_timeout": 5, // to avoid wait in dev
-            "max_retries": 3,
-            "dead_letter_queue": "unprice-api-ingestion-reporting-dlq-dev"
-          },
-          {
-            "queue": "unprice-api-ingestion-dlq-dev",
-            "max_batch_size": 25,
-            "max_batch_timeout": 1,
-            "max_retries": 3
-          },
-          {
-            "queue": "unprice-api-ingestion-reporting-dlq-dev",
-            "max_batch_size": 25,
-            "max_batch_timeout": 1,
-            "max_retries": 3
-          }
-        ]
-      },
       "unsafe": {
         // # Limit: the number of tokens allowed within a given period in a single
         // # Cloudflare location
@@ -349,25 +205,11 @@
             "class_name": "DurableObjectProject"
           },
           {
-            "name": "entitlementwindow",
-            "class_name": "EntitlementWindowDO"
-          },
-          {
-            "name": "runbudget",
-            "class_name": "RunBudgetDO"
-          },
-          {
             "name": "budget",
             "class_name": "BudgetDO"
           }
         ]
       },
-      "pipelines": [
-        {
-          "pipeline": "7e6f523d3e5e48568f8e471daca1e6bd",
-          "binding": "PIPELINE_EVENTS"
-        }
-      ],
       "migrations": [
         {
           "tag": "v2",
@@ -392,6 +234,10 @@
         {
           "tag": "v7",
           "new_sqlite_classes": ["BudgetDO"]
+        },
+        {
+          "tag": "v8",
+          "deleted_classes": ["EntitlementWindowDO", "RunBudgetDO"]
         }
       ]
     }

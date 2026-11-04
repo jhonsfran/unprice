@@ -14,7 +14,6 @@ import { name, version } from "../package.json"
 import type { ApiError } from "./errors"
 import { type GeneratedSdkResources, createGeneratedSdkResources } from "./generated/sdk-resources"
 import type { paths } from "./openapi"
-import { type Reservations, createReservations } from "./reservations"
 import type { ApiResult, Result } from "./result"
 
 export type { ApiResult, Result, UnpriceOptions }
@@ -24,8 +23,6 @@ export class Unprice implements GeneratedSdkResources {
   private readonly local: LocalLeases
   public readonly access: GeneratedSdkResources["access"]
   public readonly usage: GeneratedSdkResources["usage"]
-  public readonly runs: GeneratedSdkResources["runs"]
-  public readonly reservations: Reservations
   public readonly budgets: GeneratedSdkResources["budgets"]
   public readonly customers: GeneratedSdkResources["customers"]
   public readonly features: GeneratedSdkResources["features"]
@@ -49,8 +46,6 @@ export class Unprice implements GeneratedSdkResources {
 
     this.access = resources.access
     this.usage = resources.usage
-    this.runs = resources.runs
-    this.reservations = createReservations(resources.runs)
     this.budgets = resources.budgets
     this.local = createLocalLeases({ transport: this.budgets, settlement: this.settlement })
     this.customers = resources.customers

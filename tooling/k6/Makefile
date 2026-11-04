@@ -6,21 +6,9 @@ lifecycle:
 	pnpm build:lifecycle
 	docker run --env-file .env --rm --network=host -i grafana/k6 run - < dist/lifecycle.js
 
-ingestion-failures:
-	pnpm build:ingestion-failures
-	sh ./scripts/run-k6.sh dist/ingestion-failures.js
-
-budgeted-runs:
-	pnpm build:budgeted-runs
-	sh ./scripts/run-k6.sh dist/budgeted-runs.js
-
 latency:
 	pnpm build:latency
 	sh ./scripts/run-k6.sh dist/latency.js
-
-overspend:
-	pnpm build:overspend
-	sh ./scripts/run-k6.sh dist/overspend.js
 
 budgets:
 	pnpm build:budgets

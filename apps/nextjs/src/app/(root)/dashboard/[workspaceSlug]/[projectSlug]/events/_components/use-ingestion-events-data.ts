@@ -15,10 +15,7 @@ import {
   type IngestionStatus,
   buildIngestionEventsFilters,
 } from "./ingestion-events-table-schema"
-import { useReplayQueue } from "./use-replay-queue"
 import { useRollingWindow } from "./use-rolling-window"
-
-export { MAX_REPLAY_IDS } from "./use-replay-queue"
 
 const EVENTS_PAGE_SIZE = 50
 const INGESTION_STATES = ["processed", "rejected", "failed"] as const
@@ -31,7 +28,6 @@ export function useIngestionEventsData() {
   }>()
   const [filters, setFilters] = useFilterDataTable()
   const [detailsEvent, setDetailsEvent] = useState<IngestionEventRow | null>(null)
-  const replayStorageKey = `unprice:events:replay-queued:${workspaceSlug}:${projectSlug}`
   const { queryWindow, hasExplicitDateRange, windowLabel } = useRollingWindow(
     filters.from,
     filters.to
@@ -47,7 +43,6 @@ export function useIngestionEventsData() {
 
   const {
     data: queryData,
-    refetch,
     isLoading,
     isFetching,
     error: queryError,
@@ -72,19 +67,8 @@ export function useIngestionEventsData() {
     )
   )
 
-  const { queuedReplayIds, pendingReplayIds, blockedReplayIds, handleReplay, replayIsPending } =
-    useReplayQueue(replayStorageKey, refetch)
-
   const pages = queryData?.pages
   const rows = useMemo(() => flattenUniqueEvents(pages ?? []), [pages])
-  const hasReplayableRows = useMemo(
-    () =>
-      rows.some(
-        (row) =>
-          row.state === "failed" && row.replayable && !blockedReplayIds.has(row.canonicalAuditId)
-      ),
-    [blockedReplayIds, rows]
-  )
   const visibleDetailsEvent = useMemo(() => {
     if (!detailsEvent) {
       return null
@@ -174,12 +158,6 @@ export function useIngestionEventsData() {
     isFetchingNextPage,
     hasNextPage,
     handleLoadMore,
-    handleReplay,
-    replayIsPending,
-    blockedReplayIds,
-    hasReplayableRows,
-    queuedReplayIds,
-    pendingReplayIds,
     visibleDetailsEvent,
     detailsEvent,
     setDetailsEvent,
@@ -264,10 +242,6 @@ function isIngestionState(
   value: string
 ): value is NonNullable<IngestionQueryFilter["states"]>[number] {
   return INGESTION_STATES.includes(value as (typeof INGESTION_STATES)[number])
-}
-
-export function isReplayQueued(row: IngestionEventRow, replayIds: ReadonlySet<string>): boolean {
-  return row.state === "failed" && row.replayable && replayIds.has(row.canonicalAuditId)
 }
 
 function flattenUniqueEvents(pages: IngestionStatus[]): IngestionEventRow[] {

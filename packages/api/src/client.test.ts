@@ -73,12 +73,6 @@ describe("Unprice client", () => {
     expect(typeof client.access.entitlements.list).toBe("function")
     expect(typeof client.usage.record).toBe("function")
     expect(typeof client.usage.consume).toBe("function")
-    expect(typeof client.runs.start).toBe("function")
-    expect(typeof client.runs.consume).toBe("function")
-    expect(typeof client.runs.settle).toBe("function")
-    expect(typeof client.runs.end).toBe("function")
-    expect(typeof client.runs.get).toBe("function")
-    expect(typeof client.reservations.reserve).toBe("function")
     expect(typeof client.customers.signUp).toBe("function")
     expect(typeof client.features.list).toBe("function")
     expect(typeof client.planVersions.get).toBe("function")
@@ -88,7 +82,6 @@ describe("Unprice client", () => {
     expect(typeof client.analytics.charges.explain).toBe("function")
     expect(typeof client.analytics.usage.get).toBe("function")
     expect(typeof client.ingestionEvents.status).toBe("function")
-    expect(typeof client.ingestionEvents.replay).toBe("function")
     expect(typeof client.subscriptions.get).toBe("function")
     expect(typeof client.wallet.balance).toBe("function")
     expect(typeof client.walletCredits.balance).toBe("function")
@@ -102,55 +95,8 @@ describe("Unprice client", () => {
     expect("payments" in clientRecord).toBe(false)
     expect("billing" in clientRecord).toBe(false)
     expect("agents" in clientRecord).toBe(false)
-  })
-
-  it("exposes generated run SDK methods with workload attribution and no agents namespace", () => {
-    const client = new Unprice({ token: "unprice_dev_test" })
-
-    expect(typeof client.runs.start).toBe("function")
-    expect(typeof client.runs.consume).toBe("function")
-    expect(typeof client.runs.settle).toBe("function")
-    expect(typeof client.runs.end).toBe("function")
-    expect(typeof client.runs.get).toBe("function")
-    expect("agents" in client).toBe(false)
-
-    expectTypeOf(client.runs.start).parameter(0).toEqualTypeOf<OperationInput<"runs.start">>()
-    expectTypeOf(client.runs.settle).parameter(0).toEqualTypeOf<OperationInput<"runs.settle">>()
-    expectTypeOf<{
-      budgetAmountMinor: number
-      idempotencyKey: string
-      workloadType: null
-    }>().toMatchTypeOf<OperationInput<"runs.start">>()
-    expectTypeOf<{
-      runId: string
-      project_id?: string
-    }>().toMatchTypeOf<OperationInput<"runs.get">>()
-
-    type NullableRunSummary = {
-      runId: string
-      status: "running"
-      customerId: string
-      budgetAmountMinor: number
-      consumedAmountMinor: number
-      remainingAmountMinor: number
-      currency: string
-      workloadType: null
-      workloadId: null
-      traceId: null
-      parentRunId: null
-    }
-
-    expectTypeOf<NullableRunSummary>().toMatchTypeOf<OperationResponse<"runs.start">>()
-    expectTypeOf<{
-      accepted: true
-      reason: "accepted"
-      run: NullableRunSummary
-    }>().toMatchTypeOf<OperationResponse<"runs.consume">>()
-    expectTypeOf<NullableRunSummary>().toMatchTypeOf<OperationResponse<"runs.end">>()
-    expectTypeOf<NullableRunSummary>().toMatchTypeOf<OperationResponse<"runs.get">>()
-    expectTypeOf<OperationResponse<"runs.get">["endedAt"]>().toEqualTypeOf<
-      number | null | undefined
-    >()
+    expect("runs" in clientRecord).toBe(false)
+    expect("reservations" in clientRecord).toBe(false)
   })
 
   it("exposes exactly the two generated monetization configuration operations", () => {
@@ -416,115 +362,6 @@ describe("Unprice client", () => {
       properties: {
         amount: 42,
       },
-    })
-  })
-
-  it("sends generated run start workload attribution through the typed OpenAPI transport", async () => {
-    const requests: Request[] = []
-    const client = createClient(async (request) => {
-      requests.push(request.clone())
-      return createJsonResponse({
-        runId: "run_123",
-        status: "running",
-        budgetAmountMinor: 500,
-        consumedAmountMinor: 0,
-        remainingAmountMinor: 500,
-        currency: "USD",
-        customerId: "cus_123",
-        projectId: "proj_123",
-        workloadType: "agent",
-        workloadId: "research-assistant",
-        traceId: "trace_001",
-        parentRunId: null,
-      })
-    })
-
-    const { result, error } = await client.runs.start({
-      budgetAmountMinor: 500,
-      idempotencyKey: "idem_run_1",
-      workloadType: "agent",
-      workloadId: "research-assistant",
-      traceId: "trace_001",
-      parentRunId: null,
-    })
-
-    expect(error).toBeUndefined()
-    expect(result?.runId).toBe("run_123")
-    expect(requests[0]?.method).toBe("POST")
-    expect(requests[0]?.url).toBe("https://example.com/v1/runs/start")
-    await expect(requests[0]?.json()).resolves.toEqual({
-      budgetAmountMinor: 500,
-      idempotencyKey: "idem_run_1",
-      workloadType: "agent",
-      workloadId: "research-assistant",
-      traceId: "trace_001",
-      parentRunId: null,
-    })
-  })
-
-  it("serializes POST path params separately from request bodies", async () => {
-    const requests: Request[] = []
-    const client = createClient(async (request) => {
-      requests.push(request.clone())
-      return createJsonResponse({
-        accepted: true,
-        reason: "accepted",
-        run: {
-          runId: "run_123",
-          status: "running",
-          budgetAmountMinor: 500,
-          consumedAmountMinor: 10,
-          remainingAmountMinor: 490,
-          currency: "USD",
-          customerId: "cus_123",
-          projectId: "proj_123",
-          workloadType: "agent",
-          workloadId: "research-assistant",
-          traceId: "trace_001",
-          parentRunId: null,
-        },
-      })
-    })
-
-    const { result, error } = await client.runs.consume({
-      runId: "run_123",
-      featureSlug: "tokens",
-      idempotencyKey: "idem_123",
-    })
-
-    expect(error).toBeUndefined()
-    expect(result?.accepted).toBe(true)
-    expect(requests[0]?.method).toBe("POST")
-    expect(requests[0]?.url).toBe("https://example.com/v1/runs/consume/run_123")
-    await expect(requests[0]?.json()).resolves.toEqual({
-      featureSlug: "tokens",
-      idempotencyKey: "idem_123",
-    })
-  })
-
-  it("calls replay failed ingestion endpoint", async () => {
-    const requests: Request[] = []
-    const client = createClient(async (request) => {
-      requests.push(request.clone())
-      return createJsonResponse({
-        replayed: 1,
-        skipped: 0,
-      })
-    })
-
-    const { result, error } = await client.ingestionEvents.replay({
-      canonical_audit_ids: ["audit_1"],
-      project_id: "proj_123",
-    })
-
-    expect(error).toBeUndefined()
-    expect(result).toEqual({ replayed: 1, skipped: 0 })
-    expect(requests[0]?.method).toBe("POST")
-    expect(requests[0]?.url).toBe("https://example.com/v1/ingestion-events/replay")
-    expect(requests[0]?.headers.get("authorization")).toBe("Bearer test-token")
-    await expect(requests[0]?.json()).resolves.toEqual({
-      canonical_audit_ids: ["audit_1"],
-      project_id: "proj_123",
     })
   })
 
