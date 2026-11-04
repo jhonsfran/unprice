@@ -310,18 +310,24 @@ describe("renewSchedule", () => {
 describe("periodsSchedule", () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.subscriptionFindMany.mockResolvedValue(subscriptionRows)
-    mocks.phaseFindMany.mockResolvedValue([{ subscriptionId: "sub_2" }])
+    mocks.subscriptionFindMany.mockReset()
+    mocks.phaseFindMany.mockReset()
   })
 
-  it("re-syncs subscriptions whose phases changed within the last day with the due ones", async () => {
+  it("re-syncs only subscriptions whose phases changed within the last day, besides the due ones", async () => {
+    mocks.subscriptionFindMany.mockResolvedValueOnce([{ id: "sub_1", projectId: "proj_1" }])
+    mocks.phaseFindMany.mockResolvedValueOnce([
+      { subscriptionId: "sub_1", projectId: "proj_1" },
+      { subscriptionId: "sub_2", projectId: "proj_1" },
+      { subscriptionId: "sub_2", projectId: "proj_1" },
+    ])
     const { periodsSchedule: definition } = await import("./periods")
     const periodsSchedule = runnableSchedule<SchedulePayload>(definition)
     const now = Date.parse("2026-07-06T12:00:00.000Z")
 
     const result = await periodsSchedule.run({ timestamp: new Date(now) })
 
-    const [{ where }] = mocks.phaseFindMany.mock.calls[0] as [
+    const [{ where: phaseWhere }] = mocks.phaseFindMany.mock.calls[0] as [
       {
         where: (
           table: unknown,
@@ -330,12 +336,71 @@ describe("periodsSchedule", () => {
       },
     ]
     const gte = vi.fn()
-    where({ updatedAtM: "updated_at_m" }, { gte })
+    phaseWhere({ updatedAtM: "updated_at_m" }, { gte })
     expect(gte).toHaveBeenCalledWith("updated_at_m", now - 24 * 60 * 60 * 1000)
-    expect(mocks.periodBatchTrigger).toHaveBeenCalledWith([
-      { payload: { subscriptionId: "sub_1", projectId: "proj_1", now } },
-      { payload: { subscriptionId: "sub_2", projectId: "proj_1", now } },
+    // The due selection never reads a subscription's own updatedAtM.
+    const [{ where: dueWhere }] = mocks.subscriptionFindMany.mock.calls[0] as [
+      { where: (table: unknown, ops: Record<string, unknown>) => unknown },
+    ]
+    const ops = {
+      and: vi.fn(),
+      eq: vi.fn(),
+      notInArray: vi.fn(),
+      lte: vi.fn(),
+      gte: vi.fn(),
+      or: vi.fn(),
+    }
+    dueWhere(
+      {
+        active: "active",
+        status: "status",
+        currentCycleEndAt: "current_cycle_end_at_m",
+        updatedAtM: "updated_at_m",
+      },
+      ops
+    )
+    expect(ops.gte).not.toHaveBeenCalled()
+    expect(ops.or).not.toHaveBeenCalled()
+    expect(ops.lte).toHaveBeenCalledWith("current_cycle_end_at_m", now + 3 * 24 * 60 * 60 * 1000)
+    expect(mocks.periodBatchTrigger.mock.calls).toEqual([
+      [
+        [
+          { payload: { subscriptionId: "sub_1", projectId: "proj_1", now } },
+          { payload: { subscriptionId: "sub_2", projectId: "proj_1", now } },
+        ],
+      ],
     ])
     expect(result).toEqual({ subscriptionIds: ["sub_1", "sub_2"] })
+  })
+
+  it("triggers at most 500 subscriptions per batch", async () => {
+    const due = Array.from({ length: 1_201 }, (_, i) => ({ id: `sub_${i}`, projectId: "proj_1" }))
+    mocks.subscriptionFindMany.mockResolvedValueOnce(due)
+    mocks.phaseFindMany.mockResolvedValueOnce([])
+    const { periodsSchedule: definition } = await import("./periods")
+    const periodsSchedule = runnableSchedule<SchedulePayload>(definition)
+
+    await periodsSchedule.run({ timestamp: new Date(Date.parse("2026-07-06T12:00:00.000Z")) })
+
+    const sizes = mocks.periodBatchTrigger.mock.calls.map(([items]) => (items as unknown[]).length)
+    expect(sizes).toEqual([500, 500, 201])
+    const last = mocks.periodBatchTrigger.mock.calls[2]?.[0] as Array<{
+      payload: { subscriptionId: string }
+    }>
+    expect(last[200]?.payload.subscriptionId).toBe("sub_1200")
+  })
+
+  it("does nothing when no subscription is due or changed", async () => {
+    mocks.subscriptionFindMany.mockResolvedValueOnce([])
+    mocks.phaseFindMany.mockResolvedValueOnce([])
+    const { periodsSchedule: definition } = await import("./periods")
+    const periodsSchedule = runnableSchedule<SchedulePayload>(definition)
+
+    const result = await periodsSchedule.run({
+      timestamp: new Date(Date.parse("2026-07-06T12:00:00.000Z")),
+    })
+
+    expect(mocks.periodBatchTrigger).not.toHaveBeenCalled()
+    expect(result).toEqual({ subscriptionIds: [] })
   })
 })
