@@ -19,6 +19,7 @@
     "./subscriptions": "./src/subscriptions/index.ts",
     "./customers": "./src/customers/index.ts",
     "./analytics": "./src/analytics/index.ts",
+    "./analytics/journal-fixture": "./src/analytics/journal.fixture.ts",
     "./domains": "./src/domains/index.ts",
     "./events": "./src/events/index.ts",
     "./features": "./src/features/index.ts",

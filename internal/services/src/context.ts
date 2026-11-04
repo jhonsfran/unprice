@@ -77,7 +77,10 @@ export function createServiceContext(
      * off in tests.
      */
     payerBudgets?: PayerBudgetGateway | null
-    /** Web analytics reads. Roots that never read web analytics omit it and get NOT_CONFIGURED. */
+    /**
+     * Basin SQL: web analytics and the budget journal's usage history. Roots that never read them
+     * omit it and get NOT_CONFIGURED.
+     */
     basinSql?: BasinSql
   }
 ): ServiceContext {

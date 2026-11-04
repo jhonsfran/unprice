@@ -10,6 +10,30 @@ import { toDecimal } from "dinero.js"
 import type { z } from "zod"
 import type { LedgerGateway } from "../ledger"
 import {
+  type FeatureUsageRow,
+  type JournalEventCursor,
+  type JournalEventScope,
+  type JournalWindow,
+  buildEventFacetsSql,
+  buildEventTimelineSql,
+  buildEventTotalsSql,
+  buildFeatureUsageSql,
+  buildRecentEventsSql,
+  buildRejectedEventSql,
+  buildRejectionsSql,
+  buildStatementEventsSql,
+  buildTopPayersSql,
+  eventFacetSqlRowSchema,
+  eventTimelineSqlRowSchema,
+  eventTotalsSqlRowSchema,
+  featureUsageSqlRowSchema,
+  recentEventSqlRowSchema,
+  rejectedEventSqlRowSchema,
+  rejectionsSqlRowSchema,
+  statementEventSqlRowSchema,
+  topPayersSqlRowSchema,
+} from "./budget-journal"
+import {
   type PageBrowserVisits,
   type PageCountryVisits,
   type PageDimension,
@@ -359,6 +383,102 @@ export class AnalyticsService {
     return Ok({ data: foldPlansConversion(rows.val) })
   }
 
+  // ---- usage history: the budget journal (ADR-0008 D7) ----
+
+  /** Quantity and amount per feature the project's payer budgets consumed in the window. */
+  public async getFeatureUsage(opts: {
+    projectId: string
+    customerId?: string
+    window: JournalWindow
+    bucket?: "hour" | "day"
+    byCustomer?: boolean
+  }): Promise<Result<FeatureUsageRow[], FetchError>> {
+    return this.query(buildFeatureUsageSql(opts), featureUsageSqlRowSchema, {
+      context: "failed to read feature usage from the budget journal",
+      projectId: opts.projectId,
+      customerId: opts.customerId,
+    })
+  }
+
+  /** The payer budgets that consumed the most in the window. */
+  public async getTopPayers(opts: { projectId: string; window: JournalWindow; limit: number }) {
+    return this.query(buildTopPayersSql(opts), topPayersSqlRowSchema, {
+      context: "failed to read top payers from the budget journal",
+      projectId: opts.projectId,
+    })
+  }
+
+  public async getEventTotals(scope: JournalEventScope) {
+    return this.query(buildEventTotalsSql(scope), eventTotalsSqlRowSchema, {
+      context: "failed to read event totals from the budget journal",
+      projectId: scope.projectId,
+    })
+  }
+
+  public async getEventTimeline(scope: JournalEventScope) {
+    return this.query(buildEventTimelineSql(scope), eventTimelineSqlRowSchema, {
+      context: "failed to read the event timeline from the budget journal",
+      projectId: scope.projectId,
+    })
+  }
+
+  public async getRejections(scope: JournalEventScope & { limit: number }) {
+    return this.query(buildRejectionsSql(scope), rejectionsSqlRowSchema, {
+      context: "failed to read rejections from the budget journal",
+      projectId: scope.projectId,
+    })
+  }
+
+  public async getRecentEvents(
+    scope: JournalEventScope & { limit: number; cursor?: JournalEventCursor | null }
+  ) {
+    return this.query(buildRecentEventsSql(scope), recentEventSqlRowSchema, {
+      context: "failed to read recent events from the budget journal",
+      projectId: scope.projectId,
+    })
+  }
+
+  public async getEventFacets(scope: JournalEventScope & { limit: number }) {
+    return this.query(buildEventFacetsSql(scope), eventFacetSqlRowSchema, {
+      context: "failed to read event facets from the budget journal",
+      projectId: scope.projectId,
+    })
+  }
+
+  /** One refused event as the API journaled it; null when the journal has no such row yet. */
+  public async getRejectedEvent(opts: {
+    projectId: string
+    customerId: string
+    operationId: string
+    handledAt: number
+  }) {
+    const rows = await this.query(buildRejectedEventSql(opts), rejectedEventSqlRowSchema, {
+      context: "failed to read a rejected event from the budget journal",
+      projectId: opts.projectId,
+      operationId: opts.operationId,
+    })
+    if (rows.err) {
+      return rows
+    }
+    return Ok(rows.val[0] ?? null)
+  }
+
+  /** The accepted events one statement counted, newest first. */
+  public async getStatementEvents(opts: {
+    projectId: string
+    customerId: string
+    periodId: string
+    window: JournalWindow
+    limit: number
+    offset: number
+  }) {
+    return this.query(buildStatementEventsSql(opts), statementEventSqlRowSchema, {
+      context: "failed to read statement events from the budget journal",
+      projectId: opts.projectId,
+      periodId: opts.periodId,
+    })
+  }
+
   private async getPageDimensionVisits<D extends PageDimension>({
     projectId,
     pageId,
@@ -461,7 +581,7 @@ export class AnalyticsService {
     }
     if (!warnedBasinSqlNotConfigured) {
       warnedBasinSqlNotConfigured = true
-      this.logger.warn(`web analytics reads are disabled: ${error.message}`, logFields)
+      this.logger.warn(`Basin SQL reads are disabled: ${error.message}`, logFields)
     }
   }
 }
