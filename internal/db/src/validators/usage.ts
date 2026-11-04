@@ -86,7 +86,8 @@ export type ConsumeUsageInput = z.infer<typeof consumeUsageInputSchema>
 /** Why one event of a batch was refused, as a single call would have answered it. */
 export const usageRejectionSchema = z.object({
   code: z.string().openapi({
-    description: "The API error code a single call returns: BAD_REQUEST, NOT_FOUND, or CONFLICT",
+    description:
+      "The API error code a single call returns: BAD_REQUEST, FORBIDDEN, NOT_FOUND, or CONFLICT; UNAVAILABLE when the budget could not be reached",
     example: "BAD_REQUEST",
   }),
   status: z.number().int().openapi({
@@ -95,7 +96,7 @@ export const usageRejectionSchema = z.object({
   }),
   reason: z.string().openapi({
     description:
-      "Why the budget refused the event: NOT_PRICED (no rate row matches it), UNKNOWN_EVENT (no metered feature takes the slug), PERIOD_CLOSED (its billing period is sealed and none is open), NO_STATEMENT (no billing period covers it), TOO_LATE or INVALID_OCCURRED_AT (outside the accepted window), IDEMPOTENCY_CONFLICT, BUDGET_CLOSED, or BUDGET_NOT_FOUND (the customer has no subscription budget yet)",
+      "Why the budget refused the event: NOT_PRICED (no rate row matches it), UNKNOWN_EVENT (no metered feature takes the slug), PERIOD_CLOSED (its billing period is sealed and none is open), NO_STATEMENT (no billing period covers it), TOO_LATE or INVALID_OCCURRED_AT (outside the accepted window), IDEMPOTENCY_CONFLICT, BUDGET_CLOSED, BUDGET_NOT_FOUND (the customer has no subscription budget yet), CUSTOMER_FORBIDDEN (the API key cannot use the customer), or BUDGET_UNAVAILABLE (the budget could not be reached; retry the event with the same idempotency key)",
     example: "NOT_PRICED",
   }),
   message: z.string(),

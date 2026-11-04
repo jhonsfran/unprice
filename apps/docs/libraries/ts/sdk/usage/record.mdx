@@ -99,6 +99,8 @@ event carries the error a single call would return in `error`, and the other eve
 | `NO_STATEMENT` | 409 | No billing period covers the event |
 | `IDEMPOTENCY_CONFLICT` | 409 | The key was used for another event |
 | `BUDGET_NOT_FOUND` | 404 | The customer has no subscription yet |
+| `CUSTOMER_FORBIDDEN` | 403 | The API key is bound to another customer (`error.code` is `FORBIDDEN`) |
+| `BUDGET_UNAVAILABLE` | 503 | The customer's budget could not be reached, so the event was not counted (`error.code` is `UNAVAILABLE`). Retry it with the same idempotency key |
 
 `usage.record` does not block paid work. Use [`usage.consume`](/libraries/ts/sdk/usage/consume)
 to admit work only when it fits.

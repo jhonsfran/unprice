@@ -5,6 +5,7 @@ import { budgetJournalRowSchema } from "@unprice/lakehouse"
 import { type BudgetRejection, UnPriceBudgetError, amountUsage } from "@unprice/services/budgets"
 import type { BudgetRequest } from "@unprice/services/use-cases"
 import type { ExecutionContext } from "hono"
+import { timing } from "hono/timing"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { handleError, handleZodError } from "~/errors"
 import type { HonoEnv } from "~/hono/env"
@@ -81,6 +82,7 @@ function createApp() {
   const logged: Record<string, unknown>[] = []
   const app = new OpenAPIHono<HonoEnv>({ defaultHook: handleZodError })
   app.onError(handleError)
+  app.use(timing())
   app.use("*", async (c, next) => {
     c.set("requestId", "req_test")
     c.set("requestStartedAt", NOW)
@@ -294,6 +296,135 @@ describe("POST /v1/usage/record", () => {
     expect(logged).toContainEqual({
       usage: { verb: "record", events: 100, rejected: 4, customers: 3 },
     })
+    // One budget report for the whole batch: an aggregate do_ms and a count per outcome.
+    expect(logged.filter((fields) => "budget" in fields)).toEqual([
+      {
+        budget: {
+          command: "record",
+          outcome: "mixed",
+          outcomes: { ok: 96, NOT_PRICED: 1, TOO_LATE: 1, UNKNOWN_EVENT: 1, BUDGET_NOT_FOUND: 1 },
+          do_ms: expect.any(Number),
+        },
+      },
+    ])
+    expect(response.headers.get("Server-Timing")).toMatch(/(^|, )budget;dur=/)
+  })
+
+  it("refuses only the events naming a customer the key cannot use, with 403", async () => {
+    mocks.execute.mockResolvedValue(recorded(BigInt(4_000_000)))
+    mocks.keyAuth.mockResolvedValue({
+      id: "key_1",
+      projectId: "proj_123",
+      defaultCustomerId: "cus_default",
+    })
+    const { call, flush } = createApp()
+
+    const response = await call("/v1/usage/record", {
+      events: [
+        recordEvent("e1", "cus_default"),
+        recordEvent("e2", "cus_other"),
+        recordEvent("e3", null),
+      ],
+    })
+    await flush()
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      accepted: 2,
+      rejected: 1,
+      results: [
+        expect.objectContaining({
+          status: "accepted",
+          customerId: "cus_default",
+          idempotencyKey: "e1",
+        }),
+        {
+          status: "rejected",
+          customerId: "cus_other",
+          idempotencyKey: "e2",
+          error: {
+            code: "FORBIDDEN",
+            status: 403,
+            reason: "CUSTOMER_FORBIDDEN",
+            message: "This API key is bound to a different customer",
+          },
+        },
+        expect.objectContaining({
+          status: "accepted",
+          customerId: "cus_default",
+          idempotencyKey: "e3",
+        }),
+      ],
+    })
+    expect(
+      sent().map(([key, request]) => [key, (request as { idempotencyKey: string }).idempotencyKey])
+    ).toEqual([
+      ["unprice:customer:cus_default", "e1"],
+      ["unprice:customer:cus_default", "e3"],
+    ])
+    // The key's refusal is not the budget's: nothing is journaled.
+    expect(mocks.journal).not.toHaveBeenCalled()
+  })
+
+  it("refuses the batch with 400 when an event names no customer and the key has none", async () => {
+    const { call } = createApp()
+
+    const response = await call("/v1/usage/record", {
+      events: [recordEvent("e1"), recordEvent("e2", null)],
+    })
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ error: { code: "BAD_REQUEST" } })
+    expect(mocks.execute).not.toHaveBeenCalled()
+  })
+
+  it("answers UNAVAILABLE with 503 for the events whose budget is unreachable", async () => {
+    mocks.execute.mockImplementation(async (address: { key: string }) => {
+      if (address.key === "unprice:customer:cus_b") throw new Error("Network connection lost.")
+      return recorded(BigInt(4_000_000))
+    })
+    const { call, flush, logged } = createApp()
+
+    const response = await call("/v1/usage/record", {
+      events: [recordEvent("e1", "cus_a"), recordEvent("e2", "cus_b"), recordEvent("e3", "cus_b")],
+    })
+    await flush()
+
+    expect(response.status).toBe(200)
+    const unavailable = (idempotencyKey: string) => ({
+      status: "rejected",
+      customerId: "cus_b",
+      idempotencyKey,
+      error: {
+        code: "UNAVAILABLE",
+        status: 503,
+        reason: "BUDGET_UNAVAILABLE",
+        message:
+          "The customer's budget could not be reached; retry the event with the same idempotency key",
+      },
+    })
+    expect(await response.json()).toEqual({
+      accepted: 1,
+      rejected: 2,
+      results: [
+        expect.objectContaining({ status: "accepted", customerId: "cus_a", idempotencyKey: "e1" }),
+        unavailable("e2"),
+        unavailable("e3"),
+      ],
+    })
+    // The customer's events stop at the failure; a transport failure is never journaled.
+    expect(mocks.execute).toHaveBeenCalledTimes(2)
+    expect(mocks.journal).not.toHaveBeenCalled()
+    expect(logged.filter((fields) => "budget" in fields)).toEqual([
+      {
+        budget: {
+          command: "record",
+          outcome: "mixed",
+          outcomes: { ok: 1, UNAVAILABLE: 2 },
+          do_ms: expect.any(Number),
+        },
+      },
+    ])
   })
 
   it("refuses more than 100 events, an event without occurredAt, and nested properties", async () => {
@@ -336,12 +467,23 @@ describe("POST /v1/usage/consume", () => {
 
   it("charges the event in the payer budget and returns what it cost", async () => {
     mocks.execute.mockResolvedValue(charged(BigInt(4_000_000)))
-    const { call } = createApp()
+    const { call, logged } = createApp()
 
     const response = await call("/v1/usage/consume", consumeEvent)
 
     expect(response.status).toBe(200)
     expect(response.headers.get("Unprice-Budget-Remaining")).toBe("40")
+    expect(response.headers.get("Server-Timing")).toMatch(/(^|, )budget;dur=/)
+    expect(logged.filter((fields) => "budget" in fields)).toEqual([
+      {
+        budget: {
+          command: "charge",
+          outcome: "ok",
+          outcomes: { ok: 1 },
+          do_ms: expect.any(Number),
+        },
+      },
+    ])
     expect(await response.json()).toEqual({
       allowed: true,
       customerId: "cus_a",
@@ -430,6 +572,18 @@ describe("POST /v1/usage/consume", () => {
 
     expect(response.status).toBe(400)
     expect(await response.json()).toMatchObject({ error: { code: "BAD_REQUEST" } })
+  })
+
+  it("answers 500 when the budget is unreachable and journals nothing", async () => {
+    mocks.execute.mockRejectedValue(new Error("Network connection lost."))
+    const { call, flush } = createApp()
+
+    const response = await call("/v1/usage/consume", consumeEvent)
+    await flush()
+
+    expect(response.status).toBe(500)
+    expect(await response.json()).toMatchObject({ error: { code: "INTERNAL_SERVER_ERROR" } })
+    expect(mocks.journal).not.toHaveBeenCalled()
   })
 
   it("refuses a disabled customer before the budget", async () => {

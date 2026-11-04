@@ -1,4 +1,4 @@
-import type { UsageEventProperties } from "@unprice/db/validators"
+import { consumeUsageInputSchema, recordUsageEventSchema } from "@unprice/db/validators"
 import type { Result } from "@unprice/error"
 import {
   BUDGET_JOURNAL_SCHEMA_VERSION,
@@ -6,28 +6,45 @@ import {
   type LakehouseJsonValue,
 } from "@unprice/lakehouse"
 import { formatAmount } from "@unprice/money"
+import { z } from "zod"
 import type { OutcomeOf, UnPriceBudgetError } from "../../budgets"
 import { payerBudgetKey } from "./compile-payer-budget"
 import { type ExecuteBudgetCommandDeps, executeBudgetCommand } from "./execute-budget-command"
 
+/** The ids an adapter resolves for each event: the key's project and the event's customer. */
+const resolvedIds = { projectId: z.string().min(1), customerId: z.string().min(1) }
+
+export const meterPayerUsageInputSchema = z.discriminatedUnion("verb", [
+  // `record` counts usage that already happened, at its `occurredAt`.
+  z.object({
+    verb: z.literal("record"),
+    events: z.array(recordUsageEventSchema.extend(resolvedIds)),
+    /** When the API received the call; stamps the journal rows of refused events. */
+    receivedAt: z.number().int(),
+  }),
+  // `charge` admits usage only if it fits, priced at the budget's clock.
+  z.object({
+    verb: z.literal("charge"),
+    events: z.array(consumeUsageInputSchema.extend(resolvedIds)),
+    receivedAt: z.number().int(),
+  }),
+])
+
+export type MeterPayerUsageInput = z.infer<typeof meterPayerUsageInputSchema>
+export type PayerUsageVerb = MeterPayerUsageInput["verb"]
 /** One usage event bound for its customer's payer budget, its customer already resolved. */
-export type PayerUsageEvent = Readonly<{
-  projectId: string
-  customerId: string
-  idempotencyKey: string
-  eventSlug: string
-  properties: UsageEventProperties
-  /** Set for `record`: when the usage happened. `charge` prices at the budget's clock. */
-  occurredAt?: number
-}>
+export type PayerUsageEvent = MeterPayerUsageInput["events"][number]
 
-/** `record` counts usage that already happened; `charge` admits it only if it fits. */
-export type PayerUsageVerb = "record" | "charge"
-
-export type PayerUsageResult = Readonly<{
-  event: PayerUsageEvent
-  result: Result<OutcomeOf<PayerUsageVerb>, UnPriceBudgetError>
-}>
+/**
+ * One event's answer: the budget's `result`, or `unavailable` when its budget could not be reached
+ * (the transport failed), so the event was never decided and a retry with its key is safe.
+ */
+export type PayerUsageResult =
+  | Readonly<{
+      event: PayerUsageEvent
+      result: Result<OutcomeOf<PayerUsageVerb>, UnPriceBudgetError>
+    }>
+  | Readonly<{ event: PayerUsageEvent; unavailable: Error }>
 
 /** Where refused events go: the budget journal stream (ADR-0008 D7). */
 export type RejectedUsageJournal = {
@@ -39,44 +56,56 @@ export type MeterPayerUsageDeps = ExecuteBudgetCommandDeps & {
   journal: RejectedUsageJournal | null
 }
 
-export type MeterPayerUsageInput = Readonly<{
-  verb: PayerUsageVerb
-  events: readonly PayerUsageEvent[]
-  /** When the API received the call; stamps the journal rows of refused events. */
-  receivedAt: number
-}>
-
 /**
  * Sends each event to its customer's payer budget at `unprice:customer:<customerId>` (ADR-0008 D1,
  * D6), which meters and prices it, and answers one result per event in input order. Events of one
  * customer run in order, so a batch prices them as consecutive calls would; customers run side by
- * side. The budget is never created here: billing's compile owns it, so a customer without one
- * gets BUDGET_NOT_FOUND. Refused events go to the journal through `waitUntil`, best effort.
+ * side. When a customer's budget cannot be reached, that event and the customer's later ones answer
+ * `unavailable` (logged, never journaled) and the other customers' events answer normally. The
+ * budget is never created here: billing's compile owns it, so a customer without one gets
+ * BUDGET_NOT_FOUND. Refused events go to the journal through `waitUntil`, best effort.
  */
 export async function meterPayerUsage(
   deps: MeterPayerUsageDeps,
   input: MeterPayerUsageInput
 ): Promise<PayerUsageResult[]> {
-  const { verb, events } = input
+  const commands = commandsOf(input)
   const byBudget = new Map<string, number[]>()
-  events.forEach((event, index) => {
+  commands.forEach(({ event }, index) => {
     const budget = `${event.projectId}\n${event.customerId}`
     const indexes = byBudget.get(budget) ?? []
     indexes.push(index)
     byBudget.set(budget, indexes)
   })
 
-  const results: PayerUsageResult[] = new Array(events.length)
+  const results: PayerUsageResult[] = new Array(commands.length)
   await Promise.all(
     [...byBudget.values()].map(async (indexes) => {
-      for (const index of indexes) {
-        const event = events[index] as PayerUsageEvent
-        const result = await executeBudgetCommand(deps, {
-          projectId: event.projectId,
-          key: payerBudgetKey(event.customerId),
-          request: requestOf(verb, event),
-        })
-        results[index] = { event, result }
+      for (const [position, index] of indexes.entries()) {
+        const { event, request } = commands[index] as Command
+        try {
+          const result = await executeBudgetCommand(deps, {
+            projectId: event.projectId,
+            key: payerBudgetKey(event.customerId),
+            request,
+          })
+          results[index] = { event, result }
+        } catch (caught) {
+          // The budget was never reached: this event and the customer's later ones stay undecided,
+          // so a retry prices them in the order this call would have.
+          const unavailable = caught instanceof Error ? caught : new Error(String(caught))
+          const undecided = indexes.slice(position)
+          deps.logger.error(unavailable, {
+            context: "payer budget unreachable: usage events left undecided",
+            project_id: event.projectId,
+            customer_id: event.customerId,
+            undecided: undecided.length,
+          })
+          for (const skipped of undecided) {
+            results[skipped] = { event: (commands[skipped] as Command).event, unavailable }
+          }
+          return
+        }
       }
     })
   )
@@ -85,18 +114,30 @@ export async function meterPayerUsage(
   return results
 }
 
-function requestOf(verb: PayerUsageVerb, event: PayerUsageEvent) {
-  const usage = { slug: event.eventSlug, properties: event.properties }
-  if (verb === "charge") {
-    return { type: "charge" as const, idempotencyKey: event.idempotencyKey, event: usage }
+type Command = ReturnType<typeof commandsOf>[number]
+
+/** Each event with the budget request its verb sends. */
+function commandsOf(input: MeterPayerUsageInput) {
+  const usage = ({ eventSlug, properties }: PayerUsageEvent) => ({ slug: eventSlug, properties })
+  if (input.verb === "charge") {
+    return input.events.map((event) => ({
+      event,
+      request: {
+        type: "charge" as const,
+        idempotencyKey: event.idempotencyKey,
+        event: usage(event),
+      },
+    }))
   }
-  if (event.occurredAt === undefined) throw new Error("a recorded event needs occurredAt")
-  return {
-    type: "record" as const,
-    idempotencyKey: event.idempotencyKey,
-    occurredAt: event.occurredAt,
-    event: usage,
-  }
+  return input.events.map((event) => ({
+    event,
+    request: {
+      type: "record" as const,
+      idempotencyKey: event.idempotencyKey,
+      occurredAt: event.occurredAt,
+      event: usage(event),
+    },
+  }))
 }
 
 function journalRejections(
@@ -104,8 +145,11 @@ function journalRejections(
   input: MeterPayerUsageInput,
   results: readonly PayerUsageResult[]
 ): void {
-  const rows = results.flatMap(({ event, result }) =>
-    result.err ? [rejectedUsageRow(input, event, result.err)] : []
+  // Only the budget's refusals: an event whose budget was unreachable was never decided.
+  const rows = results.flatMap((answer) =>
+    "result" in answer && answer.result.err
+      ? [rejectedUsageRow(input, answer.event, answer.result.err)]
+      : []
   )
   if (rows.length === 0) return
   const { journal, logger } = deps
@@ -138,7 +182,7 @@ export function rejectedUsageRow(
     customerId: event.customerId,
     idempotencyKey: event.idempotencyKey,
     event: { slug: event.eventSlug, properties: event.properties },
-    ...(event.occurredAt !== undefined && { occurredAt: event.occurredAt }),
+    ...("occurredAt" in event && { occurredAt: event.occurredAt }),
     rejection: error.rejection,
   }
   return {

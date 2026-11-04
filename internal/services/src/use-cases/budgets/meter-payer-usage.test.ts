@@ -1,18 +1,40 @@
 import { budgetJournalRowSchema } from "@unprice/lakehouse"
 import { describe, expect, it } from "vitest"
-import { meterPayerUsage } from "./meter-payer-usage"
+import { type PayerUsageResult, meterPayerUsage } from "./meter-payer-usage"
 import { NOV, PROJECT_ID, image, payerHarness } from "./payer-budget.fixture"
 
 const DAY = 86_400_000
 const receivedAt = NOV + 3_600_000
 
-const event = (customerId: string, idempotencyKey: string, size: string, occurredAt?: number) => ({
+const charged = (customerId: string, idempotencyKey: string, size: string) => ({
   projectId: PROJECT_ID,
   customerId,
   idempotencyKey,
   ...image(size),
-  ...(occurredAt !== undefined && { occurredAt }),
 })
+
+const recorded = (
+  customerId: string,
+  idempotencyKey: string,
+  size: string,
+  occurredAt: number
+) => ({
+  ...charged(customerId, idempotencyKey, size),
+  occurredAt,
+})
+
+/** The budget's answer to an event that reached it. */
+function decided(answer: PayerUsageResult | undefined) {
+  if (!answer || !("result" in answer)) throw new Error("the event was not decided")
+  return answer.result
+}
+
+/** Each event's key and outcome: ok, the rejection code, or UNAVAILABLE. */
+const outcomes = (results: PayerUsageResult[]) =>
+  results.map((answer) => [
+    answer.event.idempotencyKey,
+    "unavailable" in answer ? "UNAVAILABLE" : (answer.result.err?.code ?? "ok"),
+  ])
 
 describe("meterPayerUsage", () => {
   it("records usage into the customer's payer budget and prices it at ingestion", async () => {
@@ -22,10 +44,10 @@ describe("meterPayerUsage", () => {
     const [result] = await meterPayerUsage(h.deps, {
       verb: "record",
       receivedAt,
-      events: [event("cus_a", "e1", "1024", NOV + 1_000)],
+      events: [recorded("cus_a", "e1", "1024", NOV + 1_000)],
     })
 
-    expect(result?.result.val).toMatchObject({
+    expect(decided(result).val).toMatchObject({
       type: "record",
       usage: { amount: BigInt(4_000_000) },
       replayed: false,
@@ -48,13 +70,13 @@ describe("meterPayerUsage", () => {
     const input = {
       verb: "record" as const,
       receivedAt,
-      events: [event("cus_a", "e1", "512", NOV + 1_000)],
+      events: [recorded("cus_a", "e1", "512", NOV + 1_000)],
     }
 
     await meterPayerUsage(h.deps, input)
     const [again] = await meterPayerUsage(h.deps, input)
 
-    expect(again?.result.val).toMatchObject({
+    expect(decided(again).val).toMatchObject({
       usage: { amount: BigInt(1_800_000) },
       replayed: true,
     })
@@ -74,18 +96,16 @@ describe("meterPayerUsage", () => {
       verb: "record",
       receivedAt: NOV + 2 * DAY,
       events: [
-        event("cus_a", "priced", "1024", NOV + 2 * DAY - 1_000),
-        event("cus_a", "unpriced", "2048", NOV + 2 * DAY - 1_000),
-        { ...event("cus_a", "unknown", "1024", NOV + 2 * DAY - 1_000), eventSlug: "chat.sent" },
-        event("cus_a", "late", "1024", NOV + 1_000),
-        event("cus_nobody", "orphan", "1024", NOV + 2 * DAY - 1_000),
+        recorded("cus_a", "priced", "1024", NOV + 2 * DAY - 1_000),
+        recorded("cus_a", "unpriced", "2048", NOV + 2 * DAY - 1_000),
+        { ...recorded("cus_a", "unknown", "1024", NOV + 2 * DAY - 1_000), eventSlug: "chat.sent" },
+        recorded("cus_a", "late", "1024", NOV + 1_000),
+        recorded("cus_nobody", "orphan", "1024", NOV + 2 * DAY - 1_000),
       ],
     })
     await h.flush()
 
-    expect(
-      results.map(({ event, result }) => [event.idempotencyKey, result.err?.code ?? "ok"])
-    ).toEqual([
+    expect(outcomes(results)).toEqual([
       ["priced", "ok"],
       ["unpriced", "NOT_PRICED"],
       ["unknown", "UNKNOWN_EVENT"],
@@ -125,14 +145,14 @@ describe("meterPayerUsage", () => {
     const results = await meterPayerUsage(h.deps, {
       verb: "charge",
       receivedAt,
-      events: ["c1", "c2", "c3"].map((key) => event("cus_a", key, "1024")),
+      events: ["c1", "c2", "c3"].map((key) => charged("cus_a", key, "1024")),
     })
     await h.flush()
 
-    expect(results.map(({ result }) => result.err?.code ?? "ok")).toEqual([
-      "ok",
-      "ok",
-      "LIMIT_EXCEEDED",
+    expect(outcomes(results)).toEqual([
+      ["c1", "ok"],
+      ["c2", "ok"],
+      ["c3", "LIMIT_EXCEEDED"],
     ])
     expect(h.journaled.map((row) => [row.operation_id, row.kind])).toEqual([["r:c3", "charge"]])
   })
@@ -144,10 +164,10 @@ describe("meterPayerUsage", () => {
     const [result] = await meterPayerUsage(h.deps, {
       verb: "charge",
       receivedAt,
-      events: [event("cus_a", "c1", "1024")],
+      events: [charged("cus_a", "c1", "1024")],
     })
 
-    expect(result?.result.err?.rejection).toEqual({
+    expect(decided(result).err?.rejection).toEqual({
       code: "WALLET_EMPTY",
       statementKey: "inv_nov",
       required: BigInt(4_000_000),
@@ -161,7 +181,7 @@ describe("meterPayerUsage", () => {
     await h.createPayer("cus_b")
     const events = Array.from({ length: 100 }, (_, n) =>
       // Five unpriced events per customer: n = 4, 24, ... (cus_a) and n = 9, 29, ... (cus_b).
-      event(
+      recorded(
         n % 2 === 0 ? "cus_a" : "cus_b",
         `e${n}`,
         n % 20 === 4 || n % 20 === 9 ? "2048" : "512",
@@ -175,7 +195,7 @@ describe("meterPayerUsage", () => {
     expect(results.map(({ event }) => event.idempotencyKey)).toEqual(
       events.map((e) => e.idempotencyKey)
     )
-    expect(results.filter(({ result }) => result.err?.code === "NOT_PRICED")).toHaveLength(10)
+    expect(outcomes(results).filter(([, outcome]) => outcome === "NOT_PRICED")).toHaveLength(10)
     expect(h.journaled).toHaveLength(10)
     for (const customer of ["cus_a", "cus_b"]) {
       expect(
@@ -192,7 +212,7 @@ describe("meterPayerUsage", () => {
 
     await meterPayerUsage(
       { ...h.deps, journal: null },
-      { verb: "record", receivedAt, events: [event("cus_a", "e1", "2048", NOV + 1_000)] }
+      { verb: "record", receivedAt, events: [recorded("cus_a", "e1", "2048", NOV + 1_000)] }
     )
 
     expect(h.journaled).toEqual([])
@@ -203,5 +223,65 @@ describe("meterPayerUsage", () => {
         fields: { rejected: 1 },
       },
     ])
+  })
+
+  it("answers UNAVAILABLE for a customer whose budget is unreachable and decides the rest", async () => {
+    const h = payerHarness()
+    await h.createPayer("cus_a")
+    await h.createPayer("cus_b")
+    // cus_b's budget takes one event, then its transport fails.
+    let reached = 0
+    const budgets = {
+      ...h.budgets,
+      execute: ((address, request) => {
+        if (address.key === "unprice:customer:cus_b" && ++reached > 1) {
+          return Promise.reject(new Error("Network connection lost."))
+        }
+        return h.budgets.execute(address, request)
+      }) satisfies typeof h.budgets.execute,
+    }
+
+    const results = await meterPayerUsage(
+      { ...h.deps, budgets },
+      {
+        verb: "record",
+        receivedAt,
+        events: [
+          recorded("cus_b", "b1", "512", NOV + 1),
+          recorded("cus_a", "a1", "512", NOV + 2),
+          recorded("cus_b", "b2", "512", NOV + 3),
+          recorded("cus_a", "a2", "2048", NOV + 4),
+          recorded("cus_b", "b3", "512", NOV + 5),
+        ],
+      }
+    )
+    await h.flush()
+
+    expect(outcomes(results)).toEqual([
+      ["b1", "ok"],
+      ["a1", "ok"],
+      ["b2", "UNAVAILABLE"],
+      ["a2", "NOT_PRICED"],
+      ["b3", "UNAVAILABLE"],
+    ])
+    // The transport failure is logged, never journaled; the budget's refusal still is.
+    expect(h.journaled.map((row) => row.operation_id)).toEqual(["r:a2"])
+    expect(h.logged).toEqual([
+      {
+        level: "error",
+        message: new Error("Network connection lost."),
+        fields: {
+          context: "payer budget unreachable: usage events left undecided",
+          project_id: PROJECT_ID,
+          customer_id: "cus_b",
+          undecided: 2,
+        },
+      },
+    ])
+    expect(
+      h
+        .storeOf({ projectId: PROJECT_ID, key: "unprice:customer:cus_b" })
+        .statements.get("images:bp_nov")
+    ).toMatchObject({ amount: BigInt(1_800_000), events: 1 })
   })
 })

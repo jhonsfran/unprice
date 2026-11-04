@@ -9,6 +9,7 @@ import { FakeWallet } from "@unprice/services/budgets/fake-wallet"
 import { usdCard } from "@unprice/services/pricing/fixtures"
 import {
   type MeterPayerUsageDeps,
+  type PayerUsageResult,
   checkPayerAccess,
   executeBudgetCommand,
   meterPayerUsage,
@@ -104,38 +105,54 @@ async function payer() {
   })
   if (registered.err) throw registered.err
 
-  const event = (idempotencyKey: string, size: string, occurredAt?: number) => ({
+  const charged = (idempotencyKey: string, size: string) => ({
     projectId: PROJECT_ID,
     customerId,
     idempotencyKey,
     eventSlug: "image.generated",
     properties: { size },
-    ...(occurredAt !== undefined && { occurredAt }),
   })
-  return { deps, customerId, event, journaled, flush: () => Promise.all(pending.splice(0)) }
+  const recorded = (idempotencyKey: string, size: string, occurredAt: number) => ({
+    ...charged(idempotencyKey, size),
+    occurredAt,
+  })
+  return {
+    deps,
+    customerId,
+    charged,
+    recorded,
+    journaled,
+    flush: () => Promise.all(pending.splice(0)),
+  }
 }
+
+/** The budget's answer to each event: ok, the rejection, or UNAVAILABLE when never reached. */
+const decided = (answer: PayerUsageResult) =>
+  "unavailable" in answer ? "UNAVAILABLE" : answer.result
 
 describe("usage through the payer budget's Durable Object", () => {
   it("records, replays, and refuses events, and journals each refusal", async () => {
-    const { deps, event, journaled, flush } = await payer()
+    const { deps, recorded, journaled, flush } = await payer()
     const now = Date.now()
 
     const results = await meterPayerUsage(deps, {
       verb: "record",
       receivedAt: now,
       events: [
-        event("e1", "1024", now - 1_000),
-        event("e1", "1024", now - 1_000),
-        event("e2", "2048", now - 1_000),
-        event("e3", "1024", now - 2 * DAY),
+        recorded("e1", "1024", now - 1_000),
+        recorded("e1", "1024", now - 1_000),
+        recorded("e2", "2048", now - 1_000),
+        recorded("e3", "1024", now - 2 * DAY),
       ],
     })
     await flush()
 
     expect(
-      results.map(({ result }) =>
-        result.err ? result.err.code : [result.val.usage.amount, result.val.replayed]
-      )
+      results.map((answer) => {
+        const result = decided(answer)
+        if (result === "UNAVAILABLE") return result
+        return result.err ? result.err.code : [result.val.usage.amount, result.val.replayed]
+      })
     ).toEqual([[BigInt(4_000_000), false], [BigInt(4_000_000), true], "NOT_PRICED", "TOO_LATE"])
     expect(journaled.map((row) => [row.operation_id, row.status, row.seq])).toEqual([
       ["r:e2", "rejected", 0],
@@ -144,7 +161,7 @@ describe("usage through the payer budget's Durable Object", () => {
   })
 
   it("charges until the quantity limit, then denies, and the access check sees it", async () => {
-    const { deps, customerId, event } = await payer()
+    const { deps, customerId, charged } = await payer()
     const check = () =>
       checkPayerAccess(
         {
@@ -157,14 +174,15 @@ describe("usage through the payer budget's Durable Object", () => {
     const results = await meterPayerUsage(deps, {
       verb: "charge",
       receivedAt: Date.now(),
-      events: ["c1", "c2", "c3"].map((key) => event(key, "512")),
+      events: ["c1", "c2", "c3"].map((key) => charged(key, "512")),
     })
 
-    expect(results.map(({ result }) => result.err?.code ?? "ok")).toEqual([
-      "ok",
-      "ok",
-      "LIMIT_EXCEEDED",
-    ])
+    expect(
+      results.map((answer) => {
+        const result = decided(answer)
+        return result === "UNAVAILABLE" ? result : (result.err?.code ?? "ok")
+      })
+    ).toEqual(["ok", "ok", "LIMIT_EXCEEDED"])
     expect((await check()).val).toMatchObject({
       allowed: false,
       rejectionReason: "LIMIT_EXCEEDED",

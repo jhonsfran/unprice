@@ -1,39 +1,73 @@
 import type { UsageEventResult } from "@unprice/db/validators"
 import {
   type MeterPayerUsageDeps,
+  type MeterPayerUsageInput,
   type PayerUsageResult,
-  rateCardSource,
-  walletFunding,
+  meterPayerUsage,
 } from "@unprice/services/use-cases"
 import type { Context } from "hono"
 import { bodyLimit } from "hono/body-limit"
 import { UnpriceApiError } from "~/errors"
 import type { HonoEnv } from "~/hono/env"
-import { CloudflareBudgetClient } from "~/ingestion/budget/client"
 import { journalOf } from "~/ingestion/budget/journal"
-import { amountToWire, budgetRejectionError } from "../budgets/budget-verb"
+import {
+  amountToWire,
+  batchOutcome,
+  budgetCommandDeps,
+  budgetRejectionError,
+  callBudget,
+} from "../budgets/budget-verb"
+
+/** A batch event whose budget could not be reached: never decided, so a retry with its key is safe. */
+export const USAGE_UNAVAILABLE = {
+  code: "UNAVAILABLE",
+  status: 503,
+  reason: "BUDGET_UNAVAILABLE",
+  message:
+    "The customer's budget could not be reached; retry the event with the same idempotency key",
+} as const
+
+/** A batch event naming a customer the API key cannot use. */
+export const USAGE_CUSTOMER_FORBIDDEN = {
+  code: "FORBIDDEN",
+  status: 403,
+  reason: "CUSTOMER_FORBIDDEN",
+} as const
 
 /**
- * What `meterPayerUsage` needs in the API worker: the payer budget's Durable Object reached
- * directly (billing's compile created it; a usage call never defines it), the card source and
- * wallet for a refresh or a prepaid reserve, and the journal stream for refused events.
+ * What `meterPayerUsage` needs in the API worker: the budget command's deps (billing's compile
+ * created the payer budget; a usage call never defines it) and the journal stream for refused events.
  */
 export function payerUsageDeps(c: Context<HonoEnv>): MeterPayerUsageDeps {
-  const { budgetCatalog, rateCards, wallet } = c.get("services")
-  return {
-    budgets: new CloudflareBudgetClient(c.env),
-    cards: rateCardSource(rateCards),
-    wallet: walletFunding(wallet),
-    services: { budgetCatalog },
-    logger: c.get("logger"),
-    waitUntil: c.get("waitUntil"),
-    journal: journalOf(c.env),
-  }
+  return { ...budgetCommandDeps(c), journal: journalOf(c.env) }
+}
+
+/**
+ * Meters a batch through the payer budgets and reports it once on the wide event and Server-Timing:
+ * one `do_ms` for the whole batch and a count per outcome, so events do not overwrite each other.
+ */
+export function meterPayerUsageReported(c: Context<HonoEnv>, input: MeterPayerUsageInput) {
+  return callBudget(
+    c,
+    input.verb,
+    () => meterPayerUsage(payerUsageDeps(c), input),
+    (results) => batchOutcome(results.map(usageOutcome))
+  )
+}
+
+/** One event's outcome: "ok", the budget's rejection code, or UNAVAILABLE. */
+function usageOutcome(answer: PayerUsageResult): string {
+  if ("unavailable" in answer) return USAGE_UNAVAILABLE.code
+  return answer.result.err ? answer.result.err.rejection.code : "ok"
 }
 
 /** One event's answer in a batch: what it cost, or the error a single call would have returned. */
-export function usageResultToWire({ event, result }: PayerUsageResult): UsageEventResult {
-  const { customerId, idempotencyKey } = event
+export function usageResultToWire(answer: PayerUsageResult): UsageEventResult {
+  const { customerId, idempotencyKey } = answer.event
+  if ("unavailable" in answer) {
+    return { status: "rejected", customerId, idempotencyKey, error: { ...USAGE_UNAVAILABLE } }
+  }
+  const { result } = answer
   if (result.err) {
     const error = budgetRejectionError(result.err)
     return {

@@ -19,6 +19,7 @@ import {
 import {
   type BudgetAddress,
   type BudgetVerbRequest,
+  type ExecuteBudgetCommandDeps,
   executeBudgetCommand,
   rateCardSource,
   walletFunding,
@@ -57,24 +58,31 @@ export async function runBudgetVerb<R extends BudgetVerbRequest>(
       message: `Keys starting with ${RESERVED_KEY_PREFIX} are written by Unprice; a call cannot create or upsert one`,
     })
   }
-  const budgets = new CloudflareBudgetClient(c.env)
-  const { budgetCatalog, rateCards, wallet } = c.get("services")
-  const result = await callBudget(c, request.type, () =>
-    executeBudgetCommand(
-      {
-        budgets,
-        cards: rateCardSource(rateCards),
-        wallet: walletFunding(wallet),
-        services: { budgetCatalog },
-        logger: c.get("logger"),
-        waitUntil: c.get("waitUntil"),
-      },
-      { projectId, key, request }
-    )
+  const result = await callBudget(
+    c,
+    request.type,
+    () => executeBudgetCommand(budgetCommandDeps(c), { projectId, key, request }),
+    resultOutcome
   )
   if (result.err) throw budgetApiError(c, result.err)
   setBudgetRemaining(c, result.val)
   return result.val
+}
+
+/**
+ * What `executeBudgetCommand` needs in the API worker: the budget's Durable Object, the card source
+ * and wallet for a refresh or a prepaid reserve, and the catalog for new budget facts.
+ */
+export function budgetCommandDeps(c: Context<HonoEnv>): ExecuteBudgetCommandDeps {
+  const { budgetCatalog, rateCards, wallet } = c.get("services")
+  return {
+    budgets: new CloudflareBudgetClient(c.env),
+    cards: rateCardSource(rateCards),
+    wallet: walletFunding(wallet),
+    services: { budgetCatalog },
+    logger: c.get("logger"),
+    waitUntil: c.get("waitUntil"),
+  }
 }
 
 /**
@@ -87,31 +95,56 @@ export async function inspectBudget(
   query: BudgetInspectQuery
 ) {
   const budgets = new CloudflareBudgetClient(c.env)
-  const result = await callBudget(c, "inspect", () => budgets.inspect(address, query))
+  const result = await callBudget(
+    c,
+    "inspect",
+    () => budgets.inspect(address, query),
+    resultOutcome
+  )
   if (result.err) throw budgetApiError(c, result.err)
   return result.val
 }
 
 /**
- * Runs one call on the budget's Durable Object and reports it on the request's wide event
- * (`budget_*` in Axiom) and on Server-Timing. Timed by hand, apart from key auth and the rest of
- * the Worker.
+ * How a budget call went, for the wide event: `outcome` is "ok" or the rejection code. A call that
+ * carries a batch counts each event's outcome in `outcomes`; its `outcome` is the one they share,
+ * or "mixed".
  */
-async function callBudget<T>(
+export type BudgetCallOutcome = Readonly<{ outcome: string; outcomes?: Record<string, number> }>
+
+const resultOutcome = (result: Result<unknown, UnPriceBudgetError>): BudgetCallOutcome => ({
+  outcome: result.err ? result.err.rejection.code : "ok",
+})
+
+/** The outcome of a batch from each event's outcome. */
+export function batchOutcome(outcomes: readonly string[]): BudgetCallOutcome {
+  const counts: Record<string, number> = {}
+  for (const outcome of outcomes) counts[outcome] = (counts[outcome] ?? 0) + 1
+  const distinct = Object.keys(counts)
+  return { outcome: distinct.length === 1 ? (distinct[0] as string) : "mixed", outcomes: counts }
+}
+
+/**
+ * Runs budget work (one call on a budget's Durable Object, or a batch of them) and reports it once
+ * on the request's wide event (`budget_*` in Axiom) and on Server-Timing as `budget`. Timed by
+ * hand, apart from key auth and the rest of the Worker; a thrown call reports outcome "error".
+ */
+export async function callBudget<T>(
   c: Context<HonoEnv>,
   command: string,
-  call: () => Promise<Result<T, UnPriceBudgetError>>
-) {
+  call: () => Promise<T>,
+  outcomeOf: (value: T) => BudgetCallOutcome
+): Promise<T> {
   const startedAt = performance.now()
-  let outcome = "error"
+  let reported: BudgetCallOutcome = { outcome: "error" }
   try {
-    const result = await call()
-    outcome = result.err ? result.err.rejection.code : "ok"
-    return result
+    const value = await call()
+    reported = outcomeOf(value)
+    return value
   } finally {
     const doMs = performance.now() - startedAt
     setMetric(c, "budget", doMs)
-    c.get("logger").set({ budget: { command, outcome, do_ms: doMs } })
+    c.get("logger").set({ budget: { command, ...reported, do_ms: doMs } })
   }
 }
 

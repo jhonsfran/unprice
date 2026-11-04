@@ -435,7 +435,7 @@ export interface paths {
     put?: never
     /**
      * record usage that already happened
-     * @description Record up to 100 usage events. Each goes to its customer's subscription budget, which prices it at ingestion into the billing period that contains its occurredAt. Recorded usage always counts, even past a limit, because the work already ran; the limits it crossed come back in crossed. Events at most 1 day old are accepted. The answer has one result per event, in request order: a refused event carries the error a single call would return, and the others still count. A retry with the same idempotency key replays the first answer.
+     * @description Record up to 100 usage events. Each goes to its customer's subscription budget, which prices it at ingestion into the billing period that contains its occurredAt. Recorded usage always counts, even past a limit, because the work already ran; the limits it crossed come back in crossed. Events at most 1 day old are accepted. The answer has one result per event, in request order: a refused event carries the error a single call would return, and the others still count. An event naming a customer the API key cannot use is refused with FORBIDDEN (403), and an event whose budget could not be reached with UNAVAILABLE (503): retry it with the same idempotency key. A retry with the same idempotency key replays the first answer.
      */
     post: operations["usage.record"]
     delete?: never
@@ -6854,7 +6854,7 @@ export interface operations {
                   idempotencyKey: string
                   error: {
                     /**
-                     * @description The API error code a single call returns: BAD_REQUEST, NOT_FOUND, or CONFLICT
+                     * @description The API error code a single call returns: BAD_REQUEST, FORBIDDEN, NOT_FOUND, or CONFLICT; UNAVAILABLE when the budget could not be reached
                      * @example BAD_REQUEST
                      */
                     code: string
@@ -6864,7 +6864,7 @@ export interface operations {
                      */
                     status: number
                     /**
-                     * @description Why the budget refused the event: NOT_PRICED (no rate row matches it), UNKNOWN_EVENT (no metered feature takes the slug), PERIOD_CLOSED (its billing period is sealed and none is open), NO_STATEMENT (no billing period covers it), TOO_LATE or INVALID_OCCURRED_AT (outside the accepted window), IDEMPOTENCY_CONFLICT, BUDGET_CLOSED, or BUDGET_NOT_FOUND (the customer has no subscription budget yet)
+                     * @description Why the budget refused the event: NOT_PRICED (no rate row matches it), UNKNOWN_EVENT (no metered feature takes the slug), PERIOD_CLOSED (its billing period is sealed and none is open), NO_STATEMENT (no billing period covers it), TOO_LATE or INVALID_OCCURRED_AT (outside the accepted window), IDEMPOTENCY_CONFLICT, BUDGET_CLOSED, BUDGET_NOT_FOUND (the customer has no subscription budget yet), CUSTOMER_FORBIDDEN (the API key cannot use the customer), or BUDGET_UNAVAILABLE (the budget could not be reached; retry the event with the same idempotency key)
                      * @example NOT_PRICED
                      */
                     reason: string
