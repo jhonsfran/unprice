@@ -44,6 +44,16 @@ export const periodTask = task({
         throw periodResult.err
       }
 
+      // New periods already synced the payer budget. Otherwise sync it anyway, so a change its
+      // request path left to a job (RESERVATIONS_OPEN) lands now; the job waits out open holds.
+      if (periodResult.val.cyclesCreated === 0) {
+        await context.services.billing.syncSubscriptionPayerBudget({
+          subscriptionId,
+          projectId,
+          caller: "job",
+        })
+      }
+
       return {
         cyclesCreated: periodResult.val.cyclesCreated,
         phasesProcessed: periodResult.val.phasesProcessed,

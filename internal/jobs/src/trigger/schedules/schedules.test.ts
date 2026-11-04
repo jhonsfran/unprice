@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
     where: vi.fn(),
   },
   subscriptionFindMany: vi.fn(),
+  phaseFindMany: vi.fn(),
+  periodBatchTrigger: vi.fn(),
 }))
 
 const invoiceRows = [
@@ -77,6 +79,9 @@ vi.mock("../db", () => ({
       subscriptions: {
         findMany: mocks.subscriptionFindMany,
       },
+      subscriptionPhases: {
+        findMany: mocks.phaseFindMany,
+      },
     },
   },
 }))
@@ -93,6 +98,12 @@ vi.mock("../tasks/invoice", () => ({
   },
 }))
 
+vi.mock("../tasks/period", () => ({
+  periodTask: {
+    batchTrigger: mocks.periodBatchTrigger,
+  },
+}))
+
 vi.mock("../tasks/renew", () => ({
   renewTask: {
     batchTrigger: mocks.renewBatchTrigger,
@@ -102,7 +113,12 @@ vi.mock("../tasks/renew", () => ({
 // Loading a schedule pulls in the service graph, which under Turbo contention can outlast one
 // test's timeout. Load them once here, so each test's import is a cache hit.
 beforeAll(async () => {
-  await Promise.all([import("./billing"), import("./invoicing"), import("./renew")])
+  await Promise.all([
+    import("./billing"),
+    import("./invoicing"),
+    import("./periods"),
+    import("./renew"),
+  ])
 }, 120_000)
 
 describe("billingSchedule", () => {
@@ -288,5 +304,38 @@ describe("renewSchedule", () => {
 
     expect(mocks.renewBatchTrigger).not.toHaveBeenCalled()
     expect(result).toEqual({ subscriptionIds: [] })
+  })
+})
+
+describe("periodsSchedule", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.subscriptionFindMany.mockResolvedValue(subscriptionRows)
+    mocks.phaseFindMany.mockResolvedValue([{ subscriptionId: "sub_2" }])
+  })
+
+  it("re-syncs subscriptions whose phases changed within the last day with the due ones", async () => {
+    const { periodsSchedule: definition } = await import("./periods")
+    const periodsSchedule = runnableSchedule<SchedulePayload>(definition)
+    const now = Date.parse("2026-07-06T12:00:00.000Z")
+
+    const result = await periodsSchedule.run({ timestamp: new Date(now) })
+
+    const [{ where }] = mocks.phaseFindMany.mock.calls[0] as [
+      {
+        where: (
+          table: unknown,
+          ops: { gte: (column: unknown, value: number) => unknown }
+        ) => unknown
+      },
+    ]
+    const gte = vi.fn()
+    where({ updatedAtM: "updated_at_m" }, { gte })
+    expect(gte).toHaveBeenCalledWith("updated_at_m", now - 24 * 60 * 60 * 1000)
+    expect(mocks.periodBatchTrigger).toHaveBeenCalledWith([
+      { payload: { subscriptionId: "sub_1", projectId: "proj_1", now } },
+      { payload: { subscriptionId: "sub_2", projectId: "proj_1", now } },
+    ])
+    expect(result).toEqual({ subscriptionIds: ["sub_1", "sub_2"] })
   })
 })
