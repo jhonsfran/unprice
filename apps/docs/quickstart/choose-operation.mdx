@@ -11,9 +11,9 @@ Use this rule first:
 > `runs` hold a budget before a workload starts, for cost that is not known yet.
 > `access.check` asks without changing state.
 
-Use `eventSlug` for the broad event your app observed, such as `completions`. Use `featureSlug` for
-the specific product feature you are checking or consuming, such as `ai-messages`,
-`ai-generations`, or `ai-tools`.
+Use `eventSlug` for the broad event your app observed, such as `completions`; the customer's plan
+maps it to the metered features it counts toward. Use `featureSlug` for the specific product
+feature you are checking, such as `ai-messages`, `ai-generations`, or `ai-tools`.
 
 ## Decision table
 
@@ -54,9 +54,8 @@ Use `usage.consume` when the request path needs a synchronous commercial decisio
 amount is known before the work runs.
 
 ```ts
-const { result, error } = await unprice.usage.consume({
+const { error } = await unprice.usage.consume({
   customerId: "cus_1234567890",
-  featureSlug: "ai-messages",
   eventSlug: "completions",
   idempotencyKey: request.id,
   properties: {
@@ -64,12 +63,12 @@ const { result, error } = await unprice.usage.consume({
   }
 });
 
-if (error) {
-  throw new Error(error.message);
+if (error?.code === "BUDGET_EXCEEDED") {
+  return new Response("Usage limit reached", { status: 429 });
 }
 
-if (!result.allowed) {
-  return new Response("Usage limit reached", { status: 429 });
+if (error) {
+  throw new Error(error.message);
 }
 ```
 
@@ -78,26 +77,35 @@ with the same `idempotencyKey`.
 
 ## `usage.record`: report for evidence
 
-Use `usage.record` when the request should not wait for Unprice to decide. It queues the usage event
-for metering, analytics, and invoice evidence.
+Use `usage.record` for work that already ran. It prices up to 100 events into each customer's
+billing period and counts them even past a limit, then answers one result per event.
 
 ```ts
-const { error } = await unprice.usage.record({
-  customerId: "cus_1234567890",
-  eventSlug: "completions",
-  idempotencyKey: request.id,
-  properties: {
-    aiMessages: 1,
-    aiGenerations: 2,
-    aiTools: 3,
-    inputTokens: 1840,
-    outputTokens: 620,
-    model: "gpt-4.1-mini"
-  }
+const { result, error } = await unprice.usage.record({
+  events: [
+    {
+      customerId: "cus_1234567890",
+      eventSlug: "completions",
+      idempotencyKey: request.id,
+      occurredAt: Date.now(),
+      properties: {
+        aiMessages: 1,
+        aiGenerations: 2,
+        aiTools: 3,
+        inputTokens: 1840,
+        outputTokens: 620,
+        model: "gpt-4.1-mini"
+      }
+    }
+  ]
 });
 
 if (error) {
   console.error(error.message);
+} else {
+  for (const event of result.results) {
+    if (event.status === "rejected") console.warn(event.idempotencyKey, event.error.reason);
+  }
 }
 ```
 

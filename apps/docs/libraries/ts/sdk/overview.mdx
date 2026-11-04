@@ -68,9 +68,8 @@ if (!result.allowed) {
 Use `usage.consume` when known usage must be authorized before paid work runs:
 
 ```ts
-const { result, error } = await unprice.usage.consume({
+const { error } = await unprice.usage.consume({
   customerId: "cus_1234567890",
-  featureSlug: "ai-messages",
   eventSlug: "completions",
   idempotencyKey: "req_123",
   properties: {
@@ -80,12 +79,12 @@ const { result, error } = await unprice.usage.consume({
   }
 });
 
-if (error) {
-  throw new Error(`${error.code}: ${error.message}`);
+if (error?.code === "BUDGET_EXCEEDED") {
+  return new Response("Usage limit reached", { status: 429 });
 }
 
-if (!result.allowed) {
-  return new Response("Usage limit reached", { status: 429 });
+if (error) {
+  throw new Error(`${error.code}: ${error.message}`);
 }
 ```
 

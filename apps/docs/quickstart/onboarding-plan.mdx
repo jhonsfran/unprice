@@ -126,12 +126,11 @@ match the product behavior you already trust.
 ## 6. Enforce when the decision is ready
 
 When the usage amount is known at the decision point, use `usage.consume` before the paid work runs.
-It synchronously applies the usage event and returns the allow or deny decision.
+It prices the event and counts it only if it fits; a denial returns `BUDGET_EXCEEDED`.
 
 ```ts
-const { result, error } = await unprice.usage.consume({
+const { error } = await unprice.usage.consume({
   customerId,
-  featureSlug: "ai-messages",
   eventSlug: "completions",
   idempotencyKey: request.id,
   properties: {
@@ -140,12 +139,12 @@ const { result, error } = await unprice.usage.consume({
   }
 });
 
-if (error) {
-  throw new Error(error.message);
+if (error?.code === "BUDGET_EXCEEDED") {
+  return new Response("Usage limit reached", { status: 429 });
 }
 
-if (!result.allowed) {
-  return new Response("Usage limit reached", { status: 429 });
+if (error) {
+  throw new Error(error.message);
 }
 
 return runAiGeneration();
