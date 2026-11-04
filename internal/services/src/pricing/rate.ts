@@ -21,7 +21,7 @@ import {
   matchKey,
   positionKey,
 } from "./model"
-import { resolveRow } from "./resolve"
+import { ownProperty, resolveRow } from "./resolve"
 
 /** The exact price of a cumulative quantity, before its one rounding. */
 type Curve = (quantity: Amount) => Rational
@@ -100,12 +100,16 @@ function delta(curve: Curve, before: Amount, after: Amount): Amount {
   return roundHalfUp(curve(after)) - roundHalfUp(curve(before))
 }
 
-function quantityOf(
+/**
+ * The quantity an event carries for `property`: one for null, 0 when the event lacks it. Only
+ * the event's own properties count, so `constructor` or `toString` never reads Object.prototype.
+ */
+export function quantityOf(
   properties: Readonly<Record<string, unknown>>,
   property: string | null
 ): Result<Amount, UnPricePricingError> {
   if (property === null) return Ok(ONE)
-  const parsed = parseQuantity(properties[property])
+  const parsed = parseQuantity(ownProperty(properties, property))
   if (parsed.ok) return Ok(parsed.quantity)
   return Err(new UnPricePricingError({ code: "INVALID_USAGE", property, reason: parsed.reason }))
 }

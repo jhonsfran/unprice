@@ -8,6 +8,11 @@ export function isEffective(row: RateRow, at: number): boolean {
   return row.effectiveFrom <= at && (row.effectiveTo === null || at < row.effectiveTo)
 }
 
+/** An event's own property; an inherited member such as `constructor` reads as missing. */
+export function ownProperty(properties: Readonly<Record<string, unknown>>, name: string): unknown {
+  return Object.hasOwn(properties, name) ? properties[name] : undefined
+}
+
 /**
  * The usage row for an event: overlay exact, base exact, overlay default, base default. A flat
  * row is recurring and never prices usage.
@@ -27,7 +32,7 @@ export function resolveRow(
   }
   const match: Record<string, string> = {}
   for (const dimension of feature.dimensions) {
-    const value = properties[dimension]
+    const value = ownProperty(properties, dimension)
     if (value !== undefined && value !== null) match[dimension] = String(value)
   }
   return Err(new UnPricePricingError({ code: "NOT_PRICED", feature: feature.slug, match }))
@@ -47,7 +52,7 @@ function findRow(
     const entries = Object.entries(row.match)
     if (exact !== entries.length > 0) return false
     return entries.every(([key, value]) => {
-      const actual = properties[key]
+      const actual = ownProperty(properties, key)
       return actual !== undefined && actual !== null && String(actual) === value
     })
   })

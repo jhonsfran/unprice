@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   featurePricingSchema,
+  publishRateRowsInputSchema,
   rateCardSchema,
   rateDecimalSchema,
   rateRowSchema,
@@ -74,6 +75,51 @@ describe("rate card validators", () => {
         })
       )
     ).toEqual(["only a credits card has a credit value"])
+  })
+
+  it("rejects property and dimension names that start with #, the per-event position's prefix", () => {
+    const event = { property: "#event", rate: "1", per: 1 }
+    const card = { id: "rc_1", projectId: "proj_1", name: "Card", unit: "money:USD" }
+    const feature = { slug: "calls", dimensions: [], meterProperty: null, included: null }
+
+    expect(
+      rateRowSchema.safeParse({
+        ...row,
+        price: { type: "unit", components: [{ ...event, property: null }, event] },
+      }).success
+    ).toBe(false)
+    expect(rateRowSchema.safeParse({ ...row, match: { "#model": "gpt-4.1" } }).success).toBe(false)
+    expect(featurePricingSchema.safeParse({ ...feature, dimensions: ["#model"] }).success).toBe(
+      false
+    )
+    expect(featurePricingSchema.safeParse({ ...feature, meterProperty: "#event" }).success).toBe(
+      false
+    )
+    expect(
+      rateCardSchema.safeParse({
+        ...card,
+        marginPolicy: { ...costPlus, componentMap: { input: "#event" } },
+      }).success
+    ).toBe(false)
+    expect(
+      rateCardSchema.safeParse({ ...card, marginPolicy: { ...costPlus, dimension: "#model" } })
+        .success
+    ).toBe(false)
+    expect(featurePricingSchema.safeParse({ ...feature, meterProperty: "event#1" }).success).toBe(
+      true
+    )
+  })
+
+  it("bounds instants to the last time a Date can represent", () => {
+    expect(rateRowSchema.safeParse({ ...row, effectiveFrom: 8.64e15 - 1 }).success).toBe(true)
+    expect(rateRowSchema.safeParse({ ...row, effectiveFrom: 8.64e15 + 1 }).success).toBe(false)
+    expect(
+      publishRateRowsInputSchema.safeParse({
+        cardId: "rc_1",
+        rows: [{ featureSlug: row.featureSlug, match: row.match, price: row.price, cost: null }],
+        effectiveFrom: Number.MAX_SAFE_INTEGER,
+      }).success
+    ).toBe(false)
   })
 
   it("parses a feature's included units into base units", () => {

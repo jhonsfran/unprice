@@ -19,13 +19,17 @@ const positiveDecimalSchema = rateDecimalSchema.refine((amount) => amount > BigI
 
 const positiveIntSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER)
 
-const epochMsSchema = z.number().int().nonnegative()
+/** Epoch milliseconds up to 8.64e15, the last instant a `Date` can represent. */
+const epochMsSchema = z.number().int().nonnegative().max(8.64e15)
 
 /** Feature slugs are `[a-z0-9-]+` today; "_" is allowed, "|" never, because positions key on it. */
 const featureSlugSchema = z.string().regex(/^[a-z0-9][a-z0-9_-]*$/, "a lowercase slug")
 
+/** An event property name. "#" starts reserved names, such as the per-event position `#event`. */
+const propertyNameSchema = z.string().regex(/^[^#]/, "a property name that does not start with #")
+
 /** An event property a component reads, or null for one unit per event. */
-const quantityPropertySchema = z.string().min(1).nullable()
+const quantityPropertySchema = propertyNameSchema.nullable()
 
 export const rateCardUnitSchema = z
   .string()
@@ -79,7 +83,7 @@ const rateRowFieldsSchema = z.object({
   rateCardId: z.string().min(1),
   featureSlug: featureSlugSchema,
   /** Exact-match dimension values; {} is the feature's default row. */
-  match: z.record(z.string().min(1), z.string()),
+  match: z.record(propertyNameSchema, z.string()),
   price: ratePriceSchema,
   cost: rateCostSchema.nullable(),
   effectiveFrom: epochMsSchema,
@@ -107,10 +111,10 @@ export const marginPolicySchema = z.discriminatedUnion("type", [
     /** Prices round up to a multiple of this. */
     roundTo: positiveDecimalSchema,
     /** The dimension that carries the model id. */
-    dimension: z.string().min(1),
+    dimension: propertyNameSchema,
     /** Cost component name (input, output, cache_read, ...) to the event property it prices. */
     componentMap: z
-      .record(z.string().min(1), z.string().min(1))
+      .record(z.string().min(1), propertyNameSchema)
       .refine((map) => Object.keys(map).length > 0, { message: "map at least one component" }),
   }),
 ])
@@ -170,7 +174,7 @@ export const modelCostSchema = z.object({
 export const featurePricingSchema = z.object({
   slug: featureSlugSchema,
   /** Event properties a row may match on. */
-  dimensions: z.array(z.string().min(1)),
+  dimensions: z.array(propertyNameSchema),
   /** The property limits count; null counts one per event. */
   meterProperty: quantityPropertySchema,
   /** Meter units free per statement period. */

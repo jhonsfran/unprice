@@ -1,4 +1,9 @@
-import { type RateRowInput, rateCardSchema, rateRowSchema } from "@unprice/db/validators"
+import {
+  type RateRowInput,
+  featurePricingSchema,
+  rateCardSchema,
+  rateRowSchema,
+} from "@unprice/db/validators"
 import { describe, expect, it } from "vitest"
 import { CARD_FROM, features, usdCard } from "./fixtures"
 import type { CardRows } from "./model"
@@ -81,6 +86,22 @@ describe("resolveRow", () => {
   it("never resolves a flat row for usage", () => {
     const result = resolveRow({ base: usdCard }, features.baseFee, {}, at)
     expect(result.err?.rejection).toEqual({ code: "NOT_PRICED", feature: "base_fee", match: {} })
+  })
+
+  it("treats a dimension named after an Object member as missing when the event lacks it", () => {
+    const constructorDimension = featurePricingSchema.parse({
+      slug: "llm_tokens",
+      dimensions: ["constructor"],
+      meterProperty: null,
+      included: null,
+    })
+    const inherited = card("inherited", [
+      { id: "inherited", match: { constructor: String(Object) } },
+    ])
+
+    const result = resolveRow({ base: inherited }, constructorDimension, {}, at)
+
+    expect(result.err?.rejection).toEqual({ code: "NOT_PRICED", feature: "llm_tokens", match: {} })
   })
 
   it("does not match an exact row when the dimension is missing", () => {

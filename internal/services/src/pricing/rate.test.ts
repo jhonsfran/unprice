@@ -1,4 +1,4 @@
-import { type FeaturePricing, rateRowSchema } from "@unprice/db/validators"
+import { type FeaturePricing, featurePricingSchema, rateRowSchema } from "@unprice/db/validators"
 import { formatAmount, parseAmount } from "@unprice/money"
 import { describe, expect, it } from "vitest"
 import {
@@ -14,7 +14,7 @@ import {
   usdCardWithFallback,
 } from "./fixtures"
 import type { CardRows, PricedUsage, RateCards } from "./model"
-import { priceQuantity, priceUsage } from "./rate"
+import { priceQuantity, priceUsage, quantityOf } from "./rate"
 
 const at = CARD_FROM + 60 * 60 * 1000
 
@@ -321,5 +321,31 @@ describe("priceQuantity", () => {
     expect(formatAmount(priceQuantity(rowOf(usdCard, "row_gpt41"), amountOf("1000000")))).toBe(
       "10.5"
     )
+  })
+})
+
+describe("quantityOf", () => {
+  it("reads only an event's own properties, so a missing `constructor` counts 0", () => {
+    const toStringMeter = featurePricingSchema.parse({
+      slug: "api_calls",
+      dimensions: [],
+      meterProperty: "toString",
+      included: null,
+    })
+    const priced = priceUsage({
+      cards: { base: includedApiCallsCard },
+      feature: toStringMeter,
+      properties: { calls: 10 },
+      at,
+      positionOf: () => BigInt(0),
+    })
+
+    expect(formatAmount(quantityOf({}, "constructor").val ?? BigInt(-1))).toBe("0")
+    expect(formatAmount(quantityOf({ constructor: "2.5" }, "constructor").val ?? BigInt(-1))).toBe(
+      "2.5"
+    )
+    expect(priced.err?.rejection).toBeUndefined()
+    expect(priced.val && formatAmount(priced.val.amount)).toBe("0.02")
+    expect(priced.val && formatAmount(priced.val.meterQuantity)).toBe("0")
   })
 })
