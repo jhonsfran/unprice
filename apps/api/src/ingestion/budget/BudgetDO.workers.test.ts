@@ -794,17 +794,54 @@ describe("BudgetDO statements", () => {
 })
 
 describe("BudgetDO card cache", () => {
-  it("asks for a refresh of a card cached five minutes ago, and caches nothing for an unknown key", async () => {
-    const unknown = stubFor("customer:no-budget")
-    await unknown.cacheCards([usdCard])
-    await runInDurableObject(unknown, (_instance: BudgetDO, state) => {
+  it("creates a priced budget once its cards are cached, and drops cards no create follows", async () => {
+    const parsedFor = (key: string) =>
+      upsertBudgetInternalInputSchema.parse({
+        key,
+        unit: "USD",
+        limits: [],
+        pricing: {
+          cards: { base: usdCard.card.id },
+          features: [
+            {
+              slug: "images",
+              eventSlug: "image.generated",
+              dimensions: ["size"],
+              meterProperty: null,
+              included: null,
+              priced: true,
+            },
+          ],
+          statements: "none",
+        },
+      })
+    const created = stubFor("customer:priced-create")
+    const create: BudgetRequest = {
+      type: "upsert",
+      projectId: "proj_1",
+      ...parsedFor("customer:priced-create"),
+      mayLoosen: true,
+    }
+    expect(rejection(await created.execute(create))).toEqual({
+      code: "CARDS_STALE",
+      cardIds: [usdCard.card.id],
+    })
+    await created.cacheCards([usdCard])
+    expect(outcome(await created.execute(create), "upsert").budget.version).toBe(1)
+
+    const abandoned = stubFor("customer:cards-only")
+    await abandoned.cacheCards([usdCard])
+    expect(await runDurableObjectAlarm(abandoned)).toBe(true)
+    await runInDurableObject(abandoned, (_instance: BudgetDO, state) => {
       expect(
         state.storage.sql
           .exec("SELECT count(*) AS n FROM sqlite_master WHERE name = 'budget_cards'")
           .one()
       ).toEqual({ n: 0 })
     })
+  })
 
+  it("asks for a refresh of a card cached five minutes ago", async () => {
     const key = "customer:card-refresh"
     const stub = stubFor(key)
     const t0 = CARD_FROM + DAY

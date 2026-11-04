@@ -12,6 +12,9 @@ import migrations from "./drizzle/migrations"
 import { type BudgetJournal, discardJournal, pipelineJournal } from "./journal"
 import { BudgetProcessor } from "./processor"
 
+/** How long cards cached for a key with no budget wait for the call that creates it. */
+const CARDS_ONLY_TTL_MS = 60_000
+
 /** Cloudflare adapter; budget behavior lives in BudgetProcessor and the pure core. */
 export class BudgetDO extends DurableObject {
   private readonly db: ReturnType<typeof drizzle<typeof schema>>
@@ -23,6 +26,8 @@ export class BudgetDO extends DurableObject {
    * deleted its storage.
    */
   private ready: Promise<void> | null
+  /** The storage holds cards cached for a create that has not happened yet. */
+  private cardsOnly = false
 
   constructor(state: DurableObjectState, env: Env) {
     super(state, env as unknown as Cloudflare.Env)
@@ -43,8 +48,9 @@ export class BudgetDO extends DurableObject {
   }
 
   async execute(request: BudgetRequest): Promise<BudgetReply> {
-    const fresh = !this.ready
-    if (fresh) {
+    // Storage that holds no budget yet: a new key, or one whose cards were cached for its create.
+    const fresh = !this.ready || this.cardsOnly
+    if (!this.ready) {
       const creates = request.type === "upsert" || ("ifMissing" in request && !!request.ifMissing)
       if (!creates) return { ok: false, rejection: { code: "BUDGET_NOT_FOUND" } }
       this.ready = this.prepare()
@@ -54,6 +60,7 @@ export class BudgetDO extends DurableObject {
     // A first call that was refused left a schema and no budget: the storage a mistyped key must
     // not keep. Drop it, so the key reads as never upserted again.
     if (fresh && !reply.ok && !this.processor.hasBudget()) await this.destroy()
+    else if (reply.ok) this.cardsOnly = false
     return reply
   }
 
@@ -63,12 +70,21 @@ export class BudgetDO extends DurableObject {
       await this.ctx.storage.deleteAlarm()
       await this.ctx.storage.deleteAll()
       this.ready = null
+      this.cardsOnly = false
     })
   }
 
-  /** Replaces the cached cards; a key with no budget keeps no storage for them. */
+  /**
+   * Replaces the cached cards. A key with no budget caches them for the call that creates it: a
+   * refused create, or an alarm CARDS_ONLY_TTL_MS later with still no budget, drops the storage.
+   */
   async cacheCards(cards: CardRows[]): Promise<void> {
-    if (!this.ready) return
+    if (!this.ready) {
+      this.ready = this.prepare()
+      this.cardsOnly = true
+      await this.ready
+      await this.ctx.storage.setAlarm(Date.now() + CARDS_ONLY_TTL_MS)
+    }
     await this.ready
     this.processor.cacheCards(cards)
   }
@@ -83,6 +99,7 @@ export class BudgetDO extends DurableObject {
   override async alarm(): Promise<void> {
     if (!this.ready) return
     await this.ready
+    if (!this.processor.hasBudget()) return this.destroy()
     return this.processor.alarm()
   }
 
