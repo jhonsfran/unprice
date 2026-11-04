@@ -370,6 +370,11 @@ patterns. Keep it cheap to load and useful.
 - 2026-11-04: A routing mutation in `budget.statements.properties.test.ts` survived 200 runs while
   most scenarios never reached January. `clocksOf` now scales each scenario's advances to end on
   `LAST_CLOCK`, so every run seals November and December; keep that when changing the generator.
+- 2026-11-04: Budget funding (ADR-0008 D10) follows the CARDS_STALE shape: the core refuses with
+  FUNDING_REQUIRED and writes nothing; only `fund` and a seal persist wallet intents. Never call the
+  wallet before an intent row exists, and never recompute a pending intent: `fund` answers it as stored.
+- 2026-11-04: `BudgetDO.cacheCards` stores nothing for a key without a budget, so a priced upsert over
+  RPC to a fresh key stays CARDS_STALE; workers tests seed the card cache inside `runInDurableObject` first.
 - 2026-11-03: `apps/api` tsconfig excludes tests, so a core type change breaks DO and route tests only
   at runtime. Typecheck them with a scratch tsconfig that extends `./tsconfig.json`, includes
   `src/ingestion/budget` and `src/routes/budgets`, and adds `@cloudflare/vitest-pool-workers` types;

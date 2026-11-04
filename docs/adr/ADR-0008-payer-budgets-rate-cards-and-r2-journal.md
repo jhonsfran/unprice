@@ -141,6 +141,19 @@ budget is addressed, so a jurisdiction or a location hint can be added there lat
   receivable at billing.
 - Prepaid or capped: one wallet reservation per payer and statement cycle, with the intent, `seq`,
   capture, and extend protocol ported from `EntitlementWindowDO`.
+- The mode is `pricing.funding` in the budget's internal config: `postpaid` (or absent) or
+  `prepaid` with the payer's customer id. Only billing's compile sets it.
+- `BudgetDO` has no database access. A prepaid charge or hold that its statement key's allocation
+  cannot cover is refused with `FUNDING_REQUIRED` and writes nothing. `executeBudgetCommand` sends
+  `fund`, which persists a reserve intent (`seq`, amount, time, period) before any wallet call,
+  runs it through the `BudgetWallet` port, sends the result back with `applyFunding`, and retries
+  once. Still short, the call fails with `WALLET_EMPTY` (HTTP 402). A crash replays the persisted
+  intent with the same `seq`.
+- Recorded usage, settles, and expiries never wait for funding. What they consume past the
+  allocation stays on the statement as a receivable.
+- When a seal leaves a statement key with nothing open, the key's reservation gets a close intent:
+  capture each statement's amount up to the allocation, then release the rest. A retried seal
+  replays a close that failed. A closed budget keeps its storage while a reservation is open.
 
 ## What this changes in earlier decisions
 
