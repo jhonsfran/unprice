@@ -19,6 +19,7 @@ This directory contains architecture decisions that are normative for the repo.
 - [ADR-0005: Rate Cards, Pricing at Write Time, and the Model Cost Catalog](/Users/jhonsfran/repos/unprice/docs/specs/2026-10-14-adr-0005-rate-cards-and-budget-runtime.md) — `Accepted` (2026-10-14, revised 2026-10-16)
 - [ADR-0006: The Budget Primitive](/Users/jhonsfran/repos/unprice/docs/specs/2026-10-16-adr-0006-budget-primitive.md) — `Accepted` (2026-10-16)
 - [ADR-0007. Authoritative billing usage snapshots](ADR-0007-authoritative-billing-usage-snapshots.md). `Accepted` on 2026-10-27.
+- [ADR-0008. Payer budgets, rate cards, and the R2 journal](ADR-0008-payer-budgets-rate-cards-and-r2-journal.md). `Accepted` on 2026-11-03. Amends ADR-0005, ADR-0006, and ADR-0007.
 
 ## How To Use
 
