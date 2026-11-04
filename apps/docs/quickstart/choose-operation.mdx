@@ -22,8 +22,7 @@ feature you are checking, such as `ai-messages`, `ai-generations`, or `ai-tools`
 | Compare Unprice against existing logic | `access.check` | No | No | Shadow mode, preflight UI, entitlement checks |
 | Enforce a known usage amount before work runs | `usage.consume` | Yes | Yes | API calls, exports, known-cost actions |
 | Report usage without blocking the request | `usage.record` | No | Yes, asynchronously | Background metering, invoice evidence, eventual analytics |
-| Hold a maximum for one variable-cost call | `reservations.reserve` then `reservation.settle` | Yes | Yes | LLM calls priced on tokens you cannot predict |
-| Authorize spend across multi-step work | `runs.start` / `runs.consume` / `runs.settle` / `runs.end` | Yes | Yes | Workflows, jobs, tools, agents, custom workloads |
+| Hold a maximum for one variable-cost call, or cap multi-step work | `budget(key).authorize` then `hold.settle`, or `budget(key).spend` | Yes | Yes | LLM calls priced on tokens you cannot predict; workflows, jobs, tools, agents |
 | Cap spend on any key, with no plan or customer in Unprice | `budget(key).spend` | Yes | Yes | A hard cap per customer, run, or agent while your billing stays elsewhere; see [Unprice Budgets](/budgets/overview) |
 
 ## `access.check`: ask without changing state
@@ -112,81 +111,31 @@ if (error) {
 `usage.record` never blocks over-budget work. Do not use it as a spend gate. One async event can
 carry several measured properties; meters decide which property applies to each feature.
 
-## `runs`: hold a budget envelope
+## Budgets: hold a maximum before the work
 
-Use budgeted runs when a paid action unfolds over multiple steps and can spend more than expected.
-The run labels the workload and holds a budget before it starts.
-
-For the single-call case — one LLM request whose cost you only learn from the response — the
-[reservations helper](/libraries/ts/sdk/runs/reservations) wraps the same operations in three
-lines. The operations below are for when you need the steps apart.
+Use a budget when a paid action can spend more than expected, in one call or over several steps.
+A budget key caps the work; a hold reserves the most a step may cost before it runs.
 
 ```ts
-// Reserve spend before the workload creates cost.
-const { result: run, error } = await unprice.runs.start({
-  customerId: "cus_1234567890",
-  budgetAmountMinor: 5000,
-  idempotencyKey: `run:${request.id}`,
-  workloadType: "workflow",
-  workloadId: "wf_summary_123"
+// One budget key per workload, closed when the workload's window ends.
+const key = `run:${request.id}`;
+await unprice.budgets.upsert({
+  key,
+  unit: "USD",
+  limits: [{ amount: "50", window: "never" }],
+  closesAt: Date.now() + 60 * 60 * 1000
 });
 
-if (error) {
-  throw new Error(error.message);
-}
-
-// Only start the paid work after the reservation is running.
-if (run.status !== "running") {
-  return new Response(`Run rejected: ${run.status}`, { status: 429 });
-}
-
-let finalStatus: "completed" | "failed" = "completed";
-
-try {
-  // Authorize known usage before starting this billable step.
-  const { result: usage, error: consumeError } = await unprice.runs.consume({
-    runId: run.runId,
-    featureSlug: "ai-tools",
-    eventSlug: "completions",
-    idempotencyKey: `run:${request.id}:step:summary`,
-    properties: {
-      aiTools: 3,
-    }
-  });
-
-  if (consumeError) {
-    throw new Error(consumeError.message);
-  }
-
-  if (!usage.accepted) {
-    finalStatus = "failed";
-    return new Response(`Run rejected: ${usage.reason}`, { status: 429 });
-  }
-} catch (error) {
-  finalStatus = "failed";
-  throw error;
-} finally {
-  // Always close the run so unused reservation funds are released.
-  const { error: endError } = await unprice.runs.end({
-    runId: run.runId,
-    status: finalStatus
-  });
-
-  if (endError) {
-    console.error(endError.message);
-  }
-}
+// Hold the most a step may cost before it runs, then settle what it cost.
+const summary = await unprice.budget(key).spend({ estimate: "5" }, async () => {
+  const result = await runSummaryStep();
+  return { value: result.text, actual: costOf(result.usage) };
+});
 ```
 
-Call `runs.consume` as the workload spends and `runs.end` when it finishes. Unprice does not own the
-workload executor; it owns the budget reservation, spend decision, and evidence trail.
-
-## When actual usage is only known after work
-
-The example above authorizes a known amount before a step runs. For variable provider usage,
-reserve with `runs.start`, run the workload, then use [runs.settle](/libraries/ts/sdk/runs/settle)
-to account for actual usage. Keep settlement retryable if the response is lost. Do not release the
-reservation in `finally` while incurred usage is still unaccounted for.
+`spend` holds the estimate, runs the step, and settles its actual cost; if the budget cannot cover
+the estimate, the step never runs and `spend` throws `BudgetExceededError`. Read
+[Spend](/budgets/spend) for holds, recovery, and retries.
 
 ## Shortcut
 
@@ -194,7 +143,7 @@ reservation in `finally` while incurred usage is still unaccounted for.
   <Card title="Simple request path" icon="gauge" href="/libraries/ts/sdk/usage/consume">
     Use `usage.consume` when one request maps to a known usage amount.
   </Card>
-  <Card title="Multi-step workload" icon="route" href="/libraries/ts/sdk/runs/start">
-    Use `runs.start` when the workload needs a budget before it begins.
+  <Card title="Multi-step workload" icon="route" href="/budgets/spend">
+    Use a budget key when the workload needs a cap before it begins.
   </Card>
 </CardGroup>

@@ -29,6 +29,5 @@ logic. Use `message` to correct the request. Include `requestId` if you contact 
 ## A denial is not an API error
 
 A valid `access.check` or `usage.consume` request can return HTTP `200` with `allowed: false`.
-Inspect `rejectionReason` before starting paid work. `runs.consume` and `runs.settle` use
-`accepted` and `reason` instead. HTTP `429` means API rate limiting; your application can choose
+Inspect `rejectionReason` before starting paid work. HTTP `429` means API rate limiting; your application can choose
 its own HTTP status when it handles a commercial denial.

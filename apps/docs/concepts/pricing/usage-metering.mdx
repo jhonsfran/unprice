@@ -75,8 +75,8 @@ Use [usage analytics](/libraries/ts/sdk/usage/get) for historical reporting, not
   prevent over-budget work.
 - Use `usage.consume` before an action when its usage amount is already known. Start the work
   only when the call succeeds; a denial returns `BUDGET_EXCEEDED`.
-- Use a budgeted run when the final amount is unknown before work starts. Reserve first, then
-  [settle actual usage](/libraries/ts/sdk/runs/settle) when the workload finishes.
+- Use a budget hold when the final amount is unknown before work starts. Hold first, then
+  [settle actual usage](/budgets/spend) when the work finishes.
 
 A read-only `access.check` does not consume an allowance or reserve money. Two concurrent requests
 can both pass a read-only check. Use an enforcing operation for spend control.

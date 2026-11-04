@@ -34,7 +34,7 @@ Use these calls inside your product:
 - `access.check` asks whether a customer can use a feature without changing state.
 - `usage.consume` synchronously applies known usage and returns the allow or deny decision.
 - `usage.record` asynchronously reports usage for metering and evidence.
-- `runs.start`, `runs.consume`, and `runs.end` reserve and consume a budget for multi-step work.
+- `budget(key).authorize` and `spend` hold a maximum before variable-cost or multi-step work.
 
 Read [Choose the runtime call](/quickstart/choose-operation) before wiring production enforcement.
 

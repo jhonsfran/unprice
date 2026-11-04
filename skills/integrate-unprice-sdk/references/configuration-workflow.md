@@ -5,7 +5,7 @@ Two operations own configuration: `monetization.get` reads how a project makes m
 accepts.
 
 Configuration is not a runtime path. For `access.check`, `usage.consume`, `usage.record`, and
-budgeted runs, read [operation-selection.md](operation-selection.md) instead.
+budgets, read [operation-selection.md](operation-selection.md) instead.
 
 ## The agent never publishes
 

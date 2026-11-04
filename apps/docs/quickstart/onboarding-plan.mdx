@@ -152,86 +152,37 @@ return runAiGeneration();
 
 Use the same `idempotencyKey` when retrying the same request.
 
-## 7. Use a budgeted run for multi-step work
+## 7. Cap multi-step work with a budget
 
-If the action can spend across multiple steps, reserve a budget before the work starts, report the
-usage created inside the workload, then close the run so unused reserved funds are released:
+If the action can spend across multiple steps, give the workload its own budget key and hold each
+step's maximum before it runs:
 
 ```ts
-// Reserve spend before the workload creates cost.
-const { result: run, error: startError } = await unprice.runs.start({
-  customerId,
-  budgetAmountMinor: 5000,
-  idempotencyKey: `run:${request.id}`,
-  workloadType: "workflow",
-  workloadId: "wf_summary_123"
+// One budget key per workload, closed when the workload's window ends.
+const key = `run:${request.id}`;
+await unprice.budgets.upsert({
+  key,
+  unit: "USD",
+  limits: [{ amount: "50", window: "never" }],
+  closesAt: Date.now() + 60 * 60 * 1000
 });
 
-if (startError) {
-  throw new Error(startError.message);
-}
-
-// Only start the paid work after the reservation is running.
-if (run.status !== "running") {
-  return new Response(`Run rejected: ${run.status}`, { status: 429 });
-}
-
-let finalStatus: "completed" | "failed" = "completed";
-
-try {
-  // Authorize known usage before starting this billable step.
-  const { result: usage, error: consumeError } = await unprice.runs.consume({
-    runId: run.runId,
-    featureSlug: "ai-tools",
-    eventSlug: "completions",
-    idempotencyKey: `run:${request.id}:step:summary`,
-    properties: {
-      aiTools: 3,
-      step: "summary"
-    }
-  });
-
-  if (consumeError) {
-    throw new Error(consumeError.message);
-  }
-
-  if (!usage.accepted) {
-    finalStatus = "failed";
-    return new Response(`Run rejected: ${usage.reason}`, { status: 429 });
-  }
-
-  await runSummaryWorkflow();
-} catch (error) {
-  finalStatus = "failed";
-  throw error;
-} finally {
-  // Always close the run so unused reservation funds are released.
-  const { error: endError } = await unprice.runs.end({
-    runId: run.runId,
-    status: finalStatus
-  });
-
-  if (endError) {
-    console.error(endError.message);
-  }
-}
+// Hold the most a step may cost before it runs, then settle what it cost.
+const summary = await unprice.budget(key).spend({ estimate: "5" }, async () => {
+  const result = await runSummaryStep();
+  return { value: result.text, actual: costOf(result.usage) };
+});
 ```
 
-This keeps the budget envelope separate from the workload executor: your app owns the workflow;
-Unprice owns the customer spend authorization and evidence.
-
-## When actual usage is only known after work
-
-The example above authorizes a known amount before a step runs. For variable provider usage,
-reserve with `runs.start`, run the workload, then use [runs.settle](/libraries/ts/sdk/runs/settle)
-to account for actual usage. Keep settlement retryable if the response is lost. Do not release the
-reservation in `finally` while incurred usage is still unaccounted for.
+`spend` holds the estimate, runs the step, and settles its actual cost; if the budget cannot cover
+the estimate, the step never runs and `spend` throws `BudgetExceededError`. Read
+[Spend](/budgets/spend) for holds, recovery, and retries.
 
 ## Next steps
 
 <CardGroup cols={2}>
   <Card title="Choose the runtime call" icon="code" href="/quickstart/choose-operation">
-    Compare `access.check`, `usage.record`, `usage.consume`, and budgeted runs.
+    Compare `access.check`, `usage.record`, `usage.consume`, and budgets.
   </Card>
   <Card title="TypeScript SDK" icon="terminal" href="/libraries/ts/sdk/overview">
     Learn the SDK result shape, retries, base URL, and telemetry options.

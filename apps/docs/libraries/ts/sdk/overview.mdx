@@ -92,20 +92,19 @@ For variable provider usage — an LLM call whose cost is not known until it ret
 maximum before the work and settle what it actually cost after:
 
 ```ts
-const { result: reservation, error } = await unprice.reservations.reserve({
-  customerId: "cus_1234567890",
-  maximumAmountMinor: 10,
+const { result: authorization, error } = await unprice.budget("customer:cus_1234567890").authorize({
+  amount: "0.10",
   idempotencyKey: "req_123"
 });
 
-if (error) {
+if (error || !authorization.allowed) {
   return new Response("Customer budget unavailable", { status: 402 });
 }
 ```
 
-`reservations` is a helper over the `runs` operations, not a separate API. Read
-[the reservations helper](/libraries/ts/sdk/runs/reservations) for what each call maps to, and use
-`runs.start` / `runs.consume` / `runs.settle` / `runs.end` directly for multi-step workloads.
+Settle the hold with what the call cost: `authorization.hold.settle({ amount })`. A multi-step
+workload uses one budget key with `closesAt` for its cap. Read [Spend](/budgets/spend) for holds,
+`spend`, and recovery.
 
 Read [Choose the runtime call](/quickstart/choose-operation) before you connect a production path.
 
