@@ -6,6 +6,7 @@ import {
 } from "@unprice/lakehouse"
 import { formatAmount } from "@unprice/money"
 import type { Operation } from "@unprice/services/budgets"
+import type { Env } from "~/env"
 
 /** One written version of an operation row, as the journal exports it. */
 export type JournalEntry = Readonly<{
@@ -67,4 +68,16 @@ export const discardJournal: BudgetJournal = {
   async send(rows) {
     for (const row of rows) budgetJournalRowSchema.parse(row)
   },
+}
+
+/**
+ * The journal stream when bound. Without one, local development discards rows so purges still
+ * run; elsewhere the alarm keeps rows unpurged until the binding exists, and the API worker only
+ * logs the refused events it could not journal.
+ */
+export function journalOf(
+  env: Pick<Env, "APP_ENV" | "PIPELINE_BUDGET_JOURNAL">
+): BudgetJournal | null {
+  if (env.PIPELINE_BUDGET_JOURNAL) return pipelineJournal(env.PIPELINE_BUDGET_JOURNAL)
+  return env.APP_ENV === "development" ? discardJournal : null
 }

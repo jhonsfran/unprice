@@ -652,7 +652,7 @@ export const lakehouseSourceSchemaRegistry = {
         addedInVersion: 1,
         defaultValue: null,
         description:
-          "Per-budget write sequence. Readers deduplicate on (project_id, budget_key, seq) and keep an operation's highest seq.",
+          "Per-budget write sequence. Readers deduplicate on (project_id, budget_key, seq) and keep an operation's highest seq. 0 on a rejected event, which the budget never wrote.",
       },
       {
         name: "operation_id",
@@ -661,7 +661,7 @@ export const lakehouseSourceSchemaRegistry = {
         addedInVersion: 1,
         defaultValue: null,
         description:
-          "The row's id: h_<n> for a hold, o:<key hash> for a charge or record, l:<key hash> for a lease.",
+          "The row's id: h_<n> for a hold, o:<key hash> for a charge or record, l:<key hash> for a lease, r:<idempotency key> for a rejected event.",
       },
       {
         name: "kind",
@@ -677,7 +677,8 @@ export const lakehouseSourceSchemaRegistry = {
         required: true,
         addedInVersion: 1,
         defaultValue: null,
-        description: "open, settled, released, or done.",
+        description:
+          "open, settled, released, or done; rejected for an event the budget refused, sent by the API worker (ADR-0008 D7).",
       },
       {
         name: "timestamp",
@@ -693,7 +694,8 @@ export const lakehouseSourceSchemaRegistry = {
         required: true,
         addedInVersion: 1,
         defaultValue: null,
-        description: "The operation row as the budget keeps it, amounts as decimal strings.",
+        description:
+          "The operation row as the budget keeps it, or a rejected event with its rejection, amounts as decimal strings.",
       },
     ],
   },

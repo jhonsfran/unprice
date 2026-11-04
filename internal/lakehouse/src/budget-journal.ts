@@ -19,9 +19,10 @@ export type BudgetJournalRow = Omit<LakehouseEventForSource<"budget_journal">, "
 export const budgetJournalRowSchema = buildLakehouseEventZodSchema("budget_journal").extend({
   project_id: z.string().min(1),
   budget_key: z.string().min(1),
-  seq: z.number().int().positive(),
+  // 0 for a rejected event: the budget never wrote it.
+  seq: z.number().int().nonnegative(),
   operation_id: z.string().min(1),
   kind: z.enum(["hold", "charge", "record", "lease"]),
-  status: z.enum(["open", "settled", "released", "done"]),
+  status: z.enum(["open", "settled", "released", "done", "rejected"]),
   timestamp: z.iso.datetime(),
 }) as unknown as z.ZodType<BudgetJournalRow>
