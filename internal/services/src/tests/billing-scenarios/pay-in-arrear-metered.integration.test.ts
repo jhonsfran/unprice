@@ -84,13 +84,12 @@ describe("P0-A pay_in_arrear metered billing workflow", () => {
 
   it("P0-A rates pending periods, posts pgledger entries, creates one invoice, and is idempotent", async () => {
     const logger = createLogger()
-    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+    const { reservationFlushGateway } = createRecordedUsageFixture(db, {
       events: { quantity: 1200, amount: 12_000_000_000 },
     })
     const ledger = new LedgerGateway({ db, logger })
     const rating = new RatingService({
       logger,
-      analytics,
       grantsManager: new GrantsManager({ db, logger }),
     })
     const repo = new DrizzleSubscriptionRepository(db)
@@ -215,6 +214,5 @@ describe("P0-A pay_in_arrear metered billing workflow", () => {
         AND i.statement_key = ${statementKey}
     `)
     expect(entryCount.rows).toEqual([{ count: 4 }])
-    expect(analytics.getUsageBillingFeatures).not.toHaveBeenCalled()
   })
 })

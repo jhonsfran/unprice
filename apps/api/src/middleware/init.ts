@@ -168,7 +168,6 @@ export function init(): MiddlewareHandler<HonoEnv> {
       emit: true,
       tinybirdToken: c.env.TINYBIRD_TOKEN,
       tinybirdUrl: c.env.TINYBIRD_URL,
-      logger,
     })
 
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>

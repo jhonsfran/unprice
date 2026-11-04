@@ -187,7 +187,6 @@ export function createServiceContext(
   // 2. Services with deps on leaves
   const rating = new RatingService({
     logger: deps.logger,
-    analytics: deps.analytics,
     grantsManager,
   })
 

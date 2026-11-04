@@ -81,7 +81,6 @@ export const createContext = async ({
     emit: true,
     tinybirdToken: env.TINYBIRD_TOKEN,
     tinybirdUrl: env.TINYBIRD_URL,
-    logger: logger,
   })
 
   const metrics = new NoopMetrics()

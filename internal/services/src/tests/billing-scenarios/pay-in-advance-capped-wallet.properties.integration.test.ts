@@ -112,12 +112,11 @@ async function runAdvanceCappedPropertyCase(usage: number) {
   const logger = createLogger()
   const ledger = new LedgerGateway({ db, logger })
   const wallet = new WalletService({ db, logger, ledgerGateway: ledger })
-  const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+  const { reservationFlushGateway } = createRecordedUsageFixture(db, {
     events: { quantity: usage, amount: expectedEventsAmount(usage) },
   })
   const rating = new RatingService({
     logger,
-    analytics,
     grantsManager: new GrantsManager({ db, logger }),
   })
   const repo = new DrizzleSubscriptionRepository(db)

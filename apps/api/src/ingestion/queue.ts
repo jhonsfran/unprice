@@ -54,7 +54,6 @@ export function createQueueServices(params: {
     emit: true,
     tinybirdToken: params.env.TINYBIRD_TOKEN,
     tinybirdUrl: params.env.TINYBIRD_URL,
-    logger: params.logger,
   })
 
   const svcCtx = createServiceContext({

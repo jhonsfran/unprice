@@ -74,13 +74,12 @@ async function loadSubscriptionContext(dbForContext: Database): Promise<Subscrip
 
 async function runBillPeriodWorker(dbForWorker: Database) {
   const logger = createLogger()
-  const { analytics, reservationFlushGateway } = createRecordedUsageFixture(dbForWorker, {
+  const { reservationFlushGateway } = createRecordedUsageFixture(dbForWorker, {
     events: { quantity: 1200, amount: 12_000_000_000 },
   })
   const ledger = new LedgerGateway({ db: dbForWorker, logger })
   const rating = new RatingService({
     logger,
-    analytics,
     grantsManager: new GrantsManager({ db: dbForWorker, logger }),
   })
   const repo = new DrizzleSubscriptionRepository(dbForWorker)

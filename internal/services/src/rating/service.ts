@@ -1,8 +1,4 @@
-import type { Analytics } from "@unprice/analytics"
-import { add, currencies, dinero, toDecimal } from "@unprice/db/utils"
 import {
-  type CalculatedPrice,
-  type Currency,
   calculateCycleWindow,
   calculateFreeUnits,
   calculateProration,
@@ -11,45 +7,32 @@ import {
   getAnchor,
   type grantSchemaExtended,
 } from "@unprice/db/validators"
-import { Err, Ok, type Result, wrapResult } from "@unprice/error"
+import { Err, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import { LEDGER_SCALE, formatMoney } from "@unprice/money"
-import { subtract, toSnapshot, trimScale } from "dinero.js"
 import type { z } from "zod"
 import type { GrantsManager } from "../entitlements"
-import {
-  computeGrantPeriodBucket,
-  extractCurrencyCodeFromFeatureConfig,
-} from "../entitlements/grant-consumption"
 import { toErrorContext } from "../utils/log-context"
 import { UnPriceRatingError } from "./errors"
 import type {
   BillingWindow,
-  IncrementalRatingInput,
-  IncrementalRatingResult,
   RatedCharge,
   RatingEntitlementContext,
   RatingInput,
   ResolveBillingWindowInput,
-  UsageFeatureData,
 } from "./types"
 
 export class RatingService {
   private readonly logger: Logger
-  private readonly analytics: Analytics
   private readonly grantsManager: GrantsManager
 
   constructor({
     logger,
-    analytics,
     grantsManager,
   }: {
     logger: Logger
-    analytics: Analytics
     grantsManager: GrantsManager
   }) {
     this.logger = logger
-    this.analytics = analytics
     this.grantsManager = grantsManager
   }
 
@@ -123,142 +106,6 @@ export class RatingService {
         message: "Either 'now' or both 'startAt' and 'endAt' must be provided",
       })
     )
-  }
-
-  private async rateUsageAllocations({
-    projectId,
-    customerId,
-    customerEntitlementIds,
-    featureSlug,
-    billingStartAt,
-    billingEndAt,
-    grants,
-  }: {
-    projectId: string
-    customerId: string
-    customerEntitlementIds: string[]
-    featureSlug: string
-    billingStartAt: number
-    billingEndAt: number
-    grants: z.infer<typeof grantSchemaExtended>[]
-  }): Promise<Result<RatedCharge[], UnPriceRatingError>> {
-    const usage = await wrapResult(
-      this.analytics.getBillingUsageAllocations({
-        project_id: projectId,
-        customer_id: customerId,
-        customer_entitlement_ids: customerEntitlementIds,
-        feature_slugs: [featureSlug],
-        start: billingStartAt,
-        end: billingEndAt,
-      }),
-      (error) => new UnPriceRatingError({ message: error.message })
-    )
-    if (usage.err) return Err(usage.err)
-    const { data } = usage.val
-    const charges: RatedCharge[] = []
-    for (const allocation of data) {
-      const grant = grants.find(
-        (item) =>
-          item.id === allocation.grant_id &&
-          item.customerEntitlement.id === allocation.customer_entitlement_id
-      )
-      if (!grant) {
-        return Err(
-          new UnPriceRatingError({ message: `Unknown usage grant ${allocation.grant_id}` })
-        )
-      }
-      const entitlement = this.entitlementFromGrant(grant)
-      const bucket = computeGrantPeriodBucket(
-        {
-          cadenceEffectiveAt: grant.customerEntitlement.effectiveAt,
-          cadenceExpiresAt: grant.customerEntitlement.expiresAt,
-          effectiveAt: grant.effectiveAt,
-          expiresAt: grant.expiresAt,
-          grantId: grant.id,
-          resetConfig: grant.customerEntitlement.featurePlanVersion.resetConfig,
-        },
-        Math.max(allocation.period_start_at, grant.effectiveAt)
-      )
-      if (!bucket || bucket.periodKey !== allocation.period_key) {
-        return Err(
-          new UnPriceRatingError({ message: `Invalid usage period ${allocation.period_key}` })
-        )
-      }
-      const cycleStartAt = Math.max(billingStartAt, bucket.start, grant.effectiveAt)
-      const cycleEndAt = Math.min(
-        billingEndAt,
-        bucket.end,
-        grant.expiresAt ?? Number.POSITIVE_INFINITY
-      )
-      if (cycleStartAt >= cycleEndAt) continue
-      const proration = this.calculateGrantProration({
-        grant,
-        billingStartAt: cycleStartAt,
-        billingEndAt: cycleEndAt,
-        resetConfig: entitlement.resetConfig,
-      })
-      const currencyCode = extractCurrencyCodeFromFeatureConfig(
-        grant.customerEntitlement.featurePlanVersion.config
-      )
-      if (allocation.currency !== currencyCode || allocation.amount_scale !== LEDGER_SCALE) {
-        return Err(
-          new UnPriceRatingError({
-            message: `Recorded usage money does not match grant ${grant.id}`,
-          })
-        )
-      }
-      const currency = this.resolveCurrency(undefined, [], [grant])
-      const isTrial = grant.type === "trial"
-      const amount = isTrial ? 0 : allocation.amount
-      const total = trimScale(dinero({ amount, currency, scale: LEDGER_SCALE }))
-      const unit = trimScale(
-        dinero({
-          amount: allocation.usage === 0 ? 0 : Math.round(amount / allocation.usage),
-          currency,
-          scale: LEDGER_SCALE,
-        })
-      )
-      const price = this.asCalculatedPrice(unit, total, total)
-      const freeUnits = calculateFreeUnits({
-        config: grant.customerEntitlement.featurePlanVersion.config,
-        featureType: entitlement.featureType,
-      })
-      charges.push({
-        grantId: grant.id,
-        price,
-        prorate: proration.prorationFactor,
-        cycleStartAt,
-        cycleEndAt,
-        usage: allocation.usage,
-        included: freeUnits.val ?? 0,
-        limit: grant.allowanceUnits ?? Number.POSITIVE_INFINITY,
-        isTrial,
-      })
-    }
-    return Ok(charges)
-  }
-
-  private resolveUsageCustomerEntitlementIds({
-    billingStartAt,
-    billingEndAt,
-    grants,
-  }: {
-    billingStartAt: number
-    billingEndAt: number
-    grants: z.infer<typeof grantSchemaExtended>[]
-  }): string[] {
-    const customerEntitlementIds = new Set<string>()
-
-    for (const grant of grants) {
-      const grantServiceStart = Math.max(billingStartAt, grant.effectiveAt)
-      const grantServiceEnd = Math.min(billingEndAt, grant.expiresAt ?? Number.POSITIVE_INFINITY)
-
-      if (grantServiceStart < grantServiceEnd) {
-        customerEntitlementIds.add(grant.customerEntitlement.id)
-      }
-    }
-
-    return [...customerEntitlementIds]
   }
 
   /**
@@ -340,82 +187,6 @@ export class RatingService {
     }
   }
 
-  private resolveCurrency(
-    explicitCurrency: Currency | undefined,
-    charges: RatedCharge[],
-    grants: z.infer<typeof grantSchemaExtended>[]
-  ) {
-    if (explicitCurrency) {
-      const code = explicitCurrency as string
-      if (code in currencies) {
-        return currencies[code as keyof typeof currencies]
-      }
-    }
-
-    const fromCharge = charges.find((c) => c.price.totalPrice.dinero)?.price.totalPrice.dinero
-    if (fromCharge) {
-      return toSnapshot(fromCharge).currency
-    }
-
-    for (const grant of grants) {
-      const cfg = grant.customerEntitlement.featurePlanVersion.config
-      // Try tiers first (tier pricing stores currency per tier)
-      const tierCurrency = cfg?.tiers?.[0]?.unitPrice?.dinero?.currency?.code
-      if (tierCurrency && tierCurrency in currencies) {
-        return currencies[tierCurrency as keyof typeof currencies]
-      }
-      // Then flat/unit/package price
-      const priceCurrency = cfg?.price?.dinero?.currency?.code
-      if (priceCurrency && priceCurrency in currencies) {
-        return currencies[priceCurrency as keyof typeof currencies]
-      }
-    }
-
-    this.logger.warn("Could not determine currency from grants or charges, falling back to USD")
-    return currencies.USD
-  }
-
-  private asCalculatedPrice(
-    unitPriceDinero: CalculatedPrice["unitPrice"]["dinero"],
-    subtotalPriceDinero: CalculatedPrice["subtotalPrice"]["dinero"],
-    totalPriceDinero: CalculatedPrice["totalPrice"]["dinero"]
-  ): CalculatedPrice {
-    const toPrice = (value: CalculatedPrice["totalPrice"]["dinero"]) => ({
-      dinero: value,
-      displayAmount: toDecimal(
-        value,
-        ({ value: amount, currency }) => `${formatMoney(amount, currency.code)}`
-      ),
-    })
-
-    return {
-      unitPrice: toPrice(unitPriceDinero),
-      subtotalPrice: toPrice(subtotalPriceDinero),
-      totalPrice: toPrice(totalPriceDinero),
-    }
-  }
-
-  private aggregateCalculatedPrice(
-    charges: RatedCharge[],
-    fallbackCurrency: ReturnType<typeof this.resolveCurrency>
-  ): CalculatedPrice {
-    const zero = dinero({ amount: 0, currency: fallbackCurrency })
-    const unitPriceDinero = charges.reduce(
-      (sum, charge) => add(sum, charge.price.unitPrice.dinero),
-      zero
-    )
-    const subtotalPriceDinero = charges.reduce(
-      (sum, charge) => add(sum, charge.price.subtotalPrice.dinero),
-      zero
-    )
-    const totalPriceDinero = charges.reduce(
-      (sum, charge) => add(sum, charge.price.totalPrice.dinero),
-      zero
-    )
-
-    return this.asCalculatedPrice(unitPriceDinero, subtotalPriceDinero, totalPriceDinero)
-  }
-
   /**
    * Calculates the price for a feature based on grants, usage, and billing period.
    * Handles waterfall attribution of usage across multiple grants and calculates proration.
@@ -430,7 +201,7 @@ export class RatingService {
       featureSlug,
       grants: providedGrants,
       entitlement: providedEntitlement,
-      usageData: providedUsageData,
+      usageData,
     } = params
     const now = "now" in params ? params.now : undefined
     const startAt = "startAt" in params ? params.startAt : undefined
@@ -483,24 +254,7 @@ export class RatingService {
     }
 
     const { billingStartAt, billingEndAt } = billingWindowResult.val
-    if (entitlement.featureType === "usage" && providedUsageData === undefined) {
-      return this.rateUsageAllocations({
-        projectId,
-        customerId,
-        customerEntitlementIds:
-          customerEntitlementIds ??
-          this.resolveUsageCustomerEntitlementIds({
-            billingStartAt,
-            billingEndAt,
-            grants,
-          }),
-        featureSlug,
-        billingStartAt,
-        billingEndAt,
-        grants,
-      })
-    }
-    const usage = providedUsageData?.find((item) => item.featureSlug === featureSlug)?.usage ?? 0
+    const usage = usageData.find((item) => item.featureSlug === featureSlug)?.usage ?? 0
 
     // Track remaining usage for waterfall attribution
     const pricingGrants: Array<{
@@ -623,127 +377,5 @@ export class RatingService {
     }
 
     return Ok(result)
-  }
-
-  public async rateIncrementalUsage(
-    params: IncrementalRatingInput
-  ): Promise<Result<IncrementalRatingResult, UnPriceRatingError>> {
-    const { projectId, customerId, featureSlug, usageBefore, usageAfter } = params
-
-    if (!projectId || !customerId || !featureSlug) {
-      return Err(
-        new UnPriceRatingError({
-          message: "Missing required parameters: projectId, customerId, or featureSlug",
-        })
-      )
-    }
-
-    if (
-      !Number.isFinite(usageBefore) ||
-      !Number.isFinite(usageAfter) ||
-      usageBefore < 0 ||
-      usageAfter < 0
-    ) {
-      return Err(
-        new UnPriceRatingError({
-          message:
-            "usageBefore and usageAfter must be finite numbers greater than or equal to zero",
-        })
-      )
-    }
-
-    const grants = params.grants ?? []
-
-    if (!params.entitlement && grants.length === 0) {
-      const currency = this.resolveCurrency(params.currency, [], grants)
-      const zero = dinero({ amount: 0, currency })
-      const zeroPrice = this.asCalculatedPrice(zero, zero, zero)
-      return Ok({
-        usageBefore,
-        usageAfter,
-        usageDelta: usageAfter - usageBefore,
-        before: [],
-        after: [],
-        deltaPrice: zeroPrice,
-      })
-    }
-
-    const entitlement = params.entitlement ?? this.entitlementFromGrant(grants[0]!)
-
-    const buildRatingInput = (usageData: UsageFeatureData[]): RatingInput => {
-      if (params.now !== undefined) {
-        return {
-          projectId,
-          customerId,
-          featureSlug,
-          now: params.now,
-          grants,
-          entitlement,
-          usageData,
-        }
-      }
-
-      return {
-        projectId,
-        customerId,
-        featureSlug,
-        startAt: params.startAt,
-        endAt: params.endAt,
-        grants,
-        entitlement,
-        usageData,
-      }
-    }
-
-    const beforeInput = buildRatingInput(
-      params.usageDataBefore ?? [{ featureSlug, usage: usageBefore }]
-    )
-    const afterInput = buildRatingInput(
-      params.usageDataAfter ?? [{ featureSlug, usage: usageAfter }]
-    )
-
-    // Run before and after rating in parallel — they are independent
-    const [beforeResult, afterResult] = await Promise.all([
-      this.rateBillingPeriod(beforeInput),
-      this.rateBillingPeriod(afterInput),
-    ])
-
-    if (beforeResult.err) {
-      return Err(beforeResult.err)
-    }
-
-    if (afterResult.err) {
-      return Err(afterResult.err)
-    }
-
-    const allCharges = [...beforeResult.val, ...afterResult.val]
-    const currency = this.resolveCurrency(params.currency, allCharges, grants)
-
-    const beforePrice = this.aggregateCalculatedPrice(beforeResult.val, currency)
-    const afterPrice = this.aggregateCalculatedPrice(afterResult.val, currency)
-
-    let deltaPrice: CalculatedPrice
-    try {
-      deltaPrice = this.asCalculatedPrice(
-        subtract(afterPrice.unitPrice.dinero, beforePrice.unitPrice.dinero),
-        subtract(afterPrice.subtotalPrice.dinero, beforePrice.subtotalPrice.dinero),
-        subtract(afterPrice.totalPrice.dinero, beforePrice.totalPrice.dinero)
-      )
-    } catch (error) {
-      return Err(
-        new UnPriceRatingError({
-          message: error instanceof Error ? error.message : "Failed to compute incremental delta",
-        })
-      )
-    }
-
-    return Ok({
-      usageBefore,
-      usageAfter,
-      usageDelta: usageAfter - usageBefore,
-      before: beforeResult.val,
-      after: afterResult.val,
-      deltaPrice,
-    })
   }
 }

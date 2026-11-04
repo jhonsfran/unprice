@@ -98,12 +98,11 @@ describe("P0-D pay_in_advance capped wallet workflow", () => {
     const logger = createLogger()
     const ledger = new LedgerGateway({ db, logger })
     const wallet = new WalletService({ db, logger, ledgerGateway: ledger })
-    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+    const { reservationFlushGateway } = createRecordedUsageFixture(db, {
       events: { quantity: 1200, amount: usageAmount },
     })
     const rating = new RatingService({
       logger,
-      analytics,
       grantsManager: new GrantsManager({ db, logger }),
     })
     const repo = new DrizzleSubscriptionRepository(db)

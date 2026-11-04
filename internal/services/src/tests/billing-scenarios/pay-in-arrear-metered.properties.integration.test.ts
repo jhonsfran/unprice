@@ -96,13 +96,12 @@ async function runBillingPropertyCase(usage: number) {
   await seedTestDb({ db, fixtures })
 
   const logger = createLogger()
-  const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+  const { reservationFlushGateway } = createRecordedUsageFixture(db, {
     events: { quantity: usage, amount: expectedEventsAmount(usage) },
   })
   const ledger = new LedgerGateway({ db, logger })
   const rating = new RatingService({
     logger,
-    analytics,
     grantsManager: new GrantsManager({ db, logger }),
   })
   const repo = new DrizzleSubscriptionRepository(db)
@@ -220,7 +219,6 @@ async function runBillingPropertyCase(usage: number) {
       AND i.statement_key = ${statementKey}
   `)
   expect(entryCount.rows).toEqual([{ count: expectedUsageAmount > 0 ? 4 : 2 }])
-  expect(analytics.getUsageBillingFeatures).not.toHaveBeenCalled()
 }
 
 describe("P0-A pay_in_arrear metered billing properties", () => {

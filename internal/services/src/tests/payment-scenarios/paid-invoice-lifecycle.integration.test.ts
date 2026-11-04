@@ -321,12 +321,10 @@ async function loadSubscriptionContext(): Promise<SubscriptionContext> {
 }
 
 async function createDraftInvoice({
-  analytics,
   reservationFlushGateway,
   ledger,
   logger,
 }: {
-  analytics: Analytics
   reservationFlushGateway: ReturnType<typeof createRecordedUsageFixture>["reservationFlushGateway"]
   ledger: LedgerGateway
   logger: Logger
@@ -336,7 +334,6 @@ async function createDraftInvoice({
 
   const rating = new RatingService({
     logger,
-    analytics,
     grantsManager: new GrantsManager({ db, logger }),
   })
 
@@ -421,7 +418,6 @@ function createBillingService({
     grantsManager: new GrantsManager({ db, logger }),
     ratingService: new RatingService({
       logger,
-      analytics,
       grantsManager: new GrantsManager({ db, logger }),
     }),
     ledgerService: ledger,
@@ -657,14 +653,12 @@ function createLifecycleRuntime(loggerErrors: unknown[] = []) {
 }
 
 async function prepareCollectedUnpaidInvoice({
-  analytics,
   reservationFlushGateway,
   billing,
   logger,
   services,
 }: ReturnType<typeof createLifecycleRuntime>) {
   const invoiceId = await createDraftInvoice({
-    analytics,
     reservationFlushGateway,
     ledger: services.ledger,
     logger,
@@ -732,7 +726,6 @@ describe("paid invoice lifecycle integration", () => {
       wallet: services.wallet,
     })
     const invoiceId = await createDraftInvoice({
-      analytics,
       reservationFlushGateway,
       ledger: services.ledger,
       logger,
@@ -902,7 +895,6 @@ describe("paid invoice lifecycle integration", () => {
     `)
     expect(locks.rows).toEqual([{ count: 0 }])
     expect(loggerErrors).toEqual([])
-    expect(analytics.getUsageBillingFeatures).not.toHaveBeenCalled()
   })
 
   it("processes a payment.failed webhook against real invoice, webhook, and subscription rows", async () => {
@@ -982,7 +974,6 @@ describe("paid invoice lifecycle integration", () => {
       wallet: services.wallet,
     })
     const invoiceId = await createDraftInvoice({
-      analytics,
       reservationFlushGateway,
       ledger: services.ledger,
       logger,

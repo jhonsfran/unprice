@@ -1,15 +1,10 @@
 import { NoopTinybird, Tinybird } from "@jhonsfran/zod-bird"
-import { Err, type FetchError, Ok, type Result } from "@unprice/error"
-import type { Logger } from "@unprice/logs"
 import { z } from "zod"
-import { UnPriceAnalyticsError } from "./errors"
 import {
   type AnalyticsEventAction,
   analyticsEventSchema,
   billingPeriodUsageCoverageRowSchema,
   billingPeriodUsageRowSchema,
-  billingUsageAllocationQuerySchema,
-  billingUsageAllocationRowSchema,
   entitlementMeterFactSchemaV1,
   explainChargeEventRowSchema,
   explainChargeQuerySchema,
@@ -37,10 +32,8 @@ export class Analytics {
   public readonly readClient: Tinybird | NoopTinybird
   public readonly writeClient: Tinybird | NoopTinybird
   public readonly isNoop: boolean
-  private readonly logger: Logger
 
   constructor(opts: {
-    logger: Logger
     emit: boolean
     tinybirdToken?: string
     tinybirdUrl: string
@@ -49,7 +42,6 @@ export class Analytics {
       token: string
     }
   }) {
-    this.logger = opts.logger
     this.readClient =
       opts.tinybirdToken && opts.emit
         ? new Tinybird({ token: opts.tinybirdToken, baseUrl: opts.tinybirdUrl })
@@ -475,210 +467,5 @@ export class Analytics {
         timeout: 5000,
       },
     })
-  }
-
-  // analytics usage
-  public get getFeaturesUsage() {
-    return this.readClient.buildPipe({
-      pipe: "v1_get_feature_usage",
-      parameters: z.object({
-        project_id: z.string(),
-        customer_id: z.string(),
-        period_key: z.string(),
-      }),
-      data: z.object({
-        project_id: z.string(),
-        feature_slug: z.string(),
-        customer_id: z.string(),
-        value: z.string(),
-      }),
-      opts: {
-        cache: "no-store",
-        retries: 3,
-        timeout: 5000, // 5 seconds
-      },
-    })
-  }
-
-  public get getBillingUsageAllocations() {
-    return this.readClient.buildPipe({
-      pipe: "v1_get_billing_usage_allocations",
-      parameters: billingUsageAllocationQuerySchema,
-      data: billingUsageAllocationRowSchema,
-      opts: { cache: "no-store", retries: 3, timeout: 5000 },
-    })
-  }
-
-  public get getBillingUsage() {
-    return this.readClient.buildPipe({
-      pipe: "v1_get_feature_usage_no_duplicates",
-      parameters: z.object({
-        customer_entitlement_ids: z.array(z.string()).optional(),
-        feature_slugs: z.array(z.string()).optional(),
-        period_keys: z.array(z.string()).optional(),
-        customer_id: z.string(),
-        project_id: z.string(),
-        start: z.number(),
-        end: z.number(),
-      }),
-      data: z.object({
-        project_id: z.string(),
-        customer_id: z.string(),
-        feature_slug: z.string(),
-        latest: z.number(),
-      }),
-      opts: {
-        cache: "no-store",
-        retries: 3,
-        timeout: 5000, // 5 seconds
-      },
-    })
-  }
-
-  // TODO: add telemtry for this endpoint to know how many times it's being called and the latency
-  public async getUsageBillingFeatures({
-    customerId,
-    customerEntitlementIds,
-    projectId,
-    features,
-    startAt,
-    endAt,
-    periodKeys,
-  }: {
-    customerId: string
-    customerEntitlementIds?: string[]
-    projectId: string
-    features: {
-      featureSlug: string
-      aggregationMethod: "sum" | "count" | "max" | "latest"
-      featureType: "usage" | "package" | "tier" | "flat"
-    }[]
-    startAt: number
-    endAt: number
-    periodKeys?: string[]
-  }): Promise<
-    Result<{ featureSlug: string; usage: number }[], FetchError | UnPriceAnalyticsError>
-  > {
-    const featuresUsage = features.filter((feature) => feature.featureType === "usage")
-
-    const featureSlugsArray = featuresUsage.map((feature) => feature.featureSlug)
-
-    if (featureSlugsArray.length === 0) {
-      return Ok([])
-    }
-
-    const totalPeriodUsages = await this.getBillingUsage({
-      customer_id: customerId,
-      customer_entitlement_ids:
-        customerEntitlementIds && customerEntitlementIds.length > 0
-          ? customerEntitlementIds
-          : undefined,
-      project_id: projectId,
-      feature_slugs: featureSlugsArray,
-      period_keys: periodKeys && periodKeys.length > 0 ? periodKeys : undefined,
-      start: startAt,
-      end: endAt,
-    })
-      .then((usage) => usage.data ?? [])
-      .catch((error) => {
-        this.logger.error(`Error getBillingUsage:${error.message}`, {
-          customerId,
-          customerEntitlementIds,
-          projectId,
-          feature_slugs: featureSlugsArray,
-          periodKeys,
-          startAt,
-          endAt,
-        })
-        return null
-      })
-
-    // if there was an error, return null
-    if (totalPeriodUsages === null) {
-      return Err(
-        new UnPriceAnalyticsError({ message: "Error getting usage billing subscription items" })
-      )
-    }
-
-    // if there are no usages, return an empty array
-    if (totalPeriodUsages.length === 0) {
-      return Ok([])
-    }
-
-    const result = []
-
-    // iterate over the features
-    for (const feature of featuresUsage) {
-      const totalPeriodUsage = totalPeriodUsages.find(
-        (usage) => usage.feature_slug === feature.featureSlug
-      )
-
-      if (!totalPeriodUsage) {
-        this.logger.error("No usage found for feature", {
-          featureSlug: feature.featureSlug,
-          customerId,
-          projectId,
-        })
-        continue
-      }
-
-      result.push({
-        featureSlug: feature.featureSlug,
-        usage: totalPeriodUsage.latest ?? 0,
-      })
-    }
-
-    return Ok(result)
-  }
-
-  /* cursor based usage for reconciliation */
-  public async getFeaturesUsageCustomer({
-    customerId,
-    projectId,
-    periodKey,
-  }: {
-    customerId: string
-    projectId: string
-    periodKey: string
-  }): Promise<
-    Result<
-      {
-        projectId: string
-        customerId: string
-        featureSlug: string
-        value: string
-      }[],
-      FetchError | UnPriceAnalyticsError
-    >
-  > {
-    const result = await this.getFeaturesUsage({
-      customer_id: customerId,
-      project_id: projectId,
-      period_key: periodKey,
-    }).catch((error) => {
-      this.logger.error(error, {
-        context: "Error getting features usage",
-        customerId,
-        projectId,
-        periodKey,
-      })
-      return null
-    })
-
-    if (result?.data === null) {
-      return Err(
-        new UnPriceAnalyticsError({ message: "Error getting features usage for customer" })
-      )
-    }
-
-    const data =
-      result?.data.map((row) => ({
-        featureSlug: row.feature_slug,
-        customerId: row.customer_id,
-        value: row.value,
-        projectId: row.project_id,
-      })) ?? []
-
-    return Ok(data)
   }
 }

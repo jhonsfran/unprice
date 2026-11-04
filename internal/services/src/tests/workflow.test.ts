@@ -110,7 +110,6 @@ describe("Workflow - Billing and Subscriptions", () => {
     mockAnalytics = {
       ingestFeaturesVerification: vi.fn().mockResolvedValue({ successful_rows: 1 }),
       ingestFeaturesUsage: vi.fn().mockResolvedValue({ successful_rows: 1 }),
-      getBillingUsage: vi.fn().mockResolvedValue({ data: [] }),
     } as unknown as Analytics
 
     mockMetrics = {} as unknown as Metrics

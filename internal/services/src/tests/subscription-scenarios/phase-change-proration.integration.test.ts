@@ -378,7 +378,7 @@ describe("DB-backed subscription phase changes", () => {
     const ledger = new LedgerGateway({ db, logger })
     const ensureAccounts = await ledger.ensureCustomerAccounts(customerId, "EUR")
     expect(ensureAccounts.err).toBeUndefined()
-    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+    const { reservationFlushGateway } = createRecordedUsageFixture(db, {
       events: { quantity: 120, amount: 112_000_000 },
     })
     const billed = await billPeriod({
@@ -389,7 +389,6 @@ describe("DB-backed subscription phase changes", () => {
       repo: new DrizzleSubscriptionRepository(db),
       ratingService: new RatingService({
         logger,
-        analytics,
         grantsManager: new GrantsManager({ db, logger }),
       }),
       ledgerService: ledger,

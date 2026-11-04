@@ -101,13 +101,12 @@ async function runAdvanceMeteredPropertyCase(usage: number) {
 
   const expectedUsageAmount = expectedEventsAmount(usage)
   const logger = createLogger()
-  const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+  const { reservationFlushGateway } = createRecordedUsageFixture(db, {
     events: { quantity: usage, amount: expectedEventsAmount(usage) },
   })
   const ledger = new LedgerGateway({ db, logger })
   const rating = new RatingService({
     logger,
-    analytics,
     grantsManager: new GrantsManager({ db, logger }),
   })
   const repo = new DrizzleSubscriptionRepository(db)
@@ -191,7 +190,6 @@ async function runAdvanceMeteredPropertyCase(usage: number) {
   await expectPeriodsInvoiced()
   await expectInvoiceLineAmounts(ledger, usageStatementKey, [expectedUsageAmount])
   await expectLedgerState()
-  expect(analytics.getUsageBillingFeatures).not.toHaveBeenCalled()
 }
 
 describe("P0-C pay_in_advance metered billing properties", () => {

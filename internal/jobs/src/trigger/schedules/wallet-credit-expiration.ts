@@ -39,7 +39,6 @@ export const walletCreditExpirationSchedule = schedules.task({
       emit: true,
       tinybirdToken: env.TINYBIRD_TOKEN,
       tinybirdUrl: env.TINYBIRD_URL,
-      logger: log,
     })
 
     const services = createServiceContext({

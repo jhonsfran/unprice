@@ -237,7 +237,6 @@ describe("DB-backed billing golden cases", () => {
       repo: new DrizzleSubscriptionRepository(db),
       ratingService: new RatingService({
         logger,
-        analytics,
         grantsManager: new GrantsManager({ db, logger }),
       }),
       ledgerService: ledger,
@@ -345,7 +344,7 @@ describe("DB-backed billing golden cases", () => {
 
   it("waits for the late-event grace window before invoicing an arrears statement", async () => {
     const logger = createLogger()
-    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+    const { reservationFlushGateway } = createRecordedUsageFixture(db, {
       events: { quantity: 1200, amount: 12_000_000_000 },
     })
     const ledger = new LedgerGateway({ db, logger })
@@ -358,7 +357,6 @@ describe("DB-backed billing golden cases", () => {
       repo: new DrizzleSubscriptionRepository(db),
       ratingService: new RatingService({
         logger,
-        analytics,
         grantsManager: new GrantsManager({ db, logger }),
       }),
       ledgerService: ledger,
@@ -382,7 +380,6 @@ describe("DB-backed billing golden cases", () => {
       expect.objectContaining({ status: "pending" }),
       expect.objectContaining({ status: "pending" }),
     ])
-    expect(analytics.getUsageBillingFeatures).not.toHaveBeenCalled()
 
     const ready = await billPeriod({
       reservationFlushGateway,
@@ -403,12 +400,11 @@ describe("DB-backed billing golden cases", () => {
       expect.objectContaining({ status: "invoiced" }),
       expect.objectContaining({ status: "invoiced" }),
     ])
-    expect(analytics.getUsageBillingFeatures).not.toHaveBeenCalled()
   })
 
   it("bills an annual DB statement as one yearly invoice with ledger-backed lines", async () => {
     const logger = createLogger()
-    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+    const { reservationFlushGateway } = createRecordedUsageFixture(db, {
       events: { quantity: 1200, amount: 12_000_000_000 },
     })
     const ledger = new LedgerGateway({ db, logger })
@@ -425,7 +421,6 @@ describe("DB-backed billing golden cases", () => {
       repo: new DrizzleSubscriptionRepository(db),
       ratingService: new RatingService({
         logger,
-        analytics,
         grantsManager: new GrantsManager({ db, logger }),
       }),
       ledgerService: ledger,
@@ -500,6 +495,5 @@ describe("DB-backed billing golden cases", () => {
       ?.map((line) => toLedgerMinor(line.amount))
       .sort((left, right) => left - right)
     expect(lineAmounts).toEqual([9_900_000_000, 12_000_000_000])
-    expect(analytics.getUsageBillingFeatures).not.toHaveBeenCalled()
   })
 })

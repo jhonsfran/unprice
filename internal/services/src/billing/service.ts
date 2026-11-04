@@ -28,7 +28,7 @@ import {
   transitionInvoiceStatus,
 } from "../payment-provider/invoice-state-machine"
 import type { RatingService } from "../rating/service"
-import type { RatedCharge, RatingInput } from "../rating/types"
+import type { RatedCharge } from "../rating/types"
 import type { SubscriptionMachine } from "../subscriptions/machine"
 import { DrizzleSubscriptionRepository } from "../subscriptions/repository.drizzle"
 import { LockLostError, withLockedMachine } from "../subscriptions/withLockedMachine"
@@ -2131,20 +2131,6 @@ export class BillingService {
       })
 
     return result
-  }
-
-  public async calculateFeaturePrice(
-    params: RatingInput
-  ): Promise<Result<ComputeCurrentUsageResult[], UnPriceBillingError>> {
-    const result = await this.ratingService.rateBillingPeriod(params)
-    return result.err
-      ? Err(
-          new UnPriceBillingError({
-            code: "BILLING_OPERATION_FAILED",
-            message: result.err.message,
-          })
-        )
-      : Ok(result.val)
   }
 
   public async getInvoiceStatementLines({

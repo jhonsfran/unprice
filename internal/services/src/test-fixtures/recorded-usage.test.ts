@@ -40,7 +40,7 @@ describe("explicit accepted usage fixture", () => {
         },
       },
     } as unknown as Database
-    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+    const { reservationFlushGateway } = createRecordedUsageFixture(db, {
       events: { amount: 1_000_000_000, quantity: 10 },
     })
 
@@ -51,6 +51,5 @@ describe("explicit accepted usage fixture", () => {
       expect.objectContaining({ amount: 1_000_000_000, quantity: 10, state: "sealed" }),
     ])
     expect(execute).not.toHaveBeenCalled()
-    expect(analytics.getUsageBillingFeatures).not.toHaveBeenCalled()
   })
 })

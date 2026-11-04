@@ -87,13 +87,12 @@ describe("P0-C pay_in_advance metered billing workflow", () => {
 
   it("P0-C bills fixed charges at period start and usage actuals at period end", async () => {
     const logger = createLogger()
-    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+    const { reservationFlushGateway } = createRecordedUsageFixture(db, {
       events: { quantity: 1200, amount: 12_000_000_000 },
     })
     const ledger = new LedgerGateway({ db, logger })
     const rating = new RatingService({
       logger,
-      analytics,
       grantsManager: new GrantsManager({ db, logger }),
     })
     const repo = new DrizzleSubscriptionRepository(db)
@@ -233,7 +232,6 @@ describe("P0-C pay_in_advance metered billing workflow", () => {
         AND i.statement_key IN (${startStatementKey}, ${usageStatementKey})
     `)
     expect(entryCount.rows).toEqual([{ count: 4 }])
-    expect(analytics.getUsageBillingFeatures).not.toHaveBeenCalled()
   })
 })
 

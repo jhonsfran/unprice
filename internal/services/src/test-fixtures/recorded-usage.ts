@@ -13,7 +13,6 @@ type AcceptedUsage = Readonly<Record<string, Pick<BillingUsageSnapshot, "amount"
 
 export function createRecordedUsageFixture(db: Database, acceptedUsage: AcceptedUsage) {
   const analytics = {
-    getUsageBillingFeatures: vi.fn(async () => Ok([])),
     ingestEvents: vi.fn(),
   } as unknown as Analytics
   const snapshots = new Map<string, BillingUsageSnapshot>()

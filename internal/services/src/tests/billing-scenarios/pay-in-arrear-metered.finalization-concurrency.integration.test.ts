@@ -144,7 +144,7 @@ async function loadSubscriptionContext(dbForContext: Database): Promise<Subscrip
 }
 
 async function createDraftInvoice() {
-  const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+  const { reservationFlushGateway } = createRecordedUsageFixture(db, {
     events: { quantity: 1200, amount: 12_000_000_000 },
   })
   const logger = createLogger()
@@ -160,7 +160,6 @@ async function createDraftInvoice() {
     repo: new DrizzleSubscriptionRepository(db),
     ratingService: new RatingService({
       logger,
-      analytics,
       grantsManager: new GrantsManager({ db, logger }),
     }),
     ledgerService: ledger,
@@ -218,7 +217,6 @@ function createBillingService(
     grantsManager: new GrantsManager({ db: dbForWorker, logger }),
     ratingService: new RatingService({
       logger,
-      analytics,
       grantsManager: new GrantsManager({ db: dbForWorker, logger }),
     }),
     ledgerService: ledger,

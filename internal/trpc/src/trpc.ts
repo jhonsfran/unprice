@@ -134,7 +134,6 @@ export const createInnerTRPCContext = (
     tinybirdToken: env.TINYBIRD_TOKEN,
     tinybirdUrl: env.TINYBIRD_URL,
     emit: true,
-    logger: opts.logger,
   })
 
   const services = createServiceContext({

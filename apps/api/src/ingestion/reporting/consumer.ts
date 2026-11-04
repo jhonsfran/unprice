@@ -112,7 +112,6 @@ export function createIngestionReportingConsumer(params: {
     emit: true,
     tinybirdToken: params.env.TINYBIRD_TOKEN,
     tinybirdUrl: params.env.TINYBIRD_URL,
-    logger: params.logger,
   })
 
   return new IngestionReportingConsumer({

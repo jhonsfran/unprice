@@ -1,6 +1,5 @@
 import type {
   CalculatedPrice,
-  Currency,
   grantSchemaExtended,
   meterConfigSchema,
   resetConfigSchema,
@@ -49,7 +48,7 @@ export type RatingInput =
       entitlement?: RatingEntitlementContext
       startAt?: never
       endAt?: never
-      usageData?: UsageFeatureData[]
+      usageData: UsageFeatureData[]
     }
   | {
       projectId: string
@@ -61,7 +60,7 @@ export type RatingInput =
       grants?: z.infer<typeof grantSchemaExtended>[]
       entitlement?: RatingEntitlementContext
       now?: never
-      usageData?: UsageFeatureData[]
+      usageData: UsageFeatureData[]
     }
 
 export type ResolveBillingWindowInput =
@@ -77,37 +76,3 @@ export type ResolveBillingWindowInput =
       endAt: number
       now?: never
     }
-
-type RatingTimeWindowInput =
-  | {
-      now: number
-      startAt?: never
-      endAt?: never
-    }
-  | {
-      startAt: number
-      endAt: number
-      now?: never
-    }
-
-export type IncrementalRatingInput = RatingTimeWindowInput & {
-  projectId: string
-  customerId: string
-  featureSlug: string
-  usageBefore: number
-  usageAfter: number
-  grants?: z.infer<typeof grantSchemaExtended>[]
-  entitlement?: RatingEntitlementContext
-  currency?: Currency
-  usageDataBefore?: UsageFeatureData[]
-  usageDataAfter?: UsageFeatureData[]
-}
-
-export interface IncrementalRatingResult {
-  usageBefore: number
-  usageAfter: number
-  usageDelta: number
-  before: RatedCharge[]
-  after: RatedCharge[]
-  deltaPrice: CalculatedPrice
-}

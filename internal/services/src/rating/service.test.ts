@@ -7,7 +7,6 @@ import { RatingService } from "./service"
 describe("RatingService", () => {
   it("resolves explicit billing windows without grant resolution", () => {
     const service = new RatingService({
-      analytics: {} as never,
       grantsManager: {} as never,
       logger: { warn: vi.fn() } as never,
     })
@@ -30,7 +29,6 @@ describe("RatingService", () => {
   it("loads grants for customer feature when grants are not provided", async () => {
     const listGrantsForCustomerFeature = vi.fn().mockResolvedValue(Ok([]))
     const service = new RatingService({
-      analytics: {} as never,
       grantsManager: { listGrantsForCustomerFeature } as never,
       logger: { warn: vi.fn() } as never,
     })
@@ -41,6 +39,7 @@ describe("RatingService", () => {
       featureSlug: "events",
       startAt: 10,
       endAt: 20,
+      usageData: [],
     })
 
     expect(result.err).toBeUndefined()
@@ -55,7 +54,6 @@ describe("RatingService", () => {
 
   it("resolves dayOfCreation reset anchors before monthly rating", async () => {
     const service = new RatingService({
-      analytics: {} as never,
       grantsManager: {} as never,
       logger: { warn: vi.fn() } as never,
     })
@@ -160,7 +158,6 @@ describe("RatingService", () => {
 
   it("prorates a flat monthly fee when the subscription starts mid-day", async () => {
     const service = new RatingService({
-      analytics: {} as never,
       grantsManager: {} as never,
       logger: { warn: vi.fn() } as never,
     })
@@ -263,138 +260,5 @@ describe("RatingService", () => {
       99 * expectedProrate,
       5
     )
-  })
-
-  it("filters usage billing by the grant period key", async () => {
-    const getBillingUsageAllocations = vi.fn().mockResolvedValue({
-      data: [
-        {
-          customer_entitlement_id: "ce_123",
-          grant_id: "grnt_123",
-          feature_slug: "events",
-          period_key: `month:${Date.UTC(2026, 4, 7, 12, 5, 0)}`,
-          period_start_at: Date.UTC(2026, 4, 7, 12, 5, 0),
-          usage: 5,
-          amount: 500_000,
-          currency: "EUR",
-          amount_scale: 8,
-        },
-      ],
-    })
-    const service = new RatingService({
-      analytics: { getBillingUsageAllocations } as never,
-      grantsManager: {} as never,
-      logger: { warn: vi.fn(), error: vi.fn() } as never,
-    })
-    const periodStart = Date.UTC(2026, 4, 7, 0, 0, 0)
-    const effectiveAt = Date.UTC(2026, 4, 7, 12, 5, 0)
-
-    const result = await service.rateBillingPeriod({
-      projectId: "proj_123",
-      customerId: "cus_123",
-      featureSlug: "events",
-      startAt: periodStart,
-      endAt: Date.UTC(2026, 5, 7, 0, 0, 0),
-      grants: [
-        {
-          id: "grnt_123",
-          projectId: "proj_123",
-          customerEntitlementId: "ce_123",
-          type: "subscription",
-          priority: 10,
-          allowanceUnits: 100,
-          effectiveAt,
-          expiresAt: null,
-          metadata: null,
-          createdAtM: effectiveAt,
-          updatedAtM: effectiveAt,
-          customerEntitlement: {
-            id: "ce_123",
-            projectId: "proj_123",
-            customerId: "cus_123",
-            featurePlanVersionId: "fv_123",
-            subscriptionId: "sub_123",
-            subscriptionPhaseId: "sp_123",
-            subscriptionItemId: "si_123",
-            effectiveAt,
-            expiresAt: null,
-            overageStrategy: "none",
-            metadata: null,
-            createdAtM: effectiveAt,
-            updatedAtM: effectiveAt,
-            featurePlanVersion: {
-              id: "fv_123",
-              projectId: "proj_123",
-              planVersionId: "pv_123",
-              type: "feature",
-              featureId: "feat_123",
-              featureType: "usage",
-              unitOfMeasure: "events",
-              config: {
-                price: {
-                  dinero: dinero({ amount: 1, currency: currencies.EUR, scale: 3 }).toJSON(),
-                  displayAmount: "0.001",
-                },
-                usageMode: "unit",
-                units: 1,
-              },
-              billingConfig: {
-                name: "monthly",
-                billingInterval: "month",
-                billingIntervalCount: 1,
-                billingAnchor: "dayOfCreation",
-                planType: "recurring",
-              },
-              resetConfig: {
-                name: "monthly",
-                resetInterval: "month",
-                resetIntervalCount: 1,
-                resetAnchor: "dayOfCreation",
-                planType: "recurring",
-              },
-              meterConfig: {
-                aggregationMethod: "sum",
-                aggregationField: "value",
-                eventId: "evt_123",
-                eventSlug: "events",
-              },
-              metadata: null,
-              order: 0,
-              defaultQuantity: null,
-              limit: null,
-              createdAtM: effectiveAt,
-              updatedAtM: effectiveAt,
-              feature: {
-                id: "feat_123",
-                projectId: "proj_123",
-                slug: "events",
-                code: 1,
-                title: "Events",
-                description: null,
-                unitOfMeasure: "events",
-                meterConfig: null,
-                createdAtM: effectiveAt,
-                updatedAtM: effectiveAt,
-              },
-            },
-          },
-        },
-      ],
-    })
-
-    expect(result.err).toBeUndefined()
-    expect(getBillingUsageAllocations).toHaveBeenCalledWith(
-      expect.objectContaining({
-        customer_entitlement_ids: ["ce_123"],
-        start: periodStart,
-        end: Date.UTC(2026, 5, 7, 0, 0, 0),
-      })
-    )
-    expect(
-      result.val?.map((charge) => ({
-        usage: charge.usage,
-        amount: toDecimal(charge.price.totalPrice.dinero),
-      }))
-    ).toEqual([{ usage: 5, amount: "0.005" }])
   })
 })

@@ -99,12 +99,11 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
     const logger = createLogger()
     const ledger = new LedgerGateway({ db, logger })
     const wallet = new WalletService({ db, logger, ledgerGateway: ledger })
-    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+    const { reservationFlushGateway } = createRecordedUsageFixture(db, {
       events: { quantity: 1200, amount: 12_000_000_000 },
     })
     const rating = new RatingService({
       logger,
-      analytics,
       grantsManager: new GrantsManager({ db, logger }),
     })
     const repo = new DrizzleSubscriptionRepository(db)
@@ -273,12 +272,11 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
     const logger = createLogger()
     const ledger = new LedgerGateway({ db, logger })
     const wallet = new WalletService({ db, logger, ledgerGateway: ledger })
-    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+    const { reservationFlushGateway } = createRecordedUsageFixture(db, {
       events: { quantity: 1200, amount: 12_000_000_000 },
     })
     const rating = new RatingService({
       logger,
-      analytics,
       grantsManager: new GrantsManager({ db, logger }),
     })
     const repo = new DrizzleSubscriptionRepository(db)
@@ -411,12 +409,11 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
     const logger = createLogger()
     const ledger = new LedgerGateway({ db, logger })
     const wallet = new WalletService({ db, logger, ledgerGateway: ledger })
-    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+    const { reservationFlushGateway } = createRecordedUsageFixture(db, {
       events: { quantity: 1200, amount: 12_000_000_000 },
     })
     const rating = new RatingService({
       logger,
-      analytics,
       grantsManager: new GrantsManager({ db, logger }),
     })
     const repo = new DrizzleSubscriptionRepository(db)
@@ -608,12 +605,11 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
     const logger = createLogger()
     const ledger = new LedgerGateway({ db, logger })
     const wallet = new WalletService({ db, logger, ledgerGateway: ledger })
-    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+    const { reservationFlushGateway } = createRecordedUsageFixture(db, {
       events: { quantity: 1200, amount: 12_000_000_000 },
     })
     const rating = new RatingService({
       logger,
-      analytics,
       grantsManager: new GrantsManager({ db, logger }),
     })
     const repo = new DrizzleSubscriptionRepository(db)

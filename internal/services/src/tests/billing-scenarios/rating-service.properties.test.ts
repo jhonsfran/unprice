@@ -1,4 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
 import { currencies, dinero } from "@unprice/db/utils"
 import type { grantSchemaExtended } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logs"
@@ -37,7 +36,6 @@ function createLogger(): Logger {
 function createRatingService() {
   return new RatingService({
     logger: createLogger(),
-    analytics: {} as Analytics,
     grantsManager: {} as never,
   })
 }

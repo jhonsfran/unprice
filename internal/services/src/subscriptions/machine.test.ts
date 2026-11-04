@@ -196,11 +196,7 @@ describe("SubscriptionMachine - comprehensive", () => {
     vi.clearAllMocks()
     dbMockData = []
 
-    mockAnalytics = {
-      getBillingUsage: vi
-        .fn()
-        .mockResolvedValue({ data: [{ flat_all: 10, tier_all: 20, package_all: 30 }] }),
-    } as unknown as Analytics
+    mockAnalytics = {} as unknown as Analytics
 
     mockLogger = {
       set: vi.fn(),

@@ -695,27 +695,7 @@ export type PlanConversionResponse = z.infer<typeof planConversionResponseSchema
 export type PageCountryVisits = Awaited<ReturnType<Analytics["getCountryVisits"]>>["data"]
 export type PageBrowserVisits = Awaited<ReturnType<Analytics["getBrowserVisits"]>>["data"]
 export type PageOverview = Awaited<ReturnType<Analytics["getPagesOverview"]>>["data"]
-export type FeaturesUsage = Awaited<ReturnType<Analytics["getFeaturesUsage"]>>["data"]
 export type PlansConversion = Awaited<ReturnType<Analytics["getPlansConversion"]>>["data"]
 export type Usage = GetUsageResponse[]
 
 export type Stats = z.infer<typeof statsSchema>
-
-export const billingUsageAllocationQuerySchema = z.object({
-  project_id: z.string(),
-  customer_id: z.string(),
-  customer_entitlement_ids: z.array(z.string()),
-  feature_slugs: z.array(z.string()),
-  start: z.number().int(),
-  end: z.number().int(),
-})
-
-export const billingUsageAllocationRowSchema = entitlementMeterFactSchemaV1
-  .pick({ customer_entitlement_id: true, grant_id: true, period_key: true, feature_slug: true })
-  .extend({
-    period_start_at: z.number().int(),
-    usage: z.number().finite(),
-    amount: z.coerce.number().int().safe(),
-    currency: z.string().length(3),
-    amount_scale: z.number().int(),
-  })

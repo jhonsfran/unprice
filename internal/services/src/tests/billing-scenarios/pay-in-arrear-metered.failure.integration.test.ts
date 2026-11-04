@@ -113,12 +113,11 @@ describe("P0-A pay_in_arrear metered billing failure injection", () => {
 
   it("rolls back invoice and ledger state when a mid-transaction ledger write fails", async () => {
     const logger = createLogger()
-    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+    const { reservationFlushGateway } = createRecordedUsageFixture(db, {
       events: { quantity: 1200, amount: 12_000_000_000 },
     })
     const ratingService = new RatingService({
       logger,
-      analytics,
       grantsManager: new GrantsManager({ db, logger }),
     })
     const failingLedger = new FailingLedgerGateway({ db, logger }, 2)
