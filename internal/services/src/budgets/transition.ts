@@ -20,6 +20,7 @@ import {
   isClosed,
 } from "./config"
 import { type Change, balanceOf, decide, holdNumber, repricesBudget, upsertPricing } from "./decide"
+import { decideFunding, fundingViolations, prepaidPayer } from "./funding"
 import { type RowStep, checkTransition } from "./invariants"
 import { alarmAt, consume, dueAt, rollUsage, trackLimits } from "./ledger"
 import { cardIdsOf, featuresOf } from "./meter"
@@ -29,6 +30,8 @@ import {
   type BudgetOutcome,
   type BudgetReply,
   type BudgetView,
+  type Funding,
+  type FundingWork,
   type LeaseOperation,
   type LeaseView,
   type Ledger,
@@ -43,7 +46,6 @@ import {
   type PositionWrite,
   byPeriodId,
   movedPositions,
-  sealCutoff,
   statementViolations,
   statementsAnswer,
 } from "./statements"
@@ -77,10 +79,12 @@ export type BudgetReader = {
   readStatements(periodIds: readonly string[]): Statement[]
   /** Statements of these features that are open or overlap [from, to). */
   readFeatureStatements(features: readonly string[], from: number, to: number): Statement[]
-  /** Open and sealed statements with this key whose `end <= at`. */
-  readSealable(statementKey: string, at: number): Statement[]
+  /** Every statement with this key, whatever its state. */
+  readKeyStatements(statementKey: string): Statement[]
   /** Every open and sealed statement. */
   readUnfinishedStatements(): Statement[]
+  /** The wallet reservations of these statement keys; a key without one is absent. */
+  readFunding(statementKeys: readonly string[]): Funding[]
 }
 
 /**
@@ -120,6 +124,7 @@ export function loadView(
     now
   )
   return {
+    funding: budget ? reader.readFunding(fundingKeysOf(command, budget, statements)) : [],
     budget,
     ledger,
     target,
@@ -142,6 +147,25 @@ function staleCardsOf(reader: BudgetReader, cardIds: readonly string[], now: num
     const at = Object.hasOwn(refreshedAt, cardId) ? refreshedAt[cardId] : undefined
     return at === undefined || now - at >= CARD_REFRESH_MS
   })
+}
+
+/**
+ * The statement keys whose wallet reservations the command reads: the one a funding command or a
+ * seal addresses, and for a prepaid budget the keys of the statements an event reads.
+ */
+function fundingKeysOf(
+  command: BudgetCommand,
+  budget: BudgetRecord,
+  statements: readonly Statement[]
+): string[] {
+  switch (command.type) {
+    case "fund":
+    case "applyFunding":
+    case "sealStatements":
+      return [command.statementKey]
+  }
+  if (!prepaidPayer(budget)) return []
+  return [...new Set(statements.map((statement) => statement.statementKey))]
 }
 
 /** The pricing the command runs under: an upsert's, else the budget's or the one it creates. */
@@ -236,8 +260,11 @@ function statementsOf(
         ),
       ]
     }
+    // A seal and a funding command read the whole key: a reservation closes once none is open.
     case "sealStatements":
-      return reader.readSealable(command.statementKey, sealCutoff(command, now))
+    case "fund":
+    case "applyFunding":
+      return reader.readKeyStatements(command.statementKey)
     case "completeStatements":
       return reader.readStatements(command.periodIds)
     case "statements":
@@ -293,6 +320,8 @@ export type BudgetTransition = Readonly<{
   statements: readonly Statement[]
   /** The positions those statements moved; a store that keeps positions apart writes these. */
   positions: readonly PositionWrite[]
+  /** Wallet reservations created or changed; the store upserts exactly these. */
+  funding: readonly Funding[]
   /**
    * Earliest `alarmAt` among the written rows, and a new config's `deletableAt`; the store only
    * ever lowers its alarm to it. A window boundary needs no wake: a counter keeps its period's
@@ -360,6 +389,18 @@ export function transition(params: {
   const priors = new Map<string, Operation>(view.expired.map((row) => [row.id, row]))
   if (live) priors.set(live.id, live)
 
+  const fundingInput = {
+    command,
+    view,
+    budget,
+    change,
+    heldBefore: rolledLedger.held.amount,
+    now,
+  }
+  const funded = decideFunding(fundingInput)
+  if (funded.err) return Err(funded.err)
+  const funding = funded.val.rows
+
   const statements = change.statements ?? []
   const priorStatements = byPeriodId(view.statements)
   const steps = change.rows.map((row): RowStep => [priors.get(row.id), row])
@@ -376,6 +417,7 @@ export function transition(params: {
       steps: statements.map((s) => [priorStatements.get(s.periodId), s] as const),
       rows: steps,
     }),
+    ...fundingViolations({ input: fundingInput, heldAfter: ledger.held.amount, rows: funding }),
   ]
   if (violations.length > 0) {
     throw new Error(`budget transition breaks invariants: ${violations.join("; ")}`)
@@ -392,6 +434,7 @@ export function transition(params: {
     budget !== null &&
     (operations.length > 0 ||
       statements.length > 0 ||
+      funding.length > 0 ||
       periods.length > 0 ||
       rolled.retired.length > 0 ||
       change.configured !== undefined ||
@@ -408,6 +451,7 @@ export function transition(params: {
     retiredWindows: rolled.retired,
     statements,
     positions: statements.flatMap((s) => movedPositions(priorStatements.get(s.periodId), s)),
+    funding,
     wakeAt,
     ...replyOf(command, {
       budget,
@@ -418,6 +462,8 @@ export function transition(params: {
       created: change.configured !== undefined && command.type !== "upsert",
       history: [...periods, ...view.history],
       statements: [...byPeriodId([...view.statements, ...statements]).values()],
+      work: funded.val.work,
+      fundingReplayed: funded.val.replayed,
       now,
     }),
   })
@@ -440,6 +486,8 @@ function countCall(
     case "registerStatements":
     case "sealStatements":
     case "completeStatements":
+    case "fund":
+    case "applyFunding":
       return operations
   }
   if (change.rows.length === 0 && change.configured === undefined) return operations
@@ -470,6 +518,10 @@ type OutcomeParams = Readonly<{
   history: readonly WindowPeriod[]
   /** The statements the command read, with its writes applied. */
   statements: readonly Statement[]
+  /** Funding intents pending after the command, for a funding command or a seal. */
+  work: readonly FundingWork[]
+  /** An `applyFunding` for an intent already applied. */
+  fundingReplayed: boolean
   now: number
 }>
 
@@ -505,12 +557,21 @@ function outcomeOf(command: BudgetCommand, params: OutcomeParams): BudgetOutcome
       }
     case "statements":
     case "registerStatements":
-    case "sealStatements":
     case "completeStatements":
       return {
         type: command.type,
         statements: statementsAnswer(command, params.statements, now),
       }
+    case "sealStatements":
+      return {
+        type: command.type,
+        statements: statementsAnswer(command, params.statements, now),
+        funding: params.work,
+      }
+    case "fund":
+      return { type: "fund", funding: params.work }
+    case "applyFunding":
+      return { type: "applyFunding", funding: params.work, replayed: params.fundingReplayed }
     case "authorize": {
       if (row?.kind !== "hold") throw new Error("authorize produced no hold row")
       const { id: holdId, reserved, expiresAt } = row

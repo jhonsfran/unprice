@@ -270,6 +270,9 @@ function decideVerb(
   switch (command.type) {
     case "get":
     case "statements":
+    // Funding moves no operation row; `decideFunding` steps the wallet reservation.
+    case "fund":
+    case "applyFunding":
       return Ok(unchanged(null))
     case "registerStatements":
       return writesStatements(decideRegister(command.statements, state.statements, now))

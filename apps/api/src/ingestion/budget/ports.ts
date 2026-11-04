@@ -31,11 +31,14 @@ export type BudgetStoreTx = BudgetReader & {
       | "retiredWindows"
       | "statements"
       | "positions"
+      | "funding"
       | "now"
     >
   ): void
   /** Replaces the cached copy of each card with what the card source returned at `at`. */
   cacheCards(cards: readonly CardRows[], at: number): void
+  /** Whether a wallet reservation is still open: the storage must outlive it. */
+  hasOpenFunding(): boolean
   /** Deletes up to `limit` exported closed rows whose retention ended by `now`. */
   purgeOperations(now: number, limit: number): void
   /**

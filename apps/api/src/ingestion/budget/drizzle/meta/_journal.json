@@ -71,6 +71,13 @@
       "when": 1793806914673,
       "tag": "0009_operation_journal",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1793817773427,
+      "tag": "0010_budget_funding",
+      "breakpoints": true
     }
   ]
 }

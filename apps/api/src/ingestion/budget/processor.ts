@@ -17,6 +17,11 @@ import type { BudgetProcessorDeps, BudgetStoreTx } from "./ports"
 export const ALARM_PURGE_LIMIT = 2048
 export const ALARM_CONTINUE_MS = 1_000
 export const ALARM_RETRY_MS = 30_000
+/**
+ * How often a closed budget whose wallet reservation is still open checks again before deleting:
+ * deleting it would strand the reserved money, and only billing's seal closes the reservation.
+ */
+export const OPEN_FUNDING_RECHECK_MS = 24 * 60 * 60_000
 /** How long written rows wait for the alarm that exports them, so one send carries many. */
 export const JOURNAL_EXPORT_DELAY_MS = 10_000
 /** The most journal batches one alarm sends; the alarm comes back for the rest. */
@@ -226,7 +231,8 @@ function afterExport(tx: BudgetStoreTx, sweptAt: number | null): Swept {
   // A row the journal has not received keeps the storage: deleting it would lose the row.
   const unexported = tx.readUnexported(1).length > 0
   if (due === null && !unexported && deletable !== null && sweptAt >= deletable) {
-    return { destroy: true }
+    if (!tx.hasOpenFunding()) return { destroy: true }
+    return { destroy: false, next: sweptAt + OPEN_FUNDING_RECHECK_MS, unexported }
   }
   // Work a capped batch left behind is already due, so the floor is also the continuation delay,
   // and it keeps a row the sweep cannot clear from spinning the alarm. A deletion already due

@@ -28,8 +28,11 @@ const hour = 60 * minute
 const day = 24 * hour
 const ZERO = BigInt(0)
 
-/** What the model takes: every verb with a usage vector; events and statements are out of scope. */
-type ModelCommand = Exclude<BudgetCommand, { type: StatementCommandType } | { event: object }>
+/** What the model takes: every verb with a usage vector; events, statements, and funding are out of scope. */
+type ModelCommand = Exclude<
+  BudgetCommand,
+  { type: StatementCommandType | "fund" | "applyFunding" } | { event: object }
+>
 
 type Window = "hour" | "day" | "week" | "month" | "never"
 type Every = "day" | "week" | "month"

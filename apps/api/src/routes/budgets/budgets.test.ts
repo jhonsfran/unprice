@@ -329,6 +329,26 @@ describe("budgets API", () => {
     })
   })
 
+  it("returns 402 when the payer's wallet cannot fund a charge", async () => {
+    rejectWith({
+      code: "WALLET_EMPTY",
+      statementKey: "inv_nov",
+      required: usd(1),
+      available: BigInt(0),
+    })
+
+    const response = await call("/v1/budgets/charge", {
+      key: "customer:acme",
+      amount: "1",
+      idempotencyKey: "c1",
+    })
+
+    expect(response.status).toBe(402)
+    expect(await response.json()).toEqual(
+      errorBody("BUDGET_EXCEEDED", "The wallet cannot fund 1 more usage on this budget")
+    )
+  })
+
   it("returns 402 with the blocking limit when a charge does not fit", async () => {
     rejectWith({
       code: "LIMIT_EXCEEDED",

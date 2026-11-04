@@ -2,6 +2,7 @@ import { sha256HexSync } from "@unprice/db/utils"
 import {
   type BudgetRecord,
   type ChargeOperation,
+  type Funding,
   type HoldOperation,
   type InspectReader,
   type LeaseOperation,
@@ -368,14 +369,31 @@ function bind(db: SqliteTx, configs: { last: ConfigCache }): BudgetStoreTx {
             )
           ),
 
-    readSealable: (statementKey, at) =>
-      readStatementsWhere(
-        and(
-          eq(statements.statementKey, statementKey),
-          lte(statements.end, at),
-          sql`${statements.state} IN ('open', 'sealed')`
-        )
-      ),
+    readKeyStatements: (statementKey) =>
+      readStatementsWhere(eq(statements.statementKey, statementKey)),
+
+    readFunding(statementKeys) {
+      if (statementKeys.length === 0) return []
+      const funding = schema.budgetFunding
+      return db
+        .select({ dataJson: funding.dataJson })
+        .from(funding)
+        .where(sql`${funding.statementKey} IN ${jsonList(statementKeys)}`)
+        .all()
+        .map((row) => decode<Funding>(row.dataJson))
+    },
+
+    hasOpenFunding() {
+      const funding = schema.budgetFunding
+      return (
+        db
+          .select({ statementKey: funding.statementKey })
+          .from(funding)
+          .where(eq(funding.state, "open"))
+          .limit(1)
+          .all().length > 0
+      )
+    },
 
     readUnfinishedStatements: () =>
       readStatementsWhere(sql`${statements.state} IN ('open', 'sealed')`),
@@ -418,8 +436,16 @@ function bind(db: SqliteTx, configs: { last: ConfigCache }): BudgetStoreTx {
       retiredWindows,
       statements: written,
       positions: moved,
+      funding,
       now,
     }) {
+      for (const row of funding) {
+        const values = { state: row.state, dataJson: encode(row) }
+        db.insert(schema.budgetFunding)
+          .values({ statementKey: row.statementKey, ...values })
+          .onConflictDoUpdate({ target: schema.budgetFunding.statementKey, set: values })
+          .run()
+      }
       for (const { positions: _positions, quantity, amount, cost, ...statement } of written) {
         const row = { ...statement, totalsJson: encode({ quantity, amount, cost }) }
         db.insert(statements)

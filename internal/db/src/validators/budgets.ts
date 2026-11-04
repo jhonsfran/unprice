@@ -32,6 +32,7 @@ import {
 } from "./budget-shared"
 import { eventSlugSchema } from "./events"
 import { featurePricingSchema } from "./rate-cards"
+import { currencySchema } from "./shared"
 
 export {
   BUDGET_WINDOWS,
@@ -169,15 +170,28 @@ export const budgetMeteredFeatureSchema = featurePricingSchema.extend({
 })
 
 /**
+ * How a payer budget's priced usage is paid for (ADR-0008 D10). Postpaid (an uncapped plan or a
+ * credit line) never calls the wallet: the sealed statement becomes the receivable. Prepaid (or
+ * capped) draws one wallet reservation per statement key from the customer's wallet before it
+ * admits priced usage. Absent means postpaid. Billing's compile sets it; internal callers only.
+ */
+export const budgetFundingSchema = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("postpaid") }).strict(),
+  z.object({ mode: z.literal("prepaid"), customerId: z.string().min(1).max(36) }).strict(),
+])
+export type BudgetFunding = z.infer<typeof budgetFundingSchema>
+
+/**
  * How a budget meters and prices usage events: the rate cards by id (their unit must be the
- * budget's), the metered features, and whether usage needs a registered billing statement
- * (ADR-0007: payer budgets require one). Internal callers only.
+ * budget's), the metered features, whether usage needs a registered billing statement
+ * (ADR-0007: payer budgets require one), and how priced usage is funded. Internal callers only.
  */
 export const budgetPricingSchema = z
   .object({
     cards: z.object({ base: z.string().min(1), overlay: z.string().min(1).optional() }).strict(),
     features: z.array(budgetMeteredFeatureSchema).max(64),
     statements: z.enum(["required", "none"]),
+    funding: budgetFundingSchema.optional(),
   })
   .strict()
 
@@ -240,9 +254,27 @@ function toBudgetDefinition({
 }
 
 function withValidLimits(
-  { config }: ReturnType<typeof toBudgetDefinition>,
+  { unit, config }: ReturnType<typeof toBudgetDefinition>,
   ctx: z.RefinementCtx
 ): void {
+  // A wallet holds money in one currency, and its reservation closes when a statement seals.
+  if (config.pricing?.funding?.mode === "prepaid") {
+    const currency = unit.startsWith("money:") ? unit.slice("money:".length) : null
+    if (currency === null || !currencySchema.safeParse(currency).success) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["pricing", "funding"],
+        message: "a prepaid budget's unit must be a wallet currency",
+      })
+    }
+    if (config.pricing.statements !== "required") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["pricing", "funding"],
+        message: "a prepaid budget needs registered statements",
+      })
+    }
+  }
   const seen = new Set<string>()
   config.limits.forEach((limit, index) => {
     if (seen.has(limit.id)) {

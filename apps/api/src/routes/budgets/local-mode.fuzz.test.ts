@@ -122,7 +122,9 @@ class MemoryBudgetStore implements BudgetStore {
     cacheCards: () => {},
     readStatements: () => [],
     readFeatureStatements: () => [],
-    readSealable: () => [],
+    readKeyStatements: () => [],
+    readFunding: () => [],
+    hasOpenFunding: () => false,
     readUnfinishedStatements: () => [],
     readHistory: (windowIds, limit) =>
       windowIds.flatMap((id) =>

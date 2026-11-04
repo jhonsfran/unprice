@@ -125,3 +125,14 @@ export const budgetCards = sqliteTable("budget_cards", {
   cardJson: text("card_json").notNull(),
   refreshedAt: integer("refreshed_at").notNull(),
 })
+
+/**
+ * A prepaid budget's wallet reservation for one statement key (ADR-0008 D10): its allocation, what
+ * the key consumed, the last applied `seq`, and the intent pending against the wallet. The row is
+ * tagged-bigint JSON; `state` is a column so the alarm can ask whether any reservation is open.
+ */
+export const budgetFunding = sqliteTable("budget_funding", {
+  statementKey: text("statement_key").primaryKey(),
+  state: text("state", { enum: ["open", "closed"] }).notNull(),
+  dataJson: text("data_json").notNull(),
+})

@@ -788,7 +788,7 @@ describe("a payer budget prices usage events at ingestion", () => {
     )
     ok(store.run(charge("c1", image("1024")), NOV + 21 * day))
 
-    expect(early.outcome).toEqual({ type: "sealStatements", statements: [] })
+    expect(early.outcome).toEqual({ type: "sealStatements", statements: [], funding: [] })
     expect(totals(store.statements.get("images:inv_2026-11"))).toMatchObject({
       state: "open",
       amount: "0.04",

@@ -1847,6 +1847,7 @@ describe("history does not slow the hot path", () => {
       staleCards: [],
       reservationsOpen: false,
       statements: [],
+      funding: [],
     }
     const first = transition({ view: state, command: upsert(month100), clockMs: t0 })
     if (first.err) throw first.err

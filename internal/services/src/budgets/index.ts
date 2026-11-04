@@ -1,6 +1,7 @@
 export * from "./catalog"
 export * from "./config"
 export * from "./decide"
+export * from "./funding"
 export * from "./inspect"
 export * from "./ledger"
 export * from "./invariants"

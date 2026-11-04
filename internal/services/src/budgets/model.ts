@@ -151,6 +151,74 @@ export type Statement = Readonly<{
 /** What billing registers for one period; the rest of the statement starts at zero. */
 export type StatementRegistration = Readonly<BudgetStatementRegistration>
 
+// Funding (ADR-0008 D10)
+
+/** One statement's share of what its statement key captures from the wallet at close. */
+export type FundingCapture = Readonly<{ periodId: string; amount: Amount }>
+
+/**
+ * A wallet call a prepaid budget persisted before it is made, so a crash replays the same `seq`
+ * with the same fields and the wallet answers the replay as it answered the first call. `reserve`
+ * opens the statement key's reservation for [periodStart, periodEnd), or extends the one it has;
+ * `at` decides which wallet credits may drain. `close` captures each statement's share of what
+ * the key consumed, up to the allocation, then releases the rest.
+ */
+export type FundingIntent =
+  | Readonly<{
+      kind: "reserve"
+      seq: number
+      amount: Amount
+      at: number
+      periodStart: number
+      periodEnd: number
+    }>
+  | Readonly<{ kind: "close"; seq: number; captures: readonly FundingCapture[] }>
+
+/**
+ * The wallet reservation of one statement key of a prepaid budget. The budget consumes the
+ * allocation locally; the wallet sees a reserve, an extend per refill, and one close.
+ * - `allocated` only grows, by what each reserve was granted.
+ * - `consumed` is the sum of the key's statement amounts, moved with every statement write.
+ * - `seq` is the last intent applied; a pending intent is always `seq + 1`.
+ * - A closed reservation never changes again; `captured` is what its close moved to consumed.
+ */
+export type Funding = Readonly<{
+  statementKey: string
+  /** The payer whose wallet funds the key, fixed when the reservation is first asked for. */
+  customerId: string
+  reservationId: string | null
+  allocated: Amount
+  consumed: Amount
+  seq: number
+  pending: FundingIntent | null
+  state: "open" | "closed"
+  closedAt: number | null
+  captured: Amount
+}>
+
+/** What the wallet returned for an intent, sent back to the budget with the intent's `seq`. */
+export type FundingResult =
+  | Readonly<{ kind: "reserved"; reservationId: string; granted: Amount }>
+  | Readonly<{ kind: "closed" }>
+
+/** A pending intent with what the wallet needs to run it. */
+export type FundingWork = Readonly<{
+  statementKey: string
+  customerId: string
+  /** The ISO currency of the budget's `money:` unit. */
+  currency: string
+  reservationId: string | null
+  intent: FundingIntent
+}>
+
+/** A statement key whose allocation cannot cover what a charge or hold needs from it. */
+export type FundingNeed = Readonly<{
+  statementKey: string
+  required: Amount
+  /** Allocated less consumed less everything held; negative once recorded usage overdrew it. */
+  available: SignedAmount
+}>
+
 /**
  * A hold stays open until it is settled or released, or until `expiresAt` passes: the alarm then
  * settles it at all it reserved, because a timer cannot prove the work stopped. Counting all of it
@@ -304,6 +372,11 @@ export type BudgetView = Readonly<{
   /** For an upsert that changes an existing budget's pricing: whether a hold or lease is open. */
   reservationsOpen: boolean
   /**
+   * The wallet reservations of the statement keys the command reads: for a prepaid budget's event,
+   * the keys of its statements; for a funding command or a seal, the key it addresses.
+   */
+  funding: readonly Funding[]
+  /**
    * The statements the command reads: for an event, its features' open statements and those
    * covering its time; for a statement command, the ones it addresses.
    */
@@ -397,6 +470,13 @@ export type BudgetCommand =
   | Readonly<{ type: "completeStatements"; periodIds: readonly string[] }>
   /** Open and sealed statements. */
   | Readonly<{ type: "statements" }>
+  /**
+   * Persists a reserve intent for a prepaid budget's statement key that cannot cover `required`,
+   * or answers the intent already pending on it. Nothing to do once the key can cover it.
+   */
+  | Readonly<{ type: "fund"; statementKey: string; required: Amount }>
+  /** Applies what the wallet returned for the key's pending intent with this `seq`. */
+  | Readonly<{ type: "applyFunding"; statementKey: string; seq: number; result: FundingResult }>
 
 // Outcomes
 
@@ -522,7 +602,20 @@ export type BudgetOutcome =
       balance: BudgetBalance
     }>
   | Readonly<{ type: "sweep" }>
-  | Readonly<{ type: StatementCommandType; statements: readonly Statement[] }>
+  | Readonly<{
+      type: Exclude<StatementCommandType, "sealStatements">
+      statements: readonly Statement[]
+    }>
+  /** `funding`: the close the seal left pending on its key's wallet reservation, if any. */
+  | Readonly<{
+      type: "sealStatements"
+      statements: readonly Statement[]
+      funding: readonly FundingWork[]
+    }>
+  /** `funding`: the intent to run against the wallet; empty when the key needs none. */
+  | Readonly<{ type: "fund"; funding: readonly FundingWork[] }>
+  /** `funding`: the intent the key needs next (a close once nothing is open on it). */
+  | Readonly<{ type: "applyFunding"; funding: readonly FundingWork[]; replayed: boolean }>
 
 export type StatementCommandType =
   | "registerStatements"
@@ -623,6 +716,20 @@ export type BudgetRejection =
    * that estimated it, and a lease never reaches a statement.
    */
   | Readonly<{ code: "RESERVATIONS_OPEN" }>
+  /**
+   * A prepaid budget's allocation cannot cover this charge or hold: the caller reserves from the
+   * wallet (`fund`) and sends the command again. Nothing was written.
+   */
+  | Readonly<{ code: "FUNDING_REQUIRED"; needs: readonly FundingNeed[] }>
+  /** The payer's wallet could not fund this charge or hold, even after a reserve. */
+  | Readonly<{
+      code: "WALLET_EMPTY"
+      statementKey: string
+      required: Amount
+      available: SignedAmount
+    }>
+  /** A wallet result for an intent the statement key is not waiting on. */
+  | Readonly<{ code: "FUNDING_SEQ_CONFLICT"; statementKey: string; seq: number; requested: number }>
 
 export type BudgetErrorCode = BudgetRejection["code"]
 
@@ -726,6 +833,12 @@ function rejectionMessage(rejection: BudgetRejection): string {
       return "This budget prices usage from events; send an event instead of an amount or a lease"
     case "RESERVATIONS_OPEN":
       return "Pricing can change only while no hold or lease is open; settle or release them first"
+    case "FUNDING_REQUIRED":
+      return `Statements ${rejection.needs.map((need) => need.statementKey).join(", ")} need wallet funds before this budget admits more usage`
+    case "WALLET_EMPTY":
+      return `The wallet cannot fund ${formatAmount(rejection.required)} more usage on this budget`
+    case "FUNDING_SEQ_CONFLICT":
+      return `Statement ${rejection.statementKey} applied wallet intent ${rejection.seq}; ${rejection.requested} is not pending`
   }
 }
 

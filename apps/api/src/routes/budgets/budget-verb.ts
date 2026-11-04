@@ -21,6 +21,7 @@ import {
   type BudgetVerbRequest,
   executeBudgetCommand,
   rateCardSource,
+  walletFunding,
 } from "@unprice/services/use-cases"
 import type { Context } from "hono"
 import { setMetric } from "hono/timing"
@@ -57,12 +58,13 @@ export async function runBudgetVerb<R extends BudgetVerbRequest>(
     })
   }
   const budgets = new CloudflareBudgetClient(c.env)
-  const { budgetCatalog, rateCards } = c.get("services")
+  const { budgetCatalog, rateCards, wallet } = c.get("services")
   const result = await callBudget(c, request.type, () =>
     executeBudgetCommand(
       {
         budgets,
         cards: rateCardSource(rateCards),
+        wallet: walletFunding(wallet),
         services: { budgetCatalog },
         logger: c.get("logger"),
         waitUntil: c.get("waitUntil"),
@@ -249,6 +251,9 @@ function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): Unprice
         cause: error,
         details: exceededDetails(rejection.blocked, rejection.balance),
       })
+    // A prepaid payer's wallet could not fund the usage: a denial like a limit, without its details.
+    case "WALLET_EMPTY":
+      return new UnpriceApiError({ code: "BUDGET_EXCEEDED", message, cause: error })
     case "BUDGET_CLOSED":
       return new UnpriceApiError({
         code: "CONFLICT",
@@ -318,6 +323,9 @@ function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): Unprice
     case "RESERVATIONS_OPEN":
     // Reaches a caller only when the refresh before the retry was itself stale; a retry refreshes.
     case "CARDS_STALE":
+    // Internal to the funding protocol; reaches a caller only when a concurrent call raced it.
+    case "FUNDING_REQUIRED":
+    case "FUNDING_SEQ_CONFLICT":
       return new UnpriceApiError({ code: "CONFLICT", message, cause: error })
     case "BUDGET_NOT_FOUND":
     case "HOLD_NOT_FOUND":

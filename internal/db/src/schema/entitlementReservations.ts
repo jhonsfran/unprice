@@ -34,7 +34,7 @@ import { walletCredits } from "./walletCredits"
  *   - `reconciled_at` set when the reservation is released; NULL = active.
  */
 export type EntitlementReservationMetadata = Record<string, unknown>
-export type EntitlementReservationOwnerType = "entitlement_window" | "agent_run"
+export type EntitlementReservationOwnerType = "entitlement_window" | "agent_run" | "budget"
 
 export const entitlementReservations = pgTableProject(
   "entitlement_reservations",
