@@ -92,7 +92,11 @@ For variable provider usage — an LLM call whose cost is not known until it ret
 maximum before the work and settle what it actually cost after:
 
 ```ts
-const { result: authorization, error } = await unprice.budget("customer:cus_1234567890").authorize({
+// The first call creates the budget with a $5 monthly cap; an existing budget is unchanged.
+const budget = unprice.budget("customer:cus_1234567890", {
+  ifMissing: { unit: "USD", limits: [{ amount: "5", window: "month" }] }
+});
+const { result: authorization, error } = await budget.authorize({
   amount: "0.10",
   idempotencyKey: "req_123"
 });

@@ -264,7 +264,10 @@ input, request overhead, and the configured output maximum. Do not substitute an
 product promises a hard cap.
 
 ```ts
-const budget = unprice.budget(`customer:${customerId}`)
+// The first authorize creates the cap; an existing budget is never changed.
+const budget = unprice.budget(`customer:${customerId}`, {
+  ifMissing: { unit: "USD", limits: [{ amount: "5", window: "month" }] },
+})
 
 const { result: authorization, error } = await budget.authorize({
   amount: worstCaseAmount, // a decimal string in the budget's unit, e.g. "0.10"

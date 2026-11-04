@@ -14,11 +14,14 @@ const RESERVATION_SNIPPET = `import { generateText } from "ai"
 import { Unprice } from "@unprice/api"
 
 const unprice = new Unprice({ token: process.env.UNPRICE_TOKEN })
-const budget = unprice.budget(\`customer:\${customerId}\`)
+// The first call creates the customer's cap: $5 a month.
+const budget = unprice.budget(\`customer:\${customerId}\`, {
+  ifMissing: { unit: "USD", limits: [{ amount: "5", window: "month" }] },
+})
 
 // 1. Hold the most this model call may cost.
 const { result: authorization, error } = await budget.authorize({
-  amount: "0.10", // $0.10 ceiling, held against the customer's budget
+  amount: "0.10", // $0.10 ceiling, held against the $5 cap
   idempotencyKey: messageId,
 })
 
