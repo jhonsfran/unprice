@@ -73,9 +73,27 @@ describe("priceUsage: AI tokens", () => {
         line.cost === null ? null : formatAmount(line.cost),
       ])
     ).toEqual([
-      ['llm_tokens|{"model":"gpt-4.1"}|input_tokens', "0", "1000000", "2", "1.6"],
-      ['llm_tokens|{"model":"gpt-4.1"}|cached_input_tokens', "0", "200000", "0.1", "0.08"],
-      ['llm_tokens|{"model":"gpt-4.1"}|output_tokens', "0", "50000", "0.4", "0.32"],
+      [
+        String.raw`["llm_tokens","{\"model\":\"gpt-4.1\"}","input_tokens"]`,
+        "0",
+        "1000000",
+        "2",
+        "1.6",
+      ],
+      [
+        String.raw`["llm_tokens","{\"model\":\"gpt-4.1\"}","cached_input_tokens"]`,
+        "0",
+        "200000",
+        "0.1",
+        "0.08",
+      ],
+      [
+        String.raw`["llm_tokens","{\"model\":\"gpt-4.1\"}","output_tokens"]`,
+        "0",
+        "50000",
+        "0.4",
+        "0.32",
+      ],
     ])
   })
 
@@ -118,7 +136,7 @@ describe("priceUsage: AI tokens", () => {
     ])
     expect(priced[0]?.rowId).toBe("row_tokens_default")
     expect(amounts(priced)).toEqual(["80"])
-    expect(priced[0]?.lines[2]?.positionKey).toBe("llm_tokens||output_tokens")
+    expect(priced[0]?.lines[2]?.positionKey).toBe('["llm_tokens","","output_tokens"]')
   })
 
   it("prices a credits card in credits and keeps cost in USD", () => {
@@ -140,7 +158,9 @@ describe("priceUsage: AI tokens", () => {
       ["rc_usd", "row_claude_sonnet_4"],
     ])
     expect(amounts(priced)).toEqual(["6.4", "15"])
-    expect(priced[0]?.lines[2]?.positionKey).toBe('llm_tokens|{"model":"gpt-4.1"}|output_tokens')
+    expect(priced[0]?.lines[2]?.positionKey).toBe(
+      String.raw`["llm_tokens","{\"model\":\"gpt-4.1\"}","output_tokens"]`
+    )
   })
 
   it("prices a mid-period price change on the same positions", () => {
@@ -175,8 +195,37 @@ describe("priceUsage: images, API calls, emails", () => {
       { size: "512" },
     ])
     expect(amounts(priced)).toEqual(["0.04", "0.018", "0.018"])
-    expect(priced[0]?.lines[0]?.positionKey).toBe('images|{"size":"1024"}|#event')
+    expect(priced[0]?.lines[0]?.positionKey).toBe(String.raw`["images","{\"size\":\"1024\"}",null]`)
     expect(formatAmount(priced[1]?.cost ?? BigInt(-1))).toBe("0.0144")
+  })
+
+  it("keys a per-event position apart from a property named #event", () => {
+    // Built past the schema, which refuses names starting with #: the key alone keeps them apart.
+    const image = rowOf(usdCard, "row_image_1024")
+    const twoPositions: CardRows = {
+      card: usdCard.card,
+      rows: [
+        {
+          ...image,
+          price: {
+            type: "unit",
+            components: [
+              { property: null, rate: BigInt(100_000_000), per: 1 },
+              { property: "#event", rate: BigInt(100_000_000), per: 1 },
+            ],
+          },
+          cost: null,
+        },
+      ],
+    }
+    const { priced } = price({ base: twoPositions }, features.images, [
+      { size: "1024", "#event": 3 },
+    ])
+
+    expect(priced[0]?.lines.map((line) => [line.positionKey, formatAmount(line.after)])).toEqual([
+      [String.raw`["images","{\"size\":\"1024\"}",null]`, "1"],
+      [String.raw`["images","{\"size\":\"1024\"}","#event"]`, "3"],
+    ])
   })
 
   it("denies an image size the card does not price", () => {
@@ -288,7 +337,9 @@ describe("priceUsage: rounding, validation, purity", () => {
   })
 
   it("reads positions without advancing them", () => {
-    const positions = new Map([['llm_tokens|{"model":"gpt-4.1"}|input_tokens', amountOf("10")]])
+    const positions = new Map([
+      [String.raw`["llm_tokens","{\"model\":\"gpt-4.1\"}","input_tokens"]`, amountOf("10")],
+    ])
     const input = {
       cards: { base: usdCard },
       feature: features.llmTokens,
@@ -301,7 +352,10 @@ describe("priceUsage: rounding, validation, purity", () => {
     expect(second).toEqual(first)
     expect(formatAmount(first.val?.lines[0]?.after ?? BigInt(-1))).toBe("15")
     expect(
-      formatAmount(positions.get('llm_tokens|{"model":"gpt-4.1"}|input_tokens') ?? BigInt(-1))
+      formatAmount(
+        positions.get(String.raw`["llm_tokens","{\"model\":\"gpt-4.1\"}","input_tokens"]`) ??
+          BigInt(-1)
+      )
     ).toBe("10")
   })
 })
@@ -392,6 +446,32 @@ describe("estimateUsage: the most usage can cost from any position", () => {
     }
     // From just past 50: almost 50 calls at $1, then the $10 flat, rounded up to $60.
     expect(estimate({ base: card }, features.apiCalls, { calls: 50 })).toBe("60")
+  })
+
+  it("prices and bounds a row at the 100-tier cap", () => {
+    // Tier i (from 0) covers calls (10i, 10i + 10] at $1 each, with a $1 flat on entering it.
+    const tiers = Array.from({ length: 100 }, (_, index) => ({
+      upTo: index === 99 ? null : (index + 1) * 10,
+      rate: "1",
+      flat: "1",
+    }))
+    const card: CardRows = {
+      card: { ...usdCard.card, id: "rc_many_tiers" },
+      rows: [
+        rateRowSchema.parse({
+          ...rowOf(usdCard, "row_api_calls"),
+          id: "row_many_tiers",
+          rateCardId: "rc_many_tiers",
+          price: { type: "graduated", property: "calls", per: 1, tiers },
+        }),
+      ],
+    }
+    const { priced } = price({ base: card }, features.apiCalls, [{ calls: 995 }, { calls: 10 }])
+
+    // 995 calls enter all 100 tiers: $995 + $100 in flats. 10 more stay in the last tier.
+    expect(amounts(priced)).toEqual(["1095", "10"])
+    // From any position, 10 calls enter exactly one tier: $10 plus one $1 flat.
+    expect(estimate({ base: card }, features.apiCalls, { calls: 10 })).toBe("11")
   })
 
   it("bounds packages by one package per started size, however the units straddle", () => {

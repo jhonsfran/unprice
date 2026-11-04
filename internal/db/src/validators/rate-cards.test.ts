@@ -77,7 +77,7 @@ describe("rate card validators", () => {
     ).toEqual(["only a credits card has a credit value"])
   })
 
-  it("rejects property and dimension names that start with #, the per-event position's prefix", () => {
+  it("rejects property and dimension names that start with #, the reserved prefix", () => {
     const event = { property: "#event", rate: "1", per: 1 }
     const card = { id: "rc_1", projectId: "proj_1", name: "Card", unit: "money:USD" }
     const feature = { slug: "calls", dimensions: [], meterProperty: null, included: null }
@@ -108,6 +108,58 @@ describe("rate card validators", () => {
     expect(featurePricingSchema.safeParse({ ...feature, meterProperty: "event#1" }).success).toBe(
       true
     )
+  })
+
+  it("refuses __proto__ as a match key or property name instead of dropping it", () => {
+    const draft = { featureSlug: row.featureSlug, price: row.price, cost: null }
+    const publish = (match: unknown) =>
+      publishRateRowsInputSchema.safeParse({
+        cardId: "rc_1",
+        rows: [{ ...draft, match }],
+        effectiveFrom: 0,
+      })
+    const feature = {
+      slug: "calls",
+      dimensions: ["__proto__"],
+      meterProperty: null,
+      included: null,
+    }
+
+    expect(issues(publish(JSON.parse('{"__proto__":"gpt-4o"}')))).toEqual([
+      "__proto__ is not a property name",
+    ])
+    expect(issues(publish(JSON.parse('{"model":"gpt-4o","__proto__":"x"}')))).toEqual([
+      "__proto__ is not a property name",
+    ])
+    expect(publish({ model: "gpt-4o" }).data?.rows[0]?.match).toEqual({ model: "gpt-4o" })
+    expect(issues(featurePricingSchema.safeParse(feature))).toEqual([
+      "__proto__ is not a property name",
+    ])
+    expect(
+      issues(
+        rateRowSchema.safeParse({
+          ...row,
+          price: { type: "unit", components: [{ property: "__proto__", rate: "1", per: 1 }] },
+        })
+      )
+    ).toEqual(["__proto__ is not a property name"])
+  })
+
+  it("caps a graduated price at 100 tiers", () => {
+    const tiers = (count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        upTo: index === count - 1 ? null : index + 1,
+        rate: "1",
+        flat: "0",
+      }))
+    const graduated = (count: number) =>
+      rateRowSchema.safeParse({
+        ...row,
+        price: { type: "graduated", property: "calls", per: 1, tiers: tiers(count) },
+      })
+
+    expect(graduated(100).success).toBe(true)
+    expect(issues(graduated(101))).toEqual(["Too big: expected array to have <=100 items"])
   })
 
   it("bounds instants to the last time a Date can represent", () => {

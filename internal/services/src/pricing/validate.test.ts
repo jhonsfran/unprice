@@ -252,4 +252,29 @@ describe("validateCard", () => {
       { code: "MIXED_MATCH_KEYS", feature: "llm_tokens", keySets: ["model", "model,region"] },
     ])
   })
+
+  it("mixes key sets only where their rows overlap, not across a gap", () => {
+    const regional = { ...features.llmTokens, dimensions: ["model", "region"] }
+    const tokens = (id: string, match: Record<string, string>, from: number, to: number | null) =>
+      row({
+        id,
+        featureSlug: "llm_tokens",
+        match,
+        price: unit("input_tokens"),
+        effectiveFrom: CARD_FROM + from,
+        effectiveTo: to === null ? null : CARD_FROM + to,
+      })
+    // A regroup to {model, region} at 10 and its reversal at 20.
+    const reversed = [
+      tokens("global", { model: "a" }, 0, 10),
+      tokens("regional", { model: "a", region: "eu" }, 10, 20),
+      tokens("global_again", { model: "a" }, 20, null),
+    ]
+    const overlapping = [...reversed, tokens("late", { model: "b", region: "us" }, 25, 30)]
+
+    expect(validateCard(card, reversed, [regional])).toEqual([])
+    expect(validateCard(card, overlapping, [regional])).toEqual([
+      { code: "MIXED_MATCH_KEYS", feature: "llm_tokens", keySets: ["model", "model,region"] },
+    ])
+  })
 })

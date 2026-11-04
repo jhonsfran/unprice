@@ -8,7 +8,6 @@ import {
   addRational,
   ceilDiv,
   maxAmount,
-  minAmount,
   parseQuantity,
   rational,
   roundHalfUp,
@@ -42,33 +41,60 @@ type UsageLine = Readonly<{
   included: boolean
 }>
 
-const zeroCost = { curve: (() => rational(ZERO)) as Curve, bound: (() => ZERO) as Bound }
+/**
+ * The bound of a curve on which `quantity` costs the most from position 0: linear prices and
+ * packages, where a rounded difference never exceeds the exact cost from 0 rounded up.
+ */
+function ceilOf(curve: Curve): Bound {
+  return (quantity) => {
+    const exact = curve(quantity)
+    return ceilDiv(exact.n, exact.d)
+  }
+}
+
+const zeroCurve: Curve = () => rational(ZERO)
+const zeroCost = { curve: zeroCurve, bound: ceilOf(zeroCurve) }
 
 function unitCurve(component: RateComponent): Curve {
   const d = BigInt(component.per) * ONE
   return (quantity) => rational(component.rate * quantity, d)
 }
 
-/** Linear: a rounded difference never exceeds the exact one rounded up. */
-function unitBound(component: RateComponent): Bound {
-  const d = BigInt(component.per) * ONE
-  return (quantity) => ceilDiv(component.rate * quantity, d)
-}
+/** Where a graduated tier starts, and the price numerator of every tier before it, flats included. */
+type TierStart = Readonly<{ start: Amount; before: bigint; rate: Amount; flat: bigint }>
 
-/** Tier quantities at the tier rates, plus each entered tier's flat, over one denominator. */
+/**
+ * Tier quantities at the tier rates, plus each entered tier's flat, over one denominator. Tier
+ * starts and the sums before them are computed once, so pricing a quantity is a binary search.
+ */
 function graduatedCurve(price: Extract<RatePrice, { type: "graduated" }>): Curve {
   const d = BigInt(price.per) * ONE
+  const tiers: TierStart[] = []
+  let start = ZERO
+  let before = ZERO
+  for (const tier of price.tiers) {
+    const flat = tier.flat * d
+    tiers.push({ start, before, rate: tier.rate, flat })
+    if (tier.upTo === null) break
+    const end = BigInt(tier.upTo) * ONE
+    before += (end - start) * tier.rate + flat
+    start = end
+  }
   return (quantity) => {
-    let n = ZERO
-    let start = ZERO
-    for (const tier of price.tiers) {
-      if (quantity <= start) break
-      const end = tier.upTo === null ? quantity : minAmount(quantity, BigInt(tier.upTo) * ONE)
-      n += (end - start) * tier.rate + tier.flat * d
-      if (tier.upTo === null) break
-      start = BigInt(tier.upTo) * ONE
+    // The last tier whose start the quantity has passed; usage enters a tier just past its start.
+    let low = 0
+    let high = tiers.length - 1
+    let entered: TierStart | undefined
+    while (low <= high) {
+      const middle = (low + high) >> 1
+      const tier = tiers[middle]
+      if (tier && tier.start < quantity) {
+        entered = tier
+        low = middle + 1
+      } else high = middle - 1
     }
-    return rational(n, d)
+    if (!entered) return rational(ZERO, d)
+    return rational(entered.before + entered.flat + (quantity - entered.start) * entered.rate, d)
   }
 }
 
@@ -77,8 +103,7 @@ function graduatedCurve(price: Extract<RatePrice, { type: "graduated" }>): Curve
  * cost of `quantity` from position y is linear between the points where y or y + quantity meets a
  * boundary. Its maximum is at one of them, or at 0. Included units only shift the curve right.
  */
-function graduatedBound(price: Extract<RatePrice, { type: "graduated" }>): Bound {
-  const curve = graduatedCurve(price)
+function graduatedBound(price: Extract<RatePrice, { type: "graduated" }>, curve: Curve): Bound {
   const step = BigInt(1)
   const starts = price.tiers.flatMap((tier) =>
     tier.upTo === null ? [] : [BigInt(tier.upTo) * ONE]
@@ -104,48 +129,38 @@ function packageCurve(price: Extract<RatePrice, { type: "package" }>): Curve {
   return (quantity) => rational(ceilDiv(quantity, size) * price.rate)
 }
 
-/** At most one package per started `size` units, however the units straddle packages. */
-function packageBound(price: Extract<RatePrice, { type: "package" }>): Bound {
-  const size = BigInt(price.size) * ONE
-  return (quantity) => ceilDiv(quantity, size) * price.rate
-}
-
 function usageLines(row: RateRow, meterProperty: string | null): readonly UsageLine[] {
   const costOf = (property: string | null) => {
     if (row.cost === null) return null
     const component = row.cost.components.find((c) => c.property === property)
-    return component ? { curve: unitCurve(component), bound: unitBound(component) } : zeroCost
+    if (!component) return zeroCost
+    const curve = unitCurve(component)
+    return { curve, bound: ceilOf(curve) }
   }
+  const line = (property: string | null, price: Curve, bound: Bound, included: boolean) => ({
+    property,
+    price,
+    bound,
+    cost: costOf(property),
+    included,
+  })
   const price = row.price
   switch (price.type) {
     case "unit":
-      return price.components.map((component) => ({
-        property: component.property,
-        price: unitCurve(component),
-        bound: unitBound(component),
-        cost: costOf(component.property),
-        included: price.components.length === 1 && component.property === meterProperty,
-      }))
-    case "graduated":
-      return [
-        {
-          property: price.property,
-          price: graduatedCurve(price),
-          bound: graduatedBound(price),
-          cost: costOf(price.property),
-          included: price.property === meterProperty,
-        },
-      ]
-    case "package":
-      return [
-        {
-          property: price.property,
-          price: packageCurve(price),
-          bound: packageBound(price),
-          cost: costOf(price.property),
-          included: price.property === meterProperty,
-        },
-      ]
+      return price.components.map((component) => {
+        const curve = unitCurve(component)
+        const included = price.components.length === 1 && component.property === meterProperty
+        return line(component.property, curve, ceilOf(curve), included)
+      })
+    case "graduated": {
+      const curve = graduatedCurve(price)
+      const bound = graduatedBound(price, curve)
+      return [line(price.property, curve, bound, price.property === meterProperty)]
+    }
+    case "package": {
+      const curve = packageCurve(price)
+      return [line(price.property, curve, ceilOf(curve), price.property === meterProperty)]
+    }
     case "flat":
       return []
   }

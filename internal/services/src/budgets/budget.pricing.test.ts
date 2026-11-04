@@ -439,9 +439,9 @@ describe("a payer budget prices usage events at ingestion", () => {
         ])
       )
     ).toEqual({
-      'llm_tokens|{"model":"gpt-4.1"}|input_tokens': "100000",
-      'llm_tokens|{"model":"gpt-4.1"}|cached_input_tokens': "0",
-      'llm_tokens|{"model":"gpt-4.1"}|output_tokens': "20000",
+      '["llm_tokens","{\\"model\\":\\"gpt-4.1\\"}","input_tokens"]': "100000",
+      '["llm_tokens","{\\"model\\":\\"gpt-4.1\\"}","cached_input_tokens"]': "0",
+      '["llm_tokens","{\\"model\\":\\"gpt-4.1\\"}","output_tokens"]': "20000",
     })
 
     const small = ok(
@@ -729,7 +729,9 @@ describe("a payer budget prices usage events at ingestion", () => {
     // One event of 11,500 calls costs the same $6.50.
     const statement = store.statements.get("api_calls:inv_2026-11")
     expect(totals(statement)).toMatchObject({ amount: "6.5", quantity: "11500", events: 3 })
-    expect(formatAmount(statement?.positions["api_calls||calls"] ?? BigInt(0))).toBe("11500")
+    expect(formatAmount(statement?.positions['["api_calls","","calls"]'] ?? BigInt(0))).toBe(
+      "11500"
+    )
   })
 
   it("never lets concurrent holds each claim the same included allowance past a hard limit", () => {

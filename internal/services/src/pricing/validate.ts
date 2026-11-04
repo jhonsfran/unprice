@@ -109,33 +109,16 @@ function featureViolations(feature: FeaturePricing, rows: readonly RateRow[]): C
     violations.push({ code: "INCLUDED_WITH_DIMENSIONS", feature: feature.slug })
   }
 
-  // Two key sets are mixed only while both are in force; a regrouped meter's rows can follow the
-  // rows they replace.
-  const spans = new Map<string, Interval>()
   const byMatch = new Map<string, RateRow[]>()
   for (const row of rows) {
-    const keySet = Object.keys(row.match).sort().join(",")
-    const span = spans.get(keySet)
-    if (keySet !== "") {
-      spans.set(keySet, {
-        effectiveFrom: Math.min(span?.effectiveFrom ?? row.effectiveFrom, row.effectiveFrom),
-        effectiveTo: Math.max(span?.effectiveTo ?? 0, row.effectiveTo ?? Number.POSITIVE_INFINITY),
-      })
-    }
     const key = matchKey(row.match)
     const sameMatch = byMatch.get(key)
     if (sameMatch) sameMatch.push(row)
     else byMatch.set(key, [row])
   }
-  const mixed = [...spans].filter(([keySet, span]) =>
-    [...spans].some(([other, otherSpan]) => other !== keySet && overlaps(span, otherSpan))
-  )
+  const mixed = mixedKeySets(rows)
   if (mixed.length > 0) {
-    violations.push({
-      code: "MIXED_MATCH_KEYS",
-      feature: feature.slug,
-      keySets: mixed.map(([keySet]) => keySet),
-    })
+    violations.push({ code: "MIXED_MATCH_KEYS", feature: feature.slug, keySets: mixed })
   }
 
   for (const sameMatch of byMatch.values()) {
@@ -152,4 +135,36 @@ function featureViolations(feature: FeaturePricing, rows: readonly RateRow[]): C
     })
   }
   return violations
+}
+
+/**
+ * The key sets of a feature's dimension rows that are in force together with another key set, in
+ * row order. Two key sets are mixed only while rows of both are in force, so a regrouped meter's
+ * rows can follow the rows they replace, and a key set out of force in a gap mixes with nothing
+ * there. One sweep over the rows sorted by start, counting the rows in force per key set.
+ */
+function mixedKeySets(rows: readonly RateRow[]): string[] {
+  const keyed = rows
+    .map((row) => ({ row, keySet: Object.keys(row.match).sort().join(",") }))
+    .filter(({ keySet }) => keySet !== "")
+  const end = ({ row }: (typeof keyed)[number]) => row.effectiveTo ?? Number.POSITIVE_INFINITY
+  const byStart = [...keyed].sort((a, b) => a.row.effectiveFrom - b.row.effectiveFrom)
+  const byEnd = [...keyed].sort((a, b) => (end(a) < end(b) ? -1 : end(a) > end(b) ? 1 : 0))
+  const inForce = new Map<string, number>()
+  const mixed = new Set<string>()
+  let ended = 0
+  for (const entry of byStart) {
+    // Intervals are [from, to): a row that ends where this one starts is out of force.
+    while (ended < byEnd.length) {
+      const next = byEnd[ended]
+      if (!next || end(next) > entry.row.effectiveFrom) break
+      inForce.set(next.keySet, (inForce.get(next.keySet) ?? 0) - 1)
+      ended++
+    }
+    for (const [other, count] of inForce) {
+      if (other !== entry.keySet && count > 0) mixed.add(other).add(entry.keySet)
+    }
+    inForce.set(entry.keySet, (inForce.get(entry.keySet) ?? 0) + 1)
+  }
+  return [...new Set(keyed.map(({ keySet }) => keySet))].filter((keySet) => mixed.has(keySet))
 }

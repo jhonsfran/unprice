@@ -12,9 +12,6 @@ export type CardRows = Readonly<{ card: RateCard; rows: readonly RateRow[] }>
 /** The cards one subscription prices with. Overlay rows beat base rows of the same specificity. */
 export type RateCards = Readonly<{ base: CardRows; overlay?: CardRows }>
 
-/** The property name of a position that counts one unit per event. */
-export const EVENT_POSITION = "#event"
-
 /** Canonical form of a row's match: keys sorted, JSON, and "" for the default row. */
 export function matchKey(match: Readonly<Record<string, string>>): string {
   const keys = Object.keys(match).sort()
@@ -24,10 +21,11 @@ export function matchKey(match: Readonly<Record<string, string>>): string {
 
 /**
  * A position is the cumulative quantity one price component has accumulated in a statement
- * period. Feature slugs never contain "|" (the validators enforce it), so keys cannot collide.
+ * period; a null property counts one unit per event. The key is the JSON of the triple, so two
+ * different triples never share a key, whatever characters the names hold.
  */
 export function positionKey(feature: string, rowMatchKey: string, property: string | null) {
-  return `${feature}|${rowMatchKey}|${property ?? EVENT_POSITION}`
+  return JSON.stringify([feature, rowMatchKey, property])
 }
 
 export type PricedLine = Readonly<{

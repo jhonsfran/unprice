@@ -25,8 +25,25 @@ const epochMsSchema = z.number().int().nonnegative().max(8.64e15)
 /** Feature slugs are `[a-z0-9-]+` today; "_" is allowed, "|" never, because positions key on it. */
 const featureSlugSchema = z.string().regex(/^[a-z0-9][a-z0-9_-]*$/, "a lowercase slug")
 
-/** An event property name. "#" starts reserved names, such as the per-event position `#event`. */
-const propertyNameSchema = z.string().regex(/^[^#]/, "a property name that does not start with #")
+/**
+ * An event property name. "#" starts reserved names. `__proto__` is refused because Zod records
+ * and superjson drop it as an own key, so it could never be read back.
+ */
+const propertyNameSchema = z
+  .string()
+  .regex(/^[^#]/, "a property name that does not start with #")
+  .refine((name) => name !== "__proto__", "__proto__ is not a property name")
+
+/**
+ * Exact-match dimension values; {} is the feature's default row. An own `__proto__` key is refused
+ * before `z.record` drops it, so it never turns a dimension row into the default row.
+ */
+const matchSchema = z
+  .custom<Record<string, string>>(
+    (value) => !(typeof value === "object" && value !== null && Object.hasOwn(value, "__proto__")),
+    "__proto__ is not a property name"
+  )
+  .pipe(z.record(propertyNameSchema, z.string()))
 
 /** An event property a component reads, or null for one unit per event. */
 const quantityPropertySchema = propertyNameSchema.nullable()
@@ -58,7 +75,8 @@ export const ratePriceSchema = z.discriminatedUnion("type", [
     type: z.literal("graduated"),
     property: quantityPropertySchema,
     per: positiveIntSchema,
-    tiers: z.array(rateTierSchema).min(1),
+    /** A hold bounds a graduated row in O(tiers log tiers) on every authorize, so cap the tiers. */
+    tiers: z.array(rateTierSchema).min(1).max(100),
   }),
   z.object({
     type: z.literal("package"),
@@ -82,8 +100,7 @@ const rateRowFieldsSchema = z.object({
   id: z.string().min(1),
   rateCardId: z.string().min(1),
   featureSlug: featureSlugSchema,
-  /** Exact-match dimension values; {} is the feature's default row. */
-  match: z.record(propertyNameSchema, z.string()),
+  match: matchSchema,
   price: ratePriceSchema,
   cost: rateCostSchema.nullable(),
   effectiveFrom: epochMsSchema,
