@@ -38,10 +38,13 @@ In the dashboard:
 1. Create a plan, for example `Pro`.
 2. Add the feature that gates or meters the paid action.
 3. Configure the meter if the feature is usage-based.
-4. Publish the plan version.
+4. Price the features on a rate card in the plan's currency.
+5. Publish the plan version. Publishing refuses a version with a feature its rate card does not
+   price.
 
 The plan version is the commercial rule your customer is pinned to. Future pricing experiments can
-ship as new plan versions without silently moving existing customers.
+ship as new plan versions without silently moving existing customers. See
+[Plans and versions](/concepts/pricing/plans) for how rate cards change prices.
 
 ## 3. Install the SDK
 
@@ -114,13 +117,13 @@ if (error) {
 
 console.log({
   unpriceWouldAllow: result.allowed,
+  rejectionReason: result.rejectionReason,
   usage: result.usage,
-  limit: result.limit,
-  spending: result.spending
+  limit: result.limit
 });
 ```
 
-Use this first when you need confidence that the plan version, entitlement, usage, and wallet state
+Use this first when you need confidence that the plan version, entitlement, and usage state
 match the product behavior you already trust.
 
 ## 6. Enforce when the decision is ready

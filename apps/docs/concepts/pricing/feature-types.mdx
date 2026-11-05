@@ -4,8 +4,9 @@ description: "Choose how each plan feature is priced."
 ---
 
 Each feature in a plan version has one pricing type. The type defines how Unprice calculates the
-feature charge. It does not define whether your product workload runs. Use `access.check` or
-`usage.consume` when the request path must make that decision.
+feature charge, and the plan version's rate card holds the amounts. The type does not define
+whether your product workload runs. Use `access.check` or `usage.consume` when the request path
+must make that decision.
 
 | Type | Charge rule | Typical use |
 | --- | --- | --- |
@@ -18,6 +19,15 @@ feature charge. It does not define whether your product workload runs. Use `acce
 
 Each tier prices only its own units. With 100 units at $10 and units above 100 at $8, 150 units
 cost 100 at $10 plus 50 at $8, which is $1,400.
+
+Tiers and packages need a feature without dimensions that measures one quantity. A feature with
+dimensions, such as one priced per `model`, uses a unit price for each combination.
+
+## Included units
+
+A feature can include units in each billing period. Unprice charges only the units past the
+included amount. Included units from several grants add up, so their order never changes the
+price.
 
 ## Usage features need a meter
 

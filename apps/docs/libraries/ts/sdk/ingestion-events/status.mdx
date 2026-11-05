@@ -3,18 +3,24 @@ title: Ingestion event status
 description: Inspect processed, rejected, and failed ingestion events.
 ---
 
-Use `ingestionEvents.status` to inspect recent usage ingestion. It is an evidence and recovery
-operation. It does not authorize customer spend.
+Use `ingestionEvents.status` to inspect the usage events Unprice decided in a time window, for the
+project or one customer. It reads the budget journal, so it is evidence, not a spend gate.
 
-Check the returned state before you take action:
+Each event has one state:
 
-- `processed`: Unprice accepted and applied the event.
-- `rejected`: Unprice refused the event as a business decision, such as a limit or budget denial.
-- `failed`: A system or pipeline error stopped processing. Check whether the event is replayable.
+- `processed`: the customer's budget accepted the event and counted it.
+- `rejected`: the budget refused the event, for example a limit, an unpriced event, or a closed
+  billing period.
+- `failed`: always 0. `usage.record` and `usage.consume` answer every event synchronously, so an
+  event the budget could not decide comes back to the caller and is never journaled.
 
 ```ts
+const now = Date.now();
 const { result, error } = await unprice.ingestionEvents.status({
-  project_id: "proj_123",
+  customer_id: "cus_1234567890",
+  from_ts: now - 60 * 60 * 1000,
+  to_ts: now,
+  state: "rejected",
   limit: 50,
 })
 

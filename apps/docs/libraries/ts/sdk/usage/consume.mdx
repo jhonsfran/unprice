@@ -91,3 +91,4 @@ fits every hard limit. `amount` is what it cost, in the budget's unit.
 | 400 | `BAD_REQUEST` | No rate prices the event (`NOT_PRICED`), or no metered feature takes its slug (`UNKNOWN_EVENT`) |
 | 404 | `NOT_FOUND` | The customer has no subscription yet |
 | 409 | `CONFLICT` | The key was used for another event, the billing period is closed, or the subscription ended |
+| 500 | `INTERNAL_SERVER_ERROR` | The prepaid wallet refused to fund the event for a reason a retry cannot fix. Unprice logs it for an operator; the event was not counted |
