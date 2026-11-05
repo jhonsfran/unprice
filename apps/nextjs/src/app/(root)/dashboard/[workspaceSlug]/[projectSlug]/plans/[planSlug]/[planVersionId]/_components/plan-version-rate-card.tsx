@@ -1,7 +1,7 @@
 "use client"
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { type Currency, currencySchema } from "@unprice/db/validators"
+import type { Currency } from "@unprice/db/validators"
 import { Button } from "@unprice/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@unprice/ui/select"
 import { Skeleton } from "@unprice/ui/skeleton"
@@ -12,12 +12,12 @@ import { toast } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
 
 /**
- * The rate card a plan version prices with in each currency (ADR-0008 D2). A draft version can
- * assign or replace a card per currency; a published version keeps the cards it was published with.
+ * The rate card a plan version prices with (ADR-0008 D2). A draft version can assign or replace
+ * the card in its own currency; a published version keeps the cards it was published with.
  */
 export function PlanVersionRateCard({
   planVersionId,
-  currency: versionCurrency,
+  currency,
   isPublished,
 }: {
   planVersionId: string
@@ -28,8 +28,8 @@ export function PlanVersionRateCard({
   const router = useRouter()
   const queryClient = useQueryClient()
   const params = useParams<{ workspaceSlug: string; projectSlug: string }>()
-  const [currency, setCurrency] = useState<Currency>(versionCurrency)
-  const [cardId, setCardId] = useState<string>("")
+  // The pick is kept with the currency it was made for, so a currency change drops it.
+  const [picked, setPicked] = useState<{ currency: Currency; cardId: string } | null>(null)
 
   const { data: assigned, isLoading } = useQuery(
     trpc.rateCards.forPlanVersion.queryOptions({ planVersionId })
@@ -42,10 +42,13 @@ export function PlanVersionRateCard({
     trpc.rateCards.assignToPlanVersion.mutationOptions({
       onSuccess: ({ assignment }) => {
         toast.success(`Pricing ${assignment.currency} with the card`)
-        setCardId("")
+        setPicked(null)
         void queryClient.invalidateQueries(trpc.rateCards.forPlanVersion.pathFilter())
         void queryClient.invalidateQueries({ queryKey: trpc.planVersions.getById.queryKey() })
         router.refresh()
+      },
+      onError: (error) => {
+        toast.error(error.message)
       },
     })
   )
@@ -54,6 +57,10 @@ export function PlanVersionRateCard({
 
   const cards = assigned?.cards ?? []
   const candidates = (listed?.cards ?? []).filter((card) => card.unit === `money:${currency}`)
+  const cardId =
+    picked?.currency === currency && candidates.some((card) => card.id === picked.cardId)
+      ? picked.cardId
+      : ""
 
   return (
     <div className="flex flex-col gap-3">
@@ -87,19 +94,13 @@ export function PlanVersionRateCard({
       {!isPublished && (
         <div className="flex flex-col gap-2">
           <div className="grid grid-cols-[88px_minmax(0,1fr)] gap-2">
-            <Select value={currency} onValueChange={(value) => setCurrency(value as Currency)}>
-              <SelectTrigger className="h-8 text-xs" aria-label="Currency">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {currencySchema.options.map((option) => (
-                  <SelectItem key={option} value={option}>
-                    {option}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={cardId} onValueChange={setCardId}>
+            <span className="flex h-8 items-center rounded-md border px-3 font-mono text-xs">
+              {currency}
+            </span>
+            <Select
+              value={cardId}
+              onValueChange={(value) => setPicked({ currency, cardId: value })}
+            >
               <SelectTrigger className="h-8 text-xs" aria-label="Rate card">
                 <SelectValue
                   placeholder={

@@ -77,6 +77,9 @@ export default function ConfigItemsFormField<TFieldValues extends FormValues>({
 }) {
   const planVersionId = form.watch("planVersionId" as FieldPath<TFieldValues>)
   const itemsSubs = form.watch("items" as FieldPath<TFieldValues>)
+  const configValues = form.watch("config" as FieldPath<TFieldValues>) as
+    | SubscriptionItemConfig[]
+    | undefined
 
   // TODO: use later for addons support
   const isSubscriptionTypeAddons = false
@@ -145,13 +148,16 @@ export default function ConfigItemsFormField<TFieldValues extends FormValues>({
       : undefined
   }
 
-  // The plan's flat price from its rate card (ADR-0008 D2); usage is priced as it lands.
+  // The plan's flat price from its rate card (ADR-0008 D2). Package and tier items are priced by
+  // the quantity chosen above and usage as it lands, so the total names them instead of a sum.
   const displayTotalPrice = useMemo(() => {
     if (!selectedPlanVersion) return ""
-    const hasUsage = selectedPlanVersion.planFeatures.some(
-      (feature) => feature.featureType === "usage"
-    )
-    return hasUsage ? `${selectedPlanVersion.flatPrice} + usage` : selectedPlanVersion.flatPrice
+    const types = new Set(selectedPlanVersion.planFeatures.map((feature) => feature.featureType))
+    return [
+      selectedPlanVersion.flatPrice,
+      ...(types.has("package") || types.has("tier") ? ["items by quantity"] : []),
+      ...(types.has("usage") ? ["usage"] : []),
+    ].join(" + ")
   }, [selectedPlanVersion])
 
   return (
@@ -242,6 +248,10 @@ export default function ConfigItemsFormField<TFieldValues extends FormValues>({
                       const unitText = showUnits ? ` ${feature.unitOfMeasure ?? "units"}` : ""
                       const included = Number(feature.included ?? 0)
 
+                      const quantity = configValues?.[index]?.units
+                      const pricedByQuantity =
+                        feature.featureType === "package" || feature.featureType === "tier"
+
                       const freeUnitsText =
                         included > 0
                           ? `${nFormatter(included)}${unitText} included`
@@ -323,6 +333,11 @@ export default function ConfigItemsFormField<TFieldValues extends FormValues>({
                           <TableCell className="flex h-16 items-center justify-end gap-1 pr-1">
                             <div className="inline text-end font-mono text-xs">
                               {feature.displayPrice ?? "not priced"}
+                              {pricedByQuantity && feature.displayPrice && (
+                                <span className="block text-muted-foreground">
+                                  for {quantity ?? 0} {feature.unitOfMeasure ?? "units"}
+                                </span>
+                              )}
                             </div>
                             {isSubscriptionTypeAddons && isDelete.get(itemConfig.featurePlanId) && (
                               <div className="flex flex-row items-center">
