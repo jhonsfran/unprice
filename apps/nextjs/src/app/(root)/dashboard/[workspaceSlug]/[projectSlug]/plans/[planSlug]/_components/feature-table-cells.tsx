@@ -243,7 +243,7 @@ export function CellInput({
           aria-label={label}
           aria-invalid={message ? true : undefined}
           inputMode={inputMode}
-          className="h-full w-full min-w-0 bg-transparent px-2 font-mono text-xs tabular-nums outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:text-muted-foreground"
+          className="h-full min-w-0 flex-1 bg-transparent px-2 font-mono text-xs tabular-nums outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:text-muted-foreground"
           placeholder={placeholder}
           value={text}
           disabled={disabled}
@@ -257,7 +257,14 @@ export function CellInput({
             setError(onCommit(text))
           }}
         />
-        {trailing && <span className="truncate pr-2 text-muted-foreground">{trailing}</span>}
+        {trailing && (
+          <span
+            className="max-w-[76px] shrink-0 truncate pr-2 text-muted-foreground"
+            title={trailing}
+          >
+            {trailing}
+          </span>
+        )}
       </div>
       {message && <p className="text-destructive text-xs">{message}</p>}
     </div>

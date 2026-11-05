@@ -239,17 +239,17 @@ export function FeatureTableView({
             <span className="sr-only">Order</span>
           </TableHead>
           <TableHead className={HEAD}>Feature</TableHead>
-          <TableHead className={cn(HEAD, "w-[140px]")}>Kind</TableHead>
-          <TableHead className={cn(HEAD, "w-[104px]")} title="Usage past the limit is refused.">
+          <TableHead className={cn(HEAD, "w-[120px]")}>Kind</TableHead>
+          <TableHead className={cn(HEAD, "w-[112px]")} title="Usage past the limit is refused.">
             Limit
           </TableHead>
           <TableHead
-            className={cn(HEAD, "w-[104px]")}
+            className={cn(HEAD, "w-[112px]")}
             title="Units free each period, or the quantity a subscription starts with."
           >
             Included
           </TableHead>
-          <TableHead className={cn(HEAD, "w-[176px]")}>Price</TableHead>
+          <TableHead className={cn(HEAD, "w-[196px]")}>Price</TableHead>
           <TableHead className={cn(HEAD, "w-10")}>
             <span className="sr-only">Actions</span>
           </TableHead>
