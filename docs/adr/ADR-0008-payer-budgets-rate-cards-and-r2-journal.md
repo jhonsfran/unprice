@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted.
+Accepted. Implemented on 2026-11-04 (units U1-U16 of the payer budget runtime plan).
 
 ## Date
 
