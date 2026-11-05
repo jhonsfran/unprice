@@ -7,11 +7,12 @@ import type { RouterInputs, RouterOutputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
 import { Label } from "@unprice/ui/label"
 import { Skeleton } from "@unprice/ui/skeleton"
+import { cn } from "@unprice/ui/utils"
 import { CreditCard, Plus, X } from "lucide-react"
 import { useParams } from "next/navigation"
 import { InputWithAddons } from "~/components/input-addons"
 import { SuperLink } from "~/components/super-link"
-import { type FeaturePriceRows, scheduledFrom } from "../../_components/plan-prices"
+import { type FeaturePriceRows, cardLabel, scheduledFrom } from "../../_components/plan-prices"
 
 export type PlanVersionCard = RouterOutputs["rateCards"]["forPlanVersion"]["cards"][number]
 
@@ -54,10 +55,10 @@ function emptyTier(key: string): TierDraft {
   return { key, upTo: "", unitPrice: "", flatPrice: "0" }
 }
 
+/** A fixed feature starts included at $0, so one Save prices it; every other shape asks for a number. */
 export function emptyDraft(shape: PriceShape): PriceDraft {
-  return shape === "graduated"
-    ? { kind: "tiers", tiers: [emptyTier("tier-0")] }
-    : { kind: "amount", amount: "" }
+  if (shape === "graduated") return { kind: "tiers", tiers: [emptyTier("tier-0")] }
+  return { kind: "amount", amount: shape === "flat" ? "0" : "" }
 }
 
 /**
@@ -167,9 +168,22 @@ export function PriceBlockView({
   /** A refusal of the last save that belongs to the price. */
   problem: string | null
 }) {
-  const params = useParams<{ workspaceSlug: string; projectSlug: string }>()
+  const params = useParams<{
+    workspaceSlug: string
+    projectSlug: string
+    planSlug?: string
+    planVersionId?: string
+  }>()
   const cardHref = card
     ? `/${params?.workspaceSlug}/${params?.projectSlug}/rate-cards/${card.card.id}`
+    : null
+  const label = card
+    ? cardLabel(
+        card.card.name,
+        params?.planSlug && params?.planVersionId
+          ? { planSlug: params.planSlug, planVersionId: params.planVersionId, currency }
+          : null
+      )
     : null
   const current = rows?.current ?? null
   const scheduled = rows?.scheduled ?? null
@@ -186,12 +200,15 @@ export function PriceBlockView({
           <CreditCard className="size-3.5 text-muted-foreground" />
           Price
         </span>
-        {card && cardHref && (
+        {label && cardHref && (
           <SuperLink
             href={cardHref}
-            className="truncate font-mono text-muted-foreground text-xs underline-offset-4 hover:underline"
+            className={cn(
+              "truncate text-muted-foreground text-xs underline-offset-4 hover:underline",
+              !label.isOwn && "font-mono"
+            )}
           >
-            {card.card.name}
+            {label.text}
           </SuperLink>
         )}
       </div>
@@ -211,7 +228,9 @@ export function PriceBlockView({
         </div>
       ) : (
         <p className="text-muted-foreground text-xs">
-          Not priced yet. Publishing refuses a version with an unpriced feature.
+          {shape === "flat" && editable
+            ? "Included at $0 unless you set an amount."
+            : "Not priced yet. Publishing refuses a version with an unpriced feature."}
         </p>
       )}
 

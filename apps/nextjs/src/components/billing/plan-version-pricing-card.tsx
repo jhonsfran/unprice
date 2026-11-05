@@ -14,6 +14,7 @@ import {
 } from "@unprice/ui/card"
 import { Separator } from "@unprice/ui/separator"
 import { cn } from "@unprice/ui/utils"
+import type { FeatureLineRows } from "~/components/billing/feature-line"
 import { formatBillingLabel } from "~/components/billing/format-billing-label"
 import { PlanVersionFeatureListItem } from "~/components/billing/plan-version-feature-list"
 
@@ -34,12 +35,15 @@ export function PlanVersionPricingCard({
   highlight = false,
   className,
   renderAction,
+  priceRows,
 }: {
   planVersion: RouterOutputs["planVersions"]["getById"]["planVersion"]
   action: PlanVersionPricingCardAction
   highlight?: boolean
   className?: string
   renderAction?: (action: PlanVersionPricingCardAction) => React.ReactNode
+  /** The version's card rows by feature slug, so each line can say what more of it costs. */
+  priceRows?: ReadonlyMap<string, FeatureLineRows>
 }) {
   if (!planVersion) return null
 
@@ -60,7 +64,7 @@ export function PlanVersionPricingCard({
   return (
     <Card
       className={cn(
-        "group flex h-full w-[300px] flex-col overflow-hidden border-border bg-card transition-[background-color,border-color,box-shadow] duration-200",
+        "group flex h-full w-[300px] flex-col overflow-hidden border-border bg-card transition-[background-color,border-color,box-shadow] duration-150 ease-out",
         isInteractive && "hover:border-primary-borderHover hover:bg-background-bgSubtle",
         isEmphasized && "border-primary-border shadow-sm",
         className
@@ -110,6 +114,8 @@ export function PlanVersionPricingCard({
               <li key={feature.id} className="flex w-full flex-col justify-start">
                 <PlanVersionFeatureListItem
                   feature={feature}
+                  priceRows={priceRows?.get(feature.feature.slug)}
+                  currency={planVersion.currency}
                   displayOptions={{ showQuantity: true }}
                   className="font-medium text-background-text"
                 />

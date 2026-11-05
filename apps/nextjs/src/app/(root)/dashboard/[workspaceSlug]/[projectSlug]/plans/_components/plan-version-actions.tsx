@@ -4,6 +4,7 @@ import { usePathname, useRouter } from "next/navigation"
 import type { ElementRef } from "react"
 import { forwardRef, startTransition, useState } from "react"
 
+import { Badge } from "@unprice/ui/badge"
 import { Button } from "@unprice/ui/button"
 import { LoadingAnimation } from "@unprice/ui/loading-animation"
 import { toast } from "@unprice/ui/sonner"
@@ -21,11 +22,21 @@ export interface PlanVersionPublishProps extends React.ComponentPropsWithoutRef<
   onConfirmAction?: () => void
   classNames?: string
   variant?: "primary" | "custom"
+  /** The attached features as the server knows them; with them, the button counts the unpriced ones. */
+  features?: readonly { feature: { slug: string; title: string } }[]
+  currency?: string
 }
 
 const PlanVersionPublish = forwardRef<ElementRef<"button">, PlanVersionPublishProps>(
   (props, ref) => {
-    const { planVersionId, onConfirmAction, classNames, variant = "primary" } = props
+    const {
+      planVersionId,
+      onConfirmAction,
+      classNames,
+      variant = "primary",
+      features,
+      currency,
+    } = props
     const router = useRouter()
     // Read the atom lazily via the store rather than subscribing — subscribing here causes
     // a "Cannot update a component while rendering a different component" warning when the
@@ -33,10 +44,17 @@ const PlanVersionPublish = forwardRef<ElementRef<"button">, PlanVersionPublishPr
     const store = useStore()
     const trpc = useTRPC()
     // What the confirm names before the server refuses: features without a row on the card.
-    const { data: pricing } = useQuery(
+    const { data: pricing, dataUpdatedAt } = useQuery(
       trpc.rateCards.forPlanVersion.queryOptions({ planVersionId })
     )
     const [unpriced, setUnpriced] = useState<string[]>([])
+    const unpricedCount = features
+      ? unpricedFeatureTitles(
+          features,
+          pricing?.cards.find((entry) => entry.currency === currency)?.rows ?? [],
+          dataUpdatedAt
+        ).length
+      : 0
 
     const publishVersion = useMutation(
       trpc.planVersions.publish.mutationOptions({
@@ -109,6 +127,15 @@ const PlanVersionPublish = forwardRef<ElementRef<"button">, PlanVersionPublishPr
           className={classNames}
         >
           Publish
+          {unpricedCount > 0 && (
+            <Badge
+              variant="warning"
+              className="ml-2 px-1.5 py-0 text-[10px] leading-4"
+              aria-label={`${unpricedCount} unpriced features`}
+            >
+              {unpricedCount}
+            </Badge>
+          )}
           {publishVersion.isPending && <LoadingAnimation className={"ml-2"} />}
         </Button>
       </ConfirmAction>

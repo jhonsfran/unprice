@@ -12,15 +12,18 @@ import {
   ResponsiveDialogTrigger,
 } from "@unprice/ui/responsive-dialog"
 
-import { FeatureForm } from "./feature-form"
+import { type CreatedFeature, FeatureForm } from "./feature-form"
 
 export function FeatureDialog({
   defaultValues,
   children,
+  onCreated,
 }: {
   label?: string
   defaultValues?: InsertFeature
   children?: React.ReactNode
+  /** What happens to a feature created here, such as attaching it to the open draft version. */
+  onCreated?: (feature: CreatedFeature) => void
 }) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const isEdit = Boolean(defaultValues?.id)
@@ -43,6 +46,7 @@ export function FeatureDialog({
         <FeatureForm
           defaultValues={defaultValues ?? { title: "", slug: "", description: "" }}
           setDialogOpen={setDialogOpen}
+          onCreated={onCreated}
         />
       </ResponsiveDialogContent>
     </ResponsiveDialog>

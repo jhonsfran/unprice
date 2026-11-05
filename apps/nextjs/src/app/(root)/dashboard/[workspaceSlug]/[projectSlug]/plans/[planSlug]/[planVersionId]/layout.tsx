@@ -73,6 +73,10 @@ export default async function PlanVersionLayout(props: {
                   planVersionId={planVersion.id}
                   status={status}
                   active={active}
+                  currency={planVersion.currency}
+                  features={planVersion.planFeatures.map((planFeature) => ({
+                    feature: { slug: planFeature.feature.slug, title: planFeature.feature.title },
+                  }))}
                 />
               </div>
             }

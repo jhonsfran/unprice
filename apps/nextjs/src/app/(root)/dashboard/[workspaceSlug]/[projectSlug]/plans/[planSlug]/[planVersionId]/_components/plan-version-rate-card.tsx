@@ -5,11 +5,13 @@ import type { Currency } from "@unprice/db/validators"
 import { Button } from "@unprice/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@unprice/ui/select"
 import { Skeleton } from "@unprice/ui/skeleton"
+import { cn } from "@unprice/ui/utils"
 import { useParams, useRouter } from "next/navigation"
 import { useState } from "react"
 import { SuperLink } from "~/components/super-link"
 import { toast } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
+import { cardLabel } from "../../../_components/plan-prices"
 import { CollapsibleSection } from "../../_components/section-label"
 
 /**
@@ -29,7 +31,7 @@ export function PlanVersionRateCard({
   const trpc = useTRPC()
   const router = useRouter()
   const queryClient = useQueryClient()
-  const params = useParams<{ workspaceSlug: string; projectSlug: string }>()
+  const params = useParams<{ workspaceSlug: string; projectSlug: string; planSlug: string }>()
   // The pick is kept with the currency it was made for, so a currency change drops it.
   const [picked, setPicked] = useState<{ currency: Currency; cardId: string } | null>(null)
   const [isShareOpen, setIsShareOpen] = useState(false)
@@ -74,24 +76,35 @@ export function PlanVersionRateCard({
             creates this version's card.
           </p>
         ) : (
-          cards.map((entry, index) => (
-            <div
-              key={entry.currency}
-              className={
-                index < cards.length - 1
-                  ? "flex items-center justify-between border-b px-3 py-2 text-xs"
-                  : "flex items-center justify-between px-3 py-2 text-xs"
-              }
-            >
-              <span className="font-mono text-foreground/70">{entry.currency}</span>
-              <SuperLink
-                href={`/${params?.workspaceSlug}/${params?.projectSlug}/rate-cards/${entry.card.id}`}
-                className="truncate font-mono underline-offset-4 hover:underline"
+          cards.map((entry, index) => {
+            const label = cardLabel(
+              entry.card.name,
+              params?.planSlug
+                ? { planSlug: params.planSlug, planVersionId, currency: entry.currency }
+                : null
+            )
+            return (
+              <div
+                key={entry.currency}
+                className={
+                  index < cards.length - 1
+                    ? "flex items-center justify-between border-b px-3 py-2 text-xs"
+                    : "flex items-center justify-between px-3 py-2 text-xs"
+                }
               >
-                {entry.card.name}
-              </SuperLink>
-            </div>
-          ))
+                <span className="font-mono text-foreground/70">{entry.currency}</span>
+                <SuperLink
+                  href={`/${params?.workspaceSlug}/${params?.projectSlug}/rate-cards/${entry.card.id}`}
+                  className={cn(
+                    "truncate underline-offset-4 hover:underline",
+                    !label.isOwn && "font-mono"
+                  )}
+                >
+                  {label.text}
+                </SuperLink>
+              </div>
+            )
+          })
         )}
       </div>
       {cards.length > 0 && (

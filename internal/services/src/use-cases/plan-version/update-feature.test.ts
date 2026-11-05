@@ -268,6 +268,48 @@ describe("updatePlanVersionFeature", () => {
     expect(cards.rows.map((row) => [row.id, row.effectiveTo])).toEqual([[flatRow.id, NOW]])
   })
 
+  it("re-prices the default row on the new property when the meter changes without a price", async () => {
+    const { cards, services } = createHarness(
+      stored({ featureType: "usage", config: { usageMode: "unit" }, meterConfig: tokensMeter })
+    )
+    cards.seedPlanVersionCard("pv_1", "USD", [
+      { featureSlug: "base", featureType: "usage", usageMode: "unit", price: "0.002" },
+    ])
+    const [seeded] = cards.rows
+    if (!seeded || seeded.price.type !== "unit") throw new Error("fixture")
+    // The fixture seeds a count row; the stored meter sums `tokens`, so its row prices that property.
+    const summed = {
+      ...seeded,
+      price: {
+        type: "unit" as const,
+        components: seeded.price.components.map((component) => ({
+          ...component,
+          property: "tokens",
+        })),
+      },
+    }
+    cards.rows[0] = summed
+
+    const counted = await priced(services, {
+      featureType: "usage",
+      config: { usageMode: "unit" },
+      meterConfig: { ...tokensMeter, aggregationMethod: "count", aggregationField: undefined },
+    })
+
+    expect(counted.val).toMatchObject({
+      state: "ok",
+      row: { price: { type: "unit", components: [{ property: null }] }, effectiveTo: null },
+    })
+    expect(cards.rows.map((row) => [row.id, row.effectiveTo])).toEqual([
+      [summed.id, NOW],
+      [counted.val?.state === "ok" ? counted.val.row?.id : null, null],
+    ])
+    const [, republished] = cards.rows
+    expect(republished?.price.type === "unit" && republished.price.components[0]?.rate).toBe(
+      summed.price.components[0]?.rate
+    )
+  })
+
   it("answers the service's own states for a missing or published feature", async () => {
     const missing = createHarness(stored({}))
     missing.services.plans.getPlanVersionFeatureByIdDetailed = vi.fn(async () => Ok(null))

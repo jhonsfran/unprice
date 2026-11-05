@@ -2,7 +2,7 @@ import type { PlanVersionFeatureUpdate, RateRow } from "@unprice/db/validators"
 import { Err, type FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { ServiceContext } from "../../context"
-import { ratePriceOf } from "../../pricing"
+import { decimalPriceOf, ratePriceOf } from "../../pricing"
 import {
   UnPriceRateCardError,
   planFeaturePricing,
@@ -166,7 +166,65 @@ export async function updatePlanVersionFeature(
     })
     if (closed.err) return Err(closed.err)
   }
-  return Ok({ state: "ok", planVersionFeature, row: defaultRow(kept) })
+
+  // The meter now counts another property (or none): the default row still prices the old one,
+  // so it is republished at the same decimal price on the new property. A row the decimal form
+  // cannot state (several components) ends instead, and the feature reads as unpriced.
+  const current = defaultRow(kept)
+  const meterProperty = parsed.ok ? parsed.pricing.meterProperty : null
+  if (card && current && !reshaped && pricedProperty(current) !== meterProperty) {
+    const decimal = decimalPriceOf(current.price)
+    const ratePrice =
+      decimal &&
+      ratePriceOf(
+        {
+          featureType: planVersionFeature.featureType,
+          usageMode: planVersionFeature.config.usageMode,
+          units: planVersionFeature.config.units,
+          price: decimal.price,
+          tiers: decimal.tiers,
+        },
+        meterProperty
+      )
+    if (!ratePrice) {
+      const closed = await rateCards.closeRows({
+        projectId,
+        cardId: card.cardId,
+        rowIds: [current.id],
+        now,
+      })
+      if (closed.err) return Err(closed.err)
+      return Ok({ state: "ok", planVersionFeature, row: null })
+    }
+    const plan = await plans.getPlanByIdRecord({ planId: version.planId, projectId })
+    if (plan.err) return Err(plan.err)
+    const priced = await pricePlanVersion(deps, {
+      projectId,
+      planVersionId: version.id,
+      currency: version.currency,
+      cardName: versionCardName(plan.val?.slug ?? version.planId, version.id, version.currency),
+      prices: [{ featureSlug, price: ratePrice }],
+      now,
+    })
+    if (priced.err) return Err(priced.err)
+    const rows = await featureOpenRows(deps, projectId, priced.val.cardId, featureSlug)
+    if (rows.err) return Err(rows.err)
+    return Ok({ state: "ok", planVersionFeature, row: defaultRow(rows.val) })
+  }
+  return Ok({ state: "ok", planVersionFeature, row: current })
+}
+
+/** The event property a usage row's single component counts; null for one unit per event. */
+function pricedProperty(row: RateRow): string | null {
+  switch (row.price.type) {
+    case "unit":
+      return row.price.components[0]?.property ?? null
+    case "graduated":
+    case "package":
+      return row.price.property
+    case "flat":
+      return null
+  }
 }
 
 /** The feature's rows on the card that have not ended. */

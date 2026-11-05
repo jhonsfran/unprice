@@ -7,7 +7,7 @@ import { DashboardShell } from "~/components/layout/dashboard-shell"
 import { SuperLink } from "~/components/super-link"
 import { HydrateClient, api, prefetch, trpc } from "~/trpc/server"
 import { RateCardDetail } from "../_components/rate-card-detail"
-import { formatCardUnit, formatMarginPolicy } from "../_components/rate-card-format"
+import { cardCurrency, formatCardUnit, formatMarginPolicy } from "../_components/rate-card-format"
 
 export const dynamic = "force-dynamic"
 
@@ -45,6 +45,14 @@ export default async function RateCardPage(props: {
   prefetch(trpc.rateCards.get.queryOptions({ id: cardId }))
   prefetch(trpc.features.listByActiveProject.queryOptions())
 
+  // A version's own card is named `<plan slug> <version id> <currency>` (pricePlanVersion), so the
+  // name says which version the card was made for; the procedure does not list its versions.
+  const [planSlug, planVersionId, namedCurrency] = found.card.name.split(" ")
+  const ownerHref =
+    planSlug && planVersionId?.startsWith("pv_") && namedCurrency === cardCurrency(found.card.unit)
+      ? `/${workspaceSlug}/${projectSlug}/plans/${planSlug}/${planVersionId}`
+      : null
+
   return (
     <DashboardShell
       header={
@@ -54,6 +62,15 @@ export default async function RateCardPage(props: {
             {formatCardUnit(found.card.unit)} · {formatMarginPolicy(found.card.marginPolicy)} ·{" "}
             {found.live ? "live · priced by a published version" : "draft only"}
           </span>
+          {ownerHref && (
+            <span className="text-muted-foreground text-xs">
+              Made for plan <span className="font-mono">{planSlug}</span>, version{" "}
+              <span className="font-mono">{planVersionId}</span>.{" "}
+              <SuperLink href={ownerHref} className="underline-offset-4 hover:underline">
+                Open the version editor.
+              </SuperLink>
+            </span>
+          )}
         </div>
       }
     >

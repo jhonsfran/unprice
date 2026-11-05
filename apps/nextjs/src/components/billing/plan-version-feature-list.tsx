@@ -1,11 +1,12 @@
 "use client"
 
-import { FEATURE_TYPES_MAPS, USAGE_MODES_MAP, nFormatter } from "@unprice/db/utils"
+import { FEATURE_TYPES_MAPS, USAGE_MODES_MAP } from "@unprice/db/utils"
 import type { PlanVersionExtended } from "@unprice/db/validators"
 import { CheckIcon, HelpCircle } from "@unprice/ui/icons"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { Typography } from "@unprice/ui/typography"
 import { cn } from "@unprice/ui/utils"
+import { type FeatureLineRows, describeFeatureLine } from "./feature-line"
 
 export type PlanVersionFeatureListItemDisplayOptions = {
   showQuantity?: boolean
@@ -15,33 +16,27 @@ export type PlanVersionFeatureListItemDisplayOptions = {
 
 /**
  * A plan feature as a pricing card lists it. Its price comes from the plan version's rate card
- * (ADR-0008 D2) as `displayPrice`; the feature itself stores none.
+ * (ADR-0008 D2): as `priceRows` when the card's rows are at hand, as `displayPrice` when only a
+ * summary is; the feature itself stores none.
  */
 export function PlanVersionFeatureListItem({
   feature,
+  priceRows,
+  currency,
   displayOptions,
   className,
 }: {
   feature: PlanVersionExtended["planFeatures"][number] & { displayPrice?: string | null }
+  priceRows?: FeatureLineRows
+  currency?: string
   displayOptions?: PlanVersionFeatureListItemDisplayOptions
   className?: string
 }) {
   const { showQuantity = false, showCheckIcon = true, showTitle = true } = displayOptions ?? {}
 
-  const unit = feature.unitOfMeasure ?? "units"
-  const unitText =
-    feature.featureType === "usage" && !feature.feature.slug.includes(unit) ? ` ${unit}` : ""
-  const included = Number(feature.included ?? 0)
-  const allowance =
-    included > 0
-      ? `${nFormatter(included)}${unitText} included,`
-      : feature.limit
-        ? `Up to ${nFormatter(feature.limit)}${unitText}`
-        : "Unlimited"
-  const displayFeature =
-    feature.featureType === "flat" || !showQuantity
-      ? feature.feature.title
-      : `${allowance} ${feature.feature.title}`
+  const displayFeature = showQuantity
+    ? describeFeatureLine(feature, priceRows, currency ?? "USD")
+    : feature.feature.title
 
   return (
     <div className="flex flex-row items-center gap-1">

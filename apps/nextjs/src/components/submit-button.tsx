@@ -18,6 +18,10 @@ interface SubmitButtonProps extends ButtonProps {
   onClick?: () => void
 }
 
+// Press feedback for the form's primary action: a 0.96 scale that returns on release.
+const PRESS_CLASSES =
+  "transition-[color,background-color,border-color,transform] duration-150 ease-out enabled:active:scale-[0.96]"
+
 export const SubmitButton = ({
   variant = "primary",
   isSubmitting,
@@ -46,7 +50,7 @@ export const SubmitButton = ({
           variant={variant}
           type={onClick ? "button" : "submit"}
           disabled={isDisabled || pending}
-          className={className}
+          className={cn(PRESS_CLASSES, className)}
           {...props}
         >
           <span className="line-clamp-1">{label}</span>
@@ -61,7 +65,7 @@ export const SubmitButton = ({
       variant={variant}
       type={onClick ? "button" : "submit"}
       disabled={isDisabled || pending}
-      className={className}
+      className={cn(PRESS_CLASSES, className)}
       onClick={onClick}
       {...props}
     >

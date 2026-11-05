@@ -1,6 +1,6 @@
 "use client"
 
-import { useRouter } from "next/navigation"
+import { useParams, useRouter } from "next/navigation"
 import { startTransition } from "react"
 import { z } from "zod"
 
@@ -23,26 +23,32 @@ import { Textarea } from "@unprice/ui/text-area"
 import { useMutation } from "@tanstack/react-query"
 import { slugify } from "@unprice/db/utils"
 import { ConfirmAction } from "~/components/confirm-action"
+import TrialUnitsFormField from "~/components/forms/trial-days-field"
 import { SubmitButton } from "~/components/submit-button"
 import { toastAction } from "~/lib/toast"
 import { useZodForm } from "~/lib/zod-form"
 import { useTRPC } from "~/trpc/client"
+
+// The trial belongs to the draft version a new plan starts with; editing a plan ignores it.
+// The trial input is a text field, so its value arrives as a string.
+const planFormSchema = planInsertBaseSchema.extend({ trialUnits: z.coerce.number().int().min(0) })
 
 export function PlanForm({
   setDialogOpen,
   defaultValues,
 }: {
   setDialogOpen?: (open: boolean) => void
-  defaultValues: InsertPlan
+  defaultValues: InsertPlan & { trialUnits?: number }
 }) {
   const router = useRouter()
+  const params = useParams<{ workspaceSlug: string; projectSlug: string }>()
   const editMode = !!defaultValues.id
   const trpc = useTRPC()
   const planExist = useMutation(trpc.plans.exist.mutationOptions())
 
   const formSchema = editMode
-    ? planInsertBaseSchema
-    : planInsertBaseSchema.extend({
+    ? planFormSchema
+    : planFormSchema.extend({
         slug: z
           .string()
           .min(3)
@@ -57,18 +63,19 @@ export function PlanForm({
 
   const form = useZodForm({
     schema: formSchema,
-    defaultValues: defaultValues,
+    defaultValues: { ...defaultValues, trialUnits: defaultValues.trialUnits ?? 0 },
     reValidateMode: "onSubmit",
   })
 
   const createPlan = useMutation(
-    trpc.plans.create.mutationOptions({
-      onSuccess: ({ plan }) => {
-        form.reset(plan)
+    trpc.plans.createWithDraft.mutationOptions({
+      onSuccess: ({ plan, planVersion }) => {
         toastAction("saved", "Plan created")
         setDialogOpen?.(false)
         router.refresh()
-        router.push(`plans/${plan.slug}`)
+        router.push(
+          `/${params?.workspaceSlug}/${params?.projectSlug}/plans/${plan.slug}/${planVersion.id}`
+        )
       },
     })
   )
@@ -115,14 +122,15 @@ export function PlanForm({
     })
   )
 
-  const onSubmitForm = async (data: InsertPlan) => {
+  const onSubmitForm = async (data: z.infer<typeof planFormSchema>) => {
     if (!defaultValues.id) {
       await createPlan.mutateAsync(data)
     }
 
     if (defaultValues.id && defaultValues.projectId) {
+      const { trialUnits: _trial, ...plan } = data
       await updatePlan.mutateAsync({
-        ...data,
+        ...plan,
         id: defaultValues.id,
       })
     }
@@ -204,6 +212,8 @@ export function PlanForm({
               </FormItem>
             )}
           />
+
+          {!editMode && <TrialUnitsFormField form={form} />}
 
           <FormField
             control={form.control}

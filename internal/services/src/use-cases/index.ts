@@ -1,4 +1,9 @@
 export { createPlan } from "./plan/create"
+export { createPlanWithDraft, type CreatePlanWithDraftInput } from "./plan/create-with-draft"
+export {
+  removePlanVersionFeature,
+  type RemovePlanVersionFeatureDeps,
+} from "./plan-version/remove-feature"
 export { signUp } from "./customer/sign-up"
 export { signOutCustomer } from "./customer/sign-out"
 export {

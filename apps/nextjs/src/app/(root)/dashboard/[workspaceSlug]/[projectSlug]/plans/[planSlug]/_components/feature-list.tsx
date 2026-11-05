@@ -1,10 +1,10 @@
 "use client"
 
-import { useMutation, useQuery } from "@tanstack/react-query"
-import { FileStack, Search } from "lucide-react"
+import { useQuery } from "@tanstack/react-query"
+import { FileStack, PlusIcon, Search } from "lucide-react"
 import { Fragment, use, useState } from "react"
 
-import type { PlanVersionFeatureDragDrop, PlanVersionFeatureInsert } from "@unprice/db/validators"
+import type { PlanVersionFeatureDragDrop } from "@unprice/db/validators"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
 import { Input } from "@unprice/ui/input"
@@ -13,15 +13,29 @@ import { ScrollArea } from "@unprice/ui/scroll-area"
 
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { useDebounce } from "~/hooks/use-debounce"
-import { useActiveFeature, usePlanFeaturesList } from "~/hooks/use-features"
-import { toastAction } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
 import { FeatureDialog } from "../../_components/feature-dialog"
 import { FeaturePlan } from "../../_components/feature-plan"
+import { useAttachFeature } from "./use-attach-feature"
+
+type PlanVersion = RouterOutputs["planVersions"]["getById"]["planVersion"]
 
 interface FeatureListProps {
   featuresPromise: Promise<RouterOutputs["features"]["searchBy"]>
-  planVersion: RouterOutputs["planVersions"]["getById"]["planVersion"]
+  planVersion: PlanVersion
+}
+
+/** The library's "+": a feature created while a draft is open is attached to it at once. */
+export function CreateFeatureButton({ planVersion }: { planVersion: PlanVersion }) {
+  const { attach } = useAttachFeature(planVersion)
+
+  return (
+    <FeatureDialog onCreated={attach}>
+      <Button variant="default" size="sm" aria-label="Create feature">
+        <PlusIcon className="h-3.5 w-3.5" />
+      </Button>
+    </FeatureDialog>
+  )
 }
 
 export function FeatureList({ featuresPromise, planVersion }: FeatureListProps) {
@@ -29,8 +43,7 @@ export function FeatureList({ featuresPromise, planVersion }: FeatureListProps) 
   const [filter, setFilter] = useState("")
   const filterDebounce = useDebounce(filter, 500)
   const trpc = useTRPC()
-  const [planVersionFeatureList, setPlanFeaturesList] = usePlanFeaturesList()
-  const [, setActiveFeature] = useActiveFeature()
+  const { attach, isPublished, attachedFeatureIds } = useAttachFeature(planVersion)
 
   const { data, isFetching } = useQuery(
     trpc.features.searchBy.queryOptions(
@@ -46,85 +59,11 @@ export function FeatureList({ featuresPromise, planVersion }: FeatureListProps) 
     )
   )
 
-  const isPublished = planVersion?.status === "published"
-
-  const createPlanVersionFeature = useMutation(
-    trpc.planVersionFeatures.create.mutationOptions({
-      onSuccess: ({ planVersionFeature }) => {
-        // replace the optimistic entry with the saved one
-        setPlanFeaturesList((features) =>
-          features.map((f) =>
-            f.featureId === planVersionFeature.featureId ? { ...f, ...planVersionFeature } : f
-          )
-        )
-        // hydrate the active feature with the saved id so subsequent edits use update, not create
-        setActiveFeature((current) =>
-          current && current.featureId === planVersionFeature.featureId
-            ? { ...current, ...planVersionFeature }
-            : current
-        )
-        toastAction("saved")
-      },
-      onError: () => {
-        // rollback: drop entries that haven't been persisted (no id)
-        setPlanFeaturesList((features) => features.filter((f) => Boolean(f.id)))
-        setActiveFeature((current) => (current && !current.id ? null : current))
-      },
-    })
-  )
-
   if (!planVersion) return null
 
-  const planFeatureIds = planVersionFeatureList.map((feature) => feature.feature.id)
-  const searchableFeatures = data.features.filter((feature) => !planFeatureIds.includes(feature.id))
-
-  const handleAdd = (feature: (typeof data.features)[number]) => {
-    if (isPublished) {
-      toastAction(
-        "error",
-        "You cannot add features to a published plan version. Please create a new version or duplicate the current one."
-      )
-      return
-    }
-
-    // place new feature at the end
-    const lastOrder = planVersionFeatureList[planVersionFeatureList.length - 1]?.order
-    const order = typeof lastOrder === "number" ? lastOrder + 1024 : 1024
-
-    const optimistic = {
-      planVersionId: planVersion.id,
-      featureId: feature.id,
-      featureType: "flat" as const,
-      feature,
-      order,
-      config: {},
-      billingConfig: planVersion.billingConfig,
-    } as PlanVersionFeatureDragDrop
-
-    // Optimistic local insert AND auto-expand: the user just declared intent to configure
-    // this feature, so we open the inline editor immediately. FeaturePlan scrolls itself into
-    // view when it becomes active without an id yet (see useEffect there).
-    setPlanFeaturesList((prev) => [...prev, optimistic])
-    setActiveFeature(optimistic)
-
-    const payload: PlanVersionFeatureInsert = {
-      planVersionId: optimistic.planVersionId,
-      featureId: optimistic.featureId,
-      featureType: optimistic.featureType,
-      config: optimistic.config,
-      billingConfig: optimistic.billingConfig,
-      resetConfig: optimistic.resetConfig,
-      metadata: optimistic.metadata,
-      order: optimistic.order,
-      defaultQuantity: optimistic.defaultQuantity ?? 1,
-      limit: optimistic.limit ?? undefined,
-      type: optimistic.type,
-      unitOfMeasure: optimistic.unitOfMeasure,
-      meterConfig: optimistic.meterConfig ?? undefined,
-    }
-
-    createPlanVersionFeature.mutate(payload)
-  }
+  const searchableFeatures = data.features.filter(
+    (feature) => !attachedFeatureIds.includes(feature.id)
+  )
 
   return (
     <Fragment>
@@ -160,7 +99,8 @@ export function FeatureList({ featuresPromise, planVersion }: FeatureListProps) 
               </EmptyPlaceholder.Icon>
               <EmptyPlaceholder.Title>No features found</EmptyPlaceholder.Title>
               <EmptyPlaceholder.Description>
-                No library features match your search.
+                No library features match your search. A feature created here is attached to this
+                version.
               </EmptyPlaceholder.Description>
               <EmptyPlaceholder.Action>
                 <FeatureDialog
@@ -169,6 +109,7 @@ export function FeatureList({ featuresPromise, planVersion }: FeatureListProps) 
                     slug: filterDebounce,
                     description: "",
                   }}
+                  onCreated={attach}
                 >
                   <Button size={"sm"} variant={"default"}>
                     Create feature
@@ -196,7 +137,7 @@ export function FeatureList({ featuresPromise, planVersion }: FeatureListProps) 
                   planFeatureVersion={planFeatureVersion}
                   variant={"feature"}
                   disabled={isPublished}
-                  onAdd={() => handleAdd(feature)}
+                  onAdd={() => attach(feature)}
                 />
               )
             })

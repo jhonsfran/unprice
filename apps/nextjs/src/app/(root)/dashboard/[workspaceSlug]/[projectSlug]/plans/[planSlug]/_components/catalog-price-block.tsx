@@ -8,6 +8,7 @@ import type { RouterInputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
 import { Input } from "@unprice/ui/input"
 import { Label } from "@unprice/ui/label"
+import { cn } from "@unprice/ui/utils"
 import { CreditCard } from "lucide-react"
 import { useParams } from "next/navigation"
 import { useState } from "react"
@@ -20,7 +21,7 @@ import {
   countWrites,
   formatMatch,
 } from "../../../rate-cards/_components/rate-card-format"
-import type { FeaturePriceRows } from "../../_components/plan-prices"
+import { type FeaturePriceRows, cardLabel } from "../../_components/plan-prices"
 import type { PlanVersionCard } from "./price-block"
 
 /** The cost components the catalog carries, each priced from one event property. */
@@ -218,9 +219,22 @@ export function CatalogPriceBlockView({
   onPreview: () => void
   onPublish: () => void
 }) {
-  const params = useParams<{ workspaceSlug: string; projectSlug: string }>()
+  const params = useParams<{
+    workspaceSlug: string
+    projectSlug: string
+    planSlug?: string
+    planVersionId?: string
+  }>()
   const cardHref = card
     ? `/${params?.workspaceSlug}/${params?.projectSlug}/rate-cards/${card.card.id}`
+    : null
+  const label = card
+    ? cardLabel(
+        card.card.name,
+        params?.planSlug && params?.planVersionId
+          ? { planSlug: params.planSlug, planVersionId: params.planVersionId, currency }
+          : null
+      )
     : null
   const priced = rows?.byDimension ?? []
   const writes = preview ? countWrites(preview.draft) : 0
@@ -247,12 +261,15 @@ export function CatalogPriceBlockView({
           <CreditCard className="size-3.5 text-muted-foreground" />
           Model prices from the catalog
         </span>
-        {card && cardHref && (
+        {label && cardHref && (
           <SuperLink
             href={cardHref}
-            className="truncate font-mono text-muted-foreground text-xs underline-offset-4 hover:underline"
+            className={cn(
+              "truncate text-muted-foreground text-xs underline-offset-4 hover:underline",
+              !label.isOwn && "font-mono"
+            )}
           >
-            {card.card.name}
+            {label.text}
           </SuperLink>
         )}
       </div>

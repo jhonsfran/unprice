@@ -7,6 +7,7 @@ import { z } from "zod"
 import { slugify } from "@unprice/db/utils"
 import type { InsertFeature } from "@unprice/db/validators"
 import { featureInsertBaseSchema } from "@unprice/db/validators"
+import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
 import {
   Form,
@@ -27,12 +28,17 @@ import { toastAction } from "~/lib/toast"
 import { useZodForm } from "~/lib/zod-form"
 import { useTRPC } from "~/trpc/client"
 
+export type CreatedFeature = RouterOutputs["features"]["create"]["feature"]
+
 export function FeatureForm({
   setDialogOpen,
   defaultValues,
+  onCreated,
 }: {
   setDialogOpen?: (open: boolean) => void
   defaultValues: InsertFeature
+  /** Called with the saved feature after a create; an edit never calls it. */
+  onCreated?: (feature: CreatedFeature) => void
 }) {
   const router = useRouter()
   const trpc = useTRPC()
@@ -74,6 +80,7 @@ export function FeatureForm({
         toastAction("saved", "Feature created")
         setDialogOpen?.(false)
         router.refresh()
+        onCreated?.(feature)
       },
     })
   )

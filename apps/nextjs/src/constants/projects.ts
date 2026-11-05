@@ -1,7 +1,6 @@
 import { FEATURE_SLUGS } from "@unprice/config"
 import {
   Activity,
-  CreditCard,
   Gauge,
   Key,
   Layers3,
@@ -36,12 +35,6 @@ export const PROJECT_NAV: DashboardRoute[] = [
     icon: Layers3,
     href: "/plans",
     disabled: false,
-    featureSlug: FEATURE_SLUGS.PLANS.SLUG,
-  },
-  {
-    name: "Rate cards",
-    icon: CreditCard,
-    href: "/rate-cards",
     featureSlug: FEATURE_SLUGS.PLANS.SLUG,
   },
   {

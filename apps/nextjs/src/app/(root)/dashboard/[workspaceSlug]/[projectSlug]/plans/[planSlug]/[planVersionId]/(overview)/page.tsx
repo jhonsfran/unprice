@@ -1,14 +1,11 @@
-import { PlusIcon } from "lucide-react"
 import { notFound } from "next/navigation"
 import { Suspense } from "react"
 
-import { Button } from "@unprice/ui/button"
 import { LoadingAnimation } from "@unprice/ui/loading-animation"
 import { Typography } from "@unprice/ui/typography"
 import { api } from "~/trpc/server"
 import DragDrop from "../../../_components/drag-drop"
-import { FeatureDialog } from "../../../_components/feature-dialog"
-import { FeatureList } from "../../_components/feature-list"
+import { CreateFeatureButton, FeatureList } from "../../_components/feature-list"
 import { PlanFeatureList } from "../../_components/plan-feature-list"
 import { PlanWorkspaceRail } from "../_components/plan-workspace-rail"
 
@@ -52,11 +49,7 @@ export default async function OverviewVersionPage(props: {
             <aside className="flex min-h-0 flex-col lg:overflow-hidden">
               <div className="flex h-[70px] items-center justify-between px-4">
                 <Typography variant="h4">Feature library</Typography>
-                <FeatureDialog>
-                  <Button variant="default" size="sm">
-                    <PlusIcon className="h-3.5 w-3.5" />
-                  </Button>
-                </FeatureDialog>
+                <CreateFeatureButton planVersion={planVersion} />
               </div>
 
               <div className="border-t" />

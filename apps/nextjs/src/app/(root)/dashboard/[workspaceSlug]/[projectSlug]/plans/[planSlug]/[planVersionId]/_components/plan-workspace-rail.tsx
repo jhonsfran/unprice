@@ -12,6 +12,7 @@ import { PricingCard } from "~/components/forms/pricing-card"
 import { getStatusTone, statusToneClasses } from "~/lib/status-tones"
 import { PlanVersionDialog } from "../../_components/plan-version-dialog"
 import { PlanVersionRateCard } from "./plan-version-rate-card"
+import { PublishChecklist } from "./publish-checklist"
 
 export function PlanWorkspaceRail({
   planVersion,
@@ -40,6 +41,17 @@ export function PlanWorkspaceRail({
 
   return (
     <div className="flex w-full flex-col gap-6 border-t bg-muted/20 p-4 lg:min-h-full lg:rounded-r-lg lg:border-t-0">
+      {status === "draft" && (
+        <>
+          <section className="flex flex-col gap-3">
+            <SectionTitle>Publish checklist</SectionTitle>
+            <PublishChecklist planVersionId={planVersion.id} currency={planVersion.currency} />
+          </section>
+
+          <Separator />
+        </>
+      )}
+
       <section className="flex flex-col gap-3">
         <SectionTitle>Pricing card preview</SectionTitle>
         <PricingCard planVersion={planVersion} className="w-full" showPublish={false} />

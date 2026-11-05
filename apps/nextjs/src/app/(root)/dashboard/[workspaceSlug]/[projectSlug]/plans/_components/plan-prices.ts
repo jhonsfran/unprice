@@ -65,6 +65,15 @@ export function describeFeaturePrice(
   return "Not priced"
 }
 
+/** Whether publishing accepts a feature's rows: priced now, priced from a later start, or not at all. */
+export type PriceState = "priced" | "scheduled" | "unpriced"
+
+export function priceStateOf(entry: FeaturePriceRows | undefined): PriceState {
+  if (!entry) return "unpriced"
+  if (entry.current || entry.byDimension.length > 0) return "priced"
+  return entry.scheduled ? "scheduled" : "unpriced"
+}
+
 /** The titles of plan features the card has no row for: what publishing refuses. */
 export function unpricedFeatureTitles(
   features: readonly { feature: { slug: string; title: string } }[],
@@ -74,10 +83,46 @@ export function unpricedFeatureTitles(
   const priced = rowsByFeature(rows, now)
   const titles: string[] = []
   for (const { feature } of features) {
-    const entry = priced.get(feature.slug)
-    if (!entry || (!entry.current && !entry.scheduled && entry.byDimension.length === 0)) {
-      titles.push(feature.title)
-    }
+    if (priceStateOf(priced.get(feature.slug)) === "unpriced") titles.push(feature.title)
   }
   return titles
+}
+
+/** The convention `pricePlanVersion` names a version's own card by (`versionCardName` on the server). */
+export function isVersionCardName(
+  name: string,
+  version: { planSlug: string; planVersionId: string; currency: string }
+): boolean {
+  return name === `${version.planSlug} ${version.planVersionId} ${version.currency}`
+}
+
+/** How the editor names a card: the version's own card by its role, any other card by its name. */
+export function cardLabel(
+  name: string,
+  version: { planSlug: string; planVersionId: string; currency: string } | null
+): { text: string; isOwn: boolean } {
+  return version && isVersionCardName(name, version)
+    ? { text: "This version's card", isOwn: true }
+    : { text: name, isOwn: false }
+}
+
+/**
+ * The `rateCards.forPlanVersion` cache after a feature save answered its default row: that row
+ * replaces the feature's default row on the card in `currency` (and ends it when null); every
+ * other row, including the feature's dimension rows, stays.
+ */
+export function withDefaultRow<T extends { currency: string; rows: RateRow[] }>(
+  cards: readonly T[],
+  currency: string,
+  featureSlug: string,
+  row: RateRow | null
+): T[] {
+  return cards.map((card) => {
+    if (card.currency !== currency) return card
+    const rows = card.rows.filter(
+      (candidate) =>
+        candidate.featureSlug !== featureSlug || Object.keys(candidate.match).length > 0
+    )
+    return { ...card, rows: row ? [...rows, row] : rows }
+  })
 }

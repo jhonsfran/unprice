@@ -94,6 +94,14 @@ describe("PriceBlockView", () => {
     expect(html).not.toContain("Leave unpriced")
   })
 
+  it("starts a fixed feature at $0, so one save includes it", () => {
+    const html = render([], { shape: "flat" })
+
+    expect(html).toContain("Included at $0 unless you set an amount.")
+    expect(html).toContain('value="0"')
+    expect(html).not.toContain("Not priced yet.")
+  })
+
   it("labels a scheduled row with when it starts", () => {
     const html = render([packageRow, scheduledRow])
 
@@ -155,7 +163,8 @@ describe("prefillDraft", () => {
       tiers: [{ key: "tier-0", upTo: "", unitPrice: "", flatPrice: "0" }],
     })
     expect(prefillDraft(twoComponentRow, "unit")).toBeNull()
-    expect(prefillDraft(null, "flat")).toEqual({ kind: "amount", amount: "" })
+    expect(prefillDraft(null, "flat")).toEqual({ kind: "amount", amount: "0" })
+    expect(prefillDraft(null, "unit")).toEqual({ kind: "amount", amount: "" })
   })
 })
 

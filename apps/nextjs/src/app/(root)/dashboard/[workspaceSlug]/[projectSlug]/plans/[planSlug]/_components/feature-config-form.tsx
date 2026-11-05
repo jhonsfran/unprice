@@ -34,7 +34,12 @@ import { useZodForm } from "~/lib/zod-form"
 import { useTRPC } from "~/trpc/client"
 
 import { FeatureDialog } from "../../_components/feature-dialog"
-import { type FeaturePriceRows, rowsByFeature } from "../../_components/plan-prices"
+import {
+  type FeaturePriceRows,
+  priceStateOf,
+  rowsByFeature,
+  withDefaultRow,
+} from "../../_components/plan-prices"
 import { CatalogPriceBlock } from "./catalog-price-block"
 import {
   BillingConfigFeatureFormField,
@@ -50,6 +55,7 @@ import {
   type PlanVersionCard,
   PriceBlockView,
   type PriceDraft,
+  emptyDraft,
   priceInputOf,
   priceShapeOf,
 } from "./price-block"
@@ -122,6 +128,7 @@ export function FeatureConfigForm({
     enabled: Boolean(planVersion),
   })
   const card = pricing?.cards.find((entry) => entry.currency === planVersion?.currency)
+  const priceRows = rowsByFeature(card?.rows ?? [], dataUpdatedAt).get(featureSlug)
 
   // Pre-populate every nested field so react-hook-form has a defined value to register against.
   const controlledDefaultValues = {
@@ -178,7 +185,7 @@ export function FeatureConfigForm({
   const updatePlanVersionFeatures = useMutation(
     trpc.planVersionFeatures.update.mutationOptions({
       meta: { suppressGlobalError: true },
-      onSuccess: ({ planVersionFeature }, variables) => {
+      onSuccess: ({ planVersionFeature, row }, variables) => {
         // Only the plans-page editor tracks the shared feature list; the standalone sheet
         // must not clobber another page's plan-editor state.
         if (!isStandalone) {
@@ -198,7 +205,18 @@ export function FeatureConfigForm({
         setDialogOpen?.(false)
         router.refresh()
 
-        if (variables.price !== undefined) {
+        if (variables.price !== undefined && planVersion) {
+          // The answered row goes into the pricing cache first, so the header and the block show
+          // the new price before the refetch lands.
+          queryClient.setQueryData(
+            trpc.rateCards.forPlanVersion.queryKey({ planVersionId: planVersion.id }),
+            (cached) =>
+              cached
+                ? {
+                    cards: withDefaultRow(cached.cards, planVersion.currency, featureSlug, row),
+                  }
+                : cached
+          )
           void queryClient.invalidateQueries(trpc.rateCards.forPlanVersion.pathFilter())
         }
         if (!isOnboarding) {
@@ -251,9 +269,20 @@ export function FeatureConfigForm({
   const overage = form.watch("metadata.overageStrategy") ?? "none"
   const isHidden = form.watch("metadata.hidden") ?? false
 
+  // A fixed feature the card has no row for is saved at $0, the block's starting amount, so one
+  // Save makes it an included feature; the rows must be loaded to know it has none.
+  const impliedDraft =
+    featureType === "flat" &&
+    !isPublished &&
+    pricing !== undefined &&
+    priceStateOf(priceRows) === "unpriced"
+      ? emptyDraft("flat")
+      : null
+
   const onSubmitForm = async (data: PlanVersionFeatureInsert) => {
     if (!defaultValues.id) return
-    const built = priceDraft ? priceInputOf(priceDraft) : null
+    const draft = priceDraft ?? impliedDraft
+    const built = draft ? priceInputOf(draft) : null
     if (built && !built.ok) {
       setPriceProblem(built.message)
       return
@@ -374,7 +403,7 @@ export function FeatureConfigForm({
             featureType={featureType}
             usageMode={usageMode}
             card={card}
-            priceRows={rowsByFeature(card?.rows ?? [], dataUpdatedAt).get(featureSlug)}
+            priceRows={priceRows}
             isPricingLoading={isPricingLoading}
             priceDraft={priceDraft}
             onPriceDraftChange={(draft) => {
