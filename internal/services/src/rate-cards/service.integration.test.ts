@@ -2,9 +2,11 @@ import { eq } from "@unprice/db"
 import {
   features as featuresTable,
   modelCosts as modelCostsTable,
+  planVersionFeatures as planVersionFeaturesTable,
   versions as versionsTable,
 } from "@unprice/db/schema"
 import {
+  type MeterConfig,
   type RateRow,
   type RateRowDraft,
   createRateCardInputSchema,
@@ -27,7 +29,12 @@ import {
   truncateTestDatabase,
 } from "../test-fixtures/database"
 import { seedTestDb } from "../test-fixtures/seed-db"
-import { importModelCosts, publishCostPlus, publishRateRows } from "../use-cases/rate-cards"
+import {
+  catalogEffectiveFrom,
+  importModelCosts,
+  publishCostPlus,
+  publishRateRows,
+} from "../use-cases/rate-cards"
 import { pricePlanVersion } from "./price-plan-version"
 import { projectFeaturePricing } from "./project-features"
 import { RateCardService } from "./service"
@@ -76,13 +83,69 @@ function intervals(rows: readonly RateRow[]) {
   ])
 }
 
-async function createCard(marginPolicy: object = { type: "manual" }) {
+async function createCard(marginPolicy: object = { type: "manual" }, name = "Standard") {
   const input = createRateCardInputSchema.parse({
-    name: "Standard",
+    name,
     unit: "money:USD",
     marginPolicy,
   })
   return value(rateCards.createCard(projectId, input))
+}
+
+const LIVE_VERSION = "pv_test_monthly_arrear"
+const MONTHLY = {
+  name: "monthly",
+  billingInterval: "month",
+  billingIntervalCount: 1,
+  billingAnchor: "dayOfCreation",
+  planType: "recurring",
+} as const
+const TOKENS_METER: MeterConfig = {
+  eventId: "evt_tokens",
+  eventSlug: "tokens",
+  aggregationMethod: "sum",
+  aggregationField: "input_tokens",
+  groupBy: ["model"],
+}
+
+/** A usage feature on the seeded version, metered as given. */
+function planFeature(id: string, featureId: string, meterConfig: MeterConfig, order: number) {
+  return {
+    id,
+    projectId,
+    planVersionId: LIVE_VERSION,
+    featureId,
+    featureType: "usage" as const,
+    unitOfMeasure: "unit",
+    config: { usageMode: "unit" as const },
+    billingConfig: { ...MONTHLY },
+    metadata: null,
+    order,
+    meterConfig,
+  }
+}
+
+/**
+ * A USD card a published version prices with, so every change on it takes the notice. The
+ * seeded version turns USD and carries `planFeatures` as its own, since the card is checked
+ * against the features of the versions assigned to it.
+ */
+async function liveCard(planFeatures: ReturnType<typeof planFeature>[]) {
+  await seedTestDb({ db, fixtures: ["plan-monthly-arrear.sql"] })
+  await db
+    .update(versionsTable)
+    .set({ status: "draft", currency: "USD" })
+    .where(eq(versionsTable.id, LIVE_VERSION))
+  if (planFeatures.length > 0) await db.insert(planVersionFeaturesTable).values(planFeatures)
+  const card = await createCard()
+  await value(
+    rateCards.assignToPlanVersion(projectId, {
+      planVersionId: LIVE_VERSION,
+      currency: "USD",
+      cardId: card.id,
+    })
+  )
+  return card
 }
 
 function publish(cardId: string, rows: RateRowDraft[], effectiveFrom: number, now = NOW) {
@@ -171,8 +234,92 @@ describe("RateCardService", () => {
     expect(await rateCards.cardForPlanVersion(projectId, planVersionId, "EUR")).toEqual(assigned)
   })
 
+  it("gives a change the notice only once a published version prices with the card", async () => {
+    const card = await liveCard([planFeature("fv_live_tokens", "ft_llm_tokens", TOKENS_METER, 3)])
+    await db
+      .update(versionsTable)
+      .set({ publishedAt: null })
+      .where(eq(versionsTable.id, LIVE_VERSION))
+    const unscheduled = (rows: RateRowDraft[], now: number) =>
+      publishRateRows({ services }, { projectId, cardId: card.id, rows, now })
+    const close = (rowId: string, now: number) =>
+      rateCards.closeRows({ projectId, cardId: card.id, rowIds: [rowId], now })
+
+    const first = await value(unscheduled([gpt41("2.00", "8.00")], NOW))
+    const draftChange = await value(unscheduled([gpt41("2.00", "7.00")], NOW + MINUTE))
+    await db
+      .update(versionsTable)
+      .set({ status: "published", publishedAt: NOW + 2 * MINUTE })
+      .where(eq(versionsTable.id, LIVE_VERSION))
+    const liveEarly = await rejection(
+      publish(card.id, [gpt41("2.00", "6.00")], NOW + 4 * MINUTE, NOW + 3 * MINUTE)
+    )
+    const liveChange = await value(unscheduled([gpt41("2.00", "6.00")], NOW + 3 * MINUTE))
+    const [open] = liveChange.inserted
+    const liveClose = await value(close(open?.id ?? "", NOW + 4 * MINUTE))
+    const closeRetry = await value(close(open?.id ?? "", NOW + 5 * MINUTE))
+
+    expect([first.inserted[0]?.effectiveFrom, draftChange.inserted[0]?.effectiveFrom]).toEqual([
+      NOW,
+      NOW + MINUTE,
+    ])
+    expect(liveEarly).toEqual({
+      code: "NOTICE_TOO_SHORT",
+      featureSlug: "llm_tokens",
+      earliest: NOW + 13 * MINUTE,
+    })
+    expect(liveChange.inserted[0]?.effectiveFrom).toBe(NOW + 13 * MINUTE)
+    expect(liveClose).toEqual({
+      closed: [{ rowId: open?.id, effectiveTo: NOW + 14 * MINUTE }],
+      unchanged: 0,
+    })
+    expect(closeRetry).toEqual({ closed: [], unchanged: 1 })
+    expect(await rateCards.isLive(projectId, card.id)).toBe(true)
+    expect(intervals(await cardRows(card.id)).map(([from, to]) => [from, to])).toEqual([
+      [0, MINUTE],
+      [MINUTE, 13 * MINUTE],
+      [13 * MINUTE, 14 * MINUTE],
+    ])
+  })
+
+  it("checks a card's rows against the plan features of the versions that price with it", async () => {
+    await db
+      .update(featuresTable)
+      .set({ meterConfig: { ...TOKENS_METER, groupBy: [] } })
+      .where(eq(featuresTable.id, "ft_llm_tokens"))
+    const unassignedCard = await createCard({ type: "manual" }, "Unassigned")
+    const unassigned = await rejection(publish(unassignedCard.id, [gpt41("2.00", "8.00")], NOW))
+    const card = await liveCard([planFeature("fv_live_tokens", "ft_llm_tokens", TOKENS_METER, 3)])
+
+    const assigned = await value(publish(card.id, [gpt41("2.00", "8.00")], NOW))
+    await db
+      .update(planVersionFeaturesTable)
+      .set({ meterConfig: { ...TOKENS_METER, groupBy: [] } })
+      .where(eq(planVersionFeaturesTable.id, "fv_live_tokens"))
+    const regrouped = await rejection(
+      publish(card.id, [{ ...gpt41("2.00", "8.00"), match: { model: "gpt-5" } }], NOW + 10 * MINUTE)
+    )
+    const pricing = await rateCards.featuresPricingWith(projectId, card.id)
+
+    expect(unassigned).toMatchObject({
+      code: "INVALID_CARD",
+      violations: [{ code: "UNKNOWN_DIMENSION", key: "model" }],
+    })
+    expect(assigned.inserted.map((row) => row.match)).toEqual([{ model: "gpt-4.1" }])
+    expect(regrouped).toMatchObject({
+      code: "INVALID_CARD",
+      violations: [{ code: "UNKNOWN_DIMENSION", key: "model" }],
+    })
+    expect(pricing?.features.sort((a, b) => a.slug.localeCompare(b.slug))).toEqual([
+      { slug: "access-pro", dimensions: [], meterProperty: null, included: null },
+      { slug: "events", dimensions: [], meterProperty: "events", included: null },
+      { slug: "llm_tokens", dimensions: [], meterProperty: "input_tokens", included: null },
+    ])
+    expect(await rateCards.featuresPricingWith(projectId, unassignedCard.id)).toBeNull()
+  })
+
   it("refuses a price change inside the notice and closes the old row at a change after it", async () => {
-    const card = await createCard()
+    const card = await liveCard([planFeature("fv_live_tokens", "ft_llm_tokens", TOKENS_METER, 3)])
     await value(publish(card.id, [gpt41("2.00", "8.00")], NOW))
 
     const early = await rejection(publish(card.id, [gpt41("2.00", "6.00")], NOW + 5 * MINUTE))
@@ -261,17 +408,18 @@ describe("RateCardService", () => {
   })
 
   it("keeps publishing after a feature is regrouped and retires its stale rows", async () => {
+    const imagesMeter: MeterConfig = {
+      eventId: "evt_images",
+      eventSlug: "images",
+      aggregationMethod: "count",
+      groupBy: ["size"],
+    }
     await db.insert(featuresTable).values({
       id: "ft_images",
       projectId,
       slug: "images",
       title: "Images",
-      meterConfig: {
-        eventId: "evt_images",
-        eventSlug: "images",
-        aggregationMethod: "count",
-        groupBy: ["size"],
-      },
+      meterConfig: imagesMeter,
     })
     const image = rateRowDraftSchema.parse({
       featureSlug: "images",
@@ -279,20 +427,15 @@ describe("RateCardService", () => {
       price: { type: "unit", components: [{ property: null, rate: "0.04", per: 1 }] },
       cost: null,
     })
-    const card = await createCard()
+    const card = await liveCard([
+      planFeature("fv_live_tokens", "ft_llm_tokens", TOKENS_METER, 3),
+      planFeature("fv_live_images", "ft_images", imagesMeter, 4),
+    ])
     const [stale] = (await value(publish(card.id, [gpt41("2.00", "8.00")], NOW))).inserted
     await db
-      .update(featuresTable)
-      .set({
-        meterConfig: {
-          eventId: "evt_tokens",
-          eventSlug: "tokens",
-          aggregationMethod: "sum",
-          aggregationField: "input_tokens",
-          groupBy: ["model_id"],
-        },
-      })
-      .where(eq(featuresTable.id, "ft_llm_tokens"))
+      .update(planVersionFeaturesTable)
+      .set({ meterConfig: { ...TOKENS_METER, groupBy: ["model_id"] } })
+      .where(eq(planVersionFeaturesTable.id, "fv_live_tokens"))
     const close = (effectiveTo: number, now: number) =>
       rateCards.closeRows({
         projectId,
@@ -499,8 +642,8 @@ describe("RateCardService", () => {
       },
     ])
 
-    const first = await importModelCosts({ services }, { now: NOW })
-    const second = await importModelCosts({ services }, { now: NOW + day })
+    const first = await importModelCosts({ services }, { effectiveFrom: NOW })
+    const second = await importModelCosts({ services }, { effectiveFrom: NOW + day })
     const haiku = await db
       .select()
       .from(modelCostsTable)
@@ -516,6 +659,22 @@ describe("RateCardService", () => {
       ],
       ["mc_haiku_manual", "manual", { input: "0.5" }],
     ])
+  })
+
+  it("imports the bundled catalog at its version date once, however many imports race", async () => {
+    const effectiveFrom = catalogEffectiveFrom()
+
+    const [first, second] = await Promise.all([
+      importModelCosts({ services }, { effectiveFrom }),
+      importModelCosts({ services }, { effectiveFrom }),
+    ])
+    const stored = await db.select().from(modelCostsTable)
+
+    expect(first.inserted + second.inserted).toBe(MODEL_CATALOG.length)
+    expect(stored).toHaveLength(MODEL_CATALOG.length)
+    expect(new Set(stored.map((row) => row.effectiveFrom))).toEqual(
+      new Set([Date.parse("2026-10-20T00:00:00.000Z")])
+    )
   })
 
   it("previews cost-plus rates and publishes the reviewed draft as catalog rows", async () => {

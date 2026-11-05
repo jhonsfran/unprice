@@ -36,6 +36,7 @@ function callerAs(role: WorkspaceRole, rejection: RateCardRejection) {
     services: {
       features: { listFeaturesByProject: async () => Ok([]) },
       rateCards: {
+        featuresPricingWith: async () => null,
         publishRows: async (publish: { drafts: unknown[] }) => {
           published.push(publish.drafts)
           return Err(new UnPriceRateCardError(rejection))
@@ -55,16 +56,17 @@ describe("rateCards.publishRows", () => {
     expect(published).toEqual([])
   })
 
-  it("hands the rows to close to the same publish", async () => {
-    const closed: unknown[] = []
+  it("hands the rows to close to the same publish, and the start to the card when absent", async () => {
+    const publishes: { closeRowIds?: readonly string[]; effectiveFrom?: number }[] = []
     const ctx = {
       project: { id: "proj_1" },
       verifyRole: () => undefined,
       services: {
         features: { listFeaturesByProject: async () => Ok([]) },
         rateCards: {
+          featuresPricingWith: async () => null,
           publishRows: async (publish: { closeRowIds?: readonly string[] }) => {
-            closed.push(publish.closeRowIds)
+            publishes.push(publish)
             return Ok({ inserted: [], closed: [], unchanged: 0 })
           },
         },
@@ -73,8 +75,13 @@ describe("rateCards.publishRows", () => {
     const router = initTRPC.context<Context>().create().router({ publishRows })
 
     await router.createCaller(ctx).publishRows({ ...input, closeRowIds: ["rr_old"] })
+    const { effectiveFrom: _, ...unscheduled } = input
+    await router.createCaller(ctx).publishRows(unscheduled)
 
-    expect(closed).toEqual([["rr_old"]])
+    expect(publishes.map((publish) => [publish.closeRowIds, publish.effectiveFrom])).toEqual([
+      [["rr_old"], input.effectiveFrom],
+      [undefined, undefined],
+    ])
   })
 
   it("maps each rejection to its tRPC code and keeps the violations in the message", async () => {

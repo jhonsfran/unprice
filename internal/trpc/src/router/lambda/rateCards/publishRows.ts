@@ -4,8 +4,9 @@ import { domainErrorToTrpcError } from "#domain-error"
 import { protectedProjectProcedure } from "#trpc"
 
 /**
- * Publishes price rows, and ends the rows of `closeRowIds` where they start, in one write; once
- * the card has a row, every start and end is at least 10 minutes from now.
+ * Publishes price rows, and ends the rows of `closeRowIds` where they start, in one write. Without
+ * a start they begin at the earliest the card allows: now, or 10 minutes out once a live card has
+ * a row.
  */
 export const publishRows = protectedProjectProcedure
   .input(publishRateRowsInputSchema)

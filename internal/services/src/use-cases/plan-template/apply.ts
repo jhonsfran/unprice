@@ -54,6 +54,7 @@ type ApplyPlanTemplateFailureState =
   | "payment_provider_error"
   | "publish_error"
   | "unpriced"
+  | "invalid_rows"
 
 type ApplyPlanTemplateDeps = {
   services: Pick<ServiceContext, "plans" | "features" | "events" | "customers" | "rateCards">

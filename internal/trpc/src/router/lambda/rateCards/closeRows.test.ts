@@ -67,6 +67,17 @@ describe("rateCards.closeRows", () => {
     expect(member.calls).toEqual([])
   })
 
+  it("leaves the end to the card when the caller gives none", async () => {
+    vi.useFakeTimers({ now: NOW })
+    const { caller, calls } = callerAs("OWNER", Ok({ closed: [], unchanged: 1 }))
+
+    const result = await caller.closeRows({ cardId: "rc_1", rowIds: ["rr_1"] })
+
+    expect(result).toEqual({ closed: [], unchanged: 1 })
+    expect(calls).toEqual([[{ projectId: "proj_1", cardId: "rc_1", rowIds: ["rr_1"], now: NOW }]])
+    expect("effectiveTo" in (calls[0]?.[0] as object)).toBe(false)
+  })
+
   it("maps a missing row to NOT_FOUND and a closed one to CONFLICT", async () => {
     const missing = await callerAs(
       "OWNER",

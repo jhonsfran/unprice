@@ -1,16 +1,25 @@
 import type {
   AssignPlanVersionCardInput,
+  CostPlusFeaturePolicy,
   CreateRateCardInput,
+  ModelCost,
   RateCard,
   RatePrice,
   RateRow,
 } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import { vi } from "vitest"
-import { isEffective, matchKey, ratePriceOf } from "../pricing"
+import { type CostPlusCard, costPlusRevision, isEffective, matchKey, ratePriceOf } from "../pricing"
 import type { DecimalFeaturePrice } from "../pricing"
 import { UnPriceRateCardError } from "./errors"
-import type { PlanVersionPricing, PublishRowsInput, PublishRowsResult } from "./service"
+import type {
+  CloseRowsInput,
+  PlanVersionPricing,
+  PublishRowsInput,
+  PublishRowsResult,
+} from "./service"
+import { draftHash } from "./service"
+import { canonicalJson } from "./wire"
 
 function samePrice(a: RatePrice, b: RatePrice): boolean {
   const json = (value: unknown) =>
@@ -19,14 +28,18 @@ function samePrice(a: RatePrice, b: RatePrice): boolean {
 }
 
 /**
- * An in-memory `RateCardService` for use-case tests: cards, their rows, and plan version
- * assignments. A publish replaces the open row of the same feature and match and skips an
- * identical one, like the real service; it checks no notice and no card rules.
+ * An in-memory `RateCardService` for use-case tests: cards, their rows, plan version assignments
+ * and the imported cost catalog. A publish replaces the open row of the same feature and match
+ * and skips an identical one, like the real service; it checks no notice and no card rules. Rows
+ * start at the given time, or at `now` when the caller left it to the card.
  */
 export function createRateCardsFake() {
   const cards = new Map<string, RateCard>()
   const rows: RateRow[] = []
+  const costs: ModelCost[] = []
   const assignments = new Map<string, string>()
+  /** Versions a test published; a card assigned to one is live. */
+  const published = new Set<string>()
   let sequence = 0
   const assignmentKey = (planVersionId: string, currency: string) => `${planVersionId}:${currency}`
 
@@ -51,8 +64,14 @@ export function createRateCardsFake() {
       async (_projectId: string, name: string) =>
         [...cards.values()].find((card) => card.name === name) ?? null
     ),
+    getCard: vi.fn(async (_projectId: string, cardId: string) => {
+      const card = cards.get(cardId)
+      if (!card) return Err(new UnPriceRateCardError({ code: "CARD_NOT_FOUND", cardId }))
+      return Ok({ card, rows: rows.filter((row) => row.rateCardId === cardId) })
+    }),
     publishRows: vi.fn(
       async (input: PublishRowsInput): Promise<Result<PublishRowsResult, UnPriceRateCardError>> => {
+        const effectiveFrom = input.effectiveFrom ?? input.now
         const inserted: RateRow[] = []
         const closed: { rowId: string; effectiveTo: number }[] = []
         let unchanged = 0
@@ -69,28 +88,68 @@ export function createRateCardsFake() {
             continue
           }
           if (open) {
-            open.effectiveTo = input.effectiveFrom
-            closed.push({ rowId: open.id, effectiveTo: input.effectiveFrom })
+            open.effectiveTo = effectiveFrom
+            closed.push({ rowId: open.id, effectiveTo: effectiveFrom })
           }
           sequence += 1
           const row: RateRow = {
             ...draft,
             id: `rr_${sequence}`,
             rateCardId: input.cardId,
-            effectiveFrom: input.effectiveFrom,
+            effectiveFrom,
             effectiveTo: null,
           }
           rows.push(row)
           inserted.push(row)
         }
+        for (const rowId of input.closeRowIds ?? []) {
+          const row = rows.find((candidate) => candidate.id === rowId)
+          if (!row) return Err(new UnPriceRateCardError({ code: "ROW_NOT_FOUND", rowIds: [rowId] }))
+          if (row.effectiveTo !== null || closed.some((close) => close.rowId === rowId)) {
+            unchanged += 1
+            continue
+          }
+          row.effectiveTo = effectiveFrom
+          closed.push({ rowId, effectiveTo: effectiveFrom })
+        }
         return Ok({ inserted, closed, unchanged })
       }
     ),
+    closeRows: vi.fn(async (input: CloseRowsInput) => {
+      const effectiveTo = input.effectiveTo ?? input.now
+      const closed: { rowId: string; effectiveTo: number }[] = []
+      let unchanged = 0
+      for (const rowId of input.rowIds) {
+        const row = rows.find((candidate) => candidate.id === rowId)
+        if (!row) return Err(new UnPriceRateCardError({ code: "ROW_NOT_FOUND", rowIds: [rowId] }))
+        if (row.effectiveTo !== null) {
+          unchanged += 1
+          continue
+        }
+        row.effectiveTo = effectiveTo
+        closed.push({ rowId, effectiveTo })
+      }
+      return Ok({ closed, unchanged })
+    }),
     assignToPlanVersion: vi.fn(async (_projectId: string, input: AssignPlanVersionCardInput) => {
       assignments.set(assignmentKey(input.planVersionId, input.currency), input.cardId)
       const card = cards.get(input.cardId)
       return Ok({ ...input, unit: card?.unit ?? `money:${input.currency}` })
     }),
+    versionsPricingWith: vi.fn(async (_projectId: string, cardId: string) =>
+      [...assignments]
+        .filter(([, assigned]) => assigned === cardId)
+        .map(([key]) => {
+          const [planVersionId, currency] = key.split(":") as [string, string]
+          return {
+            planVersionId,
+            currency: currency as PlanVersionPricing["currency"],
+            publishedAt: published.has(planVersionId) ? 1 : null,
+          }
+        })
+    ),
+    /** Null: the fake keeps no plan features, so a card is checked against the project's. */
+    featuresPricingWith: vi.fn(async () => null),
     pricingForPlanVersions: vi.fn(
       async (_projectId: string, planVersionIds: readonly string[], at: number) => {
         const byVersion = new Map<string, PlanVersionPricing[]>()
@@ -109,6 +168,66 @@ export function createRateCardsFake() {
         return byVersion
       }
     ),
+    setMarginPolicy: vi.fn(
+      async (_projectId: string, cardId: string, policy: CostPlusFeaturePolicy) => {
+        const card = cards.get(cardId)
+        if (!card) return Err(new UnPriceRateCardError({ code: "CARD_NOT_FOUND", cardId }))
+        if (card.unit.startsWith("money:") && card.unit !== "money:USD") {
+          return Err(new UnPriceRateCardError({ code: "CATALOG_USD_ONLY", unit: card.unit }))
+        }
+        const kept =
+          card.marginPolicy.type === "costPlus"
+            ? card.marginPolicy.features.filter((other) => other.featureSlug !== policy.featureSlug)
+            : []
+        const updated: RateCard = {
+          ...card,
+          marginPolicy: { type: "costPlus", features: [...kept, policy] },
+        }
+        cards.set(cardId, updated)
+        return Ok(updated)
+      }
+    ),
+    previewCostPlus: vi.fn(async (_projectId: string, cardId: string, at: number) => {
+      const card = cards.get(cardId)
+      if (!card) return Err(new UnPriceRateCardError({ code: "CARD_NOT_FOUND", cardId }))
+      if (card.marginPolicy.type !== "costPlus") {
+        return Err(new UnPriceRateCardError({ code: "NOT_COST_PLUS", cardId }))
+      }
+      const costPlusCard: CostPlusCard = { ...card, marginPolicy: card.marginPolicy }
+      const draft = costPlusRevision(
+        costPlusCard,
+        costs,
+        rows.filter((row) => row.rateCardId === cardId),
+        at
+      )
+      return Ok({ draft, draftHash: draftHash(draft) })
+    }),
+    latestImportedCosts: vi.fn(async () => {
+      const latest = new Map<string, ModelCost>()
+      for (const cost of costs) {
+        if (cost.source !== "modelsdev") continue
+        const key = `${cost.provider}/${cost.model}`
+        const seen = latest.get(key)
+        if (!seen || cost.effectiveFrom > seen.effectiveFrom) latest.set(key, cost)
+      }
+      return [...latest.values()]
+    }),
+    insertModelCosts: vi.fn(async (proposed: readonly ModelCost[]) => {
+      const stored = new Set(
+        costs.map((cost) =>
+          canonicalJson([cost.provider, cost.model, cost.source, cost.effectiveFrom])
+        )
+      )
+      let inserted = 0
+      for (const cost of proposed) {
+        const key = canonicalJson([cost.provider, cost.model, cost.source, cost.effectiveFrom])
+        if (stored.has(key)) continue
+        stored.add(key)
+        costs.push({ ...cost, sourceRef: `mc_${costs.length + 1}` })
+        inserted += 1
+      }
+      return inserted
+    }),
   }
 
   /** Prices a seeded plan version directly: one default row per feature on its own card. */
@@ -147,5 +266,5 @@ export function createRateCardsFake() {
     return card
   }
 
-  return { rateCards, rows, cards, seedPlanVersionCard }
+  return { rateCards, rows, cards, costs, assignments, published, seedPlanVersionCard }
 }

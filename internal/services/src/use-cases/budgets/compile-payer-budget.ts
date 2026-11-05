@@ -25,6 +25,7 @@ import { Err, Ok, type Result } from "@unprice/error"
 import { z } from "zod"
 import { windowIdOf, windowSpecOf } from "../../budgets"
 import { DomainError, type DomainErrorKind } from "../../domain-error-kind"
+import { planFeaturePricing } from "../../rate-cards/publish"
 
 /** The budget key billing writes for a customer; a public call may never define one. */
 export function payerBudgetKey(customerId: string): string {
@@ -276,7 +277,11 @@ function phaseAt(phases: readonly Phase[], now: number): Phase | undefined {
   )
 }
 
-/** How a usage feature's meter reads an event; null for a feature without one. */
+/**
+ * How a usage feature's meter reads an event; null for a feature without one. The property and
+ * dimensions are the pricing core's reading of the plan feature (`planFeaturePricing`), the same
+ * one its card's rows were checked against.
+ */
 function meterOf(feature: PayerFeature) {
   const meter = feature.meterConfig
   if (feature.featureType !== "usage" || meter === null) return null
@@ -284,10 +289,21 @@ function meterOf(feature: PayerFeature) {
   if (aggregationMethod !== "sum" && aggregationMethod !== "count") {
     return fail({ code: "UNSUPPORTED_AGGREGATION", featureSlug: feature.slug, aggregationMethod })
   }
+  const pricing = planFeaturePricing({
+    feature: { slug: feature.slug },
+    meterConfig: meter,
+    included: feature.included,
+  })
+  if (!pricing.ok) {
+    return fail({
+      code: "INVALID_BUDGET",
+      message: `${pricing.unpriceable.slug}: ${pricing.unpriceable.reason}`,
+    })
+  }
   return Ok({
     eventSlug: meter.eventSlug,
-    meterProperty: aggregationMethod === "count" ? null : (meter.aggregationField ?? null),
-    dimensions: meter.groupBy ?? [],
+    meterProperty: pricing.pricing.meterProperty,
+    dimensions: pricing.pricing.dimensions,
   })
 }
 

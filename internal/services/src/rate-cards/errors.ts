@@ -19,6 +19,14 @@ export type RateCardRejection =
   | Readonly<{ code: "PLAN_VERSION_NOT_FOUND"; planVersionId: string }>
   | Readonly<{ code: "PLAN_VERSION_PUBLISHED"; planVersionId: string }>
   | Readonly<{ code: "CARD_UNIT_MISMATCH"; cardId: string; unit: string; currency: string }>
+  /** The version's card also prices another version, so editing it would reprice that one too. */
+  | Readonly<{ code: "CARD_SHARED"; cardId: string; planVersionId: string }>
+  /** The cost catalog is in USD, so only a USD version can price from it. */
+  | Readonly<{ code: "CATALOG_USD_ONLY"; unit: string }>
+  /** Catalog pricing needs the feature's meter dimension that carries the model id. */
+  | Readonly<{ code: "DIMENSION_REQUIRED"; featureSlug: string; dimensions: readonly string[] }>
+  /** The price given has the wrong form for the feature's package: a price or tiers. */
+  | Readonly<{ code: "PRICE_SHAPE_MISMATCH"; featureSlug: string; expected: "price" | "tiers" }>
 
 export type RateCardErrorCode = RateCardRejection["code"]
 
@@ -37,6 +45,10 @@ const KIND: Record<RateCardErrorCode, DomainErrorKind> = {
   PLAN_VERSION_NOT_FOUND: "not_found",
   PLAN_VERSION_PUBLISHED: "precondition",
   CARD_UNIT_MISMATCH: "bad_request",
+  CARD_SHARED: "precondition",
+  CATALOG_USD_ONLY: "precondition",
+  DIMENSION_REQUIRED: "precondition",
+  PRICE_SHAPE_MISMATCH: "bad_request",
 }
 
 function message(rejection: RateCardRejection): string {
@@ -71,6 +83,16 @@ function message(rejection: RateCardRejection): string {
       return `Plan version ${rejection.planVersionId} is published; its cards are part of the package`
     case "CARD_UNIT_MISMATCH":
       return `Rate card ${rejection.cardId} prices in ${rejection.unit}; a plan version invoiced in ${rejection.currency} needs money:${rejection.currency}`
+    case "CARD_SHARED":
+      return `Rate card ${rejection.cardId} also prices plan version ${rejection.planVersionId}; give this version its own card before changing its prices`
+    case "CATALOG_USD_ONLY":
+      return `The model cost catalog is in USD; a ${rejection.unit} card cannot price from it`
+    case "DIMENSION_REQUIRED":
+      return rejection.dimensions.length === 0
+        ? `${rejection.featureSlug} needs a meter dimension that carries the model id before the catalog can price it per model`
+        : `${rejection.featureSlug} varies by ${rejection.dimensions.join(", ")}; name the dimension that carries the model id`
+    case "PRICE_SHAPE_MISMATCH":
+      return `${rejection.featureSlug} is priced with ${rejection.expected === "tiers" ? "graduated tiers" : "one price"}, so it takes ${rejection.expected}`
   }
 }
 

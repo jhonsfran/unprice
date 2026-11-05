@@ -12,6 +12,5 @@ export const get = protectedProjectProcedure
     const { rateCards } = opts.ctx.services
     const result = await rateCards.getCard(opts.ctx.project.id, opts.input.id)
     if (result.err) throw domainErrorToTrpcError(result.err)
-    const versions = await rateCards.versionsPricingWith(opts.ctx.project.id, opts.input.id)
-    return { ...result.val, live: versions.some((version) => version.publishedAt !== null) }
+    return { ...result.val, live: await rateCards.isLive(opts.ctx.project.id, opts.input.id) }
   })

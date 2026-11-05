@@ -1,10 +1,14 @@
 import type { Database } from "@unprice/db"
-import * as schema from "@unprice/db/schema"
+import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { describe, expect, it, vi } from "vitest"
+import type { ServiceContext } from "../../context"
+import { createRateCardsFake } from "../../rate-cards/memory.fixture"
 import { duplicatePlanVersion } from "./duplicate"
 
 type InsertedValues = Record<string, unknown>
+
+const NOW = Date.parse("2026-11-10T12:00:00.000Z")
 
 function createLogger(): Logger {
   return {
@@ -56,6 +60,7 @@ function createPlanVersion(overrides?: InsertedValues): InsertedValues {
     plan: {
       id: "plan_free",
       projectId: "proj_123",
+      slug: "free",
       defaultPlan: true,
     },
     planFeatures: [
@@ -73,25 +78,18 @@ function createPlanVersion(overrides?: InsertedValues): InsertedValues {
   }
 }
 
-function createDbMocks(planVersionData: InsertedValues | null, cards: InsertedValues[] = []) {
+function createDbMocks(planVersionData: InsertedValues | null) {
   let insertedVersion: InsertedValues | null = null
   const insertedFeatures: InsertedValues[] = []
-  const insertedCards: InsertedValues[] = []
 
   const tx = {
     select: vi.fn(() => ({
-      from: vi.fn((table: unknown) => ({
-        where: vi
-          .fn()
-          .mockResolvedValue(table === schema.planVersionRateCards ? cards : [{ count: 1 }]),
+      from: vi.fn(() => ({
+        where: vi.fn().mockResolvedValue([{ count: 1 }]),
       })),
     })),
-    insert: vi.fn((table: unknown) => ({
+    insert: vi.fn(() => ({
       values: vi.fn((values: InsertedValues | InsertedValues[]) => {
-        if (table === schema.planVersionRateCards) {
-          insertedCards.push(...(Array.isArray(values) ? values : [values]))
-          return Promise.resolve()
-        }
         if (Array.isArray(values)) throw new Error("unexpected batch insert")
         if ("planId" in values) {
           insertedVersion = values
@@ -122,45 +120,100 @@ function createDbMocks(planVersionData: InsertedValues | null, cards: InsertedVa
         return insertedVersion
       },
       features: insertedFeatures,
-      cards: insertedCards,
     },
   }
 }
 
+function createDeps(db: Database) {
+  const cards = createRateCardsFake()
+  const services = {
+    features: { listFeaturesByProject: vi.fn(async () => Ok([])) },
+    rateCards: cards.rateCards,
+  } as unknown as Pick<ServiceContext, "features" | "rateCards">
+  return { cards, deps: { db, logger: createLogger(), services } }
+}
+
 describe("duplicatePlanVersion", () => {
-  it("copies the version's rate card per currency onto the copy", async () => {
-    const { db, inserted } = createDbMocks(createPlanVersion(), [
-      { currency: "USD", rateCardId: "rc_usd" },
-      { currency: "EUR", rateCardId: "rc_eur" },
-    ])
+  it("forks the source's card: its policy and the rows in force, on a card named after the copy", async () => {
+    vi.useFakeTimers({ now: NOW })
+    try {
+      const { db } = createDbMocks(createPlanVersion())
+      const { cards, deps } = createDeps(db)
+      const source = cards.seedPlanVersionCard("pv_source", "USD", [
+        { featureSlug: "base", featureType: "flat", price: "10" },
+        {
+          featureSlug: "seats",
+          featureType: "tier",
+          tiers: [{ firstUnit: 1, lastUnit: null, unitPrice: "8", flatPrice: "0" }],
+        },
+      ])
+      const [base, seats] = cards.rows
+      if (!base || !seats) throw new Error("fixture")
+      // A successor scheduled past now, which ends the base row there; and a row that already ended.
+      base.effectiveTo = NOW + 60_000
+      cards.rows.push(
+        { ...base, id: "rr_base_next", effectiveFrom: NOW + 60_000, effectiveTo: null },
+        { ...seats, id: "rr_seats_old", effectiveFrom: 0, effectiveTo: NOW - 1 }
+      )
+      cards.published.add("pv_source")
 
-    const result = await duplicatePlanVersion(
-      { db, logger: createLogger() },
-      { id: "pv_source", projectId: "proj_123" }
-    )
+      const result = await duplicatePlanVersion(deps, { id: "pv_source", projectId: "proj_123" })
 
-    if (!result.val || result.val.state !== "ok") throw new Error("expected a duplicate")
-    const planVersionId = result.val.planVersion.id
-    expect(inserted.cards.map(({ id: _, ...card }) => card)).toEqual([
-      { currency: "USD", rateCardId: "rc_usd", projectId: "proj_123", planVersionId },
-      { currency: "EUR", rateCardId: "rc_eur", projectId: "proj_123", planVersionId },
-    ])
-    expect(planVersionId).not.toBe("pv_source")
+      if (!result.val || result.val.state !== "ok") throw new Error("expected a duplicate")
+      const copyId = result.val.planVersion.id
+      const copy = [...cards.cards.values()].find((card) => card.id !== source.id)
+      expect(copy).toMatchObject({ name: `free ${copyId} USD`, unit: "money:USD" })
+      expect(cards.assignments.get(`${copyId}:USD`)).toBe(copy?.id)
+      expect(
+        cards.rows
+          .filter((row) => row.rateCardId === copy?.id)
+          .map(({ featureSlug, price, effectiveFrom, effectiveTo, source: rowSource }) => ({
+            featureSlug,
+            price,
+            effectiveFrom,
+            effectiveTo,
+            source: rowSource,
+          }))
+      ).toEqual([
+        {
+          featureSlug: "base",
+          price: base.price,
+          effectiveFrom: NOW,
+          effectiveTo: null,
+          source: "manual",
+        },
+        {
+          featureSlug: "seats",
+          price: seats.price,
+          effectiveFrom: NOW,
+          effectiveTo: null,
+          source: "manual",
+        },
+      ])
+      expect(copyId).not.toBe("pv_source")
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("leaves a copy of a version without a card unpriced", async () => {
+    const { db } = createDbMocks(createPlanVersion())
+    const { cards, deps } = createDeps(db)
+
+    const result = await duplicatePlanVersion(deps, { id: "pv_source", projectId: "proj_123" })
+
+    expect(result.val?.state).toBe("ok")
+    expect(cards.cards.size).toBe(0)
+    expect(cards.rateCards.assignToPlanVersion).not.toHaveBeenCalled()
   })
 
   it("duplicates default plan versions without preserving a stale payment method requirement", async () => {
     const { db, inserted } = createDbMocks(createPlanVersion())
 
-    const result = await duplicatePlanVersion(
-      {
-        db,
-        logger: createLogger(),
-      },
-      {
-        id: "pv_source",
-        projectId: "proj_123",
-      }
-    )
+    const result = await duplicatePlanVersion(createDeps(db).deps, {
+      id: "pv_source",
+      projectId: "proj_123",
+    })
 
     expect(result.err).toBeUndefined()
     if (!result.val || result.val.state !== "ok") {
@@ -188,21 +241,16 @@ describe("duplicatePlanVersion", () => {
         plan: {
           id: "plan_paid",
           projectId: "proj_123",
+          slug: "paid",
           defaultPlan: false,
         },
       })
     )
 
-    const result = await duplicatePlanVersion(
-      {
-        db,
-        logger: createLogger(),
-      },
-      {
-        id: "pv_source",
-        projectId: "proj_123",
-      }
-    )
+    const result = await duplicatePlanVersion(createDeps(db).deps, {
+      id: "pv_source",
+      projectId: "proj_123",
+    })
 
     expect(result.err).toBeUndefined()
     if (!result.val || result.val.state !== "ok") {

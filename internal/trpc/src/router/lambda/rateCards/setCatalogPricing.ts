@@ -1,5 +1,6 @@
-import { TRPCError } from "@trpc/server"
 import { planVersionCatalogPricingInputSchema } from "@unprice/db/validators"
+import { setPlanVersionCatalogPricing } from "@unprice/services/use-cases"
+import { domainErrorToTrpcError } from "#domain-error"
 import { protectedProjectProcedure } from "#trpc"
 
 /**
@@ -10,8 +11,11 @@ export const setCatalogPricing = protectedProjectProcedure
   .input(planVersionCatalogPricingInputSchema)
   .mutation(async (opts) => {
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
-    throw new TRPCError({
-      code: "NOT_IMPLEMENTED",
-      message: `catalog pricing for ${opts.input.featureSlug} is not wired yet`,
-    })
+    const { plans, features, rateCards } = opts.ctx.services
+    const result = await setPlanVersionCatalogPricing(
+      { services: { plans, features, rateCards } },
+      { ...opts.input, projectId: opts.ctx.project.id, now: Date.now() }
+    )
+    if (result.err) throw domainErrorToTrpcError(result.err)
+    return result.val
   })

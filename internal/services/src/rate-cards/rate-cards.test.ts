@@ -2,10 +2,19 @@ import { type ModelRate, type RateRow, rateRowSchema } from "@unprice/db/validat
 import { describe, expect, it } from "vitest"
 import { CARD_FROM, features, modelCosts, usdCard, usdCardWithFallback } from "../pricing/fixtures"
 import { catalogCosts, changedCosts } from "./model-costs"
-import { RATE_CHANGE_NOTICE_MS, featurePricingOf, planClose, planPublish } from "./publish"
+import {
+  RATE_CHANGE_NOTICE_MS,
+  featurePricingOf,
+  planClose,
+  planFeaturePricing,
+  planPublish,
+  planVersionViolations,
+  unionFeaturePricing,
+} from "./publish"
 import { canonicalJson, toWire } from "./wire"
 
 const NOW = CARD_FROM + 60_000
+const NOTICE = RATE_CHANGE_NOTICE_MS
 
 describe("toWire", () => {
   it("formats amounts so every fixture row parses back to itself", () => {
@@ -47,38 +56,73 @@ describe("planPublish", () => {
       sourceRef: null,
     }
   }
-  const plan = (drafts: ReturnType<typeof draft>[], effectiveFrom: number) =>
+  const plan = (
+    drafts: ReturnType<typeof draft>[],
+    effectiveFrom: number | undefined,
+    noticeMs = NOTICE
+  ) =>
     planPublish({
       card,
       rows: open,
       drafts,
       effectiveFrom,
       now: NOW,
+      noticeMs,
       features: [features.llmTokens],
       newRowId: () => "row_new",
     })
 
   it("closes the open row where its successor starts", () => {
-    const result = plan([draft("6")], NOW + RATE_CHANGE_NOTICE_MS)
+    const result = plan([draft("6")], NOW + NOTICE)
 
-    expect(result.val?.closes).toEqual([
-      { rowId: "row_gpt41", effectiveTo: NOW + RATE_CHANGE_NOTICE_MS },
-    ])
+    expect(result.val?.closes).toEqual([{ rowId: "row_gpt41", effectiveTo: NOW + NOTICE }])
     expect(result.val?.inserts.map((row) => [row.id, row.effectiveFrom, row.effectiveTo])).toEqual([
-      ["row_new", NOW + RATE_CHANGE_NOTICE_MS, null],
+      ["row_new", NOW + NOTICE, null],
     ])
   })
 
   it("counts a draft equal to its open row as unchanged, at any start", () => {
-    expect(plan([draft("8")], NOW).val).toEqual({ closes: [], inserts: [], unchanged: 1 })
+    expect(plan([draft("8")], NOW).val).toEqual({
+      effectiveFrom: NOW,
+      closes: [],
+      inserts: [],
+      unchanged: 1,
+    })
   })
 
   it("refuses a change one millisecond inside the notice", () => {
-    expect(plan([draft("6")], NOW + RATE_CHANGE_NOTICE_MS - 1).err?.rejection).toEqual({
+    expect(plan([draft("6")], NOW + NOTICE - 1).err?.rejection).toEqual({
       code: "NOTICE_TOO_SHORT",
       featureSlug: "llm_tokens",
-      earliest: NOW + RATE_CHANGE_NOTICE_MS,
+      earliest: NOW + NOTICE,
     })
+  })
+
+  it("starts a change at once on a card no published version prices with", () => {
+    const result = plan([draft("6")], NOW, 0)
+
+    expect(result.val?.closes).toEqual([{ rowId: "row_gpt41", effectiveTo: NOW }])
+    expect(result.val?.inserts.map((row) => row.effectiveFrom)).toEqual([NOW])
+    expect(plan([draft("6")], NOW - 1, 0).err?.rejection).toEqual({
+      code: "NOTICE_TOO_SHORT",
+      featureSlug: "llm_tokens",
+      earliest: NOW,
+    })
+  })
+
+  it("starts at the earliest the card allows when no start is given", () => {
+    const live = plan([draft("6")], undefined)
+    const draftOnly = plan([draft("6")], undefined, 0)
+
+    expect([
+      live.val?.effectiveFrom,
+      live.val?.closes,
+      live.val?.inserts[0]?.effectiveFrom,
+    ]).toEqual([NOW + NOTICE, [{ rowId: "row_gpt41", effectiveTo: NOW + NOTICE }], NOW + NOTICE])
+    expect([draftOnly.val?.effectiveFrom, draftOnly.val?.inserts[0]?.effectiveFrom]).toEqual([
+      NOW,
+      NOW,
+    ])
   })
 
   it("publishes past rows of a deleted feature and an unchanged retry past stale dimensions", () => {
@@ -87,8 +131,9 @@ describe("planPublish", () => {
       card,
       rows: usdCard.rows,
       drafts: [draft("6")],
-      effectiveFrom: NOW + RATE_CHANGE_NOTICE_MS,
+      effectiveFrom: NOW + NOTICE,
       now: NOW,
+      noticeMs: NOTICE,
       features: [features.llmTokens],
       newRowId: () => "row_new",
     })
@@ -98,6 +143,7 @@ describe("planPublish", () => {
       drafts: [draft("8")],
       effectiveFrom: NOW,
       now: NOW,
+      noticeMs: NOTICE,
       features: [regrouped],
       newRowId: () => "row_new",
     })
@@ -105,16 +151,15 @@ describe("planPublish", () => {
       card,
       rows: usdCard.rows,
       drafts: [draft("6")],
-      effectiveFrom: NOW + RATE_CHANGE_NOTICE_MS,
+      effectiveFrom: NOW + NOTICE,
       now: NOW,
+      noticeMs: NOTICE,
       features: [regrouped],
       newRowId: () => "row_new",
     })
 
-    expect(change.val?.closes).toEqual([
-      { rowId: "row_gpt41", effectiveTo: NOW + RATE_CHANGE_NOTICE_MS },
-    ])
-    expect(retry.val).toEqual({ closes: [], inserts: [], unchanged: 1 })
+    expect(change.val?.closes).toEqual([{ rowId: "row_gpt41", effectiveTo: NOW + NOTICE }])
+    expect(retry.val).toEqual({ effectiveFrom: NOW, closes: [], inserts: [], unchanged: 1 })
     expect(staleInsert.err?.rejection).toEqual({
       code: "INVALID_CARD",
       violations: [{ code: "UNKNOWN_DIMENSION", rowId: "row_new", key: "model" }],
@@ -122,7 +167,7 @@ describe("planPublish", () => {
   })
 
   it("publishes a regrouped feature's first row where its retired rows end", () => {
-    const retireAt = NOW + RATE_CHANGE_NOTICE_MS
+    const retireAt = NOW + NOTICE
     const retired = usdCard.rows
       .filter((row) => row.featureSlug === "llm_tokens")
       .map((row) => ({ ...row, effectiveTo: retireAt }))
@@ -135,6 +180,7 @@ describe("planPublish", () => {
       drafts: [{ ...first, match: { model_id: "gpt-5" } }],
       effectiveFrom: retireAt,
       now: NOW,
+      noticeMs: NOTICE,
       features: [regrouped],
       newRowId: () => "row_gpt5",
     })
@@ -154,6 +200,7 @@ describe("planPublish", () => {
         drafts: [gpt5],
         effectiveFrom,
         now: NOW,
+        noticeMs: NOTICE,
         features: [features.llmTokens],
         newRowId: () => "row_gpt5",
       })
@@ -162,16 +209,16 @@ describe("planPublish", () => {
     expect(publish(fallback, NOW).err?.rejection).toEqual({
       code: "NOTICE_TOO_SHORT",
       featureSlug: "llm_tokens",
-      earliest: NOW + RATE_CHANGE_NOTICE_MS,
+      earliest: NOW + NOTICE,
     })
-    expect(publish(fallback, NOW + RATE_CHANGE_NOTICE_MS).val?.inserts.length).toBe(1)
+    expect(publish(fallback, NOW + NOTICE).val?.inserts.length).toBe(1)
     expect(publish([], NOW).val?.inserts.map((row) => row.effectiveFrom)).toEqual([NOW])
     expect(publish(ended, NOW).err?.rejection).toEqual({
       code: "NOTICE_TOO_SHORT",
       featureSlug: "llm_tokens",
-      earliest: NOW + RATE_CHANGE_NOTICE_MS,
+      earliest: NOW + NOTICE,
     })
-    expect(publish(ended, NOW + RATE_CHANGE_NOTICE_MS).val?.inserts.length).toBe(1)
+    expect(publish(ended, NOW + NOTICE).val?.inserts.length).toBe(1)
   })
 
   describe("regrouping a feature in one publish", () => {
@@ -182,7 +229,7 @@ describe("planPublish", () => {
     const regroup = (
       rows: readonly RateRow[],
       closeRowIds: readonly string[] | undefined,
-      effectiveFrom: number,
+      effectiveFrom: number | undefined,
       now = NOW
     ) =>
       planPublish({
@@ -192,10 +239,11 @@ describe("planPublish", () => {
         closeRowIds,
         effectiveFrom,
         now,
+        noticeMs: NOTICE,
         features: [regrouped],
         newRowId: () => "row_gpt5",
       })
-    const at = NOW + RATE_CHANGE_NOTICE_MS
+    const at = NOW + NOTICE
 
     it("ends the old rows exactly where the new ones start", () => {
       const result = regroup(stale, staleIds, at)
@@ -221,9 +269,28 @@ describe("planPublish", () => {
       const rows = [...stale.map((row) => ({ ...row, effectiveTo: at })), ...done.val.inserts]
 
       expect(regroup(rows, staleIds, at, at - 1).val).toEqual({
+        effectiveFrom: at,
         closes: [],
         inserts: [],
         unchanged: 4,
+      })
+    })
+
+    it("counts a named row that already ended as unchanged when no start is given", () => {
+      const done = regroup(stale, staleIds, at)
+      if (done.err) throw done.err
+      const rows = [...stale.map((row) => ({ ...row, effectiveTo: at })), ...done.val.inserts]
+
+      expect(regroup(rows, staleIds, undefined, at + 1).val).toEqual({
+        effectiveFrom: at + 1 + NOTICE,
+        closes: [],
+        inserts: [],
+        unchanged: 4,
+      })
+      expect(regroup(rows, staleIds, at + 1 + NOTICE, at + 1).err?.rejection).toEqual({
+        code: "ROW_CLOSED",
+        rowId: "row_gpt41",
+        effectiveTo: at,
       })
     })
 
@@ -257,6 +324,7 @@ describe("planPublish", () => {
       drafts: [draft("6")],
       effectiveFrom: NOW,
       now: NOW,
+      noticeMs: NOTICE,
       features: [],
       unpriceable,
       newRowId: () => "row_new",
@@ -276,9 +344,13 @@ describe("planPublish", () => {
 
 describe("planClose", () => {
   const open = usdCard.rows.filter((row) => row.featureSlug === "llm_tokens")
-  const closeAt = NOW + RATE_CHANGE_NOTICE_MS
-  const close = (rows: typeof open, rowIds: string[], effectiveTo: number) =>
-    planClose({ rows, rowIds, effectiveTo, now: NOW })
+  const closeAt = NOW + NOTICE
+  const close = (
+    rows: typeof open,
+    rowIds: string[],
+    effectiveTo: number | undefined,
+    noticeMs = NOTICE
+  ) => planClose({ rows, rowIds, effectiveTo, now: NOW, noticeMs })
 
   it("closes open rows and counts a row already closed at that time as unchanged", () => {
     const first = close(open, ["row_gpt41", "row_gpt41_mini", "row_gpt41"], closeAt)
@@ -288,6 +360,7 @@ describe("planClose", () => {
     const retry = close(closed, ["row_gpt41", "row_gpt41_mini"], closeAt)
 
     expect(first.val).toEqual({
+      effectiveTo: closeAt,
       closes: [
         { rowId: "row_gpt41", effectiveTo: closeAt },
         { rowId: "row_gpt41_mini", effectiveTo: closeAt },
@@ -295,8 +368,36 @@ describe("planClose", () => {
       unchanged: 0,
     })
     expect(retry.val).toEqual({
+      effectiveTo: closeAt,
       closes: [{ rowId: "row_gpt41_mini", effectiveTo: closeAt }],
       unchanged: 1,
+    })
+  })
+
+  it("ends at the earliest the card allows when no end is given, and a retry writes nothing", () => {
+    const live = close(open, ["row_gpt41"], undefined)
+    const draftOnly = close(open, ["row_gpt41"], undefined, 0)
+    const ended = open.map((row) =>
+      row.id === "row_gpt41" ? { ...row, effectiveTo: closeAt } : row
+    )
+    const retry = close(ended, ["row_gpt41"], undefined)
+    const moved = close(ended, ["row_gpt41"], closeAt + 1)
+
+    expect(live.val).toEqual({
+      effectiveTo: closeAt,
+      closes: [{ rowId: "row_gpt41", effectiveTo: closeAt }],
+      unchanged: 0,
+    })
+    expect(draftOnly.val).toEqual({
+      effectiveTo: NOW,
+      closes: [{ rowId: "row_gpt41", effectiveTo: NOW }],
+      unchanged: 0,
+    })
+    expect(retry.val).toEqual({ effectiveTo: closeAt, closes: [], unchanged: 1 })
+    expect(moved.err?.rejection).toEqual({
+      code: "ROW_CLOSED",
+      rowId: "row_gpt41",
+      effectiveTo: closeAt,
     })
   })
 
@@ -349,6 +450,15 @@ describe("featurePricingOf", () => {
         included: null,
       },
     })
+    expect(
+      featurePricingOf({
+        slug: "images",
+        meterConfig: { ...meterConfig, aggregationMethod: "count", aggregationField: "ignored" },
+      })
+    ).toEqual({
+      ok: true,
+      pricing: { slug: "images", dimensions: ["model"], meterProperty: null, included: null },
+    })
     expect(featurePricingOf({ slug: "Bad Slug", meterConfig: null })).toEqual({
       ok: false,
       unpriceable: {
@@ -366,6 +476,90 @@ describe("featurePricingOf", () => {
         reason: "meter groupBy: a property name that does not start with #",
       },
     })
+  })
+})
+
+describe("planFeaturePricing", () => {
+  const meterConfig = {
+    eventId: "evt_1",
+    eventSlug: "calls",
+    aggregationMethod: "sum" as const,
+    aggregationField: "calls",
+  }
+
+  it("reads the plan feature's own meter snapshot and included units", () => {
+    expect(
+      planFeaturePricing({ feature: { slug: "api_calls" }, meterConfig, included: "1000" })
+    ).toEqual({ ok: true, pricing: features.apiCallsIncluded })
+    expect(planFeaturePricing({ feature: { slug: "base_fee" }, meterConfig: null })).toEqual({
+      ok: true,
+      pricing: features.baseFee,
+    })
+  })
+
+  it("unions the versions assigned to a card and refuses a feature they describe differently", () => {
+    const v1 = planFeaturePricing({
+      feature: { slug: "llm_tokens" },
+      meterConfig: { ...meterConfig, aggregationMethod: "count", groupBy: ["model"] },
+    })
+    const v2 = planFeaturePricing({
+      feature: { slug: "llm_tokens" },
+      meterConfig: { ...meterConfig, aggregationMethod: "count" },
+    })
+    const calls = planFeaturePricing({ feature: { slug: "api_calls" }, meterConfig })
+    const callsIncluded = planFeaturePricing({
+      feature: { slug: "api_calls" },
+      meterConfig,
+      included: "1000",
+    })
+
+    expect(unionFeaturePricing([v1, v1, calls, callsIncluded])).toEqual({
+      features: [features.llmTokens, features.apiCallsIncluded],
+      unpriceable: [],
+    })
+    expect(unionFeaturePricing([v1, v2])).toEqual({
+      features: [],
+      unpriceable: [{ slug: "llm_tokens", reason: "versions disagree on dimensions" }],
+    })
+    expect(
+      unionFeaturePricing([
+        calls,
+        planFeaturePricing({
+          feature: { slug: "api_calls" },
+          meterConfig: { ...meterConfig, aggregationField: "requests" },
+        }),
+      ]).unpriceable
+    ).toEqual([{ slug: "api_calls", reason: "versions disagree on meter property" }])
+  })
+})
+
+describe("planVersionViolations", () => {
+  const tokensMeter = {
+    eventId: "evt_1",
+    eventSlug: "tokens",
+    aggregationMethod: "count" as const,
+    groupBy: ["model"],
+  }
+
+  it("checks only the version's features, each through its own meter snapshot", () => {
+    const baseFee = { feature: { slug: "base_fee" }, meterConfig: null }
+    const regrouped = {
+      feature: { slug: "llm_tokens" },
+      meterConfig: { ...tokensMeter, groupBy: ["model_id"] },
+    }
+
+    const violations = planVersionViolations(usdCard.card, usdCard.rows, [regrouped, baseFee])
+    const fits = planVersionViolations(usdCard.card, usdCard.rows, [
+      { ...regrouped, meterConfig: tokensMeter },
+      baseFee,
+    ])
+
+    expect(violations.map((violation) => [violation.feature, violation.code])).toEqual([
+      ["llm_tokens", "UNKNOWN_DIMENSION"],
+      ["llm_tokens", "UNKNOWN_DIMENSION"],
+      ["llm_tokens", "UNKNOWN_DIMENSION"],
+    ])
+    expect(fits).toEqual([])
   })
 })
 

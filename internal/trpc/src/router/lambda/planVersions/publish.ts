@@ -74,6 +74,23 @@ export const publish = protectedProjectProcedure
       })
     }
 
+    if (val.state === "invalid_rows") {
+      const byFeature = new Map<string, Set<string>>()
+      for (const violation of val.violations) {
+        byFeature.set(
+          violation.feature,
+          (byFeature.get(violation.feature) ?? new Set()).add(violation.code)
+        )
+      }
+      const named = [...byFeature]
+        .map(([feature, codes]) => `${feature} (${[...codes].join(", ")})`)
+        .join("; ")
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: `The rate card's rows do not fit this version's features: ${named}`,
+      })
+    }
+
     if (val.state === "payment_provider_error") {
       throw paymentProviderPublishError()
     }

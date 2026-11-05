@@ -171,4 +171,89 @@ describe("publishPlanVersion", () => {
       expect(db.transaction).not.toHaveBeenCalled()
     })
   })
+
+  it("refuses rows that break a rule for the version's features, read under the cards' lock", async () => {
+    const modelRow = rateRowSchema.parse({
+      id: "rr_api_model",
+      rateCardId: "rc_1",
+      featureSlug: "api",
+      match: { model: "gpt-5" },
+      price: { type: "unit", components: [{ property: "calls", rate: "0.01", per: 1 }] },
+      cost: null,
+      effectiveFrom: 0,
+      effectiveTo: null,
+      source: "manual",
+      sourceRef: null,
+    })
+    const apiMeter = {
+      eventId: "evt_api",
+      eventSlug: "api",
+      aggregationMethod: "sum",
+      aggregationField: "calls",
+    }
+    const card = { id: "rc_1", unit: "money:USD", marginPolicy: { type: "manual" } }
+    const pricing = new Map([["pv_123", [{ currency: "USD", card, rows: [modelRow] }]]])
+    const writes: unknown[] = []
+    const tx = {
+      update: vi.fn(() => {
+        writes.push("update")
+        return { set: vi.fn(() => ({ where: vi.fn(() => ({ returning: vi.fn() })) })) }
+      }),
+    }
+    const db = {
+      query: {
+        versions: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: "pv_123",
+            projectId: "proj_123",
+            planId: "plan_123",
+            status: "draft",
+            collectionMethod: "send_invoice",
+            currency: "USD",
+            paymentProvider: "sandbox",
+            planFeatures: [
+              {
+                id: "fpv_api",
+                featureType: "usage",
+                meterConfig: apiMeter,
+                feature: { slug: "api" },
+              },
+            ],
+          }),
+        },
+      },
+      transaction: vi.fn((callback: (tx: unknown) => Promise<unknown>) => callback(tx)),
+    } as unknown as Database
+    const lockPlanVersionCards = vi.fn(async () => ["rc_1"])
+    const getEffectiveRows = vi.fn(async (_read: { cardIds: string[]; executor: unknown }) => [
+      modelRow,
+    ])
+
+    const { val } = await publishPlanVersion(
+      {
+        services: {
+          customers: { getPaymentProvider: vi.fn() },
+          rateCards: {
+            pricingForPlanVersions: vi.fn(async () => pricing),
+            lockPlanVersionCards,
+            getEffectiveRows,
+          },
+        } as unknown as Pick<ServiceContext, "customers" | "rateCards">,
+        db,
+        logger: createLogger(),
+        userId: "usr_123",
+      },
+      { id: "pv_123", projectId: "proj_123", workspaceUnPriceCustomerId: "cus_123" }
+    )
+
+    expect(val).toEqual({
+      state: "invalid_rows",
+      violations: [
+        { code: "UNKNOWN_DIMENSION", rowId: "rr_api_model", key: "model", feature: "api" },
+      ],
+    })
+    expect(lockPlanVersionCards).toHaveBeenCalledWith("proj_123", "pv_123", tx)
+    expect(getEffectiveRows.mock.calls[0]?.[0]).toMatchObject({ cardIds: ["rc_1"], executor: tx })
+    expect(writes).toEqual([])
+  })
 })

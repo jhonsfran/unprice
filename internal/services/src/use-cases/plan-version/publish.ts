@@ -6,6 +6,7 @@ import type { Logger } from "@unprice/logs"
 import { z } from "zod"
 import type { ServiceContext } from "../../context"
 import { priceCanCharge } from "../../pricing"
+import { type FeatureViolation, planVersionViolations } from "../../rate-cards"
 import { toErrorContext } from "../../utils/log-context"
 
 export type PublishPlanVersionDeps = {
@@ -31,6 +32,12 @@ export type PublishPlanVersionOutput =
         | "publish_error"
     }
   | z.infer<typeof unpricedPlanVersionSchema>
+  /**
+   * The card's rows, read under the card's lock, break a pricing rule for the version's own
+   * features: a row matching a dimension the feature no longer has, tiers on a feature that varies
+   * by model, and so on. The budget would refuse to price with it, so the version cannot ship.
+   */
+  | { state: "invalid_rows"; violations: FeatureViolation[] }
   | { state: "ok"; planVersion: PlanVersion }
 
 /**
@@ -140,10 +147,24 @@ export async function publishPlanVersion(
     }
   }
 
-  let updated: PlanVersion | null = null
+  let updated: { version: PlanVersion } | { invalid: FeatureViolation[] } | null = null
 
   try {
     updated = await deps.db.transaction(async (tx) => {
+      // A row write on the card holds the same lock, so a publish never slips between a write's
+      // read of whether the card is live and its commit; the rows checked here are the rows that
+      // will be in force.
+      await deps.services.rateCards.lockPlanVersionCards(projectId, planVersionData.id, tx)
+      const lockedRows = await deps.services.rateCards.getEffectiveRows({
+        projectId,
+        cardIds: [card.card.id],
+        from: now,
+        to: Number.MAX_SAFE_INTEGER,
+        executor: tx,
+      })
+      const violations = planVersionViolations(card.card, lockedRows, planVersionData.planFeatures)
+      if (violations.length > 0) return { invalid: violations }
+
       const flatFeaturesIds = planVersionData.planFeatures
         .filter((feature) => ["flat", "package", "tier"].includes(feature.featureType))
         .map((feature) => feature.id)
@@ -206,7 +227,7 @@ export async function publishPlanVersion(
         })
       }
 
-      return versionUpdated
+      return { version: versionUpdated }
     })
   } catch (error) {
     const publishErr = error as Error
@@ -230,8 +251,12 @@ export async function publishPlanVersion(
     })
   }
 
+  if ("invalid" in updated) {
+    return Ok({ state: "invalid_rows", violations: updated.invalid })
+  }
+
   return Ok({
     state: "ok",
-    planVersion: updated,
+    planVersion: updated.version,
   })
 }

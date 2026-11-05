@@ -4,10 +4,18 @@ import { newId } from "@unprice/db/utils"
 import type { PlanVersion } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
+import type { ServiceContext } from "../../context"
+import {
+  type UnPriceRateCardError,
+  cardFeaturePricing,
+  versionCard,
+  versionCardName,
+} from "../../rate-cards"
 
 type DuplicatePlanVersionDeps = {
   db: Database
   logger: Logger
+  services: Pick<ServiceContext, "features" | "rateCards">
 }
 
 type DuplicatePlanVersionInput = {
@@ -24,7 +32,7 @@ export async function duplicatePlanVersion(
         state: "not_found" | "duplicate_error"
       }
     | { state: "ok"; planVersion: PlanVersion },
-    FetchError
+    FetchError | UnPriceRateCardError
   >
 > {
   const { id, projectId } = input
@@ -103,30 +111,6 @@ export async function duplicatePlanVersion(
         })
       )
 
-      // The copy prices with the same card per currency (ADR-0008 D2): a plan version owns its cards.
-      const cards = await tx
-        .select({
-          currency: schema.planVersionRateCards.currency,
-          rateCardId: schema.planVersionRateCards.rateCardId,
-        })
-        .from(schema.planVersionRateCards)
-        .where(
-          and(
-            eq(schema.planVersionRateCards.projectId, projectId),
-            eq(schema.planVersionRateCards.planVersionId, planVersionData.id)
-          )
-        )
-      if (cards.length > 0) {
-        await tx.insert(schema.planVersionRateCards).values(
-          cards.map((card) => ({
-            ...card,
-            id: newId("plan_version_rate_card"),
-            projectId,
-            planVersionId,
-          }))
-        )
-      }
-
       return version
     })
 
@@ -135,6 +119,15 @@ export async function duplicatePlanVersion(
         state: "duplicate_error",
       })
     }
+
+    const forked = await forkCard(deps, {
+      projectId,
+      planSlug: planVersionData.plan.slug,
+      source: planVersionData,
+      copyId: duplicated.id,
+      now: Date.now(),
+    })
+    if (forked.err) return Err(forked.err)
 
     return Ok({
       state: "ok",
@@ -155,4 +148,69 @@ export async function duplicatePlanVersion(
       })
     )
   }
+}
+
+/**
+ * Gives the copy its own card (ADR-0008 D2) once the copy has committed: a card named after the
+ * copy with the source card's margin policy, assigned, then the source's rows in effect now
+ * published on it at once (match, cost and provenance kept), so the copy's prices can change
+ * without touching the customers on the source. Rows scheduled to start later are not copied: the
+ * copy starts from the prices in force and schedules its own. A copy without a card in its
+ * currency gets none. Idempotent through the card's name: a rerun adopts the card it created.
+ */
+async function forkCard(
+  deps: DuplicatePlanVersionDeps,
+  input: {
+    projectId: string
+    planSlug: string
+    source: Pick<PlanVersion, "id" | "currency">
+    copyId: string
+    now: number
+  }
+): Promise<Result<void, UnPriceRateCardError | FetchError>> {
+  const { rateCards } = deps.services
+  const { projectId, source, copyId, now } = input
+  const sourceCard = await rateCards.cardForPlanVersion(projectId, source.id, source.currency)
+  if (!sourceCard) return Ok(undefined)
+  const found = await rateCards.getCard(projectId, sourceCard.cardId)
+  if (found.err) return Err(found.err)
+
+  const card = await versionCard(deps, {
+    projectId,
+    currency: source.currency,
+    cardName: versionCardName(input.planSlug, copyId, source.currency),
+    marginPolicy: found.val.card.marginPolicy,
+  })
+  if (card.err) return Err(card.err)
+  const assigned = await rateCards.assignToPlanVersion(projectId, {
+    planVersionId: copyId,
+    currency: source.currency,
+    cardId: card.val,
+  })
+  if (assigned.err) return Err(assigned.err)
+
+  const drafts = found.val.rows
+    .filter(
+      (row) => row.effectiveFrom <= now && (row.effectiveTo === null || row.effectiveTo > now)
+    )
+    .map(({ featureSlug, match, price, cost, source: rowSource, sourceRef }) => ({
+      featureSlug,
+      match,
+      price,
+      cost,
+      source: rowSource,
+      sourceRef,
+    }))
+  if (drafts.length === 0) return Ok(undefined)
+  const features = await cardFeaturePricing(deps.services, projectId, card.val)
+  if (features.err) return Err(features.err)
+  const published = await rateCards.publishRows({
+    projectId,
+    cardId: card.val,
+    drafts,
+    now,
+    ...features.val,
+  })
+  if (published.err) return Err(published.err)
+  return Ok(undefined)
 }

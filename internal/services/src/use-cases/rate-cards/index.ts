@@ -1,4 +1,8 @@
-export { importModelCosts, type ImportModelCostsDeps } from "./import-model-costs"
+export {
+  catalogEffectiveFrom,
+  importModelCosts,
+  type ImportModelCostsDeps,
+} from "./import-model-costs"
 export {
   publishCostPlus,
   type PublishCostPlusDeps,
@@ -9,3 +13,9 @@ export {
   type PublishRateRowsDeps,
   type PublishRateRowsInput,
 } from "./publish-rows"
+export {
+  setPlanVersionCatalogPricing,
+  type SetPlanVersionCatalogPricingDeps,
+  type SetPlanVersionCatalogPricingInput,
+  type SetPlanVersionCatalogPricingOutput,
+} from "./set-catalog-pricing"

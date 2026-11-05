@@ -8,6 +8,8 @@ import type { BudgetCommand, BudgetEvent, PricedEvent, Usage } from "./index"
 import { MemoryBudgetStore } from "./memory-store.fixture"
 
 const runs = Number.parseInt(process.env.UNPRICE_MODEL_RUNS ?? "200", 10)
+/** 200 runs take 4 to 5 s alone and over 20 s while the pre-commit hook runs every suite at once. */
+const PROPERTY_TIMEOUT_MS = 60_000
 const seed = process.env.UNPRICE_MODEL_SEED
   ? Number.parseInt(process.env.UNPRICE_MODEL_SEED, 10)
   : undefined
@@ -253,164 +255,175 @@ function pricedInOneEvent(expected: Expected): Amount {
 }
 
 describe("statements through the budget", () => {
-  it("record-only sequences: statements sum to the ledger and price split usage as one event", () => {
-    fc.assert(
-      fc.property(scenarioArb(["record"]), ({ sealLag, steps }) => {
-        const { store, run, sealed, sealDue } = newBudget()
-        const expected = new Map<string, Expected>()
-        const clocks = clocksOf(steps)
-        steps.forEach((step, n) => {
-          const clock = clocks[n] ?? LAST_CLOCK
-          sealDue(clock, sealLag)
-          const at = clock - step.lag
-          run({ type: "record", idempotencyKey: `e${n}`, event: step.event, occurredAt: at }, clock)
-
-          // ADR-0008 D6: the period containing the event's time, else the next open one.
-          let month = monthOf(at)
-          while (sealed.has(month)) month += 1
-          for (const feature of FEATURES.filter((f) => f.eventSlug === step.event.slug)) {
-            expect1(expected, periodId(feature.slug, month), feature, step.event)
-          }
-        })
-
-        expectStatements(store, expected)
-        const statements = [...store.statements.values()]
-        const { amount, quantities } = store.ledger.usage.never.consumed
-        expect(statements.reduce((sum, s) => sum + s.amount, ZERO)).toBe(amount)
-        for (const feature of FEATURES) {
-          const counted = statements
-            .filter((s) => s.featureSlug === feature.slug)
-            .reduce((sum, s) => sum + s.quantity, ZERO)
-          expect(counted).toBe(quantities[feature.slug] ?? ZERO)
-        }
-      }),
-      { numRuns: runs, seed }
-    )
-  })
-
-  it("with holds, settles, expiries, seals, and repricing: statements price their usage as one event and sum to the ledger less unbilled estimates", () => {
-    const seen = { unbilled: 0, late: 0, billedExpiries: 0, repriced: 0, deferred: 0 }
-    fc.assert(
-      fc.property(
-        scenarioArb(["record", "charge", "settle", "abandon", "reprice"]),
-        ({ sealLag, steps }) => {
-          const { store, run, sealDue } = newBudget()
-          const unbilled = new Map<string, Usage>()
-          // Every event a row billed, by row id: rows are purged after retention.
-          const billed = new Map<string, PricedEvent>()
-          const billedExpiries = new Set<string>()
-          const capture = () => {
-            for (const row of store.rows.values()) {
-              if ((row.kind === "charge" || row.kind === "record") && row.priced) {
-                billed.set(row.id, row.priced)
-              }
-              if (row.kind !== "hold" || row.state.status !== "settled") continue
-              if (row.state.unbilled) unbilled.set(row.id, row.reserved)
-              if (row.state.priced) billed.set(row.id, row.state.priced)
-              if (row.state.priced && row.state.byExpiry) billedExpiries.add(row.id)
-            }
-          }
-          let repriced = false
-          const clocks = clocksOf(steps)
-          let clock = FIRST + day
-          steps.forEach((step, n) => {
-            clock = clocks[n] ?? LAST_CLOCK
-            // Sealing before the alarm leaves holds open across a seal: their expiry counts late,
-            // or, with no later period open, unbilled.
-            if (step.sealFirst) sealDue(clock, sealLag)
-            store.alarm(clock)
-            capture()
-            sealDue(clock, sealLag)
-            const key = `e${n}`
-            const { event, ttlMs } = step
-            if (repriced && event.slug === "email" && step.verb !== "reprice") {
-              const refused = store.run({ type: "charge", idempotencyKey: key, event }, clock)
-              expect(refused.err?.code).toBe("UNKNOWN_EVENT")
-            } else if (step.verb === "record") {
-              run(
-                { type: "record", idempotencyKey: key, event, occurredAt: clock - step.lag },
-                clock
-              )
-            } else if (step.verb === "charge") {
-              run({ type: "charge", idempotencyKey: key, event }, clock)
-            } else if (step.verb === "abandon") {
-              run({ type: "authorize", idempotencyKey: key, event, ttlMs }, clock)
-            } else if (step.verb === "reprice") {
-              const next = repriced ? config : withoutEmails
-              const upsert = {
-                key: "unprice:customer:cus_model",
-                projectId: "proj_1",
-                unit: "money:USD",
-              }
-              const result = store.run(
-                { type: "upsert", ...upsert, config: next, mayLoosen: true, setsPricing: true },
-                clock
-              )
-              if (result.err) {
-                // An open hold settles under the pricing that estimated it.
-                expect(result.err.code).toBe("RESERVATIONS_OPEN")
-                expect(store.hasOpenReservations()).toBe(true)
-                seen.deferred += 1
-              } else {
-                repriced = !repriced
-                seen.repriced += 1
-              }
-            } else {
-              // Two holds estimated at one position; the settles price past each other.
-              const holdIds = [`${key}a`, `${key}b`].map((idempotencyKey) => {
-                const placed = run({ type: "authorize", idempotencyKey, event, ttlMs }, clock)
-                if (placed.type !== "authorize") throw new Error("not a hold")
-                return placed.holdId
-              })
-              run({ type: "settle", holdId: holdIds[1] ?? "", event: halved(event) }, clock)
-              run({ type: "settle", holdId: holdIds[0] ?? "", event }, clock)
-            }
-            capture()
-          })
-          // January seals before the alarm closes the last holds; with no later period open, their
-          // estimates stay unbilled.
-          const end = MONTHS[3].start + day
-          run({ type: "sealStatements", statementKey: MONTHS[2].key, at: MONTHS[3].start }, end)
-          store.alarm(end)
-          capture()
-
+  it(
+    "record-only sequences: statements sum to the ledger and price split usage as one event",
+    () => {
+      fc.assert(
+        fc.property(scenarioArb(["record"]), ({ sealLag, steps }) => {
+          const { store, run, sealed, sealDue } = newBudget()
           const expected = new Map<string, Expected>()
-          for (const priced of billed.values()) {
-            for (const feature of priced.features) {
-              const metered = FEATURES.find((candidate) => candidate.slug === feature.featureSlug)
-              if (!metered) throw new Error(`unknown feature ${feature.featureSlug}`)
-              expect1(expected, feature.periodId, metered, priced)
-              if (feature.late) seen.late += 1
-            }
-          }
-          seen.billedExpiries += billedExpiries.size
-          seen.unbilled += unbilled.size
-          expectStatements(store, expected)
+          const clocks = clocksOf(steps)
+          steps.forEach((step, n) => {
+            const clock = clocks[n] ?? LAST_CLOCK
+            sealDue(clock, sealLag)
+            const at = clock - step.lag
+            run(
+              { type: "record", idempotencyKey: `e${n}`, event: step.event, occurredAt: at },
+              clock
+            )
 
+            // ADR-0008 D6: the period containing the event's time, else the next open one.
+            let month = monthOf(at)
+            while (sealed.has(month)) month += 1
+            for (const feature of FEATURES.filter((f) => f.eventSlug === step.event.slug)) {
+              expect1(expected, periodId(feature.slug, month), feature, step.event)
+            }
+          })
+
+          expectStatements(store, expected)
           const statements = [...store.statements.values()]
           const { amount, quantities } = store.ledger.usage.never.consumed
-          const lost = [...unbilled.values()]
-          const total = statements.reduce((sum, s) => sum + s.amount, ZERO)
-          expect(total + lost.reduce((sum, usage) => sum + usage.amount, ZERO)).toBe(amount)
+          expect(statements.reduce((sum, s) => sum + s.amount, ZERO)).toBe(amount)
           for (const feature of FEATURES) {
             const counted = statements
               .filter((s) => s.featureSlug === feature.slug)
               .reduce((sum, s) => sum + s.quantity, ZERO)
-            const uncounted = lost.reduce(
-              (sum, usage) => sum + (usage.quantities[feature.slug] ?? ZERO),
-              ZERO
-            )
-            expect(counted + uncounted).toBe(quantities[feature.slug] ?? ZERO)
+            expect(counted).toBe(quantities[feature.slug] ?? ZERO)
           }
-        }
-      ),
-      { numRuns: runs, seed }
-    )
-    // The generators reach every way an expiry closes.
-    expect(seen.unbilled).toBeGreaterThan(0)
-    expect(seen.late).toBeGreaterThan(0)
-    expect(seen.billedExpiries).toBeGreaterThan(0)
-    expect(seen.repriced).toBeGreaterThan(0)
-    expect(seen.deferred).toBeGreaterThan(0)
-  })
+        }),
+        { numRuns: runs, seed }
+      )
+    },
+    PROPERTY_TIMEOUT_MS
+  )
+
+  it(
+    "with holds, settles, expiries, seals, and repricing: statements price their usage as one event and sum to the ledger less unbilled estimates",
+    () => {
+      const seen = { unbilled: 0, late: 0, billedExpiries: 0, repriced: 0, deferred: 0 }
+      fc.assert(
+        fc.property(
+          scenarioArb(["record", "charge", "settle", "abandon", "reprice"]),
+          ({ sealLag, steps }) => {
+            const { store, run, sealDue } = newBudget()
+            const unbilled = new Map<string, Usage>()
+            // Every event a row billed, by row id: rows are purged after retention.
+            const billed = new Map<string, PricedEvent>()
+            const billedExpiries = new Set<string>()
+            const capture = () => {
+              for (const row of store.rows.values()) {
+                if ((row.kind === "charge" || row.kind === "record") && row.priced) {
+                  billed.set(row.id, row.priced)
+                }
+                if (row.kind !== "hold" || row.state.status !== "settled") continue
+                if (row.state.unbilled) unbilled.set(row.id, row.reserved)
+                if (row.state.priced) billed.set(row.id, row.state.priced)
+                if (row.state.priced && row.state.byExpiry) billedExpiries.add(row.id)
+              }
+            }
+            let repriced = false
+            const clocks = clocksOf(steps)
+            let clock = FIRST + day
+            steps.forEach((step, n) => {
+              clock = clocks[n] ?? LAST_CLOCK
+              // Sealing before the alarm leaves holds open across a seal: their expiry counts late,
+              // or, with no later period open, unbilled.
+              if (step.sealFirst) sealDue(clock, sealLag)
+              store.alarm(clock)
+              capture()
+              sealDue(clock, sealLag)
+              const key = `e${n}`
+              const { event, ttlMs } = step
+              if (repriced && event.slug === "email" && step.verb !== "reprice") {
+                const refused = store.run({ type: "charge", idempotencyKey: key, event }, clock)
+                expect(refused.err?.code).toBe("UNKNOWN_EVENT")
+              } else if (step.verb === "record") {
+                run(
+                  { type: "record", idempotencyKey: key, event, occurredAt: clock - step.lag },
+                  clock
+                )
+              } else if (step.verb === "charge") {
+                run({ type: "charge", idempotencyKey: key, event }, clock)
+              } else if (step.verb === "abandon") {
+                run({ type: "authorize", idempotencyKey: key, event, ttlMs }, clock)
+              } else if (step.verb === "reprice") {
+                const next = repriced ? config : withoutEmails
+                const upsert = {
+                  key: "unprice:customer:cus_model",
+                  projectId: "proj_1",
+                  unit: "money:USD",
+                }
+                const result = store.run(
+                  { type: "upsert", ...upsert, config: next, mayLoosen: true, setsPricing: true },
+                  clock
+                )
+                if (result.err) {
+                  // An open hold settles under the pricing that estimated it.
+                  expect(result.err.code).toBe("RESERVATIONS_OPEN")
+                  expect(store.hasOpenReservations()).toBe(true)
+                  seen.deferred += 1
+                } else {
+                  repriced = !repriced
+                  seen.repriced += 1
+                }
+              } else {
+                // Two holds estimated at one position; the settles price past each other.
+                const holdIds = [`${key}a`, `${key}b`].map((idempotencyKey) => {
+                  const placed = run({ type: "authorize", idempotencyKey, event, ttlMs }, clock)
+                  if (placed.type !== "authorize") throw new Error("not a hold")
+                  return placed.holdId
+                })
+                run({ type: "settle", holdId: holdIds[1] ?? "", event: halved(event) }, clock)
+                run({ type: "settle", holdId: holdIds[0] ?? "", event }, clock)
+              }
+              capture()
+            })
+            // January seals before the alarm closes the last holds; with no later period open, their
+            // estimates stay unbilled.
+            const end = MONTHS[3].start + day
+            run({ type: "sealStatements", statementKey: MONTHS[2].key, at: MONTHS[3].start }, end)
+            store.alarm(end)
+            capture()
+
+            const expected = new Map<string, Expected>()
+            for (const priced of billed.values()) {
+              for (const feature of priced.features) {
+                const metered = FEATURES.find((candidate) => candidate.slug === feature.featureSlug)
+                if (!metered) throw new Error(`unknown feature ${feature.featureSlug}`)
+                expect1(expected, feature.periodId, metered, priced)
+                if (feature.late) seen.late += 1
+              }
+            }
+            seen.billedExpiries += billedExpiries.size
+            seen.unbilled += unbilled.size
+            expectStatements(store, expected)
+
+            const statements = [...store.statements.values()]
+            const { amount, quantities } = store.ledger.usage.never.consumed
+            const lost = [...unbilled.values()]
+            const total = statements.reduce((sum, s) => sum + s.amount, ZERO)
+            expect(total + lost.reduce((sum, usage) => sum + usage.amount, ZERO)).toBe(amount)
+            for (const feature of FEATURES) {
+              const counted = statements
+                .filter((s) => s.featureSlug === feature.slug)
+                .reduce((sum, s) => sum + s.quantity, ZERO)
+              const uncounted = lost.reduce(
+                (sum, usage) => sum + (usage.quantities[feature.slug] ?? ZERO),
+                ZERO
+              )
+              expect(counted + uncounted).toBe(quantities[feature.slug] ?? ZERO)
+            }
+          }
+        ),
+        { numRuns: runs, seed }
+      )
+      // The generators reach every way an expiry closes.
+      expect(seen.unbilled).toBeGreaterThan(0)
+      expect(seen.late).toBeGreaterThan(0)
+      expect(seen.billedExpiries).toBeGreaterThan(0)
+      expect(seen.repriced).toBeGreaterThan(0)
+      expect(seen.deferred).toBeGreaterThan(0)
+    },
+    PROPERTY_TIMEOUT_MS
+  )
 })

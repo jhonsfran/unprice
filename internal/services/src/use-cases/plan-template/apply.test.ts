@@ -117,6 +117,7 @@ function fakeRateCards() {
   return {
     cardForPlanVersion: vi.fn(async () => null),
     createCard: vi.fn(async () => Ok({ id: "rc_template" })),
+    featuresPricingWith: vi.fn(async () => null),
     publishRows: vi.fn(async () => Ok({ inserted: [], closed: [], unchanged: 0 })),
     assignToPlanVersion: vi.fn(async () => Ok({})),
   }

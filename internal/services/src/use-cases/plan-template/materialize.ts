@@ -17,7 +17,7 @@ import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { ServiceContext } from "../../context"
 import { type DecimalFeaturePrice, ratePriceOf } from "../../pricing"
-import { type UnPriceRateCardError, pricePlanVersion } from "../../rate-cards"
+import { type UnPriceRateCardError, pricePlanVersion, versionCardName } from "../../rate-cards"
 import { createPlan } from "../plan/create"
 import {
   BASE_FEE_FEATURE,
@@ -479,7 +479,7 @@ export async function pricePlanVersionFeatures(
       projectId,
       planVersionId: planVersion.id,
       currency: planVersion.currency,
-      cardName: `${planSlug} ${planVersion.id} ${planVersion.currency}`,
+      cardName: versionCardName(planSlug, planVersion.id, planVersion.currency),
       prices: [...prices],
       now: Date.now(),
     }

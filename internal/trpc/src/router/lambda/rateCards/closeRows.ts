@@ -2,7 +2,10 @@ import { closeRateRowsInputSchema } from "@unprice/db/validators"
 import { domainErrorToTrpcError } from "#domain-error"
 import { protectedProjectProcedure } from "#trpc"
 
-/** Ends open price rows, at least 10 minutes from now; a retry at the same end writes nothing. */
+/**
+ * Ends open price rows, at the earliest the card allows when no end is given (10 minutes out on
+ * a live card); a retry writes nothing.
+ */
 export const closeRows = protectedProjectProcedure
   .input(closeRateRowsInputSchema)
   .mutation(async (opts) => {

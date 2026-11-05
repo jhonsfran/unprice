@@ -6,9 +6,16 @@ export {
 } from "./errors"
 export {
   type FeaturePricingParse,
+  type FeaturePricingSet,
+  type FeatureViolation,
+  type PlanFeaturePricingInput,
   RATE_CHANGE_NOTICE_MS,
   type RowDraft,
+  earliestChangeAt,
   featurePricingOf,
+  planFeaturePricing,
+  planVersionViolations,
+  unionFeaturePricing,
 } from "./publish"
 export {
   type CostPlusPreview,
@@ -22,5 +29,7 @@ export {
   type PricePlanVersionInput,
   pricePlanVersion,
   pricePlanVersionInputSchema,
+  versionCard,
+  versionCardName,
 } from "./price-plan-version"
-export { projectFeaturePricing } from "./project-features"
+export { cardFeaturePricing, projectFeaturePricing } from "./project-features"

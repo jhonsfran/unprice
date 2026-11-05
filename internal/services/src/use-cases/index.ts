@@ -191,6 +191,12 @@ export * from "./workspace"
 export { transferToWorkspace } from "./project/transfer-to-workspace"
 export { transferToPersonal } from "./project/transfer-to-personal"
 export { publishPlanVersion } from "./plan-version/publish"
+export {
+  updatePlanVersionFeature,
+  type UpdatePlanVersionFeatureDeps,
+  type UpdatePlanVersionFeatureInput,
+  type UpdatePlanVersionFeatureOutput,
+} from "./plan-version/update-feature"
 export { setOnboardingCompleted } from "./user/set-onboarding-completed"
 export { savePaymentProviderConfig } from "./payment-provider/save-config"
 export {
