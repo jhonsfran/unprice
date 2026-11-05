@@ -9,3 +9,8 @@ export {
   type PublishRateRowsDeps,
   type PublishRateRowsInput,
 } from "./publish-rows"
+export {
+  pricePlanVersion,
+  type PricePlanVersionDeps,
+  type PricePlanVersionInput,
+} from "./price-plan-version"

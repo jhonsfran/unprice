@@ -36,15 +36,15 @@ import { useTRPC } from "~/trpc/client"
 import { FeatureDialog } from "../../_components/feature-dialog"
 import {
   BillingConfigFeatureFormField,
+  IncludedFormField,
   LimitFormField,
   OverageStrategyFormField,
-  PriceFormField,
   QuantityFormField,
   ResetConfigFeatureFormField,
-  TierFormField,
   UnitsFormField,
 } from "./fields-form"
 import { MeterConfigFormField } from "./meter-config-form-field"
+import { PricedByCard } from "./priced-by-card"
 import { PricingModelPicker, getConfigureSubtitle } from "./pricing-model"
 import { CollapsibleSection, NumberedStep } from "./section-label"
 
@@ -81,7 +81,6 @@ export function FeatureConfigForm({
 
   const editMode = !!defaultValues.id
   const isPublished = planVersion?.status === "published"
-  const currency = planVersion?.currency ?? "USD"
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false)
   const [isDisplayOpen, setIsDisplayOpen] = useState(false)
   const feature = "feature" in defaultValues ? defaultValues.feature : undefined
@@ -92,36 +91,6 @@ export function FeatureConfigForm({
     ...defaultValues,
     config: {
       ...defaultValues.config,
-      tiers: defaultValues.config?.tiers ?? [
-        {
-          firstUnit: 1,
-          lastUnit: null,
-          unitPrice: {
-            displayAmount: "0.00",
-            dinero: {
-              amount: 0,
-              currency: {
-                code: currency,
-                base: 10,
-                exponent: 2,
-              },
-              scale: 2,
-            },
-          },
-          flatPrice: {
-            displayAmount: "0.00",
-            dinero: {
-              amount: 0,
-              currency: {
-                code: currency,
-                base: 10,
-                exponent: 2,
-              },
-              scale: 2,
-            },
-          },
-        },
-      ],
       usageMode: defaultValues.config?.usageMode ?? "tier",
       units: defaultValues.config?.units ?? 1,
     },
@@ -237,84 +206,7 @@ export function FeatureConfigForm({
     }
   }
 
-  // Convert a displayAmount string ("10.00") into the dinero shape the schema expects.
-  // Inputs only write displayAmount — we derive the canonical numeric representation here
-  // so the schema's `price.dinero: Required` check is satisfied.
-  const toDineroShape = (displayAmount: unknown) => {
-    const raw =
-      typeof displayAmount === "number"
-        ? displayAmount
-        : typeof displayAmount === "string"
-          ? Number.parseFloat(displayAmount)
-          : Number.NaN
-    if (!Number.isFinite(raw)) return undefined
-    const exponent = 2
-    return {
-      amount: Math.round(raw * 10 ** exponent),
-      currency: { code: currency, base: 10, exponent },
-      scale: exponent,
-    }
-  }
-
-  // Force tier `firstUnit` values to be continuous (1 → prev.lastUnit + 1) AND keep every
-  // displayAmount in sync with its dinero counterpart BEFORE the resolver runs.
-  const normalizeBeforeSubmit = () => {
-    // Tier firstUnit continuity (we dropped the firstUnit input from the table)
-    const tiers = form.getValues("config.tiers")
-    if (Array.isArray(tiers)) {
-      tiers.forEach((_, i) => {
-        const expected =
-          i === 0
-            ? 1
-            : (() => {
-                const raw = form.getValues(`config.tiers.${i - 1}.lastUnit`)
-                const parsed = Number(raw)
-                return Number.isFinite(parsed) ? parsed + 1 : undefined
-              })()
-        if (typeof expected === "number") {
-          form.setValue(`config.tiers.${i}.firstUnit`, expected, {
-            shouldValidate: false,
-            shouldDirty: false,
-          })
-        }
-      })
-
-      // Sync each tier's flatPrice.dinero and unitPrice.dinero from their displayAmount
-      tiers.forEach((_, i) => {
-        const flatDisp = form.getValues(`config.tiers.${i}.flatPrice.displayAmount`)
-        const flatDinero = toDineroShape(flatDisp)
-        if (flatDinero) {
-          form.setValue(`config.tiers.${i}.flatPrice.dinero`, flatDinero, {
-            shouldValidate: false,
-            shouldDirty: false,
-          })
-        }
-        const unitDisp = form.getValues(`config.tiers.${i}.unitPrice.displayAmount`)
-        const unitDinero = toDineroShape(unitDisp)
-        if (unitDinero) {
-          form.setValue(`config.tiers.${i}.unitPrice.dinero`, unitDinero, {
-            shouldValidate: false,
-            shouldDirty: false,
-          })
-        }
-      })
-    }
-
-    // Sync top-level config.price.dinero from displayAmount (flat / package / usage>unit / usage>package)
-    const priceDisp = form.getValues("config.price.displayAmount")
-    if (typeof priceDisp !== "undefined") {
-      const dinero = toDineroShape(priceDisp)
-      if (dinero) {
-        form.setValue("config.price.dinero", dinero, {
-          shouldValidate: false,
-          shouldDirty: false,
-        })
-      }
-    }
-  }
-
   const handleFormSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    normalizeBeforeSubmit()
     void form.handleSubmit(onSubmitForm, onInvalidSubmit)(e)
   }
 
@@ -415,7 +307,8 @@ export function FeatureConfigForm({
         >
           <ConfigureFields
             form={form}
-            currency={planVersion.currency}
+            planVersion={planVersion}
+            featureSlug={feature?.slug ?? activeFeature?.feature.slug ?? ""}
             unitOfMeasure={defaultValues.unitOfMeasure ?? activeFeature?.unitOfMeasure ?? "units"}
             isDisabled={isPublished}
             featureType={featureType}
@@ -518,9 +411,12 @@ export function FeatureConfigForm({
 }
 
 // ─── contextual configure fields per pricing model ───────────────────────
+// Prices live on the plan version's rate card (ADR-0008 D2): each model shows the card's price
+// and keeps only what the package owns (quantities, limits, the meter, included units).
 function ConfigureFields({
   form,
-  currency,
+  planVersion,
+  featureSlug,
   unitOfMeasure,
   isDisabled,
   featureType,
@@ -528,7 +424,8 @@ function ConfigureFields({
 }: {
   // biome-ignore lint/suspicious/noExplicitAny: react-hook-form's UseFormReturn type doesn't narrow well across schema unions
   form: any
-  currency: PlanVersion["currency"]
+  planVersion: PlanVersion
+  featureSlug: string
   unitOfMeasure: string
   isDisabled?: boolean
   featureType: FeatureType | undefined
@@ -540,23 +437,25 @@ function ConfigureFields({
     )
   }
 
-  if (featureType === "flat") {
-    return <PriceFormField form={form} currency={currency} isDisabled={isDisabled} />
-  }
+  const price = (
+    <PricedByCard
+      planVersionId={planVersion.id}
+      featureSlug={featureSlug}
+      currency={planVersion.currency}
+      unit={unitOfMeasure.replace(/s$/, "")}
+    />
+  )
+
+  if (featureType === "flat") return price
 
   if (featureType === "package") {
     return (
       <div className="space-y-4">
+        {price}
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <PriceFormField
-            form={form}
-            currency={currency}
-            isDisabled={isDisabled}
-            label="Price per bundle"
-          />
           <UnitsFormField form={form} isDisabled={isDisabled} />
+          <QuantityFormField form={form} isDisabled={isDisabled} />
         </div>
-        <QuantityFormField form={form} isDisabled={isDisabled} />
       </div>
     )
   }
@@ -564,11 +463,11 @@ function ConfigureFields({
   if (featureType === "tier") {
     return (
       <div className="space-y-4">
+        {price}
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <QuantityFormField form={form} isDisabled={isDisabled} />
           <LimitFormField form={form} isDisabled={isDisabled} units={unitOfMeasure} />
         </div>
-        <TierFormField form={form} currency={currency} isDisabled={isDisabled} />
       </div>
     )
   }
@@ -581,7 +480,7 @@ function ConfigureFields({
           form={form}
           name="config.usageMode"
           label="Charge customers"
-          tooltip="How consumed usage maps to a price."
+          tooltip="How consumed usage maps to a price. The rate card row holds the price itself."
           isDisabled={isDisabled}
           options={USAGE_MODES.map((m) => ({
             value: m,
@@ -589,6 +488,7 @@ function ConfigureFields({
             description: USAGE_MODES_MAP[m].description,
           }))}
         />
+        {usageMode === "package" && <UnitsFormField form={form} isDisabled={isDisabled} />}
       </div>
 
       {/* Meter is required for usage features — render inline so its errors are always visible */}
@@ -602,30 +502,12 @@ function ConfigureFields({
         <MeterConfigFormField form={form} isDisabled={isDisabled} />
       </div>
 
-      <LimitFormField form={form} isDisabled={isDisabled} units={unitOfMeasure} />
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <LimitFormField form={form} isDisabled={isDisabled} units={unitOfMeasure} />
+        <IncludedFormField form={form} isDisabled={isDisabled} units={unitOfMeasure} />
+      </div>
 
-      {usageMode === "unit" && (
-        <PriceFormField
-          form={form}
-          currency={currency}
-          isDisabled={isDisabled}
-          label="Price per unit"
-        />
-      )}
-      {usageMode === "tier" && (
-        <TierFormField form={form} currency={currency} isDisabled={isDisabled} />
-      )}
-      {usageMode === "package" && (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <PriceFormField
-            form={form}
-            currency={currency}
-            isDisabled={isDisabled}
-            label="Price per bundle"
-          />
-          <UnitsFormField form={form} isDisabled={isDisabled} />
-        </div>
-      )}
+      {price}
     </div>
   )
 }

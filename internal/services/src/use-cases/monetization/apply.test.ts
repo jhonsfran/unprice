@@ -17,6 +17,7 @@ import { Err, FetchError, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { describe, expect, it, vi } from "vitest"
 import type { ServiceContext } from "../../context"
+import { createRateCardsFake } from "../../rate-cards/memory.fixture"
 import type { MaterializeContext } from "../plan-template/materialize"
 import {
   type ApplyMonetizationConfigOutput,
@@ -140,6 +141,7 @@ function detach<T>(row: T): T {
 // ---------------------------------------------------------------------------
 
 function createHarness() {
+  const cards = createRateCardsFake()
   const store = {
     plans: [] as Plan[],
     features: [] as Feature[],
@@ -417,9 +419,15 @@ function createHarness() {
       createPlanVersionFeatureRecord,
       updatePlanVersionFeatureRecord,
     },
-    features: { getFeatureBySlug, createFeatureRecord, updateFeatureRecord },
+    features: {
+      getFeatureBySlug,
+      createFeatureRecord,
+      updateFeatureRecord,
+      listFeaturesByProject: vi.fn(async () => Ok([])),
+    },
     events: { listEventsByProject, createEvent, updateEvent },
-  } as unknown as Pick<ServiceContext, "plans" | "features" | "events">
+    rateCards: cards.rateCards,
+  } as unknown as Pick<ServiceContext, "plans" | "features" | "events" | "rateCards">
 
   const { logger, info: wideEvent } = createLogger()
 
@@ -428,6 +436,7 @@ function createHarness() {
     control,
     defaultHolders,
     wideEvent,
+    cards,
     deps: { services, db, logger },
     spies: {
       insert,
@@ -444,6 +453,23 @@ function createHarness() {
       updateEvent,
     },
   }
+}
+
+/** The open price of a feature on the card a plan version prices with. */
+function cardPrice(
+  cards: ReturnType<typeof createRateCardsFake>,
+  planVersionId: string,
+  featureSlug: string
+) {
+  const assigned = cards.rateCards.assignToPlanVersion.mock.calls.find(
+    ([, input]) => input.planVersionId === planVersionId
+  )
+  return cards.rows.find(
+    (row) =>
+      row.rateCardId === assigned?.[1].cardId &&
+      row.featureSlug === featureSlug &&
+      row.effectiveTo === null
+  )?.price
 }
 
 function baseConfig(): MonetizationConfigInput {
@@ -632,7 +658,7 @@ function seedVersion(
 
 describe("applyMonetizationConfig", () => {
   it("creates events, features, plans, and one draft version per plan in an empty project", async () => {
-    const { deps, store } = createHarness()
+    const { deps, store, cards } = createHarness()
 
     const result = await applyMonetizationConfig(deps, {
       projectId: PROJECT_ID,
@@ -675,10 +701,16 @@ describe("applyMonetizationConfig", () => {
       eventSlug: "chat_request",
       aggregationMethod: "count",
     })
-    // The boundary speaks decimal strings; the stored snapshot has to be Dinero.
-    expect(metered?.config).toMatchObject({
-      usageMode: "unit",
-      price: { displayAmount: "0.01", dinero: { amount: 1, scale: 2 } },
+    // The plan feature stores no price; the decimal becomes a row of the version's own card.
+    expect(metered?.config).toEqual({ usageMode: "unit" })
+    expect(cardPrice(cards, "plan_version_1", "chat-messages")).toEqual({
+      type: "unit",
+      components: [{ property: null, rate: BigInt(1_000_000), per: 1 }],
+    })
+    expect(cards.rateCards.assignToPlanVersion).toHaveBeenCalledWith(PROJECT_ID, {
+      planVersionId: "plan_version_1",
+      currency: "USD",
+      cardId: expect.any(String),
     })
     expect(metered?.featureType).toBe("usage")
     expect(metered?.limit).toBe(20)
@@ -742,7 +774,7 @@ describe("applyMonetizationConfig", () => {
   })
 
   it("creates a new draft for a price change and leaves the published version untouched", async () => {
-    const { deps, store, spies } = createHarness()
+    const { deps, store, spies, cards } = createHarness()
 
     const first = expectApplied(
       await applyMonetizationConfig(deps, { projectId: PROJECT_ID, config: baseConfig() })
@@ -753,9 +785,7 @@ describe("applyMonetizationConfig", () => {
     if (!published) throw new Error("missing the version the first apply reported")
     published.status = "published"
     const publishedFeatureCount = published.planFeatures.length
-    const publishedPrice = published.planFeatures.find(
-      ({ feature }) => feature.slug === "chat-messages"
-    )?.config
+    const publishedPrice = cardPrice(cards, published.id, "chat-messages")
 
     const repriced = baseConfig()
     const meteredFeature = repriced.plans[0]?.version.features[1]
@@ -776,9 +806,7 @@ describe("applyMonetizationConfig", () => {
     // Untouched and still live.
     expect(published.status).toBe("published")
     expect(published.planFeatures).toHaveLength(publishedFeatureCount)
-    expect(
-      published.planFeatures.find(({ feature }) => feature.slug === "chat-messages")?.config
-    ).toEqual(publishedPrice)
+    expect(cardPrice(cards, published.id, "chat-messages")).toEqual(publishedPrice)
     expect(
       spies.createPlanVersionFeatureRecord.mock.calls.filter(
         ([input]) => input.planVersionId === published.id
@@ -787,9 +815,10 @@ describe("applyMonetizationConfig", () => {
 
     const draft = store.versions.find(({ id }) => id === second.plans[0]?.planVersionId)
     expect(draft?.status).toBe("draft")
-    expect(
-      draft?.planFeatures.find(({ feature }) => feature.slug === "chat-messages")?.config
-    ).toMatchObject({ price: { displayAmount: "0.02" } })
+    expect(draft && cardPrice(cards, draft.id, "chat-messages")).toEqual({
+      type: "unit",
+      components: [{ property: null, rate: BigInt(2_000_000), per: 1 }],
+    })
   })
 
   it("finishes a half-materialized draft on the next apply without creating a duplicate version", async () => {

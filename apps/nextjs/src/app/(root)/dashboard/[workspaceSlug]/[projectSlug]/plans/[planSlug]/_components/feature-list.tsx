@@ -97,20 +97,7 @@ export function FeatureList({ featuresPromise, planVersion }: FeatureListProps) 
       featureType: "flat" as const,
       feature,
       order,
-      config: {
-        price: {
-          displayAmount: "0.00",
-          dinero: {
-            amount: 0,
-            currency: {
-              code: planVersion.currency,
-              base: 10,
-              exponent: 2,
-            },
-            scale: 2,
-          },
-        },
-      },
+      config: {},
       billingConfig: planVersion.billingConfig,
     } as PlanVersionFeatureDragDrop
 
@@ -198,20 +185,7 @@ export function FeatureList({ featuresPromise, planVersion }: FeatureListProps) 
                 featureType: "flat",
                 feature: feature,
                 order: 1024,
-                config: {
-                  price: {
-                    displayAmount: "0.00",
-                    dinero: {
-                      amount: 0,
-                      currency: {
-                        code: planVersion.currency,
-                        base: 10,
-                        exponent: 2,
-                      },
-                      scale: 2,
-                    },
-                  },
-                },
+                config: {},
                 billingConfig: planVersion.billingConfig,
               } as PlanVersionFeatureDragDrop
 

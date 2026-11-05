@@ -64,13 +64,6 @@ export const publish = protectedProjectProcedure
       })
     }
 
-    if (val.state === "price_calculation_error") {
-      throw new TRPCError({
-        code: "INTERNAL_SERVER_ERROR",
-        message: "Error calculating price plan",
-      })
-    }
-
     if (val.state === "payment_provider_error") {
       throw paymentProviderPublishError()
     }

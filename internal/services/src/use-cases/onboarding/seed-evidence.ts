@@ -5,14 +5,16 @@ import {
   type Feature,
   type MeterConfig,
   type PlanVersionFeature,
+  type RateRow,
   currencySchema,
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import { fromCurrencyMinor, toLedgerMinor } from "@unprice/money"
+import { fromCurrencyMinor, parseAmount, toLedgerMinor } from "@unprice/money"
 import { fromZonedTime, toZonedTime } from "date-fns-tz"
 import { z } from "zod"
 import type { ServiceContext } from "../../context"
+import { featureRow } from "../../pricing"
 import { paidActionSchema } from "../plan-template/template-data"
 import { createSubscription } from "../subscription/create"
 
@@ -83,7 +85,10 @@ export type EvidenceApiClient = {
 }
 
 type SeedOnboardingEvidenceDeps = {
-  services: Pick<ServiceContext, "plans" | "apikeys" | "customers" | "subscriptions" | "billing">
+  services: Pick<
+    ServiceContext,
+    "plans" | "apikeys" | "customers" | "subscriptions" | "billing" | "rateCards"
+  >
   db: Database
   logger: Logger
   createApiClient: (token: string) => EvidenceApiClient
@@ -108,13 +113,6 @@ type OnboardingSubscription = {
   id: string
 }
 
-const unitPriceConfigSchema = z.object({
-  usageMode: z.literal("unit"),
-  price: z.object({
-    displayAmount: z.string(),
-  }),
-})
-
 function seedError(message: string, context?: Record<string, unknown>) {
   return new FetchError({
     message,
@@ -134,8 +132,13 @@ function toCurrencyMinorAmount(amount: string) {
   return Math.round(Number(amount) * 100)
 }
 
+/**
+ * The plan feature the paid action meters, when the version's card prices it at the action's unit
+ * price: one default unit row with one component (ADR-0008 D2).
+ */
 function getPaidActionTarget(
   planFeatures: DetailedPlanFeature[],
+  rows: readonly RateRow[],
   paidAction: z.infer<typeof paidActionSchema>
 ): PaidActionTarget | null {
   const target = planFeatures.find((planFeature) => {
@@ -152,10 +155,16 @@ function getPaidActionTarget(
     return null
   }
 
-  const priceConfig = unitPriceConfigSchema.safeParse(target.config)
+  const row = featureRow(rows, paidAction.featureSlug)
+  const [component] = row?.price.type === "unit" ? row.price.components : []
+  const unitPrice = parseAmount(paidAction.unitPrice)
   if (
-    !priceConfig.success ||
-    Number(priceConfig.data.price.displayAmount) !== Number(paidAction.unitPrice)
+    row?.price.type !== "unit" ||
+    row.price.components.length !== 1 ||
+    !component ||
+    component.per !== 1 ||
+    !unitPrice.ok ||
+    component.rate !== unitPrice.amount
   ) {
     return null
   }
@@ -370,7 +379,13 @@ export async function seedOnboardingEvidence(
   const paidAction = input.paidAction
   const unitPriceMinor = toCurrencyMinorAmount(paidAction.unitPrice)
   const planFeatures = planVersion.planFeatures as DetailedPlanFeature[]
-  const target = getPaidActionTarget(planFeatures, paidAction)
+  const pricing = await deps.services.rateCards.pricingForPlanVersions(
+    input.projectId,
+    [planVersion.id],
+    Date.now()
+  )
+  const rows = pricing.get(planVersion.id)?.find((card) => card.currency === "USD")?.rows ?? []
+  const target = getPaidActionTarget(planFeatures, rows, paidAction)
   if (!target) {
     return Err(
       seedError("The saved paid action does not match the published plan version.", {

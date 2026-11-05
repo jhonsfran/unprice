@@ -33,7 +33,8 @@ export interface MarketingPricingPlan {
       title: string
       type: "flat" | "usage" | "tier" | "package"
       description?: string
-      config?: Record<string, unknown>
+      /** The feature's price on the plan version's rate card; null when unpriced. */
+      price?: string | null
     }
   >[]
   cta: string
@@ -103,17 +104,6 @@ export function MarketingPricingCard({
 
             if (!feature) return null
 
-            const config = feature.config as {
-              tiers?: {
-                firstUnit: number
-                lastUnit: number | null
-                unitPrice: { displayAmount: string }
-                flatPrice: { displayAmount: string }
-              }[]
-              usageMode?: string
-              price?: { displayAmount: string }
-            } | null
-
             return (
               <li key={featureTitle} className="flex items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center">
@@ -145,44 +135,12 @@ export function MarketingPricingCard({
                           <span className="font-medium">{feature.type}</span>
                         </div>
 
-                        {config?.tiers && config.tiers.length > 0 && (
-                          <div className="mt-2 overflow-hidden rounded border text-[10px]">
-                            <table className="w-full border-collapse">
-                              <thead className="bg-muted">
-                                <tr>
-                                  <th className="px-2 py-1 text-left">Units</th>
-                                  <th className="px-2 py-1 text-right">Price</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {config.tiers.map((tier) => (
-                                  <tr key={tier.firstUnit} className="border-t">
-                                    <td className="px-2 py-1">
-                                      {tier.firstUnit} - {tier.lastUnit ?? "∞"}
-                                    </td>
-                                    <td className="px-2 py-1 text-right">
-                                      {tier.unitPrice.displayAmount}/unit
-                                      {Number.parseFloat(tier.flatPrice.displayAmount) > 0 && (
-                                        <div className="text-[8px] text-muted-foreground">
-                                          +{tier.flatPrice.displayAmount} flat
-                                        </div>
-                                      )}
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
+                        {feature.price && (
+                          <div className="flex justify-between text-[10px]">
+                            <span>Price</span>
+                            <span className="font-medium">{feature.price}</span>
                           </div>
                         )}
-
-                        {feature.type === "usage" &&
-                          config?.usageMode === "unit" &&
-                          config?.price && (
-                            <div className="flex justify-between text-[10px]">
-                              <span>Price per unit</span>
-                              <span className="font-medium">{config.price.displayAmount}</span>
-                            </div>
-                          )}
                       </div>
                     </div>
                   </TooltipContent>

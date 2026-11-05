@@ -140,12 +140,15 @@ export function createServiceContext(
     hashCache: new Map<string, string>(),
   })
 
+  const rateCards = new RateCardService({ db: deps.db })
+
   const plans = new PlanService({
     db: deps.db,
     logger: deps.logger,
     waitUntil: deps.waitUntil,
     cache: deps.cache,
     metrics: deps.metrics,
+    rateCards,
   })
 
   const features = new FeatureService({
@@ -180,8 +183,6 @@ export function createServiceContext(
     db: deps.db,
     logger: deps.logger,
   })
-
-  const rateCards = new RateCardService({ db: deps.db })
 
   // 2. Services with deps on leaves
   const wallet = new WalletService({

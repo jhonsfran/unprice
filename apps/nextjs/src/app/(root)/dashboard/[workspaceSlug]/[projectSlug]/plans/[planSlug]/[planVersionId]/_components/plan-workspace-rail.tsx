@@ -11,6 +11,7 @@ import { cn } from "@unprice/ui/utils"
 import { PricingCard } from "~/components/forms/pricing-card"
 import { getStatusTone, statusToneClasses } from "~/lib/status-tones"
 import { PlanVersionDialog } from "../../_components/plan-version-dialog"
+import { PlanVersionRateCard } from "./plan-version-rate-card"
 
 export function PlanWorkspaceRail({
   planVersion,
@@ -42,6 +43,17 @@ export function PlanWorkspaceRail({
       <section className="flex flex-col gap-3">
         <SectionTitle>Pricing card preview</SectionTitle>
         <PricingCard planVersion={planVersion} className="w-full" showPublish={false} />
+      </section>
+
+      <Separator />
+
+      <section className="flex flex-col gap-3">
+        <SectionTitle>Rate card</SectionTitle>
+        <PlanVersionRateCard
+          planVersionId={planVersion.id}
+          currency={planVersion.currency}
+          isPublished={status === "published"}
+        />
       </section>
 
       <Separator />

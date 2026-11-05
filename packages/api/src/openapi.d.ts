@@ -5097,331 +5097,11 @@ export interface operations {
               /** @description Unit of measurement captured for this plan version feature. Used for display and billing context without relying on mutable feature definitions */
               unitOfMeasure: string
               /** @description Pricing configuration for this feature. Structure depends on featureType */
-              config:
-                | {
-                    /** @description Not used for flat pricing. Will be removed during validation */
-                    tiers?: {
-                      /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
-                      unitPrice: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
-                      flatPrice: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                      firstUnit: number
-                      /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                      lastUnit: number | null
-                      /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                      label?: string
-                    }[]
-                    /** @description The fixed price for this feature. This is the single price charged regardless of usage */
-                    price: {
-                      /** @description The internal Dinero.js representation of the price for precise calculations */
-                      dinero: {
-                        /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                        amount: number
-                        /** @description Currency configuration following ISO 4217 standards */
-                        currency: {
-                          /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                          code: string
-                          /** @description The base of the currency system. Usually 10 for decimal currencies */
-                          base: number | number[]
-                          /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                          exponent: number
-                        }
-                        /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                        scale: number
-                      }
-                      /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                      displayAmount: string
-                    }
-                    /**
-                     * @description Not used for flat pricing. Will be removed during validation
-                     * @enum {string}
-                     */
-                    usageMode?: "tier" | "package" | "unit"
-                    /** @description Not used for flat pricing. Will be removed during validation */
-                    units?: number
-                  }
-                | {
-                    /** @description Base price for the feature. Not typically used in tier pricing mode */
-                    price?: {
-                      /** @description The internal Dinero.js representation of the price for precise calculations */
-                      dinero: {
-                        /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                        amount: number
-                        /** @description Currency configuration following ISO 4217 standards */
-                        currency: {
-                          /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                          code: string
-                          /** @description The base of the currency system. Usually 10 for decimal currencies */
-                          base: number | number[]
-                          /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                          exponent: number
-                        }
-                        /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                        scale: number
-                      }
-                      /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                      displayAmount: string
-                    }
-                    /** @description Array of pricing tiers defining price brackets. Tiers must be consecutive (no gaps or overlaps). The last tier's lastUnit should be null for unlimited */
-                    tiers: {
-                      /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
-                      unitPrice: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
-                      flatPrice: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                      firstUnit: number
-                      /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                      lastUnit: number | null
-                      /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                      label?: string
-                    }[]
-                    /**
-                     * @description Usage calculation mode. Not typically used in tier-type features
-                     * @enum {string}
-                     */
-                    usageMode?: "tier" | "package" | "unit"
-                    /** @description Number of units included. Not typically used in tier-type features */
-                    units?: number
-                  }
-                | {
-                    /** @description Price per unit when usageMode is 'unit' or 'package'. Required for unit/package modes, not used for tier mode */
-                    price?: {
-                      /** @description The internal Dinero.js representation of the price for precise calculations */
-                      dinero: {
-                        /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                        amount: number
-                        /** @description Currency configuration following ISO 4217 standards */
-                        currency: {
-                          /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                          code: string
-                          /** @description The base of the currency system. Usually 10 for decimal currencies */
-                          base: number | number[]
-                          /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                          exponent: number
-                        }
-                        /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                        scale: number
-                      }
-                      /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                      displayAmount: string
-                    }
-                    /**
-                     * @description How usage is calculated and billed: 'unit' (per-unit pricing), 'tier' (graduated tiers), or 'package' (bundle of units)
-                     * @enum {string}
-                     */
-                    usageMode: "tier" | "package" | "unit"
-                    /** @description Pricing tiers for tier-based usage. Required when usageMode is 'tier'. Must be consecutive with no gaps */
-                    tiers?: {
-                      /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
-                      unitPrice: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
-                      flatPrice: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                      firstUnit: number
-                      /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                      lastUnit: number | null
-                      /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                      label?: string
-                    }[]
-                    /** @description Number of units in a package when usageMode is 'package'. Required for package mode. Example: 100 API calls per package */
-                    units?: number
-                  }
-                | {
-                    /** @description Not used for package pricing. Will be removed during validation */
-                    tiers?: {
-                      /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
-                      unitPrice: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
-                      flatPrice: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                      firstUnit: number
-                      /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                      lastUnit: number | null
-                      /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                      label?: string
-                    }[]
-                    /** @description The price per package. Example: $10 per package of 100 API calls */
-                    price: {
-                      /** @description The internal Dinero.js representation of the price for precise calculations */
-                      dinero: {
-                        /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                        amount: number
-                        /** @description Currency configuration following ISO 4217 standards */
-                        currency: {
-                          /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                          code: string
-                          /** @description The base of the currency system. Usually 10 for decimal currencies */
-                          base: number | number[]
-                          /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                          exponent: number
-                        }
-                        /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                        scale: number
-                      }
-                      /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                      displayAmount: string
-                    }
-                    /**
-                     * @description Not used for package pricing. Will be removed during validation
-                     * @enum {string}
-                     */
-                    usageMode?: "tier" | "package" | "unit"
-                    /** @description Number of units included in each package. Required. Example: 100 means each package includes 100 units */
-                    units: number
-                  }
+              config: {
+                /** @enum {string} */
+                usageMode?: "tier" | "package" | "unit"
+                units?: number
+              }
               /** @description Billing cycle configuration including interval (month/year), billing anchor date, and plan type (recurring/onetime) */
               billingConfig: {
                 name: string
@@ -6684,30 +6364,28 @@ export interface operations {
                    * @enum {string}
                    */
                   featureType: "flat" | "tier" | "package" | "usage"
-                  /** @description Pricing configuration. Prices cross the boundary as decimal strings, never as Dinero */
+                  /** @description Pricing configuration. Prices are decimal strings and become rows of the plan version's rate card */
                   config: {
-                    /** @description Price as a decimal string. Example: '0.000002' */
-                    price?: string
                     /**
-                     * @description How usage is calculated and billed: 'unit' (per-unit pricing), 'tier' (graduated tiers), or 'package' (bundle of units)
+                     * @description How usage is sold: 'unit', 'tier' (graduated), or 'package'. The rate card holds the price
                      * @enum {string}
                      */
                     usageMode?: "tier" | "package" | "unit"
+                    /** @description Units in a package when usageMode is 'package'. Example: 100 */
+                    units?: number
+                    /** @description Price as a decimal string. Example: '0.000002' */
+                    price?: string
                     /** @description Pricing tiers, decimal strings */
                     tiers?: {
+                      /** @description The first unit of this tier, inclusive. 1 for the first tier */
+                      firstUnit: number
+                      /** @description The last unit of this tier, inclusive; null for the last tier */
+                      lastUnit: number | null
                       /** @description Price per unit inside this tier, as a decimal string */
                       unitPrice: string
                       /** @description Fixed price for entering this tier, as a decimal string */
                       flatPrice: string
-                      /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                      firstUnit: number
-                      /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                      lastUnit: number | null
-                      /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                      label?: string
                     }[]
-                    /** @description Number of units in a package when usageMode is 'package'. Required for package mode. Example: 100 API calls per package */
-                    units?: number
                   }
                   /** @description How usage is measured from a declared event */
                   meterConfig?: {
@@ -6966,30 +6644,28 @@ export interface operations {
                      * @enum {string}
                      */
                     featureType: "flat" | "tier" | "package" | "usage"
-                    /** @description Pricing configuration. Prices cross the boundary as decimal strings, never as Dinero */
+                    /** @description Pricing configuration. Prices are decimal strings and become rows of the plan version's rate card */
                     config: {
-                      /** @description Price as a decimal string. Example: '0.000002' */
-                      price?: string
                       /**
-                       * @description How usage is calculated and billed: 'unit' (per-unit pricing), 'tier' (graduated tiers), or 'package' (bundle of units)
+                       * @description How usage is sold: 'unit', 'tier' (graduated), or 'package'. The rate card holds the price
                        * @enum {string}
                        */
                       usageMode?: "tier" | "package" | "unit"
+                      /** @description Units in a package when usageMode is 'package'. Example: 100 */
+                      units?: number
+                      /** @description Price as a decimal string. Example: '0.000002' */
+                      price?: string
                       /** @description Pricing tiers, decimal strings */
                       tiers?: {
+                        /** @description The first unit of this tier, inclusive. 1 for the first tier */
+                        firstUnit: number
+                        /** @description The last unit of this tier, inclusive; null for the last tier */
+                        lastUnit: number | null
                         /** @description Price per unit inside this tier, as a decimal string */
                         unitPrice: string
                         /** @description Fixed price for entering this tier, as a decimal string */
                         flatPrice: string
-                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                        firstUnit: number
-                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                        lastUnit: number | null
-                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                        label?: string
                       }[]
-                      /** @description Number of units in a package when usageMode is 'package'. Required for package mode. Example: 100 API calls per package */
-                      units?: number
                     }
                     /** @description How usage is measured from a declared event */
                     meterConfig?: {
@@ -7552,331 +7228,11 @@ export interface operations {
                 /** @description Unit of measurement captured for this plan version feature. Used for display and billing context without relying on mutable feature definitions */
                 unitOfMeasure: string
                 /** @description Pricing configuration for this feature. Structure depends on featureType */
-                config:
-                  | {
-                      /** @description Not used for flat pricing. Will be removed during validation */
-                      tiers?: {
-                        /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
-                        unitPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
-                        flatPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                        firstUnit: number
-                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                        lastUnit: number | null
-                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                        label?: string
-                      }[]
-                      /** @description The fixed price for this feature. This is the single price charged regardless of usage */
-                      price: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /**
-                       * @description Not used for flat pricing. Will be removed during validation
-                       * @enum {string}
-                       */
-                      usageMode?: "tier" | "package" | "unit"
-                      /** @description Not used for flat pricing. Will be removed during validation */
-                      units?: number
-                    }
-                  | {
-                      /** @description Base price for the feature. Not typically used in tier pricing mode */
-                      price?: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /** @description Array of pricing tiers defining price brackets. Tiers must be consecutive (no gaps or overlaps). The last tier's lastUnit should be null for unlimited */
-                      tiers: {
-                        /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
-                        unitPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
-                        flatPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                        firstUnit: number
-                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                        lastUnit: number | null
-                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                        label?: string
-                      }[]
-                      /**
-                       * @description Usage calculation mode. Not typically used in tier-type features
-                       * @enum {string}
-                       */
-                      usageMode?: "tier" | "package" | "unit"
-                      /** @description Number of units included. Not typically used in tier-type features */
-                      units?: number
-                    }
-                  | {
-                      /** @description Price per unit when usageMode is 'unit' or 'package'. Required for unit/package modes, not used for tier mode */
-                      price?: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /**
-                       * @description How usage is calculated and billed: 'unit' (per-unit pricing), 'tier' (graduated tiers), or 'package' (bundle of units)
-                       * @enum {string}
-                       */
-                      usageMode: "tier" | "package" | "unit"
-                      /** @description Pricing tiers for tier-based usage. Required when usageMode is 'tier'. Must be consecutive with no gaps */
-                      tiers?: {
-                        /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
-                        unitPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
-                        flatPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                        firstUnit: number
-                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                        lastUnit: number | null
-                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                        label?: string
-                      }[]
-                      /** @description Number of units in a package when usageMode is 'package'. Required for package mode. Example: 100 API calls per package */
-                      units?: number
-                    }
-                  | {
-                      /** @description Not used for package pricing. Will be removed during validation */
-                      tiers?: {
-                        /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
-                        unitPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
-                        flatPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                        firstUnit: number
-                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                        lastUnit: number | null
-                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                        label?: string
-                      }[]
-                      /** @description The price per package. Example: $10 per package of 100 API calls */
-                      price: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /**
-                       * @description Not used for package pricing. Will be removed during validation
-                       * @enum {string}
-                       */
-                      usageMode?: "tier" | "package" | "unit"
-                      /** @description Number of units included in each package. Required. Example: 100 means each package includes 100 units */
-                      units: number
-                    }
+                config: {
+                  /** @enum {string} */
+                  usageMode?: "tier" | "package" | "unit"
+                  units?: number
+                }
                 /** @description Billing cycle configuration including interval (month/year), billing anchor date, and plan type (recurring/onetime) */
                 billingConfig: {
                   name: string
@@ -7959,6 +7315,8 @@ export interface operations {
                 } | null
                 /** @description The text you can use to show the clients */
                 displayFeatureText: string
+                /** @description The feature's current price from the plan version's rate card, formatted for display. Example: '$0.02 / call'. Null when the card has no row for the feature */
+                displayPrice: string | null
                 /** @description The feature information */
                 feature: {
                   id: string
@@ -8226,331 +7584,11 @@ export interface operations {
                 /** @description Unit of measurement captured for this plan version feature. Used for display and billing context without relying on mutable feature definitions */
                 unitOfMeasure: string
                 /** @description Pricing configuration for this feature. Structure depends on featureType */
-                config:
-                  | {
-                      /** @description Not used for flat pricing. Will be removed during validation */
-                      tiers?: {
-                        /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
-                        unitPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
-                        flatPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                        firstUnit: number
-                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                        lastUnit: number | null
-                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                        label?: string
-                      }[]
-                      /** @description The fixed price for this feature. This is the single price charged regardless of usage */
-                      price: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /**
-                       * @description Not used for flat pricing. Will be removed during validation
-                       * @enum {string}
-                       */
-                      usageMode?: "tier" | "package" | "unit"
-                      /** @description Not used for flat pricing. Will be removed during validation */
-                      units?: number
-                    }
-                  | {
-                      /** @description Base price for the feature. Not typically used in tier pricing mode */
-                      price?: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /** @description Array of pricing tiers defining price brackets. Tiers must be consecutive (no gaps or overlaps). The last tier's lastUnit should be null for unlimited */
-                      tiers: {
-                        /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
-                        unitPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
-                        flatPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                        firstUnit: number
-                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                        lastUnit: number | null
-                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                        label?: string
-                      }[]
-                      /**
-                       * @description Usage calculation mode. Not typically used in tier-type features
-                       * @enum {string}
-                       */
-                      usageMode?: "tier" | "package" | "unit"
-                      /** @description Number of units included. Not typically used in tier-type features */
-                      units?: number
-                    }
-                  | {
-                      /** @description Price per unit when usageMode is 'unit' or 'package'. Required for unit/package modes, not used for tier mode */
-                      price?: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /**
-                       * @description How usage is calculated and billed: 'unit' (per-unit pricing), 'tier' (graduated tiers), or 'package' (bundle of units)
-                       * @enum {string}
-                       */
-                      usageMode: "tier" | "package" | "unit"
-                      /** @description Pricing tiers for tier-based usage. Required when usageMode is 'tier'. Must be consecutive with no gaps */
-                      tiers?: {
-                        /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
-                        unitPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
-                        flatPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                        firstUnit: number
-                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                        lastUnit: number | null
-                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                        label?: string
-                      }[]
-                      /** @description Number of units in a package when usageMode is 'package'. Required for package mode. Example: 100 API calls per package */
-                      units?: number
-                    }
-                  | {
-                      /** @description Not used for package pricing. Will be removed during validation */
-                      tiers?: {
-                        /** @description Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier */
-                        unitPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier */
-                        flatPrice: {
-                          /** @description The internal Dinero.js representation of the price for precise calculations */
-                          dinero: {
-                            /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                            amount: number
-                            /** @description Currency configuration following ISO 4217 standards */
-                            currency: {
-                              /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                              code: string
-                              /** @description The base of the currency system. Usually 10 for decimal currencies */
-                              base: number | number[]
-                              /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                              exponent: number
-                            }
-                            /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                            scale: number
-                          }
-                          /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                          displayAmount: string
-                        }
-                        /** @description The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers */
-                        firstUnit: number
-                        /** @description The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units */
-                        lastUnit: number | null
-                        /** @description Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units' */
-                        label?: string
-                      }[]
-                      /** @description The price per package. Example: $10 per package of 100 API calls */
-                      price: {
-                        /** @description The internal Dinero.js representation of the price for precise calculations */
-                        dinero: {
-                          /** @description The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99 */
-                          amount: number
-                          /** @description Currency configuration following ISO 4217 standards */
-                          currency: {
-                            /** @description ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP' */
-                            code: string
-                            /** @description The base of the currency system. Usually 10 for decimal currencies */
-                            base: number | number[]
-                            /** @description Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY */
-                            exponent: number
-                          }
-                          /** @description The precision scale for the monetary value. Determines how many decimal places are stored */
-                          scale: number
-                        }
-                        /** @description Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99' */
-                        displayAmount: string
-                      }
-                      /**
-                       * @description Not used for package pricing. Will be removed during validation
-                       * @enum {string}
-                       */
-                      usageMode?: "tier" | "package" | "unit"
-                      /** @description Number of units included in each package. Required. Example: 100 means each package includes 100 units */
-                      units: number
-                    }
+                config: {
+                  /** @enum {string} */
+                  usageMode?: "tier" | "package" | "unit"
+                  units?: number
+                }
                 /** @description Billing cycle configuration including interval (month/year), billing anchor date, and plan type (recurring/onetime) */
                 billingConfig: {
                   name: string
@@ -8633,6 +7671,8 @@ export interface operations {
                 } | null
                 /** @description The text you can use to show the clients */
                 displayFeatureText: string
+                /** @description The feature's current price from the plan version's rate card, formatted for display. Example: '$0.02 / call'. Null when the card has no row for the feature */
+                displayPrice: string | null
                 /** @description The feature information */
                 feature: {
                   id: string

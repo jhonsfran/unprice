@@ -1,6 +1,6 @@
 "use client"
 
-import { calculateFlatPricePlan, getTrialUnitLabel } from "@unprice/db/validators"
+import { getTrialUnitLabel } from "@unprice/db/validators"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Badge } from "@unprice/ui/badge"
 import { Button } from "@unprice/ui/button"
@@ -42,15 +42,6 @@ export function PlanVersionPricingCard({
   renderAction?: (action: PlanVersionPricingCardAction) => React.ReactNode
 }) {
   if (!planVersion) return null
-
-  const { err, val } = calculateFlatPricePlan({
-    planVersion,
-    prorate: 1,
-  })
-
-  if (err) {
-    return <>Error calculating price</>
-  }
 
   const trialUnits = planVersion.trialUnits ?? 0
   const trialUnitLabel = getTrialUnitLabel({
@@ -94,7 +85,7 @@ export function PlanVersionPricingCard({
           <div className="flex flex-col gap-1">
             <div className="flex items-baseline gap-2">
               <span className="font-extrabold text-4xl text-background-textContrast tracking-tight">
-                {val.displayAmount}
+                {planVersion.flatPrice}
               </span>
               <span className="font-medium text-muted-foreground text-sm">/ {billingLabel}</span>
             </div>
@@ -119,10 +110,7 @@ export function PlanVersionPricingCard({
               <li key={feature.id} className="flex w-full flex-col justify-start">
                 <PlanVersionFeatureListItem
                   feature={feature}
-                  displayOptions={{
-                    showCalculator: true,
-                    showQuantity: true,
-                  }}
+                  displayOptions={{ showQuantity: true }}
                   className="font-medium text-background-text"
                 />
               </li>

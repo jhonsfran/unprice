@@ -144,3 +144,10 @@ export const rateCardRowsRelations = relations(rateCardRows, ({ one }) => ({
     references: [rateCards.id, rateCards.projectId],
   }),
 }))
+
+export const planVersionRateCardsRelations = relations(planVersionRateCards, ({ one }) => ({
+  card: one(rateCards, {
+    fields: [planVersionRateCards.rateCardId, planVersionRateCards.projectId],
+    references: [rateCards.id, rateCards.projectId],
+  }),
+}))

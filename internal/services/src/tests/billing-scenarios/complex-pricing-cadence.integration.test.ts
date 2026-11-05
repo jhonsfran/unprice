@@ -129,21 +129,6 @@ function meterConfig(
   } satisfies MeterConfig
 }
 
-function eurPrice(amount: number, displayAmount: string, scale = 2) {
-  return {
-    dinero: {
-      amount,
-      currency: {
-        code: "EUR",
-        base: 10,
-        exponent: 2,
-      },
-      scale,
-    },
-    displayAmount,
-  } satisfies NonNullable<PriceConfig["price"]>
-}
-
 function featureRow(input: {
   id: string
   slug: string
@@ -427,7 +412,6 @@ async function addComplexPricingConfiguration() {
         featureType: "package",
         unitOfMeasure: "bundle",
         config: {
-          price: eurPrice(700, "7.00"),
           units: 10,
         },
         billingConfig: monthlyBillingConfig,
@@ -440,22 +424,7 @@ async function addComplexPricingConfiguration() {
         featureId: "feat_test_seats",
         featureType: "tier",
         unitOfMeasure: "seat",
-        config: {
-          tiers: [
-            {
-              unitPrice: eurPrice(200, "2.00"),
-              flatPrice: eurPrice(0, "0.00"),
-              firstUnit: 1,
-              lastUnit: 5,
-            },
-            {
-              unitPrice: eurPrice(100, "1.00"),
-              flatPrice: eurPrice(300, "3.00"),
-              firstUnit: 6,
-              lastUnit: null,
-            },
-          ],
-        },
+        config: {},
         billingConfig: monthlyBillingConfig,
         resetConfig: monthlyResetConfig,
         order: 4,
@@ -468,7 +437,6 @@ async function addComplexPricingConfiguration() {
         unitOfMeasure: "token",
         config: {
           usageMode: "unit",
-          price: eurPrice(25, "0.25"),
           units: 1,
         },
         billingConfig: dailyBillingConfig,
@@ -484,7 +452,6 @@ async function addComplexPricingConfiguration() {
         unitOfMeasure: "job",
         config: {
           usageMode: "package",
-          price: eurPrice(400, "4.00"),
           units: 25,
         },
         billingConfig: weeklyBillingConfig,
@@ -703,9 +670,7 @@ async function addCoBilledCadenceConfiguration() {
         featureId: "feat_test_annual_platform",
         featureType: "flat",
         unitOfMeasure: "platform",
-        config: {
-          price: eurPrice(120000, "1200.00"),
-        },
+        config: {},
         billingConfig: annualBillingConfig,
         resetConfig: annualResetConfig,
         order: 10,
@@ -717,7 +682,6 @@ async function addCoBilledCadenceConfiguration() {
         featureType: "package",
         unitOfMeasure: "audit",
         config: {
-          price: eurPrice(1000, "10.00"),
           units: 1,
         },
         billingConfig: monthlyBillingConfig,
@@ -732,7 +696,6 @@ async function addCoBilledCadenceConfiguration() {
         unitOfMeasure: "unit",
         config: {
           usageMode: "unit",
-          price: eurPrice(10, "0.10"),
         },
         billingConfig: dailyBillingConfig,
         resetConfig: dailyResetConfig,
@@ -747,7 +710,6 @@ async function addCoBilledCadenceConfiguration() {
         unitOfMeasure: "job",
         config: {
           usageMode: "package",
-          price: eurPrice(50, "0.50"),
           units: 10,
         },
         billingConfig: hourlyBillingConfig,

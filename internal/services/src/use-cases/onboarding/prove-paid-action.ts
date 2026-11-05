@@ -42,7 +42,14 @@ export type RunPaidActionProofOutput = z.infer<typeof runPaidActionProofOutputSc
 type RunPaidActionProofDeps = {
   services: Pick<
     ServiceContext,
-    "plans" | "features" | "events" | "customers" | "apikeys" | "subscriptions" | "billing"
+    | "plans"
+    | "features"
+    | "events"
+    | "customers"
+    | "apikeys"
+    | "subscriptions"
+    | "billing"
+    | "rateCards"
   >
   db: Database
   logger: Logger

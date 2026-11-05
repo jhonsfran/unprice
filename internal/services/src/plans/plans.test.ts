@@ -30,6 +30,7 @@ function createPlanService(db: Database) {
     waitUntil: () => {},
     cache,
     metrics,
+    rateCards: { rowsForVersions: vi.fn(async () => new Map()) },
   })
 }
 
@@ -505,14 +506,6 @@ describe("PlanService plan version billing defaults", () => {
       featureType: "usage",
       config: {
         usageMode: "unit",
-        price: {
-          displayAmount: "1.00",
-          dinero: {
-            amount: 100,
-            currency: { code: "EUR", base: 10, exponent: 2 },
-            scale: 2,
-          },
-        },
       },
       billingConfig: every5MinutesBillingConfig,
       order: 1024,
@@ -581,14 +574,6 @@ describe("PlanService plan version billing defaults", () => {
       featureType: "usage",
       config: {
         usageMode: "unit",
-        price: {
-          displayAmount: "1.00",
-          dinero: {
-            amount: 100,
-            currency: { code: "EUR", base: 10, exponent: 2 },
-            scale: 2,
-          },
-        },
       },
       billingConfig: yearlyBillingConfig,
       resetConfig: resetEveryFourYears,

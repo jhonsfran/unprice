@@ -190,7 +190,7 @@ async function addEnterprisePlanVersion() {
       'feat_test_access_pro',
       'flat',
       'access',
-      '{"price":{"dinero":{"amount":31000,"currency":{"code":"EUR","base":10,"exponent":2},"scale":2},"displayAmount":"310.00"}}'::json,
+      '{}'::json,
       ${JSON.stringify(billingConfig)}::json,
       ${JSON.stringify(resetConfig)}::json,
       '{}'::json,

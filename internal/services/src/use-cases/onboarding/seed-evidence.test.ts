@@ -1,5 +1,11 @@
 import type { Database } from "@unprice/db"
-import type { Feature, Plan, PlanVersion, PlanVersionFeature } from "@unprice/db/validators"
+import {
+  type Feature,
+  type Plan,
+  type PlanVersion,
+  type PlanVersionFeature,
+  rateRowSchema,
+} from "@unprice/db/validators"
 import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -80,17 +86,7 @@ function makePaidActionPlanFeature(): PlanVersionFeature & { feature: Feature } 
     planVersionId: "plan_version_123",
     featureId: "feature_ai_generation",
     featureType: "usage",
-    config: {
-      usageMode: "unit",
-      price: {
-        displayAmount: "4.10",
-        dinero: {
-          amount: 410,
-          currency: { code: "USD", base: 10, exponent: 2 },
-          scale: 2,
-        },
-      },
-    },
+    config: { usageMode: "unit" },
     metadata: null,
     meterConfig: {
       eventId: "event_ai_generation",
@@ -99,6 +95,23 @@ function makePaidActionPlanFeature(): PlanVersionFeature & { feature: Feature } 
     },
     feature: makeFeature(),
   } as unknown as PlanVersionFeature & { feature: Feature }
+}
+
+/** The plan version's USD card: the paid action at $4.10 per event. */
+function paidActionCard() {
+  const row = rateRowSchema.parse({
+    id: "rr_ai_generation",
+    rateCardId: "rc_1",
+    featureSlug: paidAction.featureSlug,
+    match: {},
+    price: { type: "unit", components: [{ property: null, rate: "4.10", per: 1 }] },
+    cost: null,
+    effectiveFrom: 0,
+    effectiveTo: null,
+    source: "manual",
+    sourceRef: null,
+  })
+  return new Map([["plan_version_123", [{ currency: "USD", card: {}, rows: [row] }]]])
 }
 
 function makePlanVersion(): PlanVersion & {
@@ -253,9 +266,12 @@ function createSeedOnboardingEvidenceDeps({
         billing: {
           generateBillingPeriods,
         },
+        rateCards: {
+          pricingForPlanVersions: vi.fn(async () => paidActionCard()),
+        },
       } as unknown as Pick<
         ServiceContext,
-        "plans" | "apikeys" | "customers" | "subscriptions" | "billing"
+        "plans" | "apikeys" | "customers" | "subscriptions" | "billing" | "rateCards"
       >,
       db: createDbMock(),
       logger: createLogger(),

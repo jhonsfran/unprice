@@ -1,4 +1,5 @@
 import type { Database } from "@unprice/db"
+import { type RateCard, rateRowSchema } from "@unprice/db/validators"
 import { FetchError, Ok } from "@unprice/error"
 import { dinero } from "dinero.js"
 import * as currencies from "dinero.js/currencies"
@@ -109,7 +110,10 @@ describe("explainCharge", () => {
     const { db, ledger } = makeDeps({ lineMetadata: { ...usageMetadata(), cost_usd: 120_000_000 } })
     const { analytics, queries } = journalAnalytics(statementJournal(defaultJournal))
 
-    const result = await explainCharge({ db, ledger, analytics, now: () => now }, input())
+    const result = await explainCharge(
+      { db, ledger, analytics, rateCards, now: () => now },
+      input()
+    )
 
     expect(queries).toHaveLength(2)
     for (const sql of queries) {
@@ -189,7 +193,7 @@ describe("explainCharge", () => {
     const { analytics } = journalAnalytics(statementJournal(defaultJournal))
 
     const result = await explainCharge(
-      { db, ledger, analytics, now: () => now },
+      { db, ledger, analytics, rateCards, now: () => now },
       input({ entryId: groupEntryId })
     )
 
@@ -211,7 +215,10 @@ describe("explainCharge", () => {
         }),
       ])
     )
-    const result = await explainCharge({ db, ledger, analytics, now: () => now }, input())
+    const result = await explainCharge(
+      { db, ledger, analytics, rateCards, now: () => now },
+      input()
+    )
     expect(result.val?.events).toEqual([])
   })
 
@@ -222,7 +229,10 @@ describe("explainCharge", () => {
         settledHoldRow({ key: "run_1", at: 1_700_050_000_000, quantity: "40", amount: "0.4" }),
       ])
     )
-    const result = await explainCharge({ db, ledger, analytics, now: () => now }, input())
+    const result = await explainCharge(
+      { db, ledger, analytics, rateCards, now: () => now },
+      input()
+    )
     expect(result.val?.summary.eventCount).toBe(1)
     expect(result.val?.events).toEqual([
       {
@@ -261,7 +271,10 @@ describe("explainCharge", () => {
         2
       )
     )
-    const result = await explainCharge({ db, ledger, analytics, now: () => now }, input())
+    const result = await explainCharge(
+      { db, ledger, analytics, rateCards, now: () => now },
+      input()
+    )
     expect(result.err).toBeUndefined()
     expect(result.val?.events.map((event) => event.event_id)).toEqual(["evt_2"])
   })
@@ -270,7 +283,7 @@ describe("explainCharge", () => {
     const { db, ledger } = makeDeps()
     const { analytics } = journalAnalytics(statementJournal(defaultJournal, "3"))
     const result = await explainCharge(
-      { db, ledger, analytics, now: () => now },
+      { db, ledger, analytics, rateCards, now: () => now },
       input({ limit: 2 })
     )
     expect(result.val?.summary.eventCount).toBe(3)
@@ -281,13 +294,29 @@ describe("explainCharge", () => {
     const { db, ledger } = makeDeps()
     const { analytics, queries } = journalAnalytics(statementJournal([], 3))
     const result = await explainCharge(
-      { db, ledger, analytics, now: () => now },
+      { db, ledger, analytics, rateCards, now: () => now },
       input({ limit: 2, offset: 4 })
     )
     expect(queries[0]).toContain("LIMIT 2\nOFFSET 4")
     expect(result.val?.events).toEqual([])
     expect(result.val?.summary.eventCount).toBe(3)
     expect(result.val?.pagination).toEqual({ limit: 2, offset: 4, hasMore: false })
+  })
+
+  it("summarizes the feature's price from the plan version's rate card", async () => {
+    const { db, ledger } = makeDeps()
+    const { analytics } = journalAnalytics(statementJournal(defaultJournal))
+    const result = await explainCharge(
+      { db, ledger, analytics, rateCards, now: () => now },
+      input()
+    )
+    expect(result.val?.pricing).toEqual({
+      featureType: "usage",
+      usageMode: "unit",
+      unitOfMeasure: "token",
+      description: "Rate card price: $0.01 / token",
+      rows: [{ label: "Default (from 1970-01-01T00:00:00.000Z)", value: "$0.01 / token" }],
+    })
   })
 
   it("explains a non-metered line without reading the journal", async () => {
@@ -297,7 +326,8 @@ describe("explainCharge", () => {
           id: "fpv_flat",
           featureType: "flat",
           unitOfMeasure: "seats",
-          config: { price: configuredPrice("2.00") },
+          planVersionId: "pv_1",
+          config: {},
           resetConfig: null,
           feature: { slug: "seats" },
         },
@@ -306,7 +336,10 @@ describe("explainCharge", () => {
     })
     const { analytics, queries } = journalAnalytics(() => [])
 
-    const result = await explainCharge({ db, ledger, analytics, now: () => now }, input())
+    const result = await explainCharge(
+      { db, ledger, analytics, rateCards, now: () => now },
+      input()
+    )
 
     expect(queries).toEqual([])
     expect(result.val?.scope.periodKey).toBe("billing_period:bp_1")
@@ -317,7 +350,10 @@ describe("explainCharge", () => {
   it("returns the journal's failure", async () => {
     const { db, ledger } = makeDeps()
     const { analytics } = journalAnalytics(() => new Error("basin down"))
-    const result = await explainCharge({ db, ledger, analytics, now: () => now }, input())
+    const result = await explainCharge(
+      { db, ledger, analytics, rateCards, now: () => now },
+      input()
+    )
     expect(result.err).toBeInstanceOf(FetchError)
   })
 
@@ -333,7 +369,10 @@ describe("explainCharge", () => {
   ] as const)("returns %o as %s before reading the journal", async (overrides, code) => {
     const { db, ledger } = makeDeps(overrides)
     const { analytics, queries } = journalAnalytics(() => [])
-    const result = await explainCharge({ db, ledger, analytics, now: () => now }, input())
+    const result = await explainCharge(
+      { db, ledger, analytics, rateCards, now: () => now },
+      input()
+    )
     expect(result.err).toBeInstanceOf(ExplainChargeError)
     expect(result.err).toMatchObject({ code })
     expect(queries).toEqual([])
@@ -407,7 +446,8 @@ function billingPeriod(
       id: string
       featureType: string
       unitOfMeasure: string
-      config: unknown
+      planVersionId: string
+      config: { usageMode?: string }
       resetConfig: null
       feature: { slug: string }
     }
@@ -430,7 +470,8 @@ function billingPeriod(
         id: "fpv_1",
         featureType: "usage",
         unitOfMeasure: "tokens",
-        config: { usageMode: "unit", price: configuredPrice("0.01") },
+        planVersionId: "pv_1",
+        config: { usageMode: "unit" },
         resetConfig: null,
         feature: { slug: "tokens" },
       },
@@ -438,16 +479,41 @@ function billingPeriod(
   }
 }
 
-function configuredPrice(displayAmount: string, currency = currencies.USD) {
-  const scale = displayAmount.split(".")[1]?.length ?? currency.exponent
-  return {
-    displayAmount,
-    dinero: dinero({
-      amount: Math.round(Number(displayAmount) * 10 ** scale),
-      currency,
-      scale,
-    }).toJSON(),
-  }
+/** The plan version's USD card: tokens at $0.01 each, seats at a flat $2. */
+const rateCards = {
+  pricingForPlanVersions: vi.fn(async () => {
+    const row = (featureSlug: string, price: unknown) =>
+      rateRowSchema.parse({
+        id: `rr_${featureSlug}`,
+        rateCardId: "rc_1",
+        featureSlug,
+        match: {},
+        price,
+        cost: null,
+        effectiveFrom: 0,
+        effectiveTo: null,
+        source: "manual",
+        sourceRef: null,
+      })
+    return new Map([
+      [
+        "pv_1",
+        [
+          {
+            currency: "USD" as const,
+            card: {} as RateCard,
+            rows: [
+              row("tokens", {
+                type: "unit",
+                components: [{ property: null, rate: "0.01", per: 1 }],
+              }),
+              row("seats", { type: "flat", amount: "2" }),
+            ],
+          },
+        ],
+      ],
+    ])
+  }),
 }
 
 function line(

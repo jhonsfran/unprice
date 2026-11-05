@@ -13,14 +13,9 @@ import {
   type PlanVersionExtended,
   type PlanVersionFeature,
   type Project,
+  type RateRow,
   type ResetConfig,
   type Subscription,
-  calculateFlatPricePlan,
-  calculateFreeUnits,
-  configFlatSchema,
-  configPackageSchema,
-  configTierSchema,
-  configUsageSchema,
   getAnchor,
   isResetCadenceAtMostBilling,
 } from "@unprice/db/validators"
@@ -28,6 +23,8 @@ import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
+import { featureRow, planVersionPrices, priceCanCharge } from "../pricing"
+import type { RateCardService } from "../rate-cards"
 import { cachedQuery } from "../utils/cached-query"
 import { toErrorContext } from "../utils/log-context"
 
@@ -128,6 +125,7 @@ export class PlanService {
   private readonly logger: Logger
   private readonly cache: Cache
   private readonly metrics: Metrics
+  private readonly rateCards: Pick<RateCardService, "rowsForVersions">
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private readonly waitUntil: (promise: Promise<any>) => void
 
@@ -158,6 +156,7 @@ export class PlanService {
     waitUntil,
     cache,
     metrics,
+    rateCards,
   }: {
     db: Database
     logger: Logger
@@ -165,7 +164,9 @@ export class PlanService {
     waitUntil: (promise: Promise<any>) => void
     cache: Cache
     metrics: Metrics
+    rateCards: Pick<RateCardService, "rowsForVersions">
   }) {
+    this.rateCards = rateCards
     this.db = db
     this.logger = logger
     this.waitUntil = waitUntil
@@ -173,88 +174,66 @@ export class PlanService {
     this.metrics = metrics
   }
 
+  /**
+   * A published version as the public API shows it. Prices come from the version's rate card in
+   * its currency (ADR-0008 D2): `rows` are that card's rows in effect now.
+   */
   private formatPlanVersion({
     planVersion,
+    rows,
   }: {
     planVersion: PlanVersionExtended & {
       plan: Plan
     }
+    rows: readonly RateRow[]
   }): PlanVersionApi {
+    const { flatPrice, displayPrices } = planVersionPrices(
+      planVersion.planFeatures,
+      rows,
+      planVersion.currency
+    )
     const planFeatures = planVersion.planFeatures.map((planFeature) => {
-      let displayFeatureText = ""
-
-      const { val: freeUnits, err: freeUnitsErr } = calculateFreeUnits({
-        config: planFeature.config!,
-        featureType: planFeature.featureType,
-      })
-
-      if (freeUnitsErr) {
-        console.error(freeUnitsErr)
-        return {
-          ...planFeature,
-          displayFeatureText: "error calculating free units",
-        }
-      }
-
-      const showUnits =
-        planFeature.featureType === "usage" &&
-        !planFeature.feature.slug.includes(planFeature.unitOfMeasure ?? "units")
-
-      const freeUnitsText =
-        freeUnits === Number.POSITIVE_INFINITY
-          ? planFeature.limit
-            ? `Up to ${nFormatter(planFeature.limit)} ${showUnits ? (planFeature.unitOfMeasure ?? "units") : ""}`
-            : "Unlimited"
-          : freeUnits === 0
-            ? planFeature.limit
-              ? `Up to ${nFormatter(planFeature.limit)} ${showUnits ? (planFeature.unitOfMeasure ?? "units") : ""}`
+      const row = featureRow(rows, planFeature.feature.slug)
+      const unit = planFeature.unitOfMeasure ?? "units"
+      const unitText =
+        planFeature.featureType === "usage" && !planFeature.feature.slug.includes(unit)
+          ? ` ${unit}`
+          : ""
+      const included = Number(planFeature.included ?? 0)
+      const free = !row || !priceCanCharge(row.price)
+      const allowance =
+        included > 0
+          ? `${nFormatter(included)}${unitText} included,`
+          : planFeature.limit
+            ? `Up to ${nFormatter(planFeature.limit)}${unitText}`
+            : free
+              ? "Unlimited"
               : "Starts at 0"
-            : `${nFormatter(freeUnits)} ${showUnits ? (planFeature.unitOfMeasure ?? "units") : ""}`
-
-      switch (planFeature.featureType) {
-        case "flat": {
-          displayFeatureText = `${planFeature.feature.title}`
-          break
-        }
-
-        case "tier": {
-          displayFeatureText = `${freeUnitsText} ${planFeature.feature.title}`
-          break
-        }
-
-        case "usage": {
-          displayFeatureText = `${freeUnitsText} ${planFeature.feature.title}`
-
-          break
-        }
-
-        case "package": {
-          displayFeatureText = `${freeUnitsText} ${planFeature.feature.title}`
-          break
-        }
-      }
 
       return {
         ...planFeature,
-        displayFeatureText,
+        displayFeatureText:
+          planFeature.featureType === "flat"
+            ? planFeature.feature.title
+            : `${allowance} ${planFeature.feature.title}`,
+        displayPrice: displayPrices.get(planFeature.feature.slug) ?? null,
       }
     })
 
-    // calculate flat price
-    // verify if the payment method is required
-    const { err, val: totalPricePlan } = calculateFlatPricePlan({
-      planVersion,
-    })
-
-    if (err) {
-      throw err
-    }
-
     return {
       ...planVersion,
-      flatPrice: totalPricePlan.displayAmount,
+      flatPrice,
       planFeatures,
     }
+  }
+
+  /** The rows each version's card prices with now, in the version's own currency. */
+  private async currentRows(
+    versions: readonly Pick<PlanVersion, "id" | "projectId" | "currency">[]
+  ): Promise<Map<string, RateRow[]>> {
+    const [first] = versions
+    if (!first) return new Map()
+    return this.rateCards.rowsForVersions(first.projectId, versions, Date.now())
   }
 
   private async getPlanVersionData({
@@ -301,9 +280,10 @@ export class PlanService {
       return null
     }
 
-    // format plan
+    const rows = await this.currentRows([planVersionData])
     return this.formatPlanVersion({
       planVersion: planVersionData,
+      rows: rows.get(planVersionData.id) ?? [],
     })
   }
 
@@ -379,10 +359,11 @@ export class PlanService {
       ? planVersionsData.filter((version) => version.plan.enterprisePlan)
       : planVersionsData
 
-    // format every plan
+    const rows = await this.currentRows(filtered)
     const result = filtered.map((version) => {
       return this.formatPlanVersion({
         planVersion: version,
+        rows: rows.get(version.id) ?? [],
       })
     })
 
@@ -1128,7 +1109,7 @@ export class PlanService {
     Result<
       | (PlanVersion & {
           plan: Plan
-          planFeatures: Array<unknown>
+          planFeatures: Array<PlanVersionFeature & { feature: Feature }>
         })
       | null,
       FetchError
@@ -1166,7 +1147,14 @@ export class PlanService {
       return Err(err)
     }
 
-    return Ok((val as (PlanVersion & { plan: Plan; planFeatures: Array<unknown> }) | null) ?? null)
+    return Ok(
+      (val as
+        | (PlanVersion & {
+            plan: Plan
+            planFeatures: Array<PlanVersionFeature & { feature: Feature }>
+          })
+        | null) ?? null
+    )
   }
 
   public async getPlanVersionByIdForDuplication({
@@ -1434,167 +1422,19 @@ export class PlanService {
 
     const { val, err } = await wrapResult(
       this.db.transaction(async (tx) => {
-        const shouldUpdateFeatureCurrency = currency && currency !== planVersionData.currency
         const shouldUpdateFeatureCadence =
           billingConfig !== undefined &&
           !billingConfigsMatch(planVersionData.billingConfig, billingConfig)
 
-        const features =
-          shouldUpdateFeatureCurrency || shouldUpdateFeatureCadence
-            ? await tx.query.planVersionFeatures.findMany({
-                where: (feature, { and, eq }) =>
-                  and(
-                    eq(feature.planVersionId, planVersionData.id),
-                    eq(feature.projectId, projectId)
-                  ),
-              })
-            : []
-
-        if (shouldUpdateFeatureCurrency) {
-          await Promise.all(
-            features.map(async (feature) => {
-              switch (feature.featureType) {
-                case "flat": {
-                  const config = configFlatSchema.parse(feature.config)
-                  return tx
-                    .update(schema.planVersionFeatures)
-                    .set({
-                      config: {
-                        ...config,
-                        price: {
-                          ...config.price,
-                          dinero: {
-                            ...config.price.dinero,
-                            currency: {
-                              ...config.price.dinero.currency,
-                              code: currency,
-                            },
-                          },
-                        },
-                      },
-                    })
-                    .where(and(eq(schema.planVersionFeatures.id, feature.id)))
-                }
-                case "tier": {
-                  const config = configTierSchema.parse(feature.config)
-                  return tx
-                    .update(schema.planVersionFeatures)
-                    .set({
-                      config: {
-                        ...config,
-                        tiers: config.tiers.map((tier) => ({
-                          ...tier,
-                          unitPrice: {
-                            ...tier.unitPrice,
-                            dinero: {
-                              ...tier.unitPrice.dinero,
-                              currency: {
-                                ...tier.unitPrice.dinero.currency,
-                                code: currency,
-                              },
-                            },
-                          },
-                          flatPrice: {
-                            ...tier.flatPrice,
-                            dinero: {
-                              ...tier.flatPrice.dinero,
-                              currency: {
-                                ...tier.flatPrice.dinero.currency,
-                                code: currency,
-                              },
-                            },
-                          },
-                        })),
-                      },
-                    })
-                    .where(and(eq(schema.planVersionFeatures.id, feature.id)))
-                }
-                case "usage": {
-                  const config = configUsageSchema.parse(feature.config)
-                  if (config.tiers && config.tiers.length > 0) {
-                    return tx
-                      .update(schema.planVersionFeatures)
-                      .set({
-                        config: {
-                          ...config,
-                          tiers: config.tiers.map((tier) => ({
-                            ...tier,
-                            unitPrice: {
-                              ...tier.unitPrice,
-                              dinero: {
-                                ...tier.unitPrice.dinero,
-                                currency: {
-                                  ...tier.unitPrice.dinero.currency,
-                                  code: currency,
-                                },
-                              },
-                            },
-                            flatPrice: {
-                              ...tier.flatPrice,
-                              dinero: {
-                                ...tier.flatPrice.dinero,
-                                currency: {
-                                  ...tier.flatPrice.dinero.currency,
-                                  code: currency,
-                                },
-                              },
-                            },
-                          })),
-                        },
-                      })
-                      .where(and(eq(schema.planVersionFeatures.id, feature.id)))
-                  }
-
-                  if (config.price) {
-                    return tx
-                      .update(schema.planVersionFeatures)
-                      .set({
-                        config: {
-                          ...config,
-                          price: {
-                            ...config.price,
-                            dinero: {
-                              ...config.price.dinero,
-                              currency: {
-                                ...config.price.dinero.currency,
-                                code: currency,
-                              },
-                            },
-                          },
-                        },
-                      })
-                      .where(and(eq(schema.planVersionFeatures.id, feature.id)))
-                  }
-
-                  return undefined
-                }
-                case "package": {
-                  const config = configPackageSchema.parse(feature.config)
-                  return tx
-                    .update(schema.planVersionFeatures)
-                    .set({
-                      config: {
-                        ...config,
-                        price: {
-                          ...config.price,
-                          dinero: {
-                            ...config.price.dinero,
-                            currency: {
-                              ...config.price.dinero.currency,
-                              code: currency,
-                            },
-                          },
-                        },
-                      },
-                    })
-                    .where(and(eq(schema.planVersionFeatures.id, feature.id)))
-                }
-                default:
-                  return undefined
-              }
+        const features = shouldUpdateFeatureCadence
+          ? await tx.query.planVersionFeatures.findMany({
+              where: (feature, { and, eq }) =>
+                and(
+                  eq(feature.planVersionId, planVersionData.id),
+                  eq(feature.projectId, projectId)
+                ),
             })
-          )
-        }
+          : []
 
         if (shouldUpdateFeatureCadence && billingConfig) {
           await Promise.all(

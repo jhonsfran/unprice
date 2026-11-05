@@ -15,9 +15,11 @@ import type {
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import * as currencies from "dinero.js/currencies"
 import type { ServiceContext } from "../../context"
+import { type DecimalFeaturePrice, ratePriceOf } from "../../pricing"
+import type { UnPriceRateCardError } from "../../rate-cards"
 import { createPlan } from "../plan/create"
+import { pricePlanVersion } from "../rate-cards/price-plan-version"
 import {
   BASE_FEE_FEATURE,
   CREDITS_FEATURE,
@@ -31,7 +33,7 @@ import {
 const AGGREGATION_METHODS_WITHOUT_FIELD = new Set<AggregationMethod>(["count"])
 
 export type PlanTemplateMaterializeDeps = {
-  services: Pick<ServiceContext, "plans" | "features" | "events">
+  services: Pick<ServiceContext, "plans" | "features" | "events" | "rateCards">
   db: Database
   logger: Logger
 }
@@ -73,17 +75,6 @@ type PlanVersionFeatureFailureState =
 type MaterializePlanVersionFeaturesOutput =
   | { state: "ok" }
   | { state: PlanVersionFeatureFailureState }
-
-export function toDineroPrice(amount: string, currency: Currency) {
-  const currencyConfig = currencies[currency]
-  const precision = amount.split(".")[1]?.length ?? currencyConfig.exponent
-  const amountNum = Math.round(Number(amount) * 10 ** precision)
-
-  return {
-    dinero: { amount: amountNum, currency: currencyConfig, scale: precision },
-    displayAmount: amount,
-  }
-}
 
 function featureMetadata(overrides: { hidden?: boolean }): NonNullable<
   PlanVersionFeature["metadata"]
@@ -438,30 +429,77 @@ export async function getOrCreatePlanVersionFeature(
   return Ok({ state: "ok" })
 }
 
+/** A plan feature to materialize and the decimal price of its rate card row. */
+type PricedFeatureInput = Parameters<typeof getOrCreatePlanVersionFeature>[1] & {
+  price: Omit<DecimalFeaturePrice, "featureType" | "usageMode" | "units">
+}
+
+/**
+ * Materializes a feature and collects its rate card row (ADR-0008 D2), which
+ * `pricePlanVersionFeatures` publishes once every feature exists.
+ */
 async function materializeFeature(
   context: MaterializeContext,
-  input: Parameters<typeof getOrCreatePlanVersionFeature>[1]
+  prices: PlanFeaturePrice[],
+  { price, ...input }: PricedFeatureInput
 ) {
   const result = await getOrCreatePlanVersionFeature(context, input)
   if (result.err) return Err(result.err)
+  if (result.val.state === "ok") {
+    const ratePrice = ratePriceOf(
+      {
+        ...price,
+        featureType: input.featureType,
+        usageMode: input.config.usageMode,
+        units: input.config.units,
+      },
+      input.meterConfig?.aggregationField ?? null
+    )
+    if (ratePrice) prices.push({ featureSlug: input.feature.slug, price: ratePrice })
+  }
   return Ok(result.val)
+}
+
+export type PlanFeaturePrice = Parameters<typeof pricePlanVersion>[1]["prices"][number]
+
+/**
+ * Prices a materialized draft version with its own card, named after the version, so templates
+ * and monetization documents bill like any dashboard plan.
+ */
+export async function pricePlanVersionFeatures(
+  { deps, projectId }: MaterializeContext,
+  {
+    planVersion,
+    planSlug,
+    prices,
+  }: { planVersion: PlanVersion; planSlug: string; prices: readonly PlanFeaturePrice[] }
+): Promise<Result<{ cardId: string }, UnPriceRateCardError | FetchError>> {
+  return pricePlanVersion(
+    { services: deps.services },
+    {
+      projectId,
+      planVersionId: planVersion.id,
+      currency: planVersion.currency,
+      cardName: `${planSlug} ${planVersion.id} ${planVersion.currency}`,
+      prices,
+      now: Date.now(),
+    }
+  )
 }
 
 export async function materializeTemplatePlanFeatures(
   context: MaterializeContext,
-  {
-    template,
-    planVersion,
-    currency,
-  }: { template: TemplatePlan; planVersion: PlanVersion; currency: Currency }
+  { template, planVersion }: { template: TemplatePlan; planVersion: PlanVersion }
 ): Promise<Result<MaterializePlanVersionFeaturesOutput, FetchError>> {
+  const prices: PlanFeaturePrice[] = []
   const baseFeeFeature = await getOrCreateFeature(context, BASE_FEE_FEATURE)
   if (baseFeeFeature.err) return Err(baseFeeFeature.err)
-  const baseFee = await materializeFeature(context, {
+  const baseFee = await materializeFeature(context, prices, {
     planVersion,
     feature: baseFeeFeature.val,
     featureType: "flat",
-    config: { price: toDineroPrice(template.baseFee, currency) },
+    config: {},
+    price: { price: template.baseFee },
     order: 1024,
     metadata: featureMetadata({ hidden: true }),
   })
@@ -472,14 +510,12 @@ export async function materializeTemplatePlanFeatures(
   if (seatFeature?.err) return Err(seatFeature.err)
 
   if (template.seatPack && seatFeature?.val) {
-    const seat = await materializeFeature(context, {
+    const seat = await materializeFeature(context, prices, {
       planVersion,
       feature: seatFeature.val,
       featureType: "package",
-      config: {
-        price: toDineroPrice(template.seatPack.price, currency),
-        units: template.seatPack.units,
-      },
+      config: { units: template.seatPack.units },
+      price: { price: template.seatPack.price },
       order: 2048,
       limit: template.seatPack.units,
     })
@@ -489,11 +525,12 @@ export async function materializeTemplatePlanFeatures(
   for (const [index, flatFeatureTemplate] of template.flatFeatures.entries()) {
     const flatFeature = await getOrCreateFeature(context, flatFeatureTemplate)
     if (flatFeature.err) return Err(flatFeature.err)
-    const flat = await materializeFeature(context, {
+    const flat = await materializeFeature(context, prices, {
       planVersion,
       feature: flatFeature.val,
       featureType: "flat",
-      config: { price: toDineroPrice("0", currency) },
+      config: {},
+      price: { price: "0" },
       order: 3072 + index * 1024,
     })
     if (flat.err || flat.val.state !== "ok") return flat
@@ -514,26 +551,22 @@ export async function materializeTemplatePlanFeatures(
   })
   if (usageMeterConfig.err) return Err(usageMeterConfig.err)
 
-  const usageConfig: ConfigFeatureVersionType =
-    template.usage.config.mode === "unit"
-      ? {
-          usageMode: "unit",
-          price: toDineroPrice(template.usage.config.price, currency),
-        }
-      : {
-          usageMode: "tier",
-          tiers: template.usage.config.tiers.map((tier) => ({
-            firstUnit: tier.firstUnit,
-            lastUnit: tier.lastUnit,
-            unitPrice: toDineroPrice(tier.unitPrice, currency),
-            flatPrice: toDineroPrice("0", currency),
-          })),
-        }
-  const usage = await materializeFeature(context, {
+  const usage = await materializeFeature(context, prices, {
     planVersion,
     feature: usageFeature.val,
     featureType: "usage",
-    config: usageConfig,
+    config: { usageMode: template.usage.config.mode === "unit" ? "unit" : "tier" },
+    price:
+      template.usage.config.mode === "unit"
+        ? { price: template.usage.config.price }
+        : {
+            tiers: template.usage.config.tiers.map((tier) => ({
+              firstUnit: tier.firstUnit,
+              lastUnit: tier.lastUnit,
+              unitPrice: tier.unitPrice,
+              flatPrice: "0",
+            })),
+          },
     order: 6144,
     limit: template.usage.config.limit,
     meterConfig: usageMeterConfig.val,
@@ -547,31 +580,16 @@ export async function materializeTemplatePlanFeatures(
     aggregationMethod: "sum",
   })
   if (creditsMeterConfig.err) return Err(creditsMeterConfig.err)
-  return materializeFeature(context, {
+  const credits = await materializeFeature(context, prices, {
     planVersion,
     feature: creditsFeature.val,
     featureType: "usage",
-    config: {
-      usageMode: "tier",
+    config: { usageMode: "tier" },
+    price: {
       tiers: [
-        {
-          firstUnit: 1,
-          lastUnit: 1000,
-          unitPrice: toDineroPrice("0.01", currency),
-          flatPrice: toDineroPrice("0", currency),
-        },
-        {
-          firstUnit: 1001,
-          lastUnit: 10000,
-          unitPrice: toDineroPrice("0.0075", currency),
-          flatPrice: toDineroPrice("0", currency),
-        },
-        {
-          firstUnit: 10001,
-          lastUnit: null,
-          unitPrice: toDineroPrice("0.005", currency),
-          flatPrice: toDineroPrice("0", currency),
-        },
+        { firstUnit: 1, lastUnit: 1000, unitPrice: "0.01", flatPrice: "0" },
+        { firstUnit: 1001, lastUnit: 10000, unitPrice: "0.0075", flatPrice: "0" },
+        { firstUnit: 10001, lastUnit: null, unitPrice: "0.005", flatPrice: "0" },
       ],
     },
     order: 7168,
@@ -585,4 +603,20 @@ export async function materializeTemplatePlanFeatures(
     },
     meterConfig: creditsMeterConfig.val,
   })
+  if (credits.err || credits.val.state !== "ok") return credits
+
+  const priced = await pricePlanVersionFeatures(context, {
+    planVersion,
+    planSlug: template.plan.slug,
+    prices,
+  })
+  if (priced.err) {
+    return Err(
+      new FetchError({
+        message: `error pricing template plan version: ${priced.err.message}`,
+        retry: false,
+      })
+    )
+  }
+  return Ok({ state: "ok" as const })
 }

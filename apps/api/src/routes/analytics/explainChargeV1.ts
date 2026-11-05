@@ -151,6 +151,7 @@ export const registerExplainChargeV1 = (app: App) =>
         db: c.get("db"),
         ledger,
         analytics: c.get("services").analytics,
+        rateCards: c.get("services").rateCards,
       },
       {
         projectId,

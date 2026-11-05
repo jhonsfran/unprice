@@ -47,6 +47,7 @@ import {
   type Plan,
   type PlanVersion,
   type PlanVersionFeature,
+  type RateRow,
   buildIntegrationContract,
   integrationContractSchema,
   monetizationConfigDocumentSchema,
@@ -57,10 +58,13 @@ import {
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import * as z from "zod"
+import { decimalPriceOf } from "../../pricing"
+import type { RateCardService } from "../../rate-cards"
 
 export type GetMonetizationConfigDeps = {
   db: Database
   logger: Logger
+  services: { rateCards: Pick<RateCardService, "pricingForPlanVersions"> }
 }
 
 export const getMonetizationConfigInputSchema = z.object({
@@ -427,9 +431,10 @@ function unsupportedBillingConfig(planVersion: StoredPlanVersion): string | null
 }
 
 /**
- * The stored pricing configuration, carrying only the keys that apply to its
- * feature type and with the Dinero snapshots turned back into the decimal
- * strings they were written from.
+ * The stored configuration, carrying only the keys that apply to its feature
+ * type, with the price read back from the feature's default row on the version's
+ * rate card (ADR-0008 D2). A feature whose card rows the document cannot state
+ * (no row, several rows, a dimension match) makes the plan unrepresentable.
  *
  * The projection is delegated to `planVersionFeatureInsertBaseSchema`, which
  * owns `normalizePlanVersionFeatureMutation` — restating which keys survive
@@ -438,12 +443,13 @@ function unsupportedBillingConfig(planVersion: StoredPlanVersion): string | null
  * (a `tier` row carrying `price`, a `flat` row carrying `tiers`), and rows
  * written by older code, seeds, or templates are not always normalized.
  *
- * Prices come from `displayAmount`, never recomputed from the Dinero amount and
- * scale: "0.10" and "0.100" are the same money and different hashes.
+ * Prices are the card's canonical decimals, so "0.10" written by `apply` reads
+ * back as "0.1"; both parse to the same document and hash.
  */
 function toBoundaryFeature(
   planVersion: StoredPlanVersion,
-  planFeature: StoredPlanVersionFeature
+  planFeature: StoredPlanVersionFeature,
+  rows: readonly RateRow[]
 ): MonetizationVersionFeatureConfig | null {
   const normalized = planVersionFeatureInsertBaseSchema.safeParse({
     planVersionId: planFeature.planVersionId,
@@ -462,20 +468,16 @@ function toBoundaryFeature(
 
   if (!normalized.success || !normalized.data.config) return null
 
-  const { price, tiers, ...config } = normalized.data.config
+  const featureRows = rows.filter((row) => row.featureSlug === planFeature.feature.slug)
+  const [row] = featureRows
+  if (featureRows.length !== 1 || !row || Object.keys(row.match).length > 0) return null
+  const decimal = decimalPriceOf(row.price)
+  if (!decimal) return null
 
   const boundaryConfig: MonetizationPriceConfig = {
-    ...config,
-    ...(price === undefined ? {} : { price: price.displayAmount }),
-    ...(tiers === undefined
-      ? {}
-      : {
-          tiers: tiers.map((tier) => ({
-            ...tier,
-            unitPrice: tier.unitPrice.displayAmount,
-            flatPrice: tier.flatPrice.displayAmount,
-          })),
-        }),
+    ...normalized.data.config,
+    ...(decimal.price === undefined ? {} : { price: decimal.price }),
+    ...(decimal.tiers === undefined ? {} : { tiers: decimal.tiers }),
   }
 
   // Only the cadence crosses the boundary; the anchor, plan type, and display
@@ -558,7 +560,8 @@ function selectVersions(plan: LightPlan) {
 function projectPlan(
   plan: LightPlan,
   { published, drafts, current: selected }: VersionSelection,
-  featuresByVersion: Map<string, StoredPlanVersionFeature[]>
+  featuresByVersion: Map<string, StoredPlanVersionFeature[]>,
+  rowsByVersion: Map<string, RateRow[]>
 ): PlanProjection {
   if (!selected) {
     return unrepresentable(plan.slug, "no_version", `Plan "${plan.slug}" has no plan version`)
@@ -608,12 +611,12 @@ function projectPlan(
   )
 
   for (const planFeature of ordered) {
-    const feature = toBoundaryFeature(current, planFeature)
+    const feature = toBoundaryFeature(current, planFeature, rowsByVersion.get(current.id) ?? [])
     if (!feature) {
       return unrepresentable(
         plan.slug,
         "invalid_version",
-        `Feature "${planFeature.feature.slug}" of plan version ${current.id} is not a configuration the boundary accepts`
+        `Feature "${planFeature.feature.slug}" of plan version ${current.id} is not a configuration the boundary accepts: it needs one default row on the version's ${current.currency} rate card that a decimal price or graduated tiers can state`
       )
     }
     features.push(feature)
@@ -831,8 +834,22 @@ export async function getMonetizationConfig(
     }
   }
 
+  // The price of every emitted feature is its row on the version's card, as it stands now.
+  const rowsByVersion = new Map<string, RateRow[]>()
+  const pricing = await deps.services.rateCards.pricingForPlanVersions(
+    projectId,
+    currentVersionIds,
+    Date.now()
+  )
+  for (const selection of selections) {
+    const current = selection.current
+    if (!current) continue
+    const card = pricing.get(current.id)?.find((entry) => entry.currency === current.currency)
+    rowsByVersion.set(current.id, card?.rows ?? [])
+  }
+
   const projections = sortedPlans.map((plan, index) =>
-    projectPlan(plan, selections[index] as VersionSelection, featureRowsByVersion)
+    projectPlan(plan, selections[index] as VersionSelection, featureRowsByVersion, rowsByVersion)
   )
 
   const representable = projections.filter(

@@ -134,9 +134,9 @@ export function getConfigureSubtitle({
   usageMode?: string | undefined
 }): string {
   if (!featureType) return "Pick a model first"
-  if (featureType === "flat") return "Set the fixed price"
+  if (featureType === "flat") return "A fixed price from the rate card"
   if (featureType === "tier") return "Customer picks a quantity at signup"
-  if (featureType === "package") return "Set the per-bundle price"
+  if (featureType === "package") return "Set the bundle size; the rate card prices it"
   if (featureType === "usage") {
     if (usageMode === "unit") return "Charged per unit consumed"
     if (usageMode === "tier") return "Charged in tiers as usage grows"

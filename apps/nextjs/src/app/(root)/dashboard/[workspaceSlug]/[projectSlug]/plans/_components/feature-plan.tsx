@@ -1,9 +1,8 @@
 "use client"
 
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { VariantProps } from "class-variance-authority"
 import { cva } from "class-variance-authority"
-import { dinero, toDecimal } from "dinero.js"
 import {
   CalendarClock,
   ChevronRight,
@@ -21,7 +20,7 @@ import { forwardRef, useEffect, useRef, useState } from "react"
 
 import { FEATURE_TYPES_MAPS } from "@unprice/db/utils"
 import type { PlanVersionFeatureDragDrop } from "@unprice/db/validators"
-import { currencySymbol } from "@unprice/money"
+import { describeRatePrice, featureRow } from "@unprice/services/pricing"
 import { Button } from "@unprice/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@unprice/ui/popover"
 import { Tooltip, TooltipArrow, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
@@ -126,24 +125,24 @@ const FeaturePlan = forwardRef<ElementRef<"div">, FeaturePlanProps>((props, ref)
     scrollParent.scrollTo({ top: nextTop, behavior: "smooth" })
   }, [isExpanded, mode, planFeatureVersion.id])
 
-  const priceSummary = (() => {
-    const cfg = planFeatureVersion.config
-    if (cfg?.price) {
-      if (cfg.price.dinero.amount === 0) return "Free"
-      const formatted = toDecimal(
-        dinero(cfg.price.dinero),
-        ({ value, currency }) => `${currencySymbol(currency.code)}${value}`
-      )
-      if (cfg.units) {
-        return `${formatted} / ${cfg.units} ${planFeatureVersion?.unitOfMeasure ?? "units"}`
-      }
-      return formatted
-    }
-    if (cfg?.tiers?.length) {
-      return `${cfg.tiers.length} tiers`
-    }
-    return "—"
-  })()
+  // ADR-0008 D2: the feature is priced by its plan version's card; show that row's price.
+  const { data: pricing } = useQuery({
+    ...trpc.rateCards.forPlanVersion.queryOptions({
+      planVersionId: planFeatureVersion.planVersionId,
+    }),
+    enabled: mode === "FeaturePlan" && Boolean(activePlanVersion),
+  })
+  const currency = activePlanVersion?.currency
+  const cardRows = pricing?.cards.find((card) => card.currency === currency)?.rows ?? []
+  const row = featureRow(cardRows, feature.slug)
+  const priceSummary =
+    row && currency
+      ? describeRatePrice(
+          row.price,
+          currency,
+          (planFeatureVersion.unitOfMeasure ?? "units").replace(/s$/, "")
+        )
+      : "Not priced"
 
   const handleToggle = () => {
     if (mode !== "FeaturePlan") return

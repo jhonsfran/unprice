@@ -23,6 +23,7 @@ export const explainCharge = protectedProjectProcedure
         db: opts.ctx.db,
         ledger: opts.ctx.services.ledger,
         analytics: opts.ctx.services.analytics,
+        rateCards: opts.ctx.services.rateCards,
       },
       {
         projectId: opts.ctx.project.id,

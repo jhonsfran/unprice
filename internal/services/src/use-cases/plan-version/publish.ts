@@ -1,13 +1,14 @@
 import { type Database, and, eq, inArray } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
-import { type PlanVersion, planVersionRequiresPaymentMethod } from "@unprice/db/validators"
+import type { PlanVersion } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { ServiceContext } from "../../context"
+import { priceCanCharge } from "../../pricing"
 import { toErrorContext } from "../../utils/log-context"
 
 export type PublishPlanVersionDeps = {
-  services: Pick<ServiceContext, "customers">
+  services: Pick<ServiceContext, "customers" | "rateCards">
   db: Database
   logger: Logger
   userId: string
@@ -25,7 +26,6 @@ export type PublishPlanVersionOutput =
         | "version_not_found"
         | "already_published"
         | "no_features"
-        | "price_calculation_error"
         | "payment_provider_error"
         | "publish_error"
     }
@@ -76,15 +76,22 @@ export async function publishPlanVersion(
     })
   }
 
-  const { err, val: paymentMethodRequired } = planVersionRequiresPaymentMethod({
-    planVersion: planVersionData,
-  })
-
-  if (err) {
-    return Ok({
-      state: "price_calculation_error",
-    })
-  }
+  // ADR-0008 D2: the version's card in its currency owns every price. A customer needs a payment
+  // method when the version charges automatically and any row, now or scheduled, can charge.
+  const now = Date.now()
+  const pricing = await deps.services.rateCards.pricingForPlanVersions(
+    projectId,
+    [planVersionData.id],
+    now,
+    Number.MAX_SAFE_INTEGER
+  )
+  const rows =
+    pricing.get(planVersionData.id)?.find((card) => card.currency === planVersionData.currency)
+      ?.rows ?? []
+  const featureSlugs = new Set(planVersionData.planFeatures.map(({ feature }) => feature.slug))
+  const paymentMethodRequired =
+    planVersionData.collectionMethod === "charge_automatically" &&
+    rows.some((row) => featureSlugs.has(row.featureSlug) && priceCanCharge(row.price))
 
   if (paymentMethodRequired) {
     const { err: validatePaymentMethodErr } = await deps.services.customers.getPaymentProvider({

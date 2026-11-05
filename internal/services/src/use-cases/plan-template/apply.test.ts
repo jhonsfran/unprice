@@ -110,6 +110,16 @@ type CreatePlanVersionFeatureInput = Parameters<
 >[0]
 type UpdateEventInput = Parameters<ServiceContext["events"]["updateEvent"]>[0]
 
+/** A rate card service that accepts every write; the version has no card yet. */
+function fakeRateCards() {
+  return {
+    cardForPlanVersion: vi.fn(async () => null),
+    createCard: vi.fn(async () => Ok({ id: "rc_template" })),
+    publishRows: vi.fn(async () => Ok({ inserted: [], closed: [], unchanged: 0 })),
+    assignToPlanVersion: vi.fn(async () => Ok({})),
+  }
+}
+
 describe("applyPlanTemplate", () => {
   it("materializes one paid action with its saved feature, event, meter, and unit price", async () => {
     let planVersionCount = 0
@@ -170,6 +180,7 @@ describe("applyPlanTemplate", () => {
           },
           features: {
             getFeatureBySlug: vi.fn(async () => Ok(null)),
+            listFeaturesByProject: vi.fn(async () => Ok([])),
             createFeatureRecord,
           },
           events: {
@@ -178,7 +189,11 @@ describe("applyPlanTemplate", () => {
             updateEvent: vi.fn(),
           },
           customers: {},
-        } as unknown as Pick<ServiceContext, "plans" | "features" | "events" | "customers">,
+          rateCards: fakeRateCards(),
+        } as unknown as Pick<
+          ServiceContext,
+          "plans" | "features" | "events" | "customers" | "rateCards"
+        >,
         db: createDbMock(),
         logger: createLogger(),
         userId: "usr_123",
@@ -224,12 +239,7 @@ describe("applyPlanTemplate", () => {
       .find((feature) => feature.featureId === "feature_ai-generation")
     expect(paidActionFeature).toMatchObject({
       featureType: "usage",
-      config: {
-        usageMode: "unit",
-        price: {
-          displayAmount: "4.10",
-        },
-      },
+      config: { usageMode: "unit" },
       meterConfig: {
         eventSlug: "ai_generation",
         aggregationMethod: "count",
@@ -269,7 +279,7 @@ describe("applyPlanTemplate", () => {
     }
     const context = {
       deps: {
-        services: {} as Pick<ServiceContext, "plans" | "features" | "events">,
+        services: {} as Pick<ServiceContext, "plans" | "features" | "events" | "rateCards">,
         db: createDbMock({ existingPlanVersions: [existingVersion] }),
         logger: createLogger(),
       },
@@ -325,7 +335,7 @@ describe("applyPlanTemplate", () => {
     const result = await getExistingTemplatePlanVersion(
       {
         deps: {
-          services: {} as Pick<ServiceContext, "plans" | "features" | "events">,
+          services: {} as Pick<ServiceContext, "plans" | "features" | "events" | "rateCards">,
           db: createDbMock({ existingPlanVersions: [incompletePublishedVersion] }),
           logger: createLogger(),
         },
@@ -390,6 +400,7 @@ describe("applyPlanTemplate", () => {
           },
           features: {
             getFeatureBySlug: vi.fn(async () => Ok(null)),
+            listFeaturesByProject: vi.fn(async () => Ok([])),
             createFeatureRecord,
           },
           events: {
@@ -398,7 +409,11 @@ describe("applyPlanTemplate", () => {
             updateEvent: vi.fn(),
           },
           customers: {},
-        } as unknown as Pick<ServiceContext, "plans" | "features" | "events" | "customers">,
+          rateCards: fakeRateCards(),
+        } as unknown as Pick<
+          ServiceContext,
+          "plans" | "features" | "events" | "customers" | "rateCards"
+        >,
         db: createDbMock(),
         logger: createLogger(),
         userId: "usr_123",
@@ -535,6 +550,7 @@ describe("applyPlanTemplate", () => {
         },
         features: {
           getFeatureBySlug: vi.fn(async ({ slug }: { slug: string }) => Ok(makeFeature(slug))),
+          listFeaturesByProject: vi.fn(async () => Ok([])),
           createFeatureRecord: vi.fn(),
         },
         events: {
@@ -546,7 +562,11 @@ describe("applyPlanTemplate", () => {
           }),
         },
         customers: {},
-      } as unknown as Pick<ServiceContext, "plans" | "features" | "events" | "customers">,
+        rateCards: fakeRateCards(),
+      } as unknown as Pick<
+        ServiceContext,
+        "plans" | "features" | "events" | "customers" | "rateCards"
+      >,
       db,
       logger: createLogger(),
       userId: "usr_123",
@@ -654,6 +674,7 @@ describe("applyPlanTemplate", () => {
           },
           features: {
             getFeatureBySlug,
+            listFeaturesByProject: vi.fn(async () => Ok([])),
             createFeatureRecord,
           },
           events: {
@@ -662,7 +683,11 @@ describe("applyPlanTemplate", () => {
             updateEvent,
           },
           customers: {},
-        } as unknown as Pick<ServiceContext, "plans" | "features" | "events" | "customers">,
+          rateCards: fakeRateCards(),
+        } as unknown as Pick<
+          ServiceContext,
+          "plans" | "features" | "events" | "customers" | "rateCards"
+        >,
         db,
         logger: createLogger(),
         userId: "usr_123",
@@ -809,7 +834,11 @@ describe("applyPlanTemplate", () => {
             updateEvent: vi.fn(),
           },
           customers: {},
-        } as unknown as Pick<ServiceContext, "plans" | "features" | "events" | "customers">,
+          rateCards: fakeRateCards(),
+        } as unknown as Pick<
+          ServiceContext,
+          "plans" | "features" | "events" | "customers" | "rateCards"
+        >,
         db,
         logger: createLogger(),
         userId: "usr_123",

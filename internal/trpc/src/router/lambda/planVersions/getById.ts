@@ -5,6 +5,7 @@ import {
   planVersionFeatureSelectBaseSchema,
   planVersionSelectBaseSchema,
 } from "@unprice/db/validators"
+import { planVersionPrices } from "@unprice/services/pricing"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 
@@ -14,8 +15,12 @@ const getByIdOutputSchema = z.object({
     planFeatures: z.array(
       planVersionFeatureSelectBaseSchema.extend({
         feature: featureSelectBaseSchema,
+        /** The feature's current price on the version's rate card; null without a row. */
+        displayPrice: z.string().nullable(),
       })
     ),
+    /** The flat features' flat rows on the version's rate card, summed and formatted. */
+    flatPrice: z.string(),
   }),
 })
 
@@ -30,7 +35,7 @@ export const getById = protectedProjectProcedure
   .query(async (opts) => {
     const { id } = opts.input
     const project = opts.ctx.project
-    const { plans } = opts.ctx.services
+    const { plans, rateCards } = opts.ctx.services
 
     const { err, val: planVersionData } = await plans.getPlanVersionByIdDetailed({
       planVersionId: id,
@@ -51,7 +56,22 @@ export const getById = protectedProjectProcedure
       })
     }
 
+    // ADR-0008 D2: prices live on the version's rate card, never on the plan feature.
+    const rows = await rateCards.rowsForVersions(project.id, [planVersionData], Date.now())
+    const { flatPrice, displayPrices } = planVersionPrices(
+      planVersionData.planFeatures,
+      rows.get(planVersionData.id) ?? [],
+      planVersionData.currency
+    )
+
     return getByIdOutputSchema.parse({
-      planVersion: planVersionData,
+      planVersion: {
+        ...planVersionData,
+        flatPrice,
+        planFeatures: planVersionData.planFeatures.map((planFeature) => ({
+          ...planFeature,
+          displayPrice: displayPrices.get(planFeature.feature.slug) ?? null,
+        })),
+      },
     })
   })

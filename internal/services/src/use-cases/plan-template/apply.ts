@@ -49,12 +49,11 @@ type ApplyPlanTemplateFailureState =
   | "version_not_found"
   | "already_published"
   | "no_features"
-  | "price_calculation_error"
   | "payment_provider_error"
   | "publish_error"
 
 type ApplyPlanTemplateDeps = {
-  services: Pick<ServiceContext, "plans" | "features" | "events" | "customers">
+  services: Pick<ServiceContext, "plans" | "features" | "events" | "customers" | "rateCards">
   db: Database
   logger: Logger
   userId: string
@@ -131,7 +130,6 @@ export async function applyPlanTemplate(
       const materialized = await materializeTemplatePlanFeatures(context, {
         template,
         planVersion,
-        currency: input.currency,
       })
       if (materialized.err) return Err(materialized.err)
       if (materialized.val.state !== "ok") return Ok(materialized.val)

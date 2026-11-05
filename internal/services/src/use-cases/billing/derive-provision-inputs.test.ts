@@ -1,7 +1,6 @@
 import type { Database } from "@unprice/db"
+import { rateRowSchema } from "@unprice/db/validators"
 import { fromLedgerAmount, toLedgerMinor } from "@unprice/money"
-import { dinero } from "dinero.js"
-import { USD } from "dinero.js/currencies"
 import { describe, expect, it, vi } from "vitest"
 import {
   deriveActivationInputsFromPlan,
@@ -14,24 +13,29 @@ const projectId = "prj_abc"
 const subscriptionId = "sub_abc"
 
 function usageUnitFeature({
-  amount,
   limit,
-}: {
-  amount: number
-  limit: number | null
-}) {
+  included = null,
+}: { limit: number | null; included?: string | null }) {
+  return { featureType: "usage" as const, limit, included, feature: { slug: "api" } }
+}
+
+/** The plan card's row for `api`, in its stored (wire) form. */
+function wireRow(rate: string) {
   return {
-    featureType: "usage" as const,
-    limit,
-    config: {
-      usageMode: "unit" as const,
-      price: {
-        dinero: dinero({ amount, currency: USD }).toJSON(),
-        displayAmount: String(amount / 100),
-      },
-    },
+    id: "rr_api",
+    rateCardId: "rc_plan",
+    featureSlug: "api",
+    match: {},
+    price: { type: "unit", components: [{ property: null, rate, per: 1 }] },
+    cost: null,
+    effectiveFrom: 0,
+    effectiveTo: null,
+    source: "manual",
+    sourceRef: null,
   }
 }
+
+const rows = (rate: string) => [rateRowSchema.parse(wireRow(rate))]
 
 function createDb(phase: {
   creditLinePolicy: "capped" | "uncapped"
@@ -45,13 +49,16 @@ function createDb(phase: {
     id: subscriptionId,
     projectId,
     customer: { id: "cus_abc", defaultCurrency: "USD" },
-    phases: [phase],
+    phases: [{ ...phase, planVersion: { id: "pv_abc", currency: "USD", ...phase.planVersion } }],
   }))
 
   const db = {
     query: {
       subscriptions: {
         findFirst,
+      },
+      planVersionRateCards: {
+        findFirst: vi.fn(async () => ({ card: { rows: [wireRow("0.5")] } })),
       },
     },
   } as unknown as Database
@@ -66,7 +73,8 @@ describe("derivePeriodUsageAllowanceAmount", () => {
         creditLinePolicy: "capped",
         creditLineAmount: ledger("120"),
         planVersion: {
-          planFeatures: [usageUnitFeature({ amount: 50, limit: 10 })],
+          planFeatures: [usageUnitFeature({ limit: 10 })],
+          rows: rows("0.5"),
         },
       })
     ).toBe(ledger("120"))
@@ -78,10 +86,24 @@ describe("derivePeriodUsageAllowanceAmount", () => {
         creditLinePolicy: "capped",
         creditLineAmount: null,
         planVersion: {
-          planFeatures: [usageUnitFeature({ amount: 50, limit: 10 })],
+          planFeatures: [usageUnitFeature({ limit: 10 })],
+          rows: rows("0.5"),
         },
       })
     ).toBe(ledger("5"))
+  })
+
+  it("prices only the units past the feature's included allowance", () => {
+    expect(
+      derivePeriodUsageAllowanceAmount({
+        creditLinePolicy: "capped",
+        creditLineAmount: null,
+        planVersion: {
+          planFeatures: [usageUnitFeature({ limit: 10, included: "4" })],
+          rows: rows("0.5"),
+        },
+      })
+    ).toBe(ledger("3"))
   })
 
   it("does not infer credit for unlimited paid usage", () => {
@@ -90,7 +112,8 @@ describe("derivePeriodUsageAllowanceAmount", () => {
         creditLinePolicy: "capped",
         creditLineAmount: null,
         planVersion: {
-          planFeatures: [usageUnitFeature({ amount: 50, limit: null })],
+          planFeatures: [usageUnitFeature({ limit: null })],
+          rows: rows("0.5"),
         },
       })
     ).toBe(0)
@@ -102,7 +125,8 @@ describe("derivePeriodUsageAllowanceAmount", () => {
         creditLinePolicy: "capped",
         creditLineAmount: 0,
         planVersion: {
-          planFeatures: [usageUnitFeature({ amount: 50, limit: 10 })],
+          planFeatures: [usageUnitFeature({ limit: 10 })],
+          rows: rows("0.5"),
         },
       })
     ).toBe(0)
@@ -114,7 +138,8 @@ describe("derivePeriodUsageAllowanceAmount", () => {
         creditLinePolicy: "uncapped",
         creditLineAmount: ledger("120"),
         planVersion: {
-          planFeatures: [usageUnitFeature({ amount: 50, limit: 10 })],
+          planFeatures: [usageUnitFeature({ limit: 10 })],
+          rows: rows("0.5"),
         },
       })
     ).toBe(0)
@@ -127,7 +152,7 @@ describe("deriveActivationInputsFromPlan", () => {
       creditLinePolicy: "capped",
       creditLineAmount: null,
       planVersion: {
-        planFeatures: [usageUnitFeature({ amount: 50, limit: 10 })],
+        planFeatures: [usageUnitFeature({ limit: 10 })],
       },
     })
 
@@ -147,7 +172,7 @@ describe("deriveActivationInputsFromPlan", () => {
       creditLinePolicy: "uncapped",
       creditLineAmount: null,
       planVersion: {
-        planFeatures: [usageUnitFeature({ amount: 50, limit: 10 })],
+        planFeatures: [usageUnitFeature({ limit: 10 })],
       },
     })
 

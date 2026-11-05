@@ -466,6 +466,8 @@ patterns. Keep it cheap to load and useful.
 
 ## Billing, Wallets, And Invoices
 
+- 2026-11-04 ([ADR-0008 D2](adr/ADR-0008-payer-budgets-rate-cards-and-r2-journal.md#d2-a-rate-card-owns-every-price-a-plan-version-owns-the-package)): A plan feature's `config` keeps only `usageMode` and `units`; read every price from the version's card with `rateCards.pricingForPlanVersions`/`rowsForVersions`, and format it with `describeRatePrice` (`@unprice/services/pricing`, client-safe). Templates, `monetization.apply`, and onboarding price a draft through `pricePlanVersion`, one card per version.
+- 2026-11-04: `monetization.get` reads prices back from the card in canonical decimals, so the boundary canonicalizes prices on parse ("0.10" hashes as "0.1"); a feature whose card rows a decimal price cannot state makes its plan unrepresentable.
 - 2026-11-03: Tiers are graduated only (volume and `tierMode` removed, U1). A graduated config
   whose higher tier has a smaller flat fee still prices a positive usage delta negatively (the seeded
   plans do at 1000 -> 1001), so never assume tier cost deltas are non-negative.

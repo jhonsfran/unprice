@@ -288,7 +288,7 @@ describe("monetizationConfigSchema", () => {
         config: { usageMode: "unit" },
         meterConfig: countMeter,
       },
-      /price is required/i,
+      /needs a price/i,
     ],
     [
       "tiers with a gap",
@@ -326,6 +326,19 @@ describe("monetizationConfigSchema", () => {
         },
       },
       /tiers.*does not apply to a flat feature/,
+    ],
+    [
+      "tiers that leave the last tier bounded",
+      {
+        featureSlug: "input-tokens",
+        featureType: "usage",
+        config: {
+          usageMode: "tier",
+          tiers: [{ firstUnit: 1, lastUnit: 10, unitPrice: "1", flatPrice: "0" }],
+        },
+        meterConfig: countMeter,
+      },
+      /last tier is unbounded/i,
     ],
   ])("rejects %s", (_label, feature, message) => {
     expect(() => monetizationConfigSchema.parse(withFirstFeature(feature))).toThrow(message)

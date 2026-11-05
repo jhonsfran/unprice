@@ -28,6 +28,7 @@ import type { Cache } from "../../cache"
 import type { ServiceContext } from "../../context"
 import { createServiceContext } from "../../context"
 import type { Metrics } from "../../metrics"
+import { decimalPriceOf, featureRow } from "../../pricing"
 import {
   closeTestDatabaseConnection,
   createTestDatabaseConnection,
@@ -190,10 +191,20 @@ async function readPlanVersions(planSlug: string) {
   })
 }
 
-/** Reads the decimal price back out of a stored Dinero config without a cast to `any`. */
-function storedPrice(config: unknown): string | undefined {
-  if (typeof config !== "object" || config === null) return undefined
-  return (config as { price?: { displayAmount?: string } }).price?.displayAmount
+/** A feature's decimal price on the rate card the plan version prices with (ADR-0008 D2). */
+async function cardPrice(
+  services: ServiceContext,
+  planVersionId: string | undefined,
+  featureSlug: string
+): Promise<string | undefined> {
+  if (!planVersionId) return undefined
+  const pricing = await services.rateCards.pricingForPlanVersions(
+    projectId,
+    [planVersionId],
+    Date.now()
+  )
+  const row = featureRow(pricing.get(planVersionId)?.[0]?.rows ?? [], featureSlug)
+  return row ? decimalPriceOf(row.price)?.price : undefined
 }
 
 describe("monetization apply lifecycle against the database", () => {
@@ -305,14 +316,10 @@ describe("monetization apply lifecycle against the database", () => {
 
     // The published version keeps its status and its original price.
     expect(liveVersion?.status).toBe("published")
-    expect(
-      storedPrice(liveVersion?.planFeatures.find((pf) => pf.feature.slug === "seats")?.config)
-    ).toBe("10.00")
+    expect(await cardPrice(services, liveVersion?.id, "seats")).toBe("10")
 
     expect(repricedVersion?.status).toBe("draft")
-    expect(
-      storedPrice(repricedVersion?.planFeatures.find((pf) => pf.feature.slug === "seats")?.config)
-    ).toBe("12.00")
+    expect(await cardPrice(services, repricedVersion?.id, "seats")).toBe("12")
 
     // ---- staleDrafts reporting ----------------------------------------------
     const fourth = await applyMonetizationConfig(deps, {
@@ -381,6 +388,7 @@ describe("monetization apply lifecycle against the database", () => {
         plans: withFeatureWriteCrash(services.plans, 2),
         features: services.features,
         events: services.events,
+        rateCards: services.rateCards,
       },
       db,
       logger,

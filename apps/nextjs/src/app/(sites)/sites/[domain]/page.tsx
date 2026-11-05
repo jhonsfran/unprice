@@ -135,7 +135,7 @@ export default async function DomainPage(props: {
                   title: feature.feature.title,
                   type: feature.featureType,
                   description: feature.feature.description,
-                  config: feature.config,
+                  price: feature.displayPrice,
                 },
               }
             }) || []

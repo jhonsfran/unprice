@@ -254,14 +254,6 @@ function entitlement(options: {
       featureType: options.featureType,
       config: {
         usageMode: "unit",
-        price: {
-          dinero: {
-            amount: 0,
-            currency: { code: "USD", base: 10, exponent: 2 },
-            scale: 2,
-          },
-          displayAmount: "0.00",
-        },
       },
       limit: options.limit ?? null,
       meterConfig: options.meterConfig,

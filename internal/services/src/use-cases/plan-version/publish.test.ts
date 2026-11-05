@@ -1,4 +1,5 @@
 import type { Database } from "@unprice/db"
+import { rateRowSchema } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logs"
 import { describe, expect, it, vi } from "vitest"
 import type { ServiceContext } from "../../context"
@@ -15,6 +16,23 @@ function createLogger(): Logger {
     emit: vi.fn(),
     flush: vi.fn(),
   } as unknown as Logger
+}
+
+/** The version's USD card: a $1 flat base fee, so a customer needs a payment method. */
+function baseCard() {
+  const row = rateRowSchema.parse({
+    id: "rr_base",
+    rateCardId: "rc_1",
+    featureSlug: "base",
+    match: {},
+    price: { type: "flat", amount: "1" },
+    cost: null,
+    effectiveFrom: 0,
+    effectiveTo: null,
+    source: "manual",
+    sourceRef: null,
+  })
+  return new Map([["pv_123", [{ currency: "USD", card: {}, rows: [row] }]]])
 }
 
 describe("publishPlanVersion", () => {
@@ -35,22 +53,14 @@ describe("publishPlanVersion", () => {
             planId: "plan_123",
             status: "draft",
             collectionMethod: "charge_automatically",
+            currency: "USD",
             paymentProvider: "sandbox",
             planFeatures: [
               {
                 id: "fpv_123",
                 featureType: "flat",
-                config: {
-                  price: {
-                    dinero: {
-                      amount: 100,
-                      currency: { code: "USD", base: 10, exponent: 2 },
-                      scale: 2,
-                    },
-                    displayAmount: "1.00",
-                  },
-                },
-                feature: { id: "feature_123" },
+                config: {},
+                feature: { id: "feature_123", slug: "base" },
               },
             ],
             project: { id: "proj_123" },
@@ -66,7 +76,8 @@ describe("publishPlanVersion", () => {
           customers: {
             getPaymentProvider,
           },
-        } as unknown as Pick<ServiceContext, "customers">,
+          rateCards: { pricingForPlanVersions: vi.fn(async () => baseCard()) },
+        } as unknown as Pick<ServiceContext, "customers" | "rateCards">,
         db,
         logger,
         userId: "usr_123",

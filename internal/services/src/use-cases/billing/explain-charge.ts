@@ -1,12 +1,6 @@
 import { type Database, and, eq } from "@unprice/db"
 import { customerEntitlements } from "@unprice/db/schema"
-import {
-  type Currency,
-  configFlatSchema,
-  configPackageSchema,
-  configTierSchema,
-  configUsageSchema,
-} from "@unprice/db/validators"
+import type { Currency, RateRow } from "@unprice/db/validators"
 import { BaseError, Err, type FetchError, Ok, type Result } from "@unprice/error"
 import {
   type Dinero,
@@ -21,6 +15,8 @@ import type { AnalyticsService } from "../../analytics"
 import { journalChargeDataSchema, parseSignedDecimal } from "../../analytics/budget-journal"
 import type { UnPriceLedgerError } from "../../ledger"
 import type { InvoiceLine, LedgerGateway } from "../../ledger"
+import { describeRatePrice, describeTiers } from "../../pricing"
+import type { RateCardService } from "../../rate-cards"
 import { statementPeriodId } from "../budgets/compile-payer-budget"
 
 /**
@@ -138,6 +134,7 @@ export type ExplainChargeDeps = {
   db: Database
   ledger: LedgerGateway
   analytics: Pick<AnalyticsService, "getStatementEvents">
+  rateCards: Pick<RateCardService, "pricingForPlanVersions">
   now?: () => number
 }
 
@@ -410,7 +407,18 @@ export async function explainCharge(
       featurePlanVersionId: featurePlanVersion.id,
     },
     summary,
-    pricing: buildPricingSummary({ featurePlanVersion, featureSlug }),
+    pricing: buildPricingSummary({
+      featurePlanVersion,
+      featureSlug,
+      currency: invoice.currency,
+      rows: await periodRows(deps, {
+        projectId: input.projectId,
+        planVersionId: featurePlanVersion.planVersionId,
+        currency: invoice.currency,
+        from: billingPeriod.cycleStartAt,
+        to: billingPeriod.cycleEndAt,
+      }),
+    }),
     events,
     answer: buildAnswer({
       featureSlug,
@@ -621,146 +629,79 @@ function parseJson(text: string): unknown {
   }
 }
 
-type PriceSnapshot = z.infer<typeof configUsageSchema>["price"]
-type TierSnapshot = NonNullable<z.infer<typeof configUsageSchema>["tiers"]>[number]
+/** The plan version's card rows in `currency` that were in effect during [from, to). */
+async function periodRows(
+  deps: Pick<ExplainChargeDeps, "rateCards">,
+  input: { projectId: string; planVersionId: string; currency: string; from: number; to: number }
+): Promise<RateRow[]> {
+  const pricing = await deps.rateCards.pricingForPlanVersions(
+    input.projectId,
+    [input.planVersionId],
+    input.from,
+    Math.max(input.to, input.from + 1)
+  )
+  return (
+    pricing.get(input.planVersionId)?.find((card) => card.currency === input.currency)?.rows ?? []
+  )
+}
 
+/** The feature's rows on the plan version's rate card (ADR-0008 D2) during the billed period. */
 function buildPricingSummary({
   featurePlanVersion,
   featureSlug,
+  currency,
+  rows,
 }: {
   featurePlanVersion: {
     featureType: string
     unitOfMeasure: string
-    config: unknown
+    config: { usageMode?: string } | null
   }
   featureSlug: string
+  currency: string
+  rows: readonly RateRow[]
 }): ExplainChargeOutput["pricing"] {
   const unit = displayUnit(featurePlanVersion.unitOfMeasure, featureSlug)
+  const base = {
+    featureType: featurePlanVersion.featureType,
+    usageMode: featurePlanVersion.config?.usageMode ?? null,
+    unitOfMeasure: unit,
+  }
+  const featureRows = rows.filter((row) => row.featureSlug === featureSlug)
+  const [only] = featureRows
 
-  if (featurePlanVersion.featureType === "usage") {
-    const config = configUsageSchema.parse(featurePlanVersion.config)
-
-    if (config.usageMode === "unit" && config.price) {
-      const price = formatConfiguredPrice(config.price)
-      return {
-        featureType: "usage",
-        usageMode: config.usageMode,
-        unitOfMeasure: unit,
-        description: `Unit pricing: ${price} per ${unit}`,
-        rows: [{ label: "Unit price", value: `${price} / ${unit}` }],
-      }
-    }
-
-    if (config.usageMode === "package" && config.price && config.units) {
-      const price = formatConfiguredPrice(config.price)
-      return {
-        featureType: "usage",
-        usageMode: config.usageMode,
-        unitOfMeasure: unit,
-        description: `Package pricing: ${price} per ${formatUsage(config.units)} ${unit}`,
-        rows: [
-          { label: "Package", value: `${formatUsage(config.units)} ${unit}` },
-          { label: "Package price", value: price },
-        ],
-      }
-    }
-
-    if (config.usageMode === "tier" && config.tiers) {
-      return tierPricingSummary({
-        featureType: "usage",
-        usageMode: config.usageMode,
-        unit,
-        tiers: config.tiers,
-      })
-    }
+  if (!only) {
+    return { ...base, description: "No rate card row priced this feature", rows: [] }
   }
 
-  if (featurePlanVersion.featureType === "tier") {
-    const config = configTierSchema.parse(featurePlanVersion.config)
-    return tierPricingSummary({
-      featureType: "tier",
-      usageMode: null,
-      unit,
-      tiers: config.tiers,
-    })
-  }
-
-  if (featurePlanVersion.featureType === "package") {
-    const config = configPackageSchema.parse(featurePlanVersion.config)
-    const price = formatConfiguredPrice(config.price)
+  if (featureRows.length === 1 && only.price.type === "graduated") {
     return {
-      featureType: "package",
-      usageMode: null,
-      unitOfMeasure: unit,
-      description: `Package pricing: ${price} per ${formatUsage(config.units)} ${unit}`,
-      rows: [
-        { label: "Package", value: `${formatUsage(config.units)} ${unit}` },
-        { label: "Package price", value: price },
-      ],
+      ...base,
+      description: `Graduated tiers: price changes by ${unit} range`,
+      rows: describeTiers(only.price, currency, unit),
     }
   }
 
-  const config = configFlatSchema.parse(featurePlanVersion.config)
-  const price = formatConfiguredPrice(config.price)
   return {
-    featureType: "flat",
-    usageMode: null,
-    unitOfMeasure: unit,
-    description: `Fixed price: ${price}`,
-    rows: [{ label: "Fixed price", value: price }],
-  }
-}
-
-function tierPricingSummary({
-  featureType,
-  usageMode,
-  unit,
-  tiers,
-}: {
-  featureType: string
-  usageMode: string | null
-  unit: string
-  tiers: TierSnapshot[]
-}): ExplainChargeOutput["pricing"] {
-  return {
-    featureType,
-    usageMode,
-    unitOfMeasure: unit,
-    description: `Graduated tiers: price changes by ${unit} range`,
-    rows: tiers.map((tier) => ({
-      label: tierRangeLabel(tier, unit),
-      value: tierValueLabel(tier),
+    ...base,
+    description:
+      featureRows.length === 1
+        ? `Rate card price: ${describeRatePrice(only.price, currency, unit)}`
+        : `Rate card prices: ${featureRows.length} rows during the period`,
+    rows: featureRows.map((row) => ({
+      label: rowLabel(row),
+      value: describeRatePrice(row.price, currency, unit),
     })),
   }
 }
 
-function tierRangeLabel(tier: TierSnapshot, unit: string): string {
-  const first = formatUsage(tier.firstUnit)
-  const last = tier.lastUnit === null ? "unlimited" : formatUsage(tier.lastUnit)
-  return `${first}-${last} ${unit}`
-}
-
-function tierValueLabel(tier: TierSnapshot): string {
-  const unitPrice = formatConfiguredPrice(tier.unitPrice)
-  const flatPrice = formatConfiguredPrice(tier.flatPrice)
-
-  if (isZeroConfiguredPrice(tier.flatPrice)) {
-    return `${unitPrice} / unit`
-  }
-
-  return `${flatPrice} + ${unitPrice} / unit`
-}
-
-function formatConfiguredPrice(price: PriceSnapshot): string {
-  if (!price) {
-    return "0"
-  }
-
-  return `${price.displayAmount} ${price.dinero.currency.code}`
-}
-
-function isZeroConfiguredPrice(price: PriceSnapshot): boolean {
-  return Number(price?.displayAmount ?? 0) === 0
+/** The row's match and, when it changed during the period, from when it applied. */
+function rowLabel(row: RateRow): string {
+  const match = Object.entries(row.match)
+    .map(([key, value]) => `${key}=${value}`)
+    .join(", ")
+  const since = new Date(row.effectiveFrom).toISOString()
+  return `${match || "Default"} (from ${since}${row.effectiveTo === null ? "" : ` to ${new Date(row.effectiveTo).toISOString()}`})`
 }
 
 function displayUnit(unitOfMeasure: string, featureSlug: string): string {
