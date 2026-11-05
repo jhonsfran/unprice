@@ -14,8 +14,8 @@ type PlanVersion = RouterOutputs["planVersions"]["getById"]["planVersion"]
 type LibraryFeature = RouterOutputs["features"]["searchBy"]["features"][number]
 
 /**
- * Attaches a library feature to the open version: an optimistic entry at the end of the list,
- * its editor expanded at once, and the saved feature swapped in when the server answers.
+ * Attaches a library feature to the open version: an optimistic row at the end of the table, its
+ * cells editable once the server answers with the saved feature.
  */
 export function useAttachFeature(planVersion: PlanVersion) {
   const trpc = useTRPC()
@@ -33,7 +33,7 @@ export function useAttachFeature(planVersion: PlanVersion) {
             f.featureId === planVersionFeature.featureId ? { ...f, ...planVersionFeature } : f
           )
         )
-        // hydrate the active feature with the saved id so subsequent edits use update, not create
+        // a sheet opened on the optimistic row keeps editing the saved feature
         setActiveFeature((current) =>
           current && current.featureId === planVersionFeature.featureId
             ? { ...current, ...planVersionFeature }
@@ -75,11 +75,7 @@ export function useAttachFeature(planVersion: PlanVersion) {
       billingConfig: planVersion.billingConfig,
     } as PlanVersionFeatureDragDrop
 
-    // Optimistic local insert AND auto-expand: the user just declared intent to configure
-    // this feature, so we open the inline editor immediately. FeaturePlan scrolls itself into
-    // view when it becomes active without an id yet (see useEffect there).
     setPlanFeaturesList((prev) => [...prev, optimistic])
-    setActiveFeature(optimistic)
 
     const payload: PlanVersionFeatureInsert = {
       planVersionId: optimistic.planVersionId,

@@ -34,11 +34,14 @@ export function FeatureForm({
   setDialogOpen,
   defaultValues,
   onCreated,
+  onUpdated,
 }: {
   setDialogOpen?: (open: boolean) => void
   defaultValues: InsertFeature
   /** Called with the saved feature after a create; an edit never calls it. */
   onCreated?: (feature: CreatedFeature) => void
+  /** Called with the saved feature after an edit, so a list showing it can follow. */
+  onUpdated?: (feature: CreatedFeature) => void
 }) {
   const router = useRouter()
   const trpc = useTRPC()
@@ -93,6 +96,7 @@ export function FeatureForm({
           queryKey: trpc.features.searchBy.queryKey(),
         })
         toastAction("updated", "Feature saved")
+        onUpdated?.(feature)
 
         setDialogOpen?.(false)
         // Only needed when the form is inside a uncontrolled dialog - normally updates

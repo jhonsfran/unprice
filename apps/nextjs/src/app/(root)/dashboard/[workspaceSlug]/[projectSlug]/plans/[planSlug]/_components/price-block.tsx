@@ -55,9 +55,24 @@ function emptyTier(key: string): TierDraft {
   return { key, upTo: "", unitPrice: "", flatPrice: "0" }
 }
 
-/** A fixed feature starts included at $0, so one Save prices it; every other shape asks for a number. */
-export function emptyDraft(shape: PriceShape): PriceDraft {
-  if (shape === "graduated") return { kind: "tiers", tiers: [emptyTier("tier-0")] }
+/**
+ * A fixed feature starts included at $0, so one Save prices it; every other shape asks for a
+ * number. Tiers start as "N included, then a price": a $0 tier up to `includedUnits` (the default
+ * quantity, or the included units) and an open-ended tier to price, when there are units to give.
+ */
+export function emptyDraft(shape: PriceShape, includedUnits = 0): PriceDraft {
+  if (shape === "graduated") {
+    const open = emptyTier("tier-1")
+    return includedUnits > 0
+      ? {
+          kind: "tiers",
+          tiers: [
+            { key: "tier-0", upTo: String(includedUnits), unitPrice: "0", flatPrice: "0" },
+            open,
+          ],
+        }
+      : { kind: "tiers", tiers: [open] }
+  }
   return { kind: "amount", amount: shape === "flat" ? "0" : "" }
 }
 
@@ -66,8 +81,12 @@ export function emptyDraft(shape: PriceShape): PriceDraft {
  * when the feature has no row or the row has another shape, null when the row's price cannot be
  * stated in decimal form (several components, a `per` above 1).
  */
-export function prefillDraft(row: RateRow | null, shape: PriceShape): PriceDraft | null {
-  if (!row) return emptyDraft(shape)
+export function prefillDraft(
+  row: RateRow | null,
+  shape: PriceShape,
+  includedUnits = 0
+): PriceDraft | null {
+  if (!row) return emptyDraft(shape, includedUnits)
   const decimal = decimalPriceOf(row.price)
   if (!decimal) return null
   if (shape === "graduated") {
@@ -81,7 +100,7 @@ export function prefillDraft(row: RateRow | null, shape: PriceShape): PriceDraft
             flatPrice: tier.flatPrice,
           })),
         }
-      : emptyDraft(shape)
+      : emptyDraft(shape, includedUnits)
   }
   return decimal.price === undefined ? emptyDraft(shape) : { kind: "amount", amount: decimal.price }
 }
@@ -154,6 +173,7 @@ export function PriceBlockView({
   draft,
   onDraftChange,
   problem,
+  includedUnits = 0,
 }: {
   card: PlanVersionCard | undefined
   rows: FeaturePriceRows | undefined
@@ -167,6 +187,8 @@ export function PriceBlockView({
   onDraftChange: (draft: PriceDraft | null) => void
   /** A refusal of the last save that belongs to the price. */
   problem: string | null
+  /** The units a new tiers draft gives away first: the default quantity, or the included units. */
+  includedUnits?: number
 }) {
   const params = useParams<{
     workspaceSlug: string
@@ -188,7 +210,7 @@ export function PriceBlockView({
   const current = rows?.current ?? null
   const scheduled = rows?.scheduled ?? null
   const row = current ?? scheduled
-  const prefill = prefillDraft(row, shape)
+  const prefill = prefillDraft(row, shape, includedUnits)
   const effective = draft ?? prefill
 
   if (isLoading) return <Skeleton className="h-24 w-full" />
@@ -251,7 +273,7 @@ export function PriceBlockView({
             variant="ghost"
             size="sm"
             className="h-6 px-2 text-xs"
-            onClick={() => onDraftChange(emptyDraft(shape))}
+            onClick={() => onDraftChange(emptyDraft(shape, includedUnits))}
           >
             Set a price
           </Button>

@@ -160,11 +160,38 @@ describe("prefillDraft", () => {
     expect(prefillDraft(packageRow, "package")).toEqual({ kind: "amount", amount: "5" })
     expect(prefillDraft(packageRow, "graduated")).toEqual({
       kind: "tiers",
-      tiers: [{ key: "tier-0", upTo: "", unitPrice: "", flatPrice: "0" }],
+      tiers: [{ key: "tier-1", upTo: "", unitPrice: "", flatPrice: "0" }],
     })
     expect(prefillDraft(twoComponentRow, "unit")).toBeNull()
     expect(prefillDraft(null, "flat")).toEqual({ kind: "amount", amount: "0" })
     expect(prefillDraft(null, "unit")).toEqual({ kind: "amount", amount: "" })
+  })
+
+  it("starts tiers as the included units at $0, then an open tier to price", () => {
+    expect(prefillDraft(null, "graduated", 3)).toEqual({
+      kind: "tiers",
+      tiers: [
+        { key: "tier-0", upTo: "3", unitPrice: "0", flatPrice: "0" },
+        { key: "tier-1", upTo: "", unitPrice: "", flatPrice: "0" },
+      ],
+    })
+    expect(
+      priceInputOf({
+        kind: "tiers",
+        tiers: [
+          { key: "tier-0", upTo: "3", unitPrice: "0", flatPrice: "0" },
+          { key: "tier-1", upTo: "", unitPrice: "10", flatPrice: "0" },
+        ],
+      })
+    ).toEqual({
+      ok: true,
+      price: {
+        tiers: [
+          { firstUnit: 1, lastUnit: 3, unitPrice: "0", flatPrice: "0" },
+          { firstUnit: 4, lastUnit: null, unitPrice: "10", flatPrice: "0" },
+        ],
+      },
+    })
   })
 })
 

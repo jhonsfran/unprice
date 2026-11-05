@@ -189,13 +189,14 @@ export function FeatureConfigForm({
         // Only the plans-page editor tracks the shared feature list; the standalone sheet
         // must not clobber another page's plan-editor state.
         if (!isStandalone) {
-          setPlanFeatureList((features) => {
-            const index = features.findIndex(
-              (feat) => feat.featureId === planVersionFeature.featureId
+          // A new array, so the table's row and the checklist re-render with the saved feature.
+          setPlanFeatureList((features) =>
+            features.map((feat) =>
+              feat.featureId === planVersionFeature.featureId
+                ? { ...feat, ...planVersionFeature }
+                : feat
             )
-            features[index] = planVersionFeature
-            return features
-          })
+          )
         }
 
         form.reset(planVersionFeature)
@@ -243,7 +244,7 @@ export function FeatureConfigForm({
   // field so the inline FormMessage is visible. We do NOT toast — zod's per-field error already
   // renders next to the input via FormMessage, and a generic toast is noise.
   const onInvalidSubmit = (errors: Record<string, unknown>) => {
-    if (errors.billingConfig || errors.resetConfig) setIsAdvancedOpen(true)
+    if (errors.billingConfig) setIsAdvancedOpen(true)
     if (
       errors.metadata &&
       typeof errors.metadata === "object" &&
@@ -265,9 +266,13 @@ export function FeatureConfigForm({
   const featureType = form.watch("featureType") as FeatureType | undefined
   const usageMode = form.watch("config.usageMode")
   const billingConfigName = form.watch("billingConfig.name")
-  const resetConfigName = form.watch("resetConfig.name")
   const overage = form.watch("metadata.overageStrategy") ?? "none"
   const isHidden = form.watch("metadata.hidden") ?? false
+  const defaultQuantity = Number(form.watch("defaultQuantity") ?? 0)
+  const included = Number(form.watch("included") ?? 0)
+  // What a new tiers draft gives away at $0: the quantity picked at signup, or the included units.
+  const includedUnits =
+    featureType === "tier" ? defaultQuantity : featureType === "usage" ? included : 0
 
   // A fixed feature the card has no row for is saved at $0, the block's starting amount, so one
   // Save makes it an included feature; the rows must be loaded to know it has none.
@@ -278,6 +283,7 @@ export function FeatureConfigForm({
     priceStateOf(priceRows) === "unpriced"
       ? emptyDraft("flat")
       : null
+  const shape = featureType ? priceShapeOf(featureType, usageMode) : null
 
   const onSubmitForm = async (data: PlanVersionFeatureInsert) => {
     if (!defaultValues.id) return
@@ -309,9 +315,6 @@ export function FeatureConfigForm({
     if (billingConfigName && billingConfigName !== planVersion.billingConfig.name) {
       parts.push(`Bill: ${billingConfigName}`)
     }
-    if (resetConfigName && resetConfigName !== planVersion.billingConfig.name) {
-      parts.push(`Reset: ${resetConfigName}`)
-    }
     if (overage !== "none") {
       parts.push(OVERAGE_STRATEGIES_MAP[overage]?.label ?? overage)
     }
@@ -324,7 +327,7 @@ export function FeatureConfigForm({
   // Derive per-section error state so collapsed sections can flag unresolved validation issues.
   const fieldErrors = form.formState.errors
   const hasAdvancedError = Boolean(
-    fieldErrors.billingConfig || fieldErrors.resetConfig || fieldErrors.metadata?.overageStrategy
+    fieldErrors.billingConfig || fieldErrors.metadata?.overageStrategy
   )
   const hasDisplayError = Boolean(fieldErrors.metadata?.hidden)
 
@@ -412,6 +415,10 @@ export function FeatureConfigForm({
             }}
             priceProblem={priceProblem}
             savedDimensions={defaultValues.meterConfig?.groupBy ?? []}
+            includedUnits={includedUnits}
+            // The table's cells price a fixed, per-unit or bundle feature; the sheet keeps the
+            // block for tiers, for the catalog, and for reading a published version's price.
+            showPrice={shape === "graduated" || isPublished}
           />
         </NumberedStep>
 
@@ -428,7 +435,6 @@ export function FeatureConfigForm({
               >
                 <div className="space-y-4">
                   <BillingConfigFeatureFormField form={form} isDisabled={isPublished} />
-                  <ResetConfigFeatureFormField form={form} isDisabled={isPublished} />
                   <OverageStrategyFormField form={form} isDisabled={isPublished} />
                 </div>
               </CollapsibleSection>
@@ -527,6 +533,8 @@ function ConfigureFields({
   onPriceDraftChange,
   priceProblem,
   savedDimensions,
+  includedUnits,
+  showPrice,
 }: {
   // biome-ignore lint/suspicious/noExplicitAny: react-hook-form's UseFormReturn type doesn't narrow well across schema unions
   form: any
@@ -544,6 +552,10 @@ function ConfigureFields({
   priceProblem: string | null
   /** The meter's dimensions as stored; the catalog prices those, not unsaved chips. */
   savedDimensions: readonly string[]
+  /** The units a new tiers draft gives away at $0. */
+  includedUnits: number
+  /** Whether the price block renders; a dimensioned meter always prices from the catalog here. */
+  showPrice: boolean
 }) {
   if (!featureType) {
     return (
@@ -565,7 +577,7 @@ function ConfigureFields({
       editable={!isDisabled}
       pendingSave={!dimensions.every((dimension) => savedDimensionSet.has(dimension))}
     />
-  ) : (
+  ) : showPrice ? (
     <PriceBlockView
       card={card}
       rows={priceRows}
@@ -577,7 +589,10 @@ function ConfigureFields({
       draft={priceDraft}
       onDraftChange={onPriceDraftChange}
       problem={priceProblem}
+      includedUnits={includedUnits}
     />
+  ) : (
+    <p className="text-muted-foreground text-xs">The price is set in the feature table.</p>
   )
 
   if (featureType === "flat") return price
@@ -641,12 +656,19 @@ function ConfigureFields({
         <MeterConfigFormField form={form} isDisabled={isDisabled} />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      {/* The reset cadence sits with the limit it refreshes, not under Advanced. */}
+      <div
+        className={cn(
+          "grid grid-cols-1 gap-4",
+          hasDimensions ? "md:grid-cols-2" : "md:grid-cols-3"
+        )}
+      >
         <LimitFormField form={form} isDisabled={isDisabled} units={unitOfMeasure} />
         {/* Included units and dimension rows are exclusive (ADR-0008 D5). */}
         {!hasDimensions && (
           <IncludedFormField form={form} isDisabled={isDisabled} units={unitOfMeasure} />
         )}
+        <ResetConfigFeatureFormField form={form} isDisabled={isDisabled} />
       </div>
 
       {price}

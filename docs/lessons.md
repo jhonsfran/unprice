@@ -47,6 +47,17 @@ patterns. Keep it cheap to load and useful.
   earliest allowed, or the minute truncation rejects a card's first row.
 - 2026-11-05: A plan version's status moves only through publish; `planVersions.update` must not
   accept `status`, or a published version set back to draft makes its live card look unused.
+- 2026-11-05: A number typed into a text input reaches the form schema as a string; a form
+  schema that extends a boundary schema with a number field must use `z.coerce.number()`
+  (`plan-form.tsx` trial), or the dialog shows "expected number, received string" and never submits.
+- 2026-11-05: Features are project-wide: a second plan reuses them from the library, and a
+  feature dialog with an existing slug refuses (by design). A browser walk that creates features
+  must start from a project that lacks them.
+- 2026-11-05: A jotai list setter must return a new array; `features[index] = x; return
+  features` keeps the same reference and subscribers (the feature table) do not re-render.
+- 2026-11-05: In a cmdk palette whose items load async, mount the "Create" item only once the
+  matches are in; while it is the only item cmdk keeps it selected after the matches arrive, and
+  Enter creates instead of picking the first match.
 - 2026-11-05: `pnpm --filter @unprice/services test:integration -- <file>` ignores the file and
   runs the whole suite; run one file with
   `NODE_ENV=test SKIP_ENV_VALIDATION=true APP_ENV=test pnpm exec vitest run --config vitest.integration.config.ts <file>`
