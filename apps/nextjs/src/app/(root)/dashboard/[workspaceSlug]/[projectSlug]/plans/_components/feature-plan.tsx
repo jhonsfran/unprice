@@ -20,7 +20,6 @@ import { forwardRef, useEffect, useRef, useState } from "react"
 
 import { FEATURE_TYPES_MAPS } from "@unprice/db/utils"
 import type { PlanVersionFeatureDragDrop } from "@unprice/db/validators"
-import { describeRatePrice, featureRow } from "@unprice/services/pricing"
 import { Button } from "@unprice/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@unprice/ui/popover"
 import { Tooltip, TooltipArrow, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
@@ -32,6 +31,7 @@ import { toastAction } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
 import { FeatureConfigForm } from "../[planSlug]/_components/feature-config-form"
 import { FeatureDialog } from "./feature-dialog"
+import { describeFeaturePrice, rowsByFeature } from "./plan-prices"
 
 const featureVariants = cva(
   "rounded-lg border text-left text-sm transition-all bg-background-bgSubtle hover:bg-background-bgHover",
@@ -126,7 +126,7 @@ const FeaturePlan = forwardRef<ElementRef<"div">, FeaturePlanProps>((props, ref)
   }, [isExpanded, mode, planFeatureVersion.id])
 
   // ADR-0008 D2: the feature is priced by its plan version's card; show that row's price.
-  const { data: pricing } = useQuery({
+  const { data: pricing, dataUpdatedAt } = useQuery({
     ...trpc.rateCards.forPlanVersion.queryOptions({
       planVersionId: planFeatureVersion.planVersionId,
     }),
@@ -134,15 +134,13 @@ const FeaturePlan = forwardRef<ElementRef<"div">, FeaturePlanProps>((props, ref)
   })
   const currency = activePlanVersion?.currency
   const cardRows = pricing?.cards.find((card) => card.currency === currency)?.rows ?? []
-  const row = featureRow(cardRows, feature.slug)
-  const priceSummary =
-    row && currency
-      ? describeRatePrice(
-          row.price,
-          currency,
-          (planFeatureVersion.unitOfMeasure ?? "units").replace(/s$/, "")
-        )
-      : "Not priced"
+  const priceSummary = currency
+    ? describeFeaturePrice(
+        rowsByFeature(cardRows, dataUpdatedAt).get(feature.slug),
+        currency,
+        (planFeatureVersion.unitOfMeasure ?? "units").replace(/s$/, "")
+      )
+    : "Not priced"
 
   const handleToggle = () => {
     if (mode !== "FeaturePlan") return

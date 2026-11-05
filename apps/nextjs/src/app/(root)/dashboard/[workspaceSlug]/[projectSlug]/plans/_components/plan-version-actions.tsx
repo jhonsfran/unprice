@@ -2,18 +2,19 @@
 
 import { usePathname, useRouter } from "next/navigation"
 import type { ElementRef } from "react"
-import { forwardRef, startTransition } from "react"
+import { forwardRef, startTransition, useState } from "react"
 
 import { Button } from "@unprice/ui/button"
 import { LoadingAnimation } from "@unprice/ui/loading-animation"
 import { toast } from "@unprice/ui/sonner"
 
-import { useMutation } from "@tanstack/react-query"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import { useStore } from "jotai"
 import { ConfirmAction } from "~/components/confirm-action"
-import { configPlanFeaturesListAtom } from "~/hooks/use-features"
+import { configActivePlanVersionAtom, configPlanFeaturesListAtom } from "~/hooks/use-features"
 import { toastAction } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
+import { unpricedFeatureTitles } from "./plan-prices"
 
 export interface PlanVersionPublishProps extends React.ComponentPropsWithoutRef<"button"> {
   planVersionId: string
@@ -31,6 +32,11 @@ const PlanVersionPublish = forwardRef<ElementRef<"button">, PlanVersionPublishPr
     // atom is hydrated by PlanFeatureList further down the tree.
     const store = useStore()
     const trpc = useTRPC()
+    // What the confirm names before the server refuses: features without a row on the card.
+    const { data: pricing } = useQuery(
+      trpc.rateCards.forPlanVersion.queryOptions({ planVersionId })
+    )
+    const [unpriced, setUnpriced] = useState<string[]>([])
 
     const publishVersion = useMutation(
       trpc.planVersions.publish.mutationOptions({
@@ -39,6 +45,13 @@ const PlanVersionPublish = forwardRef<ElementRef<"button">, PlanVersionPublishPr
         },
       })
     )
+
+    function readUnpriced() {
+      const features = store.get(configPlanFeaturesListAtom)
+      const currency = store.get(configActivePlanVersionAtom)?.currency
+      const card = pricing?.cards.find((entry) => entry.currency === currency) ?? pricing?.cards[0]
+      setUnpriced(unpricedFeatureTitles(features, card?.rows ?? [], Date.now()))
+    }
 
     function onPublishVersion() {
       startTransition(() => {
@@ -67,8 +80,23 @@ const PlanVersionPublish = forwardRef<ElementRef<"button">, PlanVersionPublishPr
 
     return (
       <ConfirmAction
-        message="Once you publish this version, it will be available to your customers. You won't be able to edit it anymore. Are you sure you want to publish this version?"
+        message={
+          <>
+            Once you publish this version, it will be available to your customers. You won't be able
+            to edit it anymore.
+            {unpriced.length > 0 && (
+              <>
+                {" "}
+                Publishing will be refused until these features are priced:{" "}
+                <span className="font-mono text-xs">{unpriced.join(", ")}</span>.
+              </>
+            )}
+          </>
+        }
         title="Do you want to publish this version?"
+        onOpenChange={(open) => {
+          if (open) readUnpriced()
+        }}
         confirmAction={() => {
           onPublishVersion()
         }}

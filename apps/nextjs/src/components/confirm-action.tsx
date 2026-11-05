@@ -16,14 +16,17 @@ export function ConfirmAction({
   children,
   message,
   title,
+  onOpenChange,
 }: {
   confirmAction: () => void
   children: React.ReactNode
-  message?: string
+  message?: React.ReactNode
   title?: string
+  /** Fires when the dialog opens or closes, so a caller can read state as of the opening. */
+  onOpenChange?: (open: boolean) => void
 }) {
   return (
-    <AlertDialog>
+    <AlertDialog onOpenChange={onOpenChange}>
       <AlertDialogTrigger asChild>{children}</AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>

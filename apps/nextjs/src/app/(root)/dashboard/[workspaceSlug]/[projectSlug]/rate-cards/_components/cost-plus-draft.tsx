@@ -3,30 +3,34 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { RATE_CHANGE_NOTICE_MS, type RateCard } from "@unprice/db/validators"
 import { describeRatePrice } from "@unprice/services/pricing"
-import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Badge } from "@unprice/ui/badge"
 import { Button } from "@unprice/ui/button"
-import { Input } from "@unprice/ui/input"
-import { Label } from "@unprice/ui/label"
 import { Skeleton } from "@unprice/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@unprice/ui/table"
 import { Typography } from "@unprice/ui/typography"
 import { useState } from "react"
 import { toast } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
-import { cardCurrency, earliestStart, formatMatch, toDateTimeLocal } from "./rate-card-format"
-
-type Draft = RouterOutputs["rateCards"]["previewCostPlus"]["draft"]
+import {
+  type CostPlusDraftWire,
+  cardCurrency,
+  countWrites,
+  earliestStart,
+  formatMatch,
+  toDateTimeLocal,
+} from "./rate-card-format"
+import { ScheduleField } from "./schedule-field"
 
 /**
  * The card's cost-plus revision at now: each model's proposed price against its current row. A
  * publish recomputes the revision and refuses one that changed since this preview.
  */
-export function CostPlusDraft({ card }: { card: RateCard }) {
+export function CostPlusDraft({ card, live }: { card: RateCard; live: boolean }) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
+  const [schedule, setSchedule] = useState(false)
   const [effectiveFrom, setEffectiveFrom] = useState(() =>
-    toDateTimeLocal(earliestStart(true, Date.now(), RATE_CHANGE_NOTICE_MS))
+    toDateTimeLocal(earliestStart(live, Date.now(), RATE_CHANGE_NOTICE_MS))
   )
   const { data, isLoading, refetch, isFetching } = useQuery(
     trpc.rateCards.previewCostPlus.queryOptions({ cardId: card.id })
@@ -44,9 +48,7 @@ export function CostPlusDraft({ card }: { card: RateCard }) {
   if (isLoading) return <Skeleton className="h-32 w-full" />
   if (!data) return null
 
-  const writes = data.draft.changes.filter(
-    (change) => change.type === "added" || change.type === "changed"
-  )
+  const writes = countWrites(data.draft)
 
   return (
     <section className="flex flex-col gap-3 rounded-md border p-4">
@@ -59,30 +61,31 @@ export function CostPlusDraft({ card }: { card: RateCard }) {
         </Button>
       </div>
       <CostPlusChanges draft={data.draft} currency={cardCurrency(card.unit)} />
-      {writes.length > 0 && data.draftHash && (
+      {writes > 0 && data.draftHash && (
         <form
-          className="flex flex-wrap items-end gap-3"
+          className="flex flex-col gap-3"
           onSubmit={(event) => {
             event.preventDefault()
             mutate({
               cardId: card.id,
               draftHash: data.draftHash ?? "",
-              effectiveFrom: new Date(effectiveFrom).getTime(),
+              ...(schedule ? { effectiveFrom: new Date(effectiveFrom).getTime() } : {}),
             })
           }}
         >
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="cost-plus-from">Starts at</Label>
-            <Input
-              id="cost-plus-from"
-              type="datetime-local"
-              value={effectiveFrom}
-              onChange={(event) => setEffectiveFrom(event.target.value)}
-            />
+          <ScheduleField
+            id="cost-plus-from"
+            label="Starts at"
+            schedule={schedule}
+            onScheduleChange={setSchedule}
+            value={effectiveFrom}
+            onChange={setEffectiveFrom}
+          />
+          <div className="flex justify-end">
+            <Button type="submit" disabled={isPending || (schedule && !effectiveFrom)}>
+              Publish {writes} {writes === 1 ? "change" : "changes"}
+            </Button>
           </div>
-          <Button type="submit" disabled={isPending}>
-            Publish {writes.length} {writes.length === 1 ? "change" : "changes"}
-          </Button>
         </form>
       )}
     </section>
@@ -97,7 +100,13 @@ const CHANGE_BADGE = {
 } as const
 
 /** The draft's changes, controlled so a test can render them. */
-export function CostPlusChanges({ draft, currency }: { draft: Draft; currency: string }) {
+export function CostPlusChanges({
+  draft,
+  currency,
+}: {
+  draft: CostPlusDraftWire
+  currency: string
+}) {
   if (draft.changes.length === 0) {
     return (
       <p className="text-muted-foreground text-sm">

@@ -10,10 +10,12 @@ import { useState } from "react"
 import { SuperLink } from "~/components/super-link"
 import { toast } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
+import { CollapsibleSection } from "../../_components/section-label"
 
 /**
- * The rate card a plan version prices with (ADR-0008 D2). A draft version can assign or replace
- * the card in its own currency; a published version keeps the cards it was published with.
+ * The rate card a plan version prices with (ADR-0008 D2). Prices are set per feature in the
+ * editor and land on the version's own card; a draft can instead share a card with other
+ * versions, and a published version keeps the cards it was published with.
  */
 export function PlanVersionRateCard({
   planVersionId,
@@ -30,6 +32,7 @@ export function PlanVersionRateCard({
   const params = useParams<{ workspaceSlug: string; projectSlug: string }>()
   // The pick is kept with the currency it was made for, so a currency change drops it.
   const [picked, setPicked] = useState<{ currency: Currency; cardId: string } | null>(null)
+  const [isShareOpen, setIsShareOpen] = useState(false)
 
   const { data: assigned, isLoading } = useQuery(
     trpc.rateCards.forPlanVersion.queryOptions({ planVersionId })
@@ -67,7 +70,8 @@ export function PlanVersionRateCard({
       <div className="rounded-md border bg-card">
         {cards.length === 0 ? (
           <p className="px-3 py-2 text-muted-foreground text-xs">
-            No rate card yet: recurring features bill nothing and usage is refused as not priced.
+            No rate card yet. Prices are set per feature in the editor, and the first saved price
+            creates this version's card.
           </p>
         ) : (
           cards.map((entry, index) => (
@@ -90,42 +94,58 @@ export function PlanVersionRateCard({
           ))
         )}
       </div>
+      {cards.length > 0 && (
+        <p className="text-muted-foreground text-xs">
+          Prices are set per feature in the editor and land on this card.
+        </p>
+      )}
 
       {!isPublished && (
-        <div className="flex flex-col gap-2">
-          <div className="grid grid-cols-[88px_minmax(0,1fr)] gap-2">
-            <span className="flex h-8 items-center rounded-md border px-3 font-mono text-xs">
-              {currency}
-            </span>
-            <Select
-              value={cardId}
-              onValueChange={(value) => setPicked({ currency, cardId: value })}
+        <CollapsibleSection
+          label="Use a shared card"
+          summary="optional"
+          open={isShareOpen}
+          onOpenChange={setIsShareOpen}
+        >
+          <div className="flex flex-col gap-2">
+            <p className="text-muted-foreground text-xs">
+              Price this version with a card other versions use too. Its rows replace the prices set
+              in the editor.
+            </p>
+            <div className="grid grid-cols-[88px_minmax(0,1fr)] gap-2">
+              <span className="flex h-8 items-center rounded-md border px-3 font-mono text-xs">
+                {currency}
+              </span>
+              <Select
+                value={cardId}
+                onValueChange={(value) => setPicked({ currency, cardId: value })}
+              >
+                <SelectTrigger className="h-8 text-xs" aria-label="Rate card">
+                  <SelectValue
+                    placeholder={
+                      candidates.length === 0 ? `No money:${currency} cards` : "Pick a card"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {candidates.map((card) => (
+                    <SelectItem key={card.id} value={card.id}>
+                      {card.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!cardId || isPending}
+              onClick={() => mutate({ planVersionId, currency, cardId })}
             >
-              <SelectTrigger className="h-8 text-xs" aria-label="Rate card">
-                <SelectValue
-                  placeholder={
-                    candidates.length === 0 ? `No money:${currency} cards` : "Pick a card"
-                  }
-                />
-              </SelectTrigger>
-              <SelectContent>
-                {candidates.map((card) => (
-                  <SelectItem key={card.id} value={card.id}>
-                    {card.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              Assign card
+            </Button>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={!cardId || isPending}
-            onClick={() => mutate({ planVersionId, currency, cardId })}
-          >
-            Assign card
-          </Button>
-        </div>
+        </CollapsibleSection>
       )}
     </div>
   )

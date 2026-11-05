@@ -50,6 +50,7 @@ import { SubmitButton } from "~/components/submit-button"
 import { toastAction } from "~/lib/toast"
 import { useZodForm } from "~/lib/zod-form"
 import { useTRPC } from "~/trpc/client"
+import { DimensionChips } from "./dimension-chips"
 
 const AGGREGATION_METHODS_WITHOUT_FIELD = new Set<AggregationMethod>(["count"])
 const EVENT_PICKER_SEARCH_THRESHOLD = 6
@@ -406,12 +407,24 @@ export function MeterConfigFormField({
         eventSlug: event.slug,
         aggregationMethod,
         ...(aggregationField ? { aggregationField } : {}),
+        ...(meterConfig?.groupBy?.length ? { groupBy: meterConfig.groupBy } : {}),
       },
       {
         shouldDirty: true,
         shouldValidate: true,
       }
     )
+  }
+
+  const handleDimensionsChange = (groupBy: string[]) => {
+    form.setValue("meterConfig.groupBy", groupBy.length > 0 ? groupBy : undefined, {
+      shouldDirty: true,
+      shouldValidate: true,
+    })
+    // A row with dimensions is a unit price, so tiers and packages need a meter without them.
+    if (groupBy.length > 0 && form.getValues("config.usageMode") !== "unit") {
+      form.setValue("config.usageMode", "unit", { shouldDirty: true, shouldValidate: true })
+    }
   }
 
   const handleAggregationMethodChange = (value: AggregationMethod) => {
@@ -466,6 +479,7 @@ export function MeterConfigFormField({
         eventSlug: selectedEvent.slug,
         aggregationMethod: selectedAggregationMethod,
         aggregationField: onlyProperty,
+        ...(meterConfig?.groupBy?.length ? { groupBy: meterConfig.groupBy } : {}),
       },
       {
         shouldDirty: false,
@@ -475,6 +489,7 @@ export function MeterConfigFormField({
   }, [
     form,
     meterConfig?.aggregationField,
+    meterConfig?.groupBy,
     needsAggregationField,
     selectedAggregationMethod,
     selectedEvent?.id,
@@ -789,6 +804,36 @@ export function MeterConfigFormField({
             />
           )}
         </div>
+
+        <FormField
+          control={form.control}
+          name="meterConfig.groupBy"
+          render={({ field }) => (
+            <FormItem className="flex flex-col">
+              <div className="mb-2 flex items-center gap-1">
+                <FormLabel>Price varies by</FormLabel>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <HelpCircle className="size-3.5 text-muted-foreground" />
+                  </TooltipTrigger>
+                  <TooltipContent side="right" className="max-w-[320px]">
+                    Event properties a price can depend on, such as model. Each value gets its own
+                    row on the version's card; the catalog prices models. A feature with a dimension
+                    is priced per unit and has no included units.
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+              <FormControl>
+                <DimensionChips
+                  value={field.value ?? []}
+                  onChange={handleDimensionsChange}
+                  isDisabled={isDisabled}
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
       </div>
 
       <EventFormDialog

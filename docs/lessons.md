@@ -34,6 +34,30 @@ patterns. Keep it cheap to load and useful.
   when `mint validate` passes; restart `apps/docs` dev preview from the docs root before treating it
   as a config bug.
 
+## Rate Cards And Plan Pricing
+
+- 2026-11-05: A feature's meter exists twice: `features.meter_config` is the project template and
+  `plan_versions_features.meter_config` is the snapshot the plan editor writes and the budget reads.
+  Validate a card's rows against the plan features of the versions assigned to it
+  (`planFeaturePricing`), never against the project template once the card is assigned, or a
+  `model` row is refused with `UNKNOWN_DIMENSION` while the editor says the meter has it.
+- 2026-11-05: The 10-minute rate notice is a liveness rule: it applies once a version with
+  `published_at` prices with the card, not once the card has rows. Decide it under the card lock,
+  and never let a dialog pre-fill "now" as a start time: send no time and let the server pick the
+  earliest allowed, or the minute truncation rejects a card's first row.
+- 2026-11-05: A plan version's status moves only through publish; `planVersions.update` must not
+  accept `status`, or a published version set back to draft makes its live card look unused.
+- 2026-11-05: `pnpm --filter @unprice/services test:integration -- <file>` ignores the file and
+  runs the whole suite; run one file with
+  `NODE_ENV=test SKIP_ENV_VALIDATION=true APP_ENV=test pnpm exec vitest run --config vitest.integration.config.ts <file>`
+  from `internal/services`. A live-card test must attach the feature to the published version,
+  because the card is validated against its assigned versions' plan features.
+
+- 2026-11-05: The pre-commit hook runs `pnpm validate` plus every test suite in parallel, so a
+  fast-check property test that takes 5 s alone takes 20 s there. Give such a test its own
+  timeout (`budget.statements.properties.test.ts` has `PROPERTY_TIMEOUT_MS`) instead of raising
+  the global one, and rerun a suite alone before suspecting a regression.
+
 ## CI And GitHub Actions
 
 - 2026-11-03: When a billing PR predates the dependency migration on main, merge main before updating audit pins; preserve its Zod 4 compatibility patches and lockfile.

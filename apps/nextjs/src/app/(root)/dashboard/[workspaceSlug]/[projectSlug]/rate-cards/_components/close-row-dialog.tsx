@@ -12,28 +12,29 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@unprice/ui/dialog"
-import { Input } from "@unprice/ui/input"
-import { Label } from "@unprice/ui/label"
 import { useState } from "react"
 import { toast } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
 import { earliestStart, formatMatch, toDateTimeLocal } from "./rate-card-format"
+import { ScheduleField } from "./schedule-field"
 
 const NOTICE_MINUTES = RATE_CHANGE_NOTICE_MS / 60_000
 
-/** Ends one open row; an end is a price change, so it takes the card's notice. */
+/** Ends one open row; an end is a price change, so on a live card it takes the notice. */
 export function CloseRowDialog({
   cardId,
   row,
-  hasRows,
+  live,
 }: {
   cardId: string
   row: RateRow
-  hasRows: boolean
+  /** A published version prices with the card, so a change takes the notice. */
+  live: boolean
 }) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
+  const [schedule, setSchedule] = useState(false)
   const [effectiveTo, setEffectiveTo] = useState("")
   const [problem, setProblem] = useState<string | null>(null)
   const { mutate, isPending } = useMutation(
@@ -55,7 +56,8 @@ export function CloseRowDialog({
         setOpen(next)
         setProblem(null)
         if (next) {
-          setEffectiveTo(toDateTimeLocal(earliestStart(hasRows, Date.now(), RATE_CHANGE_NOTICE_MS)))
+          setSchedule(false)
+          setEffectiveTo(toDateTimeLocal(earliestStart(live, Date.now(), RATE_CHANGE_NOTICE_MS)))
         }
       }}
     >
@@ -71,8 +73,10 @@ export function CloseRowDialog({
           </DialogTitle>
           <DialogDescription>
             From this time the row prices nothing. Usage it would match is refused as not priced
-            unless another row covers it. An end takes effect at least {NOTICE_MINUTES} minutes
-            after you close it.
+            unless another row covers it.{" "}
+            {live
+              ? `A published version prices with this card, so an end takes effect at least ${NOTICE_MINUTES} minutes after you close it.`
+              : "No published version prices with this card yet, so the row can end now."}
           </DialogDescription>
         </DialogHeader>
         <form
@@ -80,22 +84,29 @@ export function CloseRowDialog({
           onSubmit={(event) => {
             event.preventDefault()
             setProblem(null)
-            mutate({ cardId, rowIds: [row.id], effectiveTo: new Date(effectiveTo).getTime() })
+            mutate({
+              cardId,
+              rowIds: [row.id],
+              ...(schedule ? { effectiveTo: new Date(effectiveTo).getTime() } : {}),
+            })
           }}
         >
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor={`close-${row.id}`}>Ends at</Label>
-            <Input
-              id={`close-${row.id}`}
-              type="datetime-local"
-              value={effectiveTo}
-              onChange={(event) => setEffectiveTo(event.target.value)}
-              required
-            />
-          </div>
+          <ScheduleField
+            id={`close-${row.id}`}
+            label="Ends at"
+            nowText="Ends now, or as soon as the card allows."
+            schedule={schedule}
+            onScheduleChange={setSchedule}
+            value={effectiveTo}
+            onChange={setEffectiveTo}
+          />
           {problem && <p className="text-destructive text-sm">{problem}</p>}
           <DialogFooter>
-            <Button type="submit" variant="destructive" disabled={isPending || !effectiveTo}>
+            <Button
+              type="submit"
+              variant="destructive"
+              disabled={isPending || (schedule && !effectiveTo)}
+            >
               Close row
             </Button>
           </DialogFooter>

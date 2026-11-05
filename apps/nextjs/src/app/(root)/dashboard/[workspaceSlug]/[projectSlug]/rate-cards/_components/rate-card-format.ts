@@ -1,9 +1,19 @@
 import type { MarginPolicy, RateRow, ratePriceSchema } from "@unprice/db/validators"
 import { formatAmount } from "@unprice/money"
+import type { RouterOutputs } from "@unprice/trpc/routes"
 import type { z } from "zod"
 
 /** A row price as the publish procedure takes it: decimals as strings. */
 export type RatePriceWire = z.input<typeof ratePriceSchema>
+
+/** A cost-plus revision as the client reads it. */
+export type CostPlusDraftWire = RouterOutputs["rateCards"]["previewCostPlus"]["draft"]
+
+/** How many of the draft's changes publishing writes as rows. */
+export function countWrites(draft: CostPlusDraftWire): number {
+  return draft.changes.filter((change) => change.type === "added" || change.type === "changed")
+    .length
+}
 
 export const RATE_CARDS_DESCRIPTION =
   "Every price lives on a rate card. A plan version prices with one card per currency; a price change is a new row, not a new plan version."
@@ -85,11 +95,11 @@ export function openRows(rows: readonly RateRow[]): RateRow[] {
 }
 
 /**
- * The earliest start a publish can take: now for a card's first rows, otherwise now plus the
- * notice and a minute of slack for the time the form stays open.
+ * The earliest start a scheduled publish can take: now for a card no published version prices
+ * with, otherwise now plus the notice and a minute of slack for the time the form stays open.
  */
-export function earliestStart(hasRows: boolean, now: number, noticeMs: number): number {
-  return hasRows ? now + noticeMs + 60_000 : now
+export function earliestStart(live: boolean, now: number, noticeMs: number): number {
+  return live ? now + noticeMs + 60_000 : now
 }
 
 /** A `datetime-local` input value for an instant, in the browser's time zone. */

@@ -30,6 +30,7 @@ import {
   parseMatch,
   toDateTimeLocal,
 } from "./rate-card-format"
+import { ScheduleField } from "./schedule-field"
 
 const NOTICE_MINUTES = RATE_CHANGE_NOTICE_MS / 60_000
 
@@ -56,10 +57,13 @@ const EMPTY_PRICE: PriceFields = {
 export function PublishRowsDialog({
   card,
   rows,
+  live,
   children,
 }: {
   card: RateCard
   rows: readonly RateRow[]
+  /** A published version prices with the card, so a change takes the notice. */
+  live: boolean
   children: ReactNode
 }) {
   const trpc = useTRPC()
@@ -68,10 +72,10 @@ export function PublishRowsDialog({
   const [featureSlug, setFeatureSlug] = useState("")
   const [match, setMatch] = useState("")
   const [price, setPrice] = useState<PriceFields>(EMPTY_PRICE)
+  const [schedule, setSchedule] = useState(false)
   const [effectiveFrom, setEffectiveFrom] = useState("")
   const [closeRowIds, setCloseRowIds] = useState<string[]>([])
   const [problem, setProblem] = useState<string | null>(null)
-  const hasRows = rows.length > 0
   const closable = openRows(rows)
 
   const { data: features } = useQuery({
@@ -117,7 +121,7 @@ export function PublishRowsDialog({
           cost: null,
         },
       ],
-      effectiveFrom: new Date(effectiveFrom).getTime(),
+      ...(schedule ? { effectiveFrom: new Date(effectiveFrom).getTime() } : {}),
       ...(closeRowIds.length > 0 ? { closeRowIds } : {}),
     })
   }
@@ -129,9 +133,8 @@ export function PublishRowsDialog({
         setOpen(next)
         setProblem(null)
         if (next) {
-          setEffectiveFrom(
-            toDateTimeLocal(earliestStart(hasRows, Date.now(), RATE_CHANGE_NOTICE_MS))
-          )
+          setSchedule(false)
+          setEffectiveFrom(toDateTimeLocal(earliestStart(live, Date.now(), RATE_CHANGE_NOTICE_MS)))
           setCloseRowIds([])
         }
       }}
@@ -141,9 +144,9 @@ export function PublishRowsDialog({
         <DialogHeader>
           <DialogTitle>Publish a row on {card.name}</DialogTitle>
           <DialogDescription>
-            {hasRows
-              ? `This card has rows, so the row starts at least ${NOTICE_MINUTES} minutes from now: budgets refresh their card every 5 minutes and never price with a stale one.`
-              : "These are the card's first rows, so they can start at once."}
+            {live
+              ? `A published version prices with this card, so the row starts at least ${NOTICE_MINUTES} minutes from now: budgets refresh their card every 5 minutes and never price with a stale one.`
+              : "No published version prices with this card yet, so the row can start now."}
           </DialogDescription>
         </DialogHeader>
         <form
@@ -182,16 +185,14 @@ export function PublishRowsDialog({
 
           <PriceFieldsInput value={price} onChange={setPrice} />
 
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="publish-from">Starts at</Label>
-            <Input
-              id="publish-from"
-              type="datetime-local"
-              value={effectiveFrom}
-              onChange={(event) => setEffectiveFrom(event.target.value)}
-              required
-            />
-          </div>
+          <ScheduleField
+            id="publish-from"
+            label="Starts at"
+            schedule={schedule}
+            onScheduleChange={setSchedule}
+            value={effectiveFrom}
+            onChange={setEffectiveFrom}
+          />
 
           {closable.length > 0 && (
             <fieldset className="flex flex-col gap-2">
@@ -221,7 +222,10 @@ export function PublishRowsDialog({
 
           {problem && <p className="text-destructive text-sm">{problem}</p>}
           <DialogFooter>
-            <Button type="submit" disabled={isPending || !featureSlug || !effectiveFrom}>
+            <Button
+              type="submit"
+              disabled={isPending || !featureSlug || (schedule && !effectiveFrom)}
+            >
               Publish row
             </Button>
           </DialogFooter>

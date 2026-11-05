@@ -38,23 +38,23 @@ export function RateCardDetail({ cardId }: { cardId: string }) {
 
 /** The rows view, controlled so a test can render it with fixed rows and a fixed clock. */
 export function RateCardRows({ data, now }: { data: RateCardData; now: number }) {
-  const { card, rows } = data
+  const { card, rows, live } = data
   const groups = groupRowsByFeature(rows, now)
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Typography variant="p" affects="removePaddingMargin" className="text-muted-foreground">
-          {rows.length === 0
-            ? "The card's first rows can start at once."
-            : "Rows are immutable: a price change publishes a successor and closes the old row."}
+          {live
+            ? "Live: a published version prices with this card, so a price change publishes a successor that starts after the notice."
+            : "Draft only: no published version prices with this card, so a price change publishes a successor that can start at once."}
         </Typography>
-        <PublishRowsDialog card={card} rows={rows}>
+        <PublishRowsDialog card={card} rows={rows} live={live}>
           <Button size="sm">Publish rows</Button>
         </PublishRowsDialog>
       </div>
 
-      {card.marginPolicy.type === "costPlus" && <CostPlusDraft card={card} />}
+      {card.marginPolicy.type === "costPlus" && <CostPlusDraft card={card} live={live} />}
 
       {groups.length === 0 ? (
         <EmptyPlaceholder className="min-h-[240px]">
@@ -73,7 +73,7 @@ export function RateCardRows({ data, now }: { data: RateCardData; now: number })
             group={group}
             cardId={card.id}
             currency={cardCurrency(card.unit)}
-            hasRows={rows.length > 0}
+            live={live}
             now={now}
           />
         ))
@@ -86,13 +86,13 @@ function FeatureRowsSection({
   group,
   cardId,
   currency,
-  hasRows,
+  live,
   now,
 }: {
   group: FeatureRows
   cardId: string
   currency: string
-  hasRows: boolean
+  live: boolean
   now: number
 }) {
   return (
@@ -104,7 +104,7 @@ function FeatureRowsSection({
         <RowsTable rows={group.current} currency={currency} now={now}>
           {(row) =>
             row.effectiveTo === null ? (
-              <CloseRowDialog cardId={cardId} row={row} hasRows={hasRows} />
+              <CloseRowDialog cardId={cardId} row={row} live={live} />
             ) : null
           }
         </RowsTable>

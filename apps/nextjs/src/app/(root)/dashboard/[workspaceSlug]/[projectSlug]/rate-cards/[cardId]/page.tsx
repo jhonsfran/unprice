@@ -51,7 +51,8 @@ export default async function RateCardPage(props: {
         <div className="flex w-full flex-col gap-1.5">
           <Typography variant="h3">{found.card.name}</Typography>
           <span className="font-mono text-muted-foreground text-xs">
-            {formatCardUnit(found.card.unit)} · {formatMarginPolicy(found.card.marginPolicy)}
+            {formatCardUnit(found.card.unit)} · {formatMarginPolicy(found.card.marginPolicy)} ·{" "}
+            {found.live ? "live · priced by a published version" : "draft only"}
           </span>
         </div>
       }
