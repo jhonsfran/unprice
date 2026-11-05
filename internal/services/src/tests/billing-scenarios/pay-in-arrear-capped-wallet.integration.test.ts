@@ -103,7 +103,10 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
     })
     const repo = new DrizzleSubscriptionRepository(db)
 
-    const activationInputs = await deriveActivationInputsFromPlan(db, { projectId, subscriptionId })
+    const activationInputs = await deriveActivationInputsFromPlan(
+      { db, rateCards: new RateCardService({ db }) },
+      { projectId, subscriptionId }
+    )
     expect(activationInputs).toEqual({
       creditLinePolicy: "capped",
       grants: [{ amount: usageAmount, reason: "Period usage allowance", source: "credit_line" }],
@@ -408,7 +411,10 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
 
     // Derivation reads the plan config: included credits first, then the
     // credit-line runway derived from finite usage limits.
-    const activationInputs = await deriveActivationInputsFromPlan(db, { projectId, subscriptionId })
+    const activationInputs = await deriveActivationInputsFromPlan(
+      { db, rateCards: new RateCardService({ db }) },
+      { projectId, subscriptionId }
+    )
     expect(activationInputs).toEqual({
       creditLinePolicy: "capped",
       grants: [
@@ -553,7 +559,10 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
     ])
 
     // The next period re-issues the plan's included credit fresh.
-    const renewalInputs = await deriveActivationInputsFromPlan(db, { projectId, subscriptionId })
+    const renewalInputs = await deriveActivationInputsFromPlan(
+      { db, rateCards: new RateCardService({ db }) },
+      { projectId, subscriptionId }
+    )
     const renewal = await activateSubscription(
       { services, db, logger },
       {

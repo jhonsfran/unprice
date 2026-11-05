@@ -5,11 +5,12 @@ import type {
   RatePrice,
   RateRow,
 } from "@unprice/db/validators"
-import { Ok } from "@unprice/error"
+import { Err, Ok, type Result } from "@unprice/error"
 import { vi } from "vitest"
 import { isEffective, matchKey, ratePriceOf } from "../pricing"
 import type { DecimalFeaturePrice } from "../pricing"
-import type { PlanVersionPricing, PublishRowsInput } from "./service"
+import { UnPriceRateCardError } from "./errors"
+import type { PlanVersionPricing, PublishRowsInput, PublishRowsResult } from "./service"
 
 function samePrice(a: RatePrice, b: RatePrice): boolean {
   const json = (value: unknown) =>
@@ -38,44 +39,53 @@ export function createRateCardsFake() {
       }
     ),
     createCard: vi.fn(async (projectId: string, input: CreateRateCardInput) => {
+      if ([...cards.values()].some((card) => card.name === input.name)) {
+        return Err(new UnPriceRateCardError({ code: "CARD_NAME_TAKEN", name: input.name }))
+      }
       sequence += 1
       const card = { ...input, id: `rc_${sequence}`, projectId } as RateCard
       cards.set(card.id, card)
       return Ok(card)
     }),
-    publishRows: vi.fn(async (input: PublishRowsInput) => {
-      const inserted: RateRow[] = []
-      const closed: { rowId: string; effectiveTo: number }[] = []
-      let unchanged = 0
-      for (const draft of input.drafts) {
-        const open = rows.find(
-          (row) =>
-            row.rateCardId === input.cardId &&
-            row.featureSlug === draft.featureSlug &&
-            matchKey(row.match) === matchKey(draft.match) &&
-            row.effectiveTo === null
-        )
-        if (open && samePrice(open.price, draft.price)) {
-          unchanged += 1
-          continue
+    cardByName: vi.fn(
+      async (_projectId: string, name: string) =>
+        [...cards.values()].find((card) => card.name === name) ?? null
+    ),
+    publishRows: vi.fn(
+      async (input: PublishRowsInput): Promise<Result<PublishRowsResult, UnPriceRateCardError>> => {
+        const inserted: RateRow[] = []
+        const closed: { rowId: string; effectiveTo: number }[] = []
+        let unchanged = 0
+        for (const draft of input.drafts) {
+          const open = rows.find(
+            (row) =>
+              row.rateCardId === input.cardId &&
+              row.featureSlug === draft.featureSlug &&
+              matchKey(row.match) === matchKey(draft.match) &&
+              row.effectiveTo === null
+          )
+          if (open && samePrice(open.price, draft.price)) {
+            unchanged += 1
+            continue
+          }
+          if (open) {
+            open.effectiveTo = input.effectiveFrom
+            closed.push({ rowId: open.id, effectiveTo: input.effectiveFrom })
+          }
+          sequence += 1
+          const row: RateRow = {
+            ...draft,
+            id: `rr_${sequence}`,
+            rateCardId: input.cardId,
+            effectiveFrom: input.effectiveFrom,
+            effectiveTo: null,
+          }
+          rows.push(row)
+          inserted.push(row)
         }
-        if (open) {
-          open.effectiveTo = input.effectiveFrom
-          closed.push({ rowId: open.id, effectiveTo: input.effectiveFrom })
-        }
-        sequence += 1
-        const row: RateRow = {
-          ...draft,
-          id: `rr_${sequence}`,
-          rateCardId: input.cardId,
-          effectiveFrom: input.effectiveFrom,
-          effectiveTo: null,
-        }
-        rows.push(row)
-        inserted.push(row)
+        return Ok({ inserted, closed, unchanged })
       }
-      return Ok({ inserted, closed, unchanged })
-    }),
+    ),
     assignToPlanVersion: vi.fn(async (_projectId: string, input: AssignPlanVersionCardInput) => {
       assignments.set(assignmentKey(input.planVersionId, input.currency), input.cardId)
       const card = cards.get(input.cardId)

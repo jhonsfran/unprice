@@ -17,6 +17,7 @@ import { Err, FetchError, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { describe, expect, it, vi } from "vitest"
 import type { ServiceContext } from "../../context"
+import { UnPriceRateCardError } from "../../rate-cards"
 import { createRateCardsFake } from "../../rate-cards/memory.fixture"
 import type { MaterializeContext } from "../plan-template/materialize"
 import {
@@ -867,6 +868,86 @@ describe("applyMonetizationConfig", () => {
     ).toHaveLength(1)
     expect(resumed.plans.map(({ status }) => status)).toEqual(["created", "created"])
     expect(resumed.staleDrafts).toEqual([])
+  })
+
+  it("prices a complete draft whose pricing failed, adopting the card the failed run created", async () => {
+    const { deps, store, cards } = createHarness()
+
+    // Every feature is written, the card is created, then its rows fail to publish.
+    cards.rateCards.publishRows.mockImplementationOnce(async () =>
+      Err(
+        new UnPriceRateCardError({
+          code: "SCHEDULE_CONFLICT",
+          featureSlug: "support",
+          scheduledFrom: 0,
+        })
+      )
+    )
+    const failed = await applyMonetizationConfig(deps, {
+      projectId: PROJECT_ID,
+      config: baseConfig(),
+    })
+
+    expect(failed.err?.message).toBe(
+      'error pricing plan "free" on its rate card: support already has a price scheduled from 1970-01-01T00:00:00.000Z; a change must start after it'
+    )
+    expect(store.versions).toHaveLength(1)
+    expect(store.versions[0]?.planFeatures.map(({ feature }) => feature.slug)).toEqual([
+      "support",
+      "chat-messages",
+    ])
+    expect([...cards.cards.values()].map(({ id, name }) => ({ id, name }))).toEqual([
+      { id: "rc_1", name: "free plan_version_1 USD" },
+    ])
+    expect(cards.rateCards.assignToPlanVersion).not.toHaveBeenCalled()
+
+    const resumed = expectApplied(
+      await applyMonetizationConfig(deps, { projectId: PROJECT_ID, config: baseConfig() })
+    )
+
+    // The complete draft is unchanged, but this apply priced it on the card the failed run made.
+    expect(resumed.plans[0]).toEqual({
+      slug: "free",
+      planVersionId: "plan_version_1",
+      status: "unchanged",
+    })
+    expect(cards.rateCards.assignToPlanVersion).toHaveBeenCalledWith(PROJECT_ID, {
+      planVersionId: "plan_version_1",
+      currency: "USD",
+      cardId: "rc_1",
+    })
+    expect(
+      cards.rows
+        .filter((row) => row.rateCardId === "rc_1")
+        .map(({ featureSlug, price, effectiveTo }) => ({ featureSlug, price, effectiveTo }))
+    ).toEqual([
+      { featureSlug: "support", price: { type: "flat", amount: BigInt(0) }, effectiveTo: null },
+      {
+        featureSlug: "chat-messages",
+        price: { type: "unit", components: [{ property: null, rate: BigInt(1_000_000), per: 1 }] },
+        effectiveTo: null,
+      },
+    ])
+
+    // A rerun with the same prices writes nothing.
+    const rowCount = cards.rows.length
+    cards.rateCards.createCard.mockClear()
+    cards.rateCards.assignToPlanVersion.mockClear()
+    cards.rateCards.publishRows.mockClear()
+    expectApplied(
+      await applyMonetizationConfig(deps, { projectId: PROJECT_ID, config: baseConfig() })
+    )
+
+    expect(cards.rateCards.createCard).not.toHaveBeenCalled()
+    expect(cards.rateCards.assignToPlanVersion).not.toHaveBeenCalled()
+    expect(cards.rows).toHaveLength(rowCount)
+    const reruns = await Promise.all(
+      cards.rateCards.publishRows.mock.results.map((result) => result.value)
+    )
+    expect(reruns.map((result) => result.val)).toEqual([
+      { inserted: [], closed: [], unchanged: 2 },
+      { inserted: [], closed: [], unchanged: 2 },
+    ])
   })
 
   it("reports published and creates no draft when the hash matches a published version", async () => {

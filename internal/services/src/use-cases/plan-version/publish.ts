@@ -3,6 +3,7 @@ import * as schema from "@unprice/db/schema"
 import type { PlanVersion } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
+import { z } from "zod"
 import type { ServiceContext } from "../../context"
 import { priceCanCharge } from "../../pricing"
 import { toErrorContext } from "../../utils/log-context"
@@ -29,7 +30,18 @@ export type PublishPlanVersionOutput =
         | "payment_provider_error"
         | "publish_error"
     }
+  | z.infer<typeof unpricedPlanVersionSchema>
   | { state: "ok"; planVersion: PlanVersion }
+
+/**
+ * A version that would ship free (ADR-0008 D2): it has no card in its currency (`no_card`), or
+ * `featureSlugs` have no current or scheduled row on that card (`missing_rows`).
+ */
+export const unpricedPlanVersionSchema = z.object({
+  state: z.literal("unpriced"),
+  reason: z.enum(["no_card", "missing_rows"]),
+  featureSlugs: z.array(z.string()),
+})
 
 export async function publishPlanVersion(
   deps: PublishPlanVersionDeps,
@@ -85,10 +97,19 @@ export async function publishPlanVersion(
     now,
     Number.MAX_SAFE_INTEGER
   )
-  const rows =
-    pricing.get(planVersionData.id)?.find((card) => card.currency === planVersionData.currency)
-      ?.rows ?? []
+  const card = pricing
+    .get(planVersionData.id)
+    ?.find((entry) => entry.currency === planVersionData.currency)
+  if (!card) {
+    return Ok({ state: "unpriced", reason: "no_card", featureSlugs: [] })
+  }
+  const { rows } = card
   const featureSlugs = new Set(planVersionData.planFeatures.map(({ feature }) => feature.slug))
+  // Every feature type bills through its row, so a feature without one would ship free.
+  const unpriced = [...featureSlugs].filter((slug) => !rows.some((row) => row.featureSlug === slug))
+  if (unpriced.length > 0) {
+    return Ok({ state: "unpriced", reason: "missing_rows", featureSlugs: unpriced })
+  }
   const paymentMethodRequired =
     planVersionData.collectionMethod === "charge_automatically" &&
     rows.some((row) => featureSlugs.has(row.featureSlug) && priceCanCharge(row.price))

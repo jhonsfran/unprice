@@ -70,6 +70,7 @@ function createCache(): Cache {
       remove: vi.fn(async () => undefined),
       set: vi.fn(async () => undefined),
     },
+    planVersion: { remove: vi.fn(async () => Ok(undefined)) },
   } as unknown as Cache
 }
 

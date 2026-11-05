@@ -351,20 +351,6 @@ async function materializeVersionFeatures(
     }
   }
 
-  const priced = await pricePlanVersionFeatures(context, {
-    planVersion,
-    planSlug: plan.slug,
-    prices: featurePrices(plan),
-  })
-  if (priced.err) {
-    return Err(
-      new FetchError({
-        message: `error pricing plan "${plan.slug}" on its rate card: ${priced.err.message}`,
-        retry: false,
-      })
-    )
-  }
-
   return Ok({ state: "ok" })
 }
 
@@ -517,6 +503,22 @@ export async function resolvePlanDraft(
         })
       )
     }
+  }
+
+  // Every draft is priced, complete or not: a run that wrote every feature and then failed to
+  // price leaves a complete draft, and only this call can finish it. A rerun writes nothing.
+  const priced = await pricePlanVersionFeatures(context, {
+    planVersion,
+    planSlug: plan.slug,
+    prices: featurePrices(plan),
+  })
+  if (priced.err) {
+    return Err(
+      new FetchError({
+        message: `error pricing plan "${plan.slug}" on its rate card: ${priced.err.message}`,
+        retry: false,
+      })
+    )
   }
 
   return Ok({

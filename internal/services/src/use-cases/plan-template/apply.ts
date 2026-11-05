@@ -5,6 +5,7 @@ import type { Logger } from "@unprice/logs"
 import type { ServiceContext } from "../../context"
 import { publishPlanVersion } from "../plan-version/publish"
 import {
+  type PlanFeaturePrice,
   type PlanTemplateMaterializeCaches,
   createTemplatePlanVersion,
   getExistingTemplatePlanVersion,
@@ -12,6 +13,7 @@ import {
   getOrCreatePlan,
   isTemplatePlanVersionComplete,
   materializeTemplatePlanFeatures,
+  pricePlanVersionFeatures,
 } from "./materialize"
 import {
   type ApplyPlanTemplateInput,
@@ -51,6 +53,7 @@ type ApplyPlanTemplateFailureState =
   | "no_features"
   | "payment_provider_error"
   | "publish_error"
+  | "unpriced"
 
 type ApplyPlanTemplateDeps = {
   services: Pick<ServiceContext, "plans" | "features" | "events" | "customers" | "rateCards">
@@ -126,7 +129,11 @@ export async function applyPlanTemplate(
       caches.planVersionFeatureSlugs.set(planVersion.id, new Set())
     }
 
-    if (!complete) {
+    // A draft is materialized and priced even when complete: a run that wrote every feature and
+    // then failed to price leaves a complete draft, and only this pass can finish it. Both steps
+    // write nothing when there is nothing left to do.
+    let prices: PlanFeaturePrice[] | null = null
+    if (planVersion.status !== "published") {
       const materialized = await materializeTemplatePlanFeatures(context, {
         template,
         planVersion,
@@ -134,6 +141,7 @@ export async function applyPlanTemplate(
       if (materialized.err) return Err(materialized.err)
       if (materialized.val.state !== "ok") return Ok(materialized.val)
 
+      prices = materialized.val.prices
       complete = isTemplatePlanVersionComplete(
         caches.planVersionFeatureSlugs.get(planVersion.id) ?? new Set(),
         expectedFeatureSlugs
@@ -147,6 +155,22 @@ export async function applyPlanTemplate(
           retry: true,
         })
       )
+    }
+
+    if (prices) {
+      const priced = await pricePlanVersionFeatures(context, {
+        planVersion,
+        planSlug: template.plan.slug,
+        prices,
+      })
+      if (priced.err) {
+        return Err(
+          new FetchError({
+            message: `error pricing template plan version: ${priced.err.message}`,
+            retry: false,
+          })
+        )
+      }
     }
 
     if (input.publish && planVersion.status !== "published") {

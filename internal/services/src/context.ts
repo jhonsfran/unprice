@@ -140,7 +140,7 @@ export function createServiceContext(
     hashCache: new Map<string, string>(),
   })
 
-  const rateCards = new RateCardService({ db: deps.db })
+  const rateCards = new RateCardService({ db: deps.db, cache: deps.cache })
 
   const plans = new PlanService({
     db: deps.db,

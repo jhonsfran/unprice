@@ -229,6 +229,7 @@ export function makeInvoicing(
       unit: "money:USD",
     }),
     getEffectiveRows: vi.fn().mockResolvedValue(opts.rows ?? [makeFlatRow()]),
+    rowsForVersions: vi.fn().mockResolvedValue(new Map()),
   }
   return { payerBudgets, rateCards } satisfies InvoicingPorts
 }

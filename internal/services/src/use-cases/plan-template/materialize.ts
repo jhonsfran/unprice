@@ -17,9 +17,8 @@ import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { ServiceContext } from "../../context"
 import { type DecimalFeaturePrice, ratePriceOf } from "../../pricing"
-import type { UnPriceRateCardError } from "../../rate-cards"
+import { type UnPriceRateCardError, pricePlanVersion } from "../../rate-cards"
 import { createPlan } from "../plan/create"
-import { pricePlanVersion } from "../rate-cards/price-plan-version"
 import {
   BASE_FEE_FEATURE,
   CREDITS_FEATURE,
@@ -435,8 +434,8 @@ type PricedFeatureInput = Parameters<typeof getOrCreatePlanVersionFeature>[1] & 
 }
 
 /**
- * Materializes a feature and collects its rate card row (ADR-0008 D2), which
- * `pricePlanVersionFeatures` publishes once every feature exists.
+ * Materializes a feature and collects its rate card row (ADR-0008 D2), which the caller
+ * publishes with `pricePlanVersionFeatures` once every feature exists.
  */
 async function materializeFeature(
   context: MaterializeContext,
@@ -481,16 +480,25 @@ export async function pricePlanVersionFeatures(
       planVersionId: planVersion.id,
       currency: planVersion.currency,
       cardName: `${planSlug} ${planVersion.id} ${planVersion.currency}`,
-      prices,
+      prices: [...prices],
       now: Date.now(),
     }
   )
 }
 
+/**
+ * Writes the template's features that a draft version is missing and returns every feature's
+ * rate card row, whether this call wrote the feature or found it, for the caller to price with.
+ */
 export async function materializeTemplatePlanFeatures(
   context: MaterializeContext,
   { template, planVersion }: { template: TemplatePlan; planVersion: PlanVersion }
-): Promise<Result<MaterializePlanVersionFeaturesOutput, FetchError>> {
+): Promise<
+  Result<
+    { state: "ok"; prices: PlanFeaturePrice[] } | { state: PlanVersionFeatureFailureState },
+    FetchError
+  >
+> {
   const prices: PlanFeaturePrice[] = []
   const baseFeeFeature = await getOrCreateFeature(context, BASE_FEE_FEATURE)
   if (baseFeeFeature.err) return Err(baseFeeFeature.err)
@@ -503,7 +511,8 @@ export async function materializeTemplatePlanFeatures(
     order: 1024,
     metadata: featureMetadata({ hidden: true }),
   })
-  if (baseFee.err || baseFee.val.state !== "ok") return baseFee
+  if (baseFee.err) return Err(baseFee.err)
+  if (baseFee.val.state !== "ok") return Ok(baseFee.val)
 
   const needsSeatFeature = Boolean(template.seatPack || template.usage.slug === SEAT_FEATURE.slug)
   const seatFeature = needsSeatFeature ? await getOrCreateFeature(context, SEAT_FEATURE) : null
@@ -519,7 +528,8 @@ export async function materializeTemplatePlanFeatures(
       order: 2048,
       limit: template.seatPack.units,
     })
-    if (seat.err || seat.val.state !== "ok") return seat
+    if (seat.err) return Err(seat.err)
+    if (seat.val.state !== "ok") return Ok(seat.val)
   }
 
   for (const [index, flatFeatureTemplate] of template.flatFeatures.entries()) {
@@ -533,7 +543,8 @@ export async function materializeTemplatePlanFeatures(
       price: { price: "0" },
       order: 3072 + index * 1024,
     })
-    if (flat.err || flat.val.state !== "ok") return flat
+    if (flat.err) return Err(flat.err)
+    if (flat.val.state !== "ok") return Ok(flat.val)
   }
 
   const usageFeature =
@@ -571,7 +582,8 @@ export async function materializeTemplatePlanFeatures(
     limit: template.usage.config.limit,
     meterConfig: usageMeterConfig.val,
   })
-  if (usage.err || usage.val.state !== "ok") return usage
+  if (usage.err) return Err(usage.err)
+  if (usage.val.state !== "ok") return Ok(usage.val)
 
   const creditsFeature = await getOrCreateFeature(context, CREDITS_FEATURE)
   if (creditsFeature.err) return Err(creditsFeature.err)
@@ -603,20 +615,8 @@ export async function materializeTemplatePlanFeatures(
     },
     meterConfig: creditsMeterConfig.val,
   })
-  if (credits.err || credits.val.state !== "ok") return credits
+  if (credits.err) return Err(credits.err)
+  if (credits.val.state !== "ok") return Ok(credits.val)
 
-  const priced = await pricePlanVersionFeatures(context, {
-    planVersion,
-    planSlug: template.plan.slug,
-    prices,
-  })
-  if (priced.err) {
-    return Err(
-      new FetchError({
-        message: `error pricing template plan version: ${priced.err.message}`,
-        retry: false,
-      })
-    )
-  }
-  return Ok({ state: "ok" as const })
+  return Ok({ state: "ok" as const, prices })
 }

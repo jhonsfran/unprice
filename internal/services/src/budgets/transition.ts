@@ -8,7 +8,7 @@
  * record), and the window history.
  */
 
-import type { BudgetPricing } from "@unprice/db/validators"
+import { type BudgetPricing, CARD_REFRESH_MS } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import type { CardRows } from "../pricing"
 import {
@@ -86,12 +86,6 @@ export type BudgetReader = {
   /** The wallet reservations of these statement keys; a key without one is absent. */
   readFunding(statementKeys: readonly string[]): Funding[]
 }
-
-/**
- * How long a cached card prices before it must be read again (ADR-0008 D2): shorter than the
- * notice a row change gives, so no budget prices with a row that has ended or misses a new one.
- */
-export const CARD_REFRESH_MS = 5 * 60_000
 
 /** The most expired reservations one sweep closes; the alarm comes back at once for the rest. */
 export const EXPIRED_PER_SWEEP = 256

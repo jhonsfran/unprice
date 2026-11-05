@@ -28,7 +28,8 @@ import { resolvePeriodCharge } from "./period-charge"
 export type InvoicingPorts = {
   /** Null where billing reaches no payer budget; a statement with metered periods then fails. */
   payerBudgets: PayerBudgetGateway | null
-  rateCards: Pick<RateCardService, "cardForPlanVersion" | "getEffectiveRows">
+  /** Also prices the credit line a period's activation derives from the plan's usage limits. */
+  rateCards: Pick<RateCardService, "cardForPlanVersion" | "getEffectiveRows" | "rowsForVersions">
 }
 
 export async function billPeriod({

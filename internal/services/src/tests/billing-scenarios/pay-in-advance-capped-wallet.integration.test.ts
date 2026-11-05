@@ -107,7 +107,10 @@ describe("P0-D pay_in_advance capped wallet workflow", () => {
       subscriptions: {},
     } as unknown as Pick<ServiceContext, "wallet" | "ledger" | "subscriptions">
 
-    const activationInputs = await deriveActivationInputsFromPlan(db, { projectId, subscriptionId })
+    const activationInputs = await deriveActivationInputsFromPlan(
+      { db, rateCards: new RateCardService({ db }) },
+      { projectId, subscriptionId }
+    )
     expect(activationInputs).toEqual({
       creditLinePolicy: "capped",
       grants: [{ amount: usageAmount, reason: "Period usage allowance", source: "credit_line" }],

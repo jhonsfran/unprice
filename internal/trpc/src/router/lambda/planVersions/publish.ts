@@ -64,6 +64,16 @@ export const publish = protectedProjectProcedure
       })
     }
 
+    if (val.state === "unpriced") {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message:
+          val.reason === "no_card"
+            ? "Assign a rate card in the version's currency before publishing"
+            : `Price these features on the version's rate card before publishing: ${val.featureSlugs.join(", ")}`,
+      })
+    }
+
     if (val.state === "payment_provider_error") {
       throw paymentProviderPublishError()
     }

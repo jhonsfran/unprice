@@ -17,3 +17,10 @@ export {
   type PublishRowsResult,
   RateCardService,
 } from "./service"
+export {
+  type PricePlanVersionDeps,
+  type PricePlanVersionInput,
+  pricePlanVersion,
+  pricePlanVersionInputSchema,
+} from "./price-plan-version"
+export { projectFeaturePricing } from "./project-features"

@@ -3,7 +3,7 @@ import { Err, type FetchError, type Result } from "@unprice/error"
 import { z } from "zod"
 import type { ServiceContext } from "../../context"
 import type { PublishRowsResult, UnPriceRateCardError } from "../../rate-cards"
-import { projectFeaturePricing } from "./project-features"
+import { projectFeaturePricing } from "../../rate-cards"
 
 export type PublishCostPlusDeps = {
   services: Pick<ServiceContext, "features" | "rateCards">

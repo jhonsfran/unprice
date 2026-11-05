@@ -20,7 +20,7 @@ function usageUnitFeature({
 }
 
 /** The plan card's row for `api`, in its stored (wire) form. */
-function wireRow(rate: string) {
+function wireRow(rate: string, overrides: Record<string, unknown> = {}) {
   return {
     id: "rr_api",
     rateCardId: "rc_plan",
@@ -32,6 +32,7 @@ function wireRow(rate: string) {
     effectiveTo: null,
     source: "manual",
     sourceRef: null,
+    ...overrides,
   }
 }
 
@@ -57,13 +58,11 @@ function createDb(phase: {
       subscriptions: {
         findFirst,
       },
-      planVersionRateCards: {
-        findFirst: vi.fn(async () => ({ card: { rows: [wireRow("0.5")] } })),
-      },
     },
   } as unknown as Database
+  const rowsForVersions = vi.fn(async () => new Map([["pv_abc", rows("0.5")]]))
 
-  return { db, findFirst }
+  return { deps: { db, rateCards: { rowsForVersions } }, findFirst, rowsForVersions }
 }
 
 describe("derivePeriodUsageAllowanceAmount", () => {
@@ -104,6 +103,32 @@ describe("derivePeriodUsageAllowanceAmount", () => {
         },
       })
     ).toBe(ledger("3"))
+  })
+
+  it("prices the units past included with the dearest row of the feature", () => {
+    // A dimension row ($2 for the large model) is dearer than the default row ($0.50); a flat
+    // row never prices usage, nor does another feature's row. 10 limit - 4 included = 6 at $2.
+    const cardRows = [
+      wireRow("0.5"),
+      wireRow("2", { id: "rr_api_large", match: { model: "large" } }),
+      wireRow("0", {
+        id: "rr_api_flat",
+        match: { model: "flat" },
+        price: { type: "flat", amount: "100" },
+      }),
+      wireRow("9", { id: "rr_other", featureSlug: "other" }),
+    ].map((row) => rateRowSchema.parse(row))
+
+    expect(
+      derivePeriodUsageAllowanceAmount({
+        creditLinePolicy: "capped",
+        creditLineAmount: null,
+        planVersion: {
+          planFeatures: [usageUnitFeature({ limit: 10, included: "4" })],
+          rows: cardRows,
+        },
+      })
+    ).toBe(ledger("12"))
   })
 
   it("does not infer credit for unlimited paid usage", () => {
@@ -148,7 +173,7 @@ describe("derivePeriodUsageAllowanceAmount", () => {
 
 describe("deriveActivationInputsFromPlan", () => {
   it("issues a credit_line grant for the derived period usage allowance", async () => {
-    const { db } = createDb({
+    const { deps, rowsForVersions } = createDb({
       creditLinePolicy: "capped",
       creditLineAmount: null,
       planVersion: {
@@ -156,8 +181,14 @@ describe("deriveActivationInputsFromPlan", () => {
       },
     })
 
-    const result = await deriveActivationInputsFromPlan(db, { subscriptionId, projectId })
+    const result = await deriveActivationInputsFromPlan(deps, { subscriptionId, projectId })
 
+    // The version's rows come from the rate card service, in the version's own currency.
+    expect(rowsForVersions).toHaveBeenCalledWith(
+      projectId,
+      [expect.objectContaining({ id: "pv_abc", currency: "USD" })],
+      expect.any(Number)
+    )
     expect(result?.grants).toEqual([
       {
         amount: ledger("5"),
@@ -168,7 +199,7 @@ describe("deriveActivationInputsFromPlan", () => {
   })
 
   it("returns the uncapped policy without issuing a credit_line grant", async () => {
-    const { db } = createDb({
+    const { deps } = createDb({
       creditLinePolicy: "uncapped",
       creditLineAmount: null,
       planVersion: {
@@ -176,7 +207,7 @@ describe("deriveActivationInputsFromPlan", () => {
       },
     })
 
-    const result = await deriveActivationInputsFromPlan(db, { subscriptionId, projectId })
+    const result = await deriveActivationInputsFromPlan(deps, { subscriptionId, projectId })
 
     expect(result).toEqual({
       creditLinePolicy: "uncapped",
@@ -185,7 +216,7 @@ describe("deriveActivationInputsFromPlan", () => {
   })
 
   it("issues a plan_included grant before the credit_line grant when the plan includes credits", async () => {
-    const { db } = createDb({
+    const { deps } = createDb({
       creditLinePolicy: "capped",
       creditLineAmount: ledger("10"),
       planVersion: {
@@ -194,7 +225,7 @@ describe("deriveActivationInputsFromPlan", () => {
       },
     })
 
-    const result = await deriveActivationInputsFromPlan(db, { subscriptionId, projectId })
+    const result = await deriveActivationInputsFromPlan(deps, { subscriptionId, projectId })
 
     expect(result?.grants).toEqual([
       {
@@ -211,7 +242,7 @@ describe("deriveActivationInputsFromPlan", () => {
   })
 
   it("issues no plan_included grant when the plan has no included credit config", async () => {
-    const { db } = createDb({
+    const { deps } = createDb({
       creditLinePolicy: "capped",
       creditLineAmount: ledger("10"),
       planVersion: {
@@ -220,13 +251,13 @@ describe("deriveActivationInputsFromPlan", () => {
       },
     })
 
-    const result = await deriveActivationInputsFromPlan(db, { subscriptionId, projectId })
+    const result = await deriveActivationInputsFromPlan(deps, { subscriptionId, projectId })
 
     expect(result?.grants.map((grant) => grant.source)).toEqual(["credit_line"])
   })
 
   it("filters phases by the provided phaseId", async () => {
-    const { db, findFirst } = createDb({
+    const { deps, findFirst } = createDb({
       creditLinePolicy: "capped",
       creditLineAmount: ledger("10"),
       planVersion: {
@@ -235,8 +266,8 @@ describe("deriveActivationInputsFromPlan", () => {
       },
     })
 
-    await deriveActivationInputsFromPlan(db, { subscriptionId, projectId, phaseId: "phase_123" })
-    await deriveActivationInputsFromPlan(db, { subscriptionId, projectId })
+    await deriveActivationInputsFromPlan(deps, { subscriptionId, projectId, phaseId: "phase_123" })
+    await deriveActivationInputsFromPlan(deps, { subscriptionId, projectId })
 
     const withPhaseId = findFirst.mock.calls[0]?.[0] as {
       with: { phases: { where?: unknown } }

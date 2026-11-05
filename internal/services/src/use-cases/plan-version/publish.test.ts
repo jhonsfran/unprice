@@ -107,4 +107,68 @@ describe("publishPlanVersion", () => {
       })
     )
   })
+
+  describe("refuses a version that would ship free", () => {
+    /** A USD draft with a flat `base` fee and a metered `api` feature. */
+    function publishWith(pricing: Map<string, unknown[]>) {
+      const db = {
+        query: {
+          versions: {
+            findFirst: vi.fn().mockResolvedValue({
+              id: "pv_123",
+              projectId: "proj_123",
+              planId: "plan_123",
+              status: "draft",
+              collectionMethod: "charge_automatically",
+              currency: "USD",
+              paymentProvider: "sandbox",
+              planFeatures: [
+                { id: "fpv_base", featureType: "flat", feature: { slug: "base" } },
+                { id: "fpv_api", featureType: "usage", feature: { slug: "api" } },
+              ],
+            }),
+          },
+        },
+        transaction: vi.fn(),
+      } as unknown as Database
+      const getPaymentProvider = vi.fn()
+
+      const result = publishPlanVersion(
+        {
+          services: {
+            customers: { getPaymentProvider },
+            rateCards: { pricingForPlanVersions: vi.fn(async () => pricing) },
+          } as unknown as Pick<ServiceContext, "customers" | "rateCards">,
+          db,
+          logger: createLogger(),
+          userId: "usr_123",
+        },
+        { id: "pv_123", projectId: "proj_123", workspaceUnPriceCustomerId: "cus_123" }
+      )
+      return { result, db, getPaymentProvider }
+    }
+
+    it("without a card in the version's currency", async () => {
+      const euros =
+        baseCard()
+          .get("pv_123")
+          ?.map((card) => ({ ...card, currency: "EUR" })) ?? []
+      const { result, db, getPaymentProvider } = publishWith(new Map([["pv_123", euros]]))
+
+      expect((await result).val).toEqual({ state: "unpriced", reason: "no_card", featureSlugs: [] })
+      expect(getPaymentProvider).not.toHaveBeenCalled()
+      expect(db.transaction).not.toHaveBeenCalled()
+    })
+
+    it("when a feature has no current or scheduled row on the card", async () => {
+      const { result, db } = publishWith(baseCard())
+
+      expect((await result).val).toEqual({
+        state: "unpriced",
+        reason: "missing_rows",
+        featureSlugs: ["api"],
+      })
+      expect(db.transaction).not.toHaveBeenCalled()
+    })
+  })
 })

@@ -23,6 +23,7 @@ import {
 } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import { formatAmount } from "@unprice/money"
+import type { Cache } from "../cache/service"
 import type { DbExecutor, Transaction } from "../deps"
 import { type CostPlusCard, type CostPlusDraft, costPlusRevision, writesRow } from "../pricing"
 import { UnPriceRateCardError, type UnpriceableFeature } from "./errors"
@@ -31,6 +32,11 @@ import { stableHash, toWire } from "./wire"
 
 type RateCardServiceDeps = {
   db: Database
+  /**
+   * The plan version cache, whose entries show prices read from cards; a card write clears its
+   * versions. Absent where nothing reads plan versions through the cache.
+   */
+  cache?: Pick<Cache, "planVersion">
 }
 
 type CardRow = typeof rateCards.$inferSelect
@@ -101,6 +107,15 @@ export class RateCardService {
       .returning()
     if (!row) return Err(new UnPriceRateCardError({ code: "CARD_NAME_TAKEN", name: input.name }))
     return Ok(toRateCard(row))
+  }
+
+  /** The project's card named `name`, or null when it has none. */
+  async cardByName(projectId: string, name: string): Promise<RateCard | null> {
+    const [row] = await this.deps.db
+      .select()
+      .from(rateCards)
+      .where(and(eq(rateCards.projectId, projectId), eq(rateCards.name, name)))
+    return row ? toRateCard(row) : null
   }
 
   async listCards(projectId: string): Promise<RateCard[]> {
@@ -176,6 +191,7 @@ export class RateCardService {
         ],
         set: { rateCardId: cardId, updatedAt: new Date() },
       })
+    await this.forgetPlanVersionPrices([planVersionId])
     return Ok({ planVersionId, currency, cardId, unit: rateCardUnitSchema.parse(card.unit) })
   }
 
@@ -430,7 +446,7 @@ export class RateCardService {
       rows: RateRow[]
     ) => Promise<Result<T, UnPriceRateCardError>>
   ): Promise<Result<T, UnPriceRateCardError>> {
-    return this.deps.db.transaction(async (tx) => {
+    const result = await this.deps.db.transaction(async (tx) => {
       const [card] = await tx
         .select()
         .from(rateCards)
@@ -439,6 +455,31 @@ export class RateCardService {
       if (!card) return Err(new UnPriceRateCardError({ code: "CARD_NOT_FOUND", cardId }))
       return write(tx, toRateCard(card), await this.cardRows(tx, projectId, cardId))
     })
+    if (!result.err) await this.forgetCardPrices(projectId, cardId)
+    return result
+  }
+
+  /**
+   * Drops the cached plan versions that show prices read from the card. A row scheduled for
+   * later takes effect without a write, so the cache's TTL is capped at `CARD_REFRESH_MS` too.
+   */
+  private async forgetCardPrices(projectId: string, cardId: string): Promise<void> {
+    if (!this.deps.cache) return
+    const assigned = await this.deps.db
+      .selectDistinct({ planVersionId: planVersionRateCards.planVersionId })
+      .from(planVersionRateCards)
+      .where(
+        and(
+          eq(planVersionRateCards.projectId, projectId),
+          eq(planVersionRateCards.rateCardId, cardId)
+        )
+      )
+    await this.forgetPlanVersionPrices(assigned.map(({ planVersionId }) => planVersionId))
+  }
+
+  private async forgetPlanVersionPrices(planVersionIds: readonly string[]): Promise<void> {
+    if (!this.deps.cache || planVersionIds.length === 0) return
+    await this.deps.cache.planVersion.remove([...planVersionIds])
   }
 }
 

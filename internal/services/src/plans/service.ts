@@ -1,4 +1,4 @@
-import { type Database, and, desc, eq, getTableColumns, sql } from "@unprice/db"
+import { type Database, and, desc, eq, getTableColumns, ne, sql } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
 import { nFormatter, newId } from "@unprice/db/utils"
 import {
@@ -1502,6 +1502,20 @@ export class PlanService {
                 )
             })
           )
+        }
+
+        // A version prices with its card in its own currency (ADR-0008 D2). A new currency drops
+        // the cards of every other one, so publishing asks for a card in the new currency.
+        if (currency !== undefined && currency !== planVersionData.currency) {
+          await tx
+            .delete(schema.planVersionRateCards)
+            .where(
+              and(
+                eq(schema.planVersionRateCards.projectId, projectId),
+                eq(schema.planVersionRateCards.planVersionId, planVersionData.id),
+                ne(schema.planVersionRateCards.currency, currency)
+              )
+            )
         }
 
         return tx

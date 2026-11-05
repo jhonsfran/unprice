@@ -1,14 +1,20 @@
 import type { Database } from "@unprice/db"
-import {
-  type CreditLinePolicy,
-  type PlanVersionFeature,
-  type PlanVersionMetadata,
-  type RateRow,
-  rateRowSchema,
+import type {
+  CreditLinePolicy,
+  Currency,
+  PlanVersionFeature,
+  PlanVersionMetadata,
+  RateRow,
 } from "@unprice/db/validators"
 import { parseAmount } from "@unprice/money"
-import { priceQuantity, rowsAt } from "../../pricing"
+import { priceQuantity } from "../../pricing"
+import type { RateCardService } from "../../rate-cards"
 import type { ActivationGrant } from "./provision-period"
+
+export type DeriveActivationInputsDeps = {
+  db: Database
+  rateCards: Pick<RateCardService, "rowsForVersions">
+}
 
 type AllowanceFeature = Pick<PlanVersionFeature, "featureType" | "limit" | "included"> & {
   feature: { slug: string }
@@ -23,7 +29,7 @@ type SubscriptionRow = {
     creditLineAmount: number | null
     planVersion: {
       id: string
-      currency: string
+      currency: Currency
       metadata: PlanVersionMetadata | null
       planFeatures: AllowanceFeature[]
     } | null
@@ -64,11 +70,11 @@ export interface DerivedActivationInputs {
  * Returns `null` when the subscription / phase / plan version is missing.
  */
 export async function deriveActivationInputsFromPlan(
-  db: Database,
+  deps: DeriveActivationInputsDeps,
   input: { subscriptionId: string; projectId: string; phaseId?: string }
 ): Promise<DerivedActivationInputs | null> {
   const phaseId = input.phaseId
-  const sub = (await db.query.subscriptions.findFirst({
+  const sub = (await deps.db.query.subscriptions.findFirst({
     with: {
       customer: { columns: { id: true, defaultCurrency: true } },
       phases: {
@@ -117,13 +123,12 @@ export async function deriveActivationInputsFromPlan(
     })
   }
 
+  const { planVersion } = phase
   const rows =
     phase.creditLinePolicy === "capped" && phase.creditLineAmount === null
-      ? await planVersionRows(db, {
-          projectId: input.projectId,
-          planVersionId: phase.planVersion.id,
-          currency: phase.planVersion.currency,
-        })
+      ? ((await deps.rateCards.rowsForVersions(input.projectId, [planVersion], Date.now())).get(
+          planVersion.id
+        ) ?? [])
       : []
   const allowanceAmount = derivePeriodUsageAllowanceAmount({
     ...phase,
@@ -139,24 +144,6 @@ export async function deriveActivationInputsFromPlan(
   }
 
   return { grants, creditLinePolicy: phase.creditLinePolicy }
-}
-
-/** The rows of the plan version's card in `currency` in effect now; none without a card. */
-async function planVersionRows(
-  db: Database,
-  input: { projectId: string; planVersionId: string; currency: string }
-): Promise<RateRow[]> {
-  const assignment = await db.query.planVersionRateCards.findFirst({
-    with: { card: { with: { rows: true } } },
-    where: (row, { and, eq }) =>
-      and(
-        eq(row.projectId, input.projectId),
-        eq(row.planVersionId, input.planVersionId),
-        eq(row.currency, input.currency as typeof row.currency._.data)
-      ),
-  })
-  const rows = (assignment?.card?.rows ?? []).map((row) => rateRowSchema.parse(row))
-  return rowsAt(rows, Date.now())
 }
 
 export function derivePeriodUsageAllowanceAmount(phase: {

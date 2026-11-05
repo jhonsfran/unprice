@@ -2,6 +2,7 @@ import { type Cache as C, type Context, Namespace, createCache } from "@unkey/ca
 import { withMetrics } from "@unkey/cache/middleware"
 
 import { MemoryStore, type Store } from "@unkey/cache/stores"
+import { CARD_REFRESH_MS } from "@unprice/db/validators"
 import type { Metrics } from "../metrics"
 import type { CacheNamespace, CacheNamespaces } from "./namespaces"
 import {
@@ -64,6 +65,7 @@ export class CacheService {
       fresh: CACHE_FRESHNESS_TIME_MS,
       stale: CACHE_STALENESS_TIME_MS,
     }
+    const pricedPlanOpts = { ...defaultOpts, stale: CARD_REFRESH_MS }
 
     this.cache = createCache({
       apiKeyByHash: new Namespace<CacheNamespaces["apiKeyByHash"]>(this.context, defaultOpts),
@@ -90,8 +92,13 @@ export class CacheService {
         this.context,
         defaultOpts
       ),
-      planVersionList: new Namespace<CacheNamespaces["planVersionList"]>(this.context, defaultOpts),
-      planVersion: new Namespace<CacheNamespaces["planVersion"]>(this.context, defaultOpts),
+      // Plan versions carry prices read from their card, and a scheduled row takes effect without
+      // a write, so they expire within the card refresh horizon.
+      planVersionList: new Namespace<CacheNamespaces["planVersionList"]>(
+        this.context,
+        pricedPlanOpts
+      ),
+      planVersion: new Namespace<CacheNamespaces["planVersion"]>(this.context, pricedPlanOpts),
       projectFeatures: new Namespace<CacheNamespaces["projectFeatures"]>(this.context, defaultOpts),
       workspaceGuard: new Namespace<CacheNamespaces["workspaceGuard"]>(this.context, {
         ...defaultOpts,

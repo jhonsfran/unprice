@@ -119,7 +119,10 @@ async function runCappedWalletPropertyCase(usage: number) {
     subscriptions: {},
   } as unknown as Pick<ServiceContext, "wallet" | "ledger" | "subscriptions">
 
-  const activationInputs = await deriveActivationInputsFromPlan(db, { projectId, subscriptionId })
+  const activationInputs = await deriveActivationInputsFromPlan(
+    { db, rateCards: new RateCardService({ db }) },
+    { projectId, subscriptionId }
+  )
   expect(activationInputs).toEqual({
     creditLinePolicy: "capped",
     grants: [{ amount: creditLineAmount, reason: "Period usage allowance", source: "credit_line" }],

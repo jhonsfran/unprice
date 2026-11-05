@@ -39,6 +39,10 @@ export function createInvoicingStub(opts: { rows?: RateRow[]; currency?: string 
           : null
       ),
       getEffectiveRows: vi.fn(async () => opts.rows ?? []),
+      rowsForVersions: vi.fn(
+        async (_projectId: string, versions: readonly { id: string }[]) =>
+          new Map(versions.map((version) => [version.id, opts.rows ?? []]))
+      ),
     },
   } satisfies InvoicingPorts
 }

@@ -4,6 +4,8 @@ import { Err, FetchError, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { describe, expect, it, vi } from "vitest"
 import type { ServiceContext } from "../../context"
+import { UnPriceRateCardError } from "../../rate-cards"
+import { createRateCardsFake } from "../../rate-cards/memory.fixture"
 import { applyPlanTemplate } from "./apply"
 import { getExistingTemplatePlanVersion } from "./materialize"
 
@@ -732,6 +734,122 @@ describe("applyPlanTemplate", () => {
     const creditInputs = usageInputs.filter((input) => input.featureId === "feature_credits")
     expect(creditInputs).toHaveLength(3)
     expect(creditInputs.every((input) => input.config.usageMode === "tier")).toBe(true)
+  })
+
+  it("prices a complete draft whose pricing failed on the next apply", async () => {
+    const features = new Map<string, Feature>()
+    const events: Event[] = []
+    const versions: Array<PlanVersion & { planFeatures: PlanVersionFeature[] }> = []
+    const cards = createRateCardsFake()
+    const services = {
+      plans: {
+        getPlanBySlug: vi.fn(async () =>
+          Ok({ id: "plan_starter", projectId: "proj_123", slug: "starter" } as unknown as Plan)
+        ),
+        createPlanVersionRecord: vi.fn(async (input: CreatePlanVersionInput) => {
+          const planVersion = makePlanVersion(`plan_version_${versions.length + 1}`, input)
+          versions.push({ ...planVersion, planFeatures: [] })
+          return Ok({ state: "ok" as const, planVersion })
+        }),
+        createPlanVersionFeatureRecord: vi.fn(async (input: CreatePlanVersionFeatureInput) => {
+          const feature = [...features.values()].find(({ id }) => id === input.featureId)
+          const planVersionFeature = {
+            id: `feature_version_${input.featureId}`,
+            ...input,
+            feature,
+          } as unknown as PlanVersionFeature
+          versions
+            .find(({ id }) => id === input.planVersionId)
+            ?.planFeatures.push(planVersionFeature)
+          return Ok({ state: "ok" as const, planVersionFeature })
+        }),
+      },
+      features: {
+        getFeatureBySlug: vi.fn(async ({ slug }: { slug: string }) =>
+          Ok(features.get(slug) ?? null)
+        ),
+        listFeaturesByProject: vi.fn(async () => Ok([])),
+        createFeatureRecord: vi.fn(async ({ slug }: { slug: string }) => {
+          features.set(slug, makeFeature(slug))
+          return Ok(makeFeature(slug))
+        }),
+      },
+      events: {
+        listEventsByProject: vi.fn(async () => Ok(events)),
+        createEvent: vi.fn(async (input: { slug: string; availableProperties?: string[] }) => {
+          const event = { ...makeEvent(input.availableProperties ?? []), slug: input.slug }
+          events.push(event)
+          return Ok(event)
+        }),
+        updateEvent: vi.fn(),
+      },
+      customers: {},
+      rateCards: cards.rateCards,
+    } as unknown as Pick<
+      ServiceContext,
+      "plans" | "features" | "events" | "customers" | "rateCards"
+    >
+    const db = createDbMock({ existingPlanVersions: versions })
+    const input = {
+      template: "saas_onboarding" as const,
+      projectId: "proj_123",
+      workspaceUnPriceCustomerId: "cus_123",
+      currency: "USD" as const,
+      paymentProvider: "sandbox" as const,
+      publish: false,
+      paidAction: {
+        title: "AI generation",
+        featureSlug: "ai-generation",
+        eventSlug: "ai_generation",
+        unitOfMeasure: "action" as const,
+        unitPrice: "4.10",
+      },
+    }
+    const deps = { services, db, logger: createLogger(), userId: "usr_123" }
+
+    // Every feature is written and the card created; then its rows fail to publish.
+    cards.rateCards.publishRows.mockImplementationOnce(async () =>
+      Err(new UnPriceRateCardError({ code: "CARD_NOT_FOUND", cardId: "rc_1" }))
+    )
+    const failed = await applyPlanTemplate(deps, input)
+
+    expect(failed.err?.message).toBe(
+      "error pricing template plan version: Rate card rc_1 not found"
+    )
+    expect(versions).toHaveLength(1)
+    expect(versions[0]?.planFeatures.map(({ featureId }) => featureId)).toEqual([
+      "feature_workflow-runtime-access",
+      "feature_ai-generation",
+      "feature_credits",
+    ])
+    expect(cards.rateCards.assignToPlanVersion).not.toHaveBeenCalled()
+
+    const resumed = await applyPlanTemplate(deps, input)
+
+    expect(resumed.val).toMatchObject({ state: "ok", primaryPlanVersionId: "plan_version_1" })
+    expect(versions).toHaveLength(1)
+    expect(cards.rateCards.assignToPlanVersion).toHaveBeenCalledWith("proj_123", {
+      planVersionId: "plan_version_1",
+      currency: "USD",
+      cardId: "rc_1",
+    })
+    expect(
+      cards.rows.map(({ rateCardId, featureSlug, effectiveTo }) => ({
+        rateCardId,
+        featureSlug,
+        effectiveTo,
+      }))
+    ).toEqual(
+      ["workflow-runtime-access", "ai-generation", "credits"].map((featureSlug) => ({
+        rateCardId: "rc_1",
+        featureSlug,
+        effectiveTo: null,
+      }))
+    )
+    expect(cards.rows.find(({ featureSlug }) => featureSlug === "ai-generation")?.price).toEqual({
+      type: "unit",
+      components: [{ property: null, rate: BigInt(410_000_000), per: 1 }],
+    })
   })
 
   it("reuses completed template versions on retry", async () => {

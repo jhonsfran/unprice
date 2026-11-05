@@ -15,6 +15,13 @@ import { currencySchema, featureSlugSchema } from "./shared"
  */
 export const RATE_CHANGE_NOTICE_MS = 10 * 60 * 1000
 
+/**
+ * How long a cached card prices before it must be read again (ADR-0008 D2): shorter than the
+ * notice a row change gives, so no budget prices with a row that has ended or misses a new one.
+ * Caches that hold prices read from a card expire within it too.
+ */
+export const CARD_REFRESH_MS = 5 * 60_000
+
 /** A non-negative decimal string with at most 8 places, parsed into base units. */
 export const rateDecimalSchema = z
   .string()

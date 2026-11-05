@@ -199,6 +199,7 @@ export class SubscriptionMachine {
             input: {
               context: SubscriptionContext
               db: Database
+              rateCards: InvoicingPorts["rateCards"]
               walletService: WalletService | null
               ledgerService: LedgerGateway
               billingService: Pick<BillingService, "generateBillingPeriods">
@@ -227,7 +228,7 @@ export class SubscriptionMachine {
               }
             }
 
-            const derived = await deriveActivationInputsFromPlan(input.db, {
+            const derived = await deriveActivationInputsFromPlan(input, {
               subscriptionId: input.context.subscriptionId,
               projectId: input.context.projectId,
               phaseId: input.context.currentPhase?.id,
@@ -654,6 +655,7 @@ export class SubscriptionMachine {
             input: ({ context }) => ({
               context,
               db: this.db,
+              rateCards: this.invoicing.rateCards,
               walletService: this.walletService,
               ledgerService: this.ledgerService,
               billingService: this.billingService,
