@@ -298,8 +298,7 @@ export const priceChangeCard: CardRows = cardRows(
   ]
 )
 
-const costPlusPolicy = {
-  type: "costPlus",
+const llmTokensPolicy = {
   featureSlug: "llm_tokens",
   markup: "0.3",
   roundTo: "0.01",
@@ -311,6 +310,8 @@ const costPlusPolicy = {
     cache_write: "cache_write_tokens",
   },
 } as const
+
+const costPlusPolicy = { type: "costPlus" as const, features: [llmTokensPolicy] }
 
 function costPlusCard(input: RateCardInput): CostPlusCard {
   const card: RateCard = rateCardSchema.parse(input)
@@ -331,7 +332,7 @@ export const creditsCostPlusCard = costPlusCard({
   name: "Credits cost plus 30%",
   unit: "credits:ai",
   creditValueUsd: "0.01",
-  marginPolicy: { ...costPlusPolicy, roundTo: "1" },
+  marginPolicy: { type: "costPlus", features: [{ ...llmTokensPolicy, roundTo: "1" }] },
 })
 
 function modelCost(input: ModelCostInput): ModelCost {

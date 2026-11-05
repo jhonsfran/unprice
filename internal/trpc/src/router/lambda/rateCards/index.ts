@@ -8,6 +8,7 @@ import { list } from "./list"
 import { previewCostPlus } from "./previewCostPlus"
 import { publishCostPlus } from "./publishCostPlus"
 import { publishRows } from "./publishRows"
+import { setCatalogPricing } from "./setCatalogPricing"
 
 export const rateCardsRouter = createTRPCRouter({
   assignToPlanVersion,
@@ -19,4 +20,5 @@ export const rateCardsRouter = createTRPCRouter({
   previewCostPlus,
   publishCostPlus,
   publishRows,
+  setCatalogPricing,
 })

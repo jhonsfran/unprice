@@ -375,11 +375,15 @@ describe("RateCardService", () => {
   it("refuses a cost-plus draft whose open row was replaced after the preview", async () => {
     const card = await createCard({
       type: "costPlus",
-      featureSlug: "llm_tokens",
-      markup: "0.3",
-      roundTo: "0.01",
-      dimension: "model",
-      componentMap: { input: "input_tokens", output: "output_tokens" },
+      features: [
+        {
+          featureSlug: "llm_tokens",
+          markup: "0.3",
+          roundTo: "0.01",
+          dimension: "model",
+          componentMap: { input: "input_tokens", output: "output_tokens" },
+        },
+      ],
     })
     await value(publish(card.id, [gpt41("2.00", "8.00")], NOW))
     await rateCards.insertModelCosts([modelCosts.gpt41])
@@ -412,11 +416,15 @@ describe("RateCardService", () => {
     const day = 24 * 60 * MINUTE
     const card = await createCard({
       type: "costPlus",
-      featureSlug: "llm_tokens",
-      markup: "0.3",
-      roundTo: "0.01",
-      dimension: "model",
-      componentMap: { input: "input_tokens", output: "output_tokens" },
+      features: [
+        {
+          featureSlug: "llm_tokens",
+          markup: "0.3",
+          roundTo: "0.01",
+          dimension: "model",
+          componentMap: { input: "input_tokens", output: "output_tokens" },
+        },
+      ],
     })
     const claude = { ...gpt41("3.00", "15.00"), match: { model: "claude-sonnet-4" } }
     const [gpt] = (await value(publish(card.id, [gpt41("2.60", "10.40"), claude], NOW))).inserted
@@ -513,16 +521,20 @@ describe("RateCardService", () => {
   it("previews cost-plus rates and publishes the reviewed draft as catalog rows", async () => {
     const card = await createCard({
       type: "costPlus",
-      featureSlug: "llm_tokens",
-      markup: "0.3",
-      roundTo: "0.01",
-      dimension: "model",
-      componentMap: {
-        input: "input_tokens",
-        cache_read: "cached_input_tokens",
-        output: "output_tokens",
-        cache_write: "cache_write_tokens",
-      },
+      features: [
+        {
+          featureSlug: "llm_tokens",
+          markup: "0.3",
+          roundTo: "0.01",
+          dimension: "model",
+          componentMap: {
+            input: "input_tokens",
+            cache_read: "cached_input_tokens",
+            output: "output_tokens",
+            cache_write: "cache_write_tokens",
+          },
+        },
+      ],
     })
     const tokenRows = usdCard.rows.filter((row) => row.featureSlug === "llm_tokens")
     await value(publish(card.id, tokenRows, NOW))

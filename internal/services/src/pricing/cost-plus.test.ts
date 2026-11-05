@@ -203,11 +203,13 @@ describe("costPlusRevision", () => {
   })
 
   it("reads only the cost's own components, so a component named constructor is just missing", () => {
+    const [policy] = usdCostPlusCard.marginPolicy.features
+    if (!policy) throw new Error("fixture changed")
     const card = {
       ...usdCostPlusCard,
       marginPolicy: {
-        ...usdCostPlusCard.marginPolicy,
-        componentMap: { input: "input_tokens", constructor: "x_tokens" },
+        type: "costPlus" as const,
+        features: [{ ...policy, componentMap: { input: "input_tokens", constructor: "x_tokens" } }],
       },
     }
 

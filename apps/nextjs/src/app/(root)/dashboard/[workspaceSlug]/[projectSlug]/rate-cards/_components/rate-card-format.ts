@@ -26,7 +26,12 @@ export function cardCurrency(unit: string): string {
 
 export function formatMarginPolicy(policy: MarginPolicy): string {
   if (policy.type === "manual") return "Manual"
-  return `Cost-plus ${Number(formatAmount(policy.markup)) * 100}% on ${policy.featureSlug}`
+  return policy.features
+    .map(
+      (feature) =>
+        `Cost-plus ${Number(formatAmount(feature.markup)) * 100}% on ${feature.featureSlug}`
+    )
+    .join(", ")
 }
 
 /** A row's match as "model=gpt-4o, region=eu", or "Default" for the empty match. */

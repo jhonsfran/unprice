@@ -4,8 +4,9 @@ import { z } from "zod"
 import { planVersionSelectBaseSchema } from "@unprice/db/validators"
 import { protectedProjectProcedure } from "#trpc"
 
+/** Edits a version's settings. Its status moves only through publish, so a card a published version prices with stays live. */
 export const update = protectedProjectProcedure
-  .input(planVersionSelectBaseSchema.partial().required({ id: true }))
+  .input(planVersionSelectBaseSchema.partial().required({ id: true }).omit({ status: true }))
   .output(
     z.object({
       planVersion: planVersionSelectBaseSchema,
@@ -13,7 +14,6 @@ export const update = protectedProjectProcedure
   )
   .mutation(async (opts) => {
     const {
-      status,
       id,
       description,
       currency,
@@ -40,7 +40,6 @@ export const update = protectedProjectProcedure
     const { err, val } = await plans.updatePlanVersionRecord({
       projectId: project.id,
       id,
-      status,
       description,
       currency,
       billingConfig,

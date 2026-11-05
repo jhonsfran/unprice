@@ -358,18 +358,19 @@ export class RateCardService {
     })
   }
 
-  /** Ends open rows at `effectiveTo`; see `planClose` for the rules. */
+  /** Ends open rows at `effectiveTo`, now when absent; see `planClose` for the rules. */
   async closeRows(input: CloseRowsInput): Promise<Result<CloseRowsResult, UnPriceRateCardError>> {
     return this.withLockedCard(input.projectId, input.cardId, async (tx, _card, rows) => {
+      const effectiveTo = input.effectiveTo ?? input.now
       const plan = planClose({
         rows,
         rowIds: input.rowIds,
-        effectiveTo: input.effectiveTo,
+        effectiveTo,
         now: input.now,
       })
       if (plan.err) return Err(plan.err)
       const rowIds = plan.val.closes.map((close) => close.rowId)
-      await closeOpenRows(tx, input.projectId, rowIds, input.effectiveTo)
+      await closeOpenRows(tx, input.projectId, rowIds, effectiveTo)
       return Ok({ closed: [...plan.val.closes], unchanged: plan.val.unchanged })
     })
   }
@@ -418,6 +419,41 @@ export class RateCardService {
       .onConflictDoNothing()
       .returning({ id: modelCosts.id })
     return inserted.length
+  }
+
+  /**
+   * The plan versions that price with a card, one per currency assignment. A card is live once any
+   * of them has been published (`publishedAt` survives later edits), because a published version
+   * is the only way a subscription, and so a budget, reaches the card.
+   */
+  async versionsPricingWith(
+    projectId: string,
+    cardId: string,
+    executor: DbExecutor = this.deps.db
+  ): Promise<
+    { planVersionId: string; currency: PlanVersionCard["currency"]; publishedAt: number | null }[]
+  > {
+    const assigned = await executor
+      .select({
+        planVersionId: planVersionRateCards.planVersionId,
+        currency: planVersionRateCards.currency,
+        publishedAt: versions.publishedAt,
+      })
+      .from(planVersionRateCards)
+      .innerJoin(
+        versions,
+        and(
+          eq(versions.projectId, planVersionRateCards.projectId),
+          eq(versions.id, planVersionRateCards.planVersionId)
+        )
+      )
+      .where(
+        and(
+          eq(planVersionRateCards.projectId, projectId),
+          eq(planVersionRateCards.rateCardId, cardId)
+        )
+      )
+    return assigned.map((row) => ({ ...row, publishedAt: row.publishedAt ?? null }))
   }
 
   private async cardRows(

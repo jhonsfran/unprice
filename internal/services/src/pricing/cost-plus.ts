@@ -14,6 +14,7 @@ import { ownProperty } from "./resolve"
 
 export type CostPlusPolicy = Extract<MarginPolicy, { type: "costPlus" }>
 export type CostPlusCard = RateCard & { marginPolicy: CostPlusPolicy }
+type FeaturePolicy = CostPlusPolicy["features"][number]
 
 /** Catalog costs are USD per million. */
 const PER_MILLION = 1_000_000
@@ -60,11 +61,12 @@ export function writesRow(
 }
 
 /**
- * Proposes one unit row per model at the costs effective at `at`: cost times (1 + markup), rounded
- * up to `roundTo`. Each proposal is diffed against its key's latest row that has not ended by `at`:
- * the open row a publish would replace, even one that starts after `at`, or a row scheduled to end,
- * which the revision leaves to retire. A manual cost row beats an imported one. Changes are ordered
- * by match, so the draft and its hash never depend on the order costs arrive in.
+ * Proposes one unit row per model and policy feature at the costs effective at `at`: cost times
+ * (1 + markup), rounded up to `roundTo`. Each proposal is diffed against its key's latest row that
+ * has not ended by `at`: the open row a publish would replace, even one that starts after `at`, or
+ * a row scheduled to end, which the revision leaves to retire. A manual cost row beats an imported
+ * one. Changes are ordered by feature and match, so the draft and its hash never depend on the
+ * order costs arrive in.
  */
 export function costPlusRevision(
   card: CostPlusCard,
@@ -72,21 +74,23 @@ export function costPlusRevision(
   currentRows: readonly RateRow[],
   at: number
 ): CostPlusDraft {
-  const policy = card.marginPolicy
-  const latest = new Map<string, RateRow>()
-  for (const row of currentRows) {
-    if (row.featureSlug !== policy.featureSlug) continue
-    if (row.effectiveTo !== null && row.effectiveTo <= at) continue
-    const key = matchKey(row.match)
-    const found = latest.get(key)
-    if (!found || row.effectiveFrom > found.effectiveFrom) latest.set(key, row)
-  }
+  const effective = effectiveCosts(costs, at)
   const changes: [string, RowChange][] = []
-  for (const cost of effectiveCosts(costs, at)) {
-    const proposed = proposeRow(card, cost)
-    if (!proposed) continue
-    const key = matchKey(proposed.match)
-    changes.push([key, diffRow(latest.get(key), proposed)])
+  for (const policy of card.marginPolicy.features) {
+    const latest = new Map<string, RateRow>()
+    for (const row of currentRows) {
+      if (row.featureSlug !== policy.featureSlug) continue
+      if (row.effectiveTo !== null && row.effectiveTo <= at) continue
+      const key = matchKey(row.match)
+      const found = latest.get(key)
+      if (!found || row.effectiveFrom > found.effectiveFrom) latest.set(key, row)
+    }
+    for (const cost of effective) {
+      const proposed = proposeRow(card, policy, cost)
+      if (!proposed) continue
+      const key = matchKey(proposed.match)
+      changes.push([`${policy.featureSlug}|${key}`, diffRow(latest.get(key), proposed)])
+    }
   }
   changes.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
   return { cardId: card.id, at, changes: changes.map(([, change]) => change) }
@@ -107,14 +111,17 @@ function ranksAbove(a: ModelCost, b: ModelCost): boolean {
   return a.effectiveFrom > b.effectiveFrom
 }
 
-function proposeRow(card: CostPlusCard, cost: ModelCost): ProposedRow | null {
-  const policy = card.marginPolicy
+function proposeRow(
+  card: CostPlusCard,
+  policy: FeaturePolicy,
+  cost: ModelCost
+): ProposedRow | null {
   const components: RateComponent[] = []
   const costComponents: RateComponent[] = []
   for (const [costComponent, property] of Object.entries(policy.componentMap)) {
     const usd = ownProperty(cost.components, costComponent)
     if (usd === undefined) continue
-    components.push({ property, rate: priceOf(card, usd), per: PER_MILLION })
+    components.push({ property, rate: priceOf(card, policy, usd), per: PER_MILLION })
     costComponents.push({ property, rate: usd, per: PER_MILLION })
   }
   if (components.length === 0) return null
@@ -129,8 +136,8 @@ function proposeRow(card: CostPlusCard, cost: ModelCost): ProposedRow | null {
 }
 
 /** cost * (1 + markup), in credits when the card counts credits, rounded up to `roundTo`. */
-function priceOf(card: CostPlusCard, usd: Amount): Amount {
-  const { markup, roundTo } = card.marginPolicy
+function priceOf(card: CostPlusCard, policy: FeaturePolicy, usd: Amount): Amount {
+  const { markup, roundTo } = policy
   const n = usd * (ONE + markup)
   const d = card.creditValueUsd ?? ONE
   return ceilDiv(n, d * roundTo) * roundTo

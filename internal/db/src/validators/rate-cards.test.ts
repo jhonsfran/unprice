@@ -20,14 +20,15 @@ const row = {
   sourceRef: null,
 }
 
-const costPlus = {
-  type: "costPlus",
+const llmTokensPolicy = {
   featureSlug: "llm_tokens",
   markup: "0.3",
   roundTo: "0.01",
   dimension: "model",
   componentMap: { input: "input_tokens" },
 }
+
+const costPlus = { type: "costPlus", features: [llmTokensPolicy] }
 
 function issues(result: { success: boolean; error?: { issues: { message: string }[] } }) {
   return result.success ? [] : (result.error?.issues.map((issue) => issue.message) ?? [])
@@ -98,12 +99,17 @@ describe("rate card validators", () => {
     expect(
       rateCardSchema.safeParse({
         ...card,
-        marginPolicy: { ...costPlus, componentMap: { input: "#event" } },
+        marginPolicy: {
+          type: "costPlus",
+          features: [{ ...llmTokensPolicy, componentMap: { input: "#event" } }],
+        },
       }).success
     ).toBe(false)
     expect(
-      rateCardSchema.safeParse({ ...card, marginPolicy: { ...costPlus, dimension: "#model" } })
-        .success
+      rateCardSchema.safeParse({
+        ...card,
+        marginPolicy: { type: "costPlus", features: [{ ...llmTokensPolicy, dimension: "#model" }] },
+      }).success
     ).toBe(false)
     expect(featurePricingSchema.safeParse({ ...feature, meterProperty: "event#1" }).success).toBe(
       true

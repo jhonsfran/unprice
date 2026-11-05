@@ -129,22 +129,36 @@ export const rateRowSchema = rateRowFieldsSchema.refine(
   }
 )
 
+/** How the catalog prices one feature's models on a cost-plus card. */
+export const costPlusFeaturePolicySchema = z.object({
+  /** The feature whose rows the catalog prices. */
+  featureSlug: featureSlugSchema,
+  /** 0.3 is +30% over cost. */
+  markup: rateDecimalSchema,
+  /** Prices round up to a multiple of this. */
+  roundTo: positiveDecimalSchema,
+  /** The dimension that carries the model id. */
+  dimension: propertyNameSchema,
+  /** Cost component name (input, output, cache_read, ...) to the event property it prices. */
+  componentMap: z
+    .record(z.string().min(1), propertyNameSchema)
+    .refine((map) => Object.keys(map).length > 0, { message: "map at least one component" }),
+})
+
 export const marginPolicySchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("manual") }),
   z.object({
     type: z.literal("costPlus"),
-    /** The feature whose rows the catalog prices. */
-    featureSlug: featureSlugSchema,
-    /** 0.3 is +30% over cost. */
-    markup: rateDecimalSchema,
-    /** Prices round up to a multiple of this. */
-    roundTo: positiveDecimalSchema,
-    /** The dimension that carries the model id. */
-    dimension: propertyNameSchema,
-    /** Cost component name (input, output, cache_read, ...) to the event property it prices. */
-    componentMap: z
-      .record(z.string().min(1), propertyNameSchema)
-      .refine((map) => Object.keys(map).length > 0, { message: "map at least one component" }),
+    /** One policy per feature; a card may price several features from the catalog. */
+    features: z
+      .array(costPlusFeaturePolicySchema)
+      .min(1)
+      .max(50)
+      .refine(
+        (policies) =>
+          new Set(policies.map((policy) => policy.featureSlug)).size === policies.length,
+        { message: "one catalog policy per feature" }
+      ),
   }),
 ])
 
@@ -226,7 +240,8 @@ export const rateRowDraftSchema = rateRowFieldsSchema.pick({
 export const publishRateRowsInputSchema = z.object({
   cardId: z.string().min(1),
   rows: z.array(rateRowDraftSchema).min(1).max(500),
-  effectiveFrom: epochMsSchema,
+  /** When the rows start; absent means the earliest the card allows (now, or now plus the notice). */
+  effectiveFrom: epochMsSchema.optional(),
   /**
    * Open rows to end at `effectiveFrom` in the same publish, such as a regrouped feature's old
    * rows, so its new rows follow them without a gap.
@@ -238,7 +253,8 @@ export const publishRateRowsInputSchema = z.object({
 export const closeRateRowsInputSchema = z.object({
   cardId: z.string().min(1),
   rowIds: z.array(z.string().min(1)).min(1).max(500),
-  effectiveTo: epochMsSchema,
+  /** When the rows end; absent means the earliest the card allows, and a row already ending counts as unchanged. */
+  effectiveTo: epochMsSchema.optional(),
 })
 
 export const previewCostPlusInputSchema = z.object({
@@ -249,9 +265,50 @@ export const previewCostPlusInputSchema = z.object({
 
 export const publishCostPlusInputSchema = z.object({
   cardId: z.string().min(1),
-  effectiveFrom: epochMsSchema,
+  /** When the rows start; absent means the earliest the card allows. */
+  effectiveFrom: epochMsSchema.optional(),
   /** The `draftHash` of the preview the caller reviewed. */
   draftHash: z.string().min(1),
+})
+
+/** A non-negative decimal string, the wire form of a price before it is parsed into base units. */
+const decimalStringSchema = z.string().regex(AMOUNT_PATTERN, "a non-negative decimal string")
+
+/** One graduated tier as the plan editor and the monetization document write it. */
+export const decimalTierSchema = z.object({
+  firstUnit: z.number().int().positive(),
+  lastUnit: z.number().int().positive().nullable(),
+  unitPrice: decimalStringSchema,
+  flatPrice: decimalStringSchema.default("0"),
+})
+
+/**
+ * A plan feature's price in decimal form: one price, or graduated tiers. The server derives the
+ * row's shape from the plan feature's type, usage mode, package size and meter, so a client cannot
+ * send a shape the package does not allow.
+ */
+export const featurePriceInputSchema = z
+  .object({
+    price: decimalStringSchema.optional(),
+    tiers: z.array(decimalTierSchema).min(1).max(100).optional(),
+  })
+  .refine((input) => input.price !== undefined || input.tiers !== undefined, {
+    message: "a price or tiers",
+  })
+
+/**
+ * Prices one plan feature's models from the cost catalog on the version's own card: the policy
+ * the card keeps for that feature. `dimension` defaults to the feature's only dimension.
+ */
+export const planVersionCatalogPricingInputSchema = z.object({
+  planVersionId: z.string().min(1),
+  featureSlug: featureSlugSchema,
+  markup: rateDecimalSchema,
+  roundTo: positiveDecimalSchema,
+  dimension: propertyNameSchema.optional(),
+  componentMap: z
+    .record(z.string().min(1), propertyNameSchema)
+    .refine((map) => Object.keys(map).length > 0, { message: "map at least one component" }),
 })
 
 /** Prices a draft plan version in one currency with a card (ADR-0008 D2: one card per currency). */
@@ -276,6 +333,10 @@ export type RateCost = z.infer<typeof rateCostSchema>
 export type RateRow = z.infer<typeof rateRowSchema>
 export type RateRowInput = z.input<typeof rateRowSchema>
 export type MarginPolicy = z.infer<typeof marginPolicySchema>
+export type CostPlusFeaturePolicy = z.infer<typeof costPlusFeaturePolicySchema>
+export type DecimalTierInput = z.infer<typeof decimalTierSchema>
+export type FeaturePriceInput = z.infer<typeof featurePriceInputSchema>
+export type PlanVersionCatalogPricingInput = z.infer<typeof planVersionCatalogPricingInputSchema>
 export type RateCard = z.infer<typeof rateCardSchema>
 export type RateCardInput = z.input<typeof rateCardSchema>
 export type ModelCost = z.infer<typeof modelCostSchema>

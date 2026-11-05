@@ -41,7 +41,7 @@ function render(rows: ReturnType<typeof row>[]): string {
   return renderToString(
     <QueryClientProvider client={queryClient}>
       <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
-        <RateCardRows data={{ card, rows }} now={NOW} />
+        <RateCardRows data={{ card, rows, live: false }} now={NOW} />
       </TRPCProvider>
     </QueryClientProvider>
   ).replace(/<!-- -->/g, "")

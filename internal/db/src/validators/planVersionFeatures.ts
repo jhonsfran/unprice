@@ -7,6 +7,7 @@ import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi"
 import { planVersionFeatures } from "../schema/planVersionFeatures"
 import { FEATURE_TYPES_MAPS, USAGE_MODES_MAP } from "../utils"
 import { featureSelectBaseSchema } from "./features"
+import { featurePriceInputSchema } from "./rate-cards"
 import {
   billingConfigSchema,
   featureConfigType,
@@ -373,6 +374,24 @@ const validatePlanVersionFeatureMutation = ({
     }
   }
 
+  // A row with dimensions is a unit price (validateCard: TIERED_WITH_DIMENSIONS), so tiers and
+  // packages need a meter without dimensions.
+  if (
+    (data.meterConfig?.groupBy?.length ?? 0) > 0 &&
+    data.config?.usageMode !== undefined &&
+    data.config.usageMode !== USAGE_MODES_MAP.unit.code
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        "A feature whose price varies by a dimension is priced per unit; tiers and packages need a meter without dimensions",
+      path: ["config", "usageMode"],
+      fatal: true,
+    })
+
+    return false
+  }
+
   if (
     requireMeterConfigForUsage &&
     data.featureType === FEATURE_TYPES_MAPS.usage.code &&
@@ -483,6 +502,11 @@ export const planVersionFeatureUpdateBaseSchema = planVersionFeatureMutationBase
   })
   .extend({
     aggregationMethod: z.never().optional(),
+    /**
+     * The feature's price on the version's own rate card (ADR-0008 D2). Absent leaves the price
+     * as it is, null leaves the feature unpriced, a value publishes its default row.
+     */
+    price: featurePriceInputSchema.nullable().optional(),
   })
   .superRefine((data, ctx) => {
     validatePlanVersionFeatureMutation({ data, ctx })

@@ -35,7 +35,7 @@ export async function publishRateRows(
       sourceRef: null,
     })),
     closeRowIds: input.closeRowIds,
-    effectiveFrom: input.effectiveFrom,
+    effectiveFrom: input.effectiveFrom ?? input.now,
     now: input.now,
     ...features.val,
   })
