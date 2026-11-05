@@ -258,7 +258,7 @@ describe("executeBudgetCommand funds a prepaid budget from the wallet", () => {
 
   it("replays the same seq after a crash between the intent and the wallet's answer", async () => {
     const { execute, wallet, store } = await payer(prepaid, "1000000000")
-    wallet.failNext = true
+    wallet.failNext = new Error("wallet unavailable")
 
     await expect(execute({ type: "charge", idempotencyKey: "c1", event: image })).rejects.toThrow(
       "wallet unavailable"
@@ -283,6 +283,48 @@ describe("executeBudgetCommand funds a prepaid budget from the wallet", () => {
         amount: BigInt(104_000_000),
       },
     ])
+  })
+
+  it("answers FUNDING_FAILED and logs while the wallet refuses, then replays once repaired", async () => {
+    const { execute, wallet, store, errors } = await payer(prepaid, "1000000000")
+    wallet.refuseWith = "WALLET_RESERVATION_ALREADY_RECONCILED"
+
+    const first = await execute({ type: "charge", idempotencyKey: "c1", event: image })
+    const second = await execute({ type: "charge", idempotencyKey: "c1", event: image })
+    wallet.refuseWith = null
+    const repaired = await execute({ type: "charge", idempotencyKey: "c1", event: image })
+
+    const refusal = {
+      code: "FUNDING_FAILED",
+      statementKey: "inv_nov",
+      seq: 1,
+      intent: "reserve",
+      walletCode: "WALLET_RESERVATION_ALREADY_RECONCILED",
+    }
+    expect(first.err?.rejection).toEqual(refusal)
+    expect(second.err?.rejection).toEqual(refusal)
+    const logged = {
+      message: "WALLET_RESERVATION_ALREADY_RECONCILED",
+      fields: {
+        context: "budget funding failed: the wallet refused a pending intent",
+        project_id: "proj_1",
+        budget_key: "customer:acme",
+        customer_id: "cus_acme",
+        statement_key: "inv_nov",
+        intent: "reserve",
+        seq: 1,
+        wallet_code: "WALLET_RESERVATION_ALREADY_RECONCILED",
+      },
+    }
+    expect(errors).toEqual([logged, logged])
+    expect(store.statements.get(periodId)?.amount).toBe(BigInt(4_000_000))
+    expect(repaired.val?.usage.amount).toBe(BigInt(4_000_000))
+    expect(wallet.calls.map((call) => [call.kind, call.seq])).toEqual([
+      ["reserve", 1],
+      ["reserve", 1],
+      ["reserve", 1],
+    ])
+    expect(store.funding.get("inv_nov")).toMatchObject({ seq: 1, pending: null })
   })
 
   it("captures the statement and releases the rest when the statement seals", async () => {

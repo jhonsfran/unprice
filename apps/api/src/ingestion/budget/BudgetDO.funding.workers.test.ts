@@ -110,7 +110,7 @@ function fundingRows(state: DurableObjectState) {
 describe("BudgetDO funding over RPC", () => {
   it("replays the same seq after a crash between the intent and the wallet's answer", async () => {
     const { execute, wallet, stub } = await payerOverRpc(prepaid, BigInt(1_000_000_000))
-    wallet.failNext = true
+    wallet.failNext = new Error("wallet unavailable")
 
     await expect(execute({ type: "charge", idempotencyKey: "c1", event: image })).rejects.toThrow(
       "wallet unavailable"

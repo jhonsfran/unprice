@@ -175,6 +175,27 @@ describe("meterPayerUsage", () => {
     })
   })
 
+  it("leaves a charge and the customer's later ones undecided while the wallet refuses", async () => {
+    const h = payerHarness()
+    await h.createPayer("cus_a", { prepaid: true })
+    h.wallet.balance = BigInt(1_000_000_000)
+    h.wallet.refuseWith = "WALLET_RESERVATION_ALREADY_RECONCILED"
+
+    const results = await meterPayerUsage(h.deps, {
+      verb: "charge",
+      receivedAt,
+      events: [charged("cus_a", "c1", "1024"), charged("cus_a", "c2", "1024")],
+    })
+    await h.flush()
+
+    expect(outcomes(results)).toEqual([
+      ["c1", "UNAVAILABLE"],
+      ["c2", "UNAVAILABLE"],
+    ])
+    expect(h.journaled).toEqual([])
+    expect(h.wallet.calls).toHaveLength(1)
+  })
+
   it("answers a mixed batch of 100 in request order, each customer's events in sequence", async () => {
     const h = payerHarness()
     await h.createPayer("cus_a")

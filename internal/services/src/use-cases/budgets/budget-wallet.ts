@@ -1,8 +1,14 @@
 import { sha256HexSync } from "@unprice/db/utils"
 import { currencySchema } from "@unprice/db/validators"
+import { Err, Ok, type Result } from "@unprice/error"
 import type { Amount } from "@unprice/money"
 import type { FundingResult } from "../../budgets"
-import { DEFAULT_RESERVATION_POLICY, type ReservationOwner, type WalletService } from "../../wallet"
+import {
+  DEFAULT_RESERVATION_POLICY,
+  type ReservationOwner,
+  UnPriceWalletError,
+  type WalletService,
+} from "../../wallet"
 import type { BudgetAddress, BudgetWallet } from "./budget-client"
 import { billingPeriodIdOf } from "./compile-payer-budget"
 
@@ -24,10 +30,23 @@ export function budgetReservationOwner(
 }
 
 /** Wallet amounts are numbers at the ledger scale; a budget's are bigints at the same scale. */
-function walletAmount(amount: Amount): number {
-  if (amount > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error(`${amount} exceeds a wallet amount`)
-  return Number(amount)
+function walletAmount(amount: Amount): number | null {
+  return amount > BigInt(Number.MAX_SAFE_INTEGER) ? null : Number(amount)
 }
+
+/**
+ * A ledger failure may clear on a replay, so it throws for the caller to retry. Every other wallet
+ * error answers a replay of the same intent the same way, so it is the intent's answer.
+ */
+function refused(error: UnPriceWalletError): Result<never, UnPriceWalletError> {
+  if (error.message === "WALLET_LEDGER_FAILED") throw error
+  return Err(error)
+}
+
+const tooLarge = (amount: Amount) =>
+  Err(
+    new UnPriceWalletError({ message: "WALLET_INVALID_AMOUNT", context: { amount: `${amount}` } })
+  )
 
 /**
  * Runs funding intents against `WalletService`. A reserve opens the key's reservation (the wallet
@@ -37,7 +56,7 @@ function walletAmount(amount: Amount): number {
  */
 export function walletFunding(wallet: WalletOps): BudgetWallet {
   return {
-    async run(address, work): Promise<FundingResult> {
+    async run(address, work): Promise<Result<FundingResult, UnPriceWalletError>> {
       const { intent, reservationId, statementKey } = work
       const currency = currencySchema.parse(work.currency)
       const base = { projectId: address.projectId, customerId: work.customerId, currency }
@@ -45,6 +64,7 @@ export function walletFunding(wallet: WalletOps): BudgetWallet {
 
       if (intent.kind === "reserve") {
         const requestedAmount = walletAmount(intent.amount)
+        if (requestedAmount === null) return tooLarge(intent.amount)
         const effectiveAt = new Date(intent.at)
         if (reservationId === null) {
           const owner = budgetReservationOwner(address, statementKey)
@@ -61,13 +81,13 @@ export function walletFunding(wallet: WalletOps): BudgetWallet {
             metadata,
             idempotencyKey: `budget:${owner.id}:${intent.seq}`,
           })
-          if (created.err) throw created.err
+          if (created.err) return refused(created.err)
           const { allocationAmount } = created.val
-          return {
+          return Ok({
             kind: "reserved",
             reservationId: created.val.reservationId,
             granted: BigInt(allocationAmount),
-          }
+          })
         }
         const extended = await wallet.extendReservation({
           ...base,
@@ -78,24 +98,29 @@ export function walletFunding(wallet: WalletOps): BudgetWallet {
           effectiveAt,
           metadata,
         })
-        if (extended.err) throw extended.err
-        return { kind: "reserved", reservationId, granted: BigInt(extended.val.grantedAmount) }
+        if (extended.err) return refused(extended.err)
+        return Ok({ kind: "reserved", reservationId, granted: BigInt(extended.val.grantedAmount) })
       }
 
-      if (reservationId === null) throw new Error(`close of ${statementKey} has no reservation`)
+      if (reservationId === null) {
+        const context = { statementKey, reason: "close without a reservation" }
+        return Err(new UnPriceWalletError({ message: "WALLET_RESERVATION_NOT_FOUND", context }))
+      }
       for (const [index, capture] of intent.captures.entries()) {
+        const amount = walletAmount(capture.amount)
+        if (amount === null) return tooLarge(capture.amount)
         const captured = await wallet.captureReservationUsage({
           ...base,
           reservationId,
           flushSeq: index + 1,
-          amount: walletAmount(capture.amount),
+          amount,
           statementKey,
           // The invoice matches a capture to its billing period, not to the statement's id.
           billingPeriodId: billingPeriodIdOf(capture.periodId),
           kind: "usage",
           metadata: { ...metadata, statement_period_id: capture.periodId },
         })
-        if (captured.err) throw captured.err
+        if (captured.err) return refused(captured.err)
       }
       const released = await wallet.releaseReservation({
         ...base,
@@ -104,8 +129,8 @@ export function walletFunding(wallet: WalletOps): BudgetWallet {
         idempotencyKey: `release:${reservationId}:period_close`,
         metadata,
       })
-      if (released.err) throw released.err
-      return { kind: "closed" }
+      if (released.err) return refused(released.err)
+      return Ok({ kind: "closed" })
     },
   }
 }

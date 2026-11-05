@@ -13,6 +13,7 @@ import {
   type PricingRejection,
   pricingRejectionMessage,
 } from "../pricing"
+import type { WalletErrorCode } from "../wallet/errors"
 import type {
   BudgetConfig,
   BudgetLimit,
@@ -732,6 +733,18 @@ export type BudgetRejection =
     }>
   /** A wallet result for an intent the statement key is not waiting on. */
   | Readonly<{ code: "FUNDING_SEQ_CONFLICT"; statementKey: string; seq: number; requested: number }>
+  /**
+   * The wallet refused a pending intent with an error a replay cannot clear (a reservation it no
+   * longer has, a closed one, a payload it rejects). The intent stays pending, and every command
+   * that needs it refuses the same way until an operator repairs the wallet side.
+   */
+  | Readonly<{
+      code: "FUNDING_FAILED"
+      statementKey: string
+      seq: number
+      intent: "reserve" | "close"
+      walletCode: WalletErrorCode
+    }>
 
 export type BudgetErrorCode = BudgetRejection["code"]
 
@@ -841,6 +854,8 @@ function rejectionMessage(rejection: BudgetRejection): string {
       return `The wallet cannot fund ${formatAmount(rejection.required)} more usage on this budget`
     case "FUNDING_SEQ_CONFLICT":
       return `Statement ${rejection.statementKey} applied wallet intent ${rejection.seq}; ${rejection.requested} is not pending`
+    case "FUNDING_FAILED":
+      return `The wallet refused ${rejection.intent} ${rejection.seq} of statement ${rejection.statementKey} with ${rejection.walletCode}`
   }
 }
 

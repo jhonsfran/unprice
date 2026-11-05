@@ -8,6 +8,7 @@ import type {
   UnPriceBudgetError,
 } from "../../budgets"
 import type { CardRows } from "../../pricing"
+import type { UnPriceWalletError } from "../../wallet"
 
 export type BudgetAddress = Readonly<{ projectId: string; key: string }>
 
@@ -38,8 +39,9 @@ export interface CardSource {
 export interface BudgetWallet {
   /**
    * Runs one pending intent. The wallet answers a replayed `seq` as it answered the first call.
-   * Throws when the wallet fails: the intent stays pending on the budget, and the next command
-   * that needs it replays it.
+   * Either way the intent stays pending on the budget, and the next command that needs it replays
+   * it: an error a replay answers the same way (a reservation the wallet no longer has, a payload
+   * it refuses) comes back as `Err`, and a failure a replay may clear throws.
    */
-  run(address: BudgetAddress, work: FundingWork): Promise<FundingResult>
+  run(address: BudgetAddress, work: FundingWork): Promise<Result<FundingResult, UnPriceWalletError>>
 }

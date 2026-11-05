@@ -11,6 +11,7 @@ import {
   isOutcomeOf,
 } from "../../budgets"
 import type { ServiceContext } from "../../context"
+import type { WalletErrorCode } from "../../wallet"
 import type {
   BudgetAddress,
   BudgetClient,
@@ -132,7 +133,7 @@ export async function executeBudgetCommand<R extends BudgetVerbRequest>(
   return Ok(outcome)
 }
 
-type FundingDeps = Pick<ExecuteBudgetCommandDeps, "budgets" | "wallet">
+type FundingDeps = Pick<ExecuteBudgetCommandDeps, "budgets" | "wallet" | "logger">
 
 /** Reserves from the wallet for every statement key a charge or hold could not fund. */
 async function fund(
@@ -152,7 +153,9 @@ async function fund(
 /**
  * Runs each pending intent against the wallet and applies what it returned, then the intent that
  * follows it (a reserve that lands after its key sealed is followed by the close). The budget
- * persisted every intent first, so a failure here leaves it pending for a replay.
+ * persisted every intent first, so a failure here leaves it pending for a replay. A wallet that
+ * refuses the intent refuses every replay too, so the refusal is logged for an operator and
+ * answered as FUNDING_FAILED.
  */
 async function drain(
   deps: FundingDeps,
@@ -161,12 +164,37 @@ async function drain(
 ): Promise<Result<void, UnPriceBudgetError>> {
   const queue = [...work]
   for (let next = queue.shift(); next; next = queue.shift()) {
-    const result = await deps.wallet.run(address, next)
+    const ran = await deps.wallet.run(address, next)
+    if (ran.err) {
+      const error = ran.err
+      // UnPriceWalletError's constructor takes only a WalletErrorCode as its message.
+      const walletCode = error.message as WalletErrorCode
+      const { statementKey, intent, customerId } = next
+      deps.logger.error(error, {
+        context: "budget funding failed: the wallet refused a pending intent",
+        project_id: address.projectId,
+        budget_key: address.key,
+        customer_id: customerId,
+        statement_key: statementKey,
+        intent: intent.kind,
+        seq: intent.seq,
+        wallet_code: walletCode,
+      })
+      return Err(
+        new UnPriceBudgetError({
+          code: "FUNDING_FAILED",
+          statementKey,
+          seq: intent.seq,
+          intent: intent.kind,
+          walletCode,
+        })
+      )
+    }
     const applied = await deps.budgets.execute(address, {
       type: "applyFunding",
       statementKey: next.statementKey,
       seq: next.intent.seq,
-      result,
+      result: ran.val,
     })
     if (applied.err) return applied
     queue.push(...fundingOf(applied.val, "applyFunding"))

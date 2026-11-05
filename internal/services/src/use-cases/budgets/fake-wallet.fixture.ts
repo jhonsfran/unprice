@@ -1,4 +1,6 @@
+import { Err, Ok, type Result } from "@unprice/error"
 import type { FundingResult, FundingWork } from "../../budgets"
+import { UnPriceWalletError, type WalletErrorCode } from "../../wallet"
 import type { BudgetAddress, BudgetWallet } from "./budget-client"
 
 /** One wallet call as the fake saw it. */
@@ -14,7 +16,8 @@ export type FakeWalletCall = Readonly<{
  * Test double for the payer's wallet: one balance, reservations by id, and every call in order.
  * A reserve grants what the balance has, up to the amount; a replayed `seq` answers what it
  * answered first, as the wallet's idempotency keys do. A close moves its captures out and returns
- * the rest of the allocation to the balance. `failNext` throws on the next call, after nothing.
+ * the rest of the allocation to the balance. `failNext` is thrown by the next call, after nothing;
+ * while `refuseWith` is set, every call answers that wallet error.
  */
 export class FakeWallet implements BudgetWallet {
   balance: bigint
@@ -23,27 +26,33 @@ export class FakeWallet implements BudgetWallet {
     string,
     { allocated: bigint; captured: bigint; closed: boolean }
   >()
-  failNext = false
+  failNext: Error | null = null
+  refuseWith: WalletErrorCode | null = null
   private readonly answered = new Map<string, FundingResult>()
 
   constructor(balance = BigInt(0)) {
     this.balance = balance
   }
 
-  async run(address: BudgetAddress, work: FundingWork): Promise<FundingResult> {
+  async run(
+    address: BudgetAddress,
+    work: FundingWork
+  ): Promise<Result<FundingResult, UnPriceWalletError>> {
     const { intent, statementKey, reservationId } = work
     const amount =
       intent.kind === "reserve"
         ? intent.amount
         : intent.captures.reduce((sum, capture) => sum + capture.amount, BigInt(0))
     this.calls.push({ kind: intent.kind, statementKey, seq: intent.seq, reservationId, amount })
-    if (this.failNext) {
-      this.failNext = false
-      throw new Error("wallet unavailable")
+    const failure = this.failNext
+    if (failure) {
+      this.failNext = null
+      throw failure
     }
+    if (this.refuseWith) return Err(new UnPriceWalletError({ message: this.refuseWith }))
     const replayKey = `${address.key}|${statementKey}|${intent.kind}|${intent.seq}`
     const replay = this.answered.get(replayKey)
-    if (replay) return replay
+    if (replay) return Ok(replay)
 
     let result: FundingResult
     if (intent.kind === "reserve") {
@@ -65,6 +74,6 @@ export class FakeWallet implements BudgetWallet {
       result = { kind: "closed" }
     }
     this.answered.set(replayKey, result)
-    return result
+    return Ok(result)
   }
 }

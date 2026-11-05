@@ -562,6 +562,26 @@ describe("POST /v1/usage/consume", () => {
     )
   })
 
+  it("answers 500 without the wallet's detail when the wallet refused the funding", async () => {
+    mocks.execute.mockResolvedValue(
+      rejected({
+        code: "FUNDING_FAILED",
+        statementKey: "inv_nov",
+        seq: 2,
+        intent: "reserve",
+        walletCode: "WALLET_RESERVATION_ALREADY_RECONCILED",
+      })
+    )
+    const { call } = createApp()
+
+    const response = await call("/v1/usage/consume", consumeEvent)
+
+    expect(response.status).toBe(500)
+    expect(await response.json()).toEqual(
+      errorBody("INTERNAL_SERVER_ERROR", "Internal server error")
+    )
+  })
+
   it("returns 400 for an event no rate prices", async () => {
     mocks.execute.mockResolvedValue(
       rejected({ code: "NOT_PRICED", feature: "images", match: { size: "2048" } })

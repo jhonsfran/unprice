@@ -280,8 +280,9 @@ export function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): 
 
 /**
  * The HTTP error a budget rejection maps to: a denial (LIMIT_EXCEEDED, WALLET_EMPTY) is 402, a
- * request the budget cannot take as sent is 400, a missing budget or record 404, and a state
- * conflict (TOO_LATE, PERIOD_CLOSED, NO_STATEMENT, IDEMPOTENCY_CONFLICT, BUDGET_CLOSED) 409.
+ * request the budget cannot take as sent is 400, a missing budget or record 404, a state
+ * conflict (TOO_LATE, PERIOD_CLOSED, NO_STATEMENT, IDEMPOTENCY_CONFLICT, BUDGET_CLOSED) 409, and a
+ * wallet that refused its funding (FUNDING_FAILED) 500.
  */
 export function budgetRejectionError(error: UnPriceBudgetError): UnpriceApiError {
   const { rejection } = error
@@ -376,6 +377,13 @@ export function budgetRejectionError(error: UnPriceBudgetError): UnpriceApiError
     case "STATEMENT_NOT_FOUND":
     case "CARD_NOT_FOUND":
       return new UnpriceApiError({ code: "NOT_FOUND", message, cause: error })
+    // The wallet side needs an operator: the caller cannot fix it, and the detail stays in the logs.
+    case "FUNDING_FAILED":
+      return new UnpriceApiError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "The customer's wallet could not fund this usage",
+        cause: error,
+      })
     case "INVALID_TTL":
     case "INVALID_OCCURRED_AT":
     case "INVALID_USAGE":

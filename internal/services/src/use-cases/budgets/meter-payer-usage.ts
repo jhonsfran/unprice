@@ -89,6 +89,8 @@ export async function meterPayerUsage(
             key: payerBudgetKey(event.customerId),
             request,
           })
+          // A wallet that refused the funding left the event undecided, not refused by the budget.
+          if (result.err?.rejection.code === "FUNDING_FAILED") throw result.err
           results[index] = { event, result }
         } catch (caught) {
           // The budget was never reached: this event and the customer's later ones stay undecided,
