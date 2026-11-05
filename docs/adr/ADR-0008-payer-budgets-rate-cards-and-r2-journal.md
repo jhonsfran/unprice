@@ -68,11 +68,23 @@ period's usage was priced in the unit in force when it landed.
 | Subscription | an optional overlay card, limit overrides, funding | the subscription |
 
 - A price row is immutable. A price change closes the row (`effectiveTo`) and inserts a successor.
-- Once a card has any row, even one that has ended, every row published on it, and every row end,
-  takes effect at least 10 minutes after publish; only a card's first rows may start at once. A
-  budget refreshes its card at least every 5 minutes, so no budget prices with a stale card. A
-  publish may end other rows where its rows start, so a regrouped meter's rows follow the old
-  ones without a gap.
+- A card is live once a plan version that has been published (`published_at` set, whatever its
+  status later) prices with it, or once a subscription overlay binds it. On a live card every row
+  published, and every row end, takes effect at least 10 minutes after publish. A budget refreshes
+  its card at least every 5 minutes, so no budget prices with a stale card. A card no published
+  version prices with has no budget reading it, so its rows may start at once: that is how a draft
+  version is priced from its editor. A publish may end other rows where its rows start, so a
+  regrouped meter's rows follow the old ones without a gap. Publishing a version locks its cards,
+  so a row write and a publish serialize. (Amended 2026-11-05.)
+- A plan version owns its card: pricing a feature in the version's editor creates the version's
+  own card in its currency when it has none, named `<plan slug> <version id> <currency>`, and
+  duplicating a version forks the card (its policy and the rows in effect now; scheduled
+  successors are not copied). A version may instead be assigned a shared card; its prices are then
+  edited on the card, never from the editor. (Amended 2026-11-05.)
+- The dimensions a row may match on are the plan feature's meter `groupBy`, read from the plan
+  version's snapshot; a card is validated against the plan features of every version assigned to
+  it, and against the project's feature definitions only while unassigned. Publishing a version
+  validates its card's rows the same way the budget does. (Amended 2026-11-05.)
 - An overlay card's rows win over the base card's rows of the same specificity.
 - A plan version stores no price and no currency inside a feature.
 
@@ -80,8 +92,13 @@ period's usage was priced in the unit in force when it landed.
 
 - A row carries `price` and an optional `cost` (USD components). Rating computes both in one pass, so
   each consumption line records amount, cost, and `rateRowId`.
-- A card's margin policy is `manual` or `costPlus { markup, minimumMargin?, roundTo? }`. A catalog
-  import produces a draft card revision with the price diff. Publishing it is explicit.
+- A card's margin policy is `manual` or `costPlus` with one `{ featureSlug, markup, roundTo,
+  dimension, componentMap }` per feature it prices from the catalog, so one version's card can
+  price several model-dimensioned features. Setting a feature's catalog pricing from the version's
+  editor imports the bundled models.dev catalog (effective at the catalog's version date), writes
+  the policy, and answers a draft revision with the price diff. Publishing it is explicit. Catalog
+  pricing is USD only. Models with context tiers are priced at their base tier and flagged in the
+  draft; tier pricing is a follow-up. (Amended 2026-11-05.)
 - Rating never reads `model_costs`.
 
 ### D4. Usage is priced once, at ingestion

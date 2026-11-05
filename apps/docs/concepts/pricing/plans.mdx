@@ -23,13 +23,20 @@ credit policy. It stores no price: it names the rate card that prices it in each
 A rate card is a list of price rows. Each row prices one feature, or one combination of a feature's
 dimensions, such as one `model`.
 
+- You set prices in the plan version's editor, next to each feature's quantities and meter. The
+  version gets its own card in its currency the first time you price a feature; a feature whose
+  meter varies by `model` can take its model prices from the models.dev catalog at a markup you
+  choose. The Rate cards page is where you inspect that card, schedule a change, or share one card
+  across versions.
 - A row never changes. To change a price, publish a new row and end the old row in the same
   publish, where the new one starts.
-- Once a card has rows, a new row or a row end takes effect at least 10 minutes after you publish
-  it. Only a card's first rows can start at once. Customer budgets refresh their cards at least
-  every 5 minutes, so no usage is priced with a price that has ended.
-- A change to a card's rows reaches every customer whose plan version uses that card. To keep
-  existing customers on their price, put the new price on a new card in a new plan version.
+- Once a published version prices with a card, a new row or a row end on it takes effect at least
+  10 minutes after you publish it. Customer budgets refresh their cards at least every 5 minutes,
+  so no usage is priced with a price that has ended. A card only draft versions use has no
+  customers on it, so its rows start at once.
+- A change to a card's rows reaches every customer whose plan version uses that card. Duplicating
+  a version copies its prices onto a new card, so the new draft is priced on its own; to keep
+  existing customers on their price, publish the new price in that new version.
 - Unprice prices usage once, when it accepts the event. Invoices add up those amounts and never
   price usage again. Recurring fees, such as a base fee or seats, are priced from the card when the
   billing period closes.
