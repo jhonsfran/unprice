@@ -5,18 +5,13 @@ import type {
   RateRow,
   RateRowDraft,
 } from "@unprice/db/validators"
-import { featurePricingSchema } from "@unprice/db/validators"
+import { RATE_CHANGE_NOTICE_MS, featurePricingSchema } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import { matchKey, validateCard } from "../pricing"
 import { UnPriceRateCardError, type UnpriceableFeature } from "./errors"
 import { canonicalJson } from "./wire"
 
-/**
- * How far ahead a price change must start. A budget refreshes its card at least every 5 minutes
- * (ADR-0008 D2), so a change published with this notice never meets a budget pricing with a card
- * that predates it.
- */
-export const RATE_CHANGE_NOTICE_MS = 10 * 60 * 1000
+export { RATE_CHANGE_NOTICE_MS }
 
 /** A row to publish and where its price came from. */
 export type RowDraft = RateRowDraft & Pick<RateRow, "source" | "sourceRef">

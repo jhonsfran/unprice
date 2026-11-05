@@ -8,6 +8,13 @@ import { currencySchema, featureSlugSchema } from "./shared"
 // does exact integer math on trusted values. Structural rules that span rows (overlaps, match
 // keys, tiers, cost properties) live in `validateCard`, which reports every violation at once.
 
+/**
+ * How far ahead a price change must start once a card has any row (ADR-0008 D2). A budget
+ * refreshes its card at least every 5 minutes, so a change published with this notice never meets
+ * a budget pricing with a card that predates it.
+ */
+export const RATE_CHANGE_NOTICE_MS = 10 * 60 * 1000
+
 /** A non-negative decimal string with at most 8 places, parsed into base units. */
 export const rateDecimalSchema = z
   .string()

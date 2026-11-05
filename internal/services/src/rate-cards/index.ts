@@ -12,6 +12,7 @@ export {
 } from "./publish"
 export {
   type CostPlusPreview,
+  type PlanVersionPricing,
   type PublishRowsInput,
   type PublishRowsResult,
   RateCardService,

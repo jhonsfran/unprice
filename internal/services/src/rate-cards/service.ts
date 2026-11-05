@@ -71,6 +71,13 @@ export type PublishRowsResult = {
 
 export type CostPlusPreview = { draft: CostPlusDraft; draftHash: string }
 
+/** A card a plan version prices with in one currency, and its rows in effect at one time. */
+export type PlanVersionPricing = {
+  currency: PlanVersionCard["currency"]
+  card: RateCard
+  rows: RateRow[]
+}
+
 /** Rate cards, their effective-dated rows, and the model cost catalog (ADR-0008 D2, D3). */
 export class RateCardService {
   constructor(private readonly deps: RateCardServiceDeps) {}
@@ -197,6 +204,75 @@ export class RateCardService {
       )
     if (!row) return null
     return { planVersionId, currency, cardId: row.cardId, unit: rateCardUnitSchema.parse(row.unit) }
+  }
+
+  /**
+   * The cards each plan version prices with, one per currency, with the rows in effect at `at`,
+   * or at any time in [at, until) when `until` is given. A version without a card is absent.
+   */
+  async pricingForPlanVersions(
+    projectId: string,
+    planVersionIds: readonly string[],
+    at: number,
+    until = at + 1
+  ): Promise<Map<string, PlanVersionPricing[]>> {
+    const byVersion = new Map<string, PlanVersionPricing[]>()
+    if (planVersionIds.length === 0) return byVersion
+    const assigned = await this.deps.db
+      .select({ assignment: planVersionRateCards, card: rateCards })
+      .from(planVersionRateCards)
+      .innerJoin(
+        rateCards,
+        and(
+          eq(rateCards.projectId, planVersionRateCards.projectId),
+          eq(rateCards.id, planVersionRateCards.rateCardId)
+        )
+      )
+      .where(
+        and(
+          eq(planVersionRateCards.projectId, projectId),
+          inArray(planVersionRateCards.planVersionId, [...planVersionIds])
+        )
+      )
+      .orderBy(asc(planVersionRateCards.currency))
+    const rows = await this.getEffectiveRows({
+      projectId,
+      cardIds: [...new Set(assigned.map(({ card }) => card.id))],
+      from: at,
+      to: until,
+    })
+    for (const { assignment, card } of assigned) {
+      const pricing = byVersion.get(assignment.planVersionId) ?? []
+      pricing.push({
+        currency: assignment.currency,
+        card: toRateCard(card),
+        rows: rows.filter((row) => row.rateCardId === card.id),
+      })
+      byVersion.set(assignment.planVersionId, pricing)
+    }
+    return byVersion
+  }
+
+  /**
+   * Each version's rows in effect at `at` on its card in the version's own currency; empty for a
+   * version without one. What a pricing card or plan editor shows as the price.
+   */
+  async rowsForVersions(
+    projectId: string,
+    planVersions: readonly { id: string; currency: PlanVersionCard["currency"] }[],
+    at: number
+  ): Promise<Map<string, RateRow[]>> {
+    const pricing = await this.pricingForPlanVersions(
+      projectId,
+      planVersions.map((version) => version.id),
+      at
+    )
+    return new Map(
+      planVersions.map((version) => [
+        version.id,
+        pricing.get(version.id)?.find((card) => card.currency === version.currency)?.rows ?? [],
+      ])
+    )
   }
 
   /** The rows of `cardIds` whose interval overlaps [from, to). */
