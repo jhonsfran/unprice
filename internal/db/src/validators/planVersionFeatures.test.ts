@@ -66,6 +66,39 @@ describe("planVersionFeatureInsertBaseSchema", () => {
     expect(result.success).toBe(false)
   })
 
+  it("rejects a usage feature in package mode without units", () => {
+    const feature = {
+      featureId: "feature_123",
+      planVersionId: "plan_version_123",
+      featureType: "usage",
+      billingConfig,
+      order: 1024,
+      defaultQuantity: 1,
+      meterConfig: {
+        eventId: "event_123",
+        eventSlug: "llm_completion",
+        aggregationMethod: "count",
+      },
+    }
+
+    const missing = planVersionFeatureInsertBaseSchema.safeParse({
+      ...feature,
+      config: { usageMode: "package" },
+    })
+    const sized = planVersionFeatureInsertBaseSchema.safeParse({
+      ...feature,
+      config: { usageMode: "package", units: 100 },
+    })
+
+    expect(missing.error?.issues.map(({ path, message }) => ({ path, message }))).toEqual([
+      {
+        path: ["config.units"],
+        message: "A usage feature in package mode needs units: how many units one package holds",
+      },
+    ])
+    expect(sized.data?.config).toEqual({ usageMode: "package", units: 100 })
+  })
+
   it("rejects unsupported top-level aggregationMethod", () => {
     const result = planVersionFeatureInsertBaseSchema.safeParse({
       featureId: "feature_123",

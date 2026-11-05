@@ -112,22 +112,46 @@ export const configTierSchema = z
   .object({})
   .describe("Tier features need no configuration; the rate card holds their tiers")
 
-export const configUsageSchema = z
-  .object({
-    usageMode: usageModeSchema.describe(
-      "How usage is sold: 'unit', 'tier' (graduated), or 'package'. The rate card holds the price"
-    ),
-    units: unitSchema
-      .optional()
-      .describe("Units in a package when usageMode is 'package'. Example: 100"),
+/** The keys of `configUsageSchema`, for schemas that extend them. */
+export const configUsageFieldsSchema = z.object({
+  usageMode: usageModeSchema.describe(
+    "How usage is sold: 'unit', 'tier' (graduated), or 'package'. The rate card holds the price"
+  ),
+  units: unitSchema
+    .optional()
+    .describe("Units in a package when usageMode is 'package'. Example: 100"),
+})
+
+export const configUsageSchema = configUsageFieldsSchema
+  .superRefine((config, ctx) => {
+    // A package row prices whole packages of `units`; without it the feature cannot be priced.
+    if (config.usageMode === USAGE_MODES_MAP.package.code && config.units === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "A usage feature in package mode needs units: how many units one package holds",
+        path: ["units"],
+      })
+    }
   })
   .describe("Configuration for a usage-based feature")
 
 export const configPackageSchema = z
   .object({
-    units: unitSchema.describe(
-      "Number of units in each package. Example: 100 means each package includes 100 units"
-    ),
+    units: unitSchema
+      .optional()
+      .describe(
+        "Number of units in each package. Example: 100 means each package includes 100 units"
+      ),
+  })
+  .superRefine((config, ctx) => {
+    // Checked here rather than by `unitSchema` so a missing size says what it is.
+    if (config.units === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "A package feature needs units: how many units one package holds",
+        path: ["units"],
+      })
+    }
   })
   .describe("Configuration for a package feature: the bundle size the rate card prices")
 

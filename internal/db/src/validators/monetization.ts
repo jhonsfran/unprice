@@ -31,6 +31,7 @@ import {
   configFlatSchema,
   configPackageSchema,
   configTierSchema,
+  configUsageFieldsSchema,
   configUsageSchema,
   planVersionFeatureInsertBaseSchema,
   priceSchema,
@@ -137,7 +138,7 @@ export const monetizationTierSchema = z
  * below. A union would type better but report every failure once per branch.
  */
 export const monetizationPriceConfigSchema = z
-  .object(configUsageSchema.shape)
+  .object(configUsageFieldsSchema.shape)
   .extend({
     price: boundaryPriceSchema
       .optional()

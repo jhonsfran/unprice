@@ -253,6 +253,31 @@ describe("monetizationConfigSchema", () => {
     ])
   })
 
+  it.each([
+    ["package", { price: "10" }, "A package feature needs units: how many units one package holds"],
+    [
+      "usage",
+      { usageMode: "package", price: "10" },
+      "A usage feature in package mode needs units: how many units one package holds",
+    ],
+  ])("rejects a %s feature sold by the package without units", (featureType, config, message) => {
+    const result = monetizationConfigSchema.safeParse(
+      withFirstFeature({
+        featureSlug: "input-tokens",
+        featureType,
+        config,
+        ...(featureType === "usage" && {
+          meterConfig: { eventSlug: "ai_completion", aggregationMethod: "count" },
+        }),
+      })
+    )
+
+    expect(result.success).toBe(false)
+    expect(
+      result.error?.issues.map((issue) => ({ path: issue.path.join("."), message: issue.message }))
+    ).toEqual([{ path: "plans.0.version.features.0.config.units", message }])
+  })
+
   it("rejects an unknown key inside a price config", () => {
     const invalid = structuredClone(config) as unknown as {
       plans: { version: { features: { config: Record<string, unknown> }[] } }[]
