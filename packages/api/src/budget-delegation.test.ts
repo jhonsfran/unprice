@@ -64,6 +64,32 @@ describe("Unprice budgets from @unprice/budgets", () => {
     ])
   })
 
+  it("sends the handle's ifMissing definition with its authorize", async () => {
+    const { unprice, requests } = clientWith(() =>
+      json({
+        allowed: true,
+        holdId: "h_1",
+        amount: "0.05",
+        expiresAt: 1_792_000_060_000,
+        replayed: false,
+        balance,
+      })
+    )
+    const ifMissing = { unit: "USD", limits: [{ amount: "5", window: "month" as const }] }
+
+    await unprice
+      .budget("customer:acme", { ifMissing })
+      .authorize({ amount: "0.05", idempotencyKey: "msg_1" })
+
+    expect(requests).toEqual([
+      {
+        path: "/v1/budgets/authorize",
+        source: expect.stringMatching(/^sdk@/),
+        body: { key: "customer:acme", amount: "0.05", idempotencyKey: "msg_1", ifMissing },
+      },
+    ])
+  })
+
   it("throws the re-exported BudgetExceededError when a limit denies a spend", async () => {
     const blocked = {
       limitId: "month",

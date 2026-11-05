@@ -14,6 +14,7 @@ export type {
   BudgetBalance,
   BudgetBlocked,
   BudgetCharge,
+  BudgetDefinitionInput,
   BudgetDenial,
   BudgetHandle,
   BudgetHold,
@@ -24,6 +25,7 @@ export type {
   SpendBudgetInput,
 } from "@unprice/budgets"
 export type {
+  BudgetHandleOptions,
   LeaseReportResponse,
   LocalBudgetHandle,
   LocalBudgetOptions,
