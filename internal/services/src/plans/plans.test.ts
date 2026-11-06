@@ -646,4 +646,72 @@ describe("PlanService plan version billing defaults", () => {
       "kept",
     ])
   })
+  it("copies the feature's meter template when a row becomes metered without its own meter", async () => {
+    const template = {
+      eventId: "event_vq",
+      eventSlug: "vector_query",
+      aggregationMethod: "count" as const,
+      groupBy: ["model"],
+    }
+    const becomeMetered = async (featureMeterConfig: typeof template | null) => {
+      const written: Record<string, unknown>[] = []
+      const stored = {
+        id: "fpv_123",
+        projectId: "proj_123",
+        planVersionId: "pv_123",
+        featureId: "feature_vq",
+        featureType: "flat",
+        config: {},
+        billingConfig: monthlyBillingConfig,
+        resetConfig: null,
+        meterConfig: null,
+        included: null,
+        metadata: {},
+        feature: { id: "feature_vq", unitOfMeasure: "queries", meterConfig: featureMeterConfig },
+      }
+      const db = {
+        query: {
+          planVersionFeatures: { findFirst: vi.fn().mockResolvedValue(stored) },
+          versions: {
+            findFirst: vi.fn().mockResolvedValue({
+              id: "pv_123",
+              projectId: "proj_123",
+              status: "draft",
+              billingConfig: monthlyBillingConfig,
+            }),
+          },
+        },
+        transaction: vi.fn((callback: (tx: unknown) => Promise<unknown>) =>
+          callback({
+            update: vi.fn(() => ({
+              set: vi.fn((values: Record<string, unknown>) => {
+                written.push(values)
+                return {
+                  where: vi.fn(() => ({
+                    returning: vi.fn().mockResolvedValue([{ id: "fpv_123" }]),
+                  })),
+                }
+              }),
+            })),
+            query: { planVersionFeatures: { findFirst: vi.fn().mockResolvedValue(stored) } },
+          })
+        ),
+      } as unknown as Database
+      const result = await createPlanService(db).updatePlanVersionFeatureRecord({
+        projectId: "proj_123",
+        id: "fpv_123",
+        planVersionId: "pv_123",
+        featureType: "usage",
+        config: { usageMode: "unit" },
+        hasMeterConfigOverride: false,
+      })
+      return { state: result.val?.state, meterConfig: written[0]?.meterConfig }
+    }
+
+    expect(await becomeMetered(template)).toEqual({ state: "ok", meterConfig: template })
+    expect(await becomeMetered(null)).toEqual({
+      state: "usage_meter_config_required",
+      meterConfig: undefined,
+    })
+  })
 })

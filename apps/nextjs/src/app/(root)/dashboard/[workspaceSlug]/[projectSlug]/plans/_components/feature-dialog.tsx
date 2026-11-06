@@ -48,8 +48,8 @@ export function FeatureDialog({
           </ResponsiveDialogTitle>
 
           <ResponsiveDialogDescription>
-            Define the sellable or gateable capability that plan versions attach to meters,
-            entitlements, and limits.
+            Name what customers get and, when it is metered, the event that measures it. Plan
+            versions attach the feature with its meter.
           </ResponsiveDialogDescription>
         </ResponsiveDialogHeader>
 

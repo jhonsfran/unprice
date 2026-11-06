@@ -5,7 +5,6 @@ import { useFieldArray } from "react-hook-form"
 import { z } from "zod"
 
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { slugify } from "@unprice/db/utils"
 import type { Event } from "@unprice/db/validators"
 import { eventInsertBaseSchema } from "@unprice/db/validators"
 import { Button } from "@unprice/ui/button"
@@ -66,26 +65,26 @@ function toAvailableProperties(values: EventFormValues["availableProperties"]) {
   return Array.from(new Set(values.map((property) => property.value.trim()).filter(Boolean)))
 }
 
+/**
+ * Edits an existing event: its name and the numeric properties it carries. Creating one happens
+ * in the event picker. The slug and the properties already in use are immutable.
+ */
 export function EventFormDialog({
   open,
   onOpenChange,
-  mode,
   event,
   onSaved,
-  isDisabled,
-  isPlanVersionLocked,
+  isLocked,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  mode: "create" | "edit"
-  event?: Event
+  event: Event | undefined
   onSaved: (event: Event) => Promise<void> | void
-  isDisabled?: boolean
-  isPlanVersionLocked?: boolean
+  /** A published version reads the event without editing it. */
+  isLocked?: boolean
 }) {
   const trpc = useTRPC()
   const queryClient = useQueryClient()
-  const createEvent = useMutation(trpc.events.create.mutationOptions())
   const updateEvent = useMutation(trpc.events.update.mutationOptions())
   const form = useZodForm({
     schema: eventFormSchema,
@@ -95,7 +94,7 @@ export function EventFormDialog({
     control: form.control,
     name: "availableProperties",
   })
-  const immutablePropertyCount = mode === "edit" ? (event?.availableProperties?.length ?? 0) : 0
+  const immutablePropertyCount = event?.availableProperties?.length ?? 0
 
   useEffect(() => {
     if (!open) {
@@ -105,31 +104,21 @@ export function EventFormDialog({
     form.reset(toEventFormValues(event))
   }, [event?.id, form, open])
 
-  const isPending = createEvent.isPending || updateEvent.isPending
-  const isCreateDisabled = Boolean(isDisabled && mode === "create")
-  const isExistingEventMetadataLocked = Boolean(isPlanVersionLocked && mode === "edit")
+  const isPending = updateEvent.isPending
 
   const onSubmit = async (data: EventFormValues) => {
-    const availableProperties = toAvailableProperties(data.availableProperties)
-
-    const result =
-      mode === "create"
-        ? await createEvent.mutateAsync({
-            name: data.name,
-            slug: data.slug,
-            availableProperties,
-          })
-        : await updateEvent.mutateAsync({
-            id: event!.id,
-            name: data.name,
-            availableProperties,
-          })
+    if (!event) return
+    const result = await updateEvent.mutateAsync({
+      id: event.id,
+      name: data.name,
+      availableProperties: toAvailableProperties(data.availableProperties),
+    })
 
     await queryClient.invalidateQueries({
       queryKey: trpc.events.listByActiveProject.queryKey(),
     })
 
-    toastAction(mode === "create" ? "saved" : "updated")
+    toastAction("updated")
     await onSaved(result.event)
     onOpenChange(false)
   }
@@ -143,12 +132,10 @@ export function EventFormDialog({
     <ResponsiveDialog open={open} onOpenChange={onOpenChange}>
       <ResponsiveDialogContent className="md:max-w-[620px]">
         <ResponsiveDialogHeader className="space-y-2">
-          <ResponsiveDialogTitle>
-            {mode === "create" ? "Create event" : isPlanVersionLocked ? "View event" : "Edit event"}
-          </ResponsiveDialogTitle>
+          <ResponsiveDialogTitle>{isLocked ? "View event" : "Edit event"}</ResponsiveDialogTitle>
           <ResponsiveDialogDescription>
-            Events are reusable across features. Add the SDK slug once. An event is counted unless
-            it carries a number to sum, such as tokens.
+            Events are reusable across features. An event is counted unless it carries a number to
+            sum, such as tokens.
           </ResponsiveDialogDescription>
         </ResponsiveDialogHeader>
 
@@ -166,14 +153,7 @@ export function EventFormDialog({
                       <Input
                         {...field}
                         placeholder="AI completion"
-                        disabled={isCreateDisabled || isExistingEventMetadataLocked || isPending}
-                        onChange={(e) => {
-                          field.onChange(e)
-
-                          if (mode === "create") {
-                            form.setValue("slug", slugify(e.target.value))
-                          }
-                        }}
+                        disabled={isLocked || isPending}
                       />
                     </FormControl>
                     <FormMessage />
@@ -189,12 +169,7 @@ export function EventFormDialog({
                     <FormLabel>SDK Slug</FormLabel>
                     <FormDescription>Slugs are immutable after creation.</FormDescription>
                     <FormControl>
-                      <Input
-                        {...field}
-                        className="font-mono"
-                        placeholder="ai_completion"
-                        disabled={isCreateDisabled || isPending || mode === "edit"}
-                      />
+                      <Input {...field} className="font-mono" readOnly disabled />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -208,8 +183,8 @@ export function EventFormDialog({
                   <p className="font-medium text-sm">Numeric properties</p>
                   <p className="text-muted-foreground text-xs">
                     Payload fields the event carries a number in, like `input_tokens` or
-                    `active_seats`. Leave empty for an event that is counted.
-                    {mode === "edit" ? " Existing properties cannot be removed." : ""}
+                    `active_seats`. Leave empty for an event that is counted. Existing properties
+                    cannot be removed.
                   </p>
                 </div>
                 <Button
@@ -217,7 +192,7 @@ export function EventFormDialog({
                   size="sm"
                   variant="outline"
                   className="shrink-0"
-                  disabled={isCreateDisabled || isPending}
+                  disabled={isLocked || isPending}
                   onClick={() => append({ value: "" })}
                 >
                   <Plus className="mr-2 size-3.5" />
@@ -228,7 +203,7 @@ export function EventFormDialog({
               {fields.length ? (
                 <div className="space-y-2">
                   {fields.map((field, index) => {
-                    const isImmutableProperty = mode === "edit" && index < immutablePropertyCount
+                    const isImmutableProperty = index < immutablePropertyCount
 
                     return (
                       <div key={field.id} className="flex items-start gap-2">
@@ -242,7 +217,7 @@ export function EventFormDialog({
                                   {...field}
                                   className="font-mono"
                                   placeholder="input_tokens"
-                                  disabled={isCreateDisabled || isPending || isImmutableProperty}
+                                  disabled={isLocked || isPending || isImmutableProperty}
                                 />
                               </FormControl>
                               <FormMessage />
@@ -254,7 +229,7 @@ export function EventFormDialog({
                           variant="ghost"
                           size="icon"
                           className="mt-0.5 shrink-0"
-                          disabled={isCreateDisabled || isPending || isImmutableProperty}
+                          disabled={isLocked || isPending || isImmutableProperty}
                           onClick={() => remove(index)}
                         >
                           <XCircle className="size-4" />
@@ -276,13 +251,15 @@ export function EventFormDialog({
               )}
             </div>
 
-            <ResponsiveDialogFooter className="pt-2">
-              <SubmitButton
-                isSubmitting={form.formState.isSubmitting}
-                isDisabled={isCreateDisabled || isPending}
-                label={mode === "create" ? "Create event" : "Save event"}
-              />
-            </ResponsiveDialogFooter>
+            {!isLocked && (
+              <ResponsiveDialogFooter className="pt-2">
+                <SubmitButton
+                  isSubmitting={form.formState.isSubmitting}
+                  isDisabled={isPending}
+                  label="Save event"
+                />
+              </ResponsiveDialogFooter>
+            )}
           </form>
         </Form>
       </ResponsiveDialogContent>

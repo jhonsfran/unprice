@@ -27,6 +27,7 @@ import { SubmitButton } from "~/components/submit-button"
 import { toastAction } from "~/lib/toast"
 import { useZodForm } from "~/lib/zod-form"
 import { useTRPC } from "~/trpc/client"
+import { MeterTemplateField } from "./meter-template-field"
 
 export type CreatedFeature = RouterOutputs["features"]["create"]["feature"]
 
@@ -70,7 +71,7 @@ export function FeatureForm({
 
   const form = useZodForm({
     schema: forSchema,
-    defaultValues,
+    defaultValues: { ...defaultValues, meterConfig: defaultValues.meterConfig ?? null },
   })
 
   const createFeature = useMutation(
@@ -223,6 +224,21 @@ export function FeatureForm({
                     placeholder="Grants customers access to custom domains."
                   />
                 </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name="meterConfig"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Measured by</FormLabel>
+                <FormDescription>
+                  The event this feature counts. A plan that meters the feature starts from it.
+                </FormDescription>
+                <MeterTemplateField value={field.value ?? null} onChange={field.onChange} />
                 <FormMessage />
               </FormItem>
             )}

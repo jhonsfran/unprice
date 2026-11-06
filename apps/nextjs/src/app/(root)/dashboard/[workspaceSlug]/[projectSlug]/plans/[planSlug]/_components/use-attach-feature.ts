@@ -15,7 +15,8 @@ type LibraryFeature = RouterOutputs["features"]["searchBy"]["features"][number]
 
 /**
  * Attaches a library feature to the open version: an optimistic row at the end of the table, its
- * cells editable once the server answers with the saved feature.
+ * cells editable once the server answers with the saved feature. A feature with a meter template
+ * joins as a metered row; the server snapshots the template, so the row never needs the sheet.
  */
 export function useAttachFeature(planVersion: PlanVersion) {
   const trpc = useTRPC()
@@ -64,15 +65,17 @@ export function useAttachFeature(planVersion: PlanVersion) {
     // place new feature at the end
     const lastOrder = planVersionFeatureList[planVersionFeatureList.length - 1]?.order
     const order = typeof lastOrder === "number" ? lastOrder + 1024 : 1024
+    const metered = Boolean(feature.meterConfig)
 
     const optimistic = {
       planVersionId: planVersion.id,
       featureId: feature.id,
-      featureType: "flat" as const,
+      featureType: metered ? ("usage" as const) : ("flat" as const),
       feature,
       order,
-      config: {},
+      config: metered ? { usageMode: "unit" as const } : {},
       billingConfig: planVersion.billingConfig,
+      meterConfig: feature.meterConfig ?? null,
     } as PlanVersionFeatureDragDrop
 
     setPlanFeaturesList((prev) => [...prev, optimistic])
@@ -90,7 +93,9 @@ export function useAttachFeature(planVersion: PlanVersion) {
       limit: optimistic.limit ?? undefined,
       type: optimistic.type,
       unitOfMeasure: optimistic.unitOfMeasure,
-      meterConfig: optimistic.meterConfig ?? undefined,
+      // The template travels as the row's meter: the insert schema requires one for a usage row,
+      // and an absent key is the only other shape the server reads as "no override".
+      ...(feature.meterConfig ? { meterConfig: feature.meterConfig } : {}),
     }
 
     createPlanVersionFeature.mutate(payload)

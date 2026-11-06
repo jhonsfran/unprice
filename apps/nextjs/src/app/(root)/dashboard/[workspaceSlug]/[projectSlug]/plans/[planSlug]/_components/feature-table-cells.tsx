@@ -1,12 +1,13 @@
 "use client"
 
 import { CalendarClock, EyeOff, MoreVertical, RotateCw, SlidersHorizontal, Zap } from "lucide-react"
-import { type KeyboardEvent, useState } from "react"
+import { type KeyboardEvent, useRef, useState } from "react"
 
 import type { FeatureType } from "@unprice/db/utils"
 import { FEATURE_TYPES_MAPS } from "@unprice/db/utils"
-import type { PlanVersionFeatureDragDrop } from "@unprice/db/validators"
-import { AMOUNT_PATTERN } from "@unprice/money"
+import type { PlanVersionFeatureDragDrop, RatePrice, RateRow } from "@unprice/db/validators"
+import { AMOUNT_PATTERN, formatMoney } from "@unprice/money"
+import { describeTiers } from "@unprice/services/pricing"
 import type { RouterInputs } from "@unprice/trpc/routes"
 import {
   AlertDialog,
@@ -56,7 +57,15 @@ export function kindLabel(kind: FeatureType): string {
   return FEATURE_TYPES_MAPS[kind].shortLabel
 }
 
-const CELL_TRANSITION = "transition-[border-color,background-color,color] duration-150 ease-out"
+/** Every cell's type: the body face at 13px, digits aligned. */
+const CELL_TEXT = "text-[13px] leading-5 tabular-nums"
+const CELL_TRANSITION = "transition-[background-color] duration-150 ease-out"
+/**
+ * A cell's surface: flat at rest, one step up on hover (the row's own hover is `bgHover`, so the
+ * cell takes `bgActive` to show against it), and a cut-out field with a ring while it has focus.
+ */
+const CELL_SURFACE =
+  "hover:bg-background-bgActive focus-within:bg-background hover:focus-within:bg-background focus-within:ring-1 focus-within:ring-ring"
 
 /**
  * What picking a kind does. Fixed and Tiered commit at once. Bundle needs its size and Metered
@@ -122,12 +131,103 @@ export function includedCellOf(
   }
 }
 
+const CYCLE_WORD: Readonly<Record<string, string>> = {
+  monthly: "month",
+  yearly: "year",
+  weekly: "week",
+  daily: "day",
+}
+
+/** One billing or reset period as a word; "cycle" for a cadence without one (the test cadences). */
+export function cycleWord(cadence: string | undefined): string {
+  return (cadence && CYCLE_WORD[cadence]) || "cycle"
+}
+
+const number = new Intl.NumberFormat("en", { maximumFractionDigits: 8 })
+
+/**
+ * The text a cell shows at rest: "1,000", or "$0.002" with a currency. Nothing for nothing, and
+ * the text itself when it is not a number.
+ */
+export function formatCellValue(raw: string, currency?: string): string {
+  const text = raw.trim()
+  if (text === "" || Number.isNaN(Number(text))) return text
+  return currency
+    ? formatMoney(text, currency, { maximumFractionDigits: 8 })
+    : number.format(Number(text))
+}
+
+/** A count of units at rest; nothing for none or zero, which the cell says in a word. */
+export function formatUnits(raw: string): string {
+  return Number(raw) ? formatCellValue(raw) : ""
+}
+
+/** The currency's symbol as `formatMoney` writes it: "$", "€", or the code of one without a symbol. */
+export function currencySymbol(currency: string): string {
+  return formatMoney("0", currency).replace(/[\d\s.,]/g, "")
+}
+
+/** The unit for a count; a feature stores it in either number ("call", "images"). */
+function unitWord(unit: string, count: number): string {
+  const singular = unit.replace(/s$/, "")
+  return count === 1 ? singular : `${singular}s`
+}
+
+/**
+ * The unit after a count of a feature's units: plural, singular for exactly one, and the reset
+ * period when it differs from the plan's billing ("images / day").
+ */
+export function unitSuffixOf(
+  row: Pick<PlanVersionFeatureDragDrop, "featureType" | "unitOfMeasure" | "resetConfig">,
+  planBillingName: string | undefined,
+  value: string
+): string {
+  const unit = unitWord(row.unitOfMeasure ?? "units", Number(value))
+  const reset = row.featureType === "usage" ? row.resetConfig?.name : undefined
+  return reset && reset !== planBillingName ? `${unit} / ${cycleWord(reset)}` : unit
+}
+
+type GraduatedPrice = Extract<RatePrice, { type: "graduated" }>
+
+/**
+ * Tiers in one line: "3 included, then $10 / seat" for a free tier followed by one rate; every
+ * tier's range and price otherwise.
+ */
+export function tierSummary(price: GraduatedPrice, currency: string, unit: string): string {
+  const lines = describeTiers(price, currency, unit)
+  const [free, rest] = price.tiers
+  const zero = BigInt(0)
+  if (
+    price.tiers.length === 2 &&
+    free &&
+    rest &&
+    free.upTo !== null &&
+    free.rate === zero &&
+    free.flat === zero &&
+    rest.flat === zero &&
+    lines[1]
+  ) {
+    return `${number.format(free.upTo)} included, then ${lines[1].value}`
+  }
+  return lines.map((line) => `${line.label} at ${line.value}`).join(", ")
+}
+
+/** Prices by dimension in one line: "79 models from the catalog". */
+export function dimensionSummary(byDimension: readonly RateRow[]): string {
+  const [key = "price"] = new Set(byDimension.flatMap((row) => Object.keys(row.match)))
+  const count = byDimension.length
+  return `${number.format(count)} ${key}${count === 1 ? "" : "s"} from the catalog`
+}
+
+export type SummaryAction = "tiers" | "catalog" | "card"
+
 export type PriceCell =
   | Readonly<{
       kind: "amount"
       shape: Exclude<PriceShape, "graduated">
       amount: string
-      unit: string
+      /** What follows the amount: "/ call", "/ month", "/ 100 calls". */
+      suffix: string
       priced: boolean
       /** "from Nov 5, 2026" when the price shown has not started. */
       scheduled: string | null
@@ -136,43 +236,72 @@ export type PriceCell =
       kind: "summary"
       text: string
       priced: boolean
-      action: "tiers" | "catalog" | "card"
+      action: SummaryAction
     }>
+
+function amountSuffixOf(
+  shape: Exclude<PriceShape, "graduated">,
+  row: PlanVersionFeatureDragDrop,
+  planBillingName: string | undefined
+): string {
+  const unit = row.unitOfMeasure ?? "units"
+  switch (shape) {
+    case "flat":
+      return `/ ${cycleWord(planBillingName)}`
+    case "unit":
+      return `/ ${unitWord(unit, 1)}`
+    case "package": {
+      const size = row.config?.units
+      return size ? `/ ${number.format(size)} ${unitWord(unit, size)}` : "/ bundle"
+    }
+  }
+}
 
 /**
  * What the Price cell shows: an amount to type for a fixed, per-unit or bundle price; a summary
  * that opens the sheet for tiers, for prices by dimension, and for a row the decimal form cannot
- * state. A fixed feature with no row shows 0, so committing the cell includes it at $0.
+ * state. A fixed feature with no row edits 0, so committing the cell includes it at $0.
  */
 export function priceCellOf(
   row: PlanVersionFeatureDragDrop,
   rows: FeaturePriceRows | undefined,
-  currency: string
+  currency: string,
+  planBillingName: string | undefined
 ): PriceCell {
   const unit = (row.unitOfMeasure ?? "units").replace(/s$/, "")
   const priced = priceStateOf(rows) !== "unpriced"
-  const text = describeFeaturePrice(rows, currency, unit)
+  const summary = (
+    action: SummaryAction,
+    text = describeFeaturePrice(rows, currency, unit)
+  ): PriceCell => ({ kind: "summary", text, priced, action })
   const hasDimensions =
     (row.meterConfig?.groupBy?.length ?? 0) > 0 || (rows?.byDimension.length ?? 0) > 0
-  if (hasDimensions) return { kind: "summary", text, priced, action: "catalog" }
+  if (hasDimensions) {
+    return summary(
+      "catalog",
+      rows?.byDimension.length ? dimensionSummary(rows.byDimension) : undefined
+    )
+  }
   const shape = priceShapeOf(row.featureType, row.config?.usageMode)
-  if (shape === "graduated") return { kind: "summary", text, priced, action: "tiers" }
+  if (shape === "graduated") {
+    const current = rows?.current?.price
+    return summary(
+      "tiers",
+      current?.type === "graduated" ? tierSummary(current, currency, unit) : undefined
+    )
+  }
   const current = rows?.current ?? rows?.scheduled ?? null
   const prefill = prefillDraft(current, shape)
-  if (!prefill || prefill.kind !== "amount") {
-    return { kind: "summary", text, priced, action: "card" }
-  }
+  if (!prefill || prefill.kind !== "amount") return summary("card")
   return {
     kind: "amount",
     shape,
     amount: prefill.amount,
-    unit,
+    suffix: amountSuffixOf(shape, row, planBillingName),
     priced,
     scheduled: rows?.scheduled && !rows.current ? scheduledFrom(rows.scheduled) : null,
   }
 }
-
-const count = new Intl.NumberFormat("en")
 
 /** A whole number of units, or what is wrong with the text. */
 function wholeNumberOf(text: string): { ok: true; value: number } | { ok: false; message: string } {
@@ -185,36 +314,59 @@ function wholeNumberOf(text: string): { ok: true; value: number } | { ok: false;
 }
 
 /**
- * One cell's input: mono, borderless until hovered or focused, committed on blur or Enter and
- * restored on Escape. `onCommit` answers what stopped the value, which stays under the cell.
+ * One cell that reads as text and edits in place. At rest it shows `text`, or the empty word when
+ * there is none. Focus swaps in the raw value with the unit after it; Enter or blur commits and
+ * Escape restores. `onCommit` answers what stopped the value, which stays under the cell. A value
+ * the cell committed reads through `format` until the row carries it.
  */
 export function CellInput({
   value,
-  label,
+  text,
+  format,
+  empty,
+  prefix,
+  suffix,
   placeholder,
-  leading,
-  trailing,
   inputMode = "numeric",
+  label,
   disabled,
   problem,
   commitUnchanged = false,
   onCommit,
 }: {
+  /** The raw text to edit. */
   value: string
-  label: string
+  /** What rest shows for `value`; "" for the empty word. */
+  text: string
+  format: (raw: string) => string
+  /** The muted word at rest with nothing to show, such as "No limit". */
+  empty: string
+  /** The currency symbol before the number while editing. */
+  prefix?: string
+  /** The muted unit after the number. */
+  suffix: string
+  /** The hint while editing with nothing typed. */
   placeholder?: string
-  leading?: string
-  trailing?: string
   inputMode?: "numeric" | "decimal"
+  label: string
   disabled?: boolean
   problem: string | null
   /** Commit on blur even when the text is what it was: a fixed feature's 0 prices it. */
   commitUnchanged?: boolean
   onCommit: (text: string) => string | null
 }) {
-  const [text, setText] = useState(value)
+  const [draft, setDraft] = useState(value)
+  const [editing, setEditing] = useState(false)
+  const [sent, setSent] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Escape blurs the input inside its own key event, before React has the restored draft, so the
+  // blur reads this flag instead of the draft it would otherwise commit.
+  const escaped = useRef(false)
   const message = error ?? problem
+  const rest = sent === null ? text : format(sent)
+  const shown = editing ? draft : rest
+  const idle = !editing && rest === ""
+  const ghost = shown || (editing ? placeholder : empty) || ""
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Enter") {
@@ -222,50 +374,69 @@ export function CellInput({
       event.currentTarget.blur()
     } else if (event.key === "Escape") {
       event.preventDefault()
-      setText(value)
-      setError(null)
+      escaped.current = true
       event.currentTarget.blur()
     }
   }
 
   return (
     <div className="flex flex-col gap-1">
-      <div
+      <label
         className={cn(
-          "flex h-7 items-center rounded border border-transparent bg-transparent font-mono text-xs tabular-nums",
+          "flex h-7 items-center gap-1 rounded px-2",
+          CELL_TEXT,
           CELL_TRANSITION,
-          !disabled && "focus-within:border-ring focus-within:bg-background hover:border-input",
-          message && "border-destructive"
+          disabled ? "cursor-not-allowed" : cn("cursor-text", CELL_SURFACE),
+          message && "ring-1 ring-destructive"
         )}
       >
-        {leading && <span className="pl-2 text-muted-foreground">{leading}</span>}
-        <input
-          aria-label={label}
-          aria-invalid={message ? true : undefined}
-          inputMode={inputMode}
-          className="h-full min-w-0 flex-1 bg-transparent px-2 font-mono text-xs tabular-nums outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:text-muted-foreground"
-          placeholder={placeholder}
-          value={text}
-          disabled={disabled}
-          onChange={(event) => {
-            setText(event.target.value)
-            setError(null)
-          }}
-          onKeyDown={onKeyDown}
-          onBlur={() => {
-            if (text === value && !problem && !commitUnchanged) return
-            setError(onCommit(text))
-          }}
-        />
-        {trailing && (
-          <span
-            className="max-w-[76px] shrink-0 truncate pr-2 text-muted-foreground"
-            title={trailing}
-          >
-            {trailing}
+        {editing && prefix && <span>{prefix}</span>}
+        <span className="grid min-w-[3ch] max-w-full">
+          <span aria-hidden className="invisible col-start-1 row-start-1 whitespace-pre">
+            {ghost}
+          </span>
+          <input
+            aria-label={label}
+            aria-invalid={message ? true : undefined}
+            inputMode={inputMode}
+            // One character wide on its own, so the ghost text sets the cell's width, not the
+            // input's default 20 characters.
+            size={1}
+            className={cn(
+              "col-start-1 row-start-1 w-full min-w-0 border-0 bg-transparent p-0 outline-none ring-0 placeholder:text-muted-foreground focus:outline-none focus:ring-0 disabled:cursor-not-allowed disabled:text-muted-foreground",
+              CELL_TEXT,
+              idle && "text-muted-foreground"
+            )}
+            placeholder={editing ? placeholder : empty}
+            value={shown}
+            disabled={disabled}
+            onFocus={() => setEditing(true)}
+            onChange={(event) => {
+              setDraft(event.target.value)
+              setError(null)
+            }}
+            onKeyDown={onKeyDown}
+            onBlur={() => {
+              setEditing(false)
+              if (escaped.current) {
+                escaped.current = false
+                setDraft(sent ?? value)
+                setError(null)
+                return
+              }
+              if (draft === (sent ?? value) && !problem && !commitUnchanged) return
+              const refused = onCommit(draft)
+              setError(refused)
+              if (!refused) setSent(draft)
+            }}
+          />
+        </span>
+        {!idle && (
+          <span className="truncate text-muted-foreground" title={suffix}>
+            {suffix}
           </span>
         )}
-      </div>
+      </label>
       {message && <p className="text-destructive text-xs">{message}</p>}
     </div>
   )
@@ -336,7 +507,7 @@ export function FeatureCell({
   )
 }
 
-/** The kind select and the details icon that opens the sheet. */
+/** The kind select, borderless with its chevron on hover, and the details icon that opens the sheet. */
 export function KindCell({
   value,
   disabled,
@@ -361,10 +532,12 @@ export function KindCell({
           <SelectTrigger
             aria-label="Kind"
             className={cn(
-              "h-7 min-w-0 flex-1 rounded border-transparent px-2 text-xs",
+              "h-7 min-w-0 flex-1 rounded border-0 px-2 py-0 shadow-none ring-offset-0 focus:ring-offset-0 [&>svg]:size-3.5 [&>svg]:text-muted-foreground [&>svg]:opacity-0 [&>svg]:transition-opacity [&>svg]:duration-150 [&>svg]:ease-out",
+              CELL_TEXT,
               CELL_TRANSITION,
-              !disabled && "hover:border-input focus:border-ring",
-              problem && "border-destructive"
+              !disabled &&
+                "hover:bg-background-bgActive focus:bg-background focus:ring-1 focus:ring-ring hover:focus:bg-background [&:focus>svg]:opacity-100 [&:hover>svg]:opacity-100 [&[data-state=open]>svg]:opacity-100",
+              problem && "ring-1 ring-destructive"
             )}
           >
             <SelectValue>{kindLabel(value)}</SelectValue>
@@ -397,13 +570,7 @@ export function KindCell({
   )
 }
 
-const AMOUNT_TRAILING: Record<Exclude<PriceShape, "graduated">, (unit: string) => string> = {
-  flat: () => "per cycle",
-  unit: (unit) => `per ${unit}`,
-  package: () => "per bundle",
-}
-
-const SUMMARY_ACTION: Record<"tiers" | "catalog" | "card", string> = {
+const SUMMARY_ACTION: Record<SummaryAction, string> = {
   tiers: "Set tiers",
   catalog: "Price models",
   card: "Edit on the card",
@@ -426,6 +593,7 @@ export function PriceCell({
   onConfigure: () => void
 }) {
   if (cell.kind === "summary") {
+    const action = SUMMARY_ACTION[cell.action]
     return (
       <div className="flex flex-col gap-1">
         <button
@@ -433,17 +601,20 @@ export function PriceCell({
           disabled={disabled}
           onClick={onConfigure}
           className={cn(
-            "flex h-7 w-full items-center justify-between gap-2 rounded border border-transparent px-2 text-left font-mono text-xs tabular-nums",
+            "group/cell relative flex min-h-7 w-full items-center rounded px-2 py-1 text-left",
+            CELL_TEXT,
             CELL_TRANSITION,
-            !disabled &&
-              "hover:border-input hover:bg-background focus-visible:border-ring focus-visible:outline-none",
-            !cell.priced && "text-muted-foreground"
+            disabled
+              ? "cursor-not-allowed"
+              : "hover:bg-background-bgActive focus-visible:bg-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+            !cell.priced && "text-muted-foreground",
+            problem && "ring-1 ring-destructive"
           )}
         >
-          <span className="truncate">{cell.priced ? cell.text : "Not priced"}</span>
-          {!disabled && (
-            <span className="shrink-0 font-sans text-muted-foreground">
-              {SUMMARY_ACTION[cell.action]}
+          <span>{cell.priced ? cell.text : action}</span>
+          {!disabled && cell.priced && (
+            <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center rounded-r bg-gradient-to-r from-transparent via-30% via-background-bgActive to-background-bgActive pr-2 pl-8 text-muted-foreground opacity-0 transition-opacity duration-150 ease-out group-hover/cell:opacity-100 group-focus-visible/cell:via-background group-focus-visible/cell:to-background group-focus-visible/cell:opacity-100">
+              {action}
             </span>
           )}
         </button>
@@ -457,11 +628,14 @@ export function PriceCell({
       <CellInput
         key={`${cell.shape}:${cell.amount}`}
         value={cell.amount}
-        label="Price"
+        text={cell.priced ? formatCellValue(cell.amount, currency) : ""}
+        format={(raw) => formatCellValue(raw, currency)}
+        empty="Set price"
+        prefix={currencySymbol(currency)}
+        suffix={cell.suffix}
         placeholder={cell.shape === "flat" ? "0" : "0.02"}
         inputMode="decimal"
-        leading={currency}
-        trailing={AMOUNT_TRAILING[cell.shape](cell.unit)}
+        label="Price"
         disabled={disabled}
         problem={problem}
         commitUnchanged={!cell.priced}
@@ -477,7 +651,7 @@ export function PriceCell({
         }}
       />
       {cell.scheduled && (
-        <span className="px-2 font-mono text-muted-foreground text-xs">{cell.scheduled}</span>
+        <span className="px-2 text-muted-foreground text-xs">{cell.scheduled}</span>
       )}
     </div>
   )
@@ -487,7 +661,8 @@ export function PriceCell({
 export function UnitsCell({
   value,
   label,
-  unit,
+  suffix,
+  empty,
   decimal = false,
   disabled,
   problem,
@@ -495,7 +670,8 @@ export function UnitsCell({
 }: {
   value: string
   label: string
-  unit: string
+  suffix: string
+  empty: string
   /** Included units are a decimal string; a limit and a quantity are whole numbers. */
   decimal?: boolean
   disabled?: boolean
@@ -506,10 +682,12 @@ export function UnitsCell({
     <CellInput
       key={value}
       value={value}
-      label={label}
-      placeholder={decimal ? "0" : "none"}
+      text={formatUnits(value)}
+      format={formatUnits}
+      empty={empty}
+      suffix={suffix}
       inputMode={decimal ? "decimal" : "numeric"}
-      trailing={unit}
+      label={label}
       disabled={disabled}
       problem={problem}
       onCommit={(text) => {
@@ -530,24 +708,24 @@ export function UnitsCell({
   )
 }
 
-/** A published version's cell: the fact in mono, never a disabled control. */
+/** A published version's cell: the fact as the editor shows it at rest, never a disabled control. */
 export function ReadOnlyCell({
-  children,
+  text,
+  suffix,
   muted,
 }: {
-  children: React.ReactNode
+  text: string
+  suffix?: string
   muted?: boolean
 }) {
   return (
-    <span className={cn("px-2 font-mono text-xs tabular-nums", muted && "text-muted-foreground")}>
-      {children}
+    <span
+      className={cn("flex items-center gap-1 px-2", CELL_TEXT, muted && "text-muted-foreground")}
+    >
+      <span>{text}</span>
+      {suffix && <span className="text-muted-foreground">{suffix}</span>}
     </span>
   )
-}
-
-export function formatUnits(value: number | string | null | undefined, empty: string): string {
-  if (value === null || value === undefined || value === "" || Number(value) === 0) return empty
-  return count.format(Number(value))
 }
 
 const MENU_ITEM = "cursor-pointer text-xs"

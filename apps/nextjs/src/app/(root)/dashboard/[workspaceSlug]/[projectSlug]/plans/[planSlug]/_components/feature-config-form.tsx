@@ -9,6 +9,7 @@ import { DOCS_DOMAIN } from "@unprice/config"
 import { OVERAGE_STRATEGIES_MAP, USAGE_MODES, USAGE_MODES_MAP } from "@unprice/db/utils"
 import type { FeatureType } from "@unprice/db/utils"
 import type {
+  Feature,
   PlanVersion,
   PlanVersionFeature,
   PlanVersionFeatureDragDrop,
@@ -34,6 +35,7 @@ import { useZodForm } from "~/lib/zod-form"
 import { useTRPC } from "~/trpc/client"
 
 import { FeatureDialog } from "../../_components/feature-dialog"
+import type { CreatedFeature } from "../../_components/feature-form"
 import {
   type FeaturePriceRows,
   priceStateOf,
@@ -50,7 +52,7 @@ import {
   ResetConfigFeatureFormField,
   UnitsFormField,
 } from "./fields-form"
-import { MeterConfigFormField } from "./meter-config-form-field"
+import { MeterSection } from "./meter-section"
 import {
   type PlanVersionCard,
   PriceBlockView,
@@ -88,7 +90,7 @@ export function FeatureConfigForm({
   const router = useRouter()
   const [, setPlanFeatureList] = usePlanFeaturesList()
   const [isOnboarding] = useIsOnboarding()
-  const [activeFeature] = useActiveFeature()
+  const [activeFeature, setActiveFeature] = useActiveFeature()
   const isStandalone = planFeatures !== undefined
   const trpc = useTRPC()
   const queryClient = useQueryClient()
@@ -116,6 +118,23 @@ export function FeatureConfigForm({
     }))
   const feature = "feature" in defaultValues ? defaultValues.feature : undefined
   const featureMeterTemplate = feature?.meterConfig
+
+  // The feature edited from the sheet: its row in the table and the open sheet read the new one.
+  const onFeatureUpdated = (updated: CreatedFeature) => {
+    if (isStandalone) return
+    setPlanFeatureList((features) =>
+      features.map((entry) =>
+        entry.featureId === updated.id
+          ? { ...entry, feature: { ...entry.feature, ...updated } }
+          : entry
+      )
+    )
+    setActiveFeature((current) =>
+      current && current.featureId === updated.id
+        ? { ...current, feature: { ...current.feature, ...updated } }
+        : current
+    )
+  }
   const featureSlug = feature?.slug ?? activeFeature?.feature.slug ?? ""
 
   // ADR-0008 D2: the price is a row on the version's card, read beside the package it prices.
@@ -405,6 +424,8 @@ export function FeatureConfigForm({
             isDisabled={isPublished}
             featureType={featureType}
             usageMode={usageMode}
+            feature={feature}
+            onFeatureUpdated={onFeatureUpdated}
             card={card}
             priceRows={priceRows}
             isPricingLoading={isPricingLoading}
@@ -526,6 +547,8 @@ function ConfigureFields({
   isDisabled,
   featureType,
   usageMode,
+  feature,
+  onFeatureUpdated,
   card,
   priceRows,
   isPricingLoading,
@@ -544,6 +567,9 @@ function ConfigureFields({
   isDisabled?: boolean
   featureType: FeatureType | undefined
   usageMode: string | undefined
+  /** The catalog feature, whose meter template the version follows unless customized. */
+  feature: Feature | undefined
+  onFeatureUpdated: (feature: CreatedFeature) => void
   card: PlanVersionCard | undefined
   priceRows: FeaturePriceRows | undefined
   isPricingLoading: boolean
@@ -645,16 +671,12 @@ function ConfigureFields({
         {usageMode === "package" && <UnitsFormField form={form} isDisabled={isDisabled} />}
       </div>
 
-      {/* Meter is required for usage features — render inline so its errors are always visible */}
-      <div className="space-y-3 rounded-md border bg-background-bgSubtle/40 p-3">
-        <div className="flex items-center gap-1.5">
-          <h5 className="font-semibold text-foreground text-xs uppercase tracking-wider">Meter</h5>
-          <span className="text-muted-foreground text-xs normal-case tracking-normal">
-            required
-          </span>
-        </div>
-        <MeterConfigFormField form={form} isDisabled={isDisabled} />
-      </div>
+      <MeterSection
+        form={form}
+        feature={feature}
+        isDisabled={isDisabled}
+        onFeatureUpdated={onFeatureUpdated}
+      />
 
       {/* The reset cadence sits with the limit it refreshes, not under Advanced. */}
       <div

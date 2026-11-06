@@ -14,12 +14,7 @@ import { toastAction } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
 import { DroppableContainer } from "../../_components/droppable"
 import { FeatureDialog } from "../../_components/feature-dialog"
-import {
-  type FeaturePriceRows,
-  describeFeaturePrice,
-  rowsByFeature,
-  withDefaultRow,
-} from "../../_components/plan-prices"
+import { type FeaturePriceRows, rowsByFeature, withDefaultRow } from "../../_components/plan-prices"
 import { SortableFeatureRow } from "../../_components/sortable-feature"
 import {
   type CellField,
@@ -28,15 +23,18 @@ import {
   FeatureCell,
   KindCell,
   PriceCell,
+  type PriceCell as PriceCellValue,
   ReadOnlyCell,
   RowMenu,
   UnitsCell,
+  formatCellValue,
   formatUnits,
   includedCellOf,
   kindChangeOf,
   kindLabel,
   limitCellOf,
   priceCellOf,
+  unitSuffixOf,
 } from "./feature-table-cells"
 
 /** The cell a patch came from, so a refusal lands under it. */
@@ -177,6 +175,11 @@ export function FeatureTable() {
 }
 
 const HEAD = "h-9 text-xs"
+/** A field column's head sits at the cell's text, which its own padding moves in by 4px. */
+const FIELD_HEAD = "h-9 px-3 text-xs"
+/** Rows are 44px; the field cells keep 4px so the cell's own surface fills the column. */
+const CELL = "h-11 py-1"
+const FIELD = "h-11 p-1"
 
 /** The table with fixed data, so a test renders each row state. */
 export function FeatureTableView({
@@ -239,17 +242,20 @@ export function FeatureTableView({
             <span className="sr-only">Order</span>
           </TableHead>
           <TableHead className={HEAD}>Feature</TableHead>
-          <TableHead className={cn(HEAD, "w-[120px]")}>Kind</TableHead>
-          <TableHead className={cn(HEAD, "w-[112px]")} title="Usage past the limit is refused.">
+          <TableHead className={cn(FIELD_HEAD, "w-[112px]")}>Kind</TableHead>
+          <TableHead
+            className={cn(FIELD_HEAD, "w-[120px]")}
+            title="Usage past the limit is refused."
+          >
             Limit
           </TableHead>
           <TableHead
-            className={cn(HEAD, "w-[112px]")}
+            className={cn(FIELD_HEAD, "w-[120px]")}
             title="Units free each period, or the quantity a subscription starts with."
           >
             Included
           </TableHead>
-          <TableHead className={cn(HEAD, "w-[196px]")}>Price</TableHead>
+          <TableHead className={cn(FIELD_HEAD, "w-[224px]")}>Price</TableHead>
           <TableHead className={cn(HEAD, "w-10")}>
             <span className="sr-only">Actions</span>
           </TableHead>
@@ -300,22 +306,22 @@ function FeatureRowCells({
   onEditFeature: () => void
   onRemove: () => void
 }) {
-  const unit = (row.unitOfMeasure ?? "units").replace(/s$/, "")
   const limit = limitCellOf(row)
   const included = includedCellOf(row)
-  const price = priceCellOf(row, priceRows, currency)
+  const price = priceCellOf(row, priceRows, currency, planBillingName)
   const problemFor = (field: CellField) => (problem?.field === field ? problem.message : null)
   const disabled = !editable || saving
+  const units = (value: string) => unitSuffixOf(row, planBillingName, value)
 
   return (
     <>
-      <TableCell className="w-10 py-1.5 align-middle">
+      <TableCell className={cn(CELL, "w-10 align-middle")}>
         <div className="flex items-center">{handle}</div>
       </TableCell>
-      <TableCell className="py-1.5">
+      <TableCell className={CELL}>
         <FeatureCell row={row} planBillingName={planBillingName} saving={saving} />
       </TableCell>
-      <TableCell className="py-1.5">
+      <TableCell className={FIELD}>
         {editable ? (
           <KindCell
             value={row.featureType}
@@ -330,29 +336,31 @@ function FeatureRowCells({
             onConfigure={() => onConfigure()}
           />
         ) : (
-          <ReadOnlyCell>{kindLabel(row.featureType)}</ReadOnlyCell>
+          <ReadOnlyCell text={kindLabel(row.featureType)} />
         )}
       </TableCell>
-      <TableCell className="py-1.5">
+      <TableCell className={FIELD}>
         {limit && editable ? (
           <UnitsCell
             value={limit.value}
             label="Limit"
-            unit={unit}
+            suffix={units(limit.value)}
+            empty="No limit"
             disabled={disabled}
             problem={problemFor("limit")}
             onCommit={(value) => onCommit({ limit: Number(value ?? 0) })}
           />
         ) : limit ? (
-          <ReadOnlyCell muted={!row.limit}>{formatUnits(row.limit, "no limit")}</ReadOnlyCell>
+          readOnlyUnits(limit.value, units(limit.value), "No limit")
         ) : null}
       </TableCell>
-      <TableCell className="py-1.5">
+      <TableCell className={FIELD}>
         {included && editable ? (
           <UnitsCell
             value={included.value}
             label="Included"
-            unit={unit}
+            suffix={units(included.value)}
+            empty="0"
             decimal={included.field === "included"}
             disabled={disabled}
             problem={problemFor("included")}
@@ -365,12 +373,10 @@ function FeatureRowCells({
             }
           />
         ) : included ? (
-          <ReadOnlyCell muted={!Number(included.value)}>
-            {formatUnits(included.value, "0")}
-          </ReadOnlyCell>
+          readOnlyUnits(included.value, units(included.value), "0")
         ) : null}
       </TableCell>
-      <TableCell className="py-1.5">
+      <TableCell className={FIELD}>
         {editable ? (
           <PriceCell
             cell={price}
@@ -381,12 +387,10 @@ function FeatureRowCells({
             onConfigure={() => onConfigure()}
           />
         ) : (
-          <ReadOnlyCell muted={!price.priced}>
-            {price.priced ? describeFeaturePrice(priceRows, currency, unit) : "Not priced"}
-          </ReadOnlyCell>
+          readOnlyPrice(price, currency)
         )}
       </TableCell>
-      <TableCell className="py-1.5 text-right">
+      <TableCell className={cn(CELL, "text-right")}>
         <RowMenu
           title={row.feature.title}
           editable={editable}
@@ -396,5 +400,23 @@ function FeatureRowCells({
         />
       </TableCell>
     </>
+  )
+}
+
+/** A published version's units: the count with its unit, or the empty word muted. */
+function readOnlyUnits(value: string, suffix: string, empty: string) {
+  const text = formatUnits(value)
+  return text ? <ReadOnlyCell text={text} suffix={suffix} /> : <ReadOnlyCell text={empty} muted />
+}
+
+/** A published version's price, as the editor's cell reads at rest. */
+function readOnlyPrice(price: PriceCellValue, currency: string) {
+  if (!price.priced) return <ReadOnlyCell text="Not priced" muted />
+  if (price.kind === "summary") return <ReadOnlyCell text={price.text} />
+  return (
+    <ReadOnlyCell
+      text={formatCellValue(price.amount, currency)}
+      suffix={price.scheduled ? `${price.suffix} ${price.scheduled}` : price.suffix}
+    />
   )
 }

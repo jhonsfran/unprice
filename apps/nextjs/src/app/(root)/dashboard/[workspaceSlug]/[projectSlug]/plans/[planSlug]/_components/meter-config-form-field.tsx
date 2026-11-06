@@ -6,31 +6,17 @@ import type { UseFormReturn } from "react-hook-form"
 import { useQuery } from "@tanstack/react-query"
 import { AGGREGATION_METHODS, AGGREGATION_METHODS_MAP } from "@unprice/db/utils"
 import type { AggregationMethod, Event, PlanVersionFeatureInsert } from "@unprice/db/validators"
-import { Badge } from "@unprice/ui/badge"
 import { Button } from "@unprice/ui/button"
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-  CommandLoading,
-} from "@unprice/ui/command"
 import { FormControl, FormField, FormItem, FormLabel, FormMessage } from "@unprice/ui/form"
-import { LoadingAnimation } from "@unprice/ui/loading-animation"
-import { Popover, PopoverContent, PopoverTrigger } from "@unprice/ui/popover"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@unprice/ui/select"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { cn } from "@unprice/ui/utils"
-import { CheckIcon, ChevronDown, HelpCircle, Pencil, Plus } from "lucide-react"
-import { FilterScroll } from "~/components/filter-scroll"
+import { HelpCircle, Pencil } from "lucide-react"
 import { useTRPC } from "~/trpc/client"
 import { DimensionChips } from "./dimension-chips"
 import { EventFormDialog } from "./event-dialog"
+import { EventPicker } from "./event-picker"
 import { aggregationFieldFor, meterDefaultsFor, requiresAggregationField } from "./meter-defaults"
-
-const EVENT_PICKER_SEARCH_THRESHOLD = 6
 
 export function MeterConfigFormField({
   form,
@@ -40,11 +26,9 @@ export function MeterConfigFormField({
   isDisabled?: boolean
 }) {
   const trpc = useTRPC()
-  const [isPickerOpen, setIsPickerOpen] = useState(false)
-  const [eventDialogMode, setEventDialogMode] = useState<"create" | "edit">("create")
   const [isEventDialogOpen, setIsEventDialogOpen] = useState(false)
   const meterConfig = form.watch("meterConfig")
-  const { data: eventsData, isLoading } = useQuery(trpc.events.listByActiveProject.queryOptions())
+  const { data: eventsData } = useQuery(trpc.events.listByActiveProject.queryOptions())
   const events = eventsData?.events ?? []
 
   const selectedEvent = useMemo(() => {
@@ -63,7 +47,6 @@ export function MeterConfigFormField({
   const needsAggregationField = requiresAggregationField(selectedAggregationMethod)
   const selectedEventProperties = selectedEvent?.availableProperties ?? []
   const selectedAggregationConfig = AGGREGATION_METHODS_MAP[selectedAggregationMethod]
-  const shouldShowEventSearch = events.length > EVENT_PICKER_SEARCH_THRESHOLD
 
   const setMeterConfigValue = (next: {
     event?: Event
@@ -216,10 +199,7 @@ export function MeterConfigFormField({
                     type="button"
                     variant="ghost"
                     size="sm"
-                    onClick={() => {
-                      setEventDialogMode("edit")
-                      setIsEventDialogOpen(true)
-                    }}
+                    onClick={() => setIsEventDialogOpen(true)}
                   >
                     <Pencil className="mr-1.5 size-3" />
                     {isDisabled ? "View event" : "Edit event"}
@@ -227,127 +207,14 @@ export function MeterConfigFormField({
                 )}
               </div>
 
-              <Popover
-                modal={true}
-                open={isPickerOpen}
-                onOpenChange={(open) => {
-                  if (isDisabled) {
-                    return
-                  }
-
-                  setIsPickerOpen(open)
-                }}
-              >
-                <PopoverTrigger asChild>
-                  <FormControl>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      // biome-ignore lint/a11y/useSemanticElements: Button trigger matches the shared searchable picker pattern used across the app.
-                      role="combobox"
-                      aria-expanded={isPickerOpen}
-                      aria-controls="meter-event-picker-popup"
-                      disabled={isDisabled}
-                      className="h-9 w-full justify-between gap-2 px-3 font-normal"
-                    >
-                      {isLoading ? (
-                        <div className="flex min-w-0 flex-1 items-center gap-2 text-left">
-                          <LoadingAnimation className="size-4" variant="dots" />
-                          <span className="text-muted-foreground text-sm">Loading events...</span>
-                        </div>
-                      ) : selectedEvent ? (
-                        <div className="flex min-w-0 flex-1 items-center gap-2 text-left">
-                          <span className="truncate">{selectedEvent.name}</span>
-                          <span className="truncate font-mono text-[11px] text-muted-foreground">
-                            {selectedEvent.slug}
-                          </span>
-                        </div>
-                      ) : meterConfig?.eventSlug ? (
-                        <span className="truncate text-left font-mono text-sm">
-                          {meterConfig.eventSlug}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground text-sm">
-                          Select or create an event
-                        </span>
-                      )}
-                      <ChevronDown className="ml-2 size-4 shrink-0 opacity-50" />
-                    </Button>
-                  </FormControl>
-                </PopoverTrigger>
-                <PopoverContent
-                  id="meter-event-picker-popup"
-                  align="start"
-                  className="max-h-[--radix-popover-content-available-height] w-[var(--radix-popover-trigger-width)] p-0"
-                >
-                  <Command>
-                    {shouldShowEventSearch ? (
-                      <CommandInput className="h-9 py-2 text-sm" placeholder="Search events" />
-                    ) : null}
-                    <CommandList className="overflow-hidden">
-                      <CommandEmpty>No events found.</CommandEmpty>
-                      <FilterScroll>
-                        <CommandGroup className="p-1">
-                          {isLoading && <CommandLoading>Loading...</CommandLoading>}
-                          {events.map((event) => {
-                            const propertyCount = (event.availableProperties ?? []).length
-
-                            return (
-                              <CommandItem
-                                key={event.id}
-                                value={`${event.name} ${event.slug} ${(event.availableProperties ?? []).join(" ")}`}
-                                className="gap-2 rounded-md px-2.5 py-2"
-                                onSelect={() => {
-                                  handleEventChosen(event)
-                                  setIsPickerOpen(false)
-                                }}
-                              >
-                                <CheckIcon
-                                  className={cn(
-                                    "size-4 shrink-0",
-                                    event.id === selectedEvent?.id ? "opacity-100" : "opacity-0"
-                                  )}
-                                />
-                                <div className="flex min-w-0 flex-1 items-center gap-2">
-                                  <span className="truncate font-medium text-sm">{event.name}</span>
-                                  <span className="truncate font-mono text-[11px] text-muted-foreground">
-                                    {event.slug}
-                                  </span>
-                                </div>
-                                {propertyCount > 0 ? (
-                                  <Badge
-                                    variant="secondary"
-                                    className="shrink-0 rounded-sm px-1.5 py-0 text-[10px]"
-                                  >
-                                    {propertyCount} {propertyCount === 1 ? "field" : "fields"}
-                                  </Badge>
-                                ) : null}
-                              </CommandItem>
-                            )
-                          })}
-                        </CommandGroup>
-                      </FilterScroll>
-                    </CommandList>
-                  </Command>
-                  <div className="border-t p-1">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 w-full justify-start px-2"
-                      disabled={isDisabled}
-                      onClick={() => {
-                        setEventDialogMode("create")
-                        setIsEventDialogOpen(true)
-                        setIsPickerOpen(false)
-                      }}
-                    >
-                      <Plus className="mr-2 size-4" />
-                      Create event
-                    </Button>
-                  </div>
-                </PopoverContent>
-              </Popover>
+              <FormControl>
+                <EventPicker
+                  selectedEventId={meterConfig?.eventId}
+                  fallbackSlug={meterConfig?.eventSlug}
+                  onPick={handleEventChosen}
+                  isDisabled={isDisabled}
+                />
+              </FormControl>
 
               <FormMessage />
             </FormItem>
@@ -472,10 +339,7 @@ export function MeterConfigFormField({
                           variant="ghost"
                           size="sm"
                           className="h-auto px-0 text-xs"
-                          onClick={() => {
-                            setEventDialogMode("edit")
-                            setIsEventDialogOpen(true)
-                          }}
+                          onClick={() => setIsEventDialogOpen(true)}
                         >
                           <Pencil className="mr-1.5 size-3.5" />
                           {isDisabled ? "View event" : "Edit event"}
@@ -525,11 +389,9 @@ export function MeterConfigFormField({
       <EventFormDialog
         open={isEventDialogOpen}
         onOpenChange={setIsEventDialogOpen}
-        mode={eventDialogMode}
-        event={eventDialogMode === "edit" ? selectedEvent : undefined}
+        event={selectedEvent}
         onSaved={handleEventSaved}
-        isDisabled={isDisabled}
-        isPlanVersionLocked={isDisabled}
+        isLocked={isDisabled}
       />
     </>
   )
