@@ -86,7 +86,14 @@ export async function duplicatePlanVersion(
           metadata: {},
           latest: false,
           active: true,
+          // A copy is a new draft: it was never published, so its own card is not live and a
+          // price change on it starts at once (ADR-0008 D2).
           status: "draft",
+          publishedAt: null,
+          publishedBy: null,
+          archived: false,
+          archivedAt: null,
+          archivedBy: null,
           createdAtM: Date.now(),
           updatedAtM: Date.now(),
           version: Number(countVersionsPlan) + 1,

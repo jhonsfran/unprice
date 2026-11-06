@@ -227,6 +227,10 @@ describe("duplicatePlanVersion", () => {
       active: true,
       metadata: {},
       version: 2,
+      // The source was published; the copy was not, so its card is not live.
+      publishedAt: null,
+      publishedBy: null,
+      archived: false,
     })
     expect(result.val.planVersion.paymentMethodRequired).toBe(false)
     expect(inserted.features[0]).toMatchObject({

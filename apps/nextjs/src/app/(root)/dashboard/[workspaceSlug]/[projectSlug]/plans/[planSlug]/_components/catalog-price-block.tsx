@@ -2,27 +2,31 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { AMOUNT_PATTERN } from "@unprice/money"
-import { MODEL_CATALOG_PROVIDERS, MODEL_CATALOG_VERSION } from "@unprice/services/budgets"
-import { describeRatePrice } from "@unprice/services/pricing"
+import { MODEL_CATALOG_VERSION } from "@unprice/services/budgets"
+import { priceTableOf } from "@unprice/services/pricing"
 import type { RouterInputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
 import { Input } from "@unprice/ui/input"
 import { Label } from "@unprice/ui/label"
-import { cn } from "@unprice/ui/utils"
 import { CreditCard } from "lucide-react"
 import { useParams } from "next/navigation"
 import { useState } from "react"
 import { SuperLink } from "~/components/super-link"
 import { toast } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
-import { CostPlusChanges } from "../../../rate-cards/_components/cost-plus-draft"
+import { PriceMatrix } from "../../../rate-cards/_components/price-matrix"
 import {
   type CostPlusDraftWire,
+  catalogPolicyFor,
+  changeMatrixOf,
   countWrites,
-  formatMatch,
+  describeChanges,
+  markupPercent,
+  matrixOf,
 } from "../../../rate-cards/_components/rate-card-format"
-import { type FeaturePriceRows, cardLabel } from "../../_components/plan-prices"
+import type { FeaturePriceRows } from "../../_components/plan-prices"
 import type { PlanVersionCard } from "./price-block"
+import { CollapsibleSection } from "./section-label"
 
 /** The cost components the catalog carries, each priced from one event property. */
 export const COST_COMPONENTS = ["input", "output", "cache_read", "cache_write"] as const
@@ -99,6 +103,14 @@ export function catalogPricingInputOf(
   }
 }
 
+/** "input_tokens, output_tokens, cache_read_tokens, cache_write_tokens · rounded to 0.000001". */
+export function describePolicyDraft(draft: CatalogPolicyDraft): string {
+  const properties = COST_COMPONENTS.map((component) => draft.components[component].trim()).filter(
+    Boolean
+  )
+  return `${properties.join(", ") || "no property"} · rounded to ${draft.roundTo.trim() || "?"}`
+}
+
 /**
  * Prices a feature's models from the cost catalog on the version's own card: one markup over the
  * provider's cost, previewed, then published as one row per model.
@@ -144,7 +156,7 @@ export function CatalogPriceBlock({
     trpc.rateCards.publishCostPlus.mutationOptions({
       meta: { suppressGlobalError: true },
       onSuccess: ({ inserted, closed }) => {
-        toast.success(`Published ${inserted.length} model prices, closed ${closed.length}`)
+        toast.success(`Published ${inserted.length} model prices, ended ${closed.length}`)
         setPreview(null)
         void queryClient.invalidateQueries(trpc.rateCards.forPlanVersion.pathFilter())
         void queryClient.invalidateQueries({ queryKey: trpc.planVersions.getById.queryKey() })
@@ -155,10 +167,10 @@ export function CatalogPriceBlock({
 
   return (
     <CatalogPriceBlockView
+      featureSlug={featureSlug}
       card={card}
       rows={rows}
       currency={currency}
-      dimension={dimension}
       editable={editable}
       pendingSave={pendingSave}
       policy={policy}
@@ -187,12 +199,14 @@ export function CatalogPriceBlock({
   )
 }
 
+const SHOWN_MODELS = 6
+
 /** The block itself, controlled so a test can render each state with fixed data. */
 export function CatalogPriceBlockView({
+  featureSlug,
   card,
   rows,
   currency,
-  dimension,
   editable,
   pendingSave = false,
   policy,
@@ -203,11 +217,12 @@ export function CatalogPriceBlockView({
   isPublishing,
   onPreview,
   onPublish,
+  now = Date.now(),
 }: {
+  featureSlug: string
   card: PlanVersionCard | undefined
   rows: FeaturePriceRows | undefined
   currency: string
-  dimension: string | undefined
   editable: boolean
   pendingSave?: boolean
   policy: CatalogPolicyDraft
@@ -218,6 +233,7 @@ export function CatalogPriceBlockView({
   isPublishing?: boolean
   onPreview: () => void
   onPublish: () => void
+  now?: number
 }) {
   const params = useParams<{
     workspaceSlug: string
@@ -225,30 +241,29 @@ export function CatalogPriceBlockView({
     planSlug?: string
     planVersionId?: string
   }>()
-  const cardHref = card
-    ? `/${params?.workspaceSlug}/${params?.projectSlug}/rate-cards/${card.card.id}`
-    : null
-  const label = card
-    ? cardLabel(
-        card.card.name,
-        params?.planSlug && params?.planVersionId
-          ? { planSlug: params.planSlug, planVersionId: params.planVersionId, currency }
-          : null
-      )
-    : null
+  const [isMappingOpen, setIsMappingOpen] = useState(false)
+  const pricesHref =
+    params?.planSlug && params?.planVersionId
+      ? `/${params.workspaceSlug}/${params.projectSlug}/plans/${params.planSlug}/${params.planVersionId}/prices`
+      : card
+        ? `/${params?.workspaceSlug}/${params?.projectSlug}/rate-cards/${card.card.id}`
+        : null
   const priced = rows?.byDimension ?? []
+  const table = priceTableOf(featureSlug, priced, now, currency, "unit")
+  const activePolicy = card ? catalogPolicyFor(card.card.marginPolicy, featureSlug) : null
+  const changes = preview ? changeMatrixOf(preview.draft, featureSlug) : null
   const writes = preview ? countWrites(preview.draft) : 0
 
   if (currency !== "USD") {
     return (
       <p className="rounded-md border bg-background-bgSubtle/40 p-3 text-muted-foreground text-xs">
         Catalog pricing is in USD; price {currency} models{" "}
-        {cardHref ? (
-          <SuperLink href={cardHref} className="underline-offset-4 hover:underline">
-            on the card.
+        {pricesHref ? (
+          <SuperLink href={pricesHref} className="underline-offset-4 hover:underline">
+            on the price list.
           </SuperLink>
         ) : (
-          "on the card."
+          "on the price list."
         )}
       </p>
     )
@@ -259,103 +274,70 @@ export function CatalogPriceBlockView({
       <div className="flex items-center justify-between gap-2">
         <span className="inline-flex items-center gap-1.5 font-medium text-sm">
           <CreditCard className="size-3.5 text-muted-foreground" />
-          Model prices from the catalog
+          Model prices
         </span>
-        {label && cardHref && (
+        {pricesHref && priced.length > 0 && (
           <SuperLink
-            href={cardHref}
-            className={cn(
-              "truncate text-muted-foreground text-xs underline-offset-4 hover:underline",
-              !label.isOwn && "font-mono"
-            )}
+            href={pricesHref}
+            className="text-muted-foreground text-xs underline-offset-4 hover:underline"
           >
-            {label.text}
+            All prices and history
           </SuperLink>
         )}
       </div>
 
       {priced.length > 0 ? (
-        <div className="space-y-1">
-          <p className="font-mono text-xs tabular-nums">
-            {priced.length} prices by {dimension ?? "dimension"}
+        <div className="space-y-2">
+          <p className="text-xs">
+            <span className="tabular-nums">{table.lines.length} models priced</span>
+            {activePolicy && (
+              <span className="text-muted-foreground">
+                {" "}
+                · follows models.dev {MODEL_CATALOG_VERSION} at cost +{" "}
+                {markupPercent(activePolicy.markup)}%
+              </span>
+            )}
           </p>
-          <ul className="max-h-40 space-y-0.5 overflow-y-auto">
-            {priced.map((row) => (
-              <li
-                key={row.id}
-                className="flex items-center justify-between gap-3 font-mono text-xs tabular-nums"
-              >
-                <span className="truncate text-muted-foreground">{formatMatch(row.match)}</span>
-                <span>{describeRatePrice(row.price, currency)}</span>
-              </li>
-            ))}
-          </ul>
+          <PriceMatrix
+            matrix={matrixOf(table)}
+            currency={currency}
+            unit="unit"
+            limit={SHOWN_MODELS}
+            className="bg-background"
+          />
         </div>
       ) : (
         <p className="text-muted-foreground text-xs">
-          Not priced yet. Publishing refuses a version with an unpriced feature.
+          Not priced yet. Pick a markup over the provider's cost and preview what every model in
+          models.dev {MODEL_CATALOG_VERSION} would cost.
         </p>
       )}
 
       {editable && (
         <>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="flex flex-wrap items-end gap-3">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="catalog-markup" className="text-xs">
-                Markup (%)
+                Markup over cost
               </Label>
-              <Input
-                id="catalog-markup"
-                inputMode="decimal"
-                className="h-8 font-mono text-xs tabular-nums"
-                value={policy.markupPercent}
-                onChange={(event) =>
-                  onPolicyChange({ ...policy, markupPercent: event.target.value })
-                }
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="catalog-round-to" className="text-xs">
-                Round to
-              </Label>
-              <Input
-                id="catalog-round-to"
-                inputMode="decimal"
-                className="h-8 font-mono text-xs tabular-nums"
-                value={policy.roundTo}
-                onChange={(event) => onPolicyChange({ ...policy, roundTo: event.target.value })}
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            {COST_COMPONENTS.map((component) => (
-              <div key={component} className="flex flex-col gap-1.5">
-                <Label htmlFor={`catalog-${component}`} className="text-xs">
-                  {COMPONENT_LABEL[component]} property
-                </Label>
+              <div className="flex items-center gap-1.5">
                 <Input
-                  id={`catalog-${component}`}
-                  className="h-8 font-mono text-xs"
-                  placeholder="empty to skip"
-                  value={policy.components[component]}
+                  id="catalog-markup"
+                  inputMode="decimal"
+                  className="h-8 w-20 text-right text-xs tabular-nums"
+                  value={policy.markupPercent}
                   onChange={(event) =>
-                    onPolicyChange({
-                      ...policy,
-                      components: { ...policy.components, [component]: event.target.value },
-                    })
+                    onPolicyChange({ ...policy, markupPercent: event.target.value })
                   }
                 />
+                <span className="text-muted-foreground text-xs">%</span>
               </div>
-            ))}
-          </div>
-          <div className="flex items-center justify-between gap-3">
-            <span className="font-mono text-muted-foreground text-xs">
-              models.dev {MODEL_CATALOG_VERSION} · {MODEL_CATALOG_PROVIDERS.join(", ")}
-            </span>
+            </div>
             <Button
               type="button"
               variant="outline"
               size="sm"
+              className="h-8"
               onClick={onPreview}
               disabled={isPreviewing || pendingSave}
             >
@@ -369,32 +351,81 @@ export function CatalogPriceBlockView({
             </p>
           )}
 
-          {preview && (
+          <CollapsibleSection
+            label="Event properties"
+            summary={describePolicyDraft(policy)}
+            open={isMappingOpen}
+            onOpenChange={setIsMappingOpen}
+          >
+            <div className="grid grid-cols-2 gap-3">
+              {COST_COMPONENTS.map((component) => (
+                <div key={component} className="flex flex-col gap-1.5">
+                  <Label htmlFor={`catalog-${component}`} className="text-xs">
+                    {COMPONENT_LABEL[component]} property
+                  </Label>
+                  <Input
+                    id={`catalog-${component}`}
+                    className="h-8 font-mono text-xs"
+                    placeholder="empty to skip"
+                    value={policy.components[component]}
+                    onChange={(event) =>
+                      onPolicyChange({
+                        ...policy,
+                        components: { ...policy.components, [component]: event.target.value },
+                      })
+                    }
+                  />
+                </div>
+              ))}
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="catalog-round-to" className="text-xs">
+                  Round prices to
+                </Label>
+                <Input
+                  id="catalog-round-to"
+                  inputMode="decimal"
+                  className="h-8 text-xs tabular-nums"
+                  value={policy.roundTo}
+                  onChange={(event) => onPolicyChange({ ...policy, roundTo: event.target.value })}
+                />
+              </div>
+            </div>
+          </CollapsibleSection>
+
+          {preview && changes && (
             <div className="space-y-2">
-              <CostPlusChanges draft={preview.draft} currency={currency} />
+              <p className="text-xs">
+                {writes === 0
+                  ? "Nothing to publish; the card already has these prices."
+                  : `${describeChanges(changes)} at cost + ${policy.markupPercent}%.`}
+              </p>
+              {changes.lines.length > 0 && (
+                <PriceMatrix
+                  matrix={changes}
+                  currency={currency}
+                  unit="unit"
+                  limit={8}
+                  className="bg-background"
+                />
+              )}
               {preview.tieredModels.length > 0 && (
                 <p className="text-muted-foreground text-xs">
                   Priced at their base context tier; longer contexts cost the provider more:{" "}
                   <span className="font-mono">{preview.tieredModels.join(", ")}</span>
                 </p>
               )}
-              <div className="flex items-center justify-end gap-3">
-                {writes === 0 ? (
-                  <span className="text-muted-foreground text-xs">
-                    Nothing to publish; the card already has these prices.
-                  </span>
-                ) : (
+              {writes > 0 && (
+                <div className="flex justify-end">
                   <Button
                     type="button"
-                    variant="outline"
                     size="sm"
                     onClick={onPublish}
                     disabled={isPublishing || !preview.draftHash}
                   >
                     Publish {writes} model {writes === 1 ? "price" : "prices"}
                   </Button>
-                )}
-              </div>
+                </div>
+              )}
             </div>
           )}
 

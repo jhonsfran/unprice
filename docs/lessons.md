@@ -1087,3 +1087,9 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   `@unprice/db/validators`; `ServiceDeps` has no `analytics` client. Analytics reads go through
   `AnalyticsService` over Basin SQL only.
 - 2026-11-04: `generate:openapi` needs only a booting worker: a `.dev.vars` copied from the example with `APP_ENV=development`, placeholder `DATABASE_*_URL`s, and every empty key filled serves `/openapi.json` on 8787 without real secrets.
+- 2026-11-05 (ADR-0008 D2): Prices render as a vendor price sheet (`priceTableOf` in `services/src/pricing/price-table.ts`: a line per dimension value, a column per component, "per 1M tokens" in the header), never as the row's formula string. A catalog revision shows only the lines that change (`changeMatrixOf`), old rate beside new.
+- 2026-11-05: A version's own card has no page of its own: `/rate-cards/<id>` redirects it to the version's Prices tab, and only shared cards keep the card route.
+- 2026-11-05: `prefetch` in `~/trpc/server` returns the query's promise. A page whose first paint is the data (not a loading state the client would replace) awaits it before `HydrateClient`; otherwise React logs a hydration mismatch and re-renders the tree.
+- 2026-11-05: Every raw `<input>` gets a 1px gray border from the global stylesheet. An inline table cell input must set `border-0` itself; a transparent border on the wrapper does not hide it.
+- 2026-11-05: `duplicatePlanVersion` spreads the source row into the copy, so every lifecycle field the copy must not inherit (`publishedAt`, `publishedBy`, `archived*`) is reset explicitly. A copy that kept `publishedAt` made its own card live and every price change on the draft wait for the notice.
+- 2026-11-05: Webpack dev keeps a deleted module in its graph (overlay error "Failed to read source code") until the dev server restarts; the page still renders, the overlay is noise until then.

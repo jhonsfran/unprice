@@ -63,20 +63,20 @@ export function CloseRowDialog({
     >
       <DialogTrigger asChild>
         <Button variant="ghost" size="sm">
-          Close…
+          End…
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            Close {row.featureSlug} · {formatMatch(row.match)}
+            End this price? {row.featureSlug} · {formatMatch(row.match)}
           </DialogTitle>
           <DialogDescription>
-            From this time the row prices nothing. Usage it would match is refused as not priced
-            unless another row covers it.{" "}
+            From that time the price no longer applies. Usage it would match is refused as not
+            priced unless another price covers it.{" "}
             {live
-              ? `A published version prices with this card, so an end takes effect at least ${NOTICE_MINUTES} minutes after you close it.`
-              : "No published version prices with this card yet, so the row can end now."}
+              ? `A published version charges this price, so the end takes effect at least ${NOTICE_MINUTES} minutes after you confirm.`
+              : "No published version charges this price yet, so it can end now."}
           </DialogDescription>
         </DialogHeader>
         <form
@@ -107,7 +107,7 @@ export function CloseRowDialog({
               variant="destructive"
               disabled={isPending || (schedule && !effectiveTo)}
             >
-              Close row
+              End price
             </Button>
           </DialogFooter>
         </form>

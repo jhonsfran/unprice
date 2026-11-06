@@ -68,16 +68,21 @@ export function HydrateClient(props: { children: React.ReactNode }) {
   return <HydrationBoundary state={dehydratedState}>{props.children}</HydrationBoundary>
 }
 
+/**
+ * Starts a query on the request's client so `HydrateClient` ships it. Awaiting the returned
+ * promise makes the server render the data instead of a loading state the client would replace.
+ */
 // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-export function prefetch<T extends ReturnType<TRPCQueryOptions<any>>>(queryOptions: T) {
+export function prefetch<T extends ReturnType<TRPCQueryOptions<any>>>(
+  queryOptions: T
+): Promise<void> {
   const queryClient = getQueryClient()
 
   if (queryOptions.queryKey[1]?.type === "infinite") {
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-    void queryClient.prefetchInfiniteQuery(queryOptions as any)
-  } else {
-    void queryClient.prefetchQuery(queryOptions)
+    return queryClient.prefetchInfiniteQuery(queryOptions as any)
   }
+  return queryClient.prefetchQuery(queryOptions)
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: <explanation>

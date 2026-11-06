@@ -48,13 +48,15 @@ const PlanVersionPublish = forwardRef<ElementRef<"button">, PlanVersionPublishPr
       trpc.rateCards.forPlanVersion.queryOptions({ planVersionId })
     )
     const [unpriced, setUnpriced] = useState<string[]>([])
-    const unpricedCount = features
-      ? unpricedFeatureTitles(
-          features,
-          pricing?.cards.find((entry) => entry.currency === currency)?.rows ?? [],
-          dataUpdatedAt
-        ).length
-      : 0
+    // Until the card has been read, nothing is known to be unpriced: no count flashes.
+    const unpricedCount =
+      features && pricing
+        ? unpricedFeatureTitles(
+            features,
+            pricing?.cards.find((entry) => entry.currency === currency)?.rows ?? [],
+            dataUpdatedAt
+          ).length
+        : 0
 
     const publishVersion = useMutation(
       trpc.planVersions.publish.mutationOptions({

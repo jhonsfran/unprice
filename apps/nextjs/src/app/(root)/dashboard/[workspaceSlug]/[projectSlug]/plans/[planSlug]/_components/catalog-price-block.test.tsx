@@ -87,10 +87,11 @@ function render(props: Partial<Parameters<typeof CatalogPriceBlockView>[0]> = {}
   const rows = [modelRow("rr_claude", "claude-sonnet-4", "0.000004")]
   return renderToString(
     <CatalogPriceBlockView
+      featureSlug="tokens"
+      now={NOW}
       card={{ currency: "USD", card: rateCard, rows }}
       rows={rowsByFeature(rows, NOW).get("tokens")}
       currency="USD"
-      dimension="model"
       editable
       policy={DEFAULT_CATALOG_POLICY}
       onPolicyChange={() => {}}
@@ -104,34 +105,39 @@ function render(props: Partial<Parameters<typeof CatalogPriceBlockView>[0]> = {}
 }
 
 describe("CatalogPriceBlockView", () => {
-  it("lists the feature's model prices and the policy inputs with their defaults", () => {
+  it("lists the feature's model prices as a sheet and the markup with its default", () => {
     const html = render()
 
-    expect(html).toContain("1 prices by model")
-    expect(html).toContain("model=claude-sonnet-4")
-    expect(html).toContain("$0.000004 / input_tokens")
+    expect(html).toContain("1 models priced")
+    expect(html).toContain("claude-sonnet-4")
+    expect(html).toContain("Input")
+    expect(html).toContain("$0.000004")
+    expect(html).not.toContain("model=claude-sonnet-4")
     expect(html).toContain('value="30"')
-    expect(html).toContain('value="0.000001"')
-    expect(html).toContain('value="cache_write_tokens"')
-    expect(html).toContain("models.dev 2026-10-20")
-    expect(html).toContain("openai, anthropic, google")
+    expect(html).toContain("input_tokens, output_tokens, cache_read_tokens, cache_write_tokens")
+    expect(html).toContain("rounded to 0.000001")
     expect(html).toContain("Preview prices")
   })
 
-  it("renders the preview with its writes to publish and the models priced at their base tier", () => {
+  it("renders the preview as the lines that change, with its writes to publish", () => {
     const html = render({ preview })
 
+    expect(html).toContain("1 changed, 1 new at cost + 30%.")
     expect(html).toContain("Publish 2 model prices")
-    expect(html).toContain("model=gpt-4o")
-    expect(html).toContain("$0.0000033 / input_tokens")
+    expect(html).toContain("gpt-4o")
+    expect(html).toContain("$0.0000033")
+    expect(html).toContain("$0.000004")
+    expect(html).toContain("$0.0000039")
+    // The unchanged model is not a line of the change sheet; it only appears in the tier note.
+    expect(html.match(/gemini-2\.5-pro/g)).toHaveLength(1)
+    expect(html).not.toContain("unchanged")
     expect(html).toContain("longer contexts cost the provider more")
-    expect(html).toContain("gemini-2.5-pro")
   })
 
   it("says the feature is unpriced when the card has no model rows yet", () => {
     const html = render({ rows: undefined })
 
-    expect(html).toContain("Not priced yet. Publishing refuses a version with an unpriced feature.")
+    expect(html).toContain("Not priced yet. Pick a markup over the provider")
   })
 
   it("sends another currency to the card, since the catalog prices in USD", () => {
@@ -144,7 +150,7 @@ describe("CatalogPriceBlockView", () => {
   it("reads only, for a published version", () => {
     const html = render({ editable: false })
 
-    expect(html).toContain("1 prices by model")
+    expect(html).toContain("1 models priced")
     expect(html).not.toContain("Preview prices")
   })
 })

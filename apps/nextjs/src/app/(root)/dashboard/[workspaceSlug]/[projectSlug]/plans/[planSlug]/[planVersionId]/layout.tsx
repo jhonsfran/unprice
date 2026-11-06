@@ -8,6 +8,7 @@ import { Button } from "@unprice/ui/button"
 import { CodeApiSheet } from "~/components/code-api-sheet"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
+import { Tab } from "~/components/layout/tab"
 import { api } from "~/trpc/server"
 import { BannerInactiveVersion, BannerPublishedVersion } from "./_components/banner"
 import { PlanVersionHeaderActions } from "./_components/plan-version-header-actions"
@@ -38,6 +39,7 @@ export default async function PlanVersionLayout(props: {
   const headerLabel = !active ? "inactive" : status
   const description = planVersion.description ?? planVersion.plan.description ?? undefined
   const baseHref = `/${params.workspaceSlug}/${params.projectSlug}/plans/${params.planSlug}`
+  const versionHref = `${baseHref}/${planVersion.id}`
   const listPlanVersionsExampleParams = {
     listPlanVersions: {
       planVersionIds: [planVersion.id],
@@ -86,6 +88,14 @@ export default async function PlanVersionLayout(props: {
             baseHref={baseHref}
             versions={plan.versions}
           />
+          <nav aria-label="Version sections" className="flex items-center gap-1">
+            <Tab href="/" baseUrl={versionHref}>
+              Features
+            </Tab>
+            <Tab href="/prices" baseUrl={versionHref}>
+              Prices
+            </Tab>
+          </nav>
         </div>
       }
     >

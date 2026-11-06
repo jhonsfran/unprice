@@ -6,9 +6,10 @@ import { transformer } from "@unprice/trpc/transformer"
 import { renderToString } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 import { TRPCProvider } from "~/trpc/client"
-import { RateCardRows } from "./rate-card-detail"
+import { PriceList } from "./rate-card-detail"
 
 const NOW = Date.parse("2026-11-04T12:00:00.000Z")
+const MILLION = 1_000_000
 
 const card: RateCard = {
   id: "rc_1",
@@ -33,7 +34,28 @@ function row(id: string, rate: string, from: number, to: number | null) {
   })
 }
 
-function render(rows: ReturnType<typeof row>[]): string {
+function modelRow(id: string, model: string, input: string, output: string) {
+  return rateRowSchema.parse({
+    id,
+    rateCardId: "rc_1",
+    featureSlug: "llm_tokens",
+    match: { model },
+    price: {
+      type: "unit",
+      components: [
+        { property: "input_tokens", rate: input, per: MILLION },
+        { property: "output_tokens", rate: output, per: MILLION },
+      ],
+    },
+    cost: null,
+    effectiveFrom: NOW - 3_600_000,
+    effectiveTo: null,
+    source: "catalog",
+    sourceRef: null,
+  })
+}
+
+function render(rows: ReturnType<typeof row>[], live = false): string {
   const queryClient = new QueryClient()
   const trpcClient = createTRPCClient<AppRouter>({
     links: [httpLink({ url: "http://localhost/unused", transformer })],
@@ -41,33 +63,65 @@ function render(rows: ReturnType<typeof row>[]): string {
   return renderToString(
     <QueryClientProvider client={queryClient}>
       <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
-        <RateCardRows data={{ card, rows, live: false }} now={NOW} />
+        <PriceList
+          data={{ card, rows, live }}
+          features={[
+            { slug: "tokens", title: "Tokens", unit: "token" },
+            { slug: "llm_tokens", title: "LLM tokens", unit: "tokens" },
+          ]}
+          now={NOW}
+        />
       </TRPCProvider>
     </QueryClientProvider>
   ).replace(/<!-- -->/g, "")
 }
 
-describe("RateCardRows", () => {
-  it("groups a feature's rows into current and ended, and offers to close only open rows", () => {
+describe("PriceList", () => {
+  it("shows a feature's current and scheduled prices, keeps past ones apart, and ends only open rows", () => {
     const html = render([
       row("rr_old", "0.03", NOW - 86_400_000, NOW - 3_600_000),
       row("rr_live", "0.02", NOW - 3_600_000, NOW + 600_000),
       row("rr_next", "0.015", NOW + 600_000, null),
     ])
 
-    expect(html).toContain("tokens")
-    expect(html).toContain("$0.02 / unit")
-    expect(html).toContain("$0.015 / unit")
-    expect(html).toContain("1 ended row")
-    // The live row already ends where its successor starts; only the open successor can close.
-    expect(html.match(/Close…/g)).toHaveLength(1)
-    expect(html).toContain("a price change publishes a successor")
+    expect(html).toContain("Tokens")
+    expect(html).toContain("$0.02")
+    expect(html).toContain("$0.015")
+    expect(html).toContain("scheduled")
+    expect(html).toContain("1 past price")
+    expect(html).toContain("$0.03")
+    // The live row already ends where its successor starts; only the open successor can end.
+    expect(html.match(/End…/g)).toHaveLength(1)
+    expect(html).toContain("a change starts at once")
   })
 
-  it("explains that a card's first rows start at once when it has none", () => {
+  it("lays model prices out as a sheet: a line per model, a column per token kind, per 1M", () => {
+    const html = render([
+      modelRow("rr_haiku", "claude-haiku-5-5", "0.13", "0.65"),
+      modelRow("rr_opus", "claude-opus-4-5", "6.5", "32.5"),
+    ])
+
+    expect(html).toContain("LLM tokens")
+    expect(html).toContain("2 prices by model")
+    expect(html).toContain("Input")
+    expect(html).toContain("Output")
+    expect(html).toContain("per 1M tokens")
+    expect(html).toContain("claude-haiku-5-5")
+    expect(html).toContain("$0.13")
+    expect(html).toContain("$32.5")
+    expect(html).not.toContain("input_tokens")
+  })
+
+  it("says a live card's change waits for the notice", () => {
+    const html = render([row("rr_live", "0.02", NOW - 3_600_000, null)], true)
+
+    expect(html).toContain("starts 10 minutes later")
+  })
+
+  it("explains that the first prices come from the plan editor when the card has none", () => {
     const html = render([])
 
-    expect(html).toContain("No rows yet")
-    expect(html).toContain("can start at once")
+    expect(html).toContain("No prices yet")
+    expect(html).toContain("Set a price per feature in the plan editor")
   })
 })

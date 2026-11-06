@@ -94,13 +94,17 @@ export function PlanVersionRateCard({
               >
                 <span className="font-mono text-foreground/70">{entry.currency}</span>
                 <SuperLink
-                  href={`/${params?.workspaceSlug}/${params?.projectSlug}/rate-cards/${entry.card.id}`}
+                  href={
+                    label.isOwn
+                      ? `/${params?.workspaceSlug}/${params?.projectSlug}/plans/${params?.planSlug}/${planVersionId}/prices`
+                      : `/${params?.workspaceSlug}/${params?.projectSlug}/rate-cards/${entry.card.id}`
+                  }
                   className={cn(
                     "truncate underline-offset-4 hover:underline",
                     !label.isOwn && "font-mono"
                   )}
                 >
-                  {label.text}
+                  {label.isOwn ? "All prices and history" : label.text}
                 </SuperLink>
               </div>
             )

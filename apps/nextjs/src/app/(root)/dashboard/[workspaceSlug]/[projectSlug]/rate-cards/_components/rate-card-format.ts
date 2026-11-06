@@ -1,5 +1,7 @@
-import type { MarginPolicy, RateRow, ratePriceSchema } from "@unprice/db/validators"
-import { formatAmount } from "@unprice/money"
+import type { MarginPolicy, RateComponent, RateRow, ratePriceSchema } from "@unprice/db/validators"
+import { type Amount, formatAmount } from "@unprice/money"
+import type { PriceColumn, PriceTable } from "@unprice/services/pricing"
+import { columnKey, lineLabel } from "@unprice/services/pricing"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import type { z } from "zod"
 
@@ -8,6 +10,8 @@ export type RatePriceWire = z.input<typeof ratePriceSchema>
 
 /** A cost-plus revision as the client reads it. */
 export type CostPlusDraftWire = RouterOutputs["rateCards"]["previewCostPlus"]["draft"]
+
+export type CostPlusFeaturePolicy = Extract<MarginPolicy, { type: "costPlus" }>["features"][number]
 
 /** How many of the draft's changes publishing writes as rows. */
 export function countWrites(draft: CostPlusDraftWire): number {
@@ -23,6 +27,8 @@ const DATE_TIME = new Intl.DateTimeFormat("en", {
   timeStyle: "short",
 })
 
+const DAY = new Intl.DateTimeFormat("en", { dateStyle: "medium" })
+
 /** "money:USD" reads as "USD", "credits:ai" as "ai credits". */
 export function formatCardUnit(unit: string): string {
   const [kind, id] = unit.split(":")
@@ -34,14 +40,25 @@ export function cardCurrency(unit: string): string {
   return unit.split(":")[1] ?? unit
 }
 
+/** "0.3" as "30". */
+export function markupPercent(markup: Amount): string {
+  return String(Number(formatAmount(markup)) * 100)
+}
+
 export function formatMarginPolicy(policy: MarginPolicy): string {
   if (policy.type === "manual") return "Manual"
   return policy.features
-    .map(
-      (feature) =>
-        `Cost-plus ${Number(formatAmount(feature.markup)) * 100}% on ${feature.featureSlug}`
-    )
+    .map((feature) => `Cost-plus ${markupPercent(feature.markup)}% on ${feature.featureSlug}`)
     .join(", ")
+}
+
+/** The catalog policy pricing a feature, when the card has one. */
+export function catalogPolicyFor(
+  policy: MarginPolicy,
+  featureSlug: string
+): CostPlusFeaturePolicy | null {
+  if (policy.type !== "costPlus") return null
+  return policy.features.find((feature) => feature.featureSlug === featureSlug) ?? null
 }
 
 /** A row's match as "model=gpt-4o, region=eu", or "Default" for the empty match. */
@@ -56,11 +73,173 @@ export function formatInstant(ms: number): string {
   return DATE_TIME.format(new Date(ms))
 }
 
+export function formatDay(ms: number): string {
+  return DAY.format(new Date(ms))
+}
+
 /** When a row applies: "since X", "X → Y", or "from X" for one that has not started. */
 export function formatInterval(row: Pick<RateRow, "effectiveFrom" | "effectiveTo">, now: number) {
   const from = formatInstant(row.effectiveFrom)
   if (row.effectiveTo !== null) return `${from} → ${formatInstant(row.effectiveTo)}`
   return row.effectiveFrom > now ? `from ${from}` : `since ${from}`
+}
+
+/**
+ * What the card's state means for a price change, in words: a live card is priced by a published
+ * version, so a change starts after the notice.
+ */
+export function describeCardState(live: boolean): string {
+  return live
+    ? "Live: a published version charges these prices. A change you publish starts 10 minutes later, so running budgets pick it up first."
+    : "Draft: no published version charges these prices yet, so a change starts at once."
+}
+
+export type MatrixStatus = "current" | "scheduled" | "ended" | "added" | "changed" | "retiring"
+
+/** One cell of a price matrix: the rate, and the rate it replaces in a change view. */
+export type MatrixCell = Readonly<{ after: Amount | null; before: Amount | null }>
+
+/** One line of a price matrix, labelled by its dimension values. */
+export type MatrixLine = Readonly<{
+  key: string
+  label: string
+  status: MatrixStatus
+  cells: ReadonlyMap<string, MatrixCell>
+  /** The price in words, for a line the columns cannot show. */
+  text: string | null
+  /** When the line applies, in words; empty for a change that has no date yet. */
+  applies: string
+  row: RateRow | null
+}>
+
+export type Matrix = Readonly<{
+  dimensions: readonly string[]
+  columns: readonly PriceColumn[]
+  lines: readonly MatrixLine[]
+}>
+
+const TIME = new Intl.DateTimeFormat("en", { timeStyle: "short" })
+
+/** An instant after `from`: only its time when it falls on the same day. */
+function formatAfter(from: number, instant: number): string {
+  return formatDay(from) === formatDay(instant)
+    ? TIME.format(new Date(instant))
+    : formatInstant(instant)
+}
+
+/** When a line applies, in words: "since Nov 5, 2026", "since Nov 5, 2026 until 9:50 PM", "from Nov 5, 2026, 9:50 PM". */
+export function appliesText(
+  row: Pick<RateRow, "effectiveFrom" | "effectiveTo">,
+  status: MatrixStatus
+): string {
+  switch (status) {
+    case "scheduled":
+      return `from ${formatInstant(row.effectiveFrom)}`
+    case "ended":
+      return `${formatDay(row.effectiveFrom)} to ${formatDay(row.effectiveTo ?? row.effectiveFrom)}`
+    default:
+      return row.effectiveTo === null
+        ? `since ${formatDay(row.effectiveFrom)}`
+        : `since ${formatDay(row.effectiveFrom)} until ${formatAfter(row.effectiveFrom, row.effectiveTo)}`
+  }
+}
+
+/** A price table's current and scheduled lines as a matrix; `ended` for its history. */
+export function matrixOf(table: PriceTable, which: "lines" | "ended" = "lines"): Matrix {
+  return {
+    dimensions: table.dimensions,
+    columns: table.columns,
+    lines: table[which].map((line) => ({
+      key: line.key,
+      label: lineLabel(line, table.dimensions),
+      status: line.status,
+      cells: new Map(
+        [...line.cells].map(([key, amount]) => [key, { after: amount, before: null }])
+      ),
+      text: line.text,
+      applies: appliesText(line.row, line.status),
+      row: line.row,
+    })),
+  }
+}
+
+function cellsOf(
+  after: readonly RateComponent[],
+  before: readonly RateComponent[]
+): Map<string, MatrixCell> {
+  const cells = new Map<string, MatrixCell>()
+  for (const component of after) {
+    const key = columnKey({ property: component.property, per: component.per })
+    const was = before.find((c) => c.property === component.property && c.per === component.per)
+    cells.set(key, { after: component.rate, before: was?.rate ?? null })
+  }
+  for (const component of before) {
+    const key = columnKey({ property: component.property, per: component.per })
+    if (!cells.has(key)) cells.set(key, { after: null, before: component.rate })
+  }
+  return cells
+}
+
+/**
+ * What a catalog revision changes for one feature, as a matrix of only the lines that change:
+ * new models, models whose rates moved (the old rate beside the new), and rows left to end.
+ */
+export function changeMatrixOf(draft: CostPlusDraftWire, featureSlug: string): Matrix {
+  const changes = draft.changes.filter(
+    (change): change is Exclude<typeof change, { type: "unchanged" }> =>
+      change.proposed.featureSlug === featureSlug && change.type !== "unchanged"
+  )
+  const columns = new Map<string, PriceColumn>()
+  const dimensions = new Set<string>()
+  for (const change of changes) {
+    for (const key of Object.keys(change.proposed.match)) dimensions.add(key)
+    const current =
+      "current" in change && change.current.price.type === "unit"
+        ? change.current.price.components
+        : []
+    for (const component of [...change.proposed.price.components, ...current]) {
+      const column = { property: component.property, per: component.per }
+      columns.set(columnKey(column), column)
+    }
+  }
+  const sortedDimensions = [...dimensions].sort()
+  return {
+    dimensions: sortedDimensions,
+    columns: [...columns.values()],
+    lines: changes.map((change) => {
+      const current = "current" in change ? change.current : null
+      return {
+        key: formatMatch(change.proposed.match),
+        label: lineLabel({ match: change.proposed.match }, sortedDimensions),
+        status: change.type,
+        cells: cellsOf(
+          change.proposed.price.components,
+          current?.price.type === "unit" ? current.price.components : []
+        ),
+        text: null,
+        applies:
+          change.type === "retiring" && current?.effectiveTo
+            ? `ends ${formatInstant(current.effectiveTo)}`
+            : "",
+        row: current,
+      }
+    }),
+  }
+}
+
+/** "3 changed, 2 new" for a change matrix; empty when nothing changes. */
+export function describeChanges(matrix: Matrix): string {
+  const counts = { changed: 0, added: 0, retiring: 0 }
+  for (const line of matrix.lines) {
+    if (line.status === "changed" || line.status === "added" || line.status === "retiring") {
+      counts[line.status] += 1
+    }
+  }
+  const parts: string[] = []
+  if (counts.changed > 0) parts.push(`${counts.changed} changed`)
+  if (counts.added > 0) parts.push(`${counts.added} new`)
+  if (counts.retiring > 0) parts.push(`${counts.retiring} ending`)
+  return parts.join(", ")
 }
 
 export type FeatureRows = { featureSlug: string; current: RateRow[]; ended: RateRow[] }
