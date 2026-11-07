@@ -23,7 +23,6 @@ export const getUpgradeOptions = protectedWorkspaceProcedure
           subscriptions: opts.ctx.services.subscriptions,
         },
         db: opts.ctx.db,
-        analytics: opts.ctx.analytics,
         logger: opts.ctx.logger,
       },
       {

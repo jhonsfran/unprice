@@ -161,17 +161,6 @@
                 ]
               },
               {
-                "group": "Budgeted runs",
-                "pages": [
-                  "libraries/ts/sdk/runs/reservations",
-                  "libraries/ts/sdk/runs/start",
-                  "libraries/ts/sdk/runs/consume",
-                  "libraries/ts/sdk/runs/settle",
-                  "libraries/ts/sdk/runs/end",
-                  "libraries/ts/sdk/runs/get"
-                ]
-              },
-              {
                 "group": "Plans",
                 "pages": [
                   "libraries/ts/sdk/plan-versions/list",
@@ -196,10 +185,7 @@
               },
               {
                 "group": "Events",
-                "pages": [
-                  "libraries/ts/sdk/ingestion-events/status",
-                  "libraries/ts/sdk/ingestion-events/replay"
-                ]
+                "pages": ["libraries/ts/sdk/ingestion-events/status"]
               }
             ]
           }

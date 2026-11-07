@@ -1,9 +1,10 @@
-import type { Analytics, PageBrowserVisits } from "@unprice/analytics"
+import type { PageBrowserVisits } from "@unprice/services/analytics"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
+import { WEB_ANALYTICS_UNAVAILABLE, pageVisitsInputSchema } from "./web-analytics-input"
 
 export const getBrowserVisits = protectedProjectProcedure
-  .input(z.custom<Parameters<Analytics["getBrowserVisits"]>[0]>())
+  .input(pageVisitsInputSchema)
   .output(
     z.object({
       data: z.custom<PageBrowserVisits>(),
@@ -22,7 +23,7 @@ export const getBrowserVisits = protectedProjectProcedure
     })
 
     if (err) {
-      return { data: [], error: err.message }
+      return { data: [], error: WEB_ANALYTICS_UNAVAILABLE }
     }
 
     return val

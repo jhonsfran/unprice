@@ -414,6 +414,13 @@ export async function changeSubscriptionPhasePlan(
     return Err(transactionResult.err)
   }
 
+  // The payer budget takes the new plan's pricing and limits, and its periods' statements.
+  await deps.services.billing.syncPayerBudget({
+    projectId,
+    customerId: subscription.customerId,
+    caller: "request",
+  })
+
   return Ok(
     subscriptionChangePhasePlanOutputSchema.parse({
       status: subscription.status,

@@ -120,7 +120,7 @@ export function CollapsibleSection({
             focusRing
           )}
         >
-          <span className="flex items-center gap-2">
+          <span className="flex shrink-0 items-center gap-2 whitespace-nowrap">
             <ChevronDown
               className={cn(
                 "size-3.5 shrink-0 transition-transform duration-200",
@@ -136,7 +136,7 @@ export function CollapsibleSection({
             )}
           </span>
           {!open && summary && (
-            <span className="line-clamp-1 normal-case tracking-normal">{summary}</span>
+            <span className="min-w-0 truncate normal-case tracking-normal">{summary}</span>
           )}
         </button>
       </CollapsibleTrigger>

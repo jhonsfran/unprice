@@ -41,7 +41,7 @@ export const getIngestionStatus = protectedProjectProcedure
   .query(async (opts) => {
     const result = await getIngestionStatusUseCase(
       {
-        analytics: opts.ctx.analytics,
+        analytics: opts.ctx.services.analytics,
       },
       {
         projectId: opts.ctx.project.id,

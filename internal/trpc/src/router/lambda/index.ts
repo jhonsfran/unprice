@@ -13,6 +13,7 @@ import { planVersionFeatureRouter } from "./planVersionFeatures"
 import { planVersionRouter } from "./planVersions"
 import { planRouter } from "./plans"
 import { projectRouter } from "./projects"
+import { rateCardsRouter } from "./rateCards"
 import { subscriptionRouter } from "./subscriptions"
 import { walletsRouter } from "./wallets"
 import { workspaceRouter } from "./workspaces"
@@ -39,6 +40,7 @@ export const lambdaEndpoints = {
   analytics: analyticsRouter,
   wallets: walletsRouter,
   budgets: budgetsRouter,
+  rateCards: rateCardsRouter,
 }
 
 export const lambdaRouter = createTRPCRouter(lambdaEndpoints)

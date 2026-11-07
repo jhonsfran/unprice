@@ -13,6 +13,8 @@ import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { describe, expect, it, vi } from "vitest"
 import type { ServiceContext } from "../../context"
+import { ratePriceOf } from "../../pricing"
+import { createRateCardsFake } from "../../rate-cards/memory.fixture"
 import { applyMonetizationConfig } from "./apply"
 import {
   type GetMonetizationConfigOutput,
@@ -38,8 +40,6 @@ type UpdateEventInput = Parameters<ServiceContext["events"]["updateEvent"]>[0]
 type StoredPlanVersion = PlanVersion & {
   planFeatures: Array<PlanVersionFeature & { feature: Feature }>
 }
-
-const USD = { code: "USD", base: 10, exponent: 2 } as const
 
 const RECURRING_RESET_CONFIG = {
   name: "monthly",
@@ -129,6 +129,7 @@ function createLogger(): Logger {
 // ---------------------------------------------------------------------------
 
 function createHarness() {
+  const cards = createRateCardsFake()
   const store = {
     plans: [] as Plan[],
     features: [] as Feature[],
@@ -386,16 +387,23 @@ function createHarness() {
       updatePlanVersionFeatureRecord,
       updatePlanVersionRecord,
     },
-    features: { getFeatureBySlug, createFeatureRecord, updateFeatureRecord },
+    features: {
+      getFeatureBySlug,
+      createFeatureRecord,
+      updateFeatureRecord,
+      listFeaturesByProject: vi.fn(async () => Ok([])),
+    },
     events: { listEventsByProject, createEvent, updateEvent },
-  } as unknown as Pick<ServiceContext, "plans" | "features" | "events">
+    rateCards: cards.rateCards,
+  } as unknown as Pick<ServiceContext, "plans" | "features" | "events" | "rateCards">
 
   const logger = createLogger()
 
   return {
     store,
+    cards,
     applyDeps: { services, db, logger },
-    getDeps: { db, logger },
+    getDeps: { db, logger, services: { rateCards: cards.rateCards } },
     logger,
     /**
      * Every way this project can be written to. The round trip touches none.
@@ -468,7 +476,6 @@ function baseConfig(): MonetizationConfigInput {
               featureType: "usage",
               config: {
                 usageMode: "tier",
-                tierMode: "graduated",
                 tiers: [
                   { firstUnit: 1, lastUnit: 10, unitPrice: "0.10", flatPrice: "0" },
                   { firstUnit: 11, lastUnit: null, unitPrice: "0.05", flatPrice: "0" },
@@ -511,7 +518,6 @@ function baseConfig(): MonetizationConfigInput {
               featureSlug: "bandwidth",
               featureType: "tier",
               config: {
-                tierMode: "volume",
                 tiers: [
                   { firstUnit: 1, lastUnit: 100, unitPrice: "0.02", flatPrice: "5.00" },
                   { firstUnit: 101, lastUnit: null, unitPrice: "0.01", flatPrice: "0" },
@@ -603,7 +609,7 @@ describe("getMonetizationConfig", () => {
     // Package and tier survive the projection with exactly the keys their
     // feature type keeps.
     expect(read.config.plans[1]?.version.features).toEqual([
-      { featureSlug: "support", featureType: "flat", config: { price: "20.00" } },
+      { featureSlug: "support", featureType: "flat", config: { price: "20" } },
       {
         featureSlug: "chat-messages",
         featureType: "usage",
@@ -611,14 +617,13 @@ describe("getMonetizationConfig", () => {
         meterConfig: { eventSlug: "chat_request", aggregationMethod: "count" },
         resetConfig: { interval: "month", intervalCount: 1 },
       },
-      { featureSlug: "seats", featureType: "package", config: { price: "10.00", units: 5 } },
+      { featureSlug: "seats", featureType: "package", config: { price: "10", units: 5 } },
       {
         featureSlug: "bandwidth",
         featureType: "tier",
         config: {
-          tierMode: "volume",
           tiers: [
-            { firstUnit: 1, lastUnit: 100, unitPrice: "0.02", flatPrice: "5.00" },
+            { firstUnit: 1, lastUnit: 100, unitPrice: "0.02", flatPrice: "5" },
             { firstUnit: 101, lastUnit: null, unitPrice: "0.01", flatPrice: "0" },
           ],
         },
@@ -650,8 +655,8 @@ describe("getMonetizationConfig", () => {
     expect(free?.version.features[0]).toEqual({
       featureSlug: "support",
       featureType: "flat",
-      // Prices cross the boundary as the decimal string they were written with.
-      config: { price: "0.00" },
+      // Prices read back from the rate card in canonical form: "0.00" was written, "0" reads.
+      config: { price: "0" },
     })
     expect(free?.version.features[1]).toEqual({
       featureSlug: "chat-messages",
@@ -666,9 +671,8 @@ describe("getMonetizationConfig", () => {
       featureType: "usage",
       config: {
         usageMode: "tier",
-        tierMode: "graduated",
         tiers: [
-          { firstUnit: 1, lastUnit: 10, unitPrice: "0.10", flatPrice: "0" },
+          { firstUnit: 1, lastUnit: 10, unitPrice: "0.1", flatPrice: "0" },
           { firstUnit: 11, lastUnit: null, unitPrice: "0.05", flatPrice: "0" },
         ],
       },
@@ -921,17 +925,14 @@ describe("getMonetizationConfig", () => {
           billingConfig: RECURRING_BILLING_CONFIG,
           resetConfig: null,
           meterConfig: null,
-          config: {
-            price: {
-              dinero: { amount: 5000, currency: { code: "EUR", base: 10, exponent: 2 }, scale: 2 },
-              displayAmount: "50.00",
-            },
-            units: 5,
-          },
+          config: { units: 5 },
           feature: harness.store.features[0],
         },
       ],
     } as unknown as StoredPlanVersion)
+    harness.cards.seedPlanVersionCard("plan_version_dashboard", "EUR", [
+      { featureSlug: "seats", featureType: "package", price: "50.00", units: 5 },
+    ])
 
     const read = expectRead(await getMonetizationConfig(harness.getDeps, { projectId: PROJECT_ID }))
 
@@ -948,7 +949,7 @@ describe("getMonetizationConfig", () => {
         {
           featureSlug: "seats",
           featureType: "package",
-          config: { price: "50.00", units: 5 },
+          config: { price: "50", units: 5 },
           limit: 5,
         },
       ],
@@ -963,33 +964,35 @@ describe("getMonetizationConfig", () => {
     await seedProject(harness)
 
     // A row written before the normalizer existed: a tier feature carrying a
-    // price and a usage mode, both of which the server discards on write.
+    // usage mode the server discards on write, priced by graduated tiers on its card.
     const version = versionOf(harness.store, "plan_version_2")
     const support = version.planFeatures[0]
     if (!support) throw new Error("fixture changed")
     support.featureType = "tier"
-    const usd = USD
-    support.config = {
-      tierMode: "volume",
-      tiers: [
-        {
-          firstUnit: 1,
-          lastUnit: null,
-          unitPrice: { dinero: { amount: 100, currency: usd, scale: 2 }, displayAmount: "1.00" },
-          flatPrice: { dinero: { amount: 0, currency: usd, scale: 2 }, displayAmount: "0" },
-        },
-      ],
-      price: { dinero: { amount: 2000, currency: usd, scale: 2 }, displayAmount: "20.00" },
-      usageMode: "unit",
-    } as unknown as PlanVersionFeature["config"]
+    support.config = { usageMode: "unit" } as PlanVersionFeature["config"]
+    const card = await harness.cards.rateCards.cardForPlanVersion(
+      PROJECT_ID,
+      "plan_version_2",
+      "USD"
+    )
+    const row = harness.cards.rows.find(
+      (candidate) => candidate.rateCardId === card?.cardId && candidate.featureSlug === "support"
+    )
+    if (!row) throw new Error("fixture changed")
+    row.price = ratePriceOf(
+      {
+        featureType: "tier",
+        tiers: [{ firstUnit: 1, lastUnit: null, unitPrice: "1.00", flatPrice: "0" }],
+      },
+      null
+    ) as typeof row.price
 
     const read = expectRead(await getMonetizationConfig(harness.getDeps, { projectId: PROJECT_ID }))
 
     const emitted = read.config.plans[1]?.version.features[0]
     expect(emitted?.featureType).toBe("tier")
     expect(emitted?.config).toEqual({
-      tierMode: "volume",
-      tiers: [{ firstUnit: 1, lastUnit: null, unitPrice: "1.00", flatPrice: "0" }],
+      tiers: [{ firstUnit: 1, lastUnit: null, unitPrice: "1", flatPrice: "0" }],
     })
   })
 
@@ -1123,9 +1126,7 @@ describe("getMonetizationConfig", () => {
     const converted = version.planFeatures[1]
     if (!converted) throw new Error("fixture changed")
     converted.featureType = "flat"
-    converted.config = {
-      price: { dinero: { amount: 500, currency: USD, scale: 2 }, displayAmount: "5.00" },
-    } as unknown as PlanVersionFeature["config"]
+    converted.config = {} as PlanVersionFeature["config"]
     converted.meterConfig = null
     converted.resetConfig = {
       ...(converted.resetConfig ?? RECURRING_RESET_CONFIG),
@@ -1139,7 +1140,8 @@ describe("getMonetizationConfig", () => {
     expect(read.config.plans[1]?.version.features[1]).toEqual({
       featureSlug: "chat-messages",
       featureType: "flat",
-      config: { price: "5.00" },
+      // The card still prices the feature at its old unit rate; the decimal reads back as is.
+      config: { price: "0.005" },
     })
   })
 
@@ -1354,9 +1356,7 @@ describe("getMonetizationConfig", () => {
     if (!converted) throw new Error("fixture changed")
     expect(converted.resetConfig).not.toBeNull()
     converted.featureType = "flat"
-    converted.config = {
-      price: { dinero: { amount: 500, currency: USD, scale: 2 }, displayAmount: "5.00" },
-    } as unknown as PlanVersionFeature["config"]
+    converted.config = {} as PlanVersionFeature["config"]
     converted.meterConfig = null
 
     const read = expectRead(await getMonetizationConfig(harness.getDeps, { projectId: PROJECT_ID }))
@@ -1365,7 +1365,8 @@ describe("getMonetizationConfig", () => {
     expect(read.config.plans[1]?.version.features[1]).toEqual({
       featureSlug: "chat-messages",
       featureType: "flat",
-      config: { price: "5.00" },
+      // The card still prices the feature at its old unit rate; the decimal reads back as is.
+      config: { price: "0.005" },
     })
   })
 

@@ -31,7 +31,7 @@ export function CustomerDialog({
         <ResponsiveDialogHeader>
           <ResponsiveDialogTitle>Customer details</ResponsiveDialogTitle>
           <ResponsiveDialogDescription>
-            Create the economic actor that holds subscriptions, wallet credits, runs, and invoices.
+            Create the economic actor that holds subscriptions, wallet credits, and invoices.
           </ResponsiveDialogDescription>
         </ResponsiveDialogHeader>
 

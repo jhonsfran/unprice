@@ -1,22 +1,27 @@
-import type { Unprice } from "@unprice/api"
+import type { BudgetCharge, BudgetHandle, Unprice } from "@unprice/api"
 import type { Database } from "@unprice/db"
 import {
   type Currency,
   type Feature,
   type MeterConfig,
   type PlanVersionFeature,
+  type RateRow,
   currencySchema,
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import { fromCurrencyMinor, toLedgerMinor } from "@unprice/money"
+import { fromCurrencyMinor, parseAmount, toLedgerMinor } from "@unprice/money"
 import { fromZonedTime, toZonedTime } from "date-fns-tz"
 import { z } from "zod"
 import type { ServiceContext } from "../../context"
+import { featureRow } from "../../pricing"
 import { paidActionSchema } from "../plan-template/template-data"
 import { createSubscription } from "../subscription/create"
 
 const onboardingCreditLineAmountMinor = 10_000
+
+/** The proof budget closes after an hour, and deletes itself once closed, so none lingers. */
+const PROOF_BUDGET_TTL_MS = 60 * 60 * 1000
 
 export const seedOnboardingEvidenceRequestSchema = z.object({
   planVersionId: z.string().min(1),
@@ -73,12 +78,17 @@ export type SeedOnboardingEvidenceRequest = z.input<typeof seedOnboardingEvidenc
 export type SeedOnboardingEvidenceInput = z.input<typeof seedOnboardingEvidenceInputSchema>
 export type SeedOnboardingEvidenceOutput = z.infer<typeof seedOnboardingEvidenceOutputSchema>
 
-type EvidenceApiClient = {
-  runs: Pick<Unprice["runs"], "start" | "consume" | "end">
+/** The SDK calls the proof makes: one standalone budget, charged twice. */
+export type EvidenceApiClient = {
+  budgets: Pick<Unprice["budgets"], "upsert">
+  budget: (key: string) => Pick<BudgetHandle, "charge">
 }
 
 type SeedOnboardingEvidenceDeps = {
-  services: Pick<ServiceContext, "plans" | "apikeys" | "customers" | "subscriptions" | "billing">
+  services: Pick<
+    ServiceContext,
+    "plans" | "apikeys" | "customers" | "subscriptions" | "billing" | "rateCards"
+  >
   db: Database
   logger: Logger
   createApiClient: (token: string) => EvidenceApiClient
@@ -103,13 +113,6 @@ type OnboardingSubscription = {
   id: string
 }
 
-const unitPriceConfigSchema = z.object({
-  usageMode: z.literal("unit"),
-  price: z.object({
-    displayAmount: z.string(),
-  }),
-})
-
 function seedError(message: string, context?: Record<string, unknown>) {
   return new FetchError({
     message,
@@ -129,8 +132,13 @@ function toCurrencyMinorAmount(amount: string) {
   return Math.round(Number(amount) * 100)
 }
 
+/**
+ * The plan feature the paid action meters, when the version's card prices it at the action's unit
+ * price: one default unit row with one component (ADR-0008 D2).
+ */
 function getPaidActionTarget(
   planFeatures: DetailedPlanFeature[],
+  rows: readonly RateRow[],
   paidAction: z.infer<typeof paidActionSchema>
 ): PaidActionTarget | null {
   const target = planFeatures.find((planFeature) => {
@@ -147,10 +155,16 @@ function getPaidActionTarget(
     return null
   }
 
-  const priceConfig = unitPriceConfigSchema.safeParse(target.config)
+  const row = featureRow(rows, paidAction.featureSlug)
+  const [component] = row?.price.type === "unit" ? row.price.components : []
+  const unitPrice = parseAmount(paidAction.unitPrice)
   if (
-    !priceConfig.success ||
-    Number(priceConfig.data.price.displayAmount) !== Number(paidAction.unitPrice)
+    row?.price.type !== "unit" ||
+    row.price.components.length !== 1 ||
+    !component ||
+    component.per !== 1 ||
+    !unitPrice.ok ||
+    component.rate !== unitPrice.amount
   ) {
     return null
   }
@@ -316,42 +330,19 @@ async function getOrCreateOnboardingSubscription({
   )
 }
 
-async function closeStartedRunAfterFailure({
-  apiClient,
-  customerId,
-  logger,
-  planVersionId,
-  runId,
-}: {
-  apiClient: EvidenceApiClient
-  customerId: string
-  logger: Logger
-  planVersionId: string
-  runId: string
-}) {
-  try {
-    const endResult = await apiClient.runs.end({
-      runId,
-      status: "failed",
-    })
+type ProofBalance = Extract<BudgetCharge, { allowed: true }>["balance"]
 
-    if (endResult.error) {
-      logger.warn("failed to close onboarding budgeted run after proof error", {
-        customerId,
-        planVersionId,
-        runId,
-        error: endResult.error.message,
-        code: endResult.error.code,
-      })
-    }
-  } catch (error) {
-    logger.warn("failed to close onboarding budgeted run after proof error", {
-      customerId,
-      planVersionId,
-      runId,
-      error: error instanceof Error ? error.message : String(error),
-    })
+/** What the proof budget has consumed and has left, in currency minor units. */
+function spendOf(balance: ProofBalance) {
+  const limit = balance.limits[0]
+  return {
+    consumedAmountMinor: toCurrencyMinorAmount(limit?.consumed ?? "0"),
+    remainingAmountMinor: toCurrencyMinorAmount(balance.remaining ?? limit?.remaining ?? "0"),
   }
+}
+
+function deniedReason(denial: Extract<BudgetCharge, { allowed: false }>) {
+  return denial.degraded ? `unavailable (${denial.blocked.error.message})` : "limit"
 }
 
 export async function seedOnboardingEvidence(
@@ -388,7 +379,13 @@ export async function seedOnboardingEvidence(
   const paidAction = input.paidAction
   const unitPriceMinor = toCurrencyMinorAmount(paidAction.unitPrice)
   const planFeatures = planVersion.planFeatures as DetailedPlanFeature[]
-  const target = getPaidActionTarget(planFeatures, paidAction)
+  const pricing = await deps.services.rateCards.pricingForPlanVersions(
+    input.projectId,
+    [planVersion.id],
+    Date.now()
+  )
+  const rows = pricing.get(planVersion.id)?.find((card) => card.currency === "USD")?.rows ?? []
+  const target = getPaidActionTarget(planFeatures, rows, paidAction)
   if (!target) {
     return Err(
       seedError("The saved paid action does not match the published plan version.", {
@@ -434,187 +431,119 @@ export async function seedOnboardingEvidence(
     return Err(subscriptionResult.err)
   }
 
+  // The proof is a standalone budget capped at one paid action: the first charge fits, the second
+  // is refused. Each attempt gets its own key, so a retry never finds an earlier attempt's spend.
   const apiClient = deps.createApiClient(apiKey.key)
-  const runIdempotencyKey = `onboarding_${customer.id}_${paidAction.featureSlug}_proof`
-  const startRun = (idempotencyKey: string) =>
-    apiClient.runs.start({
-      customerId: customer.id,
-      budgetAmountMinor: unitPriceMinor,
-      idempotencyKey,
-      workloadType: "workflow",
-      workloadId: "onboarding-paid-action",
-      traceId: `onboarding_${customer.id}`,
-      metadata: {
-        onboarding: true,
-        planVersionId: input.planVersionId,
-        paidAction: paidAction.featureSlug,
-      },
-    })
-
-  let runResult = await startRun(runIdempotencyKey)
-  if (
-    !runResult.error &&
-    runResult.result.status !== "running" &&
-    runResult.result.status !== "completed"
-  ) {
-    runResult = await startRun(`${runIdempotencyKey}_retry_${apiKey.updatedAtM ?? now}`)
-  }
-
-  if (runResult.error) {
-    return Err(
-      seedError(apiErrorMessage("Paid-action proof failed to start", runResult.error), {
-        customerId: customer.id,
-        planVersionId: input.planVersionId,
-      })
-    )
-  }
-
-  if (runResult.result.status !== "running" && runResult.result.status !== "completed") {
-    return Err(
-      seedError(`Paid-action proof did not start: ${runResult.result.status}`, {
-        customerId: customer.id,
-        runId: runResult.result.runId,
-      })
-    )
-  }
-
-  const runId = runResult.result.runId
-  const runWasRunning = runResult.result.status === "running"
-  const closeAfterFailure = async () => {
-    if (!runWasRunning) return
-    await closeStartedRunAfterFailure({
-      apiClient,
-      customerId: customer.id,
-      logger: deps.logger,
-      planVersionId: input.planVersionId,
-      runId,
-    })
-  }
-
-  const firstResult = await apiClient.runs.consume({
-    runId,
-    featureSlug: target.featureSlug,
-    eventSlug: target.eventSlug,
-    idempotencyKey: `onboarding_${runId}_${target.featureSlug}_decision_1`,
-    properties: {},
+  const proofKey = `onboarding:${customer.id}:${paidAction.featureSlug}:${now}`
+  const upsertResult = await apiClient.budgets.upsert({
+    key: proofKey,
+    unit: "USD",
+    limits: [{ amount: paidAction.unitPrice, window: "never" }],
+    closesAt: now + PROOF_BUDGET_TTL_MS,
   })
 
+  if (upsertResult.error) {
+    return Err(
+      seedError(apiErrorMessage("Paid-action proof failed to start", upsertResult.error), {
+        customerId: customer.id,
+        planVersionId: input.planVersionId,
+      })
+    )
+  }
+
+  const proofBudget = apiClient.budget(proofKey)
+  const charge = (sequence: 1 | 2) =>
+    proofBudget.charge({
+      amount: paidAction.unitPrice,
+      idempotencyKey: `${proofKey}:decision_${sequence}`,
+    })
+
+  const firstResult = await charge(1)
+
   if (firstResult.error) {
-    await closeAfterFailure()
     return Err(
       seedError(apiErrorMessage("The paid action could not run", firstResult.error), {
         customerId: customer.id,
-        runId,
+        budgetKey: proofKey,
       })
     )
   }
 
-  if (!firstResult.result.accepted) {
-    await closeAfterFailure()
+  if (!firstResult.result.allowed) {
     return Err(
-      seedError(`The first paid action was denied: ${firstResult.result.reason}`, {
+      seedError(`The first paid action was denied: ${deniedReason(firstResult.result)}`, {
         customerId: customer.id,
-        runId,
+        budgetKey: proofKey,
       })
     )
   }
 
-  const firstReason =
-    firstResult.result.reason === "duplicate" ? ("duplicate" as const) : ("accepted" as const)
+  const firstSpend = spendOf(firstResult.result.balance)
   const firstDecision = {
     sequence: 1 as const,
     accepted: true as const,
-    reason: firstReason,
-    consumedAmountMinor: firstResult.result.run.consumedAmountMinor,
-    remainingAmountMinor: firstResult.result.run.remainingAmountMinor,
+    reason: firstResult.result.replayed ? ("duplicate" as const) : ("accepted" as const),
+    ...firstSpend,
   }
 
   if (
     firstDecision.consumedAmountMinor !== unitPriceMinor ||
     firstDecision.remainingAmountMinor !== 0
   ) {
-    await closeAfterFailure()
     return Err(
       seedError("The paid action did not consume exactly the configured one-action budget.", {
         consumedAmountMinor: firstDecision.consumedAmountMinor,
         expectedAmountMinor: unitPriceMinor,
         remainingAmountMinor: firstDecision.remainingAmountMinor,
-        runId,
+        budgetKey: proofKey,
       })
     )
   }
 
-  const secondResult = await apiClient.runs.consume({
-    runId,
-    featureSlug: target.featureSlug,
-    eventSlug: target.eventSlug,
-    idempotencyKey: `onboarding_${runId}_${target.featureSlug}_decision_2`,
-    properties: {},
-  })
+  const secondResult = await charge(2)
 
   if (secondResult.error) {
-    await closeAfterFailure()
     return Err(
       seedError(apiErrorMessage("The guardrail request could not run", secondResult.error), {
         customerId: customer.id,
-        runId,
+        budgetKey: proofKey,
       })
     )
   }
 
-  if (secondResult.result.accepted) {
-    await closeAfterFailure()
+  if (secondResult.result.allowed) {
     return Err(
       seedError("The guardrail failed: the over-budget paid action was accepted.", {
         customerId: customer.id,
-        runId,
+        budgetKey: proofKey,
       })
     )
   }
 
-  if (secondResult.result.reason !== "insufficient_budget") {
-    await closeAfterFailure()
+  if (secondResult.result.degraded) {
     return Err(
-      seedError(`The guardrail denied for an unexpected reason: ${secondResult.result.reason}`, {
-        customerId: customer.id,
-        runId,
-      })
+      seedError(
+        `The guardrail denied for an unexpected reason: ${deniedReason(secondResult.result)}`,
+        { customerId: customer.id, budgetKey: proofKey }
+      )
     )
   }
 
   const secondDecision = {
     sequence: 2 as const,
     accepted: false as const,
-    reason: secondResult.result.reason,
-    consumedAmountMinor: secondResult.result.run.consumedAmountMinor,
-    remainingAmountMinor: secondResult.result.run.remainingAmountMinor,
+    reason: "insufficient_budget" as const,
+    ...spendOf(secondResult.result.balance),
   }
 
   if (secondDecision.consumedAmountMinor !== firstDecision.consumedAmountMinor) {
-    await closeAfterFailure()
     return Err(
-      seedError("The denied request changed the run spend.", {
+      seedError("The denied request changed the budget's spend.", {
         afterDeniedAmountMinor: secondDecision.consumedAmountMinor,
         beforeDeniedAmountMinor: firstDecision.consumedAmountMinor,
-        runId,
+        budgetKey: proofKey,
       })
     )
-  }
-
-  if (runWasRunning) {
-    const endResult = await apiClient.runs.end({
-      runId,
-      status: "completed",
-    })
-
-    if (endResult.error) {
-      return Err(
-        seedError(apiErrorMessage("Paid-action proof failed to close", endResult.error), {
-          customerId: customer.id,
-          runId,
-        })
-      )
-    }
   }
 
   return Ok(

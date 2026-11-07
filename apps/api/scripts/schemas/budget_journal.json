@@ -1,0 +1,49 @@
+{
+  "fields": [
+    {
+      "name": "schema_version",
+      "type": "int32",
+      "required": true
+    },
+    {
+      "name": "project_id",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "budget_key",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "seq",
+      "type": "int64",
+      "required": true
+    },
+    {
+      "name": "operation_id",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "kind",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "status",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "timestamp",
+      "type": "timestamp",
+      "required": true
+    },
+    {
+      "name": "data",
+      "type": "json",
+      "required": true
+    }
+  ]
+}

@@ -5,6 +5,7 @@ import {
   integer,
   json,
   primaryKey,
+  text,
   unique,
   varchar,
 } from "drizzle-orm/pg-core"
@@ -55,6 +56,9 @@ export const planVersionFeatures = pgTableProject(
     // the limit of the feature, if nulls there is no limit, normally used for usage features to limit the usage
     // for the rest of the features types it can be used to limit the quantity of the feature
     limit: integer("limit"),
+    // units free per statement period (ADR-0008 D5), a decimal string; null when nothing is
+    // included. Rating charges price(max(0, total - included)).
+    included: text("included"),
     meterConfig: json("meter_config").$type<z.infer<typeof meterConfigSchema>>(),
   },
   (table) => ({

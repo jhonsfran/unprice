@@ -94,6 +94,7 @@ throwing. See [settle in the background](/budgets/spend#settle-in-the-background
 | --- | --- | --- |
 | 402 | [`BUDGET_EXCEEDED`](/api-reference/errors/code/BUDGET_EXCEEDED) | The request does not fit a hard limit |
 | 403 | [`INSUFFICIENT_PERMISSIONS`](/api-reference/errors/code/INSUFFICIENT_PERMISSIONS) | A runtime key tried to loosen a budget, or the key type cannot call the operation |
+| 403 | [`FORBIDDEN`](/api-reference/errors/code/FORBIDDEN) | An upsert or `ifMissing` would create a budget under the reserved `unprice:` prefix |
 | 404 | [`NOT_FOUND`](/api-reference/errors/code/NOT_FOUND) | No budget at the key |
 | 409 | [`CONFLICT`](/api-reference/errors/code/CONFLICT) | The budget has closed, a settle exceeds its hold, a cap is below current usage, or an idempotency key was reused with another request |
 | 429 | [`TOO_MANY_REQUESTS`](/api-reference/errors/code/TOO_MANY_REQUESTS) | Unprice rate-limited the request. Retry it with the same idempotency key |

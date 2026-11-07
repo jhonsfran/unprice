@@ -1,4 +1,5 @@
 import type { Database } from "@unprice/db"
+import { rateRowSchema } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logs"
 import { describe, expect, it, vi } from "vitest"
 import type { ServiceContext } from "../../context"
@@ -15,6 +16,34 @@ function createLogger(): Logger {
     emit: vi.fn(),
     flush: vi.fn(),
   } as unknown as Logger
+}
+
+function transactionalDb(db: Database): Database {
+  const existing = db.transaction?.bind(db)
+  return {
+    ...db,
+    transaction: async (write: (tx: unknown) => Promise<unknown>) =>
+      existing
+        ? existing(async (tx) => write({ ...tx, query: db.query }))
+        : write({ query: db.query }),
+  } as unknown as Database
+}
+
+/** The version's USD card: a $1 flat base fee, so a customer needs a payment method. */
+function baseCard() {
+  const row = rateRowSchema.parse({
+    id: "rr_base",
+    rateCardId: "rc_1",
+    featureSlug: "base",
+    match: {},
+    price: { type: "flat", amount: "1" },
+    cost: null,
+    effectiveFrom: 0,
+    effectiveTo: null,
+    source: "manual",
+    sourceRef: null,
+  })
+  return new Map([["pv_123", [{ currency: "USD", card: {}, rows: [row] }]]])
 }
 
 describe("publishPlanVersion", () => {
@@ -35,22 +64,14 @@ describe("publishPlanVersion", () => {
             planId: "plan_123",
             status: "draft",
             collectionMethod: "charge_automatically",
+            currency: "USD",
             paymentProvider: "sandbox",
             planFeatures: [
               {
                 id: "fpv_123",
                 featureType: "flat",
-                config: {
-                  price: {
-                    dinero: {
-                      amount: 100,
-                      currency: { code: "USD", base: 10, exponent: 2 },
-                      scale: 2,
-                    },
-                    displayAmount: "1.00",
-                  },
-                },
-                feature: { id: "feature_123" },
+                config: {},
+                feature: { id: "feature_123", slug: "base" },
               },
             ],
             project: { id: "proj_123" },
@@ -66,8 +87,15 @@ describe("publishPlanVersion", () => {
           customers: {
             getPaymentProvider,
           },
-        } as unknown as Pick<ServiceContext, "customers">,
-        db,
+          rateCards: {
+            withTransaction() {
+              return this
+            },
+            lockPlanVersionCards: vi.fn(async () => []),
+            pricingForPlanVersions: vi.fn(async () => baseCard()),
+          },
+        } as unknown as Pick<ServiceContext, "customers" | "rateCards">,
+        db: transactionalDb(db),
         logger,
         userId: "usr_123",
       },
@@ -96,4 +124,219 @@ describe("publishPlanVersion", () => {
       })
     )
   })
+
+  describe("refuses a version that would ship free", () => {
+    /** A USD draft with a flat `base` fee and a metered `api` feature. */
+    function publishWith(pricing: Map<string, unknown[]>) {
+      const db = {
+        query: {
+          versions: {
+            findFirst: vi.fn().mockResolvedValue({
+              id: "pv_123",
+              projectId: "proj_123",
+              planId: "plan_123",
+              status: "draft",
+              collectionMethod: "charge_automatically",
+              currency: "USD",
+              paymentProvider: "sandbox",
+              planFeatures: [
+                { id: "fpv_base", featureType: "flat", feature: { slug: "base" } },
+                { id: "fpv_api", featureType: "usage", feature: { slug: "api" } },
+              ],
+            }),
+          },
+        },
+        transaction: vi.fn(async (write: (tx: unknown) => Promise<unknown>) => write({})),
+      } as unknown as Database
+      const getPaymentProvider = vi.fn()
+
+      const result = publishPlanVersion(
+        {
+          services: {
+            customers: { getPaymentProvider },
+            rateCards: {
+              withTransaction() {
+                return this
+              },
+              lockPlanVersionCards: vi.fn(async () => []),
+              pricingForPlanVersions: vi.fn(async () => pricing),
+            },
+          } as unknown as Pick<ServiceContext, "customers" | "rateCards">,
+          db: transactionalDb(db),
+          logger: createLogger(),
+          userId: "usr_123",
+        },
+        { id: "pv_123", projectId: "proj_123", workspaceUnPriceCustomerId: "cus_123" }
+      )
+      return { result, db, getPaymentProvider }
+    }
+
+    it("without a card in the version's currency", async () => {
+      const euros =
+        baseCard()
+          .get("pv_123")
+          ?.map((card) => ({ ...card, currency: "EUR" })) ?? []
+      const { result, db, getPaymentProvider } = publishWith(new Map([["pv_123", euros]]))
+
+      expect((await result).val).toEqual({ state: "unpriced", reason: "no_card", featureSlugs: [] })
+      expect(getPaymentProvider).not.toHaveBeenCalled()
+      expect(db.transaction).toHaveBeenCalledOnce()
+    })
+
+    it("when a feature has no current or scheduled row on the card", async () => {
+      const { result, db } = publishWith(baseCard())
+
+      expect((await result).val).toEqual({
+        state: "unpriced",
+        reason: "missing_rows",
+        featureSlugs: ["api"],
+      })
+      expect(db.transaction).toHaveBeenCalledOnce()
+    })
+  })
+
+  it("refuses rows that break a rule for the version's features, read under the cards' lock", async () => {
+    const modelRow = rateRowSchema.parse({
+      id: "rr_api_model",
+      rateCardId: "rc_1",
+      featureSlug: "api",
+      match: { model: "gpt-5" },
+      price: { type: "unit", components: [{ property: "calls", rate: "0.01", per: 1 }] },
+      cost: null,
+      effectiveFrom: 0,
+      effectiveTo: null,
+      source: "manual",
+      sourceRef: null,
+    })
+    const apiMeter = {
+      eventId: "evt_api",
+      eventSlug: "api",
+      aggregationMethod: "sum",
+      aggregationField: "calls",
+    }
+    const card = { id: "rc_1", unit: "money:USD", marginPolicy: { type: "manual" } }
+    const pricing = new Map([["pv_123", [{ currency: "USD", card, rows: [modelRow] }]]])
+    const writes: unknown[] = []
+    const tx = {
+      update: vi.fn(() => {
+        writes.push("update")
+        return { set: vi.fn(() => ({ where: vi.fn(() => ({ returning: vi.fn() })) })) }
+      }),
+    }
+    const db = {
+      query: {
+        versions: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: "pv_123",
+            projectId: "proj_123",
+            planId: "plan_123",
+            status: "draft",
+            collectionMethod: "send_invoice",
+            currency: "USD",
+            paymentProvider: "sandbox",
+            planFeatures: [
+              {
+                id: "fpv_api",
+                featureType: "usage",
+                meterConfig: apiMeter,
+                feature: { slug: "api" },
+              },
+            ],
+          }),
+        },
+      },
+      transaction: vi.fn((callback: (tx: unknown) => Promise<unknown>) => callback(tx)),
+    } as unknown as Database
+    const lockPlanVersionCards = vi.fn(async () => ["rc_1"])
+    const getEffectiveRows = vi.fn(async (_read: { cardIds: string[]; executor: unknown }) => [
+      modelRow,
+    ])
+
+    const { val } = await publishPlanVersion(
+      {
+        services: {
+          customers: { getPaymentProvider: vi.fn() },
+          rateCards: {
+            withTransaction() {
+              return this
+            },
+            pricingForPlanVersions: vi.fn(async () => pricing),
+            lockPlanVersionCards,
+            getEffectiveRows,
+          },
+        } as unknown as Pick<ServiceContext, "customers" | "rateCards">,
+        db: transactionalDb(db),
+        logger: createLogger(),
+        userId: "usr_123",
+      },
+      { id: "pv_123", projectId: "proj_123", workspaceUnPriceCustomerId: "cus_123" }
+    )
+
+    expect(val).toEqual({
+      state: "invalid_rows",
+      violations: [
+        { code: "UNKNOWN_DIMENSION", rowId: "rr_api_model", key: "model", feature: "api" },
+      ],
+    })
+    expect(lockPlanVersionCards).toHaveBeenCalledWith(
+      "proj_123",
+      "pv_123",
+      expect.objectContaining(tx)
+    )
+    expect(getEffectiveRows).not.toHaveBeenCalled()
+    expect(writes).toEqual([])
+  })
+})
+
+it("refuses publication when the last price row disappears before the card lock", async () => {
+  const version = {
+    id: "pv_123",
+    projectId: "proj_123",
+    planId: "plan_123",
+    status: "draft",
+    collectionMethod: "send_invoice",
+    currency: "USD",
+    paymentProvider: "sandbox",
+    planFeatures: [
+      { id: "fpv_api", featureType: "usage", feature: { slug: "base" }, meterConfig: null },
+    ],
+  }
+  const writes: unknown[] = []
+  const tx = {
+    update: () => ({
+      set: (fields: unknown) => {
+        writes.push(fields)
+        return { where: () => ({ returning: async () => [{ ...version, status: "published" }] }) }
+      },
+    }),
+  }
+  const db = {
+    query: { versions: { findFirst: async () => version } },
+    transaction: async (fn: (tx: unknown) => unknown) => fn(tx),
+  } as unknown as Database
+  const currentPricing = baseCard()
+  const result = await publishPlanVersion(
+    {
+      db: transactionalDb(db),
+      logger: createLogger(),
+      userId: "usr_123",
+      services: {
+        customers: {},
+        rateCards: {
+          withTransaction() {
+            return this
+          },
+          pricingForPlanVersions: async () => currentPricing,
+          lockPlanVersionCards: async () => {
+            currentPricing.set("pv_123", [{ currency: "USD", card: {}, rows: [] }])
+            return ["rc_1"]
+          },
+          getEffectiveRows: async () => [],
+        },
+      } as unknown as Pick<ServiceContext, "customers" | "rateCards">,
+    },
+    { id: "pv_123", projectId: "proj_123", workspaceUnPriceCustomerId: "cus_123" }
+  )
+  expect(result.val).toEqual({ state: "unpriced", reason: "missing_rows", featureSlugs: ["base"] })
+  expect(writes).toEqual([])
 })

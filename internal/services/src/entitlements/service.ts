@@ -1,4 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
 import { type Database, and, eq } from "@unprice/db"
 import { newId } from "@unprice/db/utils"
 import type {
@@ -32,7 +31,6 @@ export class EntitlementService {
   private readonly grantsManager: GrantsManager
   private readonly db: Database
   private readonly logger: Logger
-  private readonly analytics: Analytics
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private readonly waitUntil: (promise: Promise<any>) => void
   private readonly cache: Cache
@@ -43,7 +41,6 @@ export class EntitlementService {
   constructor(opts: {
     db: Database
     logger: Logger
-    analytics: Analytics
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
     waitUntil: (promise: Promise<any>) => void
     cache: Cache
@@ -55,7 +52,6 @@ export class EntitlementService {
     this.grantsManager = opts.grantsManager
     this.db = opts.db
     this.logger = opts.logger
-    this.analytics = opts.analytics
     this.waitUntil = opts.waitUntil
     this.cache = opts.cache
     this.metrics = opts.metrics

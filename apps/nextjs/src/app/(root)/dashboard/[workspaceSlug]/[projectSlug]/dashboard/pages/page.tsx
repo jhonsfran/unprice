@@ -1,5 +1,5 @@
-import { prepareInterval, preparePage } from "@unprice/analytics"
 import { FEATURE_SLUGS } from "@unprice/config"
+import { prepareInterval, preparePage } from "@unprice/db/validators"
 import type { SearchParams } from "nuqs/server"
 import { Suspense } from "react"
 import { IntervalFilter } from "~/components/analytics/interval-filter"
@@ -9,7 +9,7 @@ import UpgradePlanError from "~/components/layout/error"
 import { entitlementFlag } from "~/lib/flags"
 import { intervalParams, pageParams } from "~/lib/searchParams"
 import { HydrateClient, api, batchPrefetch, trpc } from "~/trpc/server"
-import { ANALYTICS_CONFIG_REALTIME } from "~/trpc/shared"
+import { WEB_ANALYTICS_QUERY_CONFIG } from "~/trpc/shared"
 import { Browsers, BrowsersSkeleton } from "../_components/browsers"
 import { Countries, CountriesSkeleton } from "../_components/countries"
 import { PageVisits, PageVisitsSkeleton } from "../_components/page-visits"
@@ -49,7 +49,7 @@ export default async function DashboardPages(props: {
         page_id: page.pageId,
       },
       {
-        ...ANALYTICS_CONFIG_REALTIME,
+        ...WEB_ANALYTICS_QUERY_CONFIG,
         enabled: page.isSelected,
       }
     ),
@@ -59,7 +59,7 @@ export default async function DashboardPages(props: {
         page_id: page.pageId,
       },
       {
-        ...ANALYTICS_CONFIG_REALTIME,
+        ...WEB_ANALYTICS_QUERY_CONFIG,
         enabled: page.isSelected,
       }
     ),
@@ -69,7 +69,7 @@ export default async function DashboardPages(props: {
         page_id: page.pageId,
       },
       {
-        ...ANALYTICS_CONFIG_REALTIME,
+        ...WEB_ANALYTICS_QUERY_CONFIG,
         enabled: page.isSelected,
       }
     ),

@@ -25,6 +25,16 @@ export const ANALYTICS_CONFIG_REALTIME = {
   refetchOnWindowFocus: true,
 }
 
+/**
+ * Pricing-page analytics read Basin SQL over R2, which the stream rolls into new files every 300 s:
+ * polling faster only re-runs the same paid query on the same data.
+ */
+export const WEB_ANALYTICS_QUERY_CONFIG = {
+  staleTime: 5 * 60 * 1000,
+  refetchInterval: 5 * 60 * 1000,
+  refetchOnWindowFocus: false,
+}
+
 export const createQueryClient = () =>
   new QueryClient({
     mutationCache: new MutationCache({

@@ -21,7 +21,7 @@ export const signUp = protectedRateLimitedProcedure({
   .input(workspaceSignupSchema)
   .output(signUpResponseSchema)
   .mutation(async (opts) => {
-    const { name, planVersionId, config, successUrl, cancelUrl, sessionId } = opts.input
+    const { name, planVersionId, config, successUrl, cancelUrl, pageId } = opts.input
     const user = opts.ctx.session?.user
     const workspaceId = newId("workspace")
     const verifiedSuccessUrl = appendWorkspaceIdToSuccessUrl(successUrl, workspaceId)
@@ -39,7 +39,7 @@ export const signUp = protectedRateLimitedProcedure({
       successUrl: verifiedSuccessUrl,
       cancelUrl,
       externalId: workspaceId,
-      sessionId,
+      pageId,
       metadata: {
         country: opts.ctx.geolocation.country,
         region: opts.ctx.geolocation.region,

@@ -10,8 +10,6 @@ import { init } from "~/middleware/init"
 import serveEmojiFavicon from "stoker/middlewares/serve-emoji-favicon"
 
 export { DurableObjectProject } from "~/project/do"
-export { EntitlementWindowDO } from "~/ingestion/entitlements/EntitlementWindowDO"
-export { RunBudgetDO } from "~/ingestion/run-budget/RunBudgetDO"
 export { BudgetDO } from "~/ingestion/budget/BudgetDO"
 
 import { registerUpdateACLV1 } from "./routes/access/updateACLV1"
@@ -19,10 +17,9 @@ import { registerExplainChargeV1 } from "./routes/analytics/explainChargeV1"
 import { registerGetCurrentBillingPeriodUsageV1 } from "./routes/analytics/getCurrentBillingPeriodUsageV1"
 import { registerGetIngestionStatusV1 } from "./routes/analytics/getIngestionStatusV1"
 import { registerGetAnalyticsUsageV1 } from "./routes/analytics/getUsageV1"
-import { registerFlushReservationsForInvoicingV1 } from "./routes/billing/flushReservationsForInvoicingV1"
-import { registerUsageSnapshotsV1 } from "./routes/billing/usageSnapshotsV1"
 import { registerAuthorizeBudgetV1 } from "./routes/budgets/authorizeBudgetV1"
 import { registerChargeBudgetV1 } from "./routes/budgets/chargeBudgetV1"
+import { registerCompletePayerStatementsInternalV1 } from "./routes/budgets/completePayerStatementsInternalV1"
 import { registerGetBudgetV1 } from "./routes/budgets/getBudgetV1"
 import { registerInspectBudgetInternalV1 } from "./routes/budgets/inspectBudgetInternalV1"
 import { registerLeaseBudgetV1 } from "./routes/budgets/leaseBudgetV1"
@@ -31,17 +28,15 @@ import { registerRecordBudgetV1 } from "./routes/budgets/recordBudgetV1"
 import { registerReleaseBudgetInternalV1 } from "./routes/budgets/releaseBudgetInternalV1"
 import { registerReleaseBudgetV1 } from "./routes/budgets/releaseBudgetV1"
 import { registerReportBudgetV1 } from "./routes/budgets/reportBudgetV1"
+import { registerSealPayerStatementsInternalV1 } from "./routes/budgets/sealPayerStatementsInternalV1"
 import { registerSettleBudgetV1 } from "./routes/budgets/settleBudgetV1"
+import { registerSyncPayerBudgetInternalV1 } from "./routes/budgets/syncPayerBudgetInternalV1"
 import { registerUpsertBudgetV1 } from "./routes/budgets/upsertBudgetV1"
 import { registerChangePlanV1 } from "./routes/customers/changePlanV1"
 import { registerSignUpV1 } from "./routes/customers/signUpV1"
 import { registerGetCurrentEntitlementsV1 } from "./routes/entitlements/getCurrentEntitlementsV1"
-import { registerGetEntitlementWindowStatusV1 } from "./routes/entitlements/getEntitlementWindowStatusV1"
 import { registerGetEntitlementsV1 } from "./routes/entitlements/getEntitlementsV1"
 import { registerVerifyV1 } from "./routes/entitlements/verifyV1"
-import { registerIngestEventsSyncV1 } from "./routes/events/ingestEventsSyncV1"
-import { registerIngestEventsV1 } from "./routes/events/ingestEventsV1"
-import { registerReplayIngestionEventsV1 } from "./routes/events/replayIngestionEventsV1"
 import { registerGetFeaturesV1 } from "./routes/features/getFeaturesV1"
 import { registerApplyMonetizationV1 } from "./routes/monetization/applyMonetizationV1"
 import { registerGetMonetizationV1 } from "./routes/monetization/getMonetizationV1"
@@ -53,24 +48,14 @@ import { registerProviderStripeConnectWebhookV1 } from "./routes/payments/provid
 import { registerProviderWebhookV1 } from "./routes/payments/providers/providerWebhookV1"
 import { registerGetPlanVersionV1 } from "./routes/plans/getPlanVersionV1"
 import { registerListPlanVersionsV1 } from "./routes/plans/listPlanVersionsV1"
-import { registerApplyRunSyncEventV1 } from "./routes/runs/applyRunSyncEventV1"
-import { registerEndRunV1 } from "./routes/runs/endRunV1"
-import { registerGetRunV1 } from "./routes/runs/getRunV1"
-import { registerSettleRunV1 } from "./routes/runs/settleRunV1"
-import { registerStartRunV1 } from "./routes/runs/startRunV1"
 import { registerGetSubscriptionV1 } from "./routes/subscriptions/getSubscriptionV1"
+import { registerConsumeUsageV1 } from "./routes/usage/consumeUsageV1"
+import { registerRecordUsageV1 } from "./routes/usage/recordUsageV1"
 
 import { env } from "cloudflare:workers"
-import type { IngestionQueueMessage, IngestionReportingEnvelope } from "@unprice/services/ingestion"
 import { timing } from "hono/timing"
 import { verifyRealtimeTicket } from "~/auth/ticket"
 import { serializeError } from "~/errors/log"
-import { dispatchIngestionQueueBatch } from "~/ingestion/queue-routing"
-import {
-  consumeIngestionReportingDlqBatch,
-  consumeIngestionReportingQueueBatch,
-} from "~/ingestion/reporting/consumer"
-import { consumeIngestionBatch, consumeIngestionDlqBatch } from "~/ingestion/service"
 import { internalKeyAuth } from "~/middleware/internal-key"
 import { knownRoute } from "~/middleware/known-route"
 import { obs } from "~/middleware/obs"
@@ -186,13 +171,6 @@ app.use("/v1/internal/*", internalKeyAuth())
 // Access routes
 registerUpdateACLV1(app)
 
-// Run routes
-registerStartRunV1(app)
-registerApplyRunSyncEventV1(app)
-registerSettleRunV1(app)
-registerEndRunV1(app)
-registerGetRunV1(app)
-
 // Budget routes
 registerUpsertBudgetV1(app)
 registerAuthorizeBudgetV1(app)
@@ -206,8 +184,9 @@ registerReportBudgetV1(app)
 registerModelsBudgetV1(app)
 
 // Billing routes
-registerFlushReservationsForInvoicingV1(app)
-registerUsageSnapshotsV1(app)
+registerSyncPayerBudgetInternalV1(app)
+registerSealPayerStatementsInternalV1(app)
+registerCompletePayerStatementsInternalV1(app)
 
 // Dashboard routes
 registerInspectBudgetInternalV1(app)
@@ -222,11 +201,9 @@ registerGetEntitlementsV1(app)
 registerGetCurrentEntitlementsV1(app)
 registerVerifyV1(app)
 
-// Event routes
-registerIngestEventsV1(app)
-registerIngestEventsSyncV1(app)
-registerReplayIngestionEventsV1(app)
-registerGetEntitlementWindowStatusV1(app)
+// Usage routes: every event goes to its customer's payer budget (ADR-0008 D6)
+registerRecordUsageV1(app)
+registerConsumeUsageV1(app)
 
 // Feature routes
 registerGetFeaturesV1(app)
@@ -253,7 +230,7 @@ registerListPlanVersionsV1(app)
 // Subscription routes
 registerGetSubscriptionV1(app)
 
-// Usage routes
+// Usage analytics routes
 registerExplainChargeV1(app)
 registerGetIngestionStatusV1(app)
 registerGetAnalyticsUsageV1(app)
@@ -292,58 +269,6 @@ const handler = {
       )
     }
   },
-  queue: async (
-    batch: MessageBatch<IngestionQueueMessage | IngestionReportingEnvelope>,
-    env: Env,
-    executionCtx: ExecutionContext
-  ) => {
-    try {
-      const parsedEnv = createRuntimeEnv(env as unknown as Record<string, unknown>)
-      await dispatchIngestionQueueBatch(batch, {
-        consumers: {
-          raw: (queueBatch) =>
-            consumeIngestionBatch(queueBatch, parsedEnv, executionCtx, apiDrain ?? undefined),
-          raw_dlq: (queueBatch) =>
-            consumeIngestionDlqBatch(queueBatch, parsedEnv, executionCtx, apiDrain ?? undefined),
-          reporting: (queueBatch) =>
-            consumeIngestionReportingQueueBatch(
-              queueBatch,
-              parsedEnv,
-              executionCtx,
-              apiDrain ?? undefined
-            ),
-          reporting_dlq: (queueBatch) =>
-            consumeIngestionReportingDlqBatch(
-              queueBatch,
-              parsedEnv,
-              executionCtx,
-              apiDrain ?? undefined
-            ),
-        },
-        onUnknownQueue: ({ queue }) => {
-          log.error({
-            code: "UNKNOWN_INGESTION_QUEUE",
-            message: "retrying messages from unknown ingestion queue",
-            queue,
-          })
-        },
-      })
-    } catch (error) {
-      const serializedError = serializeError(error)
-
-      log.error({
-        code: "BAD_ENVIRONMENT",
-        message: "Invalid API queue environment",
-        error: serializedError,
-        error_message: serializedError.message,
-      })
-      if (apiDrain) {
-        executionCtx.waitUntil(apiDrain.flush())
-      }
-
-      throw error
-    }
-  },
-} satisfies ExportedHandler<Env, IngestionQueueMessage | IngestionReportingEnvelope>
+} satisfies ExportedHandler<Env>
 
 export default handler

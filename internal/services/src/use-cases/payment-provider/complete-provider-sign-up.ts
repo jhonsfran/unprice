@@ -1,11 +1,12 @@
-import type { Analytics } from "@unprice/analytics"
 import { type Database, and, eq, sql } from "@unprice/db"
 import { customerProviderIds, customers } from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
 import type { PaymentProvider } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
+import { type WebEventsWriter, recordWebEvents } from "@unprice/lakehouse"
 import type { Logger } from "@unprice/logs"
 import { z } from "zod"
+import { signupWebEventRow } from "../../analytics/web-analytics"
 import type { ServiceContext } from "../../context"
 import { UnPriceCustomerError } from "../../customers/errors"
 import { activateWalletIfSubscriptionIsActive } from "../subscription/activate-wallet-if-active"
@@ -14,7 +15,7 @@ export type CompleteProviderSignUpDeps = {
   services: Pick<ServiceContext, "customers" | "subscriptions" | "billing">
   db: Database
   logger: Logger
-  analytics: Analytics
+  webEvents: WebEventsWriter
   waitUntil: (promise: Promise<unknown>) => void
 }
 
@@ -468,19 +469,15 @@ export async function completeProviderSignUp(
   })
 
   deps.waitUntil(
-    deps.analytics.ingestEvents({
-      action: "signup",
-      version: "1",
-      session_id: customerSession.metadata?.sessionId ?? "",
-      project_id: projectId,
-      timestamp: new Date().toISOString(),
-      payload: {
-        customer_id: customerUnprice.id,
-        plan_version_id: customerSession.planVersion.id,
-        page_id: customerSession.metadata?.pageId ?? "",
+    recordWebEvents(deps, [
+      signupWebEventRow({
+        projectId,
+        customerId: customerUnprice.id,
+        planVersion: customerSession.planVersion,
+        pageId: customerSession.metadata?.pageId,
         status: "signup_success",
-      },
-    })
+      }),
+    ])
   )
 
   return Ok({

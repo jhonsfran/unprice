@@ -1,6 +1,6 @@
 ---
 title: "Check access"
-description: "Resolve whether a feature is usable for a customer."
+description: "Resolve whether a feature is usable for a customer now."
 ---
 
 <RequestExample>
@@ -24,15 +24,15 @@ console.log(result);
 <ResponseExample>
 ```json
 {
-  "allowed": true,
   "featureSlug": "ai-messages",
+  "allowed": true,
+  "metered": true,
   "usage": 42,
   "limit": 100,
-  "spending": {
-    "ledgerAmount": 4200000000,
-    "currency": "USD",
-    "displayAmount": "$42",
-    "scale": 8
+  "quotaWindow": {
+    "periodKey": "ai-messages:month",
+    "startAt": 1793491200000,
+    "endAt": 1796083200000
   }
 }
 ```
@@ -48,14 +48,13 @@ console.log(result);
     The feature slug to check.
 </ParamField>
 
-<ParamField body="timestamp" type="number">
-    Optional epoch-millisecond timestamp for a recent point-in-time check.
-</ParamField>
-
 ## Response
 
+A metered feature answers from the customer's subscription budget, live. A flat, seat, or package
+feature answers from the customer's plan.
+
 <ResponseField name="allowed" type="boolean" required>
-    Whether the feature is usable for the customer at the requested timestamp.
+    Whether the customer may use the feature now.
 </ResponseField>
 
 <ResponseField name="featureSlug" type="string" required>
@@ -63,40 +62,24 @@ console.log(result);
 </ResponseField>
 
 <ResponseField name="rejectionReason" type="string">
-    Why the feature is not usable. Omitted when `allowed` is `true`.
+    Why the feature is not usable: `NO_ENTITLEMENT`, `LIMIT_EXCEEDED`, or `BUDGET_CLOSED`. Omitted
+    when `allowed` is `true`.
+</ResponseField>
+
+<ResponseField name="metered" type="boolean" required>
+    `true` when the customer's subscription budget meters the feature.
 </ResponseField>
 
 <ResponseField name="usage" type="number">
-    Current usage for usage-based features.
+    The quantity used in the limit's current window. Present for a metered feature with a limit.
 </ResponseField>
 
-<ResponseField name="limit" type="number">
-    Active quota-window limit for usage features, or subscribed quantity for tier/package features.
-    `null` means unlimited.
+<ResponseField name="limit" type="number | null" required>
+    The feature's quantity limit, or the subscribed quantity of a seat or package feature. `null`
+    means unlimited.
 </ResponseField>
 
-<ResponseField name="spending" type="object">
-    Current priced usage spend for usage-based features.
-</ResponseField>
-
-<ResponseField name="spending.ledgerAmount" type="number">
-    Current spend in ledger scale units.
-</ResponseField>
-
-<ResponseField name="spending.currency" type="string">
-    ISO currency code for the spend.
-</ResponseField>
-
-<ResponseField name="spending.displayAmount" type="string">
-    Ready-to-render localized spend, such as `$42`.
-</ResponseField>
-
-<ResponseField name="spending.scale" type="number">
-    Decimal scale for `ledgerAmount`. Currently `8`.
-</ResponseField>
-
-<ResponseField name="quotaWindow" type="object | null">
-    The quota window represented by `usage` and `limit`, with `startAt`, `endAt`, and `periodKey`.
-    Timestamps use epoch milliseconds. `endAt` is exclusive and can be null for an open-ended window.
-    The object is null when active grants use different windows.
+<ResponseField name="quotaWindow" type="object | null" required>
+    The window the limit counts in: `periodKey` is the limit's id, `startAt` and `endAt` are epoch
+    milliseconds, and `endAt` is exclusive (null for a limit that never resets).
 </ResponseField>

@@ -190,24 +190,22 @@ shape rather than copying these field names blindly.
 Derive the idempotency key from a stable logical request or command ID.
 
 ```ts
-const { result, error } = await unprice.usage.consume({
+const { error } = await unprice.usage.consume({
   customerId,
-  featureSlug: "ai-messages",
   eventSlug: "completions",
   idempotencyKey: requestId,
   properties: {
-    aiMessages: 1,
     inputTokens,
     outputTokens,
   },
 })
 
+// 402: a hard limit has no room, or a prepaid wallet cannot fund the event.
+if (error?.code === "BUDGET_EXCEEDED") {
+  return denyPaidAction(error)
+}
 if (error) {
   throw new Error(error.message)
-}
-
-if (!result.allowed) {
-  return denyPaidAction(result)
 }
 
 return performPaidAction()
@@ -216,24 +214,30 @@ return performPaidAction()
 Place this call before the cost is created. Reuse `requestId` when retrying the same logical paid
 action. Do not use `crypto.randomUUID()` inside the retry loop.
 
-If the actual charge is unknown until after work runs, decide whether the action needs a budgeted
-run rather than pretending a guessed consume amount is exact.
+If the actual charge is unknown until after work runs, decide whether the action needs a budget
+hold rather than pretending a guessed consume amount is exact.
 
 ## Record usage asynchronously
 
 Use the host's durable background or after-response mechanism when available.
 
 ```ts
-const { error } = await unprice.usage.record({
-  customerId,
-  eventSlug: "completions",
-  idempotencyKey: requestId,
-  properties: {
-    aiMessages: 1,
-    inputTokens,
-    outputTokens,
-  },
+const { result, error } = await unprice.usage.record({
+  events: [
+    {
+      customerId,
+      eventSlug: "completions",
+      idempotencyKey: requestId,
+      // When the work ran, not when the call is sent: a retry then replays.
+      occurredAt: completedAt,
+      properties: {
+        inputTokens,
+        outputTokens,
+      },
+    },
+  ],
 })
+// Each event answers on its own; a refused one carries error.reason (NOT_PRICED, TOO_LATE, ...).
 
 if (error) {
   logger.error(new Error(error.message), {
@@ -252,154 +256,66 @@ Do not branch paid-work authorization on the outcome of `usage.record`.
 ## Hard-cap a variable-cost provider call
 
 Use this pattern when a provider call must not start unless its maximum possible cost fits the
-customer and workload budgets. A run is the financial authorization; the provider cap is what
-keeps the external call inside that authorization.
+customer's budget. The hold is the financial authorization; the provider cap is what keeps the
+external call inside it.
 
-The host must derive `worstCaseAmountMinor` from a model/provider pricing table it owns. Include
-known input, request overhead, and the configured output maximum. Do not substitute an estimate
-when the product promises a hard cap.
+The host must derive `worstCaseAmount` from a model/provider pricing table it owns. Include known
+input, request overhead, and the configured output maximum. Do not substitute an estimate when the
+product promises a hard cap.
 
 ```ts
-const proposed = priceModelRequest({
-  model,
-  inputTokens: exactInputTokens,
-  // Determine this from the remaining customer and conversation allowance.
-  maxOutputTokens: affordableOutputTokens,
+// The first authorize creates the cap; an existing budget is never changed.
+const budget = unprice.budget(`customer:${customerId}`, {
+  ifMissing: { unit: "USD", limits: [{ amount: "5", window: "month" }] },
 })
 
-if (proposed.maxOutputTokens < minimumUsefulOutputTokens) {
-  return denyPaidAction({ reason: "INSUFFICIENT_BUDGET" })
-}
-
-const { result: run, error: startError } = await unprice.runs.start({
-  customerId,
-  budgetAmountMinor: proposed.worstCaseAmountMinor,
-  idempotencyKey: `chat:${chatId}:message:${messageId}`,
-  workloadType: "custom",
-  workloadId: messageId,
-  metadata: { workload_kind: "chat_message" },
+const { result: authorization, error } = await budget.authorize({
+  amount: worstCaseAmount, // a decimal string in the budget's unit, e.g. "0.10"
+  idempotencyKey: `message:${messageId}`,
 })
 
-if (startError) throw new Error(startError.message)
-if (run.status !== "running" || run.remainingAmountMinor < proposed.worstCaseAmountMinor) {
-  return denyPaidAction(run)
-}
-
-let finalStatus: "completed" | "failed" = "completed"
-
-try {
-  const response = await modelProvider.stream({
-    messages,
-    maxTokens: proposed.maxOutputTokens,
-  })
-  const actual = await response.usage
-
-  const { result: consumption, error: consumeError } = await unprice.runs.consume({
-    runId: run.runId,
-    featureSlug,
-    eventSlug,
-    idempotencyKey: `chat:${chatId}:message:${messageId}:usage`,
-    properties: actualMeterProperties(actual),
-  })
-
-  if (consumeError) throw new Error(consumeError.message)
-  if (!consumption.accepted) {
-    finalStatus = "failed"
-    throw new Error("Unprice rejected a usage amount that the reservation should have covered")
-  }
-
-  return response
-} catch (error) {
-  finalStatus = "failed"
+if (error) {
   throw error
-} finally {
-  const { error: endError } = await unprice.runs.end({
-    runId: run.runId,
-    status: finalStatus,
-  })
+}
 
-  if (endError) {
-    logger.error(new Error(endError.message), {
-      operation: "unprice.runs.end",
-      requestId: endError.requestId,
-      code: endError.code,
-      runId: run.runId,
-    })
-  }
+if (!authorization.allowed) {
+  return denyPaidAction({ reason: "BUDGET_EXCEEDED" })
+}
+
+const generation = await generateText({ model, prompt, maxOutputTokens: affordableOutputTokens })
+
+const settlement = await authorization.hold.settle({ amount: costOf(generation.usage) })
+if (settlement.error) {
+  // Retry the settle with the same hold; never release a hold whose work produced usage.
+  logger.error(settlement.error, { operation: "unprice.budget.settle" })
 }
 ```
 
-If a provider exposes no enforceable cap or the host cannot price the request's maximum possible
-cost, this is not a hard-cap integration. Reject the request before the provider call or use
-asynchronous metering with an explicit product decision to accept the risk.
-
 ## Budget a multi-step workload
 
-Track final status explicitly so failures are not reported as completed.
+Give the workload its own budget key, closed when its window ends, and wrap each paid step in
+`spend`: it holds the estimate, runs the step, and settles the actual cost.
 
 ```ts
-const { result: run, error: startError } = await unprice.runs.start({
-  customerId,
-  budgetAmountMinor,
-  idempotencyKey: `run:${workloadId}`,
-  workloadType: "workflow",
-  workloadId,
+const key = `run:${jobId}`
+await unprice.budgets.upsert({
+  key,
+  unit: "USD",
+  limits: [{ amount: "50", window: "never" }],
+  closesAt: Date.now() + 60 * 60 * 1000,
 })
 
-if (startError) {
-  throw new Error(startError.message)
-}
-
-if (run.status !== "running") {
-  return rejectWorkload(run)
-}
-
-let finalStatus: "completed" | "failed" = "completed"
-
-try {
-  const { result, error } = await unprice.runs.consume({
-    runId: run.runId,
-    featureSlug,
-    eventSlug,
-    idempotencyKey: `run:${workloadId}:step:${stepId}`,
-    properties,
+for (const step of steps) {
+  // Throws BudgetExceededError before the step runs when the cap cannot cover the estimate.
+  await unprice.budget(key).spend({ estimate: step.maxCost }, async () => {
+    const result = await step.run()
+    return { value: result, actual: result.cost }
   })
-
-  if (error) {
-    throw new Error(error.message)
-  }
-
-  if (!result.accepted) {
-    finalStatus = "failed"
-    return rejectWorkload(result)
-  }
-
-  return await performStep()
-} catch (error) {
-  finalStatus = "failed"
-  throw error
-} finally {
-  const { error: endError } = await unprice.runs.end({
-    runId: run.runId,
-    status: finalStatus,
-  })
-
-  if (endError) {
-    logger.error(new Error(endError.message), {
-      operation: "unprice.runs.end",
-      requestId: endError.requestId,
-      code: endError.code,
-      runId: run.runId,
-    })
-  }
 }
 ```
 
 Use a unique, stable idempotency key for each billable step. Keep the key stable when retrying that
 step.
-
-Do not let a `runs.end` error mask the original workload exception. Report it separately through
-the host's logger or error aggregation.
 
 ## Preserve architectural ownership
 

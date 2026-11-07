@@ -85,10 +85,4 @@ export const PROJECT_SHORTCUTS: Shortcut[] = [
     icon: Link,
     featureSlug: FEATURE_SLUGS.CUSTOMERS.SLUG,
   },
-  {
-    name: "View Budgeted Runs",
-    href: "customers/runs",
-    icon: Link,
-    featureSlug: FEATURE_SLUGS.CUSTOMERS.SLUG,
-  },
 ]

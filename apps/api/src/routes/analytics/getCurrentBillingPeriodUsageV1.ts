@@ -1,8 +1,6 @@
 import { createRoute } from "@hono/zod-openapi"
-import type { Currency } from "@unprice/db/validators"
-import { formatMoney, fromLedgerMinor, toDecimal } from "@unprice/money"
+import { formatMoney } from "@unprice/money"
 import {
-  BillingPeriodUsageCoverageError,
   type GetCurrentBillingPeriodUsageOutput,
   getCurrentBillingPeriodUsage,
 } from "@unprice/services/use-cases"
@@ -14,12 +12,12 @@ import {
   resolveCustomerIdForApiKeyOrThrow,
   validateIsAllowedToAccessProject,
 } from "~/auth/key"
-import { UnpriceApiError, toUnpriceApiError } from "~/errors"
-import { serializeError } from "~/errors/log"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import { CloudflareBudgetClient } from "~/ingestion/budget/client"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
+import { budgetApiError } from "../budgets/budget-verb"
 
 const tags = ["analytics"]
 
@@ -89,24 +87,20 @@ export type GetCurrentBillingPeriodUsageResponse = z.infer<
   (typeof route.responses)[200]["content"]["application/json"]["schema"]
 >
 
-function trimInsignificantZeros(amount: string): string {
-  if (!amount.includes(".")) return amount
-  return amount.replace(/(\.\d*?[1-9])0+$/, "$1").replace(/\.0+$/, "")
-}
+/** ISO 4217 "no currency": the amount is in credits or units, not money. */
+const NO_CURRENCY = "XXX"
 
 function formatUsage(
   row: GetCurrentBillingPeriodUsageOutput["billingPeriods"][number]["usage"][number]
 ) {
-  const currency = row.currency as Currency
-  const amount = trimInsignificantZeros(toDecimal(fromLedgerMinor(row.amount, currency)))
-
+  const currency = row.unit.startsWith("money:") ? row.unit.slice("money:".length) : null
   return {
     feature_slug: row.featureSlug,
     usage: row.usage,
     spending: {
-      amount,
-      currency,
-      display_amount: formatMoney(amount, currency),
+      amount: row.amount,
+      currency: currency ?? NO_CURRENCY,
+      display_amount: currency ? formatMoney(row.amount, currency) : `${row.amount} ${row.unit}`,
     },
   }
 }
@@ -124,51 +118,19 @@ export const registerGetCurrentBillingPeriodUsageV1 = (app: App) =>
       requestedProjectId: inputProjectId ?? key.projectId,
     })
     const now = c.get("requestStartedAt")
-    const db = c.get("db")
-    const analytics = c.get("analytics")
-    const logger = c.get("logger")
 
     startTime(c, "getCurrentBillingPeriodUsage")
 
+    // Live from the payer budget (ADR-0008 D7): its open statements, priced at ingestion.
     const result = await getCurrentBillingPeriodUsage(
-      {
-        analytics,
-        db,
-        now: () => now,
-      },
-      {
-        projectId,
-        customerId,
-      }
+      { budgets: new CloudflareBudgetClient(c.env), now: () => now },
+      { projectId, customerId }
     )
 
-    if (result.err instanceof BillingPeriodUsageCoverageError) {
-      const serializedError = serializeError(result.err)
-      logger.warn("current billing-period usage is incomplete before attribution migration", {
-        error: serializedError,
-        error_message: serializedError.message,
-        pipe: "v1_get_billing_period_usage_coverage",
-        project_id: projectId,
-        customer_id: customerId,
-        request_id: c.get("requestId"),
-      })
-      throw new UnpriceApiError({
-        code: "PRECONDITION_FAILED",
-        message: result.err.message,
-      })
-    }
+    endTime(c, "getCurrentBillingPeriodUsage")
 
     if (result.err) {
-      const serializedError = serializeError(result.err)
-      logger.error("current billing-period usage tinybird query failed", {
-        error: serializedError,
-        error_message: serializedError.message,
-        pipe: "v1_get_billing_period_usage",
-        project_id: projectId,
-        customer_id: customerId,
-        request_id: c.get("requestId"),
-      })
-      throw toUnpriceApiError(result.err)
+      throw budgetApiError(c, result.err)
     }
 
     const billing_periods = result.val.billingPeriods.map((period) => ({
@@ -178,6 +140,5 @@ export const registerGetCurrentBillingPeriodUsageV1 = (app: App) =>
       usage: period.usage.map(formatUsage),
     }))
 
-    endTime(c, "getCurrentBillingPeriodUsage")
     return c.json({ billing_periods }, HttpStatusCodes.OK)
   })

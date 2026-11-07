@@ -111,8 +111,11 @@ export function getLakehouseSourceEventZodSchemaForVersion(
 export const LAKEHOUSE_EVENT_ZOD_SCHEMAS: {
   [S in LakehouseSource]: z.ZodType<LakehouseEventForSource<S>>
 } = {
-  events: buildLakehouseEventZodSchema("events") as unknown as z.ZodType<
-    LakehouseEventForSource<"events">
+  web_events: buildLakehouseEventZodSchema("web_events") as unknown as z.ZodType<
+    LakehouseEventForSource<"web_events">
+  >,
+  budget_journal: buildLakehouseEventZodSchema("budget_journal") as unknown as z.ZodType<
+    LakehouseEventForSource<"budget_journal">
   >,
 }
 

@@ -1,57 +1,24 @@
-import {
-  buildBudgetName,
-  buildIngestionWindowName,
-  buildRunBudgetName,
-} from "@unprice/services/ingestion"
 import type { Env } from "~/env"
 
 /**
  * The only place a Durable Object is addressed.
  *
- * Every DO in this app holds customer money state — entitlement windows carry
- * wallet reservations, run budgets carry allocations and idempotency keys — so
- * all of it except budgets (see below) is pinned to the EU jurisdiction.
- * `jurisdiction()` is a guarantee (Cloudflare will not place or migrate the
- * object outside the EU), unlike `locationHint`, which is only honoured at
- * creation. The hint is kept on top of it to bias placement toward Western
- * Europe *within* the jurisdiction.
+ * Jurisdiction is part of a DO's identity: `ns.idFromName(x)` and
+ * `ns.jurisdiction("eu").idFromName(x)` are different objects with different
+ * storage. Deriving an ID from one namespace and calling `get()` on the other
+ * throws at runtime, not at compile time, so the helpers below never expose an
+ * ID, and every caller resolves a stub here. `do-placement.test.ts` fails the
+ * build if an object is addressed anywhere else.
  *
- * Everything goes through this module on purpose. Jurisdiction is part of a
- * DO's identity: `ns.idFromName(x)` and `ns.jurisdiction("eu").idFromName(x)`
- * are different objects with different storage. Two failure modes follow, and
- * both are silent:
+ * DurableObjectProject (partyserver broadcast state) is pinned to the EU
+ * jurisdiction through `durableObjectJurisdiction`.
  *
- *   1. Mixing namespaces. Deriving an ID from the base namespace and calling
- *      `get()` on the jurisdictional one (or the reverse) throws at runtime,
- *      not at compile time. `getByName` on a single scoped namespace makes the
- *      mistake unrepresentable, so the helpers below never expose an ID.
- *   2. Split-brain addressing. The entitlement window is reached from two call
- *      paths (the ingestion client and the run-budget pricing delegate). If one
- *      scopes and the other does not, an entitlement ends up with two DOs: one
- *      holding the wallet reservations, one applying the meter. Both paths call
- *      `getEntitlementWindowStub` for exactly this reason.
- *
- * `do-placement.test.ts` fails the build if either invariant is reintroduced.
- *
- * CUTOVER NOTE (2026-09-19): moving to the EU jurisdiction changed every
- * object ID. Nothing outside the DOs references those IDs — `idFromString` is
- * unused and `ctx.id.toString()` only feeds log correlation — so there are no
- * dangling references. What was left behind is the SQLite storage of the
- * pre-cutover objects: open reservations, run allocations, and idempotency
- * keys. Those objects still exist and their alarms still fire, so they can keep
- * emitting billing facts for state the EU objects know nothing about. Deleting
- * them is an ops step (Cloudflare API, per namespace), not something this
- * module can do.
- *
- * BUDGETS ARE THE EXCEPTION (2026-10-18): a budget (ADR-0006) is checked before
- * every model call from wherever the customer's backend runs, so it uses
- * automatic placement: no jurisdiction and no hint, and Cloudflare creates each
- * object near its first request and never moves it. Budget state is therefore
- * not guaranteed to stay in the EU; a per-project residency setting would
- * bring the jurisdiction back for projects that need it. The switch changed
- * every budget object ID. No budget data had shipped to production; preview
- * objects left behind settle open holds at expiry and delete themselves 30
- * days after closesAt, and the rest stay until preview storage is wiped.
+ * BUDGETS USE AUTOMATIC PLACEMENT (2026-10-18, ADR-0008 D9): a budget is
+ * checked before every model call from wherever the customer's backend runs,
+ * so it has no jurisdiction and no hint, and Cloudflare creates each object
+ * near its first request and never moves it. Budget state is therefore not
+ * guaranteed to stay in the EU; a per-project residency setting would bring
+ * the jurisdiction back for projects that need it.
  */
 export const DO_JURISDICTION = "eu" as const satisfies DurableObjectJurisdiction
 
@@ -81,74 +48,20 @@ export function durableObjectJurisdiction(appEnv: string): DurableObjectJurisdic
   return isJurisdictionSupported(appEnv) ? DO_JURISDICTION : undefined
 }
 
-/**
- * Placement bias inside the jurisdiction. Honoured at object creation only;
- * an object that already exists is never relocated.
- */
-export const DO_LOCATION_HINT = { locationHint: "weur" } as const satisfies {
-  locationHint: DurableObjectLocationHint
-}
-
-/** EU-scoped entitlement-window namespace. Never use the raw binding. */
-export function entitlementWindowNamespace(
-  env: Pick<Env, "APP_ENV" | "entitlementwindow">
-): Env["entitlementwindow"] {
-  return isJurisdictionSupported(env.APP_ENV)
-    ? env.entitlementwindow.jurisdiction(DO_JURISDICTION)
-    : env.entitlementwindow
-}
-
-/** EU-scoped run-budget namespace. Never use the raw binding. */
-export function runBudgetNamespace(env: Pick<Env, "APP_ENV" | "runbudget">): Env["runbudget"] {
-  return isJurisdictionSupported(env.APP_ENV)
-    ? env.runbudget.jurisdiction(DO_JURISDICTION)
-    : env.runbudget
-}
-
 /** The budget namespace, unscoped on purpose: budgets use automatic placement (see above). */
 export function budgetNamespace(env: Pick<Env, "budget">): Env["budget"] {
   return env.budget
 }
 
-export type EntitlementWindowStub = ReturnType<Env["entitlementwindow"]["getByName"]>
-export type RunBudgetStub = ReturnType<Env["runbudget"]["getByName"]>
 export type BudgetStub = ReturnType<Env["budget"]["getByName"]>
 
-/**
- * The canonical entitlement-window address: EU jurisdiction, Western Europe
- * hint, and the shared name builder. Both the ingestion client and the
- * run-budget pricing delegate must resolve to the same object, so neither
- * builds the name itself.
- */
-export function getEntitlementWindowStub(
-  env: Pick<Env, "APP_ENV" | "entitlementwindow">,
-  params: { customerEntitlementId: string; customerId: string; projectId: string }
-): EntitlementWindowStub {
-  return entitlementWindowNamespace(env).getByName(
-    buildIngestionWindowName({
-      appEnv: env.APP_ENV,
-      customerEntitlementId: params.customerEntitlementId,
-      customerId: params.customerId,
-      projectId: params.projectId,
-    }),
-    DO_LOCATION_HINT
-  )
-}
-
-/** The canonical run-budget address. Same rules as above. */
-export function getRunBudgetStub(
-  env: Pick<Env, "APP_ENV" | "runbudget">,
-  params: { customerId: string; projectId: string; runId: string }
-): RunBudgetStub {
-  return runBudgetNamespace(env).getByName(
-    buildRunBudgetName({
-      appEnv: env.APP_ENV,
-      customerId: params.customerId,
-      projectId: params.projectId,
-      runId: params.runId,
-    }),
-    DO_LOCATION_HINT
-  )
+/** The key is the tail, so a key containing ":" or "/" cannot collide with another address. */
+export function buildBudgetName(params: {
+  appEnv: string
+  projectId: string
+  key: string
+}): string {
+  return `${params.appEnv}:${params.projectId}:budget:${params.key}`
 }
 
 /**

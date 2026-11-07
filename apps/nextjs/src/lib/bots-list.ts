@@ -105,7 +105,7 @@ export const UA_BOTS = [
 export const IP_BOTS = [
   "127.0.0.1", // localhost
 
-  // bot IPs from Tinybird dataset
+  // bot IPs seen in past web analytics traffic
   "52.112.74.60",
   "52.112.125.8",
   "52.112.49.104",

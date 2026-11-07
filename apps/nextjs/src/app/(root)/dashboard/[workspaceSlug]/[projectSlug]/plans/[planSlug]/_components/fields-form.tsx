@@ -1,23 +1,13 @@
 "use client"
 
-import { DollarSignIcon, HelpCircle, Plus, XCircle } from "lucide-react"
+import { HelpCircle } from "lucide-react"
 import type { UseFormReturn } from "react-hook-form"
-import { useFieldArray } from "react-hook-form"
 
 import { BILLING_CONFIG, OVERAGE_STRATEGIES_MAP, RESET_CONFIG } from "@unprice/db/utils"
-import {
-  type Currency,
-  type PlanVersionFeatureInsert,
-  isResetCadenceAtMostBilling,
-} from "@unprice/db/validators"
-
-import { currencySymbol } from "@unprice/money"
-import { Button } from "@unprice/ui/button"
+import { type PlanVersionFeatureInsert, isResetCadenceAtMostBilling } from "@unprice/db/validators"
 import { FormControl, FormField, FormItem, FormLabel, FormMessage } from "@unprice/ui/form"
-import { Input } from "@unprice/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@unprice/ui/select"
-import { Tooltip, TooltipArrow, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
-import { cn } from "@unprice/ui/utils"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 
 import { InputWithAddons } from "~/components/input-addons"
 
@@ -101,6 +91,7 @@ export function LimitFormField({
                 <InputWithAddons
                   {...field}
                   trailing={units}
+                  placeholder="No limit"
                   value={field.value ?? ""}
                   disabled={isDisabled}
                 />
@@ -115,32 +106,35 @@ export function LimitFormField({
   )
 }
 
-export function PriceFormField({
+/**
+ * Units free per statement period (ADR-0008 D5): the rate card prices only usage past them. Only
+ * for a usage feature whose meter has no group-by dimensions.
+ */
+export function IncludedFormField({
   form,
-  currency,
   isDisabled,
-  label = "Price",
+  units,
 }: {
   form: UseFormReturn<PlanVersionFeatureInsert>
-  currency: Currency
   isDisabled?: boolean
-  label?: string
+  units: string
 }) {
   return (
     <div className="w-full">
       <FormField
         control={form.control}
-        name="config.price.displayAmount"
+        name="included"
         render={({ field }) => (
           <FormItem className="">
             <div className="flex items-center gap-1">
-              <FormLabel>{label}</FormLabel>
+              <FormLabel>Included</FormLabel>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <HelpCircle className="size-3.5 text-muted-foreground" />
                 </TooltipTrigger>
                 <TooltipContent side="right" className="max-w-[250px]">
-                  The cost in the plan's currency. Supports decimals (e.g., $1.99).
+                  Units free each billing period. The rate card prices only the usage past them.
+                  Leave empty to include none.
                 </TooltipContent>
               </Tooltip>
             </div>
@@ -149,9 +143,10 @@ export function PriceFormField({
               <FormControl className="w-full">
                 <InputWithAddons
                   {...field}
-                  leading={currencySymbol(currency)}
-                  trailing={currency}
+                  trailing={units}
+                  placeholder="None"
                   value={field.value ?? ""}
+                  onChange={(event) => field.onChange(event.target.value.trim() || null)}
                   disabled={isDisabled}
                 />
               </FormControl>
@@ -186,8 +181,7 @@ export function UnitsFormField({
                   <HelpCircle className="size-3.5 text-muted-foreground" />
                 </TooltipTrigger>
                 <TooltipContent side="right" className="max-w-[250px]">
-                  How many units the customer gets in each bundle. The price above is charged once
-                  per bundle.
+                  How many units the customer gets in each bundle. The rate card prices each bundle.
                 </TooltipContent>
               </Tooltip>
             </div>
@@ -447,326 +441,6 @@ export function OverageStrategyFormField({
           </FormItem>
         )}
       />
-    </div>
-  )
-}
-
-export function TierFormField({
-  form,
-  currency,
-  isDisabled,
-}: {
-  form: UseFormReturn<PlanVersionFeatureInsert>
-  currency: Currency
-  isDisabled?: boolean
-}) {
-  const { fields, append, remove } = useFieldArray({
-    control: form.control,
-    name: "config.tiers",
-  })
-
-  return (
-    <div className="flex w-full flex-col">
-      {fields.length > 0 ? (
-        <div className="px-2 py-2">
-          {fields.map((field, index) => (
-            <div
-              key={field.id}
-              className="grid grid-cols-[1fr_1fr_1fr_28px] items-end gap-2 space-y-2"
-            >
-              <div>
-                <FormField
-                  control={form.control}
-                  key={field.id}
-                  name={`config.tiers.${index}.lastUnit`}
-                  render={({ field }) => {
-                    const isLastRow = index === fields.length - 1
-                    return (
-                      <FormItem>
-                        <FormLabel className={cn(index !== 0 && "sr-only")}>
-                          <Tooltip>
-                            <div className="flex items-center gap-2 font-normal text-xs">
-                              Up to
-                              <span>
-                                <TooltipTrigger asChild>
-                                  <HelpCircle className="h-4 w-4 font-light" />
-                                </TooltipTrigger>
-                              </span>
-                            </div>
-                            <TooltipContent
-                              className="w-56 bg-background-bg font-normal text-xs"
-                              align="center"
-                            >
-                              Maximum unit covered by this tier. Use ∞ for the final tier — every
-                              following tier starts one unit above the previous "up to".
-                              <TooltipArrow className="fill-background-bg" />
-                            </TooltipContent>
-                          </Tooltip>
-                        </FormLabel>
-
-                        <FormMessage className="font-light text-xs" />
-
-                        <FormControl>
-                          <Input
-                            {...field}
-                            className="h-8"
-                            value={field.value ?? "∞"}
-                            disabled={
-                              (index !== 0 && isLastRow) || fields.length === 1 || isDisabled
-                            }
-                            onChange={(e) => {
-                              const next = e.target.value
-                              field.onChange(next)
-
-                              // keep the next tier's firstUnit in sync (= this lastUnit + 1)
-                              if (!isLastRow && next !== "" && next !== "∞") {
-                                const parsed = Number(next)
-                                if (!Number.isNaN(parsed)) {
-                                  form.setValue(`config.tiers.${index + 1}.firstUnit`, parsed + 1)
-                                }
-                              }
-                            }}
-                          />
-                        </FormControl>
-                      </FormItem>
-                    )
-                  }}
-                />
-              </div>
-              <div>
-                <FormField
-                  control={form.control}
-                  key={field.id}
-                  name={`config.tiers.${index}.flatPrice.displayAmount`}
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel className={cn(index !== 0 && "sr-only")}>
-                        <Tooltip>
-                          <div className="flex items-center justify-center gap-2 font-normal text-xs">
-                            Flat Fee
-                            <span>
-                              <TooltipTrigger asChild>
-                                <HelpCircle className="h-4 w-4 font-light" />
-                              </TooltipTrigger>
-                            </span>
-                          </div>
-
-                          <TooltipContent
-                            className="w-40 bg-background-bg font-normal text-xs"
-                            align="center"
-                          >
-                            Fixed charge added when this tier is reached, on top of per-unit costs.
-                            <TooltipArrow className="fill-background-bg" />
-                          </TooltipContent>
-                        </Tooltip>
-                      </FormLabel>
-
-                      <FormMessage className="font-light text-xs" />
-
-                      <FormControl>
-                        <div className="relative">
-                          <DollarSignIcon className="absolute top-2 left-2 h-4 w-4 text-muted-foreground" />
-                          <Input
-                            {...field}
-                            value={field.value ?? ""}
-                            disabled={isDisabled}
-                            onChange={(e) => {
-                              field.onChange(e.target.value)
-
-                              // if the value is empty, set the flatPrice to null
-                              if (e.target.value === "") {
-                                form.setValue(
-                                  `config.tiers.${index}.flatPrice.displayAmount`,
-                                  "0.00"
-                                )
-                              }
-                            }}
-                            className="h-8 pl-8"
-                          />
-                        </div>
-                      </FormControl>
-                    </FormItem>
-                  )}
-                />
-              </div>
-              <div>
-                <FormField
-                  control={form.control}
-                  key={field.id}
-                  name={`config.tiers.${index}.unitPrice.displayAmount`}
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel className={cn(index !== 0 && "sr-only")}>
-                        <Tooltip>
-                          <div className="flex items-center justify-center gap-2 font-normal text-xs">
-                            Unit Price
-                            <span>
-                              <TooltipTrigger asChild>
-                                <HelpCircle className="h-4 w-4 font-light" />
-                              </TooltipTrigger>
-                            </span>
-                          </div>
-
-                          <TooltipContent
-                            className="w-40 bg-background-bg font-normal text-xs"
-                            align="center"
-                          >
-                            Cost per unit within this tier. Multiplied by quantity used.
-                            <TooltipArrow className="fill-background-bg" />
-                          </TooltipContent>
-                        </Tooltip>
-                      </FormLabel>
-
-                      <FormMessage className="font-light text-xs" />
-
-                      <FormControl>
-                        <div className="relative">
-                          <DollarSignIcon className="absolute top-2 left-2 h-4 w-4 text-muted-foreground" />
-                          <Input {...field} className="h-8 pl-8" disabled={isDisabled} />
-                        </div>
-                      </FormControl>
-                    </FormItem>
-                  )}
-                />
-              </div>
-              <div>
-                <Button
-                  variant="link"
-                  size={"icon"}
-                  className="h-8 w-8 rounded-full"
-                  disabled={isDisabled}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    e.preventDefault()
-                    if (fields.length === 1) return
-
-                    // change last unit of the previous tier to the last unit of the current tier
-                    form.setValue(
-                      `config.tiers.${index - 1}.lastUnit`,
-                      form.getValues(`config.tiers.${index}.lastUnit`)
-                    )
-
-                    remove(index)
-                  }}
-                >
-                  <XCircle className="h-5 w-5" />
-                  <span className="sr-only">delete tier</span>
-                </Button>
-              </div>
-            </div>
-          ))}
-          <div className="w-full px-2 py-4">
-            <div className="flex justify-end">
-              <Button
-                variant="default"
-                size={"sm"}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  e.preventDefault()
-
-                  if (isDisabled) return
-
-                  const firstUnitValue = Number(
-                    form.getValues(`config.tiers.${fields.length - 1}.firstUnit`)
-                  )
-
-                  const lastUnitValue = form.getValues(`config.tiers.${fields.length - 1}.lastUnit`)
-
-                  form.setValue(
-                    `config.tiers.${fields.length - 1}.lastUnit`,
-                    lastUnitValue ?? firstUnitValue + 1
-                  )
-
-                  append({
-                    firstUnit:
-                      lastUnitValue === null ? firstUnitValue + 2 : (lastUnitValue ?? 0) + 1,
-                    lastUnit: null,
-                    unitPrice: {
-                      displayAmount: "0.00",
-                      dinero: {
-                        amount: 0,
-                        currency: {
-                          code: currency,
-                          base: 10,
-                          exponent: 2,
-                        },
-                        scale: 2,
-                      },
-                    },
-                    flatPrice: {
-                      displayAmount: "0.00",
-                      dinero: {
-                        amount: 0,
-                        currency: {
-                          code: currency,
-                          base: 10,
-                          exponent: 2,
-                        },
-                        scale: 2,
-                      },
-                    },
-                  })
-                }}
-              >
-                <Plus className="h-3 w-3" />
-                <span className="ml-2">Add tier</span>
-              </Button>
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className="flex items-center justify-center p-4">
-          <div className="flex flex-col items-center gap-2">
-            <div className="flex items-center gap-2">
-              <div className="grid gap-2">
-                <p className="self-center font-semibold text-sm">No tiers</p>
-                <p className="justify-center font-normal text-muted-foreground text-xs leading-snug">
-                  Add the first tier before saving this metered price.
-                </p>
-                <Button
-                  variant="default"
-                  size={"sm"}
-                  className="py-2"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    e.preventDefault()
-                    append({
-                      firstUnit: 1,
-                      lastUnit: null,
-                      unitPrice: {
-                        displayAmount: "0.00",
-                        dinero: {
-                          amount: 0,
-                          currency: {
-                            code: currency,
-                            base: 10,
-                            exponent: 2,
-                          },
-                          scale: 2,
-                        },
-                      },
-                      flatPrice: {
-                        displayAmount: "0.00",
-                        dinero: {
-                          amount: 0,
-                          currency: {
-                            code: currency,
-                            base: 10,
-                            exponent: 2,
-                          },
-                          scale: 2,
-                        },
-                      },
-                    })
-                  }}
-                >
-                  Add first tier
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

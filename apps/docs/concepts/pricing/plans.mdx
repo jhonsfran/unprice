@@ -3,8 +3,9 @@ title: Plans and versions
 description: "Keep commercial rules stable while you change pricing."
 ---
 
-A plan is the commercial offer that you sell. A plan version is a dated set of rules for that
-offer: billing settings, prices, entitlements, meters, limits, and included credits.
+A plan is the commercial offer that you sell. A plan version is the package of that offer:
+billing settings, features, meters, included quantities, limits, and one rate card per currency.
+The rate card holds the prices.
 
 ## Plan: stable identity
 
@@ -14,20 +15,51 @@ latest published version during customer signup.
 ## Plan version: commercial rules
 
 Use a plan version for the rules that must remain true for a customer after you publish them. A
-version can contain a billing period, currency, features, usage meters, limits, and credit policy.
+version can contain a billing period, features, usage meters, included quantities, limits, and
+credit policy. It stores no price: it names the rate card that prices it in each currency.
+
+## Rate card: the prices
+
+A rate card is a list of price rows. Each row prices one feature, or one combination of a feature's
+dimensions, such as one `model`.
+
+- You set prices in the plan version's editor, next to each feature's quantities and meter. The
+  version gets its own card in its currency the first time you price a feature; a feature whose
+  meter varies by `model` can take its model prices from the models.dev catalog at a markup you
+  choose. The Rate cards page is where you inspect that card, schedule a change, or share one card
+  across versions.
+- A row never changes. To change a price, publish a new row and end the old row in the same
+  publish, where the new one starts.
+- Once a published version prices with a card, a new row or a row end on it takes effect at least
+  10 minutes after you publish it. Customer budgets refresh their cards at least every 5 minutes,
+  so no usage is priced with a price that has ended. A card only draft versions use has no
+  customers on it, so its rows start at once.
+- A change to a card's rows reaches every customer whose plan version uses that card. Duplicating
+  a version copies its prices onto a new card, so the new draft is priced on its own; to keep
+  existing customers on their price, publish the new price in that new version.
+- Unprice prices usage once, when it accepts the event. Invoices add up those amounts and never
+  price usage again. Recurring fees, such as a base fee or seats, are priced from the card when the
+  billing period closes.
+- Usage of a priced feature that no row matches is rejected with `NOT_PRICED`. It is never priced
+  at zero.
 
 ## Lifecycle
 
 | State | Meaning | What to do |
 | --- | --- | --- |
 | Draft | The version is still being configured. | Review its rules before you publish it. |
-| Published | The version can be assigned to customers. | Use it for signup or migration. |
+| Published | The version can be assigned to customers. Publishing refuses a version with a feature its rate card does not price. | Use it for signup or migration. |
 | Archived | The version is not available for new assignment. | Keep it as evidence for customers who used it. |
 
 ## Change a commercial rule
 
+To change a price for every customer on a card, publish a new row on the card.
+
+To change an entitlement, meter, limit, or billing rule, or to change a price for some customers
+only:
+
 1. Create a draft from the current plan.
-2. Change the required price, entitlement, meter, or billing rule.
+2. Change the rule, or point the draft at a different rate card.
 3. Review and publish the new version.
 4. Assign or migrate only the customers who should receive the new terms.
 

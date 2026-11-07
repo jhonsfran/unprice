@@ -12,13 +12,11 @@ import { getEntitlements } from "./getEntitlements"
 import { getInvoiceById } from "./getInvoiceById"
 import { getInvoices } from "./getInvoices"
 import { getLedger } from "./getLedger"
-import { getRuns } from "./getRuns"
 import { getSubscription } from "./getSubscription"
 import { getSubscriptions } from "./getSubscriptions"
 import { getWallet } from "./getWallet"
 import { listByActiveProject } from "./listByActiveProject"
 import { listPaymentMethodsByActiveProject } from "./listPaymentMethodsByActiveProject"
-import { listRunsByActiveProject } from "./listRunsByActiveProject"
 import { remove } from "./remove"
 import { update } from "./update"
 
@@ -39,9 +37,7 @@ export const customersRouter = createTRPCRouter({
   getSubscriptions: getSubscriptions,
   listByActiveProject: listByActiveProject,
   listPaymentMethodsByActiveProject: listPaymentMethodsByActiveProject,
-  listRunsByActiveProject: listRunsByActiveProject,
   getInvoices: getInvoices,
-  getRuns: getRuns,
   getLedger: getLedger,
   getWallet: getWallet,
   getInvoiceById: getInvoiceById,

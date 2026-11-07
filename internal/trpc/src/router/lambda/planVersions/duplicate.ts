@@ -3,8 +3,10 @@ import { planVersionSelectBaseSchema } from "@unprice/db/validators"
 import { duplicatePlanVersion } from "@unprice/services/use-cases"
 import { z } from "zod"
 
+import { domainErrorToTrpcError } from "#domain-error"
 import { protectedProjectProcedure } from "#trpc"
 
+/** Copies a version as a draft, with its own card holding the source's prices in force. */
 export const duplicate = protectedProjectProcedure
   .input(
     z.object({
@@ -19,6 +21,7 @@ export const duplicate = protectedProjectProcedure
   .mutation(async (opts) => {
     const { id } = opts.input
     const project = opts.ctx.project
+    const { features, rateCards } = opts.ctx.services
 
     // only owner and admin can duplicate a plan version
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
@@ -27,6 +30,7 @@ export const duplicate = protectedProjectProcedure
       {
         db: opts.ctx.db,
         logger: opts.ctx.logger,
+        services: { features, rateCards },
       },
       {
         id,
@@ -34,12 +38,7 @@ export const duplicate = protectedProjectProcedure
       }
     )
 
-    if (err) {
-      throw new TRPCError({
-        code: "INTERNAL_SERVER_ERROR",
-        message: err.message,
-      })
-    }
+    if (err) throw domainErrorToTrpcError(err)
 
     if (val.state === "not_found") {
       throw new TRPCError({

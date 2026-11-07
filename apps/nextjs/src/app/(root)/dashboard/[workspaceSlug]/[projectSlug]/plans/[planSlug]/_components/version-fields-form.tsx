@@ -132,10 +132,10 @@ export function PaymentProviderFormField<TFieldValues extends PaymentProviderFor
       control={form.control}
       name={"paymentProvider" as FieldPath<TFieldValues>}
       render={({ field }) => (
-        <FormItem className="col-start-1 row-start-5 flex flex-col justify-end">
+        <FormItem className="flex flex-col justify-end">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1">
-              <FormLabel>Payment Provider</FormLabel>
+              <FormLabel>Payment provider</FormLabel>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <HelpCircle className="size-3.5 text-muted-foreground" />
@@ -235,7 +235,7 @@ export function DescriptionFormField<TFieldValues extends FormValues>({
       control={form.control}
       name={"description" as FieldPath<TFieldValues>}
       render={({ field }) => (
-        <FormItem className="col-start-2 row-span-2 flex flex-col justify-start">
+        <FormItem className="flex flex-col justify-start">
           <div className="flex items-center gap-1">
             <FormLabel>Description</FormLabel>
             <Tooltip>

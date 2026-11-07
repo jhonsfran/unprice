@@ -45,7 +45,7 @@ export default async function ProjectUsersPage(props: {
       header={
         <HeaderTab
           title="Customers"
-          description="Customers hold the subscriptions, wallet credits, invoices, and budgeted runs in this project."
+          description="Customers hold the subscriptions, wallet credits, and invoices in this project."
           action={
             <div className="flex items-center gap-2">
               <CodeApiSheet defaultMethod="signUpCustomer">
@@ -70,9 +70,6 @@ export default async function ProjectUsersPage(props: {
           <TabNavigationLink asChild>
             <SuperLink href={`${baseUrl}/subscriptions`}>Subscriptions</SuperLink>
           </TabNavigationLink>
-          <TabNavigationLink asChild>
-            <SuperLink href={`${baseUrl}/runs`}>Budgeted Runs</SuperLink>
-          </TabNavigationLink>
         </div>
       </TabNavigation>
       <div className="mt-4 flex flex-col gap-4">
@@ -95,7 +92,7 @@ export default async function ProjectUsersPage(props: {
             emptyState={{
               title: "No customers yet",
               description:
-                "Customers appear after signup or API creation. Create a customer before recording usage, assigning subscriptions, issuing wallet credits, or starting budgeted runs.",
+                "Customers appear after signup or API creation. Create a customer before recording usage, assigning subscriptions, or issuing wallet credits.",
               action: (
                 <CodeApiSheet defaultMethod="signUpCustomer">
                   <Button size="sm" variant="outline">

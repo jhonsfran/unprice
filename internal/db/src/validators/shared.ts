@@ -20,7 +20,6 @@ import {
   PLAN_TYPES,
   SUBJECT_TYPES,
   SUBSCRIPTION_STATUS,
-  TIER_MODES,
   USAGE_MODES,
   WHEN_TO_BILLING,
 } from "../utils"
@@ -31,7 +30,30 @@ export const subjectTypeSchema = z.enum(SUBJECT_TYPES)
 export const grantTypeSchema = z.enum(GRANT_TYPES)
 export const paymentProviderSchema = z.enum(PAYMENT_PROVIDERS)
 export const currencySchema = z.enum(CURRENCIES)
+
+/**
+ * An id that pricing-page analytics carry from the browser: a track.js session id, a page id, or a
+ * plan version id. 1-128 characters of letters, digits, `_`, `-`, `.` and `:`, so no control
+ * character (a NUL breaks the Basin SQL literal it is compared in) or whitespace reaches a query.
+ */
+export const attributionIdSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[A-Za-z0-9_.:-]+$/, "must be 1-128 letters, digits, '_', '-', '.' or ':'")
 export const typeFeatureSchema = z.enum(FEATURE_TYPES)
+
+/**
+ * The one feature slug: what features, rate rows, and budget measures name a feature by. Lowercase
+ * letters, digits, "-" and "_", starting with a letter or digit; never "|" or ":", because pricing
+ * positions and quantity limit ids key on them.
+ */
+export const featureSlugSchema = z
+  .string()
+  .regex(
+    /^[a-z0-9][a-z0-9_-]{0,63}$/,
+    "a lowercase slug: letters, digits, - and _, starting with a letter or digit, at most 64 characters"
+  )
 export const billingPeriodStatusSchema = z.enum(BILLING_PERIOD_STATUS)
 export const billingPeriodTypeSchema = z.enum(BILLING_PERIOD_TYPE)
 export const usageModeSchema = z.enum(USAGE_MODES)
@@ -62,7 +84,6 @@ export const meterConfigSchema = z
     }
   })
 
-export const tierModeSchema = z.enum(TIER_MODES)
 export const featureConfigType = z.enum(FEATURE_CONFIG_TYPES)
 export const unitSchema = z.coerce.number().int().min(1)
 export const collectionMethodSchema = z.enum(COLLECTION_METHODS)
@@ -129,6 +150,7 @@ export const deniedReasonSchema = z.enum([
   "CUSTOMER_DISABLED",
   "PLAN_VERSION_NOT_PUBLISHED",
   "PLAN_VERSION_NOT_ACTIVE",
+  "PLAN_VERSION_ENTERPRISE",
   "PAYMENT_PROVIDER_CONFIG_NOT_FOUND",
   "ENTITLEMENT_EXPIRED",
   "ENTITLEMENT_NOT_ACTIVE",

@@ -1,19 +1,18 @@
 import { CloudflareStore } from "@unkey/cache/stores"
-import { Analytics } from "@unprice/analytics"
 import { createConnection, createHttpConnection } from "@unprice/db"
 import { newId } from "@unprice/db/utils"
+import { createBasinSql, createWebEventsWriter } from "@unprice/lakehouse"
 import { shouldEmitMetrics } from "@unprice/observability/env"
 import { ApiKeysService } from "@unprice/services/apikey"
 import { CacheService } from "@unprice/services/cache"
 import { createServiceContext } from "@unprice/services/context"
-import type { IngestionQueueMessage } from "@unprice/services/ingestion"
 import { LogdrainMetrics, NoopMetrics } from "@unprice/services/metrics"
+import { InProcessPayerBudgetGateway } from "@unprice/services/use-cases"
 import type { MiddlewareHandler } from "hono"
 import type { HonoEnv } from "~/hono/env"
 import { apiMetricsLogger, createApiLogger } from "~/observability"
 
-import { CloudflareRawIngestionQueueClient } from "~/ingestion/raw-queue-client"
-import { createIngestionService } from "~/ingestion/service"
+import { payerBudgetSyncDeps } from "~/ingestion/budget/payer-budget-sync"
 import { resolveSampleRate } from "~/sampling"
 
 /**
@@ -164,29 +163,29 @@ export function init(): MiddlewareHandler<HonoEnv> {
       logger: c.env.DRIZZLE_LOG.toString() === "true",
     })
 
-    const analytics = new Analytics({
-      emit: true,
-      tinybirdToken: c.env.TINYBIRD_TOKEN,
-      tinybirdUrl: c.env.TINYBIRD_URL,
-      logger,
-    })
-
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
     const waitUntil = (promise: Promise<any>) => c.executionCtx.waitUntil(promise)
 
-    // Build the shared service graph from infrastructure deps.
+    // Build the shared service graph from infrastructure deps. Billing syncs a payer budget in
+    // process, next to its Durable Object, instead of calling this API over HTTP.
     const svcCtx = createServiceContext({
       db,
       logger,
-      analytics,
       waitUntil,
       cache,
       metrics,
+      payerBudgets: new InProcessPayerBudgetGateway(() =>
+        payerBudgetSyncDeps({ env: c.env, db, services: svcCtx, logger, waitUntil })
+      ),
+      basinSql: createBasinSql({
+        accountId: c.env.BASIN_SQL_ACCOUNT_ID,
+        bucket: c.env.BASIN_SQL_BUCKET,
+        token: c.env.BASIN_SQL_TOKEN,
+      }),
     })
 
     const apikey = new ApiKeysService({
       cache,
-      analytics,
       logger,
       metrics,
       db,
@@ -195,35 +194,24 @@ export function init(): MiddlewareHandler<HonoEnv> {
       hashCache,
     })
 
-    const ingestion = createIngestionService({
-      cache,
-      db,
-      entitlementService: svcCtx.entitlements,
-      subscriptionService: svcCtx.subscriptions,
-      logger,
-      env: c.env,
-    })
-
     c.set("cache", cache)
     c.set("logger", logger)
     c.set("metrics", metrics)
-    c.set("analytics", analytics)
     c.set(
-      "rawIngestionQueue",
-      new CloudflareRawIngestionQueueClient({
-        logger,
-        queues: [c.env.QUEUE_SHARD_0 as Queue<IngestionQueueMessage>],
+      "webEvents",
+      createWebEventsWriter({
+        url: c.env.LAKEHOUSE_WEB_EVENTS_URL,
+        token: c.env.LAKEHOUSE_WEB_EVENTS_TOKEN,
       })
     )
     c.set("db", db)
     c.set("waitUntil", waitUntil)
 
     c.set("services", {
-      budgetRuns: svcCtx.budgetRuns,
+      analytics: svcCtx.analytics,
       budgetCatalog: svcCtx.budgetCatalog,
       subscription: svcCtx.subscriptions,
       entitlement: svcCtx.entitlements,
-      ingestion,
       project: svcCtx.projects,
       apikey,
       customer: svcCtx.customers,
@@ -233,6 +221,8 @@ export function init(): MiddlewareHandler<HonoEnv> {
       ledger: svcCtx.ledger,
       wallet: svcCtx.wallet,
       billing: svcCtx.billing,
+      rateCards: svcCtx.rateCards,
+      pages: svcCtx.pages,
     })
 
     await next()

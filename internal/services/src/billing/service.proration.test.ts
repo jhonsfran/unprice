@@ -1,4 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import type { BillingConfig } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
@@ -10,9 +9,8 @@ import type { GrantsManager } from "../entitlements"
 import type { LedgerGateway } from "../ledger"
 import { UnPriceLedgerError } from "../ledger/errors"
 import type { Metrics } from "../metrics"
-import type { RatingService } from "../rating/service"
 import type { SubscriptionMachine } from "../subscriptions/machine"
-import { createBillingGatewayStub } from "../test-fixtures/billing-gateway"
+import { createInvoicingStub } from "../test-fixtures/billing-gateway"
 import type { WalletService } from "../wallet"
 import type { UnPriceBillingError } from "./errors"
 import { BillingService } from "./service"
@@ -72,16 +70,14 @@ function makeBillingService() {
   const logger = makeLogger()
 
   const billing = new BillingService({
-    reservationFlushGateway: createBillingGatewayStub(),
+    invoicing: createInvoicingStub(),
     db: {} as Database,
     logger,
-    analytics: {} as Analytics,
     waitUntil: (p) => p,
     cache: {} as Cache,
     metrics: {} as Metrics,
     customerService: {} as CustomerService,
     grantsManager: {} as GrantsManager,
-    ratingService: {} as RatingService,
     ledgerService: ledgerMock as unknown as LedgerGateway,
     walletService: {} as WalletService,
   })

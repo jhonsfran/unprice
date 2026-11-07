@@ -95,18 +95,6 @@ export type RefillDecision = {
   maxEventCostAmount: number
 }
 
-export type EffectiveWalletCostInput = {
-  requestedCostAmount: number
-  consumedAmount: number
-  flushedAmount: number
-  clampNegativeCostToUnflushed?: boolean
-}
-
-export type EffectiveWalletCost = {
-  effectiveCostAmount: number
-  clampedNegativeAmount: number
-}
-
 export type TopUpRefillInput = {
   remainingAmount: number
   targetReservationAmount: number
@@ -270,35 +258,6 @@ export function computeRefillDecision(input: RefillDecisionInput): RefillDecisio
     needsRefill,
     refillAmount,
     maxEventCostAmount,
-  }
-}
-
-/**
- * Converts a raw event cost into the amount that may be applied locally.
- *
- * Positive costs pass through. Negative corrections are allowed only down to
- * flushedAmount, because already-flushed consumption has been recognized in the
- * wallet ledger and cannot be undone by local SQLite state alone.
- */
-export function computeEffectiveWalletCost(input: EffectiveWalletCostInput): EffectiveWalletCost {
-  const clampNegativeCostToUnflushed = input.clampNegativeCostToUnflushed ?? true
-  const requestedCostAmount = finiteInt(input.requestedCostAmount)
-
-  if (requestedCostAmount >= 0 || !clampNegativeCostToUnflushed) {
-    return {
-      effectiveCostAmount: requestedCostAmount,
-      clampedNegativeAmount: 0,
-    }
-  }
-
-  const consumedAmount = finiteInt(input.consumedAmount)
-  const flushedAmount = finiteInt(input.flushedAmount)
-  const desiredConsumed = consumedAmount + requestedCostAmount
-  const clampedConsumed = Math.max(flushedAmount, desiredConsumed)
-
-  return {
-    effectiveCostAmount: clampedConsumed - consumedAmount,
-    clampedNegativeAmount: desiredConsumed - clampedConsumed,
   }
 }
 

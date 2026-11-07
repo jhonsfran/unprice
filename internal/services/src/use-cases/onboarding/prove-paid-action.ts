@@ -1,4 +1,3 @@
-import type { Unprice } from "@unprice/api"
 import type { Database } from "@unprice/db"
 import { currencySchema, paidActionSchema } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
@@ -7,7 +6,11 @@ import { z } from "zod"
 import type { ServiceContext } from "../../context"
 import { setProviderEnabled } from "../payment-provider/connection"
 import { appliedPlanTemplateSchema, applyPlanTemplate } from "../plan-template/apply"
-import { seedOnboardingEvidence, seedOnboardingEvidenceOutputSchema } from "./seed-evidence"
+import {
+  type EvidenceApiClient,
+  seedOnboardingEvidence,
+  seedOnboardingEvidenceOutputSchema,
+} from "./seed-evidence"
 
 // One atomic onboarding step. The client creates the Sandbox project (that call
 // is workspace-scoped and mints a fresh project), then hands the project here to
@@ -39,12 +42,19 @@ export type RunPaidActionProofOutput = z.infer<typeof runPaidActionProofOutputSc
 type RunPaidActionProofDeps = {
   services: Pick<
     ServiceContext,
-    "plans" | "features" | "events" | "customers" | "apikeys" | "subscriptions" | "billing"
+    | "plans"
+    | "features"
+    | "events"
+    | "customers"
+    | "apikeys"
+    | "subscriptions"
+    | "billing"
+    | "rateCards"
   >
   db: Database
   logger: Logger
   userId: string
-  createApiClient: (token: string) => { runs: Pick<Unprice["runs"], "start" | "consume" | "end"> }
+  createApiClient: (token: string) => EvidenceApiClient
 }
 
 export async function runPaidActionProof(

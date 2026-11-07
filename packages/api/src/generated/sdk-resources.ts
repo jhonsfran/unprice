@@ -27,7 +27,6 @@ export const sdkOperationIds = [
   "customers.changePlan",
   "customers.signUp",
   "features.list",
-  "ingestionEvents.replay",
   "ingestionEvents.status",
   "invoices.get",
   "monetization.apply",
@@ -36,11 +35,6 @@ export const sdkOperationIds = [
   "paymentMethods.list",
   "planVersions.get",
   "planVersions.list",
-  "runs.consume",
-  "runs.end",
-  "runs.get",
-  "runs.settle",
-  "runs.start",
   "subscriptions.get",
   "usage.consume",
   "usage.record",
@@ -138,9 +132,6 @@ export type GeneratedSdkResources = {
     list: () => Promise<ApiResult<OperationResponse<"features.list">>>
   }
   ingestionEvents: {
-    replay: (
-      req: OperationInput<"ingestionEvents.replay">
-    ) => Promise<ApiResult<OperationResponse<"ingestionEvents.replay">>>
     status: (
       req: OperationInput<"ingestionEvents.status">
     ) => Promise<ApiResult<OperationResponse<"ingestionEvents.status">>>
@@ -171,19 +162,6 @@ export type GeneratedSdkResources = {
     list: (
       req: OperationInput<"planVersions.list">
     ) => Promise<ApiResult<OperationResponse<"planVersions.list">>>
-  }
-  runs: {
-    consume: (
-      req: OperationInput<"runs.consume">
-    ) => Promise<ApiResult<OperationResponse<"runs.consume">>>
-    end: (req: OperationInput<"runs.end">) => Promise<ApiResult<OperationResponse<"runs.end">>>
-    get: (req: OperationInput<"runs.get">) => Promise<ApiResult<OperationResponse<"runs.get">>>
-    settle: (
-      req: OperationInput<"runs.settle">
-    ) => Promise<ApiResult<OperationResponse<"runs.settle">>>
-    start: (
-      req: OperationInput<"runs.start">
-    ) => Promise<ApiResult<OperationResponse<"runs.start">>>
   }
   subscriptions: {
     get: (
@@ -253,7 +231,6 @@ export function createGeneratedSdkResources(
       list: () => toResult(openapi.GET("/v1/features/list", {})),
     },
     ingestionEvents: {
-      replay: (body) => toResult(openapi.POST("/v1/ingestion-events/replay", { body })),
       status: (body) => toResult(openapi.POST("/v1/ingestion-events/status", { body })),
     },
     invoices: {
@@ -276,17 +253,6 @@ export function createGeneratedSdkResources(
           })
         ),
       list: (body) => toResult(openapi.POST("/v1/plan-versions/list", { body })),
-    },
-    runs: {
-      consume: ({ runId, ...body }) =>
-        toResult(openapi.POST("/v1/runs/consume/{runId}", { params: { path: { runId } }, body })),
-      end: ({ runId, ...body }) =>
-        toResult(openapi.POST("/v1/runs/end/{runId}", { params: { path: { runId } }, body })),
-      get: ({ runId, ...query }) =>
-        toResult(openapi.GET("/v1/runs/get/{runId}", { params: { path: { runId }, query } })),
-      settle: ({ runId, ...body }) =>
-        toResult(openapi.POST("/v1/runs/settle/{runId}", { params: { path: { runId } }, body })),
-      start: (body) => toResult(openapi.POST("/v1/runs/start", { body })),
     },
     subscriptions: {
       get: (body) => toResult(openapi.POST("/v1/subscriptions/get", { body })),

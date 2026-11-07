@@ -22,7 +22,6 @@ import type { Database } from "@unprice/db"
 import {
   type BillingConfig,
   type ConfigFeatureVersionType,
-  type Currency,
   type Feature,
   type MeterConfig,
   type MonetizationConfig,
@@ -36,7 +35,6 @@ import {
   type ResetConfig,
   buildIntegrationContract,
   computeConfigHash,
-  configFeatureSchema,
   integrationContractSchema,
   monetizationConfigSchema,
 } from "@unprice/db/validators"
@@ -44,22 +42,24 @@ import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import * as z from "zod"
 import type { ServiceContext } from "../../context"
+import { ratePriceOf } from "../../pricing"
 import {
   type MaterializeContext,
+  type PlanFeaturePrice,
   type PlanTemplateMaterializeCaches,
   createTemplatePlanVersion,
   getOrCreateEvent,
   getOrCreatePlan,
   getOrCreatePlanVersionFeature,
   isTemplatePlanVersionComplete,
-  toDineroPrice,
+  pricePlanVersionFeatures,
 } from "../plan-template/materialize"
 
 /** Gap between adjacent features, matching what the plan templates already write. */
 const FEATURE_ORDER_STRIDE = 1024
 
 export type ApplyMonetizationConfigDeps = {
-  services: Pick<ServiceContext, "plans" | "features" | "events">
+  services: Pick<ServiceContext, "plans" | "features" | "events" | "rateCards">
   db: Database
   logger: Logger
 }
@@ -157,26 +157,27 @@ function writeFailure(state: WriteFailureState, locator: FailureLocator = {}): A
 }
 
 /**
- * Boundary prices are decimal strings; stored prices are Dinero snapshots. The
- * converted object goes back through the canonical config schema so the stored
- * shape is decided by the same code the dashboard writes through, not by a cast.
+ * The plan feature keeps how it is sold; its price is a row of the version's rate card
+ * (ADR-0008 D2), written by `featurePrices`.
  */
-function toStoredConfig(
-  config: MonetizationPriceConfig,
-  currency: Currency
-): ConfigFeatureVersionType {
-  return configFeatureSchema.parse({
-    ...config,
-    ...(config.price === undefined ? {} : { price: toDineroPrice(config.price, currency) }),
-    ...(config.tiers === undefined
-      ? {}
-      : {
-          tiers: config.tiers.map((tier) => ({
-            ...tier,
-            unitPrice: toDineroPrice(tier.unitPrice, currency),
-            flatPrice: toDineroPrice(tier.flatPrice, currency),
-          })),
-        }),
+function toStoredConfig({ price: _price, tiers: _tiers, ...config }: MonetizationPriceConfig) {
+  return config satisfies ConfigFeatureVersionType
+}
+
+/** Each document feature's default row on the version's rate card. */
+function featurePrices(plan: MonetizationPlanConfig): PlanFeaturePrice[] {
+  return plan.version.features.flatMap((feature) => {
+    const price = ratePriceOf(
+      {
+        featureType: feature.featureType,
+        usageMode: feature.config.usageMode,
+        units: feature.config.units,
+        price: feature.config.price,
+        tiers: feature.config.tiers,
+      },
+      feature.meterConfig?.aggregationField ?? null
+    )
+    return price ? [{ featureSlug: feature.featureSlug, price }] : []
   })
 }
 
@@ -333,7 +334,7 @@ async function materializeVersionFeatures(
       planVersion,
       feature,
       featureType: versionFeature.featureType,
-      config: toStoredConfig(versionFeature.config, plan.version.currency),
+      config: toStoredConfig(versionFeature.config),
       order: order * FEATURE_ORDER_STRIDE,
       limit: versionFeature.limit,
       resetConfig: toStoredResetConfig(versionFeature.resetConfig, planVersion.billingConfig),
@@ -502,6 +503,22 @@ export async function resolvePlanDraft(
         })
       )
     }
+  }
+
+  // Every draft is priced, complete or not: a run that wrote every feature and then failed to
+  // price leaves a complete draft, and only this call can finish it. A rerun writes nothing.
+  const priced = await pricePlanVersionFeatures(context, {
+    planVersion,
+    planSlug: plan.slug,
+    prices: featurePrices(plan),
+  })
+  if (priced.err) {
+    return Err(
+      new FetchError({
+        message: `error pricing plan "${plan.slug}" on its rate card: ${priced.err.message}`,
+        retry: false,
+      })
+    )
   }
 
   return Ok({

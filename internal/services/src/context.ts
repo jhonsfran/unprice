@@ -1,10 +1,10 @@
+import { type BasinSql, createBasinSql } from "@unprice/lakehouse"
 import { env } from "../env"
 import { AnalyticsService } from "./analytics/service"
 import { ApiKeysService } from "./apikey/service"
 import { BillingService } from "./billing/service"
 import { BudgetAuditService } from "./budget-audit/service"
 import { BudgetCatalogService } from "./budget-catalog/service"
-import { BudgetRunService } from "./budget-runs/service"
 import { CustomerService } from "./customers/service"
 import type { ServiceDeps } from "./deps"
 import { DomainService } from "./domains/service"
@@ -17,17 +17,17 @@ import { PageService } from "./pages/service"
 import { PaymentProviderResolver } from "./payment-provider/resolver"
 import { PlanService } from "./plans/service"
 import { ProjectService } from "./projects/service"
-import { RatingService } from "./rating/service"
+import { RateCardService } from "./rate-cards/service"
 import { DrizzleSubscriptionRepository } from "./subscriptions/repository.drizzle"
 import { SubscriptionService } from "./subscriptions/service"
-import {
-  type BillingReservationFlushGateway,
-  HttpBillingReservationFlushGateway,
-} from "./use-cases/billing/reservation-flush-gateway"
 import {
   type BudgetOperatorGateway,
   HttpBudgetOperatorGateway,
 } from "./use-cases/budgets/operator-gateway"
+import {
+  HttpPayerBudgetGateway,
+  type PayerBudgetGateway,
+} from "./use-cases/budgets/payer-budget-gateway"
 import { WalletService } from "./wallet"
 import { WorkspaceService } from "./workspaces/service"
 
@@ -38,7 +38,6 @@ import { WorkspaceService } from "./workspaces/service"
  * no service creates its own child services.
  */
 export interface ServiceContext {
-  budgetRuns: BudgetRunService
   budgetCatalog: BudgetCatalogService
   budgetAudit: BudgetAuditService
   /** The dashboard's operator calls on budgets, through the API's internal routes. */
@@ -54,7 +53,7 @@ export interface ServiceContext {
   workspaces: WorkspaceService
   grantsManager: GrantsManager
   paymentProviderResolver: PaymentProviderResolver
-  rating: RatingService
+  rateCards: RateCardService
   ledger: LedgerGateway
   customerLedger: CustomerLedgerService
   billing: BillingService
@@ -73,17 +72,19 @@ export interface ServiceContext {
  */
 export function createServiceContext(
   deps: ServiceDeps & {
-    reservationFlushGateway?: BillingReservationFlushGateway
+    /**
+     * Payer budget sync and invoicing; null turns it off. Defaults to the API's internal routes,
+     * off in tests.
+     */
+    payerBudgets?: PayerBudgetGateway | null
+    /**
+     * Basin SQL: web analytics and the budget journal's usage history. Roots that never read them
+     * omit it and get NOT_CONFIGURED.
+     */
+    basinSql?: BasinSql
   }
 ): ServiceContext {
   // 1. Leaf services (no service deps)
-  const budgetRuns = new BudgetRunService({
-    db: deps.db,
-    logger: deps.logger,
-    cache: deps.cache,
-    waitUntil: deps.waitUntil,
-  })
-
   const budgetCatalog = new BudgetCatalogService({
     db: deps.db,
     logger: deps.logger,
@@ -107,7 +108,7 @@ export function createServiceContext(
   const analytics = new AnalyticsService({
     db: deps.db,
     logger: deps.logger,
-    analytics: deps.analytics,
+    basinSql: deps.basinSql ?? createBasinSql({}),
     ledgerGateway: ledger,
   })
 
@@ -119,7 +120,6 @@ export function createServiceContext(
   const customers = new CustomerService({
     db: deps.db,
     logger: deps.logger,
-    analytics: deps.analytics,
     waitUntil: deps.waitUntil,
     cache: deps.cache,
     metrics: deps.metrics,
@@ -134,20 +134,21 @@ export function createServiceContext(
   const apikeys = new ApiKeysService({
     db: deps.db,
     logger: deps.logger,
-    analytics: deps.analytics,
     waitUntil: deps.waitUntil,
     cache: deps.cache,
     metrics: deps.metrics,
     hashCache: new Map<string, string>(),
   })
 
+  const rateCards = new RateCardService({ db: deps.db, cache: deps.cache })
+
   const plans = new PlanService({
     db: deps.db,
     logger: deps.logger,
-    analytics: deps.analytics,
     waitUntil: deps.waitUntil,
     cache: deps.cache,
     metrics: deps.metrics,
+    rateCards,
   })
 
   const features = new FeatureService({
@@ -173,7 +174,6 @@ export function createServiceContext(
   const projects = new ProjectService({
     db: deps.db,
     logger: deps.logger,
-    analytics: deps.analytics,
     waitUntil: deps.waitUntil,
     cache: deps.cache,
     metrics: deps.metrics,
@@ -185,44 +185,36 @@ export function createServiceContext(
   })
 
   // 2. Services with deps on leaves
-  const rating = new RatingService({
-    logger: deps.logger,
-    analytics: deps.analytics,
-    grantsManager,
-  })
-
   const wallet = new WalletService({
     db: deps.db,
     logger: deps.logger,
     ledgerGateway: ledger,
   })
 
-  const reservationFlushGateway =
-    deps.reservationFlushGateway ??
-    new HttpBillingReservationFlushGateway({
-      baseUrl: env.UNPRICE_API_URL,
-      token: env.UNPRICE_API_KEY,
-    })
+  const payerBudgets =
+    deps.payerBudgets !== undefined
+      ? deps.payerBudgets
+      : env.NODE_ENV === "test"
+        ? null
+        : new HttpPayerBudgetGateway({ baseUrl: env.UNPRICE_API_URL, token: env.UNPRICE_API_KEY })
+  const invoicing = { payerBudgets, rateCards }
 
   const billing = new BillingService({
     db: deps.db,
     logger: deps.logger,
-    analytics: deps.analytics,
     waitUntil: deps.waitUntil,
     cache: deps.cache,
     metrics: deps.metrics,
     customerService: customers,
     grantsManager,
-    ratingService: rating,
     ledgerService: ledger,
     walletService: wallet,
-    reservationFlushGateway,
+    invoicing,
   })
 
   const entitlements = new EntitlementService({
     db: deps.db,
     logger: deps.logger,
-    analytics: deps.analytics,
     waitUntil: deps.waitUntil,
     cache: deps.cache,
     metrics: deps.metrics,
@@ -235,17 +227,15 @@ export function createServiceContext(
     db: deps.db,
     repo: new DrizzleSubscriptionRepository(deps.db),
     logger: deps.logger,
-    analytics: deps.analytics,
     waitUntil: deps.waitUntil,
     cache: deps.cache,
     metrics: deps.metrics,
     customerService: customers,
     entitlementService: entitlements,
     billingService: billing,
-    ratingService: rating,
     ledgerService: ledger,
     walletService: wallet,
-    reservationFlushGateway,
+    invoicing,
   })
 
   const budgetOperator = new HttpBudgetOperatorGateway({
@@ -254,7 +244,6 @@ export function createServiceContext(
   })
 
   return {
-    budgetRuns,
     budgetCatalog,
     budgetAudit,
     budgetOperator,
@@ -269,7 +258,7 @@ export function createServiceContext(
     workspaces,
     grantsManager,
     paymentProviderResolver,
-    rating,
+    rateCards,
     ledger,
     customerLedger,
     billing,

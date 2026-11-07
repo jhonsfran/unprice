@@ -135,7 +135,7 @@ export default async function DomainPage(props: {
                   title: feature.feature.title,
                   type: feature.featureType,
                   description: feature.feature.description,
-                  config: feature.config,
+                  price: feature.displayPrice,
                 },
               }
             }) || []
@@ -150,6 +150,7 @@ export default async function DomainPage(props: {
           detailedFeatures,
           cta: version.plan.enterprisePlan ? "Contact Us" : "Get Started",
           ctaLink: page.ctaLink,
+          pageId: page.id,
           isEnterprisePlan: version.plan.enterprisePlan || false,
           billingPeriod: version.billingConfig.billingInterval,
           contactEmail: page.project.contactEmail,
@@ -163,15 +164,12 @@ export default async function DomainPage(props: {
 
   return (
     <div>
-      {env.TINYBIRD_TOKEN ? (
+      {env.LAKEHOUSE_WEB_EVENTS_URL ? (
         <Script
           defer
           strategy="afterInteractive"
           src="/track.js"
-          data-host={env.TINYBIRD_URL}
-          data-proxy={" "}
           data-storage={"cookie"}
-          data-token={env.TINYBIRD_TOKEN}
           data-plan-ids={plans.map((plan) => plan.id).join(",")}
           data-page-id={page.id}
           data-project-id={page.project.id}

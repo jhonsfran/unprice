@@ -1,6 +1,6 @@
 import { OpenAPIHono } from "@hono/zod-openapi"
 import { Err } from "@unprice/error"
-import { type BudgetBalance, UnPriceBudgetError } from "@unprice/services/budgets"
+import { type BudgetBalance, UnPriceBudgetError, amountUsage } from "@unprice/services/budgets"
 import type { ExecutionContext, MiddlewareHandler } from "hono"
 import { type Mock, afterEach, beforeEach, vi } from "vitest"
 import { handleError, handleZodError } from "~/errors"
@@ -21,12 +21,13 @@ export const usd = (value: number) => BigInt(value) * ONE
 
 export const balance = (remaining: bigint, held = BigInt(0)): BudgetBalance => ({
   remaining,
-  held,
+  held: amountUsage(held),
   limits: [
     {
       id: "month",
       window: "month",
       enforce: "hard",
+      measure: { type: "amount" },
       amount: usd(50),
       consumed: usd(50) - remaining - held,
       held,

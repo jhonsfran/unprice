@@ -5,12 +5,13 @@ import {
   settleBudgetInputSchema,
   settleBudgetResponseSchema,
 } from "@unprice/db/validators"
+import { amountUsage } from "@unprice/services/budgets"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
-import { runBudgetVerb, toWire } from "./budget-verb"
+import { amountToWire, balanceToWire, runBudgetVerb, toWire } from "./budget-verb"
 
 export const route = createRoute(
   defineEndpointContract(
@@ -40,7 +41,21 @@ export const route = createRoute(
 
 export const registerSettleBudgetV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { key, ...request } = c.req.valid("json")
-    const { type: _, ...settled } = await runBudgetVerb(c, key, { type: "settle", ...request })
-    return c.json(toWire(settled), HttpStatusCodes.OK)
+    const { key, holdId, amount } = c.req.valid("json")
+    const {
+      type: _,
+      actual,
+      released,
+      balance,
+      ...settled
+    } = await runBudgetVerb(c, key, { type: "settle", holdId, actual: amountUsage(amount) })
+    return c.json(
+      {
+        ...toWire(settled),
+        actual: amountToWire(actual),
+        released: amountToWire(released),
+        balance: balanceToWire(balance),
+      },
+      HttpStatusCodes.OK
+    )
   })

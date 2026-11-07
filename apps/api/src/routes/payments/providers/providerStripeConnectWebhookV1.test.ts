@@ -12,6 +12,8 @@ vi.mock("cloudflare:workers", () => ({
   },
 }))
 
+const webEvents = vi.hoisted(() => ({ send: vi.fn() }))
+
 const useCaseMocks = vi.hoisted(() => ({
   processWebhookEvent: vi.fn(),
 }))
@@ -73,7 +75,8 @@ describe("providerStripeConnectWebhookV1 route", () => {
     )
 
     expect(useCaseMocks.processWebhookEvent).toHaveBeenCalledWith(
-      expect.anything(),
+      // a checkout completion records the signup web event through the request's writer
+      expect.objectContaining({ webEvents }),
       expect.objectContaining({
         projectId: "proj_123",
         provider: "stripe",
@@ -236,7 +239,7 @@ function createTestApp(opts?: { paymentProviderConfig?: Record<string, unknown> 
       error: vi.fn(),
       debug: vi.fn(),
     })
-    c.set("analytics", {})
+    c.set("webEvents", webEvents)
     c.set("waitUntil", vi.fn())
 
     await next()

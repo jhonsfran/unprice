@@ -50,6 +50,7 @@ function setup() {
   })
   const caller = router.createCaller({
     project: { id: "proj_123" },
+    services: { analytics: {} },
     cache,
     logger: { error: vi.fn() },
   } as unknown as Context)

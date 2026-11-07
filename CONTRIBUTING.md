@@ -50,7 +50,7 @@ bin/startup.dev              # apply database migrations (never run migrations m
 
 Environment templates live next to the app that needs them (for example
 `apps/api/.dev.vars.example`). Copy them without the `.example` suffix and fill in values. Some
-services such as Tinybird, Trigger.dev, and Stripe are external. Most contributions do not need
+services such as Basin SQL on R2, Trigger.dev, and Stripe are external. Most contributions do not need
 them because the tests use local fakes and the Sandbox payment provider.
 
 ## Make a change

@@ -1,4 +1,4 @@
-import { DEFAULT_INTERVAL, INTERVAL_KEYS } from "@unprice/analytics"
+import { DEFAULT_INTERVAL, INTERVAL_KEYS } from "@unprice/db/validators"
 import {
   createLoader,
   parseAsInteger,

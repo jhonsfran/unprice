@@ -1,13 +1,13 @@
 export {
-  getFailedIngestionEventPayload,
-  getFailedIngestionEventPayloadInputSchema,
-  getFailedIngestionEventPayloadOutputSchema,
-} from "./get-failed-ingestion-event-payload"
+  getRejectedEventPayload,
+  getRejectedEventPayloadInputSchema,
+  getRejectedEventPayloadOutputSchema,
+} from "./get-rejected-event-payload"
 export type {
-  GetFailedIngestionEventPayloadDeps,
-  GetFailedIngestionEventPayloadInput,
-  GetFailedIngestionEventPayloadOutput,
-} from "./get-failed-ingestion-event-payload"
+  GetRejectedEventPayloadDeps,
+  GetRejectedEventPayloadInput,
+  GetRejectedEventPayloadOutput,
+} from "./get-rejected-event-payload"
 export {
   getIngestionStatus,
   getIngestionStatusCursorSchema,

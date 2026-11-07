@@ -5,9 +5,8 @@ import { toLedgerMinor } from "@unprice/money"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ServiceContext } from "../../context"
 import { LATE_EVENT_GRACE_MS } from "../../entitlements"
-import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
-import { RatingService } from "../../rating/service"
+import { RateCardService } from "../../rate-cards/service"
 import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
 import { billPeriod } from "../../use-cases/billing/bill-period"
 
@@ -98,13 +97,8 @@ describe("P0-D pay_in_advance capped wallet workflow", () => {
     const logger = createLogger()
     const ledger = new LedgerGateway({ db, logger })
     const wallet = new WalletService({ db, logger, ledgerGateway: ledger })
-    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+    const { payerBudgets } = createRecordedUsageFixture(db, {
       events: { quantity: 1200, amount: usageAmount },
-    })
-    const rating = new RatingService({
-      logger,
-      analytics,
-      grantsManager: new GrantsManager({ db, logger }),
     })
     const repo = new DrizzleSubscriptionRepository(db)
     const services = {
@@ -113,7 +107,10 @@ describe("P0-D pay_in_advance capped wallet workflow", () => {
       subscriptions: {},
     } as unknown as Pick<ServiceContext, "wallet" | "ledger" | "subscriptions">
 
-    const activationInputs = await deriveActivationInputsFromPlan(db, { projectId, subscriptionId })
+    const activationInputs = await deriveActivationInputsFromPlan(
+      { db, rateCards: new RateCardService({ db }) },
+      { projectId, subscriptionId }
+    )
     expect(activationInputs).toEqual({
       creditLinePolicy: "capped",
       grants: [{ amount: usageAmount, reason: "Period usage allowance", source: "credit_line" }],
@@ -142,12 +139,11 @@ describe("P0-D pay_in_advance capped wallet workflow", () => {
     })
 
     const startRun = await billPeriod({
-      reservationFlushGateway,
+      invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
       context: await loadSubscriptionContext(jan1),
       logger,
       db,
       repo,
-      ratingService: rating,
       ledgerService: ledger,
     })
     expect(startRun.phasesProcessed).toBe(1)
@@ -225,21 +221,19 @@ describe("P0-D pay_in_advance capped wallet workflow", () => {
     })
 
     const usageRun = await billPeriod({
-      reservationFlushGateway,
+      invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
       context: await loadSubscriptionContext(feb1 + LATE_EVENT_GRACE_MS + 1),
       logger,
       db,
       repo,
-      ratingService: rating,
       ledgerService: ledger,
     })
     const rerun = await billPeriod({
-      reservationFlushGateway,
+      invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
       context: await loadSubscriptionContext(feb1 + LATE_EVENT_GRACE_MS + 1),
       logger,
       db,
       repo,
-      ratingService: rating,
       ledgerService: ledger,
     })
     expect(usageRun.phasesProcessed).toBe(1)

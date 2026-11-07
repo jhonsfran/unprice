@@ -1,6 +1,4 @@
-import { LEDGER_SCALE } from "@unprice/money"
-import { dinero } from "dinero.js"
-import * as currencies from "dinero.js/currencies"
+import { AMOUNT_PATTERN, LEDGER_SCALE } from "@unprice/money"
 import { createInsertSchema, createSelectSchema } from "drizzle-zod"
 import * as z from "zod"
 import { ZodError } from "zod"
@@ -9,13 +7,13 @@ import { extendZodWithOpenApi } from "@asteasolutions/zod-to-openapi"
 import { planVersionFeatures } from "../schema/planVersionFeatures"
 import { FEATURE_TYPES_MAPS, USAGE_MODES_MAP } from "../utils"
 import { featureSelectBaseSchema } from "./features"
+import { featurePriceInputSchema } from "./rate-cards"
 import {
   billingConfigSchema,
   featureConfigType,
   meterConfigSchema,
   overageStrategySchema,
   resetConfigSchema,
-  tierModeSchema,
   typeFeatureSchema,
   unitSchema,
   usageModeSchema,
@@ -23,12 +21,10 @@ import {
 
 extendZodWithOpenApi(z)
 
-// Prices are validated against the ledger scale (LEDGER_SCALE = 8 decimal
-// places) on both ends: finer fractions would be silently truncated by the
-// ledger's numeric column, and a pre-decimal limit keeps the max encodable
-// minor-unit amount (10^8 × 10^8 = 10^16) safely below `Number.MAX_SAFE_INTEGER`
-// (~9.007 × 10^15). Single prices >$99,999,999 aren't realistic for SaaS;
-// revisit if they ever are.
+/**
+ * A decimal price string at the ledger scale (8 places). The monetization boundary writes prices
+ * in this form; they land on the plan version's rate card, never on the plan feature.
+ */
 export const priceSchema = z.coerce
   .string()
   .regex(
@@ -39,97 +35,17 @@ export const priceSchema = z.coerce
     `Price value as a decimal string. Up to 8 digits before the decimal point and up to ${LEDGER_SCALE} after (matches ledger scale). Examples: '9.99', '100', '0.50', '1234.56', '0.00000003'`
   )
 
-export const dineroSnapshotSchema = z
-  .object({
-    amount: z
-      .number()
-      .describe(
-        "The monetary amount in the smallest currency unit (e.g., cents for USD). Example: 999 represents $9.99"
-      ),
-    currency: z
-      .object({
-        code: z.string().describe("ISO 4217 currency code. Examples: 'USD', 'EUR', 'GBP'"),
-        base: z
-          .union([z.number(), z.number().array().readonly()])
-          .describe("The base of the currency system. Usually 10 for decimal currencies"),
-        exponent: z
-          .number()
-          .describe(
-            "Number of decimal places for the currency. Example: 2 for USD (cents), 0 for JPY"
-          ),
-      })
-      .describe("Currency configuration following ISO 4217 standards"),
-    scale: z
-      .number()
-      .describe(
-        "The precision scale for the monetary value. Determines how many decimal places are stored"
-      ),
-  })
-  .describe("Internal representation of a monetary value using the Dinero.js library format")
-
-export type DineroSnapshot = z.infer<typeof dineroSnapshotSchema>
-
-export const dineroSchema = z
-  .object({
-    dinero: dineroSnapshotSchema.describe(
-      "The internal Dinero.js representation of the price for precise calculations"
-    ),
-    displayAmount: priceSchema.describe(
-      "Human-readable price value as a decimal string. This is the value users see and input. Example: '9.99'"
-    ),
-  })
+/**
+ * Units of a usage feature free per statement period (ADR-0008 D5), a non-negative decimal string;
+ * null when nothing is included. Rating charges price(max(0, total - included)).
+ */
+export const includedUnitsSchema = z
+  .string()
+  .regex(AMOUNT_PATTERN, "a non-negative decimal string with at most 8 decimal places")
+  .nullable()
   .describe(
-    "Price object containing both the display value and internal monetary representation for precise currency calculations"
+    "Units free per statement period. Usage up to this quantity costs nothing; the rate card prices the rest. Only for usage features whose meter has no dimensions. Example: '1000'"
   )
-  .transform((data, ctx) => {
-    if (!data.dinero) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Invalid dinero object",
-        path: ["displayAmount"],
-        fatal: true,
-      })
-
-      return z.NEVER
-    }
-
-    const priceDisplay = data.displayAmount
-
-    // only rely on the currency code because the scale is not always the same
-    const currencyDinero = currencies[data.dinero.currency.code as keyof typeof currencies]
-
-    // recalculate the scale base on the currency
-    const precision = priceDisplay.split(".")[1]?.length ?? currencyDinero.exponent
-
-    // convert the price to the smallest unit
-    const amount = Math.round(Number(priceDisplay) * 10 ** precision)
-
-    const price = dinero({
-      amount: amount,
-      currency: currencyDinero,
-      scale: precision,
-    })
-
-    try {
-      // Cast to the unbranded snapshot shape so the zod output type stays
-      // currency-agnostic. In dinero 2.0.2, `currencies[code]` is typed with
-      // the full ISO union, which leaks into `.toJSON()` and would narrow
-      // every downstream consumer (CalculatedPrice, test fixtures, etc.).
-      return {
-        dinero: price.toJSON() as z.infer<typeof dineroSnapshotSchema>,
-        displayAmount: priceDisplay,
-      }
-    } catch {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Invalid dinero object",
-        path: ["displayAmount"],
-        fatal: true,
-      })
-
-      return z.NEVER
-    }
-  })
 
 export const planVersionFeatureMetadataSchema = z
   .object({
@@ -185,325 +101,69 @@ export const planVersionFeatureMetadataSchema = z
     "Additional configuration options controlling feature behavior, notifications, and visibility"
   )
 
-export const tiersSchema = z
-  .object({
-    unitPrice: dineroSchema.describe(
-      "Price charged per unit within this tier. Example: $0.10 per API call in the 1-1000 calls tier"
-    ),
-    flatPrice: dineroSchema.describe(
-      "Fixed price charged for entering this tier, regardless of units consumed. Example: $50 base fee for the 'Pro' tier"
-    ),
-    firstUnit: z.coerce
-      .number()
-      .int()
-      .min(1)
-      .describe(
-        "The starting unit number for this tier (inclusive). Must be 1 for the first tier, and consecutive with previous tier's lastUnit + 1 for subsequent tiers"
-      ),
-    lastUnit: z.coerce
-      .number()
-      .int()
-      .min(1)
-      .nullable()
-      .describe(
-        "The ending unit number for this tier (inclusive). Set to null for the final tier to indicate unlimited. Example: 1000 means this tier covers up to 1000 units"
-      ),
-    label: z
-      .string()
-      .optional()
-      .describe(
-        "Display name for this tier shown in pricing UI. Examples: 'Starter', 'Growth', 'Enterprise', '1-100 units'"
-      ),
-  })
-  .describe("Configuration for a single pricing tier defining unit ranges and associated pricing")
+/**
+ * How a plan feature is counted and sold. Its price lives on the plan version's rate card
+ * (ADR-0008 D2), so a feature carries no price, tiers, or currency.
+ */
+export const configFlatSchema = z
+  .object({})
+  .describe("Flat features need no configuration; the rate card prices them")
 
 export const configTierSchema = z
-  .object({
-    price: dineroSchema
-      .optional()
-      .describe("Base price for the feature. Not typically used in tier pricing mode"),
-    tierMode: tierModeSchema.describe(
-      "How tier pricing is calculated: 'volume' (all units priced at the tier they fall into) or 'graduated' (each unit priced at its respective tier)"
-    ),
-    tiers: z
-      .array(tiersSchema)
-      .describe(
-        "Array of pricing tiers defining price brackets. Tiers must be consecutive (no gaps or overlaps). The last tier's lastUnit should be null for unlimited"
-      ),
-    usageMode: usageModeSchema
-      .optional()
-      .describe("Usage calculation mode. Not typically used in tier-type features"),
-    units: unitSchema
-      .optional()
-      .describe("Number of units included. Not typically used in tier-type features"),
-  })
-  .describe(
-    "Configuration for tier-based pricing where different price rates apply to different volume ranges"
-  )
-  .superRefine((data, ctx) => {
-    const tiers = data.tiers
+  .object({})
+  .describe("Tier features need no configuration; the rate card holds their tiers")
 
-    for (let i = 0; i < tiers.length; i++) {
-      if (i > 0) {
-        const currentFirstUnit = tiers[i]?.firstUnit
-        const previousLastUnit = tiers[i - 1]?.lastUnit
+/** The keys of `configUsageSchema`, for schemas that extend them. */
+export const configUsageFieldsSchema = z.object({
+  usageMode: usageModeSchema.describe(
+    "How usage is sold: 'unit', 'tier' (graduated), or 'package'. The rate card holds the price"
+  ),
+  units: unitSchema
+    .optional()
+    .describe("Units in a package when usageMode is 'package'. Example: 100"),
+})
 
-        if (!currentFirstUnit) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: "firstUnit needs to be defined",
-            path: ["tiers", i, "firstUnit"],
-            fatal: true,
-          })
-
-          return
-        }
-
-        if (!previousLastUnit) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: "Only the last unit of the tiers can be null",
-            path: ["tiers", i - 1, "lastUnit"],
-            fatal: true,
-          })
-
-          return
-        }
-
-        if (!previousLastUnit) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: "lastUnit needs to be defined",
-            path: ["tiers", i - 1, "lastUnit"],
-            fatal: true,
-          })
-
-          return
-        }
-
-        if (currentFirstUnit > previousLastUnit + 1) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: "Tiers need to be consecutive",
-            path: ["tiers", i - 1, "lastUnit"],
-            fatal: true,
-          })
-
-          return
-        }
-        if (currentFirstUnit < previousLastUnit + 1) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: "Tiers cannot overlap",
-            path: ["tiers", i, "firstUnit"],
-            fatal: true,
-          })
-
-          return
-        }
-      }
+export const configUsageSchema = configUsageFieldsSchema
+  .superRefine((config, ctx) => {
+    // A package row prices whole packages of `units`; without it the feature cannot be priced.
+    if (config.usageMode === USAGE_MODES_MAP.package.code && config.units === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "A usage feature in package mode needs units: how many units one package holds",
+        path: ["units"],
+      })
     }
-
-    return
   })
-
-export const configUsageSchema = z
-  .object({
-    price: dineroSchema
-      .optional()
-      .describe(
-        "Price per unit when usageMode is 'unit' or 'package'. Required for unit/package modes, not used for tier mode"
-      ),
-    usageMode: usageModeSchema.describe(
-      "How usage is calculated and billed: 'unit' (per-unit pricing), 'tier' (volume-based tiers), or 'package' (bundle of units)"
-    ),
-    tierMode: tierModeSchema
-      .optional()
-      .describe(
-        "Tier calculation method when usageMode is 'tier': 'volume' or 'graduated'. Only applicable when usageMode is 'tier'"
-      ),
-    tiers: z
-      .array(tiersSchema)
-      .optional()
-      .describe(
-        "Pricing tiers for tier-based usage. Required when usageMode is 'tier'. Must be consecutive with no gaps"
-      ),
-    units: unitSchema
-      .optional()
-      .describe(
-        "Number of units in a package when usageMode is 'package'. Required for package mode. Example: 100 API calls per package"
-      ),
-  })
-  .describe(
-    "Configuration for usage-based (pay-as-you-go) pricing with support for per-unit, tiered, or package billing"
-  )
-  .superRefine((data, ctx) => {
-    if (data.usageMode === USAGE_MODES_MAP.unit.code) {
-      if (!data.price) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Price is required when usage mode is unit",
-          path: ["price"],
-          fatal: true,
-        })
-
-        return
-      }
-    }
-
-    if (data.usageMode === USAGE_MODES_MAP.package.code) {
-      if (!data.price) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Price is required when usage mode is unit",
-          path: ["price"],
-          fatal: true,
-        })
-
-        return
-      }
-
-      if (!data.units) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Units for the package is required",
-          path: ["unit"],
-          fatal: true,
-        })
-
-        return
-      }
-    }
-
-    if (data.usageMode === USAGE_MODES_MAP.tier.code) {
-      const tiers = data.tiers
-
-      if (!tiers || tiers.length === 0) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Tiers are required when usage mode is tier",
-          path: ["usageMode"], // TODO: check path
-          fatal: true,
-        })
-
-        return
-      }
-
-      for (let i = 0; i < tiers.length; i++) {
-        if (i > 0) {
-          const currentFirstUnit = tiers[i]?.firstUnit
-          const previousLastUnit = tiers[i - 1]?.lastUnit
-
-          if (!currentFirstUnit) {
-            ctx.addIssue({
-              code: z.ZodIssueCode.custom,
-              message: "firstUnit needs to be defined",
-              path: ["tiers", i, "firstUnit"],
-              fatal: true,
-            })
-
-            return
-          }
-
-          if (!previousLastUnit) {
-            ctx.addIssue({
-              code: z.ZodIssueCode.custom,
-              message: "Only the last unit of the tiers can be null",
-              path: ["tiers", i - 1, "lastUnit"],
-              fatal: true,
-            })
-
-            return
-          }
-
-          if (!previousLastUnit) {
-            ctx.addIssue({
-              code: z.ZodIssueCode.custom,
-              message: "lastUnit needs to be defined",
-              path: ["tiers", i - 1, "lastUnit"],
-              fatal: true,
-            })
-
-            return
-          }
-
-          if (currentFirstUnit > previousLastUnit + 1) {
-            ctx.addIssue({
-              code: z.ZodIssueCode.custom,
-              message: "Tiers need to be consecutive",
-              path: ["tiers", i - 1, "lastUnit"],
-              fatal: true,
-            })
-
-            return
-          }
-          if (currentFirstUnit < previousLastUnit + 1) {
-            ctx.addIssue({
-              code: z.ZodIssueCode.custom,
-              message: "Tiers cannot overlap",
-              path: ["tiers", i, "firstUnit"],
-              fatal: true,
-            })
-
-            return
-          }
-        }
-      }
-    }
-
-    return
-  })
-
-export const configFlatSchema = z
-  .object({
-    tiers: z
-      .array(tiersSchema)
-      .optional()
-      .describe("Not used for flat pricing. Will be removed during validation"),
-    price: dineroSchema.describe(
-      "The fixed price for this feature. This is the single price charged regardless of usage"
-    ),
-    usageMode: usageModeSchema
-      .optional()
-      .describe("Not used for flat pricing. Will be removed during validation"),
-    tierMode: tierModeSchema
-      .optional()
-      .describe("Not used for flat pricing. Will be removed during validation"),
-    units: unitSchema
-      .optional()
-      .describe("Not used for flat pricing. Will be removed during validation"),
-  })
-  .describe(
-    "Configuration for flat-rate pricing where a single fixed price is charged regardless of consumption"
-  )
+  .describe("Configuration for a usage-based feature")
 
 export const configPackageSchema = z
   .object({
-    tiers: z
-      .array(tiersSchema)
+    units: unitSchema
       .optional()
-      .describe("Not used for package pricing. Will be removed during validation"),
-    price: dineroSchema.describe(
-      "The price per package. Example: $10 per package of 100 API calls"
-    ),
-    usageMode: usageModeSchema
-      .optional()
-      .describe("Not used for package pricing. Will be removed during validation"),
-    tierMode: tierModeSchema
-      .optional()
-      .describe("Not used for package pricing. Will be removed during validation"),
-    units: unitSchema.describe(
-      "Number of units included in each package. Required. Example: 100 means each package includes 100 units"
-    ),
+      .describe(
+        "Number of units in each package. Example: 100 means each package includes 100 units"
+      ),
+  })
+  .superRefine((config, ctx) => {
+    // Checked here rather than by `unitSchema` so a missing size says what it is.
+    if (config.units === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "A package feature needs units: how many units one package holds",
+        path: ["units"],
+      })
+    }
+  })
+  .describe("Configuration for a package feature: the bundle size the rate card prices")
+
+/** Every key any feature type uses; `validatePlanVersionFeatureMutation` checks one per type. */
+export const configFeatureSchema = z
+  .object({
+    usageMode: usageModeSchema.optional(),
+    units: unitSchema.optional(),
   })
   .describe(
-    "Configuration for package pricing where customers purchase bundles of units at a fixed price per bundle"
-  )
-
-export const configFeatureSchema = z
-  .union([configFlatSchema, configTierSchema, configUsageSchema, configPackageSchema])
-  .describe(
-    "Feature pricing configuration. The schema used depends on the featureType: 'flat' uses configFlatSchema, 'tier' uses configTierSchema, 'usage' uses configUsageSchema, 'package' uses configPackageSchema"
+    "Feature configuration. 'usage' needs usageMode, 'package' needs units, 'flat' and 'tier' need nothing. Prices live on the plan version's rate card"
   )
 
 export type ConfigFeatureVersionType = z.infer<typeof configFeatureSchema>
@@ -550,7 +210,7 @@ export const planVersionFeatureSelectBaseSchema = createSelectSchema(planVersion
       ),
   featureType: () =>
     typeFeatureSchema.describe(
-      "The pricing model type: 'flat' (fixed price), 'tier' (volume-based tiers), 'usage' (pay-as-you-go), or 'package' (bundle pricing)"
+      "The pricing model type: 'flat' (fixed price), 'tier' (graduated tiers), 'usage' (pay-as-you-go), or 'package' (bundle pricing)"
     ),
   unitOfMeasure: () =>
     z
@@ -562,20 +222,8 @@ export const planVersionFeatureSelectBaseSchema = createSelectSchema(planVersion
     billingConfigSchema.describe(
       "Billing cycle configuration including interval (month/year), billing anchor date, and plan type (recurring/onetime)"
     ),
+  included: () => includedUnitsSchema,
 })
-
-export const parseFeaturesConfig = (feature: PlanVersionFeature) => {
-  switch (feature.featureType) {
-    case FEATURE_TYPES_MAPS.flat.code:
-      return configFlatSchema.parse(feature.config)
-    case FEATURE_TYPES_MAPS.tier.code:
-      return configTierSchema.parse(feature.config)
-    case FEATURE_TYPES_MAPS.usage.code:
-      return configUsageSchema.parse(feature.config)
-    default:
-      throw new Error("Feature type not supported")
-  }
-}
 
 const planVersionFeatureMutationBaseObject = createInsertSchema(planVersionFeatures, {
   config: () =>
@@ -628,6 +276,7 @@ const planVersionFeatureMutationBaseObject = createInsertSchema(planVersionFeatu
       .describe(
         "Maximum usage allowed per billing period. Leave undefined for unlimited. Example: 10000 for max 10,000 API calls"
       ),
+  included: () => includedUnitsSchema.optional(),
   type: () =>
     featureConfigType
       .optional()
@@ -648,46 +297,22 @@ const normalizePlanVersionFeatureMutation = <
   data: T
 ) => {
   if (data.config && data.featureType) {
-    // remove unnecessary fields
+    // keep only the keys the feature type uses
     switch (data.featureType) {
       case FEATURE_TYPES_MAPS.flat.code:
-        delete data.config.tiers
-        delete data.config.tierMode
-        delete data.config.usageMode
-        delete data.config.units
-        return data
-
-      case FEATURE_TYPES_MAPS.package.code:
-        delete data.config.usageMode
-        delete data.config.tiers
-        delete data.config.tierMode
-        delete data.config.usageMode
-
-        return data
-
       case FEATURE_TYPES_MAPS.tier.code:
-        delete data.config.price
-        delete data.config.usageMode
-        delete data.config.units
-
+        data.config = {}
         return data
-
+      case FEATURE_TYPES_MAPS.package.code:
+        data.config = { units: data.config.units }
+        return data
       case FEATURE_TYPES_MAPS.usage.code:
-        if (data.config.usageMode === USAGE_MODES_MAP.unit.code) {
-          delete data.config.tierMode
-          delete data.config.tiers
+        data.config = {
+          usageMode: data.config.usageMode,
+          ...(data.config.usageMode === USAGE_MODES_MAP.package.code && data.config.units
+            ? { units: data.config.units }
+            : {}),
         }
-
-        if (data.config.usageMode === USAGE_MODES_MAP.tier.code) {
-          delete data.config.price
-          delete data.config.units
-        }
-
-        if (data.config.usageMode === USAGE_MODES_MAP.package.code) {
-          delete data.config.tierMode
-          delete data.config.tiers
-        }
-
         return data
       default:
         throw new Error("Feature type not supported")
@@ -707,6 +332,7 @@ const validatePlanVersionFeatureMutation = ({
     featureType?: z.infer<typeof typeFeatureSchema>
     meterConfig?: z.infer<typeof meterConfigSchema> | null
     config?: z.infer<typeof configFeatureSchema>
+    included?: string | null
   }
   ctx: z.RefinementCtx
   validateConfigWithoutFeatureType?: boolean
@@ -717,6 +343,49 @@ const validatePlanVersionFeatureMutation = ({
       code: z.ZodIssueCode.custom,
       message: "Meter config is only supported for usage features",
       path: ["meterConfig"],
+      fatal: true,
+    })
+
+    return false
+  }
+
+  // ADR-0008 D5: an allowance needs one quantity and no dimensions; across models it is a grant.
+  if (data.included !== undefined && data.included !== null) {
+    if (data.featureType && data.featureType !== FEATURE_TYPES_MAPS.usage.code) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Included units are only supported for usage features",
+        path: ["included"],
+        fatal: true,
+      })
+
+      return false
+    }
+
+    if ((data.meterConfig?.groupBy?.length ?? 0) > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Included units need a meter without dimensions; use a money or credit grant",
+        path: ["included"],
+        fatal: true,
+      })
+
+      return false
+    }
+  }
+
+  // A row with dimensions is a unit price (validateCard: TIERED_WITH_DIMENSIONS), so tiers and
+  // packages need a meter without dimensions.
+  if (
+    (data.meterConfig?.groupBy?.length ?? 0) > 0 &&
+    data.config?.usageMode !== undefined &&
+    data.config.usageMode !== USAGE_MODES_MAP.unit.code
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        "A feature whose price varies by a dimension is priced per unit; tiers and packages need a meter without dimensions",
+      path: ["config", "usageMode"],
       fatal: true,
     })
 
@@ -833,6 +502,11 @@ export const planVersionFeatureUpdateBaseSchema = planVersionFeatureMutationBase
   })
   .extend({
     aggregationMethod: z.never().optional(),
+    /**
+     * The feature's price on the version's own rate card (ADR-0008 D2). Absent leaves the price
+     * as it is, null leaves the feature unpriced, a value publishes its default row.
+     */
+    price: featurePriceInputSchema.nullable().optional(),
   })
   .superRefine((data, ctx) => {
     validatePlanVersionFeatureMutation({ data, ctx })

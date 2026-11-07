@@ -7,6 +7,23 @@ export type BudgetOperation = BudgetInspection["closedRecently"][number]
 /** One line of an operation row: what happened, to which id, for how much, and when. */
 export type OperationLine = { kind: string; id: string; detail: string; at: number }
 
+type SettledHold = Extract<
+  Extract<BudgetOperation, { kind: "hold" }>["state"],
+  { status: "settled" }
+>
+
+/**
+ * A settle against its hold. The budget settles an expired hold: an estimate at its event's price,
+ * else in full, or in full and unbilled when no statement could take the estimate.
+ */
+function settleDetail(state: SettledHold, held: string, amount: (value: string) => string) {
+  const actual = amount(state.actual)
+  if (!state.byExpiry) return `${actual} of ${amount(held)} held`
+  if (state.unbilled) return `${actual} (expired, unbilled: ${state.unbilled.reason})`
+  if (state.priced) return `${actual} of ${amount(held)} held (expired, billed at its price)`
+  return `${actual} (expired, charged in full)`
+}
+
 export function describeOperation(operation: BudgetOperation, unit: string): OperationLine {
   const amount = (value: string) => formatBudgetAmount(value, unit)
 
@@ -31,9 +48,7 @@ export function describeOperation(operation: BudgetOperation, unit: string): Ope
     return {
       kind: "settle",
       id: operation.id,
-      detail: state.byExpiry
-        ? `${amount(state.actual)} (expired, charged in full)`
-        : `${amount(state.actual)} of ${amount(operation.amount)} held`,
+      detail: settleDetail(state, operation.amount, amount),
       at: state.closedAt,
     }
   }

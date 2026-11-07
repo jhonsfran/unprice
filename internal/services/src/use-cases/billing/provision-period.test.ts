@@ -13,8 +13,7 @@ import { activateSubscription } from "./provision-period"
 //   - Issues additive `wallet_credits` rows (plan_included / trial / credit_line / promo / manual)
 //   - Flips the subscription to `active`
 //
-// Reservations are owned by the EntitlementWindowDO (lazy on first priced
-// event). Base fees settle through the invoicing flow at period boundaries.
+// Usage is priced by the payer budget (BudgetDO) as it lands. Base fees settle through the invoicing flow at period boundaries.
 // Both are out of scope for these tests.
 // ---------------------------------------------------------------------------
 

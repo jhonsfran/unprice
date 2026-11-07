@@ -6,15 +6,23 @@ import {
   type BudgetBalance,
   type BudgetInspectQuery,
   type BudgetOutcome,
+  type BudgetRejection,
   type BudgetSnapshot,
+  type Operation,
   type OutcomeOf,
+  type ReservationOperation,
   type UnPriceBudgetError,
+  type Usage,
+  type WindowPeriod,
   formatBudgetConfig,
 } from "@unprice/services/budgets"
 import {
   type BudgetAddress,
   type BudgetVerbRequest,
+  type ExecuteBudgetCommandDeps,
   executeBudgetCommand,
+  rateCardSource,
+  walletFunding,
 } from "@unprice/services/use-cases"
 import type { Context } from "hono"
 import { setMetric } from "hono/timing"
@@ -24,6 +32,12 @@ import type { HonoEnv } from "~/hono/env"
 import { CloudflareBudgetClient } from "~/ingestion/budget/client"
 
 export const BUDGET_REMAINING_HEADER = "Unprice-Budget-Remaining"
+
+/**
+ * Keys Unprice writes itself: a customer's subscription budget is `unprice:customer:<customerId>`
+ * (ADR-0008 D1). A public call may read and spend under one, never create or define it.
+ */
+export const RESERVED_KEY_PREFIX = "unprice:"
 
 /**
  * Runs one verb against the budget at `key` and sets the remaining header. Authenticates a runtime
@@ -37,22 +51,38 @@ export async function runBudgetVerb<R extends BudgetVerbRequest>(
   apiKey?: Pick<ApiKeyExtended, "projectId">
 ) {
   const { projectId } = apiKey ?? (await keyAuth(c))
-  const budgets = new CloudflareBudgetClient(c.env)
-  const { budgetCatalog } = c.get("services")
-  const result = await callBudget(c, request.type, () =>
-    executeBudgetCommand(
-      {
-        budgets,
-        services: { budgetCatalog },
-        logger: c.get("logger"),
-        waitUntil: c.get("waitUntil"),
-      },
-      { projectId, key, request }
-    )
+  const defines = request.type === "upsert" || ("ifMissing" in request && request.ifMissing)
+  if (defines && key.startsWith(RESERVED_KEY_PREFIX)) {
+    throw new UnpriceApiError({
+      code: "FORBIDDEN",
+      message: `Keys starting with ${RESERVED_KEY_PREFIX} are written by Unprice; a call cannot create or upsert one`,
+    })
+  }
+  const result = await callBudget(
+    c,
+    request.type,
+    () => executeBudgetCommand(budgetCommandDeps(c), { projectId, key, request }),
+    resultOutcome
   )
   if (result.err) throw budgetApiError(c, result.err)
-  setRemaining(c, result.val)
+  setBudgetRemaining(c, result.val)
   return result.val
+}
+
+/**
+ * What `executeBudgetCommand` needs in the API worker: the budget's Durable Object, the card source
+ * and wallet for a refresh or a prepaid reserve, and the catalog for new budget facts.
+ */
+export function budgetCommandDeps(c: Context<HonoEnv>): ExecuteBudgetCommandDeps {
+  const { budgetCatalog, rateCards, wallet } = c.get("services")
+  return {
+    budgets: new CloudflareBudgetClient(c.env),
+    cards: rateCardSource(rateCards),
+    wallet: walletFunding(wallet),
+    services: { budgetCatalog },
+    logger: c.get("logger"),
+    waitUntil: c.get("waitUntil"),
+  }
 }
 
 /**
@@ -65,31 +95,56 @@ export async function inspectBudget(
   query: BudgetInspectQuery
 ) {
   const budgets = new CloudflareBudgetClient(c.env)
-  const result = await callBudget(c, "inspect", () => budgets.inspect(address, query))
+  const result = await callBudget(
+    c,
+    "inspect",
+    () => budgets.inspect(address, query),
+    resultOutcome
+  )
   if (result.err) throw budgetApiError(c, result.err)
   return result.val
 }
 
 /**
- * Runs one call on the budget's Durable Object and reports it on the request's wide event
- * (`budget_*` in Axiom) and on Server-Timing. Timed by hand, apart from key auth and the rest of
- * the Worker.
+ * How a budget call went, for the wide event: `outcome` is "ok" or the rejection code. A call that
+ * carries a batch counts each event's outcome in `outcomes`; its `outcome` is the one they share,
+ * or "mixed".
  */
-async function callBudget<T>(
+export type BudgetCallOutcome = Readonly<{ outcome: string; outcomes?: Record<string, number> }>
+
+const resultOutcome = (result: Result<unknown, UnPriceBudgetError>): BudgetCallOutcome => ({
+  outcome: result.err ? result.err.rejection.code : "ok",
+})
+
+/** The outcome of a batch from each event's outcome. */
+export function batchOutcome(outcomes: readonly string[]): BudgetCallOutcome {
+  const counts: Record<string, number> = {}
+  for (const outcome of outcomes) counts[outcome] = (counts[outcome] ?? 0) + 1
+  const distinct = Object.keys(counts)
+  return { outcome: distinct.length === 1 ? (distinct[0] as string) : "mixed", outcomes: counts }
+}
+
+/**
+ * Runs budget work (one call on a budget's Durable Object, or a batch of them) and reports it once
+ * on the request's wide event (`budget_*` in Axiom) and on Server-Timing as `budget`. Timed by
+ * hand, apart from key auth and the rest of the Worker; a thrown call reports outcome "error".
+ */
+export async function callBudget<T>(
   c: Context<HonoEnv>,
   command: string,
-  call: () => Promise<Result<T, UnPriceBudgetError>>
-) {
+  call: () => Promise<T>,
+  outcomeOf: (value: T) => BudgetCallOutcome
+): Promise<T> {
   const startedAt = performance.now()
-  let outcome = "error"
+  let reported: BudgetCallOutcome = { outcome: "error" }
   try {
-    const result = await call()
-    outcome = result.err ? result.err.rejection.code : "ok"
-    return result
+    const value = await call()
+    reported = outcomeOf(value)
+    return value
   } finally {
     const doMs = performance.now() - startedAt
     setMetric(c, "budget", doMs)
-    c.get("logger").set({ budget: { command, outcome, do_ms: doMs } })
+    c.get("logger").set({ budget: { command, ...reported, do_ms: doMs } })
   }
 }
 
@@ -115,6 +170,50 @@ function wire(value: unknown): unknown {
   return value
 }
 
+// The public wire carries amounts only. The core counts a usage vector (the amount and a quantity
+// per feature), so every vector projects to its amount here, and a limit that caps a quantity names
+// its `feature`, as `formatBudgetConfig` does.
+
+export function amountToWire(usage: Usage): string {
+  return formatAmount(usage.amount)
+}
+
+export function balanceToWire({ remaining, held, limits, asOf }: BudgetBalance) {
+  return {
+    remaining: remaining === null ? null : formatAmount(remaining),
+    held: amountToWire(held),
+    limits: limits.map(({ measure, ...limit }) => ({
+      ...toWire(limit),
+      ...(measure.type === "quantity" && { feature: measure.feature }),
+    })),
+    asOf,
+  }
+}
+
+export function periodToWire({ consumed, ...period }: WindowPeriod) {
+  return { ...period, consumed: amountToWire(consumed) }
+}
+
+/** A hold or lease row as the dashboard's inspection reads it. */
+export function reservationToWire(row: ReservationOperation) {
+  if (row.kind === "lease") return toWire(row)
+  const { reserved, state, ...hold } = row
+  return {
+    // An estimate carries the bigints of the event it priced.
+    ...toWire(hold),
+    amount: amountToWire(reserved),
+    state:
+      state.status === "settled" ? { ...toWire(state), actual: amountToWire(state.actual) } : state,
+  }
+}
+
+/** An operation row as the dashboard's inspection reads it. */
+export function operationToWire(row: Operation) {
+  if (row.kind === "hold" || row.kind === "lease") return reservationToWire(row)
+  const { usage, ...operation } = row
+  return { ...toWire(operation), amount: amountToWire(usage) }
+}
+
 /**
  * A budget on the wire: its config with every default filled, amounts as decimals, and closesAt in
  * epoch ms, as `formatBudgetConfig` returns it.
@@ -122,14 +221,40 @@ function wire(value: unknown): unknown {
 export function budgetToWire(budget: BudgetSnapshot) {
   const { key, unit, version, closed, balance, operations } = budget
   const config = formatBudgetConfig(budget)
-  return { key, unit, version, ...config, closed, balance: toWire(balance), operations }
+  return { key, unit, version, ...config, closed, balance: balanceToWire(balance), operations }
 }
 
 const exceededDetails = (blocked: Blocked, balance: BudgetBalance) => ({
   kind: "budget_exceeded" as const,
   blocked: toWire(blocked),
-  balance: toWire(balance),
+  balance: balanceToWire(balance),
 })
+
+export function releaseToWire({
+  released,
+  balance,
+  ...outcome
+}: Omit<OutcomeOf<"release">, "type">) {
+  return { ...toWire(outcome), released: amountToWire(released), balance: balanceToWire(balance) }
+}
+
+/** A charge or record: the amount it consumed. */
+export function consumedToWire({
+  usage,
+  balance,
+  ...outcome
+}: Omit<OutcomeOf<"charge"> | OutcomeOf<"record">, "type" | "created">) {
+  return { ...toWire(outcome), amount: amountToWire(usage), balance: balanceToWire(balance) }
+}
+
+/** An admission rejection as `details` carries it, with its code instead of a kind. */
+export function admissionToWire(
+  rejection: Extract<BudgetRejection, { code: "BUDGET_CLOSED" | "LIMIT_EXCEEDED" }>
+) {
+  if (rejection.code === "BUDGET_CLOSED") return rejection
+  const { kind: _, ...details } = exceededDetails(rejection.blocked, rejection.balance)
+  return { code: rejection.code, ...details }
+}
 
 const closedDetails = (closedAt: number) => ({ kind: "budget_closed" as const, closedAt })
 
@@ -147,18 +272,32 @@ export function extensionToWire(
   return { ...wire, denied: details }
 }
 
-function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): UnpriceApiError {
+/** The HTTP error a budget rejection maps to; a denial also sets the remaining header. */
+export function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): UnpriceApiError {
+  if (error.rejection.code === "LIMIT_EXCEEDED") setBudgetRemaining(c, error.rejection)
+  return budgetRejectionError(error)
+}
+
+/**
+ * The HTTP error a budget rejection maps to: a denial (LIMIT_EXCEEDED, WALLET_EMPTY) is 402, a
+ * request the budget cannot take as sent is 400, a missing budget or record 404, a state
+ * conflict (TOO_LATE, PERIOD_CLOSED, NO_STATEMENT, IDEMPOTENCY_CONFLICT, BUDGET_CLOSED) 409, and a
+ * wallet that refused its funding (FUNDING_FAILED) 500.
+ */
+export function budgetRejectionError(error: UnPriceBudgetError): UnpriceApiError {
   const { rejection } = error
   const message = error.message
   switch (rejection.code) {
     case "LIMIT_EXCEEDED":
-      setRemaining(c, rejection)
       return new UnpriceApiError({
         code: "BUDGET_EXCEEDED",
         message,
         cause: error,
         details: exceededDetails(rejection.blocked, rejection.balance),
       })
+    // A prepaid payer's wallet could not fund the usage: a denial like a limit, without its details.
+    case "WALLET_EMPTY":
+      return new UnpriceApiError({ code: "BUDGET_EXCEEDED", message, cause: error })
     case "BUDGET_CLOSED":
       return new UnpriceApiError({
         code: "CONFLICT",
@@ -212,22 +351,53 @@ function budgetApiError(c: Context<HonoEnv>, error: UnPriceBudgetError): Unprice
     case "HOLD_RETIRED":
     case "UNIT_IMMUTABLE":
     case "LIMIT_WINDOW_IMMUTABLE":
+    case "LIMIT_MEASURE_IMMUTABLE":
     case "TOO_LATE":
     case "LEASE_CLOSED":
     case "LEASE_SEQ_CONFLICT":
     case "LEASE_CAPTURE_OUT_OF_RANGE":
+    case "PERIOD_CLOSED":
+    case "NO_STATEMENT":
+    case "STATEMENT_CONFLICT":
+    case "STATEMENT_OVERLAP":
+    case "STATEMENT_NOT_SEALED":
+    case "UNIT_MISMATCH":
+    case "CARD_INCOMPATIBLE":
+    case "INCLUDED_NOT_APPLICABLE":
+    case "RESERVATIONS_OPEN":
+    // Reaches a caller only when the refresh before the retry was itself stale; a retry refreshes.
+    case "CARDS_STALE":
+    // Internal to the funding protocol; reaches a caller only when a concurrent call raced it.
+    case "FUNDING_REQUIRED":
+    case "FUNDING_SEQ_CONFLICT":
       return new UnpriceApiError({ code: "CONFLICT", message, cause: error })
     case "BUDGET_NOT_FOUND":
     case "HOLD_NOT_FOUND":
     case "LEASE_NOT_FOUND":
+    case "STATEMENT_NOT_FOUND":
+    case "CARD_NOT_FOUND":
       return new UnpriceApiError({ code: "NOT_FOUND", message, cause: error })
+    // The wallet side needs an operator: the caller cannot fix it, and the detail stays in the logs.
+    case "FUNDING_FAILED":
+      return new UnpriceApiError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "The customer's wallet could not fund this usage",
+        cause: error,
+      })
     case "INVALID_TTL":
     case "INVALID_OCCURRED_AT":
+    case "INVALID_USAGE":
+    case "NOT_PRICED":
+    case "UNKNOWN_EVENT":
+    case "EVENT_REQUIRED":
       return new UnpriceApiError({ code: "BAD_REQUEST", message, cause: error })
   }
 }
 
-function setRemaining(c: Context<HonoEnv>, carrier: BudgetOutcome | { balance: BudgetBalance }) {
+export function setBudgetRemaining(
+  c: Context<HonoEnv>,
+  carrier: BudgetOutcome | { balance: BudgetBalance }
+) {
   const balance =
     "budget" in carrier ? carrier.budget.balance : "balance" in carrier ? carrier.balance : null
   if (!balance) return

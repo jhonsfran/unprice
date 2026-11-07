@@ -2,7 +2,7 @@
 
 import type { ColumnDef } from "@tanstack/react-table"
 
-import type { analytics } from "@unprice/analytics/client"
+import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Badge } from "@unprice/ui/badge"
 import {
   Drawer,
@@ -24,7 +24,7 @@ import { useTRPC } from "~/trpc/client"
 import { PageForm } from "../../../pages/_components/page-form"
 import { PlanVersionForm } from "../../../plans/[planSlug]/_components/plan-version-form"
 
-type PlanConversion = Awaited<ReturnType<typeof analytics.getPlansConversion>>["data"][number]
+type PlanConversion = RouterOutputs["analytics"]["getPlansConversion"]["data"][number]
 
 export const columns: ColumnDef<PlanConversion>[] = [
   {

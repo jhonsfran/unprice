@@ -154,8 +154,8 @@ Avoid until proven:
 - Enterprise revenue recognition, tax, or accounting replacement.
 - "AI agent platform" or ownership of prompts, tools, memory, traces, or deployments.
 - Infrastructure-agnostic self-hosting (VPS, docker-compose, Kubernetes) — the runtime deploys to
-  the buyer's own Cloudflare account today (Workers, Durable Objects, Queues, Pipelines) and uses
-  Tinybird for usage analytics.
+  the buyer's own Cloudflare account today (Workers, Durable Objects, Queues, Pipelines), with
+  usage analytics on R2 read through Basin SQL.
 
 ## Payments And Business Model
 
@@ -168,7 +168,7 @@ Unprice is open-core: an AGPL-3.0 open-source core plus a Commercial License for
 open-source their modifications or want dedicated support.
 
 Hosting boundary: the runtime deploys to the buyer's own Cloudflare account (Workers, Durable
-Objects, Queues, Pipelines); usage analytics run on Tinybird. Say "run it in your own Cloudflare
+Objects, Queues, Pipelines); usage analytics run on R2 with Basin SQL. Say "run it in your own Cloudflare
 account," not unqualified "self-host," until a portable runtime ships.
 
 ## Brand Personality

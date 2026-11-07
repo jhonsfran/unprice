@@ -1,458 +1,405 @@
-import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
+import { type RateCard, rateRowSchema } from "@unprice/db/validators"
 import { FetchError, Ok } from "@unprice/error"
 import { dinero } from "dinero.js"
 import * as currencies from "dinero.js/currencies"
 import { describe, expect, it, vi } from "vitest"
+import { journalAnalytics } from "../../analytics/journal.fixture"
 import type { LedgerGateway } from "../../ledger"
-import { ExplainChargeError, explainCharge } from "./explain-charge"
+import { ExplainChargeError, type ExplainChargeInput, explainCharge } from "./explain-charge"
+
+const now = 1_702_600_000_000
+
+/** A journaled record as the budget exported it: amounts as decimal strings. */
+function journalRow(opts: {
+  key: string
+  at: number
+  quantity: string
+  amount: string
+  periodId?: string
+  lines?: number
+}) {
+  const data = {
+    kind: "record",
+    id: `o:${opts.key}`,
+    idempotencyKey: opts.key,
+    usage: { amount: opts.amount, quantities: { tokens: opts.quantity } },
+    createdAt: opts.at + 5,
+    crossed: [],
+    priced: pricedEvent(opts),
+  }
+  return {
+    operation_id: `o:hash_${opts.key}`,
+    timestamp: new Date(opts.at + 5).toISOString(),
+    data: JSON.stringify(data),
+  }
+}
+
+/** A settled hold as the budget exported it: its priced event on the state, not on the row. */
+function settledHoldRow(opts: { key: string; at: number; quantity: string; amount: string }) {
+  const data = {
+    kind: "hold",
+    id: "h_7",
+    idempotencyKey: opts.key,
+    reserved: { amount: "10", quantities: {} },
+    ttlMs: null,
+    createdAt: opts.at,
+    expiresAt: opts.at + 60_000,
+    state: {
+      status: "settled",
+      closedAt: opts.at + 30_000,
+      actual: { amount: opts.amount, quantities: { tokens: opts.quantity } },
+      crossed: [],
+      priced: pricedEvent(opts),
+    },
+  }
+  return {
+    operation_id: "h_7",
+    timestamp: new Date(opts.at + 30_000).toISOString(),
+    data: JSON.stringify(data),
+  }
+}
+
+function pricedEvent(opts: {
+  at: number
+  quantity: string
+  amount: string
+  periodId?: string
+  lines?: number
+}) {
+  return {
+    slug: "tokens.used",
+    properties: { tokens: Number(opts.quantity) },
+    at: opts.at,
+    features: [
+      {
+        featureSlug: "tokens",
+        periodId: opts.periodId ?? "tokens:bp_1",
+        late: false,
+        cardId: "card_1",
+        rowId: "row_1",
+        lines: Array.from({ length: opts.lines ?? 1 }, () => ({
+          positionKey: '["tokens","",null]',
+          property: null,
+          before: "0",
+          after: opts.quantity,
+          amount: opts.amount,
+          cost: null,
+        })),
+        meterQuantity: opts.quantity,
+        amount: opts.amount,
+        cost: null,
+      },
+    ],
+  }
+}
+
+/** Basin's answer: the page for the events query, `total` for the count query. */
+function statementJournal(page: unknown[], total: number | string = page.length) {
+  return (sql: string) =>
+    sql.endsWith("SELECT COUNT(*) AS events\nFROM statement") ? [{ events: total }] : page
+}
+
+const defaultJournal = [
+  journalRow({ key: "evt_2", at: 1_700_086_400_000, quantity: "50", amount: "1.75", lines: 2 }),
+  journalRow({ key: "evt_1", at: 1_700_000_000_000, quantity: "100", amount: "2.5" }),
+]
 
 describe("explainCharge", () => {
-  it("explains an invoice line from ledger metadata and rated meter facts", async () => {
-    const { db, ledger, analytics } = makeDeps()
+  it("explains a metered line from its billed statement and the journal's events", async () => {
+    const { db, ledger } = makeDeps({ lineMetadata: { ...usageMetadata(), cost_usd: 120_000_000 } })
+    const { analytics, queries } = journalAnalytics(statementJournal(defaultJournal))
 
     const result = await explainCharge(
-      { db, ledger, analytics },
-      {
-        projectId: "proj_1",
-        invoiceId: "inv_1",
-        entryId: "entry_1",
-        limit: 100,
-        offset: 0,
-      }
+      { db, ledger, analytics, rateCards, now: () => now },
+      input()
     )
 
+    expect(queries).toHaveLength(2)
+    for (const sql of queries) {
+      expect(sql).toContain("AND budget_key = 'unprice:customer:cus_1'")
+      expect(sql).toContain("AND kind IN ('charge', 'record', 'hold')")
+      expect(sql).toContain("json_get_str(features, 0, 'periodId') = 'tokens:bp_1'")
+      expect(sql).toContain("AND timestamp >= '2023-11-14T22:13:20.000Z'")
+    }
     expect(result.err).toBeUndefined()
-    expect(result.val?.line.billingPeriodId).toBe("bp_1")
-    expect(result.val?.scope.featureSlug).toBe("tokens")
-    expect(result.val?.scope.customerEntitlementId).toBe("ce_1")
-    expect(result.val?.summary.eventCount).toBe(2)
-    expect(result.val?.events).toHaveLength(2)
+    expect(result.val?.scope).toMatchObject({
+      featureSlug: "tokens",
+      periodKey: "tokens:bp_1",
+      customerEntitlementId: "ce_1",
+    })
+    expect(result.val?.summary).toEqual({
+      eventCount: 2,
+      totalUsage: 150,
+      totalAmount: 425_000_000,
+      latestAmountAfter: 425_000_000,
+      costUsd: 120_000_000,
+      currency: "USD",
+      amountScale: 8,
+      firstEventAt: 1_700_000_000_000,
+      lastEventAt: 1_700_086_400_000,
+      multiComponentEventCount: 1,
+    })
+    expect(result.val?.events[1]).toEqual({
+      event_id: "evt_1",
+      idempotency_key: "evt_1",
+      customer_entitlement_id: "ce_1",
+      grant_id: "",
+      feature_plan_version_id: "fpv_1",
+      feature_slug: "tokens",
+      period_key: "tokens:bp_1",
+      event_slug: "tokens.used",
+      aggregation_method: "sum",
+      timestamp: 1_700_000_000_000,
+      created_at: 1_700_000_000_005,
+      delta: 100,
+      value_after: 100,
+      amount: 250_000_000,
+      amount_after: 250_000_000,
+      amount_scale: 8,
+      currency: "USD",
+      priced_at: 1_700_000_000_000,
+      tier_index: null,
+      pricing_component_count: 1,
+      source_type: "api_key",
+      source_id: "o:hash_evt_1",
+    })
     expect(result.val?.pagination.hasMore).toBe(false)
     expect(result.val?.answer).toContain("$4.25")
-    expect(result.val?.answer).not.toContain("425000000")
-    expect(result.val?.answer).not.toContain("entry_1")
-    expect(result.val?.answer).not.toContain("inv_1")
-    expect(result.val?.answer).not.toContain("onetime:")
-    expect(result.val?.pricing).toMatchObject({
-      featureType: "usage",
-      usageMode: "unit",
-      description: "Unit pricing: 0.01 USD per token",
-      rows: [{ label: "Unit price", value: "0.01 USD / token" }],
-    })
     expect(result.val?.evidence).toContainEqual({ type: "ledger_line", id: "entry_1" })
     expect(result.val?.evidence).toContainEqual({ type: "billing_period", id: "bp_1" })
     expect(result.val?.evidence).toContainEqual({ type: "meter_fact", id: "evt_1" })
-
-    expect(analytics.getExplainChargeSummary).toHaveBeenCalledWith({
-      project_id: "proj_1",
-      customer_id: "cus_1",
-      feature_slug: "tokens",
-      period_key: "onetime:1700000000000",
-      customer_entitlement_id: "ce_1",
-    })
-    expect(analytics.getExplainChargeEvents).toHaveBeenCalledWith({
-      project_id: "proj_1",
-      customer_id: "cus_1",
-      feature_slug: "tokens",
-      period_key: "onetime:1700000000000",
-      customer_entitlement_id: "ce_1",
-      limit: 100,
-      offset: 0,
-    })
   })
 
-  it("explains grouped invoice statement rows", async () => {
+  it("sums grouped invoice rows into one line", async () => {
     const groupEntryId = "group:bp_1:si_1:subscription:provider:due:collectable"
-    const { db, ledger, analytics } = makeDeps({
-      summaryRows: [summaryRow({ event_count: 2, total_delta: 999, total_amount: 999 })],
+    const metadata = { ...usageMetadata(), subscription_item_id: "si_1" }
+    const { db, ledger } = makeDeps({
       lines: [
         line({
           entryId: "entry_1",
           quantity: 100,
           amount: dinero({ amount: 250_000_000, currency: currencies.USD, scale: 8 }),
-          metadata: {
-            kind: "subscription",
-            billing_period_id: "bp_1",
-            subscription_item_id: "si_1",
-          },
+          metadata,
         }),
         line({
           entryId: "entry_2",
           quantity: 50,
           amount: dinero({ amount: 175_000_000, currency: currencies.USD, scale: 8 }),
-          metadata: {
-            kind: "subscription",
-            billing_period_id: "bp_1",
-            subscription_item_id: "si_1",
-          },
+          metadata,
         }),
       ],
     })
+    const { analytics } = journalAnalytics(statementJournal(defaultJournal))
 
     const result = await explainCharge(
-      { db, ledger, analytics },
-      {
-        projectId: "proj_1",
-        invoiceId: "inv_1",
-        entryId: groupEntryId,
-        limit: 100,
-        offset: 0,
-      }
+      { db, ledger, analytics, rateCards, now: () => now },
+      input({ entryId: groupEntryId })
     )
 
-    expect(result.err).toBeUndefined()
-    expect(result.val?.line.entryId).toBe(groupEntryId)
     expect(result.val?.line.amount).toBe(425_000_000)
-    expect(result.val?.summary.totalAmount).toBe(425_000_000)
     expect(result.val?.summary.totalUsage).toBe(150)
-    expect(result.val?.answer).toContain("$4.25")
-    expect(result.val?.evidence).toContainEqual({ type: "ledger_line", id: "entry_1" })
     expect(result.val?.evidence).toContainEqual({ type: "ledger_line", id: "entry_2" })
-    expect(analytics.getExplainChargeSummary).toHaveBeenCalledWith({
-      project_id: "proj_1",
-      customer_id: "cus_1",
-      feature_slug: "tokens",
-      period_key: "onetime:1700000000000",
-      customer_entitlement_id: "ce_1",
-    })
   })
 
-  it("uses the billing window for rated facts when a usage period key cannot be derived", async () => {
-    const { db, ledger, analytics } = makeDeps({
-      entitlements: [entitlement({ effectiveAt: 1, expiresAt: 2 })],
-      lines: [
-        line({
-          quantity: 517,
-          amount: dinero({ amount: 517_000_000, currency: currencies.USD, scale: 8 }),
+  it("skips journal rows that do not carry the statement's feature", async () => {
+    const { db, ledger } = makeDeps()
+    const { analytics } = journalAnalytics(
+      statementJournal([
+        journalRow({
+          key: "evt_x",
+          at: 1,
+          quantity: "1",
+          amount: "1",
+          periodId: "tokens:bp_other",
         }),
-      ],
-    })
+      ])
+    )
+    const result = await explainCharge(
+      { db, ledger, analytics, rateCards, now: () => now },
+      input()
+    )
+    expect(result.val?.events).toEqual([])
+  })
 
-    const result = await callDefault({ db, ledger, analytics })
+  it("explains a settled hold from the priced event on its state", async () => {
+    const { db, ledger } = makeDeps()
+    const { analytics } = journalAnalytics(
+      statementJournal([
+        settledHoldRow({ key: "run_1", at: 1_700_050_000_000, quantity: "40", amount: "0.4" }),
+      ])
+    )
+    const result = await explainCharge(
+      { db, ledger, analytics, rateCards, now: () => now },
+      input()
+    )
+    expect(result.val?.summary.eventCount).toBe(1)
+    expect(result.val?.events).toEqual([
+      {
+        event_id: "run_1",
+        idempotency_key: "run_1",
+        customer_entitlement_id: "ce_1",
+        grant_id: "",
+        feature_plan_version_id: "fpv_1",
+        feature_slug: "tokens",
+        period_key: "tokens:bp_1",
+        event_slug: "tokens.used",
+        aggregation_method: "sum",
+        timestamp: 1_700_050_000_000,
+        created_at: 1_700_050_000_000,
+        delta: 40,
+        value_after: 40,
+        amount: 40_000_000,
+        amount_after: 40_000_000,
+        amount_scale: 8,
+        currency: "USD",
+        priced_at: 1_700_050_000_000,
+        tier_index: null,
+        pricing_component_count: 1,
+        source_type: "api_key",
+        source_id: "h_7",
+      },
+    ])
+  })
 
+  it("skips a journal row whose data is not valid JSON", async () => {
+    const { db, ledger } = makeDeps()
+    const [good] = defaultJournal
+    const { analytics } = journalAnalytics(
+      statementJournal(
+        [{ operation_id: "o:broken", timestamp: good?.timestamp, data: "{not json" }, good],
+        2
+      )
+    )
+    const result = await explainCharge(
+      { db, ledger, analytics, rateCards, now: () => now },
+      input()
+    )
     expect(result.err).toBeUndefined()
-    expect(result.val?.scope.periodKey).toBe("billing_period:bp_1")
-    expect(result.val?.summary).toMatchObject({
-      eventCount: 2,
-      totalUsage: 517,
-      totalAmount: 517_000_000,
-      latestAmountAfter: 517_000_000,
-    })
-    expect(result.val?.events).toHaveLength(2)
-    expect(result.val?.answer).toContain("$5.17")
-    expect(analytics.getExplainChargeSummary).toHaveBeenCalledWith({
-      project_id: "proj_1",
-      customer_id: "cus_1",
-      feature_slug: "tokens",
-      start: 1_700_000_000_000,
-      end: 1_702_592_000_000,
-      customer_entitlement_id: "ce_1",
-    })
-    expect(analytics.getExplainChargeEvents).toHaveBeenCalledWith({
-      project_id: "proj_1",
-      customer_id: "cus_1",
-      feature_slug: "tokens",
-      start: 1_700_000_000_000,
-      end: 1_702_592_000_000,
-      customer_entitlement_id: "ce_1",
-      limit: 100,
-      offset: 0,
+    expect(result.val?.events.map((event) => event.event_id)).toEqual(["evt_2"])
+  })
+
+  it("reports more pages from the journal's count", async () => {
+    const { db, ledger } = makeDeps()
+    const { analytics } = journalAnalytics(statementJournal(defaultJournal, "3"))
+    const result = await explainCharge(
+      { db, ledger, analytics, rateCards, now: () => now },
+      input({ limit: 2 })
+    )
+    expect(result.val?.summary.eventCount).toBe(3)
+    expect(result.val?.pagination.hasMore).toBe(true)
+  })
+
+  it("keeps the count on a page past the last event", async () => {
+    const { db, ledger } = makeDeps()
+    const { analytics, queries } = journalAnalytics(statementJournal([], 3))
+    const result = await explainCharge(
+      { db, ledger, analytics, rateCards, now: () => now },
+      input({ limit: 2, offset: 4 })
+    )
+    expect(queries[0]).toContain("LIMIT 2\nOFFSET 4")
+    expect(result.val?.events).toEqual([])
+    expect(result.val?.summary.eventCount).toBe(3)
+    expect(result.val?.pagination).toEqual({ limit: 2, offset: 4, hasMore: false })
+  })
+
+  it("summarizes the feature's price from the plan version's rate card", async () => {
+    const { db, ledger } = makeDeps()
+    const { analytics } = journalAnalytics(statementJournal(defaultJournal))
+    const result = await explainCharge(
+      { db, ledger, analytics, rateCards, now: () => now },
+      input()
+    )
+    expect(result.val?.pricing).toEqual({
+      featureType: "usage",
+      usageMode: "unit",
+      unitOfMeasure: "token",
+      description: "Rate card price: $0.01 / token",
+      rows: [{ label: "Default (from 1970-01-01T00:00:00.000Z)", value: "$0.01 / token" }],
     })
   })
 
-  it("uses the persisted usage reset cadence to query rated fact period keys", async () => {
-    const cycleStartAt = Date.UTC(2026, 5, 7, 22, 15, 25)
-    const cycleEndAt = Date.UTC(2026, 5, 7, 22, 20, 25)
-    const entitlementEffectiveAt = Date.UTC(2026, 5, 7, 22, 14, 25, 128)
-    const { db, ledger, analytics } = makeDeps({
+  it("explains a non-metered line without reading the journal", async () => {
+    const { db, ledger } = makeDeps({
       billingPeriod: billingPeriod({
-        cycleStartAt,
-        cycleEndAt,
-        subscriptionItem: {
-          featurePlanVersion: {
-            id: "fpv_1",
-            featureType: "usage",
-            unitOfMeasure: "events",
-            config: {
-              usageMode: "unit",
-              price: configuredPrice("0.001"),
-            },
-            billingConfig: {
-              name: "every-5-minutes",
-              billingInterval: "minute",
-              billingIntervalCount: 5,
-              billingAnchor: "dayOfCreation",
-              planType: "recurring",
-            },
-            resetConfig: {
-              name: "every-5-minutes",
-              resetInterval: "minute",
-              resetIntervalCount: 5,
-              resetAnchor: "dayOfCreation",
-              planType: "recurring",
-            },
-            feature: {
-              slug: "events",
-            },
-          },
+        featurePlanVersion: {
+          id: "fpv_flat",
+          featureType: "flat",
+          unitOfMeasure: "seats",
+          planVersionId: "pv_1",
+          config: {},
+          resetConfig: null,
+          feature: { slug: "seats" },
         },
       }),
-      entitlements: [
-        entitlement({
-          effectiveAt: entitlementEffectiveAt,
-          expiresAt: cycleEndAt,
-        }),
-      ],
+      lines: [line({ quantity: 3 })],
     })
-
-    const result = await callDefault({ db, ledger, analytics })
-
-    expect(result.err).toBeUndefined()
-    expect(result.val?.scope.periodKey).toBe(`minute:${cycleStartAt}`)
-    expect(analytics.getExplainChargeSummary).toHaveBeenCalledWith({
-      project_id: "proj_1",
-      customer_id: "cus_1",
-      feature_slug: "events",
-      period_key: `minute:${cycleStartAt}`,
-      customer_entitlement_id: "ce_1",
-    })
-    expect(analytics.getExplainChargeEvents).toHaveBeenCalledWith({
-      project_id: "proj_1",
-      customer_id: "cus_1",
-      feature_slug: "events",
-      period_key: `minute:${cycleStartAt}`,
-      customer_entitlement_id: "ce_1",
-      limit: 100,
-      offset: 0,
-    })
-  })
-
-  it("does not filter Tinybird to one entitlement when multiple entitlements are in scope", async () => {
-    const { db, ledger, analytics } = makeDeps({
-      entitlements: [entitlement({ id: "ce_1" }), entitlement({ id: "ce_2" })],
-      summaryRows: [summaryRow({ event_count: 2, total_delta: 150, total_amount: 425_000_000 })],
-      eventRows: [
-        eventRow({ event_id: "evt_1", customer_entitlement_id: "ce_1", amount: 250_000_000 }),
-        eventRow({
-          event_id: "evt_2",
-          customer_entitlement_id: "ce_2",
-          delta: 50,
-          amount: 175_000_000,
-          amount_after: 425_000_000,
-        }),
-      ],
-    })
+    const { analytics, queries } = journalAnalytics(() => [])
 
     const result = await explainCharge(
-      { db, ledger, analytics },
-      {
-        projectId: "proj_1",
-        invoiceId: "inv_1",
-        entryId: "entry_1",
-        limit: 100,
-        offset: 0,
-      }
+      { db, ledger, analytics, rateCards, now: () => now },
+      input()
     )
 
-    expect(result.err).toBeUndefined()
-    expect(result.val?.scope.customerEntitlementId).toBeNull()
-    expect(result.val?.summary.totalAmount).toBe(425_000_000)
-    expect(result.val?.events.map((event) => event.customer_entitlement_id)).toEqual([
-      "ce_1",
-      "ce_2",
-    ])
-    expect(result.val?.evidence).toContainEqual({ type: "meter_fact", id: "evt_2" })
-    expect(analytics.getExplainChargeSummary).toHaveBeenCalledWith(
-      expect.not.objectContaining({ customer_entitlement_id: expect.any(String) })
-    )
-    expect(analytics.getExplainChargeEvents).toHaveBeenCalledWith(
-      expect.not.objectContaining({ customer_entitlement_id: expect.any(String) })
-    )
-  })
-
-  it("explains non-usage invoice lines without deriving a usage period key", async () => {
-    const { db, ledger, analytics } = makeDeps({
-      billingPeriod: billingPeriod({
-        subscriptionItem: {
-          featurePlanVersion: {
-            id: "fpv_flat",
-            featureType: "flat",
-            unitOfMeasure: "seats",
-            config: {
-              price: configuredPrice("2.00"),
-            },
-            billingConfig: billingConfig(),
-            resetConfig: null,
-            feature: {
-              slug: "seats",
-            },
-          },
-        },
-      }),
-      lines: [
-        line({
-          description: "Seats",
-          quantity: 3,
-          metadata: {
-            kind: "subscription",
-            billing_period_id: "bp_1",
-          },
-        }),
-      ],
-    })
-
-    const result = await callDefault({ db, ledger, analytics })
-
-    expect(result.err).toBeUndefined()
-    expect(result.val?.scope.featureSlug).toBe("seats")
+    expect(queries).toEqual([])
     expect(result.val?.scope.periodKey).toBe("billing_period:bp_1")
-    expect(result.val?.summary).toMatchObject({
-      eventCount: 0,
-      totalUsage: 3,
-      totalAmount: 425_000_000,
-      latestAmountAfter: 425_000_000,
-    })
-    expect(result.val?.events).toEqual([])
-    expect(result.val?.answer).toContain("$4.25")
-    expect(result.val?.answer).not.toContain("425000000")
+    expect(result.val?.summary).toMatchObject({ eventCount: 0, totalUsage: 3, costUsd: null })
     expect(result.val?.answer).toContain("no rated meter facts are expected")
-    expect(result.val?.pricing).toMatchObject({
-      featureType: "flat",
-      description: "Fixed price: 2.00 USD",
-    })
-    expect(analytics.getExplainChargeSummary).not.toHaveBeenCalled()
-    expect(analytics.getExplainChargeEvents).not.toHaveBeenCalled()
   })
 
-  it("returns missing invoice as an expected error", async () => {
-    const { db, ledger, analytics } = makeDeps({ invoice: null })
-
-    const result = await callDefault({ db, ledger, analytics })
-
-    expect(result.err).toMatchObject({ code: "INVOICE_NOT_FOUND" })
-    expect(ledger.getInvoiceLines).not.toHaveBeenCalled()
-  })
-
-  it("returns missing line as an expected error", async () => {
-    const { db, ledger, analytics } = makeDeps({ lines: [] })
-
-    const result = await callDefault({ db, ledger, analytics })
-
-    expect(result.err).toMatchObject({ code: "LEDGER_LINE_NOT_FOUND" })
-    expect(analytics.getExplainChargeSummary).not.toHaveBeenCalled()
-  })
-
-  it("fails when the ledger line does not carry billing period metadata", async () => {
-    const { db, ledger, analytics } = makeDeps({
-      lineMetadata: { kind: "subscription" },
-    })
-
-    const result = await callDefault({ db, ledger, analytics })
-
-    expect(result.val).toBeUndefined()
-    expect(result.err).toBeInstanceOf(ExplainChargeError)
-    expect(result.err).toMatchObject({ code: "BILLING_PERIOD_METADATA_MISSING" })
-    expect(analytics.getExplainChargeSummary).not.toHaveBeenCalled()
-  })
-
-  it("returns missing billing period as an expected error", async () => {
-    const { db, ledger, analytics } = makeDeps({ billingPeriod: null })
-
-    const result = await callDefault({ db, ledger, analytics })
-
-    expect(result.err).toMatchObject({ code: "BILLING_PERIOD_NOT_FOUND" })
-    expect(analytics.getExplainChargeSummary).not.toHaveBeenCalled()
-  })
-
-  it("rejects a billing period that does not belong to the invoice context", async () => {
-    const { db, ledger, analytics } = makeDeps({
-      billingPeriod: billingPeriod({ invoiceId: "inv_other" }),
-    })
-
-    const result = await callDefault({ db, ledger, analytics })
-
-    expect(result.err).toMatchObject({ code: "BILLING_PERIOD_CONTEXT_MISMATCH" })
-    expect(analytics.getExplainChargeSummary).not.toHaveBeenCalled()
-  })
-
-  it("returns Tinybird failures as fetch errors", async () => {
-    const { db, ledger, analytics } = makeDeps({
-      summaryError: new Error("tinybird unavailable"),
-    })
-
-    const result = await callDefault({ db, ledger, analytics })
-
-    expect(result.err).toBeInstanceOf(FetchError)
-    expect(result.err?.message).toBe("tinybird unavailable")
-  })
-
-  it("computes hasMore from the summary count instead of exact page size", async () => {
-    const { db, ledger, analytics } = makeDeps({
-      summaryRows: [summaryRow({ event_count: 2 })],
-      eventRows: [eventRow({ event_id: "evt_1" }), eventRow({ event_id: "evt_2" })],
-    })
-
-    const exactPage = await explainCharge(
-      { db, ledger, analytics },
-      {
-        projectId: "proj_1",
-        invoiceId: "inv_1",
-        entryId: "entry_1",
-        limit: 2,
-        offset: 0,
-      }
+  it("returns the journal's failure", async () => {
+    const { db, ledger } = makeDeps()
+    const { analytics } = journalAnalytics(() => new Error("basin down"))
+    const result = await explainCharge(
+      { db, ledger, analytics, rateCards, now: () => now },
+      input()
     )
+    expect(result.err).toBeInstanceOf(FetchError)
+  })
 
-    expect(exactPage.val?.pagination.hasMore).toBe(false)
-
-    const withMore = makeDeps({
-      summaryRows: [summaryRow({ event_count: 3 })],
-      eventRows: [eventRow({ event_id: "evt_1" }), eventRow({ event_id: "evt_2" })],
-    })
-    const nonFinalPage = await explainCharge(withMore, {
-      projectId: "proj_1",
-      invoiceId: "inv_1",
-      entryId: "entry_1",
-      limit: 2,
-      offset: 0,
-    })
-
-    expect(nonFinalPage.val?.pagination.hasMore).toBe(true)
+  it.each([
+    [{ invoice: null }, "INVOICE_NOT_FOUND"],
+    [{ lines: [] }, "LEDGER_LINE_NOT_FOUND"],
+    [{ lineMetadata: { kind: "subscription" } }, "BILLING_PERIOD_METADATA_MISSING"],
+    [{ billingPeriod: null }, "BILLING_PERIOD_NOT_FOUND"],
+    [
+      { billingPeriod: billingPeriod({ invoiceId: "inv_other" }) },
+      "BILLING_PERIOD_CONTEXT_MISMATCH",
+    ],
+  ] as const)("returns %o as %s before reading the journal", async (overrides, code) => {
+    const { db, ledger } = makeDeps(overrides)
+    const { analytics, queries } = journalAnalytics(() => [])
+    const result = await explainCharge(
+      { db, ledger, analytics, rateCards, now: () => now },
+      input()
+    )
+    expect(result.err).toBeInstanceOf(ExplainChargeError)
+    expect(result.err).toMatchObject({ code })
+    expect(queries).toEqual([])
   })
 })
 
-async function callDefault({
-  db,
-  ledger,
-  analytics,
-}: {
-  db: Database
-  ledger: LedgerGateway
-  analytics: Analytics
-}) {
-  return explainCharge(
-    { db, ledger, analytics },
-    {
-      projectId: "proj_1",
-      invoiceId: "inv_1",
-      entryId: "entry_1",
-      limit: 100,
-      offset: 0,
-    }
-  )
+function input(overrides: Partial<ExplainChargeInput> = {}): ExplainChargeInput {
+  return {
+    projectId: "proj_1",
+    invoiceId: "inv_1",
+    entryId: "entry_1",
+    limit: 100,
+    offset: 0,
+    ...overrides,
+  }
+}
+
+function usageMetadata() {
+  return { kind: "subscription", billing_period_id: "bp_1" }
 }
 
 function makeDeps(
   overrides: {
     invoice?: ReturnType<typeof invoice> | null
     billingPeriod?: ReturnType<typeof billingPeriod> | null
-    entitlements?: ReturnType<typeof entitlement>[]
     lineMetadata?: Record<string, unknown>
-    lines?: Array<ReturnType<typeof line>>
-    summaryRows?: Array<ReturnType<typeof summaryRow>>
-    eventRows?: Array<ReturnType<typeof eventRow>>
-    summaryError?: Error
+    lines?: ReadonlyArray<ReturnType<typeof line>>
   } = {}
 ) {
   const db = {
@@ -470,89 +417,39 @@ function makeDeps(
           ),
       },
       customerEntitlements: {
-        findMany: vi.fn().mockResolvedValue(overrides.entitlements ?? [entitlement()]),
+        findMany: vi
+          .fn()
+          .mockResolvedValue([
+            { id: "ce_1", effectiveAt: 1_700_000_000_000, expiresAt: 1_702_592_000_000 },
+          ]),
       },
     },
   } as unknown as Database
   const ledger = {
-    getInvoiceLines: vi.fn().mockResolvedValue(
-      Ok(
-        overrides.lines ?? [
-          line({
-            metadata: overrides.lineMetadata ?? {
-              kind: "subscription",
-              billing_period_id: "bp_1",
-            },
-          }),
-        ]
-      )
-    ),
+    getInvoiceLines: vi
+      .fn()
+      .mockResolvedValue(
+        Ok(overrides.lines ?? [line({ metadata: overrides.lineMetadata ?? usageMetadata() })])
+      ),
   } as unknown as LedgerGateway
-  const analytics = {
-    getExplainChargeSummary: vi.fn().mockImplementation(() => {
-      if (overrides.summaryError) {
-        return Promise.reject(overrides.summaryError)
-      }
-      return Promise.resolve({
-        data: overrides.summaryRows ?? [summaryRow()],
-      })
-    }),
-    getExplainChargeEvents: vi.fn().mockResolvedValue({
-      data: overrides.eventRows ?? [
-        eventRow({ event_id: "evt_1", delta: 100, amount: 250_000_000 }),
-        eventRow({ event_id: "evt_2", delta: 50, amount: 175_000_000, amount_after: 425_000_000 }),
-      ],
-    }),
-  } as unknown as Analytics
-
-  return { db, ledger, analytics }
+  return { db, ledger }
 }
 
-function invoice(
-  overrides: Partial<{
-    id: string
-    statementKey: string
-    customerId: string
-    currency: string
-  }> = {}
-) {
-  return {
-    id: "inv_1",
-    statementKey: "stmt_1",
-    customerId: "cus_1",
-    currency: "USD",
-    ...overrides,
-  }
+function invoice() {
+  return { id: "inv_1", statementKey: "stmt_1", customerId: "cus_1", currency: "USD" }
 }
 
 function billingPeriod(
   overrides: Partial<{
-    id: string
-    projectId: string
-    customerId: string
     invoiceId: string
-    statementKey: string
-    subscriptionItemId: string
-    cycleStartAt: number
-    cycleEndAt: number
-    subscriptionItem: {
-      featurePlanVersion: {
-        id: string
-        featureType: string
-        unitOfMeasure: string
-        config: unknown
-        billingConfig: ReturnType<typeof billingConfig>
-        resetConfig: null | {
-          name: string
-          resetInterval: string
-          resetIntervalCount: number
-          resetAnchor: string
-          planType: string
-        }
-        feature: {
-          slug: string
-        }
-      }
+    featurePlanVersion: {
+      id: string
+      featureType: string
+      unitOfMeasure: string
+      planVersionId: string
+      config: { usageMode?: string }
+      resetConfig: null
+      feature: { slug: string }
     }
   }> = {}
 ) {
@@ -560,82 +457,70 @@ function billingPeriod(
     id: "bp_1",
     projectId: "proj_1",
     customerId: "cus_1",
-    invoiceId: "inv_1",
+    invoiceId: overrides.invoiceId ?? "inv_1",
     statementKey: "stmt_1",
     subscriptionItemId: "si_1",
     cycleStartAt: 1_700_000_000_000,
     cycleEndAt: 1_702_592_000_000,
+    invoiceAt: 1_702_592_000_000,
+    type: "normal" as const,
     subscriptionItem: {
-      featurePlanVersion: {
+      units: null,
+      featurePlanVersion: overrides.featurePlanVersion ?? {
         id: "fpv_1",
         featureType: "usage",
         unitOfMeasure: "tokens",
-        config: {
-          usageMode: "unit",
-          price: configuredPrice("0.01"),
-        },
-        billingConfig: billingConfig(),
+        planVersionId: "pv_1",
+        config: { usageMode: "unit" },
         resetConfig: null,
-        feature: {
-          slug: "tokens",
-        },
+        feature: { slug: "tokens" },
       },
     },
-    ...overrides,
   }
 }
 
-function billingConfig() {
-  return {
-    name: "one-time",
-    billingInterval: "onetime",
-    billingIntervalCount: 1,
-    billingAnchor: "dayOfCreation",
-    planType: "onetime",
-  }
-}
-
-function entitlement(
-  overrides: Partial<{
-    id: string
-    effectiveAt: number
-    expiresAt: number
-  }> = {}
-) {
-  return {
-    id: "ce_1",
-    effectiveAt: 1_700_000_000_000,
-    expiresAt: 1_702_592_000_000,
-    ...overrides,
-  }
-}
-
-function configuredPrice(displayAmount: string, currency = currencies.USD) {
-  const scale = displayAmount.split(".")[1]?.length ?? currency.exponent
-  return {
-    displayAmount,
-    dinero: dinero({
-      amount: Math.round(Number(displayAmount) * 10 ** scale),
-      currency,
-      scale,
-    }).toJSON(),
-  }
+/** The plan version's USD card: tokens at $0.01 each, seats at a flat $2. */
+const rateCards = {
+  pricingForPlanVersions: vi.fn(async () => {
+    const row = (featureSlug: string, price: unknown) =>
+      rateRowSchema.parse({
+        id: `rr_${featureSlug}`,
+        rateCardId: "rc_1",
+        featureSlug,
+        match: {},
+        price,
+        cost: null,
+        effectiveFrom: 0,
+        effectiveTo: null,
+        source: "manual",
+        sourceRef: null,
+      })
+    return new Map([
+      [
+        "pv_1",
+        [
+          {
+            currency: "USD" as const,
+            card: {} as RateCard,
+            rows: [
+              row("tokens", {
+                type: "unit",
+                components: [{ property: null, rate: "0.01", per: 1 }],
+              }),
+              row("seats", { type: "flat", amount: "2" }),
+            ],
+          },
+        ],
+      ],
+    ])
+  }),
 }
 
 function line(
   overrides: Partial<{
     entryId: string
-    statementKey: string
-    kind: string
-    description: string
     quantity: number
     amount: ReturnType<typeof dinero>
-    amountDue: number
-    amountIncluded: number
-    amountPaid: number
-    collectable: boolean
-    settlementSource: "provider" | "wallet" | "trial"
-    settlementStatus: "due" | "paid" | "included"
     metadata: Record<string, unknown>
   }> = {}
 ) {
@@ -657,70 +542,7 @@ function line(
     walletId: null,
     currency: "USD",
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
-    metadata: {
-      kind: "subscription",
-      billing_period_id: "bp_1",
-    },
+    metadata: usageMetadata(),
     ...overrides,
-  }
-}
-
-function summaryRow(overrides: Partial<ReturnType<typeof baseSummaryRow>> = {}) {
-  return {
-    ...baseSummaryRow(),
-    ...overrides,
-  }
-}
-
-function baseSummaryRow() {
-  return {
-    project_id: "proj_1",
-    customer_id: "cus_1",
-    feature_slug: "tokens",
-    period_key: "onetime:1700000000000",
-    currency: "USD",
-    amount_scale: 8 as const,
-    event_count: 2,
-    total_delta: 150,
-    total_amount: 425_000_000,
-    latest_amount_after: 425_000_000,
-    first_event_at: 1_700_000_000_000,
-    last_event_at: 1_700_086_400_000,
-    multi_component_event_count: 1,
-  }
-}
-
-function eventRow(overrides: Partial<ReturnType<typeof baseEventRow>> = {}) {
-  return {
-    ...baseEventRow(),
-    ...overrides,
-  }
-}
-
-function baseEventRow() {
-  return {
-    event_id: "evt_1",
-    idempotency_key: "idem_1",
-    customer_entitlement_id: "ce_1",
-    grant_id: "grant_1",
-    feature_plan_version_id: "fpv_1",
-    feature_slug: "tokens",
-    period_key: "onetime:1700000000000",
-    event_slug: "tokens.used",
-    aggregation_method: "sum",
-    timestamp: 1_700_000_000_000,
-    created_at: 1_700_000_000_100,
-    delta: 100,
-    value_after: 100,
-    amount: 250_000_000,
-    amount_after: 250_000_000,
-    amount_scale: 8 as const,
-    currency: "USD",
-    priced_at: 1_700_000_000_100,
-    tier_index: 0,
-    tier_mode: "graduated" as const,
-    pricing_component_count: 1,
-    source_type: "api_key" as const,
-    source_id: "key_1",
   }
 }

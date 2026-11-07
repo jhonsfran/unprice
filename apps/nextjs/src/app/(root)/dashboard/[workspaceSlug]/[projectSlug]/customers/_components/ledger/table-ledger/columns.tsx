@@ -9,8 +9,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { Typography } from "@unprice/ui/typography"
 import { cn } from "@unprice/ui/utils"
 import { ArrowRight, InfoIcon } from "lucide-react"
-import { useParams } from "next/navigation"
-import { SuperLink } from "~/components/super-link"
 import { formatDate } from "~/lib/dates"
 import { accountLabel, activityLabel, partyLabel } from "./labels"
 
@@ -49,28 +47,11 @@ function AmountCell({ movement }: { movement: Movement }) {
   )
 }
 
-/** The run that caused this movement, linked into the runs tab's search. */
+/** What caused this movement: its run, statement, or reservation. */
 function MovementContext({ movement }: { movement: Movement }) {
-  const { workspaceSlug, projectSlug, customerId } = useParams<{
-    workspaceSlug: string
-    projectSlug: string
-    customerId: string
-  }>()
+  const context = movement.runId ?? movement.statementKey ?? movement.reservationId
 
-  if (movement.runId) {
-    return (
-      <SuperLink
-        href={`/${workspaceSlug}/${projectSlug}/customers/${customerId}/runs?search=${movement.runId}`}
-        className="truncate font-mono text-muted-foreground text-xs underline-offset-4 hover:underline"
-      >
-        {movement.runId}
-      </SuperLink>
-    )
-  }
-
-  const fallback = movement.statementKey ?? movement.reservationId
-
-  return <span className="truncate font-mono text-muted-foreground text-xs">{fallback ?? "—"}</span>
+  return <span className="truncate font-mono text-muted-foreground text-xs">{context ?? "—"}</span>
 }
 
 /**

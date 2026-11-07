@@ -89,7 +89,7 @@ The skill selects the runtime call from the commercial decision:
 | Ask whether a customer can use a feature without changing state | `access.check` |
 | Enforce a known usage amount before paid work starts | `usage.consume` |
 | Report usage without using it as a spend gate | `usage.record` |
-| Reserve credits before an agent, workflow, or other multi-step workload starts | `runs.start`, `runs.consume`, and `runs.end` |
+| Cap an agent, workflow, or other multi-step workload before it starts | `budgets.upsert`, then `budget(key).spend` per step |
 
 The agent should keep API failures separate from valid commercial denials. It should also reuse the
 same idempotency key when it retries the same logical mutation.
@@ -106,6 +106,6 @@ before generation.
     Follow the SDK quickstart without an AI agent.
   </Card>
   <Card title="Choose the runtime call" icon="route" href="/quickstart/choose-operation">
-    Compare access checks, usage operations, and budgeted runs.
+    Compare access checks, usage operations, and budgets.
   </Card>
 </CardGroup>

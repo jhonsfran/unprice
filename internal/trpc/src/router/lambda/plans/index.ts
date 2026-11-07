@@ -1,5 +1,6 @@
 import { createTRPCRouter } from "#trpc"
 import { create } from "./create"
+import { createWithDraft } from "./createWithDraft"
 import { exist } from "./exist"
 import { getById } from "./getById"
 import { getBySlug } from "./getBySlug"
@@ -11,6 +12,7 @@ import { update } from "./update"
 
 export const planRouter = createTRPCRouter({
   create: create,
+  createWithDraft,
   remove: remove,
   update: update,
   exist: exist,

@@ -1,10 +1,12 @@
 import type { Database } from "@unprice/db"
 import { customers } from "@unprice/db/schema"
 import { Ok } from "@unprice/error"
+import { type WebEventsWriter, createWebEventsWriter } from "@unprice/lakehouse"
 import type { Logger } from "@unprice/logs"
 import { fromCurrencyMinor, toLedgerMinor } from "@unprice/money"
 import { describe, expect, it, vi } from "vitest"
 import { UnPriceCustomerError } from "../../customers/errors"
+import { PageService } from "../../pages/service"
 import { signUp } from "./sign-up"
 
 function createLogger(): Logger {
@@ -39,6 +41,7 @@ function createPlanVersion(paymentProvider: "stripe" | "sandbox") {
     plan: {
       id: "plan_123",
       slug: "pro",
+      enterprisePlan: false,
     },
   }
 }
@@ -56,7 +59,7 @@ describe("customer signUp payment provider guard", () => {
       {
         db: {} as Database,
         logger: createLogger(),
-        analytics: {} as never,
+        webEvents: { send: vi.fn() } as never,
         waitUntil: vi.fn(),
         services: {
           customers: { getCustomerByExternalId },
@@ -90,7 +93,7 @@ describe("customer signUp payment provider guard", () => {
       {
         db: {} as Database,
         logger: createLogger(),
-        analytics: {} as never,
+        webEvents: { send: vi.fn() } as never,
         waitUntil: vi.fn(),
         services: {
           customers: {
@@ -144,10 +147,7 @@ describe("customer signUp payment provider guard", () => {
       {
         db,
         logger: createLogger(),
-        analytics: {
-          getPlanClickBySessionId: vi.fn(),
-          ingestEvents: vi.fn(),
-        } as never,
+        webEvents: { send: vi.fn().mockResolvedValue(Ok({ sent: 1 })) } as never,
         waitUntil: vi.fn(),
         services: {
           customers: {
@@ -228,15 +228,23 @@ describe("customer signUp payment provider guard", () => {
       .fn()
       .mockResolvedValue(Ok({ cyclesCreated: 1, phasesProcessed: 1 }))
 
+    const logger = createLogger()
+    const pending: Promise<unknown>[] = []
+    const failingStream = createWebEventsWriter({
+      url: "https://stream-id.ingest.cloudflare.com",
+      token: "<STREAM_TOKEN>",
+      backoffMs: 0,
+      fetch: (async () => new Response("unavailable", { status: 503 })) as typeof fetch,
+    })
+
     const result = await signUp(
       {
         db,
-        logger: createLogger(),
-        analytics: {
-          getPlanClickBySessionId: vi.fn(),
-          ingestEvents: vi.fn().mockResolvedValue(undefined),
-        } as never,
-        waitUntil: vi.fn(),
+        logger,
+        webEvents: failingStream,
+        waitUntil: (promise) => {
+          pending.push(promise)
+        },
         services: {
           customers: {
             getCustomerByExternalId: vi.fn(),
@@ -250,6 +258,7 @@ describe("customer signUp payment provider guard", () => {
           },
           billing: {
             generateBillingPeriods,
+            syncPayerBudget: async () => {},
           },
           plans: {},
         } as never,
@@ -270,6 +279,14 @@ describe("customer signUp payment provider guard", () => {
 
     expect(result.err).toBeUndefined()
     expect(result.val?.success).toBe(true)
+    await expect(Promise.all(pending)).resolves.toEqual([
+      { err: expect.objectContaining({ code: "HTTP_ERROR" }) },
+    ])
+    expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({ code: "HTTP_ERROR" }), {
+      context: "web analytics events were not recorded",
+      code: "HTTP_ERROR",
+      kinds: ["signup"],
+    })
     expect(createSubscription).toHaveBeenCalled()
     expect(generateBillingPeriods).toHaveBeenCalledWith({
       subscriptionId: "sub_123",
@@ -346,10 +363,7 @@ describe("customer signUp payment provider guard", () => {
       {
         db,
         logger: createLogger(),
-        analytics: {
-          getPlanClickBySessionId: vi.fn(),
-          ingestEvents: vi.fn().mockResolvedValue(undefined),
-        } as never,
+        webEvents: { send: vi.fn().mockResolvedValue(Ok({ sent: 1 })) } as never,
         waitUntil: vi.fn(),
         services: {
           customers: {
@@ -364,6 +378,7 @@ describe("customer signUp payment provider guard", () => {
           },
           billing: {
             generateBillingPeriods,
+            syncPayerBudget: async () => {},
           },
           plans: {},
         } as never,
@@ -453,10 +468,7 @@ describe("customer signUp payment provider guard", () => {
     const deps = {
       db,
       logger: createLogger(),
-      analytics: {
-        getPlanClickBySessionId: vi.fn(),
-        ingestEvents: vi.fn().mockResolvedValue(undefined),
-      } as never,
+      webEvents: { send: vi.fn().mockResolvedValue(Ok({ sent: 1 })) } as never,
       waitUntil: vi.fn(),
       services: {
         customers: {
@@ -471,6 +483,7 @@ describe("customer signUp payment provider guard", () => {
         },
         billing: {
           generateBillingPeriods,
+          syncPayerBudget: async () => {},
         },
         plans: {},
       } as never,
@@ -497,5 +510,234 @@ describe("customer signUp payment provider guard", () => {
     expect(committedCustomers).toHaveLength(1)
     expect(createSubscription).toHaveBeenCalledTimes(2)
     expect(generateBillingPeriods).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("customer signUp plan attribution", () => {
+  type VersionRow = ReturnType<typeof createPlanVersion>
+
+  /** Evaluates the use case's drizzle `where` callback against in-memory plan versions. */
+  function versionsTable(rows: VersionRow[]) {
+    return {
+      findFirst: vi.fn(async ({ where }: { where: (...args: unknown[]) => unknown }) => {
+        const conditions = where(
+          { id: "id", projectId: "projectId", currency: "currency" },
+          {
+            eq: (column: keyof VersionRow, value: unknown) => [column, value],
+            and: (...clauses: unknown[]) => clauses.filter(Boolean),
+          }
+        ) as [keyof VersionRow, unknown][]
+        return rows.find((row) => conditions.every(([column, value]) => row[column] === value))
+      }),
+    }
+  }
+
+  type PageRow = { id: string; projectId: string; selectedPlans: { id: string }[] }
+
+  function pagesTable(rows: PageRow[]) {
+    return {
+      findFirst: vi.fn(async ({ where }: { where: (...args: unknown[]) => unknown }) => {
+        const conditions = where(
+          { id: "id", projectId: "projectId" },
+          {
+            eq: (column: keyof PageRow, value: unknown) => [column, value],
+            and: (...clauses: unknown[]) => clauses.filter(Boolean),
+          }
+        ) as [keyof PageRow, unknown][]
+        return rows.find((row) => conditions.every(([column, value]) => row[column] === value))
+      }),
+    }
+  }
+
+  function createDeps(opts: {
+    versions: VersionRow[]
+    pages?: PageRow[]
+  }) {
+    const tx = {
+      insert: vi.fn(() => ({
+        values: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([{ id: "cus_123" }]),
+        }),
+      })),
+    }
+    const send = vi.fn().mockResolvedValue(Ok({ sent: 1 }))
+    const pending: Promise<unknown>[] = []
+    const logger = createLogger()
+    const db = {
+      query: {
+        versions: versionsTable(opts.versions),
+        pages: pagesTable(opts.pages ?? []),
+        paymentProviderConfig: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: "ppc_123",
+            projectId: "proj_123",
+            paymentProvider: "sandbox",
+            active: true,
+            connectionType: "managed_connection",
+            mode: "test",
+            status: "active",
+            key: null,
+            keyIv: null,
+          }),
+        },
+      },
+      transaction: vi.fn(async (callback: (tx: Database) => Promise<unknown>) =>
+        callback(tx as unknown as Database)
+      ),
+    } as unknown as Database
+    const deps = {
+      db,
+      logger,
+      webEvents: { send } as unknown as WebEventsWriter,
+      waitUntil: (promise: Promise<unknown>) => {
+        pending.push(promise)
+      },
+      services: {
+        customers: { getCustomerByExternalId: vi.fn(), getPaymentProvider: vi.fn() },
+        subscriptions: {
+          createSubscription: vi.fn().mockResolvedValue(Ok({ id: "sub_123" })),
+          createPhase: vi.fn().mockResolvedValue(Ok({ id: "phase_123" })),
+          getSubscriptionData: vi.fn().mockResolvedValue({ status: "inactive" }),
+          activateWallet: vi.fn().mockResolvedValue(undefined),
+        },
+        billing: {
+          generateBillingPeriods: vi
+            .fn()
+            .mockResolvedValue(Ok({ cyclesCreated: 1, phasesProcessed: 1 })),
+          syncPayerBudget: async () => {},
+        },
+        plans: {},
+        pages: new PageService({ db, logger }),
+      } as never,
+    }
+    return { deps, send, pending }
+  }
+
+  const baseInput = {
+    email: "customer@example.com",
+    successUrl: "https://example.com/success/{CUSTOMER_ID}",
+    cancelUrl: "https://example.com/cancel",
+  }
+
+  it("signs up with the explicit plan version", async () => {
+    const { deps, send, pending } = createDeps({
+      versions: [createPlanVersion("sandbox")],
+    })
+
+    const result = await signUp(deps, {
+      projectId: "proj_123",
+      input: { ...baseInput, planVersionId: "version_123" } as never,
+    })
+    await Promise.all(pending)
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.success).toBe(true)
+    expect(send.mock.calls[0]?.[0]).toEqual([
+      expect.objectContaining({
+        kind: "signup",
+        plan_version_id: "version_123",
+        signup_status: "signup_success",
+      }),
+    ])
+  })
+
+  it("rejects a plan version that belongs to another project", async () => {
+    const { deps } = createDeps({
+      versions: [{ ...createPlanVersion("sandbox"), id: "version_other", projectId: "proj_other" }],
+    })
+
+    const result = await signUp(deps, {
+      projectId: "proj_123",
+      input: { ...baseInput, planVersionId: "version_other" } as never,
+    })
+
+    expect(result.err).toBeInstanceOf(UnPriceCustomerError)
+    expect(result.err?.message).toBe("Plan version not found in this project")
+  })
+
+  it("records the CTA page when it belongs to the project and lists the plan version", async () => {
+    const { deps, send, pending } = createDeps({
+      versions: [createPlanVersion("sandbox")],
+      pages: [{ id: "page_1", projectId: "proj_123", selectedPlans: [{ id: "version_123" }] }],
+    })
+
+    const result = await signUp(deps, {
+      projectId: "proj_123",
+      input: { ...baseInput, planVersionId: "version_123", pageId: "page_1" } as never,
+    })
+    await Promise.all(pending)
+
+    expect(result.val?.success).toBe(true)
+    expect(send.mock.calls[0]?.[0]).toEqual([
+      expect.objectContaining({
+        kind: "signup",
+        page_id: "page_1",
+        plan_version_id: "version_123",
+      }),
+    ])
+  })
+
+  it("drops a CTA page that does not list the plan version, and still signs up", async () => {
+    const { deps, send, pending } = createDeps({
+      versions: [createPlanVersion("sandbox")],
+      pages: [
+        { id: "page_1", projectId: "proj_123", selectedPlans: [{ id: "version_other" }] },
+        { id: "page_2", projectId: "proj_other", selectedPlans: [{ id: "version_123" }] },
+      ],
+    })
+
+    const listed = await signUp(deps, {
+      projectId: "proj_123",
+      input: { ...baseInput, planVersionId: "version_123", pageId: "page_1" } as never,
+    })
+    const foreign = await signUp(deps, {
+      projectId: "proj_123",
+      input: { ...baseInput, planVersionId: "version_123", pageId: "page_2" } as never,
+    })
+    await Promise.all(pending)
+
+    expect(listed.val?.success).toBe(true)
+    expect(foreign.val?.success).toBe(true)
+    expect(send.mock.calls.map(([rows]) => rows[0].page_id)).toEqual([undefined, undefined])
+    expect(deps.logger.warn).toHaveBeenCalledWith("ignoring sign-up page attribution", {
+      page_id: "page_1",
+      reason: "plan version not on page",
+    })
+    expect(deps.logger.warn).toHaveBeenCalledWith("ignoring sign-up page attribution", {
+      page_id: "page_2",
+      reason: "page not in project",
+    })
+  })
+
+  it("signs up without page attribution when the page read fails", async () => {
+    const { deps, send, pending } = createDeps({
+      versions: [createPlanVersion("sandbox")],
+    })
+    ;(deps.db.query.pages.findFirst as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error("connection reset")
+    )
+
+    const result = await signUp(deps, {
+      projectId: "proj_123",
+      input: { ...baseInput, planVersionId: "version_123", pageId: "page_1" } as never,
+    })
+    await Promise.all(pending)
+
+    expect(result.val?.success).toBe(true)
+    expect(send.mock.calls[0]?.[0][0].page_id).toBeUndefined()
+  })
+
+  it("refuses an enterprise plan version passed explicitly", async () => {
+    const enterprise = createPlanVersion("sandbox")
+    enterprise.plan.enterprisePlan = true
+    const { deps } = createDeps({ versions: [enterprise] })
+
+    const result = await signUp(deps, {
+      projectId: "proj_123",
+      input: { ...baseInput, planVersionId: "version_123" } as never,
+    })
+
+    expect(result.err).toBeInstanceOf(UnPriceCustomerError)
+    expect(result.err).toMatchObject({ code: "PLAN_VERSION_ENTERPRISE" })
   })
 })

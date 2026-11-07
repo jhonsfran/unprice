@@ -69,7 +69,7 @@ export const DEFAULT_FEATURES: Feature[] = [
     id: "compute_min",
     displayName: "Compute",
     type: "usage",
-    call: "runs.start",
+    call: "budget.authorize",
     rate: 0.15,
     unit: "GB-hrs",
     rateUnit: "GB-hr",

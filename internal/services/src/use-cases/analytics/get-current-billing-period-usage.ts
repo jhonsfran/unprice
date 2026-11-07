@@ -1,7 +1,10 @@
-import type { Analytics, BillingPeriodUsageRow } from "@unprice/analytics"
-import type { Database } from "@unprice/db"
-import { BaseError, Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
+import { Err, Ok, type Result } from "@unprice/error"
+import { formatAmount } from "@unprice/money"
 import { z } from "zod"
+import { type UnPriceBudgetError, isOutcomeOf } from "../../budgets"
+import type { BudgetClient } from "../budgets/budget-client"
+import { billingPeriodIdOf, payerBudgetKey } from "../budgets/compile-payer-budget"
+import { quantity } from "../budgets/payer-access"
 
 export const getCurrentBillingPeriodUsageInputSchema = z.object({
   customerId: z.string(),
@@ -9,15 +12,19 @@ export const getCurrentBillingPeriodUsageInputSchema = z.object({
 })
 
 const currentBillingPeriodUsageSchema = z.object({
-  cycleEndAt: z.number().int(),
-  cycleStartAt: z.number().int(),
+  /** The billing period the statements belong to. */
   id: z.string(),
+  cycleStartAt: z.number().int(),
+  cycleEndAt: z.number().int(),
   usage: z.array(
     z.object({
-      amount: z.number().int(),
-      currency: z.string().length(3),
       featureSlug: z.string(),
+      /** The metered quantity so far. */
       usage: z.number(),
+      /** What that usage costs so far, priced at ingestion: a decimal in `unit`. */
+      amount: z.string(),
+      /** The payer budget's unit: money:<code>, credits:<id>, or units:<slug>. */
+      unit: z.string(),
     })
   ),
 })
@@ -33,192 +40,73 @@ export type GetCurrentBillingPeriodUsageOutput = z.infer<
   typeof getCurrentBillingPeriodUsageOutputSchema
 >
 
-export type GetCurrentBillingPeriodUsageAnalytics = Pick<
-  Analytics,
-  "getBillingPeriodUsage" | "getBillingPeriodUsageCoverage"
->
-
 export type GetCurrentBillingPeriodUsageDeps = {
-  analytics: GetCurrentBillingPeriodUsageAnalytics
-  db: Database
+  budgets: BudgetClient
   now?: () => number
 }
 
-export class BillingPeriodUsageCoverageError extends BaseError<{
-  billingPeriodIds: string[]
-  customerId: string
-  projectId: string
-  start: number
-  end: number
-}> {
-  public readonly retry = false
-  public readonly name = BillingPeriodUsageCoverageError.name
-
-  constructor(context: {
-    billingPeriodIds: string[]
-    customerId: string
-    projectId: string
-    start: number
-    end: number
-  }) {
-    super({
-      message:
-        "Current billing-period usage is unavailable until pre-attribution usage is migrated.",
-      context,
-    })
-  }
-}
-
-type GetCurrentBillingPeriodUsageFailure = BillingPeriodUsageCoverageError | FetchError
-
+/**
+ * The customer's usage in the billing periods open now, live from the payer budget at
+ * `unprice:customer:<customerId>` (ADR-0008 D1, D7): one statement per metered feature and
+ * billing period, priced at ingestion. A customer without a payer budget has no metered usage.
+ */
 export async function getCurrentBillingPeriodUsage(
   deps: GetCurrentBillingPeriodUsageDeps,
   rawInput: GetCurrentBillingPeriodUsageInput
-): Promise<Result<GetCurrentBillingPeriodUsageOutput, GetCurrentBillingPeriodUsageFailure>> {
+): Promise<Result<GetCurrentBillingPeriodUsageOutput, UnPriceBudgetError>> {
   const input = getCurrentBillingPeriodUsageInputSchema.parse(rawInput)
   const now = deps.now?.() ?? Date.now()
-  const billingPeriods = await deps.db.query.billingPeriods.findMany({
-    columns: {
-      id: true,
-      cycleStartAt: true,
-      cycleEndAt: true,
-    },
-    where: (table, { and, eq, gt, lte }) =>
-      and(
-        eq(table.projectId, input.projectId),
-        eq(table.customerId, input.customerId),
-        eq(table.status, "pending"),
-        lte(table.cycleStartAt, now),
-        gt(table.cycleEndAt, now)
-      ),
-  })
+  const address = { projectId: input.projectId, key: payerBudgetKey(input.customerId) }
 
-  if (billingPeriods.length === 0) {
-    return Ok(getCurrentBillingPeriodUsageOutputSchema.parse({ billingPeriods: [] }))
-  }
-
-  const billingPeriodIds = billingPeriods.map((period) => period.id)
-  const start = Math.min(...billingPeriods.map((period) => period.cycleStartAt))
-  const end = Math.max(...billingPeriods.map((period) => period.cycleEndAt))
-  const analyticsInput = {
-    project_id: input.projectId,
-    customer_id: input.customerId,
-    start,
-    end,
-  }
-  const [usageResult, coverageResult] = await Promise.all([
-    wrapResult(
-      deps.analytics.getBillingPeriodUsage({
-        ...analyticsInput,
-        billing_period_ids: billingPeriodIds,
-      }),
-      (error) =>
-        toBillingUsageFetchError({
-          error,
-          pipe: "v1_get_billing_period_usage",
-          projectId: input.projectId,
-          customerId: input.customerId,
-          billingPeriodIds,
-        })
-    ),
-    wrapResult(deps.analytics.getBillingPeriodUsageCoverage(analyticsInput), (error) =>
-      toBillingUsageFetchError({
-        error,
-        pipe: "v1_get_billing_period_usage_coverage",
-        projectId: input.projectId,
-        customerId: input.customerId,
-        billingPeriodIds,
-      })
-    ),
+  const [got, statements] = await Promise.all([
+    deps.budgets.execute(address, { type: "get" }),
+    deps.budgets.execute(address, { type: "statements" }),
   ])
-
-  if (usageResult.err) {
-    return Err(usageResult.err)
+  const failure = got.err ?? statements.err
+  if (failure) {
+    return failure.rejection.code === "BUDGET_NOT_FOUND" ? Ok({ billingPeriods: [] }) : Err(failure)
+  }
+  if (
+    !got.val ||
+    !statements.val ||
+    !isOutcomeOf(got.val, "get") ||
+    !isOutcomeOf(statements.val, "statements")
+  ) {
+    throw new Error("payer budget answered another verb")
   }
 
-  if (coverageResult.err) {
-    return Err(coverageResult.err)
-  }
-
-  const coverage = coverageResult.val.data
-  const coverageRow = coverage?.[0]
-  if (!coverageRow || coverage?.length !== 1) {
-    return Err(
-      toBillingUsageFetchError({
-        error: new Error("Expected one billing-period usage coverage row"),
-        pipe: "v1_get_billing_period_usage_coverage",
-        projectId: input.projectId,
-        customerId: input.customerId,
-        billingPeriodIds,
-      })
-    )
-  }
-
-  if (coverageRow.unattributed_fact_count > 0) {
-    return Err(
-      new BillingPeriodUsageCoverageError({
-        billingPeriodIds,
-        customerId: input.customerId,
-        projectId: input.projectId,
-        start,
-        end,
-      })
-    )
+  const unit = got.val.budget.unit
+  const periods = new Map<string, z.infer<typeof currentBillingPeriodUsageSchema>>()
+  for (const statement of statements.val.statements) {
+    // The budget's own perpetual statements start with "#": billing registered none of them.
+    const current = statement.state === "open" && statement.start <= now && now < statement.end
+    if (!current || statement.periodId.startsWith("#")) continue
+    const id = billingPeriodIdOf(statement.periodId)
+    const period = periods.get(id) ?? {
+      id,
+      cycleStartAt: statement.start,
+      cycleEndAt: statement.end,
+      usage: [],
+    }
+    period.cycleStartAt = Math.min(period.cycleStartAt, statement.start)
+    period.cycleEndAt = Math.max(period.cycleEndAt, statement.end)
+    period.usage.push({
+      featureSlug: statement.featureSlug,
+      usage: quantity(statement.quantity),
+      amount: formatAmount(statement.amount),
+      unit,
+    })
+    periods.set(id, period)
   }
 
   return Ok(
     getCurrentBillingPeriodUsageOutputSchema.parse({
-      billingPeriods: joinUsageByPeriod(billingPeriods, usageResult.val.data ?? []),
+      billingPeriods: [...periods.values()]
+        .map((period) => ({
+          ...period,
+          usage: period.usage.sort((a, b) => a.featureSlug.localeCompare(b.featureSlug)),
+        }))
+        .sort((a, b) => a.cycleStartAt - b.cycleStartAt || a.id.localeCompare(b.id)),
     })
   )
-}
-
-function joinUsageByPeriod(
-  billingPeriods: Array<{ id: string; cycleStartAt: number; cycleEndAt: number }>,
-  usageRows: BillingPeriodUsageRow[]
-): GetCurrentBillingPeriodUsageOutput["billingPeriods"] {
-  const usageByPeriodId = new Map<string, BillingPeriodUsageRow[]>()
-  for (const row of usageRows) {
-    const usage = usageByPeriodId.get(row.billing_period_id) ?? []
-    usage.push(row)
-    usageByPeriodId.set(row.billing_period_id, usage)
-  }
-
-  return billingPeriods.map((period) => ({
-    id: period.id,
-    cycleStartAt: period.cycleStartAt,
-    cycleEndAt: period.cycleEndAt,
-    usage: (usageByPeriodId.get(period.id) ?? []).map((row) => ({
-      featureSlug: row.feature_slug,
-      usage: row.usage,
-      amount: row.amount,
-      currency: row.currency,
-    })),
-  }))
-}
-
-function toBillingUsageFetchError({
-  error,
-  pipe,
-  projectId,
-  customerId,
-  billingPeriodIds,
-}: {
-  error: Error
-  pipe: "v1_get_billing_period_usage" | "v1_get_billing_period_usage_coverage"
-  projectId: string
-  customerId: string
-  billingPeriodIds: string[]
-}): FetchError {
-  return new FetchError({
-    message: error.message,
-    retry: true,
-    context: {
-      url: `tinybird:${pipe}`,
-      method: "GET",
-      projectId,
-      customerId,
-      billingPeriodIds,
-    },
-  })
 }

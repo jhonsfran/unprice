@@ -1,69 +1,30 @@
 import { TRPCError } from "@trpc/server"
-import { z } from "zod"
 
-import {
-  planVersionFeatureDragDropSchema,
-  planVersionFeatureUpdateBaseSchema,
-} from "@unprice/db/validators"
+import { planVersionFeatureUpdateBaseSchema } from "@unprice/db/validators"
+import { updatePlanVersionFeature } from "@unprice/services/use-cases"
+import { domainErrorToTrpcError } from "#domain-error"
 import { protectedProjectProcedure } from "#trpc"
 
+/**
+ * Edits a draft version's feature and, when `price` is given, prices it on the version's own
+ * rate card in the same step; `price: null` leaves it unpriced. Answers the feature and its open
+ * default row.
+ */
 export const update = protectedProjectProcedure
   .input(planVersionFeatureUpdateBaseSchema)
-  .output(
-    z.object({
-      planVersionFeature: planVersionFeatureDragDropSchema,
-    })
-  )
   .mutation(async (opts) => {
-    const hasMeterConfigOverride = Object.prototype.hasOwnProperty.call(opts.input, "meterConfig")
-    const {
-      id,
-      featureId,
-      featureType,
-      config,
-      metadata,
-      planVersionId,
-      order,
-      defaultQuantity,
-      limit,
-      billingConfig,
-      resetConfig,
-      type,
-      unitOfMeasure,
-      meterConfig,
-    } = opts.input
-
     const project = opts.ctx.project
-    const { plans } = opts.ctx.services
+    const { plans, features, rateCards } = opts.ctx.services
 
     // only owner and admin can update a feature
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
-    const { err, val } = await plans.updatePlanVersionFeatureRecord({
-      projectId: project.id,
-      id,
-      featureId,
-      featureType,
-      config,
-      metadata,
-      planVersionId,
-      order,
-      defaultQuantity,
-      limit,
-      billingConfig,
-      resetConfig,
-      type,
-      unitOfMeasure,
-      meterConfig,
-      hasMeterConfigOverride,
-    })
+    const { err, val } = await updatePlanVersionFeature(
+      { db: opts.ctx.db, services: { plans, features, rateCards }, logger: opts.ctx.logger },
+      { ...opts.input, projectId: project.id, now: Date.now() }
+    )
 
-    if (err) {
-      throw new TRPCError({
-        code: "INTERNAL_SERVER_ERROR",
-        message: err.message,
-      })
-    }
+    if (err) throw domainErrorToTrpcError(err)
 
     if (val.state === "plan_version_feature_not_found") {
       throw new TRPCError({
@@ -109,5 +70,6 @@ export const update = protectedProjectProcedure
 
     return {
       planVersionFeature: val.planVersionFeature,
+      row: val.row,
     }
   })

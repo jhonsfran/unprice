@@ -1,18 +1,17 @@
-# API scripts: queues + events pipeline
+# API scripts: lakehouse pipelines
 
-Scripts to provision Cloudflare Queues and the Cloudflare Pipelines + R2 Data Catalog resources used by the API events pipeline.
+Scripts to provision the Cloudflare Pipelines + R2 Data Catalog resources used by the lakehouse sources (`web_events`, `budget_journal`).
 
 Reference: [Build an end-to-end data pipeline (Cloudflare)](https://developers.cloudflare.com/r2-sql/tutorials/end-to-end-pipeline/).
 
 ## Layout
 
-- `configure-queues.sh` – Creates queue resources from `apps/api/wrangler.jsonc` (`producers`, `consumers`, and `dead_letter_queue`).
-- `configure-lakehouse-pipelines.sh` – Configures the **events** stream, sink, and pipeline for one environment.
+- `configure-lakehouse-pipelines.sh` – Configures the stream, sink, and pipeline of each lakehouse source for one environment.
 - `setup-r2.sh` – Applies lifecycle rules to the selected environment bucket.
 - `delete-r2-bucket.sh` – Force-deletes an R2 bucket by purging objects first, then deleting the bucket.
 - `r2-lifecycle.json` – Lifecycle config used by `setup-r2.sh`.
-- `generate-lakehouse-schemas.ts` – Regenerates `schemas/events.json` from the `@unprice/lakehouse` registry.
-- `schemas/events.json` – Cloudflare stream schema for lakehouse events.
+- `generate-lakehouse-schemas.ts` – Regenerates `schemas/<source>.json` from the `@unprice/lakehouse` registry.
+- `schemas/*.json` – Cloudflare stream schemas for the lakehouse sources.
 
 All scripts are intended to be run from `apps/api`.
 
@@ -20,7 +19,6 @@ All scripts are intended to be run from `apps/api`.
 
 From `apps/api`:
 
-- `npm run scripts:queues -- all` (or `dev` / `preview` / `prod`)
 - `npm run scripts:r2-pipelines -- dev` (options: `--skip-lifecycle`, `--skip-compaction`, `--recreate`, `--delete-only`, `--name-prefix`, `--name-suffix`)
 - `npm run scripts:r2-lifecycle -- dev` (or `preview` / `prod`)
 - `npm run scripts:r2-delete-bucket -- dev --yes` (or `preview` / `prod`)
@@ -49,25 +47,9 @@ export WRANGLER_R2_SQL_AUTH_TOKEN="<your-token>"
 
 `CLOUDFLARE_API_TOKEN` is accepted as fallback by `configure-lakehouse-pipelines.sh`.
 
-## Queue setup
+## Pipeline setup
 
-Create queues from `wrangler.jsonc`:
-
-```bash
-# all env queues (default behavior)
-./scripts/configure-queues.sh
-
-# explicit scope
-./scripts/configure-queues.sh all
-./scripts/configure-queues.sh dev
-./scripts/configure-queues.sh preview --dry-run
-```
-
-The script is idempotent and treats "already exists" responses as success.
-
-## Events pipeline setup
-
-Configure events stream/sink/pipeline for one environment:
+Configure the lakehouse streams, sinks, and pipelines for one environment:
 
 ```bash
 export WRANGLER_R2_SQL_AUTH_TOKEN="<token>"
@@ -82,23 +64,23 @@ The script resolves the lakehouse bucket from `apps/api/wrangler.jsonc` by prefe
 
 - `--skip-lifecycle` – Do not apply lifecycle rules.
 - `--skip-compaction` – Do not enable catalog compaction.
-- `--recreate` – Delete existing events pipeline resources and recreate them.
-- `--delete-only` – Delete existing events pipeline resources and exit.
+- `--recreate` – Delete existing pipeline resources and recreate them.
+- `--delete-only` – Delete existing pipeline resources and exit.
 - `--name-prefix <prefix>` – Prefix for stream/sink/pipeline names.
 - `--name-suffix <suffix>` – Suffix for stream/sink/pipeline names (default: `_<environment>`).
 
 ### What gets created
 
-Default names (for env `dev`):
+Default names (for env `dev`), one set per source (`web_events`, `budget_journal`):
 
-- Stream: `lakehouse_events_stream_dev`
-- Sink: `lakehouse_events_sink_dev`
-- Pipeline: `lakehouse_events_pipeline_dev`
+- Stream: `lakehouse_<source>_stream_dev`
+- Sink: `lakehouse_<source>_sink_dev`
+- Pipeline: `lakehouse_<source>_pipeline_dev`
 
 Catalog target:
 
 - Namespace: `lakehouse`
-- Table: `events`
+- Table: `<source>`
 
 ## Lifecycle only
 
@@ -134,7 +116,7 @@ Required env vars for purge step:
 - `AWS_SECRET_ACCESS_KEY`
 - `CLOUDFLARE_ACCOUNT_ID` (or `R2_ACCOUNT_ID`)
 
-## Regenerate events schema JSON
+## Regenerate schema JSON
 
 When the lakehouse registry changes:
 
@@ -144,7 +126,7 @@ npm run scripts:lakehouse-schemas
 
 This writes:
 
-- `scripts/schemas/events.json`
+- `scripts/schemas/<source>.json`
 
 ## After configuration
 
@@ -157,12 +139,12 @@ npx wrangler pipelines streams list
 2. Query table:
 
 ```bash
-npx wrangler r2 sql query "<WAREHOUSE>" "SELECT * FROM lakehouse.events LIMIT 10"
+npx wrangler r2 sql query "<WAREHOUSE>" "SELECT * FROM lakehouse.budget_journal LIMIT 10"
 ```
 
-3. Wrangler pipeline binding should point to your created pipeline name for each environment with binding `PIPELINE_EVENTS`.
+3. Bind the `budget_journal` stream as `PIPELINE_BUDGET_JOURNAL` in each wrangler environment.
 
 ## Idempotency
 
-- `configure-queues.sh` and `configure-lakehouse-pipelines.sh` are safe to re-run.
-- Use `--recreate` (or `--delete-only` followed by a normal run) for clean replacement of events pipeline resources.
+- `configure-lakehouse-pipelines.sh` is safe to re-run.
+- Use `--recreate` (or `--delete-only` followed by a normal run) for clean replacement of pipeline resources.

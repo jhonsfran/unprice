@@ -16,20 +16,25 @@ usage meter.
 | Feature | Names the capability you sell or limit | `ai-output-tokens` |
 
 Use `eventSlug` for the action and `properties` for its measured values. Use `featureSlug` when
-checking or consuming one specific feature.
+checking one specific feature.
 
-One asynchronous event can update several matching feature meters:
+One recorded event can update several matching feature meters:
 
 ```ts
 const { error } = await unprice.usage.record({
-  customerId: "cus_1234567890",
-  eventSlug: "completions",
-  idempotencyKey: request.id,
-  properties: {
-    aiMessages: 1,
-    inputTokens: 1840,
-    outputTokens: 620
-  }
+  events: [
+    {
+      customerId: "cus_1234567890",
+      eventSlug: "completions",
+      idempotencyKey: request.id,
+      occurredAt: Date.now(),
+      properties: {
+        aiMessages: 1,
+        inputTokens: 1840,
+        outputTokens: 620
+      }
+    }
+  ]
 });
 
 if (error) throw new Error(error.message);
@@ -68,10 +73,10 @@ Use [usage analytics](/libraries/ts/sdk/usage/get) for historical reporting, not
 
 - Use `usage.record` after an action when you need asynchronous metering and evidence. It does not
   prevent over-budget work.
-- Use `usage.consume` before an action when its usage amount is already known. Check `allowed`
-  before starting the work.
-- Use a budgeted run when the final amount is unknown before work starts. Reserve first, then
-  [settle actual usage](/libraries/ts/sdk/runs/settle) when the workload finishes.
+- Use `usage.consume` before an action when its usage amount is already known. Start the work
+  only when the call succeeds; a denial returns `BUDGET_EXCEEDED`.
+- Use a budget hold when the final amount is unknown before work starts. Hold first, then
+  [settle actual usage](/budgets/spend) when the work finishes.
 
 A read-only `access.check` does not consume an allowance or reserve money. Two concurrent requests
 can both pass a read-only check. Use an enforcing operation for spend control.
@@ -83,11 +88,15 @@ system. Configure `max` to track the highest reported value or `last` to track t
 
 ```ts
 const { error } = await unprice.usage.record({
-  customerId,
-  eventSlug: "active_seats_snapshot",
-  idempotencyKey: `active-seats:${customerId}:${snapshotId}`,
-  timestamp: snapshotTimestamp,
-  properties: { activeSeats }
+  events: [
+    {
+      customerId,
+      eventSlug: "active_seats_snapshot",
+      idempotencyKey: `active-seats:${customerId}:${snapshotId}`,
+      occurredAt: snapshotTimestamp,
+      properties: { activeSeats }
+    }
+  ]
 });
 
 if (error) throw new Error(error.message);

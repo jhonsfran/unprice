@@ -1,13 +1,11 @@
 import type { Pipeline } from "cloudflare:pipelines"
 import { type StandardSchemaV1, createEnv } from "@t3-oss/env-core"
-import { env as envAnalytics } from "@unprice/analytics/env"
 import { env as envDb } from "@unprice/db/env"
+import { assertAllOrNoneConfigured } from "@unprice/lakehouse"
 import { env as envObservability } from "@unprice/observability/env"
 import { env as envServices } from "@unprice/services/env"
 import { z } from "zod"
 import type { BudgetDO } from "~/ingestion/budget/BudgetDO"
-import type { EntitlementWindowDO } from "~/ingestion/entitlements/EntitlementWindowDO"
-import type { RunBudgetDO } from "~/ingestion/run-budget/RunBudgetDO"
 import type { DurableObjectProject } from "./project/do"
 
 export const cloudflareRatelimiter = z.custom<{
@@ -23,10 +21,6 @@ function isCloudflarePipeline(value: unknown): value is Pipeline {
 }
 
 export const cloudflarePipeline = z.custom<Pipeline>(isCloudflarePipeline)
-export const cloudflareQueue = z.custom<Queue<unknown>>(
-  (queue) =>
-    !!queue && typeof queue === "object" && "send" in queue && typeof queue.send === "function"
-)
 
 function readOptionalStringBinding(workerEnv: Record<string, unknown>, key: string) {
   const value = workerEnv[key]
@@ -102,10 +96,6 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
       projectdo: z.custom<DurableObjectNamespace<DurableObjectProject>>(
         (ns) => typeof ns === "object"
       ),
-      entitlementwindow: z.custom<DurableObjectNamespace<EntitlementWindowDO>>(
-        (ns) => typeof ns === "object"
-      ),
-      runbudget: z.custom<DurableObjectNamespace<RunBudgetDO>>((ns) => typeof ns === "object"),
       budget: z.custom<DurableObjectNamespace<BudgetDO>>((ns) => typeof ns === "object"),
       RL_FREE_1000_60s: cloudflareRatelimiter,
       RL_FREE_6000_60s: cloudflareRatelimiter,
@@ -113,10 +103,8 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
       CLOUDFLARE_API_TOKEN: z.string().optional(),
       CLOUDFLARE_ACCOUNT_ID: z.string(),
       CLOUDFLARE_CACHE_DOMAIN: z.string().optional(),
-      LOCAL_PIPELINE_URL: z.string().url().optional(),
-      PIPELINE_EVENTS: cloudflarePipeline.optional(),
-      QUEUE_SHARD_0: cloudflareQueue,
-      INGESTION_REPORTING_QUEUE: cloudflareQueue,
+      /** The budget journal stream (ADR-0008 D7); BudgetDO keeps unexported rows until it is bound. */
+      PIPELINE_BUDGET_JOURNAL: cloudflarePipeline.optional(),
       // Fraction of typed metric emissions (cache/db/ratelimit) exported to
       // the log drain. Wide events are sampled separately by evlog.
       METRICS_SAMPLE_RATE: z.coerce.number().optional(),
@@ -126,10 +114,20 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
 
       STRIPE_API_KEY: z.string().optional(),
       STRIPE_CONNECT_WEBHOOK_SECRET: z.string().optional(),
+
+      // Web analytics: the web_events stream's HTTP ingest endpoint and a Pipelines Send token.
+      LAKEHOUSE_WEB_EVENTS_URL: z.string().url().optional(),
+      LAKEHOUSE_WEB_EVENTS_TOKEN: z.string().optional(),
+
+      // Basin SQL: usage history from the budget journal (ADR-0008 D7). Without them the history
+      // routes answer NOT_CONFIGURED as a fetch error.
+      BASIN_SQL_ACCOUNT_ID: z.string().optional(),
+      BASIN_SQL_BUCKET: z.string().optional(),
+      BASIN_SQL_TOKEN: z.string().optional(),
     },
     emptyStringAsUndefined: true,
     runtimeEnv: workerEnv as Record<string, string | number | boolean | undefined>,
-    extends: [envServices, envDb, envAnalytics, envObservability],
+    extends: [envServices, envDb, envObservability],
     skipValidation:
       !!process.env.SKIP_ENV_VALIDATION ||
       process.env.npm_lifecycle_event === "lint" ||
@@ -139,9 +137,10 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
     },
   })
 
-  if (parsedEnv.APP_ENV !== "development" && !parsedEnv.PIPELINE_EVENTS) {
-    throw new Error("PIPELINE_EVENTS binding is required outside development")
-  }
+  assertAllOrNoneConfigured({
+    LAKEHOUSE_WEB_EVENTS_URL: parsedEnv.LAKEHOUSE_WEB_EVENTS_URL,
+    LAKEHOUSE_WEB_EVENTS_TOKEN: parsedEnv.LAKEHOUSE_WEB_EVENTS_TOKEN,
+  })
 
   warnIfAxiomUnconfiguredOnce(parsedEnv)
 

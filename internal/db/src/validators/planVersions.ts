@@ -263,6 +263,12 @@ export const getPlanVersionApiResponseSchema = planVersionSelectBaseSchema
             .openapi({
               description: "The text you can use to show the clients",
             }),
+          displayPrice: z
+            .string()
+            .nullable()
+            .describe(
+              "The feature's current price from the plan version's rate card, formatted for display. Example: '$0.02 / call'. Null when the card has no row for the feature"
+            ),
           feature: featureSelectBaseSchema
             .describe(
               "The base feature definition with title, slug, unit of measure, and description"
@@ -278,7 +284,7 @@ export const getPlanVersionApiResponseSchema = planVersionSelectBaseSchema
     flatPrice: z
       .string()
       .describe(
-        "Total flat/base price of the plan as a formatted string. Sum of all flat-rate feature prices. Example: '$49.99'"
+        "Total flat/base price of the plan as a formatted string: the sum of the flat feature rows on the plan version's rate card. Example: '$49.99'"
       )
       .openapi({
         description: "Flat price of the plan",

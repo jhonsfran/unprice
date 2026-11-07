@@ -1,16 +1,35 @@
-import { analyticsIntervalSchema } from "@unprice/analytics"
+import { analyticsIntervalSchema } from "@unprice/db/validators"
+import { Err, FetchError, Ok } from "@unprice/error"
 import {
+  type CurrentEntitlementsReader,
+  getCustomerCurrentEntitlementsOutputSchema,
   getWorkspaceBillingOverview,
   getWorkspaceBillingOverviewOutputSchema,
 } from "@unprice/services/use-cases"
 import { z } from "zod"
 import { domainErrorToTrpcError } from "#domain-error"
 import { protectedWorkspaceProcedure } from "#trpc"
+import { unprice } from "#utils/unprice"
 
 const getBillingOverviewInputSchema = z.object({
   workspaceSlug: z.string().optional(),
   range: analyticsIntervalSchema,
 })
+
+/** Live metered usage from the payer budget, which only the API reaches. */
+const currentEntitlements: CurrentEntitlementsReader = async ({ projectId, customerId }) => {
+  const { result, error } = await unprice.access.entitlements.current({ projectId, customerId })
+  if (error || !result) {
+    return Err(
+      new FetchError({
+        message: error?.message ?? "access.entitlements.current answered nothing",
+        retry: true,
+        context: { url: "/v1/access/entitlements/current", method: "POST" },
+      })
+    )
+  }
+  return Ok(getCustomerCurrentEntitlementsOutputSchema.parse(result))
+}
 
 export const getBillingOverview = protectedWorkspaceProcedure
   .input(getBillingOverviewInputSchema)
@@ -21,9 +40,10 @@ export const getBillingOverview = protectedWorkspaceProcedure
         services: {
           customers: opts.ctx.services.customers,
           wallet: opts.ctx.services.wallet,
+          analytics: opts.ctx.services.analytics,
         },
         db: opts.ctx.db,
-        analytics: opts.ctx.analytics,
+        currentEntitlements,
         logger: opts.ctx.logger,
       },
       {

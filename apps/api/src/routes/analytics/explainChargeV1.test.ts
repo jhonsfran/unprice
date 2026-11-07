@@ -113,7 +113,6 @@ describe("explainChargeV1 route", () => {
       pricing: {
         feature_type: "usage",
         usage_mode: "unit",
-        tier_mode: null,
         unit_of_measure: "token",
         description: "Unit pricing: 0.01 USD per token",
         rows: [{ label: "Unit price", value: "0.01 USD / token" }],
@@ -153,8 +152,8 @@ describe("explainChargeV1 route", () => {
         },
         {
           type: "meter_fact",
-          id: "proj_123:cus_1:ce_1:grant_1:evt_1",
-          source: "tinybird",
+          id: "proj_123:cus_1:onetime:1700000000000:key_1",
+          source: "r2",
           timestamp: 1_700_000_000_000,
         },
       ],
@@ -283,9 +282,9 @@ function createTestApp() {
 
   app.use("*", async (c, next) => {
     c.set("db", {})
-    c.set("analytics", {})
     c.set("services", {
       ledger: {},
+      analytics: {},
     })
 
     await next()
@@ -353,7 +352,6 @@ function makeExplainChargeOutput() {
     pricing: {
       featureType: "usage",
       usageMode: "unit",
-      tierMode: null,
       unitOfMeasure: "token",
       description: "Unit pricing: 0.01 USD per token",
       rows: [{ label: "Unit price", value: "0.01 USD / token" }],
@@ -420,7 +418,6 @@ function makeEvent() {
     currency: "USD",
     priced_at: 1_700_000_000_100,
     tier_index: 0,
-    tier_mode: "graduated",
     pricing_component_count: 1,
     source_type: "api_key",
     source_id: "key_1",

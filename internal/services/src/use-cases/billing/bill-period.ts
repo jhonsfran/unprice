@@ -1,7 +1,7 @@
 import { type Database, and, asc, eq, sql } from "@unprice/db"
-import { billingPeriods, customerEntitlements } from "@unprice/db/schema"
+import { billingPeriods } from "@unprice/db/schema"
 import { isZero, newId, toSnapshot } from "@unprice/db/utils"
-import { calculateDateAt } from "@unprice/db/validators"
+import { type Currency, type RateRow, calculateDateAt } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logs"
 import { fromLedgerMinor, toLedgerMinor } from "@unprice/money"
 import { toZonedTime } from "date-fns-tz"
@@ -10,31 +10,45 @@ import { isNegative } from "dinero.js"
 import { summarizeInvoiceSettlementAmounts } from "../../billing/invoice-settlement"
 import { DrizzleBillingRepository } from "../../billing/repository.drizzle"
 import { billingStrategyForInterval } from "../../billing/strategy"
-import { ownsBillingUsagePeriod } from "../../billing/usage-snapshot"
 import { LATE_EVENT_GRACE_MS } from "../../entitlements"
 import { type InvoiceLine, type LedgerGateway, customerAccountKeys } from "../../ledger"
-import type { RatingService } from "../../rating/service"
+import type { RateCardService } from "../../rate-cards/service"
 import type { SubscriptionRepository } from "../../subscriptions/repository"
 import type { SubscriptionContext } from "../../subscriptions/types"
+import { billingPeriodIdOf } from "../budgets/compile-payer-budget"
+import type { PayerStatementLine } from "../budgets/invoice-payer-statements"
+import type { PayerBudgetGateway } from "../budgets/payer-budget-gateway"
 import { resolvePeriodCharge } from "./period-charge"
-import type { BillingReservationFlushGateway } from "./reservation-flush-gateway"
+
+/**
+ * What invoicing reads besides the database (ADR-0008 D4): the payer budget, whose sealed
+ * statements carry the usage it priced at ingestion, and the plan version's rate card, which
+ * prices recurring items.
+ */
+export type InvoicingPorts = {
+  /** Null where billing reaches no payer budget; a statement with metered periods then fails. */
+  payerBudgets: PayerBudgetGateway | null
+  /** Also prices the credit line a period's activation derives from the plan's usage limits. */
+  rateCards: Pick<RateCardService, "cardForPlanVersion" | "getEffectiveRows" | "rowsForVersions">
+}
 
 export async function billPeriod({
   context,
   logger,
   db,
   repo,
-  ratingService,
   ledgerService,
-  reservationFlushGateway,
+  invoicing,
+  lateEventGraceMs = LATE_EVENT_GRACE_MS,
 }: {
   context: SubscriptionContext
   logger: Logger
   db: Database
   repo: SubscriptionRepository
-  ratingService: RatingService
   ledgerService: LedgerGateway
-  reservationFlushGateway: BillingReservationFlushGateway
+  invoicing: InvoicingPorts
+  /** How long usage of an ended period may still arrive; a cancel invoices at once with 0. */
+  lateEventGraceMs?: number
 }): Promise<
   Partial<SubscriptionContext> & {
     phasesProcessed: number
@@ -42,18 +56,33 @@ export async function billPeriod({
 > {
   const { subscription, now } = context
   const billingRepo = new DrizzleBillingRepository(db)
-  const completeUsage = async () => {
-    const completed = await reservationFlushGateway.completeForInvoicing({
+  const { payerBudgets } = invoicing
+  // The budget may drop the statements of committed invoices, including any whose completion
+  // failed after an earlier commit. Best effort: an invoice never waits on it, and the next run
+  // repairs what this one left.
+  const completeStatements = async () => {
+    if (!payerBudgets) return
+    const fields = {
+      context: "completing invoiced payer statements failed; the next invoicing run repairs it",
       projectId: subscription.projectId,
-      customerId: context.customer.id,
       subscriptionId: subscription.id,
-    })
-    if (completed.err) throw completed.err
+      customerId: context.customer.id,
+    }
+    try {
+      const completed = await payerBudgets.completeInvoiced({
+        projectId: subscription.projectId,
+        customerId: context.customer.id,
+      })
+      if (completed.err) logger.error(completed.err, fields)
+    } catch (error) {
+      logger.error(error instanceof Error ? error : new Error(String(error)), fields)
+    }
   }
-  await completeUsage()
+  // Set once a group has metered periods: only then does the run touch the payer budget.
+  let metered = false
 
   const periodItemsGroups = await billingRepo.listPendingPeriodGroups({
-    lateEventGraceMs: LATE_EVENT_GRACE_MS,
+    lateEventGraceMs,
     projectId: subscription.projectId,
     subscriptionId: subscription.id,
     now,
@@ -123,25 +152,24 @@ export async function billPeriod({
       continue
     }
 
-    // Flush wallet reservation usage into the ledger before invoicing.
-    // This ensures the invoice reflects all consumed usage up to this moment.
-    const flush = await reservationFlushGateway.flushForInvoicing({
+    const meteredPeriods = await pendingMeteredPeriods({
+      db,
+      projectId: phase.projectId,
+      group: periodItemGroup,
+    })
+    if (meteredPeriods.length > 0 && !metered) {
+      metered = true
+      await completeStatements()
+    }
+    const statements = await sealStatements({
+      payerBudgets,
       projectId: phase.projectId,
       customerId: phase.subscription.customerId,
-      subscriptionId: periodItemGroup.subscriptionId,
-      subscriptionPhaseId: periodItemGroup.subscriptionPhaseId,
-      statementKey: periodItemGroup.statementKey,
+      group: periodItemGroup,
+      metered: meteredPeriods,
+      now,
     })
-    if (flush.err) {
-      logger.warn("Blocking invoicing until wallet reservation usage flushes", {
-        projectId: periodItemGroup.projectId,
-        subscriptionId: periodItemGroup.subscriptionId,
-        statementKey: periodItemGroup.statementKey,
-        error: flush.err.message,
-      })
-      throw flush.err
-    }
-    const usageSnapshots = flush.val.snapshots
+    const rows = await recurringRows(invoicing.rateCards, phase)
 
     // Serialize concurrent re-runs for the same statement and wrap the entire
     // BILL flow (rate → ledger transfers → invoice upsert → mark periods
@@ -177,32 +205,6 @@ export async function billPeriod({
       //    double-post.
       for (const period of billingPeriodsToInvoice) {
         const feature = period.subscriptionItem.featurePlanVersion.feature
-        const entitlementRows = await tx
-          .select({
-            id: customerEntitlements.id,
-            effectiveAt: customerEntitlements.effectiveAt,
-            expiresAt: customerEntitlements.expiresAt,
-          })
-          .from(customerEntitlements)
-          .where(
-            and(
-              eq(customerEntitlements.projectId, period.projectId),
-              eq(customerEntitlements.customerId, period.customerId),
-              eq(customerEntitlements.subscriptionId, period.subscriptionId),
-              eq(customerEntitlements.subscriptionPhaseId, period.subscriptionPhaseId),
-              eq(customerEntitlements.subscriptionItemId, period.subscriptionItemId)
-            )
-          )
-        const customerEntitlementIds = entitlementRows
-          .filter((row) => ownsBillingUsagePeriod(row, period))
-          .map((row) => row.id)
-
-        if (customerEntitlementIds.length === 0) {
-          throw new Error(
-            `No customer entitlement found for billing period ${period.id} and subscription item ${period.subscriptionItemId}`
-          )
-        }
-
         const featurePlanVersionItemId = period.subscriptionItem.id
         const walletSettlementForItem = await ledgerService.getInvoiceLines(
           {
@@ -222,28 +224,22 @@ export async function billPeriod({
           throw walletSettlementForItem.err
         }
 
-        const chargeResult = await resolvePeriodCharge({
+        const charge = resolvePeriodCharge({
           period,
           currency: phase.planVersion.currency,
-          creditLinePolicy: phase.creditLinePolicy,
-          customerEntitlementIds,
-          snapshots: usageSnapshots,
+          phase,
+          statement: statements.get(period.id) ?? null,
+          rows,
           statementLines: walletSettlementForItem.val,
-          ratingService,
         })
-        if (chargeResult.err) {
-          logger.error(chargeResult.err, {
-            billingPeriodId: period.id,
-            phaseId: phase.id,
-            statementKey: period.statementKey,
-            context: "Error while rating billing period before ledger posting",
-          })
-          throw chargeResult.err
-        }
-        const charge = chargeResult.val
-        if (!charge) continue
-        const { grossChargeAmount, unitAmount, quantity, prorationFactor, collectableAmount } =
-          charge
+        const {
+          grossChargeAmount,
+          unitAmount,
+          quantity,
+          prorationFactor,
+          collectableAmount,
+          cost,
+        } = charge
         const sourceType = "subscription_billing_period_charge_v1"
         const sourceId = `${period.id}:${period.subscriptionItemId}`
         const kind = period.type === "trial" ? "trial" : charge.kind
@@ -261,11 +257,13 @@ export async function billPeriod({
           unit_amount_snapshot: unitAmount ? toSnapshot(unitAmount) : null,
           proration_factor: prorationFactor,
           description: feature.title,
+          feature_slug: feature.slug,
+          ...(cost !== null && { cost_usd: cost }),
         }
 
         // Trial / zero-amount periods don't post to the ledger — pgledger
         // rejects non-positive transfers and there's no receivable to record.
-        if (!grossChargeAmount || isZero(grossChargeAmount)) {
+        if (isZero(grossChargeAmount)) {
           continue
         }
 
@@ -474,11 +472,98 @@ export async function billPeriod({
         })
       }
     })
-    await completeUsage()
   }
+  if (metered) await completeStatements()
 
   return {
     phasesProcessed: periodItemsGroups.length,
     subscription,
   }
+}
+
+type PeriodGroup = { subscriptionId: string; subscriptionPhaseId: string; statementKey: string }
+
+/** The group's pending periods of metered items: the ones the payer budget priced. */
+async function pendingMeteredPeriods(input: {
+  db: Database
+  projectId: string
+  group: PeriodGroup
+}): Promise<Array<{ id: string; cycleEndAt: number }>> {
+  const { group } = input
+  const pending = await input.db.query.billingPeriods.findMany({
+    columns: { id: true, cycleEndAt: true },
+    where: (period, ops) =>
+      ops.and(
+        ops.eq(period.projectId, input.projectId),
+        ops.eq(period.subscriptionId, group.subscriptionId),
+        ops.eq(period.subscriptionPhaseId, group.subscriptionPhaseId),
+        ops.eq(period.statementKey, group.statementKey),
+        ops.eq(period.status, "pending")
+      ),
+    with: {
+      subscriptionItem: { with: { featurePlanVersion: { columns: { featureType: true } } } },
+    },
+  })
+  return pending.filter(
+    (period) => period.subscriptionItem.featurePlanVersion.featureType === "usage"
+  )
+}
+
+/**
+ * Seals the payer budget's statements of the group's key (ADR-0008 D4) and answers the sealed
+ * ones by billing period. The seal cuts off at the invoice time, and never before the end of a
+ * metered period of the key, so each one's statement seals; a statement still open has not ended
+ * for the budget yet, and invoicing waits for the next attempt. A group without metered periods
+ * seals nothing.
+ */
+async function sealStatements(input: {
+  payerBudgets: PayerBudgetGateway | null
+  projectId: string
+  customerId: string
+  group: PeriodGroup
+  metered: ReadonlyArray<{ id: string; cycleEndAt: number }>
+  now: number
+}): Promise<Map<string, PayerStatementLine>> {
+  const { group, metered } = input
+  if (metered.length === 0) return new Map()
+  if (!input.payerBudgets) {
+    throw new Error(`Statement ${group.statementKey} has metered periods but no payer budget`)
+  }
+  // A phase's last statement ends 1 ms past the phase's inclusive end, where its period ends.
+  const at = Math.max(input.now, ...metered.map((period) => period.cycleEndAt + 1))
+  const sealed = await input.payerBudgets.seal({
+    projectId: input.projectId,
+    customerId: input.customerId,
+    statementKey: group.statementKey,
+    at,
+  })
+  if (sealed.err) throw sealed.err
+  const open = sealed.val.open.map(billingPeriodIdOf)
+  const unsealed = metered.filter((period) => open.includes(period.id))
+  if (unsealed.length > 0) {
+    const ids = unsealed.map((period) => period.id).join(", ")
+    throw new Error(`Statement ${group.statementKey} still has open usage for ${ids}; retry later`)
+  }
+  return new Map(sealed.val.sealed.map((line) => [line.billingPeriodId, line]))
+}
+
+/** The rows of the phase's plan card in its currency; empty when the plan prices nothing. */
+async function recurringRows(
+  rateCards: InvoicingPorts["rateCards"],
+  phase: { projectId: string; planVersionId: string; planVersion: { currency: Currency } }
+): Promise<RateRow[]> {
+  const { currency } = phase.planVersion
+  const card = await rateCards.cardForPlanVersion(phase.projectId, phase.planVersionId, currency)
+  if (!card) return []
+  if (card.unit !== `money:${currency}`) {
+    throw new Error(
+      `Card ${card.cardId} prices in ${card.unit}; an invoice in ${currency} needs money`
+    )
+  }
+  return rateCards.getEffectiveRows({
+    projectId: phase.projectId,
+    cardIds: [card.cardId],
+    from: 0,
+    to: Number.MAX_SAFE_INTEGER,
+  })
 }

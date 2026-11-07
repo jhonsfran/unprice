@@ -1,0 +1,1 @@
+ALTER TABLE `budget_statements` ADD `free` integer DEFAULT false NOT NULL;

@@ -1,12 +1,11 @@
 import { createRoute } from "@hono/zod-openapi"
 import {
-  type FeatureUsagePeriodRow,
   analyticsIntervalSchema,
   getUsageResponseSchema,
   prepareInterval,
-} from "@unprice/analytics"
-import type { Currency } from "@unprice/db/validators"
-import { formatMoney, fromLedgerMinor, toDecimal } from "@unprice/money"
+} from "@unprice/db/validators"
+import { formatAmount, formatMoney } from "@unprice/money"
+import { FEATURE_SLOTS, type FeatureUsageRow, customerOfKey } from "@unprice/services/analytics"
 import { endTime, startTime } from "hono/timing"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import * as HttpStatusCodes from "~/util/http-status-codes"
@@ -56,6 +55,14 @@ export const route = createRoute(
         [HttpStatusCodes.OK]: jsonContent(
           z.object({
             usage: getUsageResponseSchema.array(),
+            truncated_events: z
+              .number()
+              .int()
+              .nonnegative()
+              .openapi({
+                description: `Events that fed more than ${FEATURE_SLOTS} features. Their features past the ${FEATURE_SLOTS}th are not in usage; 0 when every event is counted in full.`,
+                example: 0,
+              }),
           }),
           "The result of the get usage"
         ),
@@ -82,26 +89,19 @@ export type GetAnalyticsUsageResponse = z.infer<
   (typeof route.responses)[200]["content"]["application/json"]["schema"]
 >
 
-function trimInsignificantZeros(amount: string): string {
-  if (!amount.includes(".")) {
-    return amount
-  }
-
-  return amount.replace(/(\.\d*?[1-9])0+$/, "$1").replace(/\.0+$/, "")
-}
-
 function formatUsageResponse(
-  row: FeatureUsagePeriodRow,
-  fallbackCurrency: Currency
+  row: FeatureUsageRow & { feature_slug: string },
+  projectId: string,
+  currency: string
 ): z.infer<typeof getUsageResponseSchema> {
-  const currency = row.currency ?? fallbackCurrency
-  const amount = trimInsignificantZeros(toDecimal(fromLedgerMinor(row.amount_after ?? 0, currency)))
+  const amount = formatAmount(row.amount)
+  const customerId = row.budget_key ? customerOfKey(row.budget_key) : null
 
   return {
-    project_id: row.project_id,
-    customer_id: row.customer_id,
+    project_id: projectId,
+    ...(customerId ? { customer_id: customerId } : {}),
     feature_slug: row.feature_slug,
-    usage: row.usage ?? row.value_after ?? 0,
+    usage: Number(formatAmount(row.quantity)),
     spending: {
       amount,
       currency,
@@ -113,7 +113,7 @@ function formatUsageResponse(
 export const registerGetAnalyticsUsageV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { customer_id: inputCustomerId, range, project_id: projectId } = c.req.valid("json")
-    const analytics = c.get("analytics")
+    const { analytics } = c.get("services")
     const cache = c.get("cache")
     const logger = c.get("logger")
 
@@ -127,7 +127,6 @@ export const registerGetAnalyticsUsageV1 = (app: App) =>
           })
         : undefined
 
-    // start a new timer
     startTime(c, "getUsage")
 
     const { start, end } = prepareInterval(range)
@@ -135,7 +134,7 @@ export const registerGetAnalyticsUsageV1 = (app: App) =>
     // main workspace can see all usage
     const isMain = key.project.workspace.isMain
     const projectID = isMain ? (projectId ? projectId : key.projectId) : key.projectId
-    const defaultCurrency = key.project.defaultCurrency
+    const currency = key.project.defaultCurrency
 
     if (!isMain && projectID !== projectId) {
       throw new UnpriceApiError({
@@ -144,51 +143,48 @@ export const registerGetAnalyticsUsageV1 = (app: App) =>
       })
     }
 
-    const cacheKey = `${projectID}:${customerId}:${range}`
+    const cacheKey = `journal:v2:${projectID}:${customerId}:${range}`
 
+    // Usage history from the budget journal (ADR-0008 D7), one row per customer and feature.
     const { err, val: data } = await cache.getUsage.swr(cacheKey, async () => {
-      const rows = await analytics
-        .getFeaturesUsagePeriod({
-          customer_id: customerId,
+      const rows = await analytics.getFeatureUsage({
+        projectId: projectID,
+        customerId,
+        window: { from: new Date(start), to: new Date(end) },
+        byCustomer: true,
+      })
+
+      if (rows.err) {
+        const serializedError = serializeError(rows.err)
+        logger.error("analytics usage journal query failed", {
+          error: serializedError,
+          error_message: serializedError.message,
           project_id: projectID,
-          start,
-          end,
+          customer_id: customerId,
+          range,
+          request_id: c.get("requestId"),
         })
-        .then((res) => res.data)
-        .catch((error) => {
-          const serializedError = serializeError(error)
+        throw rows.err
+      }
 
-          logger.error("analytics usage tinybird query failed", {
-            error: serializedError,
-            error_message: serializedError.message,
-            pipe: "v1_get_feature_usage_period",
-            project_id: projectID,
-            customer_id: customerId,
-            range,
-            start,
-            end,
-            request_id: c.get("requestId"),
-          })
-
-          throw error
-        })
-
-      return (rows ?? []).map((row) => formatUsageResponse(row, defaultCurrency))
+      // A null feature slug counts the events that fed more than FEATURE_SLOTS features.
+      return {
+        usage: rows.val
+          .filter(
+            (row): row is FeatureUsageRow & { feature_slug: string } => row.feature_slug !== null
+          )
+          .map((row) => formatUsageResponse(row, projectID, currency)),
+        truncated_events: rows.val
+          .filter((row) => row.feature_slug === null)
+          .reduce((sum, row) => sum + row.events, 0),
+      }
     })
 
-    const usage = data ?? []
-
-    // end the timer
     endTime(c, "getUsage")
 
     if (err) {
       throw toUnpriceApiError(err)
     }
 
-    return c.json(
-      {
-        usage,
-      },
-      HttpStatusCodes.OK
-    )
+    return c.json(data ?? { usage: [], truncated_events: 0 }, HttpStatusCodes.OK)
   })

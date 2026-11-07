@@ -9,16 +9,19 @@
  * | ----------------------------------- | -------------------------- | -------------------------------- |
  * | `meterConfig.eventId`               | `eventSlug`                | server, after events exist       |
  * | `planId` / `featureId`              | `planSlug` / `featureSlug` | server                           |
- * | `config.price`, `tiers[].unitPrice` | decimal string             | `toDineroPrice()` in materialize |
+ * | rate card rows (ADR-0008 D2)        | `config.price`, `tiers`    | `featureRowDraft()` in apply     |
  *
- * Every object is `.strict()`, so the internal forms (row ids, project ids,
- * Dinero snapshots) are rejected instead of silently ignored. Pricing-mode
+ * A plan feature stores no price: `config.price` and `config.tiers` become rows
+ * of the rate card `apply` assigns to the version, and `get` reads them back
+ * from that card. Every object is `.strict()`, so the internal forms (row ids,
+ * project ids) are rejected instead of silently ignored. Pricing-mode
  * semantics (which config fields each featureType needs, tier consecutiveness,
  * "price required for unit mode", the meterConfig/usage pairing) are not
  * restated: the boundary validates every priced feature against
  * `planVersionFeatureInsertBaseSchema` itself, so a malformed shape fails here
  * rather than several steps later inside the server.
  */
+import { formatAmount, parseAmount } from "@unprice/money"
 import * as z from "zod"
 
 import { sha256HexSync } from "../utils/sha256-sync"
@@ -28,10 +31,10 @@ import {
   configFlatSchema,
   configPackageSchema,
   configTierSchema,
+  configUsageFieldsSchema,
   configUsageSchema,
   planVersionFeatureInsertBaseSchema,
   priceSchema,
-  tiersSchema,
 } from "./planVersionFeatures"
 import { versionInsertBaseSchema } from "./planVersions"
 import { planInsertBaseSchema } from "./plans"
@@ -92,34 +95,61 @@ export const monetizationResetConfigSchema = z
   .strict()
   .describe("When usage counters reset. Omit to reset on the billing cadence")
 
-/** `tiersSchema` with the two Dinero prices replaced by decimal strings. */
-export const monetizationTierSchema = tiersSchema
-  .extend({
-    unitPrice: priceSchema.describe("Price per unit inside this tier, as a decimal string"),
-    flatPrice: priceSchema.describe("Fixed price for entering this tier, as a decimal string"),
+/**
+ * A boundary price in canonical form ("0.10" and "0.1" are one price), because the rate card
+ * stores amounts and `monetization.get` reads them back canonically; both must hash the same.
+ */
+const boundaryPriceSchema = priceSchema.transform((value) => {
+  const parsed = parseAmount(value)
+  return parsed.ok ? formatAmount(parsed.amount) : value
+})
+
+/**
+ * One graduated tier as decimal strings. Tiers start at unit 1, follow each other without gaps,
+ * and the last one is unbounded, so they map one to one onto a rate card graduated row.
+ */
+export const monetizationTierSchema = z
+  .object({
+    firstUnit: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .describe("The first unit of this tier, inclusive. 1 for the first tier"),
+    lastUnit: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .nullable()
+      .describe("The last unit of this tier, inclusive; null for the last tier"),
+    unitPrice: boundaryPriceSchema.describe("Price per unit inside this tier, as a decimal string"),
+    flatPrice: boundaryPriceSchema.describe(
+      "Fixed price for entering this tier, as a decimal string"
+    ),
   })
   .strict()
 
 /**
  * Pricing configuration with decimal-string prices.
  *
- * The field model comes from `configUsageSchema`, whose shape is the superset of
- * all four internal config schemas (flat, tier, package, usage all use these same
- * five keys), with only the documented price substitution applied. `usageMode` is
- * relaxed to optional because it is required for usage features only; which
- * fields a given featureType actually requires is decided by the internal
- * schemas, through `validateAgainstInternalFeature` below. A union of the four
- * would type better but report every failure four times, once per branch.
+ * `usageMode` and `units` come from `configUsageSchema` and are stored on the
+ * plan feature. `price` and `tiers` are the feature's rate card row. `usageMode`
+ * is relaxed to optional because it is required for usage features only; which
+ * fields a featureType requires is decided by `validateAgainstInternalFeature`
+ * below. A union would type better but report every failure once per branch.
  */
 export const monetizationPriceConfigSchema = z
-  .object(configUsageSchema.shape)
+  .object(configUsageFieldsSchema.shape)
   .extend({
-    price: priceSchema.optional().describe("Price as a decimal string. Example: '0.000002'"),
+    price: boundaryPriceSchema
+      .optional()
+      .describe("Price as a decimal string. Example: '0.000002'"),
     tiers: z.array(monetizationTierSchema).optional().describe("Pricing tiers, decimal strings"),
   })
   .partial({ usageMode: true })
   .strict()
-  .describe("Pricing configuration. Prices cross the boundary as decimal strings, never as Dinero")
+  .describe(
+    "Pricing configuration. Prices are decimal strings and become rows of the plan version's rate card"
+  )
 
 /**
  * `meterConfigSchema` with `eventId` removed: the boundary points at an event by
@@ -220,46 +250,100 @@ const INTERNAL_PLACEHOLDER_BILLING_CONFIG = {
   planType: "recurring",
 } as const
 
-/**
- * `dineroSchema` recomputes the snapshot from `displayAmount` and reads nothing
- * from the input snapshot except the currency code, so one placeholder currency
- * validates any decimal string. The real conversion happens server-side with the
- * plan version's own currency, in `toDineroPrice()`.
- */
-const INTERNAL_PLACEHOLDER_CURRENCY = { code: "USD", base: 10, exponent: 2 } as const
-
-function toInternalPrice(amount: string) {
-  return {
-    dinero: {
-      amount: 0,
-      currency: INTERNAL_PLACEHOLDER_CURRENCY,
-      scale: INTERNAL_PLACEHOLDER_CURRENCY.exponent,
-    },
-    displayAmount: amount,
-  }
+/** How the rate card prices a feature: one decimal price, or graduated tiers. */
+function pricingMode(
+  feature: z.infer<typeof monetizationVersionFeatureBaseSchema>
+): "price" | "tiers" | null {
+  if (feature.featureType === "tier") return "tiers"
+  if (feature.featureType !== "usage") return "price"
+  if (!feature.config.usageMode) return null
+  return feature.config.usageMode === "tier" ? "tiers" : "price"
 }
 
-function toInternalConfig(config: MonetizationPriceConfig) {
-  return {
-    ...config,
-    ...(config.price === undefined ? {} : { price: toInternalPrice(config.price) }),
-    ...(config.tiers === undefined
-      ? {}
-      : {
-          tiers: config.tiers.map((tier) => ({
-            ...tier,
-            unitPrice: toInternalPrice(tier.unitPrice),
-            flatPrice: toInternalPrice(tier.flatPrice),
-          })),
-        }),
+/**
+ * The pricing half of a feature: the rate card row `apply` writes. A tier mode needs tiers that
+ * start at 1, follow each other, and end unbounded (a graduated row); every other mode needs one
+ * price.
+ */
+function validatePricing(
+  feature: z.infer<typeof monetizationVersionFeatureBaseSchema>,
+  ctx: z.RefinementCtx
+) {
+  const mode = pricingMode(feature)
+  if (mode === null) return
+  const { price, tiers } = feature.config
+
+  if (mode === "price") {
+    if (price === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `A ${featureScope(feature)} needs a price`,
+        path: ["config", "price"],
+      })
+    }
+    if (tiers !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `"tiers" does not apply to a ${featureScope(feature)}`,
+        path: ["config", "tiers"],
+      })
+    }
+    return
   }
+
+  if (price !== undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `"price" does not apply to a ${featureScope(feature)}`,
+      path: ["config", "price"],
+    })
+  }
+  if (!tiers || tiers.length === 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `A ${featureScope(feature)} needs tiers`,
+      path: ["config", "tiers"],
+    })
+    return
+  }
+
+  tiers.forEach((tier, index) => {
+    const previous = tiers[index - 1]
+    const expectedFirst = previous ? (previous.lastUnit ?? 0) + 1 : 1
+    if (tier.firstUnit !== expectedFirst) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          index === 0
+            ? "The first tier starts at unit 1"
+            : "Tiers need to be consecutive, without gaps or overlaps",
+        path: ["config", "tiers", index, "firstUnit"],
+      })
+    }
+    const last = index === tiers.length - 1
+    if (last !== (tier.lastUnit === null)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: last
+          ? "The last tier is unbounded: its lastUnit is null"
+          : "Only the last tier can be unbounded",
+        path: ["config", "tiers", index, "lastUnit"],
+      })
+    }
+    if (tier.lastUnit !== null && tier.lastUnit < tier.firstUnit) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "A tier's lastUnit cannot be before its firstUnit",
+        path: ["config", "tiers", index, "lastUnit"],
+      })
+    }
+  })
 }
 
 /**
  * Which config schema each featureType uses. `validatePlanVersionFeatureMutation`
- * owns this mapping but is not exported, and the exported `parseFeaturesConfig`
- * throws for package features. Only the mapping is repeated; every pricing rule
- * stays inside the schemas named here.
+ * owns this mapping but is not exported. Only the mapping is repeated; every
+ * structural rule stays inside the schemas named here.
  *
  * Needed because `planVersionFeatureInsertBaseSchema` parses `config` through the
  * `configFeatureSchema` union first, and a union failure aborts the object parse
@@ -284,11 +368,11 @@ function featureScope(feature: z.infer<typeof monetizationVersionFeatureBaseSche
 }
 
 /**
- * Runs the priced feature through the featureType's own config schema and then
- * through `planVersionFeatureInsertBaseSchema`, the canonical owner of the
- * feature-level pricing contract. Between them they reject an empty config,
- * unit-mode usage without a price, tiers with a gap, a flat feature carrying a
- * meterConfig, and a usage feature without one — none of which are restated here.
+ * Checks the feature's rate card pricing, then runs the rest through the
+ * featureType's own config schema and `planVersionFeatureInsertBaseSchema`, the
+ * canonical owner of the feature-level contract. Between them they reject a usage
+ * feature without a mode or a meterConfig and a flat feature carrying one — none
+ * of which are restated here.
  *
  * Also rejects the fields the server would accept and then discard: a config key
  * the normalizer strips, and a `resetConfig` on a non-usage feature.
@@ -309,7 +393,9 @@ function validateAgainstInternalFeature(
     })
   }
 
-  const internalConfig = toInternalConfig(feature.config)
+  validatePricing(feature, ctx)
+
+  const { price: _price, tiers: _tiers, ...internalConfig } = feature.config
   const configResult = INTERNAL_CONFIG_SCHEMAS[feature.featureType].safeParse(internalConfig)
 
   if (!configResult.success) {
@@ -373,7 +459,7 @@ function validateAgainstInternalFeature(
   // normalized for their featureType, or the round trip fails here.
   const applied = result.data.config ?? {}
 
-  for (const [key, value] of Object.entries(feature.config)) {
+  for (const [key, value] of Object.entries(internalConfig)) {
     if (value === undefined || key in applied) continue
 
     ctx.addIssue({
@@ -639,7 +725,7 @@ function effectiveResetConfig(
  * value is included because it changes who can subscribe to the plan.
  *
  * Hashes the boundary form (slugs and decimal strings), never resolved ids or
- * Dinero snapshots, so the same document hashes identically in every project.
+ * rate card rows, so the same document hashes identically in every project.
  * Plan `title`, `description`, and `defaultPlan` are excluded: they are mutable
  * plan-row fields and never justify a new plan version.
  *

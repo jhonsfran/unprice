@@ -1,0 +1,159 @@
+{
+  "fields": [
+    {
+      "name": "schema_version",
+      "type": "int32",
+      "required": true
+    },
+    {
+      "name": "event_id",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "kind",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "timestamp",
+      "type": "timestamp",
+      "required": true
+    },
+    {
+      "name": "project_id",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "session_id",
+      "type": "string",
+      "required": true
+    },
+    {
+      "name": "page_id",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "plan_id",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "plan_version_id",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "customer_id",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "signup_status",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "pathname",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "url",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "referrer",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "referrer_url",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "locale",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "country",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "region",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "city",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "continent",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "device",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "device_vendor",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "device_model",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "browser",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "browser_version",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "os",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "os_version",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "engine",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "engine_version",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "cpu_architecture",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "bot",
+      "type": "bool",
+      "required": false
+    }
+  ]
+}

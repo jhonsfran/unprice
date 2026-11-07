@@ -141,9 +141,10 @@ function createDeps(overrides?: { customer?: Customer | null }) {
     services: {
       customers: { getCustomerByIdAcrossProjects },
       wallet: {},
+      analytics: {},
     },
     db: {},
-    analytics: {},
+    currentEntitlements: vi.fn(),
     logger,
     now: () => now,
   }
@@ -261,7 +262,7 @@ describe("getWorkspaceBillingOverview", () => {
     getCustomerCurrentAccessMock.mockResolvedValue(Ok(createAccess()))
     getCustomerWalletMock.mockResolvedValue(Ok(createWallet()))
     getUsageDashboardMock.mockResolvedValue(
-      Err(new FetchError({ message: "tinybird unavailable", retry: false }))
+      Err(new FetchError({ message: "basin sql unavailable", retry: false }))
     )
 
     const result = await getWorkspaceBillingOverview(deps as never, createInput())

@@ -117,7 +117,7 @@ function processTopupWebhook(input: {
 }) {
   return processWebhookEvent(
     {
-      analytics: { ingestEvents: vi.fn() } as never,
+      webEvents: { send: vi.fn() } as never,
       db,
       logger: input.logger,
       services: {

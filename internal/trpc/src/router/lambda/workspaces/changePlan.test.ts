@@ -137,7 +137,6 @@ describe("workspace changePlan mutation", () => {
             unPriceCustomerId: "cus_workspace",
           },
           db: {} as never,
-          analytics: {} as never,
           logger: {} as never,
           services: {} as never,
         },
@@ -174,7 +173,6 @@ describe("workspace changePlan mutation", () => {
           unPriceCustomerId: "cus_workspace",
         },
         db: {} as never,
-        analytics: {} as never,
         logger: {} as never,
         services: {
           billing: {},

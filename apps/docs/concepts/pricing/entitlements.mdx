@@ -52,9 +52,8 @@ Use `usage.consume` when the request path needs a synchronous decision and the u
 known.
 
 ```ts
-const { result, error } = await unprice.usage.consume({
+const { error } = await unprice.usage.consume({
   customerId: "cus_1234567890",
-  featureSlug: "ai-messages",
   eventSlug: "completions",
   idempotencyKey: "req_123",
   properties: {
@@ -64,17 +63,17 @@ const { result, error } = await unprice.usage.consume({
   }
 });
 
-if (error) {
-  throw new Error(error.message);
+if (error?.code === "BUDGET_EXCEEDED") {
+  return new Response("Usage limit reached", { status: 429 });
 }
 
-if (!result.allowed) {
-  return new Response("Usage limit reached", { status: 429 });
+if (error) {
+  throw new Error(error.message);
 }
 ```
 
 `usage.consume` is an enforcing operation. Use [Choose the runtime call](/quickstart/choose-operation)
-to decide when to use `access.check`, `usage.record`, `usage.consume`, or budgeted runs.
+to decide when to use `access.check`, `usage.record`, `usage.consume`, or budgets.
 
 ## Why this matters
 

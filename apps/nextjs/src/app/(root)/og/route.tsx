@@ -113,7 +113,7 @@ function DenialReceiptCard() {
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", width: "100%" }}>
-        <Row label="REQUEST" fact="reservations.reserve" />
+        <Row label="REQUEST" fact="budget.authorize" />
         <Row label="PRICE" fact="2,050 tokens × $0.002 = $4.10" />
         <Row label="BALANCE" fact="$1.80" factColor={AMBER} />
         <div

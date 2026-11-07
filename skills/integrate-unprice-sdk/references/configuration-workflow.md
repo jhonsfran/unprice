@@ -5,7 +5,7 @@ Two operations own configuration: `monetization.get` reads how a project makes m
 accepts.
 
 Configuration is not a runtime path. For `access.check`, `usage.consume`, `usage.record`, and
-budgeted runs, read [operation-selection.md](operation-selection.md) instead.
+budgets, read [operation-selection.md](operation-selection.md) instead.
 
 ## The agent never publishes
 
@@ -156,8 +156,8 @@ Rules that are easy to get wrong:
 
 ## Model included usage and an overage cap separately
 
-Use a `usageMode: "tier"`, `tierMode: "graduated"` feature when a plan includes
-some metered units and charges beyond them. For example, 1,000,000 included
+Use a `usageMode: "tier"` feature when a plan includes some metered units and
+charges beyond them. Tiers are graduated: each tier prices only its own units. For example, 1,000,000 included
 tokens followed by `$0.00001` per token has a zero-priced first tier and a
 second tier beginning at unit 1,000,001. Omit `limit` when usage should continue
 into the paid tier.

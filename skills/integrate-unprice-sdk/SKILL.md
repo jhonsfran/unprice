@@ -68,19 +68,16 @@ configuration: read [configuration-workflow.md](references/configuration-workflo
   `access.check` when one paid action needs one current decision.
 - Treat `access.check` as a read-only decision.
 - Never use `usage.record` as a spend gate.
-- Do not begin paid work after a denied `usage.consume` or rejected run reservation.
-- A run reservation authorizes a finite currency envelope; it does not constrain a downstream
-  provider by itself. Before starting variable-cost work, derive a conservative worst-case cost
-  for the request, reserve that amount, and pass the matching cap to the provider (for example,
-  `maxTokens`). If the known input plus the minimum useful output cannot fit, deny before the
-  provider call. Never use post-response `runs.consume` as the only spend gate.
-- A nonzero `runs.start` reserves wallet funds. An active subscription alone is
-  insufficient: provision a wallet grant, credit line, or top-up large enough
-  for the expected simultaneous reservations.
-- Close short-lived runs in `finally`. For a deliberately long-lived conversation,
-  set `expiresAt`, reuse its stable idempotency key throughout that window, and
-  explicitly close it on cancellation or failure.
-- End a run as `failed` after exceptions or rejected consumption; do not report it as `completed`.
+- Do not begin paid work after a denied `usage.consume` or a refused budget hold.
+- A budget hold authorizes a finite amount; it does not constrain a downstream provider by
+  itself. Before starting variable-cost work, derive a conservative worst-case cost for the
+  request, hold that amount with `budget(key).authorize` (or `spend`), and pass the matching cap
+  to the provider (for example, `maxTokens`). If the known input plus the minimum useful output
+  cannot fit, deny before the provider call. Never record usage after the response as the only
+  spend gate.
+- Settle a hold with what the work cost; release it only when the work produced no usage. A hold
+  left open settles at its full amount when it expires.
+- Cap a multi-step workload with its own budget key and `closesAt`; the budget closes on its own.
 - Reuse the same idempotency key when retrying the same logical mutation.
 - Do not replace a repository's existing billing or authorization owner with route-level
   orchestration when a service or use-case layer owns that behavior.

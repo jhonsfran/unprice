@@ -1,4 +1,3 @@
-import type { FeatureUsagePeriodRow } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import {
   type BillingConfig,
@@ -17,6 +16,10 @@ import {
   sumGrantAllowance,
   toGrantResetConfigFromBillingConfig,
 } from "../../entitlements"
+import type {
+  GetCustomerCurrentEntitlementsInput,
+  GetCustomerCurrentEntitlementsOutput,
+} from "./get-current-entitlements"
 
 const entitlementFeatureTypeSchema = z.enum(["flat", "tier", "package", "usage"])
 
@@ -100,21 +103,22 @@ export const getCustomerCurrentAccessOutputSchema = z.object({
 export type GetCustomerCurrentAccessInput = z.infer<typeof getCustomerCurrentAccessInputSchema>
 export type GetCustomerCurrentAccessOutput = z.infer<typeof getCustomerCurrentAccessOutputSchema>
 
-export type GetCustomerCurrentAccessAnalytics = {
-  getFeaturesUsagePeriod(params: {
-    project_id: string
-    customer_id?: string
-    feature_slugs?: string[]
-    period_key?: string
-    start?: number
-    end?: number
-  }): Promise<{ data?: FeatureUsagePeriodRow[] }>
-}
+/**
+ * The customer's live entitlements from the payer budget (`getCustomerCurrentEntitlements`,
+ * reached through the API where the budget runs).
+ */
+export type CurrentEntitlementsReader = (
+  input: GetCustomerCurrentEntitlementsInput
+) => Promise<Result<GetCustomerCurrentEntitlementsOutput, FetchError>>
 
 export type GetCustomerCurrentAccessDeps = {
   db: Database
-  analytics: GetCustomerCurrentAccessAnalytics
   logger: Pick<Logger, "error">
+  /**
+   * Live usage of metered entitlements. Without it, or when it fails, `currentUsage` is null and
+   * `usageUnavailable` is true; callers that only need the plan and limits leave it out.
+   */
+  currentEntitlements?: CurrentEntitlementsReader
   now?: () => number
 }
 
@@ -250,25 +254,10 @@ export async function getCustomerCurrentAccess(
               timestamp: now,
             })
           : { scopes: [], usagePeriodsByEntitlementId: new Map<string, UsagePeriodBucket[]>() }
-      const usageResult =
+      const live =
         usagePeriodPlan.scopes.length > 0
-          ? await loadUsageByFeaturePeriodKey({
-              deps,
-              projectId: input.projectId,
-              customerId: input.customerId,
-              scopes: usagePeriodPlan.scopes,
-            })
-          : { usageByFeaturePeriodKey: new Map<string, number>(), error: null }
-
-      if (usageResult.error) {
-        deps.logger.error(usageResult.error, {
-          context: "error getting customer current-cycle usage",
-          projectId: input.projectId,
-          customerId: input.customerId,
-        })
-      }
-
-      const usageByFeaturePeriodKey = usageResult.usageByFeaturePeriodKey
+          ? await loadLiveUsage(deps, input)
+          : { byEntitlementId: new Map<string, LiveEntitlement>(), unavailable: false }
 
       const output: GetCustomerCurrentAccessOutput = {
         customerId: input.customerId,
@@ -303,7 +292,7 @@ export async function getCustomerCurrentAccess(
           : null,
         activeSubscriptionCount: activeSubscriptions.length,
         entitlementCount: entitlements.length,
-        usageUnavailable: Boolean(usageResult.error),
+        usageUnavailable: live.unavailable,
         usageWindow,
         entitlements: entitlements
           .map((entitlement) => {
@@ -320,18 +309,20 @@ export async function getCustomerCurrentAccess(
               featureType === "usage" ||
               (featurePlanVersion.meterConfig !== null &&
                 featurePlanVersion.meterConfig !== undefined)
-            const usagePeriods =
-              usagePeriodPlan.usagePeriodsByEntitlementId.get(entitlement.id) ?? []
-            const periodKeys = usagePeriods.map((period) => period.periodKey)
-            const currentUsage =
-              isUsageEntitlement && !usageResult.error
-                ? sumUsageForFeaturePeriodKeys({
-                    usageByFeaturePeriodKey,
-                    customerEntitlementId: entitlement.id,
-                    featureSlug: feature.slug,
-                    periodKeys,
-                  })
-                : null
+            const liveEntitlement = isUsageEntitlement
+              ? live.byEntitlementId.get(entitlement.id)
+              : undefined
+            const liveWindow = liveEntitlement?.quotaWindow
+            const usagePeriods = liveWindow
+              ? [
+                  {
+                    periodKey: liveWindow.periodKey,
+                    start: liveWindow.startAt,
+                    end: liveWindow.endAt ?? Number.MAX_SAFE_INTEGER,
+                  },
+                ]
+              : (usagePeriodPlan.usagePeriodsByEntitlementId.get(entitlement.id) ?? [])
+            const currentUsage = liveEntitlement ? (liveEntitlement.usage ?? 0) : null
 
             return {
               id: entitlement.id,
@@ -395,83 +386,38 @@ export async function getCustomerCurrentAccess(
   return Ok(result.val ?? null)
 }
 
-async function loadUsageByFeaturePeriodKey({
-  deps,
-  projectId,
-  customerId,
-  scopes,
-}: {
-  deps: GetCustomerCurrentAccessDeps
-  projectId: string
-  customerId: string
-  scopes: UsagePeriodScope[]
-}): Promise<{ usageByFeaturePeriodKey: Map<string, number>; error: FetchError | null }> {
-  const scopesByPeriodKey = new Map<string, Set<string>>()
+type LiveEntitlement = Extract<
+  GetCustomerCurrentEntitlementsOutput["entitlements"][number],
+  { status: "available" }
+>
 
-  for (const scope of scopes) {
-    const featureSlugs = scopesByPeriodKey.get(scope.periodKey) ?? new Set<string>()
-    featureSlugs.add(scope.featureSlug)
-    scopesByPeriodKey.set(scope.periodKey, featureSlugs)
+/** Live metered usage per entitlement id; unavailable without a reader or when it fails. */
+async function loadLiveUsage(
+  deps: GetCustomerCurrentAccessDeps,
+  input: GetCustomerCurrentAccessInput
+): Promise<{ byEntitlementId: Map<string, LiveEntitlement>; unavailable: boolean }> {
+  const byEntitlementId = new Map<string, LiveEntitlement>()
+  if (!deps.currentEntitlements) {
+    return { byEntitlementId, unavailable: true }
   }
 
-  const periodGroups = [...scopesByPeriodKey.entries()].map(([periodKey, featureSlugs]) => ({
-    featureSlugs,
-    periodKey,
-  }))
-  const results = await Promise.all(
-    periodGroups.map(({ periodKey, featureSlugs }) =>
-      wrapResult(
-        deps.analytics.getFeaturesUsagePeriod({
-          project_id: projectId,
-          customer_id: customerId,
-          period_key: periodKey,
-          feature_slugs: [...featureSlugs].sort(),
-        }),
-        (error) =>
-          new FetchError({
-            message: error.message,
-            retry: true,
-            context: {
-              url: "tinybird:v1_get_feature_usage_period",
-              method: "GET",
-              projectId,
-              customerId,
-              periodKey,
-            },
-          })
-      )
-    )
-  )
-
-  const failedResult = results.find((result) => result.err)
-  if (failedResult?.err) {
-    return {
-      usageByFeaturePeriodKey: new Map<string, number>(),
-      error: failedResult.err,
-    }
+  const current = await deps.currentEntitlements({
+    projectId: input.projectId,
+    customerId: input.customerId,
+  })
+  if (current.err) {
+    deps.logger.error(current.err, {
+      context: "error getting customer live usage",
+      projectId: input.projectId,
+      customerId: input.customerId,
+    })
+    return { byEntitlementId, unavailable: true }
   }
 
-  const usageByFeaturePeriodKey = new Map<string, number>()
-
-  for (let index = 0; index < results.length; index++) {
-    const result = results[index]
-    if (!result?.val) {
-      continue
-    }
-
-    const periodKey = periodGroups[index]?.periodKey
-    if (!periodKey) {
-      continue
-    }
-
-    for (const row of result.val.data ?? []) {
-      const usage = row.usage ?? row.value_after ?? 0
-      const key = usagePeriodKey(row.customer_entitlement_id, row.feature_slug, periodKey)
-      usageByFeaturePeriodKey.set(key, (usageByFeaturePeriodKey.get(key) ?? 0) + usage)
-    }
+  for (const entitlement of current.val.entitlements) {
+    if (entitlement.status === "available") byEntitlementId.set(entitlement.id, entitlement)
   }
-
-  return { usageByFeaturePeriodKey, error: null }
+  return { byEntitlementId, unavailable: false }
 }
 
 function toPublicMeterConfig(meterConfig: unknown) {
@@ -554,34 +500,6 @@ function buildUsagePeriodPlan({
     scopes: [...scopesByKey.values()],
     usagePeriodsByEntitlementId,
   }
-}
-
-function sumUsageForFeaturePeriodKeys({
-  usageByFeaturePeriodKey,
-  customerEntitlementId,
-  featureSlug,
-  periodKeys,
-}: {
-  usageByFeaturePeriodKey: Map<string, number>
-  customerEntitlementId: string
-  featureSlug: string
-  periodKeys: string[]
-}): number {
-  return periodKeys.reduce(
-    (total, periodKey) =>
-      total +
-      (usageByFeaturePeriodKey.get(usagePeriodKey(customerEntitlementId, featureSlug, periodKey)) ??
-        0),
-    0
-  )
-}
-
-function usagePeriodKey(
-  customerEntitlementId: string,
-  featureSlug: string,
-  periodKey: string
-): string {
-  return `${customerEntitlementId}\u0000${featureSlug}\u0000${periodKey}`
 }
 
 function usageScopeKey(featureSlug: string, periodKey: string): string {

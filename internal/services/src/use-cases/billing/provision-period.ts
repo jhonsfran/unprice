@@ -46,8 +46,8 @@ export interface ActivateSubscriptionInput {
    * Additive wallet grants to issue at activation. Each entry creates one
    * `wallet_credits` row that expires at `periodEndAt`. This is the only
    * money movement activation owns — base fees and usage are settled by
-   * the invoicing flow at period boundaries; usage reservations are
-   * created lazily by the EntitlementWindowDO on first priced event.
+   * the invoicing flow at period boundaries; usage is priced by the payer
+   * budget (BudgetDO) as it lands.
    */
   grants?: ActivationGrant[]
 }
@@ -67,8 +67,8 @@ export interface ActivateSubscriptionOutput {
  * Issues additive wallet grants for a billing period and flips the
  * subscription to `active`.
  *
- * Reservations are created lazily by the EntitlementWindowDO on first
- * priced usage event — they're not opened here. Base fees settle through
+ * Usage is priced by the payer budget (BudgetDO) as it lands — nothing is
+ * reserved here. Base fees settle through
  * the invoicing flow at period boundaries — also not transferred here.
  *
  * Single transaction, single advisory lock per customer. Any grant

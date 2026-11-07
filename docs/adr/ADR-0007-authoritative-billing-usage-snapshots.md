@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted.
+Superseded by ADR-0008 on 2026-11-04. Invoices read sealed payer budget statements; the
+per-entitlement usage snapshots are deleted.
 
 ## Date
 

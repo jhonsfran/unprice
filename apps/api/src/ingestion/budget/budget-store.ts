@@ -2,18 +2,35 @@ import { sha256HexSync } from "@unprice/db/utils"
 import {
   type BudgetRecord,
   type ChargeOperation,
+  type Funding,
   type HoldOperation,
   type InspectReader,
   type LeaseOperation,
   type Ledger,
   type Operation,
   type ReservationOperation,
+  type Statement,
   WINDOW_HISTORY_PERIODS,
   type WindowId,
+  type WindowPeriod,
   alarmAt,
   emptyLedger,
 } from "@unprice/services/budgets"
-import { type SQL, and, asc, desc, eq, gt, inArray, lte, min, notInArray, sql } from "drizzle-orm"
+import type { CardRows } from "@unprice/services/pricing"
+import {
+  type SQL,
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  inArray,
+  lte,
+  min,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm"
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite"
 import * as schema from "./db/schema"
 import type { BudgetStore, BudgetStoreTx, Sync } from "./ports"
@@ -22,22 +39,41 @@ type SqliteHandle = DrizzleSqliteDODatabase<typeof schema>
 
 const SINGLETON_ID = 1
 
-/** JSON with bigints tagged, so amounts in the config, counters, and rows round-trip exactly. */
-function encode(value: unknown): string {
-  return JSON.stringify(value, (_key: string, item: unknown) =>
-    typeof item === "bigint" ? { $bigint: item.toString() } : item
-  )
+const BIGINT_TAG = "$bigint"
+
+function isRecord(item: unknown): item is Record<string, unknown> {
+  return item !== null && typeof item === "object" && !Array.isArray(item)
 }
 
-function decode<T>(text: string): T {
-  return JSON.parse(text, (_key: string, item: unknown) =>
-    item !== null &&
-    typeof item === "object" &&
-    "$bigint" in item &&
-    typeof item.$bigint === "string"
-      ? BigInt(item.$bigint)
-      : item
-  ) as T
+/** Renames the keys of `item` that start with `$`; null when none does. */
+function renamedDollarKeys(item: Record<string, unknown>, rename: (key: string) => string) {
+  const keys = Object.keys(item)
+  if (!keys.some((key) => key.startsWith("$"))) return null
+  // fromEntries defines own properties, so a `__proto__` key stays a key.
+  return Object.fromEntries(keys.map((key) => [key.startsWith("$") ? rename(key) : key, item[key]]))
+}
+
+/**
+ * JSON with bigints tagged as `{"$bigint": "<decimal>"}`, so amounts in the config, usage vectors,
+ * counters, and rows round-trip exactly. Event properties are caller data and may name a key
+ * `$bigint`, so every key that starts with `$` is stored with one more `$`: an unescaped
+ * `$bigint` key is always the tag.
+ */
+export function encode(value: unknown): string {
+  return JSON.stringify(value, (_key: string, item: unknown) => {
+    if (typeof item === "bigint") return { [BIGINT_TAG]: item.toString() }
+    return isRecord(item) ? (renamedDollarKeys(item, (key) => `$${key}`) ?? item) : item
+  })
+}
+
+export function decode<T>(text: string): T {
+  return JSON.parse(text, (_key: string, item: unknown) => {
+    if (!isRecord(item)) return item
+    const keys = Object.keys(item)
+    const tag = item[BIGINT_TAG]
+    if (keys.length === 1 && keys[0] === BIGINT_TAG && typeof tag === "string") return BigInt(tag)
+    return renamedDollarKeys(item, (key) => key.slice(1)) ?? item
+  }) as T
 }
 
 type Payload =
@@ -57,7 +93,7 @@ function decodeOperation(
   if (row.kind === "lease" && "leaseKey" in payload) {
     return { ...payload, kind: "lease", id: `l:${payload.leaseKey}` }
   }
-  if (row.kind === "hold" && "amount" in payload && "state" in payload) {
+  if (row.kind === "hold" && "reserved" in payload && "state" in payload) {
     return { ...payload, kind: "hold", id: row.id }
   }
   if ((row.kind === "charge" || row.kind === "record") && "crossed" in payload) {
@@ -78,20 +114,35 @@ function storedId(operation: Operation): string {
 
 const leaseId = (leaseKey: string) => `l:${sha256HexSync(leaseKey)}`
 
+/**
+ * The first `seq` of a budget's journal: its first write's clock times 1,000. A key deleted and
+ * created again starts above every `seq` the deleted budget used, so `(budget key, seq)` stays
+ * unique while it writes fewer than 1,000 rows per millisecond it lived.
+ */
+const firstSeqAt = (now: number) => now * 1_000
+
 function statusOf(operation: Operation): (typeof schema.budgetOperations.$inferInsert)["status"] {
   if (operation.kind === "hold") return operation.state.status
   return operation.kind === "lease" && operation.state.status === "open" ? "open" : "done"
 }
 
+/**
+ * The last config decoded, by its stored text. A priced config embeds every metered feature, and
+ * decoding it on every command cost about 120 µs at 64 features; it changes only on an upsert.
+ */
+type ConfigCache = { json: string; config: BudgetRecord["config"] } | null
+
 export class BudgetSqliteStore implements BudgetStore {
+  private readonly configs: { last: ConfigCache } = { last: null }
+
   constructor(private readonly db: SqliteHandle) {}
 
   atomically<T>(fn: (tx: BudgetStoreTx) => Sync<T>): T {
-    return this.db.transaction((tx) => fn(bind(tx)))
+    return this.db.transaction((tx) => fn(bind(tx, this.configs)))
   }
 
   inspecting<T>(fn: (tx: BudgetStoreTx & InspectReader) => Sync<T>): T {
-    return this.db.transaction((tx) => fn({ ...bind(tx), ...bindInspect(tx) }))
+    return this.db.transaction((tx) => fn({ ...bind(tx, this.configs), ...bindInspect(tx) }))
   }
 }
 
@@ -148,9 +199,41 @@ function bindInspect(db: SqliteTx): InspectReader {
   }
 }
 
-function bind(db: SqliteTx): BudgetStoreTx {
+type StatementTotals = Pick<Statement, "quantity" | "amount" | "cost">
+
+/** A JSON array bound as one parameter: DO SQLite caps bound parameters at 100 per statement. */
+const jsonList = (values: readonly string[]) =>
+  sql`(SELECT value FROM json_each(${JSON.stringify(values)}))`
+
+function bind(db: SqliteTx, configs: { last: ConfigCache }): BudgetStoreTx {
   const operations = schema.budgetOperations
+  const statements = schema.budgetStatements
+  const positions = schema.budgetPositions
+  /** The statements `where` selects, each with its positions. */
+  const readStatementsWhere = (where: SQL | undefined): Statement[] => {
+    const rows = db.select().from(statements).where(where).all()
+    if (rows.length === 0) return []
+    const byPeriod = new Map<string, Record<string, bigint>>()
+    const moved = db
+      .select()
+      .from(positions)
+      .where(sql`${positions.periodId} IN ${jsonList(rows.map((row) => row.periodId))}`)
+      .all()
+    for (const { periodId, positionKey, value } of moved) {
+      // Without a prototype, a position key is never an inherited member.
+      const held = byPeriod.get(periodId) ?? Object.create(null)
+      held[positionKey] = BigInt(value)
+      byPeriod.set(periodId, held)
+    }
+    return rows.map(({ totalsJson, ...row }) => ({
+      ...row,
+      ...decode<StatementTotals>(totalsJson),
+      positions: { ...byPeriod.get(row.periodId) },
+    }))
+  }
+
   const terminal = sql`${operations.status} IN ('done', 'settled', 'released')`
+  const exportedSeq = sql`(SELECT ${schema.budgetLedger.exportedSeq} FROM ${schema.budgetLedger} WHERE ${schema.budgetLedger.id} = ${SINGLETON_ID})`
   const readOperationWhere = (where: SQL) => {
     const row = db
       .select({ id: operations.id, kind: operations.kind, dataJson: operations.dataJson })
@@ -158,6 +241,13 @@ function bind(db: SqliteTx): BudgetStoreTx {
       .where(where)
       .get()
     return row ? decodeOperation(row) : null
+  }
+
+  const configOf = (json: string) => {
+    if (configs.last?.json !== json) {
+      configs.last = { json, config: decode<BudgetRecord["config"]>(json) }
+    }
+    return configs.last.config
   }
 
   return {
@@ -173,7 +263,7 @@ function bind(db: SqliteTx): BudgetStoreTx {
         projectId: row.projectId,
         unit: row.unit,
         version: row.version,
-        config: decode<BudgetRecord["config"]>(row.configJson),
+        config: configOf(row.configJson),
       }
     },
 
@@ -187,7 +277,7 @@ function bind(db: SqliteTx): BudgetStoreTx {
       return {
         lastAt: row.lastAt,
         holdSeq: row.holdSeq,
-        held: row.held,
+        held: decode<Ledger["held"]>(row.heldJson),
         usage: decode<Ledger["usage"]>(row.usageJson),
         operations: decode<Ledger["operations"]>(row.operationsJson),
       }
@@ -209,6 +299,18 @@ function bind(db: SqliteTx): BudgetStoreTx {
       throw new Error(`row for ${leaseKey} is not a lease`)
     },
 
+    // Asked only when an upsert changes pricing, so the scan without a status index is rare.
+    hasOpenReservations() {
+      return (
+        db
+          .select({ id: operations.id })
+          .from(operations)
+          .where(eq(operations.status, "open"))
+          .limit(1)
+          .all().length > 0
+      )
+    },
+
     readExpired(now, limit) {
       return (
         db
@@ -227,6 +329,86 @@ function bind(db: SqliteTx): BudgetStoreTx {
       )
     },
 
+    cardsRefreshedAt(cardIds) {
+      if (cardIds.length === 0) return {}
+      const cards = schema.budgetCards
+      const rows = db
+        .select({ cardId: cards.cardId, refreshedAt: cards.refreshedAt })
+        .from(cards)
+        .where(sql`${cards.cardId} IN ${jsonList(cardIds)}`)
+        .all()
+      return Object.fromEntries(rows.map((row) => [row.cardId, row.refreshedAt]))
+    },
+
+    readCards(cardIds) {
+      if (cardIds.length === 0) return {}
+      const cards = schema.budgetCards
+      const rows = db
+        .select({ cardId: cards.cardId, cardJson: cards.cardJson })
+        .from(cards)
+        .where(sql`${cards.cardId} IN ${jsonList(cardIds)}`)
+        .all()
+      return Object.fromEntries(rows.map((row) => [row.cardId, decode<CardRows>(row.cardJson)]))
+    },
+
+    readStatements: (periodIds) =>
+      periodIds.length === 0
+        ? []
+        : readStatementsWhere(sql`${statements.periodId} IN ${jsonList(periodIds)}`),
+
+    readFeatureStatements: (features, from, to) =>
+      features.length === 0
+        ? []
+        : readStatementsWhere(
+            and(
+              sql`${statements.featureSlug} IN ${jsonList(features)}`,
+              or(
+                eq(statements.state, "open"),
+                and(sql`${statements.start} < ${to}`, gt(statements.end, from))
+              )
+            )
+          ),
+
+    readKeyStatements: (statementKey) =>
+      readStatementsWhere(eq(statements.statementKey, statementKey)),
+
+    readFunding(statementKeys) {
+      if (statementKeys.length === 0) return []
+      const funding = schema.budgetFunding
+      return db
+        .select({ dataJson: funding.dataJson })
+        .from(funding)
+        .where(sql`${funding.statementKey} IN ${jsonList(statementKeys)}`)
+        .all()
+        .map((row) => decode<Funding>(row.dataJson))
+    },
+
+    hasOpenFunding() {
+      const funding = schema.budgetFunding
+      return (
+        db
+          .select({ statementKey: funding.statementKey })
+          .from(funding)
+          .where(eq(funding.state, "open"))
+          .limit(1)
+          .all().length > 0
+      )
+    },
+
+    readUnfinishedStatements: () =>
+      readStatementsWhere(sql`${statements.state} IN ('open', 'sealed')`),
+
+    cacheCards(cards, at) {
+      const table = schema.budgetCards
+      for (const card of cards) {
+        const row = { cardJson: encode(card), refreshedAt: at }
+        db.insert(table)
+          .values({ cardId: card.card.id, ...row })
+          .onConflictDoUpdate({ target: table.cardId, set: row })
+          .run()
+      }
+    },
+
     readHistory(windowIds, limit) {
       const history = schema.budgetWindowHistory
       return windowIds.flatMap((windowId) =>
@@ -237,11 +419,49 @@ function bind(db: SqliteTx): BudgetStoreTx {
           .orderBy(desc(history.start))
           .limit(limit)
           .all()
-          .map((row) => ({ ...row, windowId: row.windowId as WindowId }))
+          .map(({ consumedJson, ...row }) => ({
+            ...row,
+            windowId: row.windowId as WindowId,
+            consumed: decode<WindowPeriod["consumed"]>(consumedJson),
+          }))
       )
     },
 
-    commit({ budget, ledger, purged, operations: changed, periods, retiredWindows, now }) {
+    commit({
+      budget,
+      ledger,
+      purged,
+      operations: changed,
+      periods,
+      retiredWindows,
+      statements: written,
+      positions: moved,
+      funding,
+      now,
+    }) {
+      for (const row of funding) {
+        const values = { state: row.state, dataJson: encode(row) }
+        db.insert(schema.budgetFunding)
+          .values({ statementKey: row.statementKey, ...values })
+          .onConflictDoUpdate({ target: schema.budgetFunding.statementKey, set: values })
+          .run()
+      }
+      for (const { positions: _positions, quantity, amount, cost, ...statement } of written) {
+        const row = { ...statement, totalsJson: encode({ quantity, amount, cost }) }
+        db.insert(statements)
+          .values(row)
+          .onConflictDoUpdate({ target: statements.periodId, set: row })
+          .run()
+      }
+      for (const { periodId, positionKey, value } of moved) {
+        db.insert(positions)
+          .values({ periodId, positionKey, value: value.toString() })
+          .onConflictDoUpdate({
+            target: [positions.periodId, positions.positionKey],
+            set: { value: value.toString() },
+          })
+          .run()
+      }
       if (budget) {
         const record = {
           key: budget.key,
@@ -260,14 +480,25 @@ function bind(db: SqliteTx): BudgetStoreTx {
       const ledgerRow = {
         lastAt: ledger.lastAt,
         holdSeq: ledger.holdSeq,
-        held: ledger.held,
+        heldJson: encode(ledger.held),
         usageJson: encode(ledger.usage),
         operationsJson: encode(ledger.operations),
       }
-      db.insert(schema.budgetLedger)
-        .values({ id: SINGLETON_ID, ...ledgerRow })
-        .onConflictDoUpdate({ target: schema.budgetLedger.id, set: ledgerRow })
-        .run()
+      // The same write reserves a `seq` for each changed row: the last reserved comes back.
+      const reservedSeqs = changed.length
+      const ledgerTable = schema.budgetLedger
+      const lastSeq = sql`CASE WHEN ${ledgerTable.journalSeq} = 0 THEN ${firstSeqAt(now)} ELSE ${ledgerTable.journalSeq} END + ${reservedSeqs}`
+      const reserved = db
+        .insert(ledgerTable)
+        .values({ id: SINGLETON_ID, ...ledgerRow, journalSeq: firstSeqAt(now) + reservedSeqs })
+        .onConflictDoUpdate({
+          target: ledgerTable.id,
+          set: { ...ledgerRow, journalSeq: reservedSeqs === 0 ? ledgerTable.journalSeq : lastSeq },
+        })
+        .returning({ journalSeq: ledgerTable.journalSeq })
+        .get()
+      if (!reserved) throw new Error("the ledger write returned no row")
+      let seq = reserved.journalSeq - reservedSeqs
 
       // One statement per row: DO SQLite caps bound parameters at 100 per statement.
       const history = schema.budgetWindowHistory
@@ -278,9 +509,11 @@ function bind(db: SqliteTx): BudgetStoreTx {
           )
           .run()
       }
-      for (const period of periods) {
+      for (const { consumed, ...period } of periods) {
         const ofWindow = eq(history.windowId, period.windowId)
-        db.insert(history).values(period).run()
+        db.insert(history)
+          .values({ ...period, consumedJson: encode(consumed) })
+          .run()
         // Keep what `get` can return and no more.
         const kept = db
           .select({ start: history.start })
@@ -294,16 +527,25 @@ function bind(db: SqliteTx): BudgetStoreTx {
       }
 
       // Before the upserts: a row past its retention frees its key for the row that reuses it.
+      const backlog = schema.budgetJournalBacklog
       for (const operation of purged) {
-        db.delete(operations)
-          .where(eq(operations.id, storedId(operation)))
-          .run()
+        const id = storedId(operation)
+        // The journal still needs the row when its last write was not exported: keep that write.
+        db.run(
+          sql`INSERT INTO ${backlog} (${sql.raw("seq, stored_id, kind, status, data_json, written_at")})
+            SELECT ${operations.seq}, ${operations.id}, ${operations.kind}, ${operations.status}, ${operations.dataJson}, ${operations.writtenAt}
+            FROM ${operations} WHERE ${operations.id} = ${id} AND ${operations.seq} > ${exportedSeq}`
+        )
+        db.delete(operations).where(eq(operations.id, id)).run()
       }
       for (const operation of changed) {
+        seq += 1
         const row = {
           status: statusOf(operation),
           dueAt: alarmAt(operation),
           dataJson: encodeOperation(operation),
+          seq,
+          writtenAt: now,
         }
         const insert = db
           .insert(operations)
@@ -316,11 +558,62 @@ function bind(db: SqliteTx): BudgetStoreTx {
       }
     },
 
+    readUnexported(limit) {
+      const live = db
+        .select({
+          id: operations.id,
+          kind: operations.kind,
+          status: operations.status,
+          dataJson: operations.dataJson,
+          seq: operations.seq,
+          writtenAt: operations.writtenAt,
+        })
+        .from(operations)
+        .where(gt(operations.seq, exportedSeq))
+        .orderBy(asc(operations.seq))
+        .limit(limit)
+        .all()
+      const backlog = schema.budgetJournalBacklog
+      const deleted = db
+        .select({
+          id: backlog.storedId,
+          kind: backlog.kind,
+          status: backlog.status,
+          dataJson: backlog.dataJson,
+          seq: backlog.seq,
+          writtenAt: backlog.writtenAt,
+        })
+        .from(backlog)
+        .where(gt(backlog.seq, exportedSeq))
+        .orderBy(asc(backlog.seq))
+        .limit(limit)
+        .all()
+      return [...live, ...deleted]
+        .sort((a, b) => a.seq - b.seq)
+        .slice(0, limit)
+        .map((row) => ({
+          seq: row.seq,
+          writtenAt: row.writtenAt,
+          storedId: row.id,
+          status: row.status,
+          operation: decodeOperation(row),
+        }))
+    },
+
+    markExported(seq) {
+      db.update(schema.budgetLedger)
+        .set({ exportedSeq: sql`max(${schema.budgetLedger.exportedSeq}, ${seq})` })
+        .where(eq(schema.budgetLedger.id, SINGLETON_ID))
+        .run()
+      const backlog = schema.budgetJournalBacklog
+      db.delete(backlog).where(lte(backlog.seq, seq)).run()
+    },
+
     purgeOperations(now, limit) {
       const expired = db
         .select({ id: operations.id })
         .from(operations)
-        .where(and(terminal, lte(operations.dueAt, now)))
+        .where(and(terminal, lte(operations.dueAt, now), lte(operations.seq, exportedSeq)))
         .orderBy(asc(operations.dueAt))
         .limit(limit)
       db.delete(operations).where(inArray(operations.id, expired)).run()
@@ -331,6 +624,7 @@ function bind(db: SqliteTx): BudgetStoreTx {
         db
           .select({ at: min(operations.dueAt) })
           .from(operations)
+          .where(or(eq(operations.status, "open"), lte(operations.seq, exportedSeq)))
           .get()?.at ?? null
       )
     },

@@ -33,10 +33,15 @@ export function PlanVersionHeaderActions({
   planVersionId,
   status,
   active,
+  features,
+  currency,
 }: {
   planVersionId: string
   status: "draft" | "published"
   active: boolean
+  /** The attached features as the server knows them, for the count of unpriced ones on Publish. */
+  features: readonly { feature: { slug: string; title: string } }[]
+  currency: string
 }) {
   const isDraft = status === "draft"
   const canDeactivate = status === "published" && active
@@ -46,7 +51,12 @@ export function PlanVersionHeaderActions({
   return (
     <div className="button-primary flex items-center space-x-1 rounded-md">
       {isDraft ? (
-        <PlanVersionPublish planVersionId={planVersionId} variant="custom" />
+        <PlanVersionPublish
+          planVersionId={planVersionId}
+          variant="custom"
+          features={features}
+          currency={currency}
+        />
       ) : (
         <PlanVersionDuplicate planVersionId={planVersionId} />
       )}

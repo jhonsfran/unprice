@@ -5,7 +5,7 @@ import {
   RECORD_DEDUPE_MS,
   upsertBudgetInputSchema,
 } from "@unprice/db/validators"
-import { isOutcomeOf } from "@unprice/services/budgets"
+import { amountUsage, isOutcomeOf } from "@unprice/services/budgets"
 import type { BudgetReply, BudgetRequest } from "@unprice/services/use-cases"
 import { drizzle } from "drizzle-orm/durable-sqlite"
 import { afterEach, describe, expect, it } from "vitest"
@@ -13,6 +13,7 @@ import { getBudgetStub } from "~/ingestion/do-placement"
 import type { BudgetDO } from "./BudgetDO"
 import { BudgetSqliteStore } from "./budget-store"
 import * as schema from "./db/schema"
+import { discardJournal } from "./journal"
 import { BudgetProcessor } from "./processor"
 
 const UNIT = BigInt(100_000_000)
@@ -128,7 +129,7 @@ async function prepare(key: string, limits: number, history: number, amount = "1
         await instance.execute({
           type: "record",
           idempotencyKey: `seed_${i}`,
-          amount: UNIT,
+          usage: amountUsage(UNIT),
           occurredAt: Date.now(),
         })
       )
@@ -157,7 +158,7 @@ describe("BudgetDO measured work", () => {
     const measured = await sample(stub, {
       type: "record",
       idempotencyKey: "first",
-      amount: UNIT,
+      usage: amountUsage(UNIT),
       occurredAt: Date.now(),
     })
     const outcome = accepted(measured.reply)
@@ -183,7 +184,7 @@ describe("BudgetDO measured work", () => {
             const measured = await sample(stub, {
               type: verb,
               idempotencyKey: `sample_${i}`,
-              amount: UNIT,
+              usage: amountUsage(UNIT),
               ...(verb === "record" ? { occurredAt: Date.now() } : {}),
             } as BudgetRequest)
             const outcome = accepted(measured.reply)
@@ -214,12 +215,16 @@ describe("BudgetDO measured work", () => {
         const held = await sample(stub, {
           type: "authorize",
           idempotencyKey: `hold_${i}`,
-          amount: UNIT * BigInt(2),
+          usage: amountUsage(UNIT * BigInt(2)),
         })
         const hold = accepted(held.reply)
         if (!isOutcomeOf(hold, "authorize")) throw new Error("expected authorize")
-        expect(hold.balance.held).toBe(UNIT * BigInt(2))
-        const closed = await sample(stub, { type: "settle", holdId: hold.holdId, amount: UNIT })
+        expect(hold.balance.held).toEqual(amountUsage(UNIT * BigInt(2)))
+        const closed = await sample(stub, {
+          type: "settle",
+          holdId: hold.holdId,
+          actual: amountUsage(UNIT),
+        })
         const settle = accepted(closed.reply)
         if (!isOutcomeOf(settle, "settle")) throw new Error("expected settle")
         expect([
@@ -227,7 +232,12 @@ describe("BudgetDO measured work", () => {
           settle.released,
           settle.balance.held,
           settle.balance.remaining,
-        ]).toEqual([UNIT, UNIT, BigInt(0), BigInt(998999 - i) * UNIT])
+        ]).toEqual([
+          amountUsage(UNIT),
+          amountUsage(UNIT),
+          amountUsage(BigInt(0)),
+          BigInt(998999 - i) * UNIT,
+        ])
         authorization.push(held.sql)
         settlement.push(closed.sql)
         authorizeMs.push(held.rpcMs)
@@ -267,6 +277,7 @@ describe("BudgetDO measured work", () => {
       const clock = {
         now: Date.now() + 1_000,
         processor: new BudgetProcessor({
+          journal: discardJournal,
           runtime: { destroy: async () => {} },
           clock: { now: () => clock.now },
           logger: {
@@ -351,7 +362,9 @@ describe("BudgetDO measured work", () => {
         await measured("expiry", () => clock.processor.alarm())
       }
       const current = accepted(await clock.processor.execute({ type: "get" }))
-      expect(isOutcomeOf(current, "get") && current.budget.balance.held).toBe(BigInt(0))
+      expect(isOutcomeOf(current, "get") && current.budget.balance.held).toEqual(
+        amountUsage(BigInt(0))
+      )
       expect(isOutcomeOf(current, "get") && current.budget.balance.remaining).toBe(
         BigInt(1_000_000 - 1000 - 3 * SAMPLES - SAMPLES) * UNIT
       )
@@ -379,7 +392,7 @@ describe("BudgetDO measured work", () => {
         request: (): BudgetRequest => ({
           type: "record",
           idempotencyKey: "seed_0",
-          amount: UNIT,
+          usage: amountUsage(UNIT),
           occurredAt: Date.now(),
         }),
         receipts: 1000,
@@ -388,7 +401,7 @@ describe("BudgetDO measured work", () => {
         request: (i: number): BudgetRequest => ({
           type: "charge",
           idempotencyKey: `deny_${i}`,
-          amount: UNIT,
+          usage: amountUsage(UNIT),
         }),
         receipts: 1000,
       },
@@ -441,7 +454,7 @@ describe("BudgetDO measured work", () => {
             const reply = await stub.execute({
               type: "charge",
               idempotencyKey: `batch_${batch}_${i}`,
-              amount: UNIT,
+              usage: amountUsage(UNIT),
             })
             rpcMs.push(performance.now() - start)
             return reply
@@ -517,7 +530,7 @@ describe("BudgetDO measured work", () => {
         const measured = await sample(stub, {
           type: "charge",
           idempotencyKey: `churn_charge_${i}`,
-          amount: UNIT,
+          usage: amountUsage(UNIT),
         })
         const outcome = accepted(measured.reply)
         expect(isOutcomeOf(outcome, "charge") && outcome.balance.remaining).toBe(
@@ -550,6 +563,7 @@ describe("BudgetDO measured work", () => {
           const clock = {
             now: start,
             processor: new BudgetProcessor({
+              journal: discardJournal,
               runtime: { destroy: async () => {} },
               clock: { now: () => clock.now },
               logger: {
@@ -570,7 +584,7 @@ describe("BudgetDO measured work", () => {
               await clock.processor.execute({
                 type: "record",
                 idempotencyKey: `receipt_${i}`,
-                amount: BigInt(0),
+                usage: amountUsage(BigInt(0)),
                 occurredAt: clock.now,
               })
             )
@@ -581,7 +595,7 @@ describe("BudgetDO measured work", () => {
               await clock.processor.execute({
                 type: "authorize",
                 idempotencyKey: `expired_${i}`,
-                amount: UNIT,
+                usage: amountUsage(UNIT),
                 ttlMs: 1000,
               })
             )
@@ -597,7 +611,7 @@ describe("BudgetDO measured work", () => {
           return clock.processor.execute({
             type: "authorize",
             idempotencyKey: "after_expiry",
-            amount: UNIT * BigInt(40),
+            usage: amountUsage(UNIT * BigInt(40)),
           })
         })
         admissionMs.push(performance.now() - requestStart)
@@ -609,7 +623,7 @@ describe("BudgetDO measured work", () => {
         admitted.push(request.ok)
         if (request.ok) {
           if (!isOutcomeOf(request.outcome, "authorize")) throw new Error("expected authorize")
-          expect(request.outcome.amount).toBe(UNIT * BigInt(40))
+          expect(request.outcome.reserved).toEqual(amountUsage(UNIT * BigInt(40)))
           const holdId = request.outcome.holdId
           await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
             const clock = clocks.get(state.storage.sql)
@@ -643,7 +657,7 @@ describe("BudgetDO measured work", () => {
         const outcome = accepted(settled)
         const balance = isOutcomeOf(outcome, "get") ? outcome.budget.balance : null
         expect([balance?.held, balance?.limits[0]?.consumed]).toEqual([
-          BigInt(0),
+          amountUsage(BigInt(0)),
           UNIT * BigInt(64),
         ])
       }

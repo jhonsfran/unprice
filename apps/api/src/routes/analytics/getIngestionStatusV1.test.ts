@@ -1,6 +1,5 @@
 import { OpenAPIHono } from "@hono/zod-openapi"
-import type { Analytics } from "@unprice/analytics"
-import { FetchError } from "@unprice/error"
+import { journalAnalytics } from "@unprice/services/analytics/journal-fixture"
 import type { ExecutionContext } from "hono"
 import { timing } from "hono/timing"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -54,253 +53,26 @@ afterEach(() => {
 })
 
 describe("getIngestionStatusV1 route", () => {
-  it("returns computed customer ingestion status", async () => {
-    const {
-      app,
-      env,
-      executionCtx,
-      getIngestionLive,
-      getIngestionRejections,
-      getIngestionRecent,
-      getIngestionFacets,
-    } = createTestApp({
-      liveRows: [
-        {
-          second: "2026-06-05 12:00:00",
-          processed: 2,
-          rejected: 1,
-          failed: 0,
-          total: 3,
-        },
-        {
-          second: "2026-06-05 12:00:01",
-          processed: 1,
-          rejected: 0,
-          failed: 0,
-          total: 1,
-        },
-      ],
-      rejectionRows: [
-        {
-          rejection_reason: "missing_entitlement",
-          event_slug: "usage.recorded",
-          source_id: "src_1",
-          source_type: "api_key",
-          event_count: 1,
-          last_seen_at: fromTs + 5_000,
-        },
-        {
-          rejection_reason: "wrong_source",
-          event_slug: "usage.recorded",
-          source_id: "src_2",
-          source_type: "api_key",
-          event_count: 4,
-          last_seen_at: fromTs + 4_000,
-        },
-      ],
-      recentRows: [
-        makeRecentEvent({
-          event_id: "evt_1",
-          canonical_audit_id: "audit_1",
-          state: "processed",
-          rejection_reason: null,
-          handled_at: fromTs + 5_500,
-        }),
-        makeRecentEvent({
-          event_id: "evt_2",
-          canonical_audit_id: "audit_2",
-          source_id: "src_2",
-          state: "rejected",
-          rejection_reason: "wrong_source",
-          handled_at: fromTs + 5_250,
-        }),
-        makeRecentEvent({
-          event_id: "evt_3",
-          canonical_audit_id: "audit_3",
-          handled_at: fromTs - 1,
-        }),
-      ],
-    })
+  it("answers a customer's status from the budget journal, scoped to the key's project", async () => {
+    const { app, env, executionCtx, queries } = createTestApp((sql) =>
+      sql.includes("SELECT state, COUNT(*)")
+        ? [
+            {
+              state: "processed",
+              events: 2,
+              last_seen_at: new Date(fromTs + 1_000).toISOString(),
+            },
+          ]
+        : []
+    )
 
     const response = await app.fetch(
       buildRequest({
         customer_id: "cus_123",
         from_ts: fromTs,
         to_ts: toTs,
-        source_id: "src_1",
-        event_slug: "usage.recorded",
-        limit: 2,
-      }),
-      env,
-      executionCtx
-    )
-
-    expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toEqual({
-      window: {
-        from: fromTs,
-        to: toTs,
-      },
-      totals: {
-        processed: 3,
-        rejected: 1,
-        failed: 0,
-        total: 4,
-      },
-      successRate: 0.75,
-      freshness: {
-        generatedAt: now,
-        dataFrom: fromTs,
-        dataTo: fromTs + 5_500,
-        latestHandledAt: fromTs + 5_500,
-        secondsSinceLatest: 1,
-      },
-      live: [
-        {
-          second: "2026-06-05 12:00:00",
-          processed: 2,
-          rejected: 1,
-          failed: 0,
-          total: 3,
-        },
-        {
-          second: "2026-06-05 12:00:01",
-          processed: 1,
-          rejected: 0,
-          failed: 0,
-          total: 1,
-        },
-      ],
-      rejections: [
-        {
-          rejectionReason: "missing_entitlement",
-          eventSlug: "usage.recorded",
-          sourceId: "src_1",
-          sourceType: "api_key",
-          eventCount: 1,
-          lastSeenAt: fromTs + 5_000,
-        },
-      ],
-      recentEvents: [
-        {
-          eventId: "evt_1",
-          canonicalAuditId: "audit_1",
-          customerId: "cus_123",
-          eventSlug: "usage.recorded",
-          sourceType: "api_key",
-          sourceId: "src_1",
-          ingestionMode: "async",
-          runId: null,
-          traceId: null,
-          parentRunId: null,
-          workloadType: null,
-          workloadId: null,
-          state: "processed",
-          rejectionReason: null,
-          failureStage: null,
-          failureReason: null,
-          failureMessage: null,
-          replayable: false,
-          timestamp: fromTs - 100,
-          receivedAt: fromTs + 100,
-          handledAt: fromTs + 5_500,
-        },
-      ],
-      facets: emptyFacets(),
-      nextCursor: null,
-      answer:
-        "4 events were observed in the requested window for customer cus_123 (1780000000000 to 1780000010000). 3 were processed, 1 were rejected, and 0 failed, for a 75% success rate.",
-      confidence: "high",
-      evidence: [
-        {
-          type: "ingestion_status",
-          id: "proj_123:cus_123:1780000000000:1780000010000",
-          source: "tinybird",
-          timestamp: fromTs + 5_500,
-        },
-        {
-          type: "ingestion_status",
-          id: "live:2026-06-05 12:00:00",
-          source: "tinybird",
-          timestamp: Date.parse("2026-06-05T12:00:00Z"),
-        },
-        {
-          type: "ingestion_status",
-          id: "live:2026-06-05 12:00:01",
-          source: "tinybird",
-          timestamp: Date.parse("2026-06-05T12:00:01Z"),
-        },
-        {
-          type: "ingestion_status",
-          id: "rejection:src_1:usage.recorded:missing_entitlement:1780000005000",
-          source: "tinybird",
-          timestamp: fromTs + 5_000,
-        },
-        {
-          type: "event",
-          id: "evt_1",
-          source: "tinybird",
-          timestamp: fromTs + 5_500,
-        },
-      ],
-      warnings: ["Some ingestion events were rejected or failed in the requested window."],
-      nextActions: [
-        "Inspect rejected or failed events and fix the reported reasons: missing_entitlement",
-      ],
-    })
-    expect(getIngestionLive).toHaveBeenCalledWith({
-      project_id: "proj_123",
-      customer_id: "cus_123",
-      from_ts: fromTs,
-      to_ts: toTs,
-      source_ids: ["src_1"],
-      event_slugs: ["usage.recorded"],
-    })
-    expect(getIngestionRejections).toHaveBeenCalledWith({
-      project_id: "proj_123",
-      customer_id: "cus_123",
-      from_ts: fromTs,
-      to_ts: toTs,
-      source_ids: ["src_1"],
-      event_slugs: ["usage.recorded"],
-      limit: 2,
-    })
-    expect(getIngestionRecent).toHaveBeenCalledWith({
-      project_id: "proj_123",
-      customer_id: "cus_123",
-      from_ts: fromTs,
-      to_ts: toTs,
-      source_ids: ["src_1"],
-      event_slugs: ["usage.recorded"],
-      limit: 3,
-    })
-    expect(getIngestionFacets).toHaveBeenCalledWith({
-      project_id: "proj_123",
-      customer_id: "cus_123",
-      from_ts: fromTs,
-      to_ts: toTs,
-      source_ids: ["src_1"],
-      event_slugs: ["usage.recorded"],
-      limit: 50,
-    })
-  })
-
-  it("returns zeros and a no-events answer for an empty requested window", async () => {
-    const { app, env, executionCtx, getIngestionRejections } = createTestApp({
-      recentRows: [
-        makeRecentEvent({
-          event_id: "evt_outside_window",
-          canonical_audit_id: "audit_outside_window",
-          handled_at: fromTs - 1,
-        }),
-      ],
-    })
-
-    const response = await app.fetch(
-      buildRequest({
-        customer_id: "cus_empty",
-        from_ts: fromTs,
-        to_ts: toTs,
+        event_slug: "tokens",
+        state: "processed",
       }),
       env,
       executionCtx
@@ -308,233 +80,72 @@ describe("getIngestionStatusV1 route", () => {
 
     expect(response.status).toBe(200)
     const body = await response.json()
-    expect(body).toEqual({
-      window: {
-        from: fromTs,
-        to: toTs,
-      },
-      totals: {
-        processed: 0,
-        rejected: 0,
-        failed: 0,
-        total: 0,
-      },
-      successRate: 0,
-      freshness: {
-        generatedAt: now,
-        dataFrom: fromTs,
-        dataTo: toTs,
-        latestHandledAt: null,
-        secondsSinceLatest: null,
-      },
-      live: [],
-      rejections: [],
-      recentEvents: [],
-      facets: emptyFacets(),
-      nextCursor: null,
-      answer: "No events were observed in the requested window for customer cus_empty.",
+    expect(body).toMatchObject({
+      window: { from: fromTs, to: toTs },
+      totals: { processed: 2, rejected: 0, failed: 0, total: 2 },
+      successRate: 1,
+      confidence: "high",
+    })
+    // totals, timeline, rejections, recent events, and facets
+    expect(queries).toHaveLength(5)
+    for (const sql of queries) {
+      expect(sql).toContain("WHERE project_id = 'proj_123'")
+      expect(sql).toContain("AND budget_key = 'unprice:customer:cus_123'")
+      expect(sql).toContain("event_slug IN ('tokens')")
+      expect(sql).toContain("state IN ('processed')")
+    }
+  })
+
+  it("reads every payer budget of the project when customer_id is omitted", async () => {
+    const { app, env, executionCtx, queries } = createTestApp(() => [])
+
+    const response = await app.fetch(
+      buildRequest({ from_ts: fromTs, to_ts: toTs }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({
+      totals: { processed: 0, rejected: 0, failed: 0, total: 0 },
       confidence: "low",
-      evidence: [
-        {
-          type: "ingestion_status",
-          id: "proj_123:cus_empty:1780000000000:1780000010000",
-          source: "tinybird",
-          timestamp: null,
-        },
-      ],
-      warnings: ["No ingestion events were observed in the requested window."],
-      nextActions: ["Verify the customer_id, source_id, event_slug, and time window."],
     })
-    expect(body.answer).toContain("No events were observed in the requested window")
-    expect(getIngestionRejections).toHaveBeenCalledWith({
-      project_id: "proj_123",
-      customer_id: "cus_empty",
-      from_ts: fromTs,
-      to_ts: toTs,
-      limit: 50,
-    })
+    expect(queries[0]).toContain("AND starts_with(budget_key, 'unprice:customer:')")
   })
 
   it("rejects invalid windows before auth", async () => {
-    const { app, env, executionCtx, getIngestionLive } = createTestApp()
+    const { app, env, executionCtx, queries } = createTestApp(() => [])
 
     const response = await app.fetch(
-      buildRequest({
-        customer_id: "cus_invalid",
-        from_ts: toTs,
-        to_ts: fromTs,
-      }),
+      buildRequest({ customer_id: "cus_invalid", from_ts: toTs, to_ts: fromTs }),
       env,
       executionCtx
     )
 
     expect(response.status).toBe(400)
     expect(authMocks.keyAuth).not.toHaveBeenCalled()
-    expect(getIngestionLive).not.toHaveBeenCalled()
+    expect(queries).toEqual([])
   })
 
-  it("maps Tinybird failures to internal server errors", async () => {
-    const { app, env, executionCtx } = createTestApp({
-      liveError: new Error("tinybird unavailable"),
-    })
+  it("maps journal failures to internal server errors", async () => {
+    const { app, env, executionCtx } = createTestApp(() => new Error("basin unavailable"))
 
     const response = await app.fetch(
-      buildRequest({
-        customer_id: "cus_123",
-        from_ts: fromTs,
-        to_ts: toTs,
-      }),
+      buildRequest({ customer_id: "cus_123", from_ts: fromTs, to_ts: toTs }),
       env,
       executionCtx
     )
 
     expect(response.status).toBe(500)
     await expect(response.json()).resolves.toEqual(
-      expect.objectContaining({
-        code: "INTERNAL_SERVER_ERROR",
-        message: "tinybird unavailable",
-      })
+      expect.objectContaining({ code: "INTERNAL_SERVER_ERROR" })
     )
-  })
-
-  it("returns project-wide ingestion status when customer_id is omitted", async () => {
-    const { app, env, executionCtx, getIngestionLive, getIngestionRecent, getIngestionFacets } =
-      createTestApp({
-        liveRows: [
-          {
-            second: "2026-06-05 12:00:00",
-            processed: 1,
-            rejected: 0,
-            failed: 0,
-            total: 1,
-          },
-        ],
-        recentRows: [
-          makeRecentEvent({
-            event_id: "evt_project",
-            customer_id: "cus_456",
-            state: "processed",
-            handled_at: fromTs + 5_500,
-          }),
-        ],
-      })
-
-    const response = await app.fetch(
-      buildRequest({
-        from_ts: fromTs,
-        to_ts: toTs,
-        state: "processed",
-        cursor: {
-          handledAt: fromTs + 8_000,
-          canonicalAuditId: "audit_cursor",
-        },
-        limit: 5,
-      }),
-      env,
-      executionCtx
-    )
-
-    expect(response.status).toBe(200)
-    const body = await response.json()
-    expect(body.recentEvents).toEqual([
-      expect.objectContaining({
-        eventId: "evt_project",
-        customerId: "cus_456",
-        state: "processed",
-      }),
-    ])
-    expect(body.answer).toContain("project proj_123")
-    expect(getIngestionLive).toHaveBeenCalledWith({
-      project_id: "proj_123",
-      from_ts: fromTs,
-      to_ts: toTs,
-      states: ["processed"],
-    })
-    expect(getIngestionRecent).toHaveBeenCalledWith({
-      project_id: "proj_123",
-      from_ts: fromTs,
-      to_ts: toTs,
-      states: ["processed"],
-      cursor_handled_at: fromTs + 8_000,
-      cursor_canonical_audit_id: "audit_cursor",
-      limit: 6,
-    })
-    expect(getIngestionFacets).toHaveBeenCalledWith({
-      project_id: "proj_123",
-      from_ts: fromTs,
-      to_ts: toTs,
-      states: ["processed"],
-      limit: 50,
-    })
-  })
-
-  it("accepts failed state filters", async () => {
-    const { app, env, executionCtx, getIngestionLive, getIngestionRecent, getIngestionFacets } =
-      createTestApp()
-
-    const response = await app.fetch(
-      buildRequest({
-        customer_id: "cus_123",
-        from_ts: fromTs,
-        to_ts: toTs,
-        state: "failed",
-      }),
-      env,
-      executionCtx
-    )
-
-    expect(response.status).toBe(200)
-    expect(getIngestionLive).toHaveBeenCalledWith({
-      project_id: "proj_123",
-      customer_id: "cus_123",
-      from_ts: fromTs,
-      to_ts: toTs,
-      states: ["failed"],
-    })
-    expect(getIngestionRecent).toHaveBeenCalledWith({
-      project_id: "proj_123",
-      customer_id: "cus_123",
-      from_ts: fromTs,
-      to_ts: toTs,
-      states: ["failed"],
-      limit: 51,
-    })
-    expect(getIngestionFacets).toHaveBeenCalledWith({
-      project_id: "proj_123",
-      customer_id: "cus_123",
-      from_ts: fromTs,
-      to_ts: toTs,
-      states: ["failed"],
-      limit: 50,
-    })
   })
 })
 
-function createTestApp(
-  options: {
-    liveRows?: Array<Record<string, unknown>>
-    rejectionRows?: Array<Record<string, unknown>>
-    recentRows?: Array<Record<string, unknown>>
-    facetRows?: Array<Record<string, unknown>>
-    liveError?: Error
-  } = {}
-) {
+function createTestApp(answer: (sql: string) => unknown[] | Error) {
   const app = new OpenAPIHono<HonoEnv>()
-  const getIngestionLive = vi.fn(() => {
-    if (options.liveError) {
-      return Promise.reject(
-        new FetchError({
-          message: options.liveError.message,
-          retry: true,
-        })
-      )
-    }
-
-    return Promise.resolve({ data: options.liveRows ?? [] })
-  })
-  const getIngestionRejections = vi.fn().mockResolvedValue({ data: options.rejectionRows ?? [] })
-  const getIngestionRecent = vi.fn().mockResolvedValue({ data: options.recentRows ?? [] })
-  const getIngestionFacets = vi.fn().mockResolvedValue({ data: options.facetRows ?? [] })
+  const { analytics, queries } = journalAnalytics(answer)
 
   app.use(timing())
 
@@ -547,36 +158,19 @@ function createTestApp(
   })
 
   app.use("*", async (c, next) => {
-    c.set("analytics", {
-      getIngestionLive,
-      getIngestionRejections,
-      getIngestionRecent,
-      getIngestionFacets,
-    } as unknown as Analytics)
-
+    c.set("services", { analytics } as unknown as HonoEnv["Variables"]["services"])
     await next()
   })
 
   registerGetIngestionStatusV1(app)
 
-  const env = {
-    APP_ENV: "development",
-  }
-
+  const env = { APP_ENV: "development" }
   const executionCtx = {
     passThroughOnException: vi.fn(),
     waitUntil: vi.fn(),
   } as unknown as ExecutionContext
 
-  return {
-    app,
-    env,
-    executionCtx,
-    getIngestionLive,
-    getIngestionRejections,
-    getIngestionRecent,
-    getIngestionFacets,
-  }
+  return { app, env, executionCtx, queries }
 }
 
 function buildRequest(body: Record<string, unknown>) {
@@ -588,41 +182,4 @@ function buildRequest(body: Record<string, unknown>) {
     },
     body: JSON.stringify(body),
   })
-}
-
-function makeRecentEvent(overrides: Record<string, unknown> = {}) {
-  return {
-    event_id: "evt_1",
-    canonical_audit_id: "audit_1",
-    customer_id: "cus_123",
-    event_slug: "usage.recorded",
-    source_type: "api_key",
-    source_id: "src_1",
-    run_id: null,
-    trace_id: null,
-    parent_run_id: null,
-    workload_type: null,
-    workload_id: null,
-    ingestion_mode: "async",
-    state: "processed",
-    rejection_reason: null,
-    failure_stage: null,
-    failure_reason: null,
-    failure_message: null,
-    replayable: false,
-    timestamp: fromTs - 100,
-    received_at: fromTs + 100,
-    handled_at: fromTs + 1_000,
-    ...overrides,
-  }
-}
-
-function emptyFacets() {
-  return {
-    states: [],
-    eventSlugs: [],
-    sourceTypes: [],
-    rejectionReasons: [],
-    customers: [],
-  }
 }

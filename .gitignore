@@ -1,8 +1,9 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
-# tinybird
-.tinyb
+# local env and tooling
 .env
+# Local Tinybird credentials left from before ADR-0008 D8; never commit one.
+.tinyb
 .venv
 .diff_tmp/
 

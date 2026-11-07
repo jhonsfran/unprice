@@ -73,23 +73,59 @@ export function getSafeNextPath(next: string | null | undefined): string | null 
   return next
 }
 
-/** Where auth continues: a safe `next` from the link, else the intent's own route through `/new`. */
+/** The pricing CTA's attribution, which auth must hand to `/new` when the link named no `next`. */
+export type PlanAttribution = { planVersionId?: string; pageId?: string }
+
+/**
+ * Where auth continues: a safe `next` from the link; else `/new` carrying a picked plan; else the
+ * intent's own route through `/new`.
+ */
 export function authNextPath(
   next: string | null | undefined,
-  intent?: SignupIntent
+  intent?: SignupIntent,
+  plan: PlanAttribution = {}
 ): string | null {
-  return getSafeNextPath(next) ?? (intent ? (nextAfterAuth(intent) ?? null) : null)
+  const safeNext = getSafeNextPath(next)
+  if (safeNext) {
+    return safeNext
+  }
+
+  if (plan.planVersionId) {
+    const params = new URLSearchParams()
+    for (const key of ["planVersionId", "pageId"] as const) {
+      const value = plan[key]
+      if (value) {
+        params.set(key, value)
+      }
+    }
+    if (intent) {
+      params.set("intent", intent)
+    }
+    return `/new?${params}`
+  }
+
+  return intent ? (nextAfterAuth(intent) ?? null) : null
+}
+
+/**
+ * Where an auth page sends a visitor who is already signed in. A picked plan only routes to `/new`
+ * for a visitor without a workspace: one who has a workspace goes to the app, as before plan
+ * attribution existed, instead of to a second workspace.
+ */
+export function signedInNextPath(
+  next: string | null | undefined,
+  intent: SignupIntent | undefined,
+  plan: PlanAttribution,
+  hasWorkspace: boolean
+): string | null {
+  return authNextPath(next, intent, hasWorkspace ? {} : plan)
 }
 
 export function buildAuthHref(
   route: AuthRoute,
-  { sessionId, intent, next }: { sessionId?: string; intent?: SignupIntent; next?: string | null }
+  { intent, next }: { intent?: SignupIntent; next?: string | null }
 ): string {
   const params = new URLSearchParams()
-
-  if (sessionId) {
-    params.set("sessionId", sessionId)
-  }
 
   if (intent) {
     params.set("intent", intent)
@@ -104,13 +140,10 @@ export function buildAuthHref(
   return query ? `${route}?${query}` : route
 }
 
-/**
- * The signup link for a marketing CTA. It names the intent and where auth continues even before a
- * click adds the conversion session, so an unhydrated, middle-clicked, or copied link keeps it.
- */
-export function acquisitionSignupHref(intent: SignupIntent, sessionId?: string): string {
+/** The signup link for a marketing CTA: it names the intent and where auth continues. */
+export function acquisitionSignupHref(intent: SignupIntent): string {
   return new URL(
-    buildAuthHref(AUTH_ROUTES.SIGNUP, { sessionId, intent, next: nextAfterAuth(intent) }),
+    buildAuthHref(AUTH_ROUTES.SIGNUP, { intent, next: nextAfterAuth(intent) }),
     APP_DOMAIN
   ).toString()
 }

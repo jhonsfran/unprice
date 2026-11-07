@@ -17,7 +17,6 @@ export const getCurrentAccess = protectedProjectProcedure
     const result = await getCustomerCurrentAccess(
       {
         db: opts.ctx.db,
-        analytics: opts.ctx.analytics,
         logger: opts.ctx.logger,
       },
       {

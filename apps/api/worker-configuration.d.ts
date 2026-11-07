@@ -5,18 +5,11 @@ declare namespace Cloudflare {
 	interface GlobalProps {
 		mainModule: typeof import("./src/index");
 	}
-	type LakehouseEventsStreamProdRecord = { event_date: string | number; schema_version: number; id: string; project_id: string; customer_id: string; request_id: string; idempotency_key: string; slug: string; timestamp: string | number; received_at: string | number; handled_at: string | number; state: string; rejection_reason?: string; properties: Record<string, unknown> };
-	type LakehouseEventsPipelineDev2StreamRecord = { event_date: string | number; schema_version: number; id: string; project_id: string; customer_id: string; workspace_id?: string; environment?: string; api_key_id?: string; source_type?: string; source_id?: string; source_name?: string; run_id?: string; trace_id?: string; parent_run_id?: string; workload_type?: string; workload_id?: string; ingestion_mode?: string; request_id: string; idempotency_key: string; slug: string; timestamp: string | number; received_at: string | number; handled_at: string | number; state: string; rejection_reason?: string; failure_stage?: string; failure_reason?: string; failure_message?: string; replayable?: boolean; payload_json?: string; properties: Record<string, unknown>; canonical_audit_id?: string; payload_hash?: string };
 	interface ProdEnv {
-		QUEUE_SHARD_0: Queue;
-		INGESTION_REPORTING_QUEUE: Queue;
-		TINYBIRD_TOKEN: string;
-		TINYBIRD_URL: string;
 		CLOUDFLARE_ZONE_ID: string;
 		CLOUDFLARE_API_TOKEN: string;
 		CLOUDFLARE_ACCOUNT_ID: string;
 		DATABASE_URL: string;
-		LOCAL_PIPELINE_URL: string;
 		DATABASE_READ1_URL: string;
 		DATABASE_READ2_URL: string;
 		ENCRYPTION_KEY: string;
@@ -33,23 +26,15 @@ declare namespace Cloudflare {
 		STRIPE_API_KEY: string;
 		STRIPE_CONNECT_WEBHOOK_SECRET: string;
 		projectdo: DurableObjectNamespace<import("./src/index").DurableObjectProject>;
-		entitlementwindow: DurableObjectNamespace<import("./src/index").EntitlementWindowDO>;
-		runbudget: DurableObjectNamespace<import("./src/index").RunBudgetDO>;
 		budget: DurableObjectNamespace<import("./src/index").BudgetDO>;
 		RL_FREE_1000_60s: RateLimit;
 		RL_FREE_6000_60s: RateLimit;
-		PIPELINE_EVENTS: import("cloudflare:pipelines").Pipeline<Cloudflare.LakehouseEventsStreamProdRecord>;
 	}
 	interface PreviewEnv {
-		QUEUE_SHARD_0: Queue;
-		INGESTION_REPORTING_QUEUE: Queue;
-		TINYBIRD_TOKEN: string;
-		TINYBIRD_URL: string;
 		CLOUDFLARE_ZONE_ID: string;
 		CLOUDFLARE_API_TOKEN: string;
 		CLOUDFLARE_ACCOUNT_ID: string;
 		DATABASE_URL: string;
-		LOCAL_PIPELINE_URL: string;
 		DATABASE_READ1_URL: string;
 		DATABASE_READ2_URL: string;
 		ENCRYPTION_KEY: string;
@@ -66,23 +51,15 @@ declare namespace Cloudflare {
 		STRIPE_API_KEY: string;
 		STRIPE_CONNECT_WEBHOOK_SECRET: string;
 		projectdo: DurableObjectNamespace<import("./src/index").DurableObjectProject>;
-		entitlementwindow: DurableObjectNamespace<import("./src/index").EntitlementWindowDO>;
-		runbudget: DurableObjectNamespace<import("./src/index").RunBudgetDO>;
 		budget: DurableObjectNamespace<import("./src/index").BudgetDO>;
 		RL_FREE_1000_60s: RateLimit;
 		RL_FREE_6000_60s: RateLimit;
-		PIPELINE_EVENTS: import("cloudflare:pipelines").Pipeline<Cloudflare.LakehouseEventsPipelineDev2StreamRecord>;
 	}
 	interface DevEnv {
-		QUEUE_SHARD_0: Queue;
-		INGESTION_REPORTING_QUEUE: Queue;
-		TINYBIRD_TOKEN: string;
-		TINYBIRD_URL: string;
 		CLOUDFLARE_ZONE_ID: string;
 		CLOUDFLARE_API_TOKEN: string;
 		CLOUDFLARE_ACCOUNT_ID: string;
 		DATABASE_URL: string;
-		LOCAL_PIPELINE_URL: string;
 		DATABASE_READ1_URL: string;
 		DATABASE_READ2_URL: string;
 		ENCRYPTION_KEY: string;
@@ -99,21 +76,15 @@ declare namespace Cloudflare {
 		STRIPE_API_KEY: string;
 		STRIPE_CONNECT_WEBHOOK_SECRET: string;
 		projectdo: DurableObjectNamespace<import("./src/index").DurableObjectProject>;
-		entitlementwindow: DurableObjectNamespace<import("./src/index").EntitlementWindowDO>;
-		runbudget: DurableObjectNamespace<import("./src/index").RunBudgetDO>;
 		budget: DurableObjectNamespace<import("./src/index").BudgetDO>;
 		RL_FREE_1000_60s: RateLimit;
 		RL_FREE_6000_60s: RateLimit;
-		PIPELINE_EVENTS: import("cloudflare:pipelines").Pipeline<Cloudflare.LakehouseEventsPipelineDev2StreamRecord>;
 	}
 	interface Env {
-		TINYBIRD_TOKEN: string;
-		TINYBIRD_URL: string;
 		CLOUDFLARE_ZONE_ID: string;
 		CLOUDFLARE_API_TOKEN: string;
 		CLOUDFLARE_ACCOUNT_ID: string;
 		DATABASE_URL: string;
-		LOCAL_PIPELINE_URL: string;
 		DATABASE_READ1_URL: string;
 		DATABASE_READ2_URL: string;
 		ENCRYPTION_KEY: string;
@@ -129,15 +100,10 @@ declare namespace Cloudflare {
 		UNPRICE_API_URL: string;
 		STRIPE_API_KEY: string;
 		STRIPE_CONNECT_WEBHOOK_SECRET: string;
-		QUEUE_SHARD_0?: Queue;
-		INGESTION_REPORTING_QUEUE?: Queue;
 		projectdo?: DurableObjectNamespace<import("./src/index").DurableObjectProject>;
-		entitlementwindow?: DurableObjectNamespace<import("./src/index").EntitlementWindowDO>;
-		runbudget?: DurableObjectNamespace<import("./src/index").RunBudgetDO>;
 		budget?: DurableObjectNamespace<import("./src/index").BudgetDO>;
 		RL_FREE_1000_60s?: RateLimit;
 		RL_FREE_6000_60s?: RateLimit;
-		PIPELINE_EVENTS?: import("cloudflare:pipelines").Pipeline<Cloudflare.LakehouseEventsStreamProdRecord> | import("cloudflare:pipelines").Pipeline<Cloudflare.LakehouseEventsPipelineDev2StreamRecord>;
 	}
 }
 interface Env extends Cloudflare.Env {}
@@ -145,7 +111,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "TINYBIRD_TOKEN" | "TINYBIRD_URL" | "CLOUDFLARE_ZONE_ID" | "CLOUDFLARE_API_TOKEN" | "CLOUDFLARE_ACCOUNT_ID" | "DATABASE_URL" | "LOCAL_PIPELINE_URL" | "DATABASE_READ1_URL" | "DATABASE_READ2_URL" | "ENCRYPTION_KEY" | "AUTH_SECRET" | "DRIZZLE_LOG" | "APP_ENV" | "NODE_ENV" | "AXIOM_API_TOKEN" | "AXIOM_DATASET" | "UPSTASH_REDIS_REST_URL" | "UPSTASH_REDIS_REST_TOKEN" | "UNPRICE_API_KEY" | "UNPRICE_API_URL" | "STRIPE_API_KEY" | "STRIPE_CONNECT_WEBHOOK_SECRET">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "CLOUDFLARE_ZONE_ID" | "CLOUDFLARE_API_TOKEN" | "CLOUDFLARE_ACCOUNT_ID" | "DATABASE_URL" | "DATABASE_READ1_URL" | "DATABASE_READ2_URL" | "ENCRYPTION_KEY" | "AUTH_SECRET" | "DRIZZLE_LOG" | "APP_ENV" | "NODE_ENV" | "AXIOM_API_TOKEN" | "AXIOM_DATASET" | "UPSTASH_REDIS_REST_URL" | "UPSTASH_REDIS_REST_TOKEN" | "UNPRICE_API_KEY" | "UNPRICE_API_URL" | "STRIPE_API_KEY" | "STRIPE_CONNECT_WEBHOOK_SECRET">> {}
 }
 declare module "*.sql" {
 	const value: string;

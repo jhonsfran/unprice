@@ -28,7 +28,6 @@ function createService({
   const service = new CustomerService({
     db: { select, update } as never,
     logger: { error: vi.fn(), warn: vi.fn() } as never,
-    analytics: {} as never,
     waitUntil: vi.fn(),
     cache: cache as never,
     metrics: {} as never,

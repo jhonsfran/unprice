@@ -58,10 +58,15 @@ export default async function (profile: CustomerUsageProfile): Promise<void> {
   const usageResults = await Promise.all(
     profile.usageEvents.map((event) =>
       client.usage.record({
-        customerId: CUSTOMER_ID,
-        eventSlug: event.eventSlug,
-        idempotencyKey: nextIdempotencyKey(event.eventSlug),
-        properties: buildProperties(event.propertyFields),
+        events: [
+          {
+            customerId: CUSTOMER_ID,
+            eventSlug: event.eventSlug,
+            idempotencyKey: nextIdempotencyKey(event.eventSlug),
+            occurredAt: Date.now(),
+            properties: buildProperties(event.propertyFields),
+          },
+        ],
       })
     )
   )

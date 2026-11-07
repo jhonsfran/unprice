@@ -85,8 +85,6 @@ jobs:
         shell: bash
         run: |
           required_secrets=(
-            TINYBIRD_TOKEN
-            TINYBIRD_URL
             AUTH_SECRET
             REALTIME_TICKET_SECRET
             CLOUDFLARE_ZONE_ID
@@ -109,6 +107,11 @@ jobs:
           optional_secrets=(
             DATABASE_READ1_URL
             DATABASE_READ2_URL
+            LAKEHOUSE_WEB_EVENTS_URL
+            LAKEHOUSE_WEB_EVENTS_TOKEN
+            BASIN_SQL_ACCOUNT_ID
+            BASIN_SQL_BUCKET
+            BASIN_SQL_TOKEN
           )
 
           {
@@ -147,8 +150,6 @@ jobs:
           CLOUDFLARE_ZONE_ID: ${{ env.CLOUDFLARE_ZONE_ID }}
           CLOUDFLARE_CACHE_DOMAIN: ${{ env.CLOUDFLARE_CACHE_DOMAIN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ env.CLOUDFLARE_ACCOUNT_ID }}
-          TINYBIRD_TOKEN: ${{ env.TINYBIRD_TOKEN }}
-          TINYBIRD_URL: ${{ env.TINYBIRD_URL }}
           AUTH_SECRET: ${{ env.AUTH_SECRET }}
           REALTIME_TICKET_SECRET: ${{ env.REALTIME_TICKET_SECRET }}
           # we are passing the preview database url to the deploy action
@@ -168,3 +169,8 @@ jobs:
           UNPRICE_API_URL: ${{ env.UNPRICE_API_URL }}
           STRIPE_API_KEY: ${{ env.STRIPE_API_KEY }}
           STRIPE_CONNECT_WEBHOOK_SECRET: ${{ env.STRIPE_CONNECT_WEBHOOK_SECRET }}
+          LAKEHOUSE_WEB_EVENTS_URL: ${{ env.LAKEHOUSE_WEB_EVENTS_URL || '' }}
+          LAKEHOUSE_WEB_EVENTS_TOKEN: ${{ env.LAKEHOUSE_WEB_EVENTS_TOKEN || '' }}
+          BASIN_SQL_ACCOUNT_ID: ${{ env.BASIN_SQL_ACCOUNT_ID || '' }}
+          BASIN_SQL_BUCKET: ${{ env.BASIN_SQL_BUCKET || '' }}
+          BASIN_SQL_TOKEN: ${{ env.BASIN_SQL_TOKEN || '' }}

@@ -5,6 +5,7 @@ import {
   budgetEpochMsSchema,
   budgetWindowSchema,
 } from "./budget-shared"
+import { featureSlugSchema } from "./shared"
 import { searchParamsSchemaDataTable } from "./utils"
 
 // The dashboard catalog: one Postgres row per budget, written after each upsert. It holds
@@ -20,6 +21,8 @@ export const budgetCatalogLimitSchema = z.object({
   id: z.string(),
   window: budgetWindowSchema,
   enforce: budgetEnforceSchema,
+  /** The feature a quantity limit caps; absent when the limit caps the budget's amount. */
+  feature: featureSlugSchema.optional(),
   amount: budgetDecimalSchema,
 })
 

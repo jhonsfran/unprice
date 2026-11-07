@@ -7,10 +7,9 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Cache } from "../../cache"
 import type { ServiceContext } from "../../context"
 import { createServiceContext } from "../../context"
-import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
 import type { Metrics } from "../../metrics"
-import { RatingService } from "../../rating/service"
+import { RateCardService } from "../../rate-cards/service"
 import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
 import { billPeriod } from "../../use-cases/billing/bill-period"
 
@@ -68,14 +67,13 @@ function createCache(): Cache {
 
 function createServices(): { logger: Logger; services: ServiceContext } {
   const logger = createLogger()
-  const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {})
+  const { payerBudgets } = createRecordedUsageFixture(db, {})
   return {
     logger,
     services: createServiceContext({
-      reservationFlushGateway,
+      payerBudgets,
       db,
       logger,
-      analytics,
       waitUntil: (promise) => {
         void promise
       },
@@ -192,7 +190,7 @@ async function addEnterprisePlanVersion() {
       'feat_test_access_pro',
       'flat',
       'access',
-      '{"price":{"dinero":{"amount":31000,"currency":{"code":"EUR","base":10,"exponent":2},"scale":2},"displayAmount":"310.00"}}'::json,
+      '{}'::json,
       ${JSON.stringify(billingConfig)}::json,
       ${JSON.stringify(resetConfig)}::json,
       '{}'::json,
@@ -201,6 +199,27 @@ async function addEnterprisePlanVersion() {
       NULL,
       NULL
     ) ON CONFLICT DO NOTHING
+  `)
+
+  // The enterprise version's EUR card: a 310 EUR flat fee for access.
+  await db.execute(sql`
+    INSERT INTO unprice_rate_cards (id, project_id, name, unit, margin_policy)
+    VALUES ('card_test_enterprise', ${projectId}, 'Enterprise EUR', 'money:EUR', '{"type":"manual"}'::jsonb)
+    ON CONFLICT DO NOTHING
+  `)
+  await db.execute(sql`
+    INSERT INTO unprice_rate_card_rows (
+      id, project_id, rate_card_id, feature_slug, match, price, cost,
+      effective_from, effective_to, source, source_ref
+    ) VALUES (
+      'row_test_enterprise_access', ${projectId}, 'card_test_enterprise', 'access-pro', '{}'::jsonb,
+      '{"type":"flat","amount":"310"}'::jsonb, NULL, 0, NULL, 'manual', NULL
+    ) ON CONFLICT DO NOTHING
+  `)
+  await db.execute(sql`
+    INSERT INTO unprice_plan_version_rate_cards (id, project_id, plan_version_id, currency, rate_card_id)
+    VALUES ('pvrc_test_enterprise', ${projectId}, 'pv_test_enterprise_arrear', 'EUR', 'card_test_enterprise')
+    ON CONFLICT DO NOTHING
   `)
 }
 
@@ -378,20 +397,15 @@ describe("DB-backed subscription phase changes", () => {
     const ledger = new LedgerGateway({ db, logger })
     const ensureAccounts = await ledger.ensureCustomerAccounts(customerId, "EUR")
     expect(ensureAccounts.err).toBeUndefined()
-    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+    const { payerBudgets } = createRecordedUsageFixture(db, {
       events: { quantity: 120, amount: 112_000_000 },
     })
     const billed = await billPeriod({
-      reservationFlushGateway,
+      invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
       context: await loadSubscriptionContext(),
       logger,
       db,
       repo: new DrizzleSubscriptionRepository(db),
-      ratingService: new RatingService({
-        logger,
-        analytics,
-        grantsManager: new GrantsManager({ db, logger }),
-      }),
       ledgerService: ledger,
     })
     expect(billed.phasesProcessed).toBe(1)

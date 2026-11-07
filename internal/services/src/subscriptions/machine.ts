@@ -1,4 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import type { Customer, Subscription, SubscriptionStatus } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
@@ -20,13 +19,12 @@ import type { BillingService } from "../billing/service"
 import type { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
 import type { LedgerGateway } from "../ledger"
-import type { RatingService } from "../rating/service"
+import type { InvoicingPorts } from "../use-cases/billing/bill-period"
 import { deriveActivationInputsFromPlan } from "../use-cases/billing/derive-provision-inputs"
 import {
   type ActivateSubscriptionDeps,
   activateSubscription,
 } from "../use-cases/billing/provision-period"
-import type { BillingReservationFlushGateway } from "../use-cases/billing/reservation-flush-gateway"
 import type { WalletService } from "../wallet"
 import sendCustomerNotification, { logTransition, updateSubscription } from "./actions"
 import {
@@ -67,7 +65,6 @@ import type {
 export class SubscriptionMachine {
   private subscriptionId: string
   private projectId: string
-  private analytics: Analytics
   private logger: Logger
   private actor!: AnyActorRef
   private db: Database
@@ -75,11 +72,10 @@ export class SubscriptionMachine {
   private now: number
   private customerService: CustomerService
   private grantService: GrantsManager
-  private ratingService: RatingService
   private ledgerService: LedgerGateway
   private walletService: WalletService | null
   private billingService: Pick<BillingService, "generateBillingPeriods">
-  private reservationFlushGateway: BillingReservationFlushGateway
+  private invoicing: InvoicingPorts
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private machine: any
   // Serializes event sends to this actor to avoid concurrent transitions/races.
@@ -91,13 +87,11 @@ export class SubscriptionMachine {
   private constructor({
     subscriptionId,
     projectId,
-    analytics,
     logger,
     customer,
-    ratingService,
     ledgerService,
     walletService,
-    reservationFlushGateway,
+    invoicing,
     billingService,
     now,
     db,
@@ -105,13 +99,11 @@ export class SubscriptionMachine {
   }: {
     subscriptionId: string
     projectId: string
-    analytics: Analytics
     logger: Logger
     customer: CustomerService
-    ratingService: RatingService
     ledgerService: LedgerGateway
     walletService?: WalletService
-    reservationFlushGateway: BillingReservationFlushGateway
+    invoicing: InvoicingPorts
     billingService: Pick<BillingService, "generateBillingPeriods">
     now: number
     db: Database
@@ -119,18 +111,16 @@ export class SubscriptionMachine {
   }) {
     this.subscriptionId = subscriptionId
     this.projectId = projectId
-    this.analytics = analytics
     this.logger = logger
     this.now = now
     this.customerService = customer
-    this.ratingService = ratingService
     this.ledgerService = ledgerService
     // Nullable on purpose: older callers that don't wire wallet through
     // skip the `activating` state via a guard; once every caller passes
     // walletService this can become required. See `shouldActivate`.
     this.walletService = walletService ?? null
     this.billingService = billingService
-    this.reservationFlushGateway = reservationFlushGateway
+    this.invoicing = invoicing
     this.db = db
     this.repo = repo
     this.machine = this.createMachineSubscription()
@@ -186,9 +176,8 @@ export class SubscriptionMachine {
               logger: Logger
               db: Database
               repo: SubscriptionRepository
-              ratingService: RatingService
               ledgerService: LedgerGateway
-              reservationFlushGateway: BillingReservationFlushGateway
+              invoicing: InvoicingPorts
             }
           }) => {
             const result = await invoiceSubscription({
@@ -196,9 +185,8 @@ export class SubscriptionMachine {
               logger: input.logger,
               db: input.db,
               repo: input.repo,
-              ratingService: input.ratingService,
               ledgerService: input.ledgerService,
-              reservationFlushGateway: input.reservationFlushGateway,
+              invoicing: input.invoicing,
             })
 
             return result
@@ -211,6 +199,7 @@ export class SubscriptionMachine {
             input: {
               context: SubscriptionContext
               db: Database
+              rateCards: InvoicingPorts["rateCards"]
               walletService: WalletService | null
               ledgerService: LedgerGateway
               billingService: Pick<BillingService, "generateBillingPeriods">
@@ -239,7 +228,7 @@ export class SubscriptionMachine {
               }
             }
 
-            const derived = await deriveActivationInputsFromPlan(input.db, {
+            const derived = await deriveActivationInputsFromPlan(input, {
               subscriptionId: input.context.subscriptionId,
               projectId: input.context.projectId,
               phaseId: input.context.currentPhase?.id,
@@ -253,7 +242,7 @@ export class SubscriptionMachine {
             }
 
             // Activation issues period grants only.
-            // - Reservations: lazy in EntitlementWindowDO on first priced event.
+            // - Usage: priced by the payer budget (BudgetDO) as it lands.
             // - Base fees / usage: settled by `invoiceSubscription` at period
             //   boundaries.
             // - Trial credits: issued at `trialing` entry, not here.
@@ -542,7 +531,7 @@ export class SubscriptionMachine {
         pending_payment: {
           tags: ["subscription"],
           description:
-            "Pay-in-advance plan waiting on the first payment provider webhook before the subscription becomes active. Customer cannot consume usage yet — the EntitlementWindowDO denies events while the wallet is empty.",
+            "Pay-in-advance plan waiting on the first payment provider webhook before the subscription becomes active. Customer cannot consume usage yet — the payer budget denies events while the wallet is empty.",
           on: {
             // First successful payment of the bootstrap invoice settles the
             // wallet topup; the webhook fires PAYMENT_SUCCESS, which moves us
@@ -571,9 +560,8 @@ export class SubscriptionMachine {
               logger: this.logger,
               db: this.db,
               repo: this.repo,
-              ratingService: this.ratingService,
               ledgerService: this.ledgerService,
-              reservationFlushGateway: this.reservationFlushGateway,
+              invoicing: this.invoicing,
             }),
             onDone: {
               target: "activating",
@@ -667,6 +655,7 @@ export class SubscriptionMachine {
             input: ({ context }) => ({
               context,
               db: this.db,
+              rateCards: this.invoicing.rateCards,
               walletService: this.walletService,
               ledgerService: this.ledgerService,
               billingService: this.billingService,
@@ -1050,13 +1039,11 @@ export class SubscriptionMachine {
   public static async create(payload: {
     subscriptionId: string
     projectId: string
-    analytics: Analytics
     logger: Logger
     customer: CustomerService
-    ratingService: RatingService
     ledgerService: LedgerGateway
     walletService?: WalletService
-    reservationFlushGateway: BillingReservationFlushGateway
+    invoicing: InvoicingPorts
     billingService: Pick<BillingService, "generateBillingPeriods">
     now: number
     db: Database

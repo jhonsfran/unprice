@@ -1,4 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import type { BillingConfig, ResetConfig } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logs"
@@ -20,7 +19,6 @@ function createLogger(): Logger {
 }
 
 function createPlanService(db: Database) {
-  const analytics = {} as unknown as Analytics
   const cache = {
     planVersionList: { swr: vi.fn((_key: string, fn: () => Promise<unknown>) => fn()) },
   } as unknown as Cache
@@ -29,10 +27,10 @@ function createPlanService(db: Database) {
   return new PlanService({
     db,
     logger: createLogger(),
-    analytics,
     waitUntil: () => {},
     cache,
     metrics,
+    rateCards: { rowsForVersions: vi.fn(async () => new Map()) },
   })
 }
 
@@ -508,18 +506,11 @@ describe("PlanService plan version billing defaults", () => {
       featureType: "usage",
       config: {
         usageMode: "unit",
-        price: {
-          displayAmount: "1.00",
-          dinero: {
-            amount: 100,
-            currency: { code: "EUR", base: 10, exponent: 2 },
-            scale: 2,
-          },
-        },
       },
       billingConfig: every5MinutesBillingConfig,
       order: 1024,
       hasMeterConfigOverride: false,
+      included: "1000",
     })
 
     expect(err).toBeUndefined()
@@ -527,6 +518,7 @@ describe("PlanService plan version billing defaults", () => {
     if (val?.state !== "ok") {
       throw new Error("expected usage feature with shorter billing cadence to be valid")
     }
+    expect(insertedValues?.included).toBe("1000")
     expect(val.planVersionFeature.metadata).toMatchObject({
       billingCadenceOverride: true,
       resetCadenceOverride: false,
@@ -582,14 +574,6 @@ describe("PlanService plan version billing defaults", () => {
       featureType: "usage",
       config: {
         usageMode: "unit",
-        price: {
-          displayAmount: "1.00",
-          dinero: {
-            amount: 100,
-            currency: { code: "EUR", base: 10, exponent: 2 },
-            scale: 2,
-          },
-        },
       },
       billingConfig: yearlyBillingConfig,
       resetConfig: resetEveryFourYears,
@@ -599,5 +583,135 @@ describe("PlanService plan version billing defaults", () => {
 
     expect(err).toBeUndefined()
     expect(val?.state).toBe("invalid_reset_config")
+  })
+
+  it("writes included units on update, and keeps them when the update leaves them out", async () => {
+    const written: Record<string, unknown>[] = []
+    const stored = {
+      id: "fpv_123",
+      projectId: "proj_123",
+      planVersionId: "pv_123",
+      featureId: "feature_usage",
+      featureType: "usage",
+      billingConfig: monthlyBillingConfig,
+      resetConfig: monthlyResetConfig,
+      meterConfig: { eventId: "event_123", eventSlug: "events", aggregationMethod: "count" },
+      included: "10",
+      metadata: {},
+      feature: { id: "feature_usage", unitOfMeasure: "events", meterConfig: null },
+    }
+    const db = {
+      query: {
+        planVersionFeatures: { findFirst: vi.fn().mockResolvedValue(stored) },
+        versions: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: "pv_123",
+            projectId: "proj_123",
+            status: "draft",
+            billingConfig: monthlyBillingConfig,
+          }),
+        },
+      },
+      transaction: vi.fn((callback: (tx: unknown) => Promise<unknown>) =>
+        callback({
+          update: vi.fn(() => ({
+            set: vi.fn((values: Record<string, unknown>) => {
+              written.push(values)
+              return {
+                where: vi.fn(() => ({
+                  returning: vi.fn().mockResolvedValue([{ id: "fpv_123" }]),
+                })),
+              }
+            }),
+          })),
+          query: { planVersionFeatures: { findFirst: vi.fn().mockResolvedValue(stored) } },
+        })
+      ),
+    } as unknown as Database
+    const update = (included?: string | null) =>
+      createPlanService(db).updatePlanVersionFeatureRecord({
+        projectId: "proj_123",
+        id: "fpv_123",
+        planVersionId: "pv_123",
+        hasMeterConfigOverride: false,
+        ...(included !== undefined && { included }),
+      })
+
+    expect((await update("2500")).val?.state).toBe("ok")
+    expect((await update(null)).val?.state).toBe("ok")
+    expect((await update()).val?.state).toBe("ok")
+    expect(written.map((values) => ("included" in values ? values.included : "kept"))).toEqual([
+      "2500",
+      null,
+      "kept",
+    ])
+  })
+  it("copies the feature's meter template when a row becomes metered without its own meter", async () => {
+    const template = {
+      eventId: "event_vq",
+      eventSlug: "vector_query",
+      aggregationMethod: "count" as const,
+      groupBy: ["model"],
+    }
+    const becomeMetered = async (featureMeterConfig: typeof template | null) => {
+      const written: Record<string, unknown>[] = []
+      const stored = {
+        id: "fpv_123",
+        projectId: "proj_123",
+        planVersionId: "pv_123",
+        featureId: "feature_vq",
+        featureType: "flat",
+        config: {},
+        billingConfig: monthlyBillingConfig,
+        resetConfig: null,
+        meterConfig: null,
+        included: null,
+        metadata: {},
+        feature: { id: "feature_vq", unitOfMeasure: "queries", meterConfig: featureMeterConfig },
+      }
+      const db = {
+        query: {
+          planVersionFeatures: { findFirst: vi.fn().mockResolvedValue(stored) },
+          versions: {
+            findFirst: vi.fn().mockResolvedValue({
+              id: "pv_123",
+              projectId: "proj_123",
+              status: "draft",
+              billingConfig: monthlyBillingConfig,
+            }),
+          },
+        },
+        transaction: vi.fn((callback: (tx: unknown) => Promise<unknown>) =>
+          callback({
+            update: vi.fn(() => ({
+              set: vi.fn((values: Record<string, unknown>) => {
+                written.push(values)
+                return {
+                  where: vi.fn(() => ({
+                    returning: vi.fn().mockResolvedValue([{ id: "fpv_123" }]),
+                  })),
+                }
+              }),
+            })),
+            query: { planVersionFeatures: { findFirst: vi.fn().mockResolvedValue(stored) } },
+          })
+        ),
+      } as unknown as Database
+      const result = await createPlanService(db).updatePlanVersionFeatureRecord({
+        projectId: "proj_123",
+        id: "fpv_123",
+        planVersionId: "pv_123",
+        featureType: "usage",
+        config: { usageMode: "unit" },
+        hasMeterConfigOverride: false,
+      })
+      return { state: result.val?.state, meterConfig: written[0]?.meterConfig }
+    }
+
+    expect(await becomeMetered(template)).toEqual({ state: "ok", meterConfig: template })
+    expect(await becomeMetered(null)).toEqual({
+      state: "usage_meter_config_required",
+      meterConfig: undefined,
+    })
   })
 })

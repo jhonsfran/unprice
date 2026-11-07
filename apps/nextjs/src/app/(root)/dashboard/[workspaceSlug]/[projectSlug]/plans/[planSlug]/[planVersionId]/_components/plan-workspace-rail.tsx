@@ -1,4 +1,7 @@
+"use client"
+
 import type React from "react"
+import { useState } from "react"
 
 import { Pencil } from "lucide-react"
 
@@ -11,12 +14,18 @@ import { cn } from "@unprice/ui/utils"
 import { PricingCard } from "~/components/forms/pricing-card"
 import { getStatusTone, statusToneClasses } from "~/lib/status-tones"
 import { PlanVersionDialog } from "../../_components/plan-version-dialog"
+import { CollapsibleSection } from "../../_components/section-label"
+import { PlanVersionRateCard } from "./plan-version-rate-card"
+import { PublishChecklist } from "./publish-checklist"
 
 export function PlanWorkspaceRail({
   planVersion,
 }: {
   planVersion: RouterOutputs["planVersions"]["getById"]["planVersion"]
 }) {
+  // The preview is the one rail section that repeats the table; it opens on demand.
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false)
+
   if (!planVersion) return null
 
   const status = planVersion.status ?? "draft"
@@ -39,12 +48,16 @@ export function PlanWorkspaceRail({
 
   return (
     <div className="flex w-full flex-col gap-6 border-t bg-muted/20 p-4 lg:min-h-full lg:rounded-r-lg lg:border-t-0">
-      <section className="flex flex-col gap-3">
-        <SectionTitle>Pricing card preview</SectionTitle>
-        <PricingCard planVersion={planVersion} className="w-full" showPublish={false} />
-      </section>
+      {status === "draft" && (
+        <>
+          <section className="flex flex-col gap-3">
+            <SectionTitle>Publish checklist</SectionTitle>
+            <PublishChecklist planVersionId={planVersion.id} currency={planVersion.currency} />
+          </section>
 
-      <Separator />
+          <Separator />
+        </>
+      )}
 
       <section className="flex flex-col gap-3">
         <SectionTitle>Version settings</SectionTitle>
@@ -76,6 +89,19 @@ export function PlanWorkspaceRail({
           </Button>
         </PlanVersionDialog>
       </section>
+
+      <Separator />
+
+      <PlanVersionRateCard planVersionId={planVersion.id} />
+
+      <CollapsibleSection
+        label="Preview"
+        summary="pricing card"
+        open={isPreviewOpen}
+        onOpenChange={setIsPreviewOpen}
+      >
+        <PricingCard planVersion={planVersion} className="w-full" showPublish={false} />
+      </CollapsibleSection>
     </div>
   )
 }

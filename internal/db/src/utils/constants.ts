@@ -1,16 +1,5 @@
 import type { OverageStrategy, PlanType } from "../validators/shared"
 
-export const TIER_MODES_MAP = {
-  volume: {
-    label: "Volume",
-    description: "All units are charged at the same price based on the total quantity",
-  },
-  graduated: {
-    label: "Graduated",
-    description: "Each tier has its own price — units in lower tiers stay at lower prices",
-  },
-} as const
-
 export const FEATURE_TYPES_MAPS = {
   flat: {
     code: "flat",
@@ -20,7 +9,7 @@ export const FEATURE_TYPES_MAPS = {
   },
   tier: {
     code: "tier",
-    label: "Pay by volume",
+    label: "Pay by tier",
     shortLabel: "Tiered",
     description: "Price changes as the customer chooses more units up front.",
   },
@@ -210,7 +199,6 @@ export const RESET_CONFIG: Record<
 }
 
 type AggregationMethod = keyof typeof AGGREGATION_METHODS_MAP
-export type TierMode = keyof typeof TIER_MODES_MAP
 export type UsageMode = keyof typeof USAGE_MODES_MAP
 export type FeatureType = keyof typeof FEATURE_TYPES_MAPS
 
@@ -267,10 +255,6 @@ export const WALLET_CREDIT_SOURCES = [
   "credit_line",
 ] as const
 
-export const TIER_MODES = Object.keys(TIER_MODES_MAP) as unknown as readonly [
-  TierMode,
-  ...TierMode[],
-]
 export const USAGE_MODES = Object.keys(USAGE_MODES_MAP) as unknown as readonly [
   UsageMode,
   ...UsageMode[],

@@ -146,7 +146,7 @@ Use this ownership rule before adding a test:
 
 | Symptom | Test owner |
 | --- | --- |
-| wrong accepted/rejected event, duplicate usage, late event policy | ingestion service or EntitlementWindowDO |
+| wrong accepted/rejected event, duplicate usage, late event policy | payer budget (`meterPayerUsage`, BudgetDO) |
 | wrong usage quantity or price math | reference model, rating service, billing property |
 | wrong invoice row, period status, statement key | `billPeriod` integration |
 | duplicate or missing ledger movement | ledger gateway or pgledger integration |

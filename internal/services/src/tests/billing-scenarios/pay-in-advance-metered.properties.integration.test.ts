@@ -5,9 +5,8 @@ import { toLedgerMinor } from "@unprice/money"
 import * as fc from "fast-check"
 import { afterAll, describe, expect, it, vi } from "vitest"
 import { LATE_EVENT_GRACE_MS } from "../../entitlements"
-import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
-import { RatingService } from "../../rating/service"
+import { RateCardService } from "../../rate-cards/service"
 import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
 import { billPeriod } from "../../use-cases/billing/bill-period"
 
@@ -86,13 +85,13 @@ async function loadSubscriptionContext(now: number): Promise<SubscriptionContext
 function expectedEventsAmount(usage: number) {
   if (usage <= 0) return 0
 
-  // The seeded advance plan uses volume tiers:
-  // 1..1000 => 1 EUR flat + 0.001 EUR/unit, 1001+ => 0.10 EUR/unit.
+  // The seeded advance plan uses graduated tiers:
+  // 1..1000 => 1 EUR flat + 0.001 EUR/unit; 1001+ => 1 EUR for the first 1000 units + 0.10 EUR/unit above, no flat.
   if (usage <= 1000) {
     return 100_000_000 + usage * 100_000
   }
 
-  return usage * 10_000_000
+  return 100_000_000 + (usage - 1000) * 10_000_000
 }
 
 async function runAdvanceMeteredPropertyCase(usage: number) {
@@ -101,26 +100,20 @@ async function runAdvanceMeteredPropertyCase(usage: number) {
 
   const expectedUsageAmount = expectedEventsAmount(usage)
   const logger = createLogger()
-  const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+  const { payerBudgets } = createRecordedUsageFixture(db, {
     events: { quantity: usage, amount: expectedEventsAmount(usage) },
   })
   const ledger = new LedgerGateway({ db, logger })
-  const rating = new RatingService({
-    logger,
-    analytics,
-    grantsManager: new GrantsManager({ db, logger }),
-  })
   const repo = new DrizzleSubscriptionRepository(db)
   const ensureAccounts = await ledger.ensureCustomerAccounts(customerId, "EUR")
   expect(ensureAccounts.err).toBeUndefined()
 
   const startRun = await billPeriod({
-    reservationFlushGateway,
+    invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
     context: await loadSubscriptionContext(jan1),
     logger,
     db,
     repo,
-    ratingService: rating,
     ledgerService: ledger,
   })
   expect(startRun.phasesProcessed).toBe(1)
@@ -140,21 +133,19 @@ async function runAdvanceMeteredPropertyCase(usage: number) {
   await expectInvoiceLineAmounts(ledger, startStatementKey, [flatAccessAmount])
 
   const usageRun = await billPeriod({
-    reservationFlushGateway,
+    invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
     context: await loadSubscriptionContext(feb1 + LATE_EVENT_GRACE_MS),
     logger,
     db,
     repo,
-    ratingService: rating,
     ledgerService: ledger,
   })
   const rerun = await billPeriod({
-    reservationFlushGateway,
+    invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
     context: await loadSubscriptionContext(feb1 + LATE_EVENT_GRACE_MS),
     logger,
     db,
     repo,
-    ratingService: rating,
     ledgerService: ledger,
   })
   expect(usageRun.phasesProcessed).toBe(1)
@@ -191,7 +182,6 @@ async function runAdvanceMeteredPropertyCase(usage: number) {
   await expectPeriodsInvoiced()
   await expectInvoiceLineAmounts(ledger, usageStatementKey, [expectedUsageAmount])
   await expectLedgerState()
-  expect(analytics.getUsageBillingFeatures).not.toHaveBeenCalled()
 }
 
 describe("P0-C pay_in_advance metered billing properties", () => {

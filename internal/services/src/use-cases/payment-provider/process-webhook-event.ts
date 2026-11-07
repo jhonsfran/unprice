@@ -1,9 +1,9 @@
-import type { Analytics } from "@unprice/analytics"
 import { type Database, and, eq, sql } from "@unprice/db"
 import { webhookEvents } from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
 import type { Currency, InvoiceStatus, PaymentProvider } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
+import type { WebEventsWriter } from "@unprice/lakehouse"
 import type { Logger } from "@unprice/logs"
 import { DrizzleBillingRepository } from "../../billing/repository.drizzle"
 import type { ServiceContext } from "../../context"
@@ -20,7 +20,7 @@ type ProcessWebhookEventDeps = {
   services: Pick<ServiceContext, "customers" | "subscriptions" | "wallet" | "billing">
   db: Database
   logger: Logger
-  analytics: Analytics
+  webEvents: WebEventsWriter
   waitUntil: (promise: Promise<unknown>) => void
 }
 
@@ -244,7 +244,7 @@ async function applyWebhookEvent({
         },
         db: deps.db,
         logger: deps.logger,
-        analytics: deps.analytics,
+        webEvents: deps.webEvents,
         waitUntil: deps.waitUntil,
       },
       {

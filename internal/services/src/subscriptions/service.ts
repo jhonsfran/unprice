@@ -1,4 +1,3 @@
-import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import { newId } from "@unprice/db/utils"
 import {
@@ -24,8 +23,8 @@ import { GrantsManager } from "../entitlements/grants"
 import type { EntitlementService } from "../entitlements/service"
 import type { LedgerGateway } from "../ledger"
 import type { Metrics } from "../metrics"
-import type { RatingService } from "../rating/service"
-import type { BillingReservationFlushGateway } from "../use-cases/billing/reservation-flush-gateway"
+import type { InvoicingPorts } from "../use-cases/billing/bill-period"
+import type { PayerBudgetSyncCaller } from "../use-cases/budgets/payer-budget-gateway"
 import type { WalletService } from "../wallet"
 import { UnPriceSubscriptionError } from "./errors"
 import type { SubscriptionMachine } from "./machine"
@@ -91,38 +90,33 @@ export class SubscriptionService {
   private readonly db: Database
   private readonly repo: SubscriptionRepository
   private readonly logger: Logger
-  private readonly analytics: Analytics
   private readonly metrics: Metrics
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private readonly waitUntil: (promise: Promise<any>) => void
   private readonly customerService: CustomerService
   private readonly entitlementService: EntitlementService
   private readonly billingService: BillingService
-  private readonly ratingService: RatingService
   private readonly ledgerService: LedgerGateway
   private readonly walletService: WalletService | undefined
-  private readonly reservationFlushGateway: BillingReservationFlushGateway
+  private readonly invoicing: InvoicingPorts
 
   constructor({
     db,
     repo,
     logger,
-    analytics,
     waitUntil,
     cache: _cache,
     metrics,
     customerService,
     entitlementService,
     billingService,
-    ratingService,
     ledgerService,
     walletService,
-    reservationFlushGateway,
+    invoicing,
   }: {
     db: Database
     repo: SubscriptionRepository
     logger: Logger
-    analytics: Analytics
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
     waitUntil: (promise: Promise<any>) => void
     cache: Cache
@@ -130,24 +124,21 @@ export class SubscriptionService {
     customerService: CustomerService
     entitlementService: EntitlementService
     billingService: BillingService
-    ratingService: RatingService
     ledgerService: LedgerGateway
     walletService?: WalletService
-    reservationFlushGateway: BillingReservationFlushGateway
+    invoicing: InvoicingPorts
   }) {
     this.db = db
     this.repo = repo
     this.logger = logger
-    this.analytics = analytics
     this.metrics = metrics
     this.waitUntil = waitUntil
     this.customerService = customerService
     this.entitlementService = entitlementService
     this.billingService = billingService
-    this.ratingService = ratingService
     this.ledgerService = ledgerService
     this.walletService = walletService
-    this.reservationFlushGateway = reservationFlushGateway
+    this.invoicing = invoicing
   }
 
   private setLockContext(context: {
@@ -1116,23 +1107,38 @@ export class SubscriptionService {
       return Ok(phase)
     })
 
-    if (!result.err && !db && env.NODE_ENV !== "test") {
+    if (!result.err && !db) {
+      await this.afterPhaseChange({ subscriptionId, projectId })
+    }
+
+    return result
+  }
+
+  /**
+   * After a phase was created or changed outside a caller's transaction: generate its periods and
+   * sync the payer budget, which takes the phase's pricing, limits, and close even when no period
+   * was created. Period generation syncs by itself when it created one.
+   */
+  private async afterPhaseChange(input: { subscriptionId: string; projectId: string }) {
+    let synced = false
+    if (env.NODE_ENV !== "test") {
       const periodsResult = await this.billingService.generateBillingPeriods({
-        subscriptionId,
-        projectId,
+        ...input,
         now: Date.now(),
       })
 
       if (periodsResult.err) {
         this.logger.warn("subscription phase billing period generation failed", {
-          subscriptionId,
-          projectId,
+          ...input,
           error: periodsResult.err,
         })
+      } else {
+        synced = periodsResult.val.cyclesCreated > 0
       }
     }
-
-    return result
+    if (!synced) {
+      await this.billingService.syncSubscriptionPayerBudget({ ...input, caller: "request" })
+    }
   }
 
   public async removePhase({
@@ -1557,20 +1563,8 @@ export class SubscriptionService {
       return Ok(subscriptionPhase)
     })
 
-    if (!result.err && !db && env.NODE_ENV !== "test") {
-      const periodsResult = await this.billingService.generateBillingPeriods({
-        subscriptionId,
-        projectId,
-        now: Date.now(),
-      })
-
-      if (periodsResult.err) {
-        this.logger.warn("subscription phase billing period generation failed", {
-          subscriptionId,
-          projectId,
-          error: periodsResult.err,
-        })
-      }
+    if (!result.err && !db) {
+      await this.afterPhaseChange({ subscriptionId, projectId })
     }
 
     return result
@@ -1756,6 +1750,28 @@ export class SubscriptionService {
           updates: { subscriptionStatus: "canceled" },
         })
       )
+      // A cancel that takes effect now caps the last periods where the subscription ended. The
+      // invoicing job bills them once their late-usage grace passes; the request never invoices.
+      if (cancelAt <= now) {
+        const capped = await this.billingService.generateBillingPeriods({
+          projectId,
+          subscriptionId,
+          now: cancelAt,
+        })
+        if (capped.err) {
+          this.logger.error(capped.err, {
+            context: "capping a canceled subscription's periods failed; the periods job retries it",
+            projectId,
+            subscriptionId,
+          })
+        }
+      }
+      // The payer budget closes where the canceled phase ends.
+      await this.billingService.syncPayerBudget({
+        projectId,
+        customerId: subscriptionWithPhases.customerId,
+        caller: "request",
+      })
     }
 
     return result
@@ -1987,13 +2003,11 @@ export class SubscriptionService {
         db: this.db,
         repo: this.repo,
         logger: this.logger,
-        analytics: this.analytics,
         customer: this.customerService,
-        ratingService: this.ratingService,
         ledgerService: this.ledgerService,
         walletService: this.walletService,
         billingService: this.billingService,
-        reservationFlushGateway: this.reservationFlushGateway,
+        invoicing: this.invoicing,
         setLockContext: (ctx: Parameters<typeof this.setLockContext>[0]) =>
           this.setLockContext(ctx),
       })
@@ -2012,10 +2026,13 @@ export class SubscriptionService {
     subscriptionId,
     projectId,
     now = Date.now(),
+    caller = "request",
   }: {
     subscriptionId: string
     projectId: string
     now?: number
+    /** Who syncs the payer budget after renewal: the renew job waits out open holds. */
+    caller?: PayerBudgetSyncCaller
   }): Promise<Result<{ status: SusbriptionMachineStatus }, UnPriceSubscriptionError>> {
     try {
       const status = await this.withSubscriptionMachine({
@@ -2028,6 +2045,8 @@ export class SubscriptionService {
           return s1.val
         },
       })
+      // Renewal generated the next periods inside the lock; their statements register now.
+      await this.billingService.syncSubscriptionPayerBudget({ projectId, subscriptionId, caller })
       return Ok({ status })
     } catch (e) {
       return Err(e as UnPriceSubscriptionError)
@@ -2056,6 +2075,13 @@ export class SubscriptionService {
           if (result.err) throw result.err
           return result.val
         },
+      })
+      // Activation generated periods inside the lock, even when the wallet parked it; their
+      // statements register now.
+      await this.billingService.syncSubscriptionPayerBudget({
+        projectId,
+        subscriptionId,
+        caller: "request",
       })
 
       // The activating actor parks failed activations in `pending_activation`
@@ -2101,6 +2127,29 @@ export class SubscriptionService {
       UnPriceSubscriptionError
     >
   > {
+    const subscription = await this.db.query.subscriptions.findFirst({
+      columns: { status: true },
+      where: (row, ops) =>
+        ops.and(ops.eq(row.id, subscriptionId), ops.eq(row.projectId, projectId)),
+    })
+    // A canceled or expired subscription's machine is final; its last statements still bill.
+    if (subscription?.status === "canceled" || subscription?.status === "expired") {
+      const { status } = subscription
+      const invoiced = await this.billingService.invoiceEndedSubscription({
+        projectId,
+        subscriptionId,
+        now,
+      })
+      if (invoiced.err) {
+        return Err(
+          new UnPriceSubscriptionError({
+            code: "SUBSCRIPTION_OPERATION_FAILED",
+            message: invoiced.err.message,
+          })
+        )
+      }
+      return Ok({ status })
+    }
     try {
       const status = await this.withSubscriptionMachine({
         subscriptionId,

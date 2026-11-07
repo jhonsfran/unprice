@@ -165,32 +165,33 @@ export function PlanVersionForm({
 
         {isPublished && <BannerPublishedVersion />}
 
-        <div className="flex flex-col gap-4 md:grid md:grid-cols-2 md:space-y-4">
-          <TitleFormField form={form} isDisabled={isPublished} />
+        <TitleFormField form={form} isDisabled={isPublished} />
 
+        <FieldGroup title="Billing">
           <CurrencyFormField form={form} isDisabled={isPublished} />
-
-          <CollectionMethodFormField form={form} isDisabled={isPublished} />
-
           <BillingConfigFormField form={form} isDisabled={isPublished} />
-
-          <TrialUnitsFormField form={form} isDisabled={isPublished} unitLabel={trialUnitLabel} />
-
-          <IncludedCreditsFormField form={form} isDisabled={isPublished} />
-
           <WhenToBillFormField form={form} isDisabled={isPublished} />
-
+          <CollectionMethodFormField form={form} isDisabled={isPublished} />
           <AutoRenewFormField form={form} isDisabled={isPublished} />
+        </FieldGroup>
 
+        <FieldGroup title="Trial and credits">
+          <TrialUnitsFormField form={form} isDisabled={isPublished} unitLabel={trialUnitLabel} />
+          <IncludedCreditsFormField form={form} isDisabled={isPublished} />
+        </FieldGroup>
+
+        <FieldGroup title="Payment provider">
           <PaymentProviderFormField
             form={form}
             isDisabled={isPublished}
             workspaceSlug={params.workspaceSlug as string}
             projectSlug={params.projectSlug as string}
           />
+        </FieldGroup>
 
+        <FieldGroup title="Description" columns={1}>
           <DescriptionFormField form={form} />
-        </div>
+        </FieldGroup>
 
         <div className="mt-8 flex justify-end space-x-4">
           {editMode && (
@@ -225,5 +226,32 @@ export function PlanVersionForm({
         </div>
       </form>
     </Form>
+  )
+}
+
+/** A named group of version settings: an eyebrow, then its fields in up to two columns. */
+function FieldGroup({
+  title,
+  columns = 2,
+  children,
+}: {
+  title: string
+  columns?: 1 | 2
+  children: React.ReactNode
+}) {
+  return (
+    <section className="space-y-3">
+      <h4 className="font-semibold text-muted-foreground text-xs uppercase tracking-wider">
+        {title}
+      </h4>
+      <div
+        className={cn(
+          "flex flex-col gap-4",
+          columns === 2 && "md:grid md:grid-cols-2 md:items-start"
+        )}
+      >
+        {children}
+      </div>
+    </section>
   )
 }

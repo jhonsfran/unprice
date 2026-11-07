@@ -5,52 +5,39 @@ import { createRecordedUsageFixture } from "./recorded-usage"
 const input = {
   projectId: "proj_fixture",
   customerId: "cus_fixture",
-  subscriptionId: "sub_fixture",
-  subscriptionPhaseId: "phase_fixture",
   statementKey: "stmt_fixture",
+  at: 200,
 }
 
-describe("explicit accepted usage fixture", () => {
-  it("keeps accepted $10 independent of a $6 ledger capture and delayed reporting", async () => {
-    const execute = vi.fn().mockResolvedValue({
-      rows: [{ amount: "6.00000000", metadata: { flow: "capture" } }],
-    })
-    const db = {
-      execute,
-      query: {
-        billingPeriods: {
-          findMany: vi.fn().mockResolvedValue([
-            {
-              ...input,
-              id: "bp_fixture",
-              subscriptionItemId: "item_fixture",
-              cycleStartAt: 100,
-              cycleEndAt: 200,
-              subscriptionItem: {
-                featurePlanVersion: { featureType: "usage", feature: { slug: "events" } },
-              },
-              subscriptionPhase: { creditLinePolicy: "capped", planVersion: { currency: "USD" } },
-            },
-          ]),
-        },
-        customerEntitlements: {
-          findMany: vi
-            .fn()
-            .mockResolvedValue([{ id: "ent_fixture", effectiveAt: 100, expiresAt: 200 }]),
+describe("recorded usage fixture", () => {
+  it("seals the accepted usage of each metered period, once", async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      {
+        id: "bp_fixture",
+        statementKey: "stmt_fixture",
+        cycleStartAt: 100,
+        cycleEndAt: 200,
+        subscriptionItem: {
+          featurePlanVersion: { featureType: "usage", feature: { slug: "events" } },
         },
       },
-    } as unknown as Database
-    const { analytics, reservationFlushGateway } = createRecordedUsageFixture(db, {
+    ])
+    const db = { query: { billingPeriods: { findMany } } } as unknown as Database
+    const { payerBudgets } = createRecordedUsageFixture(db, {
       events: { amount: 1_000_000_000, quantity: 10 },
     })
 
-    const result = await reservationFlushGateway.flushForInvoicing(input)
+    const first = await payerBudgets.seal(input)
+    const second = await payerBudgets.seal(input)
 
-    expect(result.err).toBeUndefined()
-    expect(result.val?.snapshots).toEqual([
-      expect.objectContaining({ amount: 1_000_000_000, quantity: 10, state: "sealed" }),
+    expect(first.val?.sealed).toEqual([
+      expect.objectContaining({
+        periodId: "events:bp_fixture",
+        billingPeriodId: "bp_fixture",
+        amount: "1000000000",
+        quantity: "1000000000",
+      }),
     ])
-    expect(execute).not.toHaveBeenCalled()
-    expect(analytics.getUsageBillingFeatures).not.toHaveBeenCalled()
+    expect(second.val).toEqual(first.val)
   })
 })

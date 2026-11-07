@@ -1,4 +1,9 @@
 export { createPlan } from "./plan/create"
+export { createPlanWithDraft, type CreatePlanWithDraftInput } from "./plan/create-with-draft"
+export {
+  removePlanVersionFeature,
+  type RemovePlanVersionFeatureDeps,
+} from "./plan-version/remove-feature"
 export { signUp } from "./customer/sign-up"
 export { signOutCustomer } from "./customer/sign-out"
 export {
@@ -19,6 +24,7 @@ export {
   getCustomerCurrentAccessOutputSchema,
 } from "./customer/get-current-access"
 export type {
+  CurrentEntitlementsReader,
   GetCustomerCurrentAccessDeps,
   GetCustomerCurrentAccessInput,
   GetCustomerCurrentAccessOutput,
@@ -35,15 +41,15 @@ export type {
   GetCustomerCurrentEntitlementsOutput,
 } from "./customer/get-current-entitlements"
 export {
-  getFailedIngestionEventPayload,
-  getFailedIngestionEventPayloadInputSchema,
-  getFailedIngestionEventPayloadOutputSchema,
-} from "./analytics/get-failed-ingestion-event-payload"
+  getRejectedEventPayload,
+  getRejectedEventPayloadInputSchema,
+  getRejectedEventPayloadOutputSchema,
+} from "./analytics/get-rejected-event-payload"
 export type {
-  GetFailedIngestionEventPayloadDeps,
-  GetFailedIngestionEventPayloadInput,
-  GetFailedIngestionEventPayloadOutput,
-} from "./analytics/get-failed-ingestion-event-payload"
+  GetRejectedEventPayloadDeps,
+  GetRejectedEventPayloadInput,
+  GetRejectedEventPayloadOutput,
+} from "./analytics/get-rejected-event-payload"
 export {
   getIngestionStatus,
   getIngestionStatusCursorSchema,
@@ -56,7 +62,6 @@ export type {
   GetIngestionStatusOutput,
 } from "./analytics/get-ingestion-status"
 export {
-  BillingPeriodUsageCoverageError,
   getCurrentBillingPeriodUsage,
   getCurrentBillingPeriodUsageInputSchema,
   getCurrentBillingPeriodUsageOutputSchema,
@@ -90,6 +95,7 @@ export { activateSubscription } from "./billing/provision-period"
 export {
   ExplainChargeError,
   explainCharge,
+  explainChargeEventSchema,
   explainChargeInputSchema,
   explainChargeOutputSchema,
 } from "./billing/explain-charge"
@@ -110,25 +116,6 @@ export type {
 } from "./subscription/change-plan"
 export { deriveActivationInputsFromPlan } from "./billing/derive-provision-inputs"
 export { settlePrepaidInvoiceToWallet } from "./billing/settle-invoice"
-export {
-  billingUsageOperationSchema,
-  billingUsageOperationOutputSchema,
-  processBillingUsageSnapshots,
-} from "./billing/usage-snapshots"
-export {
-  FlushReservationsForInvoicingError,
-  flushReservationsForInvoicing,
-  flushReservationsForInvoicingErrorReasonSchema,
-  flushReservationsForInvoicingInputSchema,
-  flushReservationsForInvoicingOutputSchema,
-} from "./billing/flush-reservations-for-invoicing"
-export type {
-  FlushReservationsForInvoicingDeps,
-  FlushReservationsForInvoicingErrorReason,
-  FlushReservationsForInvoicingInput,
-  FlushReservationsForInvoicingOutput,
-  InvoicingEntitlementWindowClient,
-} from "./billing/flush-reservations-for-invoicing"
 export { duplicatePlanVersion } from "./plan-version/duplicate"
 export {
   appliedPlanTemplateSchema,
@@ -209,6 +196,12 @@ export * from "./workspace"
 export { transferToWorkspace } from "./project/transfer-to-workspace"
 export { transferToPersonal } from "./project/transfer-to-personal"
 export { publishPlanVersion } from "./plan-version/publish"
+export {
+  updatePlanVersionFeature,
+  type UpdatePlanVersionFeatureDeps,
+  type UpdatePlanVersionFeatureInput,
+  type UpdatePlanVersionFeatureOutput,
+} from "./plan-version/update-feature"
 export { setOnboardingCompleted } from "./user/set-onboarding-completed"
 export { savePaymentProviderConfig } from "./payment-provider/save-config"
 export {
@@ -255,6 +248,5 @@ export type {
   GetCustomerLedgerOutput,
   LedgerParty,
 } from "./wallet/get-customer-ledger"
-export * from "./runs"
 export * from "./budgets"
-export * from "./ingestion"
+export * from "./rate-cards"

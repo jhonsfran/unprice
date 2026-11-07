@@ -64,10 +64,30 @@ export const publish = protectedProjectProcedure
       })
     }
 
-    if (val.state === "price_calculation_error") {
+    if (val.state === "unpriced") {
       throw new TRPCError({
-        code: "INTERNAL_SERVER_ERROR",
-        message: "Error calculating price plan",
+        code: "PRECONDITION_FAILED",
+        message:
+          val.reason === "no_card"
+            ? "Assign a rate card in the version's currency before publishing"
+            : `Price these features on the version's rate card before publishing: ${val.featureSlugs.join(", ")}`,
+      })
+    }
+
+    if (val.state === "invalid_rows") {
+      const byFeature = new Map<string, Set<string>>()
+      for (const violation of val.violations) {
+        byFeature.set(
+          violation.feature,
+          (byFeature.get(violation.feature) ?? new Set()).add(violation.code)
+        )
+      }
+      const named = [...byFeature]
+        .map(([feature, codes]) => `${feature} (${[...codes].join(", ")})`)
+        .join("; ")
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: `The rate card's rows do not fit this version's features: ${named}`,
       })
     }
 

@@ -1,6 +1,7 @@
 import { OpenAPIHono } from "@hono/zod-openapi"
 import { upsertBudgetInputSchema } from "@unprice/db/validators"
 import { Ok } from "@unprice/error"
+import { amountUsage } from "@unprice/services/budgets"
 import { MemoryBudgetStore } from "@unprice/services/budgets/memory-store"
 import type { BudgetRequest } from "@unprice/services/use-cases"
 import type { ExecutionContext } from "hono"
@@ -63,7 +64,11 @@ afterEach(() => {
 })
 
 function authorize(idempotencyKey: string): string {
-  const held = run({ type: "authorize", amount: BigInt(5) * BigInt(100_000_000), idempotencyKey })
+  const held = run({
+    type: "authorize",
+    usage: amountUsage(BigInt(5) * BigInt(100_000_000)),
+    idempotencyKey,
+  })
   if (held.type !== "authorize") throw new Error("expected a hold")
   return held.holdId
 }
@@ -167,7 +172,7 @@ describe("POST /v1/internal/budgets/release", () => {
   it("answers 409 with the rejection for a hold that was settled", async () => {
     mocks.keyAuth.mockResolvedValue(keyOf({ isMain: true, isInternal: false }))
     const holdId = authorize("job-1")
-    run({ type: "settle", holdId, amount: BigInt(100_000_000) })
+    run({ type: "settle", holdId, actual: amountUsage(BigInt(100_000_000)) })
 
     const response = await call({
       projectId: "proj_tenant",
