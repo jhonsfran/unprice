@@ -50,6 +50,7 @@ export const prefixes = {
   rate_card_row: "rr",
   plan_version_rate_card: "pvrc",
   model_cost: "mc",
+  custom_model_cost: "cmc",
 } as const
 
 // Thread-local counter for monotonicity within the same millisecond

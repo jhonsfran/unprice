@@ -32,7 +32,12 @@ export type DecimalFeaturePrice = Readonly<{
   tiers?: readonly DecimalTier[]
 }>
 
-function pricingShape(input: Pick<DecimalFeaturePrice, "featureType" | "usageMode">) {
+/** The row shape a plan feature's package allows: what the feature fixes, the price only rates. */
+export type PricingShape = "flat" | "unit" | "package" | "graduated"
+
+export function pricingShape(
+  input: Pick<DecimalFeaturePrice, "featureType" | "usageMode">
+): PricingShape {
   switch (input.featureType) {
     case "flat":
       return "flat"

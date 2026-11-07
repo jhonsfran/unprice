@@ -1,7 +1,7 @@
 "use client"
 
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { AMOUNT_PATTERN } from "@unprice/money"
+import { AMOUNT_PATTERN, formatAmount } from "@unprice/money"
 import { MODEL_CATALOG_VERSION } from "@unprice/services/budgets"
 import { priceTableOf } from "@unprice/services/pricing"
 import type { RouterInputs } from "@unprice/trpc/routes"
@@ -17,6 +17,7 @@ import { useTRPC } from "~/trpc/client"
 import { PriceMatrix } from "../../../rate-cards/_components/price-matrix"
 import {
   type CostPlusDraftWire,
+  type CostPlusFeaturePolicy,
   catalogPolicyFor,
   changeMatrixOf,
   countWrites,
@@ -57,7 +58,24 @@ export const DEFAULT_CATALOG_POLICY: CatalogPolicyDraft = {
   },
 }
 
-/** The preview `rateCards.setCatalogPricing` answers; `publishCostPlus` publishes it under `draftHash`. */
+/**
+ * The typed policy a saved one reads as, so the editor opens on the markup the card prices with,
+ * not on the default: "where did 30% come from" has an answer on screen.
+ */
+export function policyDraftOf(policy: CostPlusFeaturePolicy): CatalogPolicyDraft {
+  return {
+    markupPercent: markupPercent(policy.markup),
+    roundTo: formatAmount(policy.roundTo),
+    components: {
+      input: policy.componentMap.input ?? "",
+      output: policy.componentMap.output ?? "",
+      cache_read: policy.componentMap.cache_read ?? "",
+      cache_write: policy.componentMap.cache_write ?? "",
+    },
+  }
+}
+
+/** The reviewed preview that `applyCatalogPricing` publishes under `draftHash`. */
 export type CatalogPreview = Readonly<{
   cardId: string
   draft: CostPlusDraftWire
@@ -66,7 +84,8 @@ export type CatalogPreview = Readonly<{
   tieredModels: readonly string[]
 }>
 
-type CatalogPricingInput = RouterInputs["rateCards"]["setCatalogPricing"]
+type CatalogPricingInput = RouterInputs["rateCards"]["previewCatalogPricing"]
+type CatalogApplyInput = RouterInputs["rateCards"]["applyCatalogPricing"]
 
 /** "30" as the policy's markup "0.3"; null when it is not a non-negative number. */
 export function markupRateOf(percent: string): string | null {
@@ -136,34 +155,14 @@ export function CatalogPriceBlock({
   /** The dimension is typed but not saved yet: the catalog prices the saved meter. */
   pendingSave?: boolean
 }) {
-  const trpc = useTRPC()
-  const queryClient = useQueryClient()
-  const [policy, setPolicy] = useState<CatalogPolicyDraft>(DEFAULT_CATALOG_POLICY)
+  // null until edited: the saved policy, or the default for a feature not priced from the catalog.
+  const [edited, setPolicy] = useState<CatalogPolicyDraft | null>(null)
+  const saved = card ? catalogPolicyFor(card.card.marginPolicy, featureSlug) : null
+  const policy = edited ?? (saved ? policyDraftOf(saved) : DEFAULT_CATALOG_POLICY)
   const [preview, setPreview] = useState<CatalogPreview | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
 
-  const previewPrices = useMutation(
-    trpc.rateCards.setCatalogPricing.mutationOptions({
-      meta: { suppressGlobalError: true },
-      onSuccess: (result: CatalogPreview) => {
-        setPreview(result)
-        setProblem(null)
-      },
-      onError: (error) => setProblem(error.message),
-    })
-  )
-  const publishPrices = useMutation(
-    trpc.rateCards.publishCostPlus.mutationOptions({
-      meta: { suppressGlobalError: true },
-      onSuccess: ({ inserted, closed }) => {
-        toast.success(`Published ${inserted.length} model prices, ended ${closed.length}`)
-        setPreview(null)
-        void queryClient.invalidateQueries(trpc.rateCards.forPlanVersion.pathFilter())
-        void queryClient.invalidateQueries({ queryKey: trpc.planVersions.getById.queryKey() })
-      },
-      onError: (error) => setProblem(error.message),
-    })
-  )
+  const pricing = useCatalogPricing({ planVersionId, featureSlug })
 
   return (
     <CatalogPriceBlockView
@@ -180,8 +179,8 @@ export function CatalogPriceBlock({
       }}
       preview={preview}
       problem={problem}
-      isPreviewing={previewPrices.isPending}
-      isPublishing={publishPrices.isPending}
+      isPreviewing={pricing.isPreviewing}
+      isPublishing={pricing.isApplying}
       onPreview={() => {
         const built = catalogPricingInputOf(policy, dimension)
         if (!built.ok) {
@@ -189,14 +188,65 @@ export function CatalogPriceBlock({
           return
         }
         setProblem(null)
-        previewPrices.mutate({ planVersionId, featureSlug, ...built.input })
+        pricing.preview(built.input).then(
+          (result) => setPreview(result),
+          (error: Error) => setProblem(error.message)
+        )
       }}
       onPublish={() => {
-        if (!preview?.draftHash) return
-        publishPrices.mutate({ cardId: preview.cardId, draftHash: preview.draftHash })
+        const built = catalogPricingInputOf(policy, dimension)
+        if (!built.ok || !preview?.draftHash) return
+        pricing.apply({ ...built.input, draftHash: preview.draftHash }).then(
+          ({ inserted, closed }) => {
+            toast.success(`Published ${inserted.length} model prices, ended ${closed.length}`)
+            setPreview(null)
+            // The card now holds the policy; read it from there again.
+            setPolicy(null)
+          },
+          (error: Error) => setProblem(error.message)
+        )
       }}
     />
   )
+}
+
+type CatalogPolicyInput = Omit<CatalogPricingInput, "planVersionId" | "featureSlug">
+
+/**
+ * Catalog pricing for one feature: `preview` drafts the policy without saving it (a closed
+ * preview changes nothing), `apply` saves it and publishes the reviewed revision.
+ */
+export function useCatalogPricing({
+  planVersionId,
+  featureSlug,
+}: {
+  planVersionId: string
+  featureSlug: string
+}) {
+  const trpc = useTRPC()
+  const queryClient = useQueryClient()
+  const options = { meta: { suppressGlobalError: true } }
+  const previewPricing = useMutation(trpc.rateCards.previewCatalogPricing.mutationOptions(options))
+  const applyPricing = useMutation(trpc.rateCards.applyCatalogPricing.mutationOptions(options))
+
+  const preview = (input: CatalogPolicyInput): Promise<CatalogPreview> =>
+    previewPricing.mutateAsync({ planVersionId, featureSlug, ...input })
+
+  const apply = async (input: Omit<CatalogApplyInput, "planVersionId" | "featureSlug">) => {
+    const published = await applyPricing.mutateAsync({ planVersionId, featureSlug, ...input })
+    void queryClient.invalidateQueries(trpc.rateCards.forPlanVersion.pathFilter())
+    void queryClient.invalidateQueries(trpc.rateCards.get.pathFilter())
+    void queryClient.invalidateQueries(trpc.rateCards.previewCostPlus.pathFilter())
+    void queryClient.invalidateQueries({ queryKey: trpc.planVersions.getById.queryKey() })
+    return published
+  }
+
+  return {
+    preview,
+    apply,
+    isPreviewing: previewPricing.isPending,
+    isApplying: applyPricing.isPending,
+  }
 }
 
 const SHOWN_MODELS = 6

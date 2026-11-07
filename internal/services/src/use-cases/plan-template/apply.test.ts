@@ -823,7 +823,8 @@ describe("applyPlanTemplate", () => {
       "feature_ai-generation",
       "feature_credits",
     ])
-    expect(cards.rateCards.assignToPlanVersion).not.toHaveBeenCalled()
+    expect(cards.assignments.get("plan_version_1:USD")).toBe("rc_1")
+    expect(cards.rows).toEqual([])
 
     const resumed = await applyPlanTemplate(deps, input)
 

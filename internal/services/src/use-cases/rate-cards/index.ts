@@ -1,4 +1,10 @@
 export {
+  addCustomModelCost,
+  listCustomModelCosts,
+  type AddCustomModelCostInput,
+  type CustomModelCostsDeps,
+} from "./custom-model-costs"
+export {
   catalogEffectiveFrom,
   importModelCosts,
   type ImportModelCostsDeps,
@@ -13,9 +19,4 @@ export {
   type PublishRateRowsDeps,
   type PublishRateRowsInput,
 } from "./publish-rows"
-export {
-  setPlanVersionCatalogPricing,
-  type SetPlanVersionCatalogPricingDeps,
-  type SetPlanVersionCatalogPricingInput,
-  type SetPlanVersionCatalogPricingOutput,
-} from "./set-catalog-pricing"
+export { previewPlanVersionCatalogPricing, applyPlanVersionCatalogPricing } from "./catalog-pricing"

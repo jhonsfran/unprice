@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { createTRPCClient, httpLink } from "@trpc/client"
+import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query"
 import type { PlanVersion, PlanVersionFeatureDragDrop } from "@unprice/db/validators"
 import type { AppRouter } from "@unprice/trpc/routes"
 import { transformer } from "@unprice/trpc/transformer"
@@ -88,6 +89,12 @@ function render(defaultValues: PlanVersionFeatureDragDrop) {
   const trpcClient = createTRPCClient<AppRouter>({
     links: [httpLink({ url: "http://localhost/unused", transformer })],
   })
+  // The version has no card yet, so the price block renders instead of its loading skeleton.
+  const trpc = createTRPCOptionsProxy<AppRouter>({ client: trpcClient, queryClient })
+  queryClient.setQueryData(
+    trpc.rateCards.forPlanVersion.queryKey({ planVersionId: planVersion.id }),
+    { cards: [] }
+  )
 
   return renderToString(
     <QueryClientProvider client={queryClient}>
@@ -114,11 +121,11 @@ describe("FeatureConfigForm", () => {
     expect(html).not.toContain("Feature Billing")
   })
 
-  it("leaves a per-unit price to the table and says so", () => {
+  it("edits a per-unit price in the sheet, so configuring a feature needs no second place", () => {
     const html = render(apiCalls)
 
-    expect(html).toContain("The price is set in the feature table.")
-    expect(html).not.toContain('id="feature-price"')
+    expect(html).toContain('id="feature-price"')
+    expect(html).toContain("Price per unit")
   })
 
   it("keeps the price block for tiers", () => {
@@ -127,6 +134,6 @@ describe("FeatureConfigForm", () => {
       config: { usageMode: "tier" },
     } as PlanVersionFeatureDragDrop)
 
-    expect(html).not.toContain("The price is set in the feature table.")
+    expect(html).toContain("Tier 1 unit price")
   })
 })

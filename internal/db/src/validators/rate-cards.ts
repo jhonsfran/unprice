@@ -213,6 +213,31 @@ export const modelCostSchema = z.object({
   sourceRef: z.string().nullable(),
 })
 
+/** The cost components a catalog cost carries, each in USD per million tokens. */
+export const COST_COMPONENT_NAMES = ["input", "output", "cache_read", "cache_write"] as const
+
+/**
+ * A model a project adds to its own cost catalog: a fine-tune, a self-hosted model, one models.dev
+ * does not list yet, or a negotiated cost for one it does. Costs are USD per million tokens. It is
+ * priced like every catalog model, cost plus the feature's markup, and outranks the models.dev
+ * cost of a model with the same id, for this project only.
+ */
+export const customModelCostInputSchema = z.object({
+  provider: z.string().trim().min(1).max(64),
+  model: z.string().trim().min(1).max(128),
+  components: z
+    .partialRecord(z.enum(COST_COMPONENT_NAMES), rateDecimalSchema)
+    .refine((components) => Object.keys(components).length > 0, {
+      message: "set at least one cost",
+    }),
+})
+
+/** A stored custom cost; a newer one for the same model replaces it from its `effectiveFrom`. */
+export const customModelCostSchema = customModelCostInputSchema.extend({
+  id: z.string().min(1),
+  effectiveFrom: epochMsSchema,
+})
+
 /** What the pricing core needs to know about a metered feature. */
 export const featurePricingSchema = z.object({
   slug: featureSlugSchema,
@@ -259,12 +284,14 @@ export const closeRateRowsInputSchema = z.object({
 
 export const previewCostPlusInputSchema = z.object({
   cardId: z.string().min(1),
+  featureSlug: featureSlugSchema.optional(),
   /** When the revision is computed; now when absent. */
   at: epochMsSchema.optional(),
 })
 
 export const publishCostPlusInputSchema = z.object({
   cardId: z.string().min(1),
+  featureSlug: featureSlugSchema.optional(),
   /** When the rows start; absent means the earliest the card allows. */
   effectiveFrom: epochMsSchema.optional(),
   /** The `draftHash` of the preview the caller reviewed. */
@@ -311,6 +338,11 @@ export const planVersionCatalogPricingInputSchema = z.object({
     .refine((map) => Object.keys(map).length > 0, { message: "map at least one component" }),
 })
 
+export const applyPlanVersionCatalogPricingInputSchema =
+  planVersionCatalogPricingInputSchema.extend({
+    draftHash: z.string().min(1),
+  })
+
 /** Prices a draft plan version in one currency with a card (ADR-0008 D2: one card per currency). */
 export const assignPlanVersionCardInputSchema = z.object({
   planVersionId: z.string().min(1),
@@ -340,6 +372,8 @@ export type PlanVersionCatalogPricingInput = z.infer<typeof planVersionCatalogPr
 export type RateCard = z.infer<typeof rateCardSchema>
 export type RateCardInput = z.input<typeof rateCardSchema>
 export type ModelCost = z.infer<typeof modelCostSchema>
+export type CustomModelCost = z.infer<typeof customModelCostSchema>
+export type CustomModelCostInput = z.input<typeof customModelCostInputSchema>
 export type ModelCostInput = z.input<typeof modelCostSchema>
 export type FeaturePricing = z.infer<typeof featurePricingSchema>
 export type FeaturePricingInput = z.input<typeof featurePricingSchema>

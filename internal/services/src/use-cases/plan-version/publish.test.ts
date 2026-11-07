@@ -18,6 +18,17 @@ function createLogger(): Logger {
   } as unknown as Logger
 }
 
+function transactionalDb(db: Database): Database {
+  const existing = db.transaction?.bind(db)
+  return {
+    ...db,
+    transaction: async (write: (tx: unknown) => Promise<unknown>) =>
+      existing
+        ? existing(async (tx) => write({ ...tx, query: db.query }))
+        : write({ query: db.query }),
+  } as unknown as Database
+}
+
 /** The version's USD card: a $1 flat base fee, so a customer needs a payment method. */
 function baseCard() {
   const row = rateRowSchema.parse({
@@ -76,9 +87,15 @@ describe("publishPlanVersion", () => {
           customers: {
             getPaymentProvider,
           },
-          rateCards: { pricingForPlanVersions: vi.fn(async () => baseCard()) },
+          rateCards: {
+            withTransaction() {
+              return this
+            },
+            lockPlanVersionCards: vi.fn(async () => []),
+            pricingForPlanVersions: vi.fn(async () => baseCard()),
+          },
         } as unknown as Pick<ServiceContext, "customers" | "rateCards">,
-        db,
+        db: transactionalDb(db),
         logger,
         userId: "usr_123",
       },
@@ -129,7 +146,7 @@ describe("publishPlanVersion", () => {
             }),
           },
         },
-        transaction: vi.fn(),
+        transaction: vi.fn(async (write: (tx: unknown) => Promise<unknown>) => write({})),
       } as unknown as Database
       const getPaymentProvider = vi.fn()
 
@@ -137,9 +154,15 @@ describe("publishPlanVersion", () => {
         {
           services: {
             customers: { getPaymentProvider },
-            rateCards: { pricingForPlanVersions: vi.fn(async () => pricing) },
+            rateCards: {
+              withTransaction() {
+                return this
+              },
+              lockPlanVersionCards: vi.fn(async () => []),
+              pricingForPlanVersions: vi.fn(async () => pricing),
+            },
           } as unknown as Pick<ServiceContext, "customers" | "rateCards">,
-          db,
+          db: transactionalDb(db),
           logger: createLogger(),
           userId: "usr_123",
         },
@@ -157,7 +180,7 @@ describe("publishPlanVersion", () => {
 
       expect((await result).val).toEqual({ state: "unpriced", reason: "no_card", featureSlugs: [] })
       expect(getPaymentProvider).not.toHaveBeenCalled()
-      expect(db.transaction).not.toHaveBeenCalled()
+      expect(db.transaction).toHaveBeenCalledOnce()
     })
 
     it("when a feature has no current or scheduled row on the card", async () => {
@@ -168,7 +191,7 @@ describe("publishPlanVersion", () => {
         reason: "missing_rows",
         featureSlugs: ["api"],
       })
-      expect(db.transaction).not.toHaveBeenCalled()
+      expect(db.transaction).toHaveBeenCalledOnce()
     })
   })
 
@@ -234,12 +257,15 @@ describe("publishPlanVersion", () => {
         services: {
           customers: { getPaymentProvider: vi.fn() },
           rateCards: {
+            withTransaction() {
+              return this
+            },
             pricingForPlanVersions: vi.fn(async () => pricing),
             lockPlanVersionCards,
             getEffectiveRows,
           },
         } as unknown as Pick<ServiceContext, "customers" | "rateCards">,
-        db,
+        db: transactionalDb(db),
         logger: createLogger(),
         userId: "usr_123",
       },
@@ -252,8 +278,65 @@ describe("publishPlanVersion", () => {
         { code: "UNKNOWN_DIMENSION", rowId: "rr_api_model", key: "model", feature: "api" },
       ],
     })
-    expect(lockPlanVersionCards).toHaveBeenCalledWith("proj_123", "pv_123", tx)
-    expect(getEffectiveRows.mock.calls[0]?.[0]).toMatchObject({ cardIds: ["rc_1"], executor: tx })
+    expect(lockPlanVersionCards).toHaveBeenCalledWith(
+      "proj_123",
+      "pv_123",
+      expect.objectContaining(tx)
+    )
+    expect(getEffectiveRows).not.toHaveBeenCalled()
     expect(writes).toEqual([])
   })
+})
+
+it("refuses publication when the last price row disappears before the card lock", async () => {
+  const version = {
+    id: "pv_123",
+    projectId: "proj_123",
+    planId: "plan_123",
+    status: "draft",
+    collectionMethod: "send_invoice",
+    currency: "USD",
+    paymentProvider: "sandbox",
+    planFeatures: [
+      { id: "fpv_api", featureType: "usage", feature: { slug: "base" }, meterConfig: null },
+    ],
+  }
+  const writes: unknown[] = []
+  const tx = {
+    update: () => ({
+      set: (fields: unknown) => {
+        writes.push(fields)
+        return { where: () => ({ returning: async () => [{ ...version, status: "published" }] }) }
+      },
+    }),
+  }
+  const db = {
+    query: { versions: { findFirst: async () => version } },
+    transaction: async (fn: (tx: unknown) => unknown) => fn(tx),
+  } as unknown as Database
+  const currentPricing = baseCard()
+  const result = await publishPlanVersion(
+    {
+      db: transactionalDb(db),
+      logger: createLogger(),
+      userId: "usr_123",
+      services: {
+        customers: {},
+        rateCards: {
+          withTransaction() {
+            return this
+          },
+          pricingForPlanVersions: async () => currentPricing,
+          lockPlanVersionCards: async () => {
+            currentPricing.set("pv_123", [{ currency: "USD", card: {}, rows: [] }])
+            return ["rc_1"]
+          },
+          getEffectiveRows: async () => [],
+        },
+      } as unknown as Pick<ServiceContext, "customers" | "rateCards">,
+    },
+    { id: "pv_123", projectId: "proj_123", workspaceUnPriceCustomerId: "cus_123" }
+  )
+  expect(result.val).toEqual({ state: "unpriced", reason: "missing_rows", featureSlugs: ["base"] })
+  expect(writes).toEqual([])
 })

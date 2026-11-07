@@ -2,7 +2,13 @@
 
 import type { FeatureType } from "@unprice/db/utils"
 import { type RateRow, featurePriceInputSchema } from "@unprice/db/validators"
-import { decimalPriceOf, describeRatePrice } from "@unprice/services/pricing"
+import {
+  type DecimalFeaturePrice,
+  type PricingShape,
+  decimalPriceOf,
+  describeRatePrice,
+  pricingShape,
+} from "@unprice/services/pricing"
 import type { RouterInputs, RouterOutputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
 import { Label } from "@unprice/ui/label"
@@ -19,22 +25,11 @@ export type PlanVersionCard = RouterOutputs["rateCards"]["forPlanVersion"]["card
 /** The `price` a feature update carries: absent leaves it, null unprices, a value sets it. */
 export type FeaturePriceInput = NonNullable<RouterInputs["planVersionFeatures"]["update"]["price"]>
 
-/** The row shape a plan feature's package allows (`ratePriceOf` derives the same on the server). */
-export type PriceShape = "flat" | "unit" | "package" | "graduated"
+/** The row shape a plan feature's package allows (`pricingShape` owns the rule). */
+export type PriceShape = PricingShape
 
 export function priceShapeOf(featureType: FeatureType, usageMode: string | undefined): PriceShape {
-  switch (featureType) {
-    case "flat":
-      return "flat"
-    case "tier":
-      return "graduated"
-    case "package":
-      return "package"
-    case "usage":
-      if (usageMode === "tier") return "graduated"
-      if (usageMode === "package") return "package"
-      return "unit"
-  }
+  return pricingShape({ featureType, usageMode: usageMode as DecimalFeaturePrice["usageMode"] })
 }
 
 /** One editable tier; `key` identifies the row while it is edited and never reaches the server. */
@@ -51,7 +46,7 @@ export type PriceDraft =
   | Readonly<{ kind: "amount"; amount: string }>
   | Readonly<{ kind: "tiers"; tiers: readonly TierDraft[] }>
 
-function emptyTier(key: string): TierDraft {
+export function emptyTier(key: string): TierDraft {
   return { key, upTo: "", unitPrice: "", flatPrice: "0" }
 }
 
@@ -77,7 +72,7 @@ export function emptyDraft(shape: PriceShape, includedUnits = 0): PriceDraft {
 }
 
 /**
- * The draft the inputs start from: the row's decimal price when it fits the shape, an empty draft
+ * The draft the inputs start from: the row's decimal price when it has the shape, an empty draft
  * when the feature has no row or the row has another shape, null when the row's price cannot be
  * stated in decimal form (several components, a `per` above 1).
  */
@@ -86,7 +81,8 @@ export function prefillDraft(
   shape: PriceShape,
   includedUnits = 0
 ): PriceDraft | null {
-  if (!row) return emptyDraft(shape, includedUnits)
+  // A row of another shape is not this feature's price any more: $49 a cycle is not $49 a unit.
+  if (!row || row.price.type !== shape) return emptyDraft(shape, includedUnits)
   const decimal = decimalPriceOf(row.price)
   if (!decimal) return null
   if (shape === "graduated") {
@@ -199,6 +195,11 @@ export function PriceBlockView({
   const cardHref = card
     ? `/${params?.workspaceSlug}/${params?.projectSlug}/rate-cards/${card.card.id}`
     : null
+  // The version's own card is read on its Prices tab; a shared card on its own page.
+  const pricesHref =
+    params?.planSlug && params?.planVersionId
+      ? `/${params.workspaceSlug}/${params.projectSlug}/plans/${params.planSlug}/${params.planVersionId}/prices`
+      : null
   const label = card
     ? cardLabel(
         card.card.name,
@@ -212,6 +213,8 @@ export function PriceBlockView({
   const row = current ?? scheduled
   const prefill = prefillDraft(row, shape, includedUnits)
   const effective = draft ?? prefill
+  // A saved price of another shape (a fixed $49 on a feature switched to metered) is replaced on save.
+  const replaced = row !== null && row.price.type !== shape
 
   if (isLoading) return <Skeleton className="h-24 w-full" />
 
@@ -224,27 +227,36 @@ export function PriceBlockView({
         </span>
         {label && cardHref && (
           <SuperLink
-            href={cardHref}
+            href={label.isOwn ? (pricesHref ?? cardHref) : cardHref}
             className={cn(
               "truncate text-muted-foreground text-xs underline-offset-4 hover:underline",
               !label.isOwn && "font-mono"
             )}
           >
-            {label.text}
+            {label.isOwn ? "Price history" : label.text}
           </SuperLink>
         )}
       </div>
 
       {row ? (
-        <div className="flex flex-col gap-0.5">
+        <div className="flex flex-col gap-0.5 text-xs">
           {current && (
-            <span className="font-mono text-xs tabular-nums">
-              {describeRatePrice(current.price, currency, unit)}
+            <span>
+              <span className="text-muted-foreground">Saved price: </span>
+              <span className={cn("font-mono tabular-nums", replaced && "line-through")}>
+                {describeRatePrice(current.price, currency, unit)}
+              </span>
             </span>
           )}
           {scheduled && (
-            <span className="font-mono text-muted-foreground text-xs tabular-nums">
+            <span className="font-mono text-muted-foreground tabular-nums">
               {describeRatePrice(scheduled.price, currency, unit)} {scheduledFrom(scheduled)}
+            </span>
+          )}
+          {replaced && editable && (
+            <span className="text-muted-foreground">
+              It no longer fits how this feature is charged; saving replaces it with the price
+              below.
             </span>
           )}
         </div>
@@ -339,8 +351,12 @@ export function PriceBlockView({
   )
 }
 
+function title(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
 /** Graduated tiers: each row ends at "up to" units; the last row is open-ended. */
-function TiersEditor({
+export function TiersEditor({
   tiers,
   currency,
   unit,
@@ -357,10 +373,14 @@ function TiersEditor({
 
   return (
     <div className="space-y-1.5">
+      <p className="text-muted-foreground text-xs">
+        Each tier prices only the {unit}s inside it. Add a tier to charge differently past a
+        threshold.
+      </p>
       <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_28px] gap-2 text-muted-foreground text-xs">
-        <span>Up to ({unit})</span>
+        <span>{title(unit)}s</span>
         <span>Price per {unit}</span>
-        <span>Flat fee</span>
+        <span>Plus a flat fee</span>
         <span />
       </div>
       {tiers.map((tier, index) => {
@@ -374,14 +394,14 @@ function TiersEditor({
           >
             {last ? (
               <span className="flex h-9 items-center rounded-md border border-dashed px-3 font-mono text-muted-foreground text-xs tabular-nums">
-                {from} and up
+                {from} and above
               </span>
             ) : (
               <InputWithAddons
                 inputMode="numeric"
                 aria-label={`Tier ${index + 1} ends at`}
                 className="font-mono text-xs tabular-nums"
-                leading={String(from)}
+                leading={`${from} to`}
                 value={tier.upTo}
                 onChange={(event) => update(index, { upTo: event.target.value })}
               />

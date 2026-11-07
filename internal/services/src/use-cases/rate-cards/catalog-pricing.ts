@@ -1,54 +1,38 @@
-import { type PlanVersionCatalogPricingInput, currencySchema } from "@unprice/db/validators"
+import type { Database } from "@unprice/db"
+import {
+  type PlanVersionCatalogPricingInput,
+  type applyPlanVersionCatalogPricingInputSchema,
+  currencySchema,
+} from "@unprice/db/validators"
 import { Err, type FetchError, Ok, type Result } from "@unprice/error"
+import type { z } from "zod"
 import { MODEL_CATALOG } from "../../budgets/model-catalog"
 import type { ServiceContext } from "../../context"
-import type { CostPlusDraft } from "../../pricing"
+import type { Transaction } from "../../deps"
 import {
   UnPriceRateCardError,
+  cardFeaturePricing,
   planFeaturePricing,
   pricePlanVersion,
   versionCardName,
 } from "../../rate-cards"
+import type { PublishRowsResult } from "../../rate-cards"
+import { transactionResult } from "../../utils/transaction-result"
 import { catalogEffectiveFrom, importModelCosts } from "./import-model-costs"
 
-export type SetPlanVersionCatalogPricingDeps = {
-  services: Pick<ServiceContext, "plans" | "features" | "rateCards">
-}
-
-export type SetPlanVersionCatalogPricingInput = PlanVersionCatalogPricingInput & {
-  projectId: string
-  now: number
-}
-
-export type SetPlanVersionCatalogPricingOutput = {
-  cardId: string
-  /** The card's cost-plus revision now, for the caller to review and publish under its hash. */
-  draft: CostPlusDraft
-  draftHash: string
-  /**
-   * Catalog ids of the drafted models that models.dev prices by context tier. The draft prices
-   * them at their base tier; a long-context call costs the provider more than the row says.
-   */
-  tieredModels: string[]
-}
-
+type CatalogPricingDeps = { services: Pick<ServiceContext, "plans" | "features" | "rateCards"> }
+type CatalogPricingInput = PlanVersionCatalogPricingInput & { projectId: string; now: number }
 const USD = currencySchema.parse("USD")
 
-/**
- * Prices one feature's models from the cost catalog on the version's own card (ADR-0008 D3): the
- * bundled catalog is imported, the card gets a cost-plus policy for the feature, and the resulting
- * revision comes back as a draft for `publishCostPlus`. The version must be a USD draft, the
- * feature a usage feature that varies by the dimension carrying the model id, and the card the
- * version's own. Reruns rewrite the policy and import nothing new.
- */
-export async function setPlanVersionCatalogPricing(
-  deps: SetPlanVersionCatalogPricingDeps,
-  input: SetPlanVersionCatalogPricingInput
-): Promise<Result<SetPlanVersionCatalogPricingOutput, UnPriceRateCardError | FetchError>> {
+async function prepareCatalogPricing(
+  deps: CatalogPricingDeps,
+  input: CatalogPricingInput,
+  tx?: Transaction
+) {
   const { plans, rateCards } = deps.services
   const { projectId, planVersionId, featureSlug, now } = input
 
-  const found = await plans.getPlanVersionByIdDetailed({ planVersionId, projectId })
+  const found = await plans.getPlanVersionByIdDetailed({ planVersionId, projectId }, tx)
   if (found.err) return Err(found.err)
   const version = found.val
   if (!version)
@@ -105,24 +89,69 @@ export async function setPlanVersionCatalogPricing(
   const { cardId } = card.val
 
   await importModelCosts(deps, { effectiveFrom: catalogEffectiveFrom() })
-  const policy = await rateCards.setMarginPolicy(projectId, cardId, {
+  const featurePolicy = {
     featureSlug,
     markup: input.markup,
     roundTo: input.roundTo,
     dimension,
     componentMap: input.componentMap,
-  })
-  if (policy.err) return Err(policy.err)
+  }
+  return Ok({ cardId, featurePolicy, dimension })
+}
 
-  const preview = await rateCards.previewCostPlus(projectId, cardId, now)
+/** Previews one feature's policy without saving it. */
+export async function previewPlanVersionCatalogPricing(
+  deps: CatalogPricingDeps,
+  input: CatalogPricingInput
+) {
+  const prepared = await prepareCatalogPricing(deps, input)
+  if (prepared.err) return Err(prepared.err)
+  const { cardId, featurePolicy, dimension } = prepared.val
+  const preview = await deps.services.rateCards.previewCostPlus(
+    input.projectId,
+    cardId,
+    input.now,
+    { policy: featurePolicy, featureSlug: input.featureSlug }
+  )
   if (preview.err) return Err(preview.err)
   const drafted = new Set(
-    preview.val.draft.changes.flatMap((change) =>
-      change.proposed.featureSlug === featureSlug ? [change.proposed.match[dimension]] : []
-    )
+    preview.val.draft.changes.map((change) => change.proposed.match[dimension])
   )
   const tieredModels = MODEL_CATALOG.filter(
     (row) => row.tiers.length > 0 && drafted.has(row.model)
   ).map((row) => row.id)
   return Ok({ cardId, ...preview.val, tieredModels })
+}
+
+/** Applies exactly the reviewed feature revision, or rolls back policy, assignment and rows. */
+export async function applyPlanVersionCatalogPricing(
+  deps: CatalogPricingDeps & { db: Database },
+  input: z.infer<typeof applyPlanVersionCatalogPricingInputSchema> & {
+    projectId: string
+    now: number
+  }
+): Promise<Result<PublishRowsResult, FetchError | UnPriceRateCardError>> {
+  const result = await transactionResult<PublishRowsResult, FetchError | UnPriceRateCardError>(
+    deps.db,
+    async (tx) => {
+      await deps.services.rateCards.lockPlanVersionCards(input.projectId, input.planVersionId, tx)
+      const rateCards = deps.services.rateCards.withTransaction(tx)
+      const services = { ...deps.services, rateCards }
+      const prepared = await prepareCatalogPricing({ services }, input, tx)
+      if (prepared.err) return Err(prepared.err)
+      const features = await cardFeaturePricing(services, input.projectId, prepared.val.cardId)
+      if (features.err) return Err(features.err)
+      return rateCards.publishCostPlus({
+        projectId: input.projectId,
+        cardId: prepared.val.cardId,
+        now: input.now,
+        draftHash: input.draftHash,
+        featureSlug: input.featureSlug,
+        policy: prepared.val.featurePolicy,
+        ...features.val,
+      })
+    }
+  )
+  if (!result.err) await deps.services.rateCards.invalidatePlanVersionPrices([input.planVersionId])
+  return result
 }

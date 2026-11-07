@@ -35,12 +35,12 @@ describe("rateCards.previewCostPlus", () => {
 
     const whatIf = await router
       .createCaller(ctx)
-      .previewCostPlus({ cardId: "rc_1", at: NOW + 3_600_000 })
+      .previewCostPlus({ cardId: "rc_1", at: NOW + 3_600_000, featureSlug: "ai" })
     const current = await router.createCaller(ctx).previewCostPlus({ cardId: "rc_1" })
 
     expect(calls).toEqual([
-      ["proj_1", "rc_1", NOW + 3_600_000],
-      ["proj_1", "rc_1", NOW],
+      ["proj_1", "rc_1", NOW + 3_600_000, { featureSlug: "ai" }],
+      ["proj_1", "rc_1", NOW, { featureSlug: undefined }],
     ])
     expect(whatIf).toEqual({
       draft: { cardId: "rc_1", at: NOW + 3_600_000, changes: [] },

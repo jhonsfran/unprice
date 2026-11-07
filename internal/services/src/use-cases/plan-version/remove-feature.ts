@@ -1,8 +1,11 @@
+import type { Database } from "@unprice/db"
 import { Err, type FetchError, Ok, type Result } from "@unprice/error"
 import type { ServiceContext } from "../../context"
 import type { UnPriceRateCardError } from "../../rate-cards"
+import { transactionResult } from "../../utils/transaction-result"
 
 export type RemovePlanVersionFeatureDeps = {
+  db: Database
   services: Pick<ServiceContext, "plans" | "rateCards">
 }
 
@@ -20,30 +23,40 @@ export async function removePlanVersionFeature(
   input: { projectId: string; id: string; now: number }
 ): Promise<Result<RecordRemoval, FetchError | UnPriceRateCardError>> {
   const { plans, rateCards } = deps.services
-  const { projectId, id, now } = input
-
-  const stored = await plans.getPlanVersionFeatureByIdDetailed({ id, projectId })
-  if (stored.err) return Err(stored.err)
-  const removed = await plans.removePlanVersionFeatureRecord({ projectId, id })
-  if (removed.err) return Err(removed.err)
-  if (removed.val.state !== "ok" || !stored.val) return Ok(removed.val)
-
-  const { planVersion, feature } = stored.val
-  const card = await rateCards.cardForPlanVersion(projectId, planVersion.id, planVersion.currency)
-  if (!card) return Ok(removed.val)
-  const shared = (await rateCards.versionsPricingWith(projectId, card.cardId)).some(
-    (assigned) => assigned.planVersionId !== planVersion.id
+  const result = await transactionResult<RecordRemoval, FetchError | UnPriceRateCardError>(
+    deps.db,
+    async (tx) => {
+      const { projectId, id, now } = input
+      const initial = await plans.getPlanVersionFeatureByIdDetailed({ id, projectId }, tx)
+      if (initial.err) return Err(initial.err)
+      if (!initial.val) return Ok({ state: "not_found" as const })
+      await rateCards.lockPlanVersionCards(projectId, initial.val.planVersionId, tx)
+      const stored = await plans.getPlanVersionFeatureByIdDetailed({ id, projectId }, tx)
+      if (stored.err) return Err(stored.err)
+      if (!stored.val) return Ok({ state: "not_found" as const })
+      const removed = await plans.removePlanVersionFeatureRecord({ projectId, id }, tx)
+      if (removed.err) return Err(removed.err)
+      if (removed.val.state !== "ok") return Ok(removed.val)
+      const scoped = rateCards.withTransaction(tx)
+      const card = await scoped.cardForPlanVersion(
+        projectId,
+        stored.val.planVersionId,
+        stored.val.planVersion.currency
+      )
+      if (card) {
+        const ended = await scoped.removeFeaturePrices({
+          projectId,
+          cardId: card.cardId,
+          featureSlug: stored.val.feature.slug,
+          now,
+        })
+        if (ended.err) return Err(ended.err)
+      }
+      return Ok(removed.val)
+    }
   )
-  if (shared) return Ok(removed.val)
-
-  const found = await rateCards.getCard(projectId, card.cardId)
-  if (found.err) return Err(found.err)
-  const rowIds = found.val.rows
-    .filter((row) => row.featureSlug === feature.slug && row.effectiveTo === null)
-    .map((row) => row.id)
-  if (rowIds.length > 0) {
-    const closed = await rateCards.closeRows({ projectId, cardId: card.cardId, rowIds, now })
-    if (closed.err) return Err(closed.err)
+  if (!result.err && result.val.state === "ok") {
+    await rateCards.invalidatePlanVersionPrices([result.val.planVersionFeature.planVersionId])
   }
-  return Ok(removed.val)
+  return result
 }

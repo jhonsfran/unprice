@@ -1,9 +1,10 @@
 import type { Database } from "@unprice/db"
-import { Ok } from "@unprice/error"
+import { Err, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { describe, expect, it, vi } from "vitest"
 import type { ServiceContext } from "../../context"
 import { createRateCardsFake } from "../../rate-cards/memory.fixture"
+import { planPublish } from "../../rate-cards/publish"
 import { duplicatePlanVersion } from "./duplicate"
 
 type InsertedValues = Record<string, unknown>
@@ -69,10 +70,12 @@ function createPlanVersion(overrides?: InsertedValues): InsertedValues {
         projectId: "proj_123",
         planVersionId: "pv_source",
         featureId: "feature_123",
+        feature: { slug: "base" },
         metadata: { hidden: false },
         createdAtM: 1,
         updatedAtM: 1,
       },
+      { id: "pf_seats", featureId: "ft_seats", feature: { slug: "seats" }, metadata: {} },
     ],
     ...overrides,
   }
@@ -104,13 +107,10 @@ function createDbMocks(planVersionData: InsertedValues | null) {
     })),
   }
 
+  const query = { versions: { findFirst: vi.fn().mockResolvedValue(planVersionData) } }
   const db = {
-    query: {
-      versions: {
-        findFirst: vi.fn().mockResolvedValue(planVersionData),
-      },
-    },
-    transaction: vi.fn((callback: (tx: unknown) => Promise<unknown>) => callback(tx)),
+    query,
+    transaction: vi.fn((callback: (tx: unknown) => Promise<unknown>) => callback({ ...tx, query })),
   } as unknown as Database
 
   return {
@@ -267,4 +267,46 @@ describe("duplicatePlanVersion", () => {
       version: 2,
     })
   })
+})
+
+it("copies only the features carried by the source version from a shared card", async () => {
+  const source = createPlanVersion({
+    planFeatures: [
+      { id: "pf_base", featureId: "ft_base", feature: { slug: "base" }, metadata: {} },
+    ],
+  })
+  const { db } = createDbMocks(source)
+  const { cards, deps } = createDeps(db)
+  const original = cards.seedPlanVersionCard("pv_source", "USD", [
+    { featureSlug: "base", featureType: "flat", price: "10" },
+    { featureSlug: "other_version_feature", featureType: "flat", price: "20" },
+  ])
+  deps.services.rateCards.featuresPricingWith = vi.fn(async () => ({
+    features: [{ slug: "base", dimensions: [], meterProperty: null, included: null }],
+    unpriceable: [],
+  }))
+  cards.rateCards.publishRows.mockImplementation(async (request) => {
+    const card = cards.cards.get(request.cardId)
+    if (!card) throw new Error("fixture")
+    const planned = planPublish({
+      ...request,
+      card,
+      rows: [],
+      noticeMs: 0,
+      newRowId: () => "rr_regression",
+    })
+    return planned.err
+      ? Err(planned.err)
+      : Ok({
+          inserted: [...planned.val.inserts],
+          closed: [...planned.val.closes],
+          unchanged: planned.val.unchanged,
+        })
+  })
+  const result = await duplicatePlanVersion(deps, { id: "pv_source", projectId: "proj_123" })
+  expect(result.err).toBeUndefined()
+  expect(result.val?.state).toBe("ok")
+  const publish = cards.rateCards.publishRows.mock.calls[0]?.[0]
+  expect(publish?.drafts.map((row) => row.featureSlug)).toEqual(["base"])
+  expect(publish?.cardId).not.toBe(original.id)
 })

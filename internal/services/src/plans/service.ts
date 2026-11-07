@@ -22,6 +22,7 @@ import {
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { Cache } from "../cache/service"
+import type { DbExecutor } from "../deps"
 import type { Metrics } from "../metrics"
 import { featureRow, planVersionPrices, priceCanCharge } from "../pricing"
 import type { RateCardService } from "../rate-cards"
@@ -1099,13 +1100,16 @@ export class PlanService {
     return Ok((val as PlanVersion | null) ?? null)
   }
 
-  public async getPlanVersionByIdDetailed({
-    planVersionId,
-    projectId,
-  }: {
-    planVersionId: string
-    projectId: string
-  }): Promise<
+  public async getPlanVersionByIdDetailed(
+    {
+      planVersionId,
+      projectId,
+    }: {
+      planVersionId: string
+      projectId: string
+    },
+    executor: DbExecutor = this.db
+  ): Promise<
     Result<
       | (PlanVersion & {
           plan: Plan
@@ -1116,7 +1120,7 @@ export class PlanService {
     >
   > {
     const { val, err } = await wrapResult(
-      this.db.query.versions.findFirst({
+      executor.query.versions.findFirst({
         with: {
           plan: true,
           planFeatures: {
@@ -1748,13 +1752,16 @@ export class PlanService {
     })
   }
 
-  public async getPlanVersionFeatureByIdDetailed({
-    id,
-    projectId,
-  }: {
-    id: string
-    projectId: string
-  }): Promise<
+  public async getPlanVersionFeatureByIdDetailed(
+    {
+      id,
+      projectId,
+    }: {
+      id: string
+      projectId: string
+    },
+    executor: DbExecutor = this.db
+  ): Promise<
     Result<
       | (PlanVersionFeature & {
           planVersion: PlanVersion
@@ -1765,7 +1772,7 @@ export class PlanService {
     >
   > {
     const { val, err } = await wrapResult(
-      this.db.query.planVersionFeatures.findFirst({
+      executor.query.planVersionFeatures.findFirst({
         with: {
           planVersion: true,
           feature: true,
@@ -2077,44 +2084,47 @@ export class PlanService {
     })
   }
 
-  public async updatePlanVersionFeatureRecord({
-    projectId,
-    id,
-    planVersionId,
-    featureId,
-    featureType,
-    config,
-    metadata,
-    order,
-    defaultQuantity,
-    limit,
-    billingConfig,
-    resetConfig,
-    type,
-    unitOfMeasure,
-    meterConfig,
-    hasMeterConfigOverride,
-    included,
-  }: {
-    projectId: string
-    id: string
-    planVersionId: string
-    featureId?: PlanVersionFeature["featureId"]
-    featureType?: PlanVersionFeature["featureType"]
-    config?: PlanVersionFeature["config"]
-    metadata?: PlanVersionFeature["metadata"]
-    order?: PlanVersionFeature["order"]
-    defaultQuantity?: PlanVersionFeature["defaultQuantity"]
-    limit?: PlanVersionFeature["limit"]
-    billingConfig?: PlanVersionFeature["billingConfig"]
-    resetConfig?: PlanVersionFeature["resetConfig"]
-    type?: PlanVersionFeature["type"]
-    unitOfMeasure?: PlanVersionFeature["unitOfMeasure"]
-    meterConfig?: PlanVersionFeature["meterConfig"]
-    hasMeterConfigOverride: boolean
-    /** Units included per statement period (ADR-0008 D5); undefined keeps the stored value. */
-    included?: PlanVersionFeature["included"]
-  }): Promise<
+  public async updatePlanVersionFeatureRecord(
+    {
+      projectId,
+      id,
+      planVersionId,
+      featureId,
+      featureType,
+      config,
+      metadata,
+      order,
+      defaultQuantity,
+      limit,
+      billingConfig,
+      resetConfig,
+      type,
+      unitOfMeasure,
+      meterConfig,
+      hasMeterConfigOverride,
+      included,
+    }: {
+      projectId: string
+      id: string
+      planVersionId: string
+      featureId?: PlanVersionFeature["featureId"]
+      featureType?: PlanVersionFeature["featureType"]
+      config?: PlanVersionFeature["config"]
+      metadata?: PlanVersionFeature["metadata"]
+      order?: PlanVersionFeature["order"]
+      defaultQuantity?: PlanVersionFeature["defaultQuantity"]
+      limit?: PlanVersionFeature["limit"]
+      billingConfig?: PlanVersionFeature["billingConfig"]
+      resetConfig?: PlanVersionFeature["resetConfig"]
+      type?: PlanVersionFeature["type"]
+      unitOfMeasure?: PlanVersionFeature["unitOfMeasure"]
+      meterConfig?: PlanVersionFeature["meterConfig"]
+      hasMeterConfigOverride: boolean
+      /** Units included per statement period (ADR-0008 D5); undefined keeps the stored value. */
+      included?: PlanVersionFeature["included"]
+    },
+    executor: DbExecutor = this.db
+  ): Promise<
     Result<
       | {
           state:
@@ -2134,7 +2144,7 @@ export class PlanService {
       FetchError
     >
   > {
-    const existingPlanVersionFeature = await this.db.query.planVersionFeatures.findFirst({
+    const existingPlanVersionFeature = await executor.query.planVersionFeatures.findFirst({
       with: {
         feature: true,
       },
@@ -2148,7 +2158,7 @@ export class PlanService {
       })
     }
 
-    const planVersionData = await this.db.query.versions.findFirst({
+    const planVersionData = await executor.query.versions.findFirst({
       where: (version, { and, eq }) =>
         and(eq(version.id, planVersionId), eq(version.projectId, projectId)),
     })
@@ -2236,7 +2246,7 @@ export class PlanService {
     }
 
     const { val, err } = await wrapResult(
-      this.db.transaction(async (tx) => {
+      executor.transaction(async (tx) => {
         const planVersionFeatureUpdated = await tx
           .update(schema.planVersionFeatures)
           .set({
@@ -2325,13 +2335,16 @@ export class PlanService {
     })
   }
 
-  public async removePlanVersionFeatureRecord({
-    projectId,
-    id,
-  }: {
-    projectId: string
-    id: string
-  }): Promise<
+  public async removePlanVersionFeatureRecord(
+    {
+      projectId,
+      id,
+    }: {
+      projectId: string
+      id: string
+    },
+    executor: DbExecutor = this.db
+  ): Promise<
     Result<
       | { state: "not_found" | "published_conflict" }
       | {
@@ -2341,7 +2354,7 @@ export class PlanService {
       FetchError
     >
   > {
-    const planVersionFeatureData = await this.db.query.planVersionFeatures.findFirst({
+    const planVersionFeatureData = await executor.query.planVersionFeatures.findFirst({
       with: {
         planVersion: true,
       },
@@ -2362,7 +2375,7 @@ export class PlanService {
     }
 
     const { val, err } = await wrapResult(
-      this.db
+      executor
         .delete(schema.planVersionFeatures)
         .where(
           and(

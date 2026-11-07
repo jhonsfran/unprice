@@ -1,9 +1,11 @@
-import { type Database, and, asc, desc, eq, gt, inArray, isNull, lt, lte, or } from "@unprice/db"
+import { and, asc, desc, eq, gt, inArray, isNull, lt, or } from "@unprice/db"
 import {
+  customModelCosts,
   features as featuresTable,
   modelCosts,
   planVersionFeatures,
   planVersionRateCards,
+  plans,
   rateCardRows,
   rateCards,
   versions,
@@ -14,12 +16,13 @@ import {
   type CloseRateRowsInput,
   type CostPlusFeaturePolicy,
   type CreateRateCardInput,
+  type CustomModelCost,
   type FeaturePricing,
+  type MarginPolicy,
   type ModelCost,
   type PlanVersionCard,
   type RateCard,
   type RateRow,
-  modelCostSchema,
   rateCardSchema,
   rateCardUnitSchema,
   rateRowSchema,
@@ -28,7 +31,15 @@ import { Err, Ok, type Result } from "@unprice/error"
 import { formatAmount } from "@unprice/money"
 import type { Cache } from "../cache/service"
 import type { DbExecutor, Transaction } from "../deps"
-import { type CostPlusCard, type CostPlusDraft, costPlusRevision, writesRow } from "../pricing"
+import { type CostPlusDraft, writesRow } from "../pricing"
+import {
+  costPlusPreview,
+  hasFeaturePolicy,
+  retainFeaturePolicies,
+  toCustomModelCost,
+  toModelCost,
+  withFeaturePolicy,
+} from "./catalog"
 import { UnPriceRateCardError, type UnpriceableFeature } from "./errors"
 import {
   type FeaturePricingSet,
@@ -39,10 +50,10 @@ import {
   planPublish,
   unionFeaturePricing,
 } from "./publish"
-import { stableHash, toWire } from "./wire"
+import { toWire } from "./wire"
 
 type RateCardServiceDeps = {
-  db: Database
+  db: DbExecutor
   /**
    * The plan version cache, whose entries show prices read from cards; a card write clears its
    * versions. Absent where nothing reads plan versions through the cache.
@@ -52,6 +63,8 @@ type RateCardServiceDeps = {
 
 type CardRow = typeof rateCards.$inferSelect
 type RowRow = typeof rateCardRows.$inferSelect
+type ModelCostRow = typeof modelCosts.$inferSelect
+type CustomModelCostRow = typeof customModelCosts.$inferSelect
 
 export type PublishRowsInput = {
   projectId: string
@@ -71,6 +84,8 @@ export type PublishRowsInput = {
 export type PublishCostPlusInput = Omit<PublishRowsInput, "drafts" | "closeRowIds"> & {
   /** The `draftHash` of the preview the caller reviewed. */
   draftHash: string
+  featureSlug?: string
+  policy?: CostPlusFeaturePolicy
 }
 
 export type CloseRowsInput = CloseRateRowsInput & { projectId: string; now: number }
@@ -99,6 +114,11 @@ export type PlanVersionPricing = {
 /** Rate cards, their effective-dated rows, and the model cost catalog (ADR-0008 D2, D3). */
 export class RateCardService {
   constructor(private readonly deps: RateCardServiceDeps) {}
+
+  /** Shares the caller's transaction; cache invalidation belongs after its commit. */
+  withTransaction(tx: Transaction): RateCardService {
+    return new RateCardService({ db: tx })
+  }
 
   async createCard(
     projectId: string,
@@ -166,45 +186,53 @@ export class RateCardService {
     input: AssignPlanVersionCardInput
   ): Promise<Result<PlanVersionCard, UnPriceRateCardError>> {
     const { planVersionId, currency, cardId } = input
-    const [version] = await this.deps.db
-      .select({ status: versions.status })
-      .from(versions)
-      .where(and(eq(versions.projectId, projectId), eq(versions.id, planVersionId)))
-    if (!version) {
-      return Err(new UnPriceRateCardError({ code: "PLAN_VERSION_NOT_FOUND", planVersionId }))
-    }
-    if (version.status === "published") {
-      return Err(new UnPriceRateCardError({ code: "PLAN_VERSION_PUBLISHED", planVersionId }))
-    }
-    const [card] = await this.deps.db
-      .select({ unit: rateCards.unit })
-      .from(rateCards)
-      .where(and(eq(rateCards.projectId, projectId), eq(rateCards.id, cardId)))
-    if (!card) return Err(new UnPriceRateCardError({ code: "CARD_NOT_FOUND", cardId }))
-    if (card.unit !== `money:${currency}`) {
-      return Err(
-        new UnPriceRateCardError({ code: "CARD_UNIT_MISMATCH", cardId, unit: card.unit, currency })
-      )
-    }
-    await this.deps.db
-      .insert(planVersionRateCards)
-      .values({
-        id: newId("plan_version_rate_card"),
-        projectId,
-        planVersionId,
-        currency,
-        rateCardId: cardId,
-      })
-      .onConflictDoUpdate({
-        target: [
-          planVersionRateCards.projectId,
-          planVersionRateCards.planVersionId,
-          planVersionRateCards.currency,
-        ],
-        set: { rateCardId: cardId, updatedAt: new Date() },
-      })
-    await this.forgetPlanVersionPrices([planVersionId])
-    return Ok({ planVersionId, currency, cardId, unit: rateCardUnitSchema.parse(card.unit) })
+    const result = await this.deps.db.transaction(
+      async (tx): Promise<Result<PlanVersionCard, UnPriceRateCardError>> => {
+        const version = await lockPlanVersion(tx, projectId, planVersionId)
+        if (!version) {
+          return Err(new UnPriceRateCardError({ code: "PLAN_VERSION_NOT_FOUND", planVersionId }))
+        }
+        if (version.status === "published") {
+          return Err(new UnPriceRateCardError({ code: "PLAN_VERSION_PUBLISHED", planVersionId }))
+        }
+        const [card] = await tx
+          .select({ unit: rateCards.unit })
+          .from(rateCards)
+          .where(and(eq(rateCards.projectId, projectId), eq(rateCards.id, cardId)))
+          .for("update")
+        if (!card) return Err(new UnPriceRateCardError({ code: "CARD_NOT_FOUND", cardId }))
+        if (card.unit !== `money:${currency}`) {
+          return Err(
+            new UnPriceRateCardError({
+              code: "CARD_UNIT_MISMATCH",
+              cardId,
+              unit: card.unit,
+              currency,
+            })
+          )
+        }
+        await tx
+          .insert(planVersionRateCards)
+          .values({
+            id: newId("plan_version_rate_card"),
+            projectId,
+            planVersionId,
+            currency,
+            rateCardId: cardId,
+          })
+          .onConflictDoUpdate({
+            target: [
+              planVersionRateCards.projectId,
+              planVersionRateCards.planVersionId,
+              planVersionRateCards.currency,
+            ],
+            set: { rateCardId: cardId, updatedAt: new Date() },
+          })
+        return Ok({ planVersionId, currency, cardId, unit: rateCardUnitSchema.parse(card.unit) })
+      }
+    )
+    if (!result.err) await this.invalidatePlanVersionPrices([planVersionId])
+    return result
   }
 
   /** The card a plan version prices with in `currency`, or null when it has none. */
@@ -337,9 +365,10 @@ export class RateCardService {
   async publishRows(
     input: PublishRowsInput
   ): Promise<Result<PublishRowsResult, UnPriceRateCardError>> {
-    return this.withLockedCard(input.projectId, input.cardId, (locked) =>
-      writePublish(locked, input, input.drafts)
-    )
+    return this.withLockedCard(input.projectId, input.cardId, async (locked) => {
+      const assigned = await this.featuresPricingWith(input.projectId, input.cardId, locked.tx)
+      return writePublish(locked, { ...input, ...assigned }, input.drafts)
+    })
   }
 
   /**
@@ -352,8 +381,14 @@ export class RateCardService {
     input: PublishCostPlusInput
   ): Promise<Result<PublishRowsResult, UnPriceRateCardError>> {
     return this.withLockedCard(input.projectId, input.cardId, async (locked) => {
-      const { tx, card, rows } = locked
-      const preview = await costPlusPreview(tx, card, rows, input.now)
+      const { tx, rows } = locked
+      const card = input.policy
+        ? {
+            ...locked.card,
+            marginPolicy: withFeaturePolicy(locked.card.marginPolicy, input.policy),
+          }
+        : locked.card
+      const preview = await costPlusPreview(tx, card, rows, input.now, input.featureSlug)
       if (preview.err) return Err(preview.err)
       const { changes } = preview.val.draft
       const drafts: RowDraft[] = changes.filter(writesRow).map((change) => {
@@ -361,14 +396,21 @@ export class RateCardService {
         return { featureSlug, match: { ...match }, price, cost, source, sourceRef }
       })
       const skipped = changes.length - drafts.length
-      if (drafts.length === 0) return Ok({ inserted: [], closed: [], unchanged: skipped })
+      if (
+        drafts.length === 0 &&
+        (!input.policy || hasFeaturePolicy(locked.card.marginPolicy, input.policy))
+      )
+        return Ok({ inserted: [], closed: [], unchanged: skipped })
       if (preview.val.draftHash !== input.draftHash) {
         return Err(
           new UnPriceRateCardError({ code: "DRAFT_STALE", draftHash: preview.val.draftHash })
         )
       }
-      const published = await writePublish(locked, input, drafts)
+      const assigned = await this.featuresPricingWith(input.projectId, input.cardId, tx)
+      const published = await writePublish({ ...locked, card }, { ...input, ...assigned }, drafts)
       if (published.err) return Err(published.err)
+      if (input.policy)
+        await writeMarginPolicy(tx, input.projectId, input.cardId, card.marginPolicy)
       return Ok({ ...published.val, unchanged: published.val.unchanged + skipped })
     })
   }
@@ -393,35 +435,46 @@ export class RateCardService {
     })
   }
 
-  /**
-   * Gives the card the catalog policy for one feature, replacing the policy it had for that
-   * feature; a manual card becomes cost-plus. The card's other policies stay.
-   */
-  async setMarginPolicy(
-    projectId: string,
-    cardId: string,
-    policy: CostPlusFeaturePolicy
-  ): Promise<Result<RateCard, UnPriceRateCardError>> {
-    return this.withLockedCard(projectId, cardId, async ({ tx, card }) => {
-      if (card.unit.startsWith("money:") && card.unit !== "money:USD") {
-        return Err(new UnPriceRateCardError({ code: "CATALOG_USD_ONLY", unit: card.unit }))
+  /** Ends prices and drops the policy only when no assigned version carries the feature. */
+  async removeFeaturePrices(input: {
+    projectId: string
+    cardId: string
+    featureSlug: string
+    now: number
+  }): Promise<Result<void, UnPriceRateCardError>> {
+    return this.withLockedCard(
+      input.projectId,
+      input.cardId,
+      async ({ tx, card, rows, noticeMs }) => {
+        const assigned = await this.featuresPricingWith(input.projectId, input.cardId, tx)
+        if (
+          assigned?.features.some((feature) => feature.slug === input.featureSlug) ||
+          assigned?.unpriceable.some((feature) => feature.slug === input.featureSlug)
+        )
+          return Ok(undefined)
+        const plan = planClose({
+          rows,
+          rowIds: rows
+            .filter((row) => row.featureSlug === input.featureSlug && row.effectiveTo === null)
+            .map((row) => row.id),
+          now: input.now,
+          noticeMs,
+        })
+        if (plan.err) return Err(plan.err)
+        await closeOpenRows(
+          tx,
+          input.projectId,
+          plan.val.closes.map((close) => close.rowId),
+          plan.val.effectiveTo
+        )
+        const marginPolicy = retainFeaturePolicies(
+          card.marginPolicy,
+          (policy) => policy.featureSlug !== input.featureSlug
+        )
+        await writeMarginPolicy(tx, input.projectId, input.cardId, marginPolicy)
+        return Ok(undefined)
       }
-      const kept =
-        card.marginPolicy.type === "costPlus"
-          ? card.marginPolicy.features.filter((other) => other.featureSlug !== policy.featureSlug)
-          : []
-      const marginPolicy: RateCard["marginPolicy"] = {
-        type: "costPlus",
-        features: [...kept, policy],
-      }
-      const [row] = await tx
-        .update(rateCards)
-        .set({ marginPolicy: toWire<CardRow["marginPolicy"]>(marginPolicy), updatedAt: new Date() })
-        .where(and(eq(rateCards.projectId, projectId), eq(rateCards.id, cardId)))
-        .returning()
-      if (!row) return Err(new UnPriceRateCardError({ code: "CARD_NOT_FOUND", cardId }))
-      return Ok(toRateCard(row))
-    })
+    )
   }
 
   /**
@@ -432,11 +485,17 @@ export class RateCardService {
   async previewCostPlus(
     projectId: string,
     cardId: string,
-    at: number
+    at: number,
+    /** A feature policy to draft with instead of the saved one; nothing is written. */
+    options?: { policy?: CostPlusFeaturePolicy; featureSlug?: string }
   ): Promise<Result<CostPlusPreview, UnPriceRateCardError>> {
     const found = await this.getCard(projectId, cardId)
     if (found.err) return Err(found.err)
-    return costPlusPreview(this.deps.db, found.val.card, found.val.rows, at)
+    const { card, rows } = found.val
+    const drafted = options?.policy
+      ? { ...card, marginPolicy: withFeaturePolicy(card.marginPolicy, options.policy) }
+      : card
+    return costPlusPreview(this.deps.db, drafted, rows, at, options?.featureSlug)
   }
 
   /** The newest `modelsdev` cost of each provider and model. */
@@ -447,6 +506,44 @@ export class RateCardService {
       .where(eq(modelCosts.source, "modelsdev"))
       .orderBy(asc(modelCosts.provider), asc(modelCosts.model), desc(modelCosts.effectiveFrom))
     return rows.map(toModelCost)
+  }
+
+  /**
+   * Adds a project's own cost for a model. Rows are never updated: an edit is a newer row, and the
+   * cost-plus revision prices each model from its latest one at or before its own instant.
+   */
+  async insertCustomModelCost(
+    projectId: string,
+    cost: Omit<CustomModelCost, "id">
+  ): Promise<CustomModelCost> {
+    const [row] = await this.deps.db
+      .insert(customModelCosts)
+      .values({
+        id: newId("custom_model_cost"),
+        projectId,
+        provider: cost.provider,
+        model: cost.model,
+        components: toWire<CustomModelCostRow["components"]>(cost.components),
+        effectiveFrom: cost.effectiveFrom,
+      })
+      .returning()
+    if (!row) throw new Error("custom model cost insert returned no row")
+    return toCustomModelCost(row)
+  }
+
+  /** The newest custom cost of each provider and model in a project. */
+  async customModelCosts(projectId: string): Promise<CustomModelCost[]> {
+    const rows = await this.deps.db
+      .selectDistinctOn([customModelCosts.provider, customModelCosts.model])
+      .from(customModelCosts)
+      .where(eq(customModelCosts.projectId, projectId))
+      .orderBy(
+        asc(customModelCosts.provider),
+        asc(customModelCosts.model),
+        desc(customModelCosts.effectiveFrom),
+        desc(customModelCosts.id)
+      )
+    return rows.map(toCustomModelCost)
   }
 
   /** Inserts costs; a cost already stored at the same version is skipped. Returns the count. */
@@ -577,6 +674,7 @@ export class RateCardService {
     planVersionId: string,
     tx: Transaction
   ): Promise<string[]> {
+    await lockPlanVersion(tx, projectId, planVersionId)
     const locked = await tx
       .select({ id: rateCards.id })
       .from(rateCards)
@@ -593,6 +691,7 @@ export class RateCardService {
           eq(planVersionRateCards.planVersionId, planVersionId)
         )
       )
+      .orderBy(asc(rateCards.id))
       .for("update", { of: rateCards })
     return locked.map((row) => row.id)
   }
@@ -654,10 +753,10 @@ export class RateCardService {
           eq(planVersionRateCards.rateCardId, cardId)
         )
       )
-    await this.forgetPlanVersionPrices(assigned.map(({ planVersionId }) => planVersionId))
+    await this.invalidatePlanVersionPrices(assigned.map(({ planVersionId }) => planVersionId))
   }
 
-  private async forgetPlanVersionPrices(planVersionIds: readonly string[]): Promise<void> {
+  async invalidatePlanVersionPrices(planVersionIds: readonly string[]): Promise<void> {
     if (!this.deps.cache || planVersionIds.length === 0) return
     await this.deps.cache.planVersion.remove([...planVersionIds])
   }
@@ -727,47 +826,6 @@ async function closeOpenRows(
   }
 }
 
-async function costPlusPreview(
-  executor: DbExecutor,
-  card: RateCard,
-  rows: readonly RateRow[],
-  at: number
-): Promise<Result<CostPlusPreview, UnPriceRateCardError>> {
-  if (card.marginPolicy.type !== "costPlus") {
-    return Err(new UnPriceRateCardError({ code: "NOT_COST_PLUS", cardId: card.id }))
-  }
-  const costRows = await executor
-    .select()
-    .from(modelCosts)
-    .where(lte(modelCosts.effectiveFrom, at))
-    .orderBy(
-      asc(modelCosts.provider),
-      asc(modelCosts.model),
-      asc(modelCosts.source),
-      asc(modelCosts.effectiveFrom),
-      asc(modelCosts.id)
-    )
-  // costPlusRevision copies a cost's sourceRef onto its proposed row, and a catalog row
-  // references the cost row it was priced from.
-  const costs = costRows.map((row) => ({ ...toModelCost(row), sourceRef: row.id }))
-  const costPlusCard: CostPlusCard = { ...card, marginPolicy: card.marginPolicy }
-  const draft = costPlusRevision(costPlusCard, costs, rows, at)
-  return Ok({ draft, draftHash: draftHash(draft) })
-}
-
-type ModelCostRow = typeof modelCosts.$inferSelect
-
-/** Hashes what publishing the draft would write, so a stale preview cannot be published. */
-export function draftHash(draft: CostPlusDraft): string {
-  return stableHash(
-    draft.changes.filter(writesRow).map((change) => ({
-      type: change.type,
-      current: change.type === "changed" ? change.current.id : null,
-      proposed: change.proposed,
-    }))
-  )
-}
-
 function toRateCard(row: CardRow): RateCard {
   return rateCardSchema.parse({
     id: row.id,
@@ -810,13 +868,34 @@ function toInsert(projectId: string, row: RateRow): typeof rateCardRows.$inferIn
   }
 }
 
-function toModelCost(row: ModelCostRow): ModelCost {
-  return modelCostSchema.parse({
-    provider: row.provider,
-    model: row.model,
-    components: row.components,
-    effectiveFrom: row.effectiveFrom,
-    source: row.source,
-    sourceRef: row.sourceRef,
-  })
+async function writeMarginPolicy(
+  tx: Transaction,
+  projectId: string,
+  cardId: string,
+  marginPolicy: MarginPolicy
+) {
+  await tx
+    .update(rateCards)
+    .set({ marginPolicy: toWire<CardRow["marginPolicy"]>(marginPolicy), updatedAt: new Date() })
+    .where(and(eq(rateCards.projectId, projectId), eq(rateCards.id, cardId)))
+}
+
+/** Plan, version, then card locks: publishing also updates the plan's previous latest version. */
+async function lockPlanVersion(tx: Transaction, projectId: string, planVersionId: string) {
+  const [target] = await tx
+    .select({ planId: versions.planId })
+    .from(versions)
+    .where(and(eq(versions.projectId, projectId), eq(versions.id, planVersionId)))
+  if (!target) return undefined
+  await tx
+    .select({ id: plans.id })
+    .from(plans)
+    .where(and(eq(plans.projectId, projectId), eq(plans.id, target.planId)))
+    .for("update")
+  const [version] = await tx
+    .select({ status: versions.status })
+    .from(versions)
+    .where(and(eq(versions.projectId, projectId), eq(versions.id, planVersionId)))
+    .for("update")
+  return version
 }

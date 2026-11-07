@@ -11,7 +11,7 @@ import { FormControl, FormField, FormItem, FormLabel, FormMessage } from "@unpri
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@unprice/ui/select"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { cn } from "@unprice/ui/utils"
-import { HelpCircle, Pencil } from "lucide-react"
+import { HelpCircle, Pencil, Plus } from "lucide-react"
 import { useTRPC } from "~/trpc/client"
 import { DimensionChips } from "./dimension-chips"
 import { EventFormDialog } from "./event-dialog"
@@ -47,6 +47,14 @@ export function MeterConfigFormField({
   const needsAggregationField = requiresAggregationField(selectedAggregationMethod)
   const selectedEventProperties = selectedEvent?.availableProperties ?? []
   const selectedAggregationConfig = AGGREGATION_METHODS_MAP[selectedAggregationMethod]
+  const [isVaryingOpen, setIsVaryingOpen] = useState(false)
+  // The common case first, then the event's own properties other than the one it measures.
+  const dimensionSuggestions = [
+    ...new Set([
+      "model",
+      ...selectedEventProperties.filter((property) => property !== meterConfig?.aggregationField),
+    ]),
+  ].slice(0, 6)
 
   const setMeterConfigValue = (next: {
     event?: Event
@@ -189,8 +197,8 @@ export function MeterConfigFormField({
                       <HelpCircle className="size-3.5 text-muted-foreground" />
                     </TooltipTrigger>
                     <TooltipContent side="right" className="max-w-[250px]">
-                      The SDK event this feature listens to. The event slug is snapshotted into the
-                      plan version feature for fast routing later.
+                      The event your app sends when the feature is used, such as one API call or one
+                      model response.
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -233,14 +241,14 @@ export function MeterConfigFormField({
             render={() => (
               <FormItem className="flex flex-col">
                 <div className="mb-2 flex items-center gap-1">
-                  <FormLabel>Aggregation method</FormLabel>
+                  <FormLabel>Measure</FormLabel>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <HelpCircle className="size-3.5 text-muted-foreground" />
                     </TooltipTrigger>
                     <TooltipContent side="right" className="max-w-[320px]">
-                      Choose how this feature interprets matched events. Count-based methods do not
-                      need a numeric field; sum, max, and latest do.
+                      How the events add up to usage: count them, or sum, take the max, or keep the
+                      latest of a number they carry.
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -282,7 +290,7 @@ export function MeterConfigFormField({
               render={({ field }) => (
                 <FormItem className="flex flex-col">
                   <div className="mb-2 flex items-center gap-1">
-                    <FormLabel>Aggregation field</FormLabel>
+                    <FormLabel>Of property</FormLabel>
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <HelpCircle className="size-3.5 text-muted-foreground" />
@@ -358,31 +366,53 @@ export function MeterConfigFormField({
         <FormField
           control={form.control}
           name="meterConfig.groupBy"
-          render={({ field }) => (
-            <FormItem className="flex flex-col">
-              <div className="mb-2 flex items-center gap-1">
-                <FormLabel>Price varies by</FormLabel>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <HelpCircle className="size-3.5 text-muted-foreground" />
-                  </TooltipTrigger>
-                  <TooltipContent side="right" className="max-w-[320px]">
-                    Event properties a price can depend on, such as model. Each value gets its own
-                    row on the version's card; the catalog prices models. A feature with a dimension
-                    is priced per unit and has no included units.
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-              <FormControl>
-                <DimensionChips
-                  value={field.value ?? []}
-                  onChange={handleDimensionsChange}
-                  isDisabled={isDisabled}
-                />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
+          render={({ field }) => {
+            const dimensions = field.value ?? []
+            if (dimensions.length === 0 && !isVaryingOpen) {
+              return (
+                <FormItem className="flex flex-row items-center justify-between gap-3 space-y-0 rounded-md border border-dashed px-3 py-2">
+                  <span className="text-muted-foreground text-xs">One price for every event.</span>
+                  {!isDisabled && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 gap-1 px-2 text-xs"
+                      onClick={() => setIsVaryingOpen(true)}
+                    >
+                      <Plus className="size-3" />
+                      Price per model or property
+                    </Button>
+                  )}
+                </FormItem>
+              )
+            }
+            return (
+              <FormItem className="flex flex-col">
+                <div className="mb-2 flex items-center gap-1">
+                  <FormLabel>Price varies by</FormLabel>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <HelpCircle className="size-3.5 text-muted-foreground" />
+                    </TooltipTrigger>
+                    <TooltipContent side="right" className="max-w-[320px]">
+                      Give each value of an event property its own price, such as one price per
+                      model. Prices are then set per unit, with no included units.
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+                <FormControl>
+                  <DimensionChips
+                    value={dimensions}
+                    onChange={handleDimensionsChange}
+                    isDisabled={isDisabled}
+                    suggestions={dimensionSuggestions}
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )
+          }}
         />
       </div>
 

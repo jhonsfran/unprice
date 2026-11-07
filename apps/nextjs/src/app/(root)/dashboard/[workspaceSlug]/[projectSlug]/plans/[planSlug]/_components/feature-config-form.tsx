@@ -154,7 +154,10 @@ export function FeatureConfigForm({
     ...defaultValues,
     config: {
       ...defaultValues.config,
-      usageMode: defaultValues.config?.usageMode ?? "tier",
+      // A new metered feature starts as one price per unit; tiers and bundles are a choice.
+      usageMode:
+        defaultValues.config?.usageMode ??
+        (defaultValues.featureType === "usage" ? "unit" : "tier"),
       units: defaultValues.config?.units ?? 1,
     },
     billingConfig: defaultValues.billingConfig ?? planVersion?.billingConfig,
@@ -302,7 +305,6 @@ export function FeatureConfigForm({
     priceStateOf(priceRows) === "unpriced"
       ? emptyDraft("flat")
       : null
-  const shape = featureType ? priceShapeOf(featureType, usageMode) : null
 
   const onSubmitForm = async (data: PlanVersionFeatureInsert) => {
     if (!defaultValues.id) return
@@ -396,6 +398,9 @@ export function FeatureConfigForm({
                     if (isPublished) return
                     field.onChange(value)
                     if (value === "usage") {
+                      if (field.value !== "usage") {
+                        form.setValue("config.usageMode", "unit", { shouldDirty: true })
+                      }
                       const current = form.getValues("meterConfig")
                       form.setValue("meterConfig", current ?? featureMeterTemplate ?? undefined)
                     } else {
@@ -437,9 +442,6 @@ export function FeatureConfigForm({
             priceProblem={priceProblem}
             savedDimensions={defaultValues.meterConfig?.groupBy ?? []}
             includedUnits={includedUnits}
-            // The table's cells price a fixed, per-unit or bundle feature; the sheet keeps the
-            // block for tiers, for the catalog, and for reading a published version's price.
-            showPrice={shape === "graduated" || isPublished}
           />
         </NumberedStep>
 
@@ -557,7 +559,6 @@ function ConfigureFields({
   priceProblem,
   savedDimensions,
   includedUnits,
-  showPrice,
 }: {
   // biome-ignore lint/suspicious/noExplicitAny: react-hook-form's UseFormReturn type doesn't narrow well across schema unions
   form: any
@@ -580,8 +581,6 @@ function ConfigureFields({
   savedDimensions: readonly string[]
   /** The units a new tiers draft gives away at $0. */
   includedUnits: number
-  /** Whether the price block renders; a dimensioned meter always prices from the catalog here. */
-  showPrice: boolean
 }) {
   if (!featureType) {
     return (
@@ -603,7 +602,7 @@ function ConfigureFields({
       editable={!isDisabled}
       pendingSave={!dimensions.every((dimension) => savedDimensionSet.has(dimension))}
     />
-  ) : showPrice ? (
+  ) : (
     <PriceBlockView
       card={card}
       rows={priceRows}
@@ -617,8 +616,6 @@ function ConfigureFields({
       problem={priceProblem}
       includedUnits={includedUnits}
     />
-  ) : (
-    <p className="text-muted-foreground text-xs">The price is set in the feature table.</p>
   )
 
   if (featureType === "flat") return price
@@ -664,7 +661,7 @@ function ConfigureFields({
           }))}
           note={
             hasDimensions
-              ? `Per unit only: the price varies by ${dimensions.join(", ")}, and tiers and packages need a meter without dimensions.`
+              ? `Per unit only while the price varies by ${dimensions.join(", ")}.`
               : undefined
           }
         />

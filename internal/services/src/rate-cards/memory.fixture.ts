@@ -2,6 +2,8 @@ import type {
   AssignPlanVersionCardInput,
   CostPlusFeaturePolicy,
   CreateRateCardInput,
+  CustomModelCost,
+  FeaturePricing,
   ModelCost,
   RateCard,
   RatePrice,
@@ -9,16 +11,30 @@ import type {
 } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import { vi } from "vitest"
-import { type CostPlusCard, costPlusRevision, isEffective, matchKey, ratePriceOf } from "../pricing"
+import {
+  type CostPlusCard,
+  costPlusRevision,
+  isEffective,
+  matchKey,
+  ratePriceOf,
+  writesRow,
+} from "../pricing"
 import type { DecimalFeaturePrice } from "../pricing"
+import {
+  customAsModelCost,
+  draftHash,
+  hasFeaturePolicy,
+  retainFeaturePolicies,
+  withFeaturePolicy,
+} from "./catalog"
 import { UnPriceRateCardError } from "./errors"
 import type {
   CloseRowsInput,
   PlanVersionPricing,
   PublishRowsInput,
   PublishRowsResult,
+  RateCardService,
 } from "./service"
-import { draftHash } from "./service"
 import { canonicalJson } from "./wire"
 
 function samePrice(a: RatePrice, b: RatePrice): boolean {
@@ -37,6 +53,8 @@ export function createRateCardsFake() {
   const cards = new Map<string, RateCard>()
   const rows: RateRow[] = []
   const costs: ModelCost[] = []
+  /** Each project's own model costs, newest last. */
+  const customCosts: { projectId: string; cost: CustomModelCost }[] = []
   const assignments = new Map<string, string>()
   /** Versions a test published; a card assigned to one is live. */
   const published = new Set<string>()
@@ -44,6 +62,10 @@ export function createRateCardsFake() {
   const assignmentKey = (planVersionId: string, currency: string) => `${planVersionId}:${currency}`
 
   const rateCards = {
+    withTransaction: vi.fn<RateCardService["withTransaction"]>(),
+    publishCostPlus: vi.fn<RateCardService["publishCostPlus"]>(),
+    lockPlanVersionCards: vi.fn(async () => [] as string[]),
+    invalidatePlanVersionPrices: vi.fn(async (_ids: string[]) => {}),
     cardForPlanVersion: vi.fn(
       async (_projectId: string, planVersionId: string, currency: RateCard["unit"]) => {
         const cardId = assignments.get(assignmentKey(planVersionId, currency))
@@ -149,7 +171,9 @@ export function createRateCardsFake() {
         })
     ),
     /** Null: the fake keeps no plan features, so a card is checked against the project's. */
-    featuresPricingWith: vi.fn(async () => null),
+    featuresPricingWith: vi.fn(
+      async (): Promise<{ features: FeaturePricing[]; unpriceable: [] } | null> => null
+    ),
     pricingForPlanVersions: vi.fn(
       async (_projectId: string, planVersionIds: readonly string[], at: number) => {
         const byVersion = new Map<string, PlanVersionPricing[]>()
@@ -168,40 +192,75 @@ export function createRateCardsFake() {
         return byVersion
       }
     ),
-    setMarginPolicy: vi.fn(
-      async (_projectId: string, cardId: string, policy: CostPlusFeaturePolicy) => {
-        const card = cards.get(cardId)
-        if (!card) return Err(new UnPriceRateCardError({ code: "CARD_NOT_FOUND", cardId }))
-        if (card.unit.startsWith("money:") && card.unit !== "money:USD") {
-          return Err(new UnPriceRateCardError({ code: "CATALOG_USD_ONLY", unit: card.unit }))
-        }
-        const kept =
-          card.marginPolicy.type === "costPlus"
-            ? card.marginPolicy.features.filter((other) => other.featureSlug !== policy.featureSlug)
-            : []
-        const updated: RateCard = {
+    removeFeaturePrices: vi.fn(
+      async (input: { projectId: string; cardId: string; featureSlug: string; now: number }) => {
+        const assigned = await rateCards.featuresPricingWith()
+        if (
+          assigned?.features.some((feature: { slug: string }) => feature.slug === input.featureSlug)
+        )
+          return Ok(undefined)
+        const shared =
+          [...assignments.values()].filter((cardId) => cardId === input.cardId).length > 1
+        if (shared) return Ok(undefined)
+        const card = cards.get(input.cardId)
+        if (!card)
+          return Err(new UnPriceRateCardError({ code: "CARD_NOT_FOUND", cardId: input.cardId }))
+        const closed = await rateCards.closeRows({
+          ...input,
+          rowIds: rows
+            .filter((row) => row.featureSlug === input.featureSlug && row.effectiveTo === null)
+            .map((row) => row.id),
+        })
+        if (closed.err) return Err(closed.err)
+        cards.set(card.id, {
           ...card,
-          marginPolicy: { type: "costPlus", features: [...kept, policy] },
-        }
-        cards.set(cardId, updated)
-        return Ok(updated)
+          marginPolicy: retainFeaturePolicies(
+            card.marginPolicy,
+            (policy) => policy.featureSlug !== input.featureSlug
+          ),
+        })
+        return Ok(undefined)
       }
     ),
-    previewCostPlus: vi.fn(async (_projectId: string, cardId: string, at: number) => {
-      const card = cards.get(cardId)
-      if (!card) return Err(new UnPriceRateCardError({ code: "CARD_NOT_FOUND", cardId }))
-      if (card.marginPolicy.type !== "costPlus") {
-        return Err(new UnPriceRateCardError({ code: "NOT_COST_PLUS", cardId }))
+    previewCostPlus: vi.fn(
+      async (
+        _projectId: string,
+        cardId: string,
+        at: number,
+        options?: { policy?: CostPlusFeaturePolicy; featureSlug?: string }
+      ) => {
+        const saved = cards.get(cardId)
+        if (!saved) return Err(new UnPriceRateCardError({ code: "CARD_NOT_FOUND", cardId }))
+        const card = options?.policy
+          ? { ...saved, marginPolicy: withFeaturePolicy(saved.marginPolicy, options.policy) }
+          : saved
+        if (card.marginPolicy.type !== "costPlus") {
+          return Err(new UnPriceRateCardError({ code: "NOT_COST_PLUS", cardId }))
+        }
+        const costPlusCard: CostPlusCard = {
+          ...card,
+          marginPolicy: {
+            ...card.marginPolicy,
+            features: card.marginPolicy.features.filter(
+              (policy) =>
+                options?.featureSlug === undefined || policy.featureSlug === options.featureSlug
+            ),
+          },
+        }
+        const draft = costPlusRevision(
+          costPlusCard,
+          [
+            ...costs,
+            ...customCosts
+              .filter((entry) => entry.projectId === card.projectId)
+              .map((entry) => customAsModelCost(entry.cost)),
+          ],
+          rows.filter((row) => row.rateCardId === cardId),
+          at
+        )
+        return Ok({ draft, draftHash: draftHash(draft) })
       }
-      const costPlusCard: CostPlusCard = { ...card, marginPolicy: card.marginPolicy }
-      const draft = costPlusRevision(
-        costPlusCard,
-        costs,
-        rows.filter((row) => row.rateCardId === cardId),
-        at
-      )
-      return Ok({ draft, draftHash: draftHash(draft) })
-    }),
+    ),
     latestImportedCosts: vi.fn(async () => {
       const latest = new Map<string, ModelCost>()
       for (const cost of costs) {
@@ -211,6 +270,27 @@ export function createRateCardsFake() {
         if (!seen || cost.effectiveFrom > seen.effectiveFrom) latest.set(key, cost)
       }
       return [...latest.values()]
+    }),
+    insertCustomModelCost: vi.fn(
+      async (projectId: string, cost: Omit<CustomModelCost, "id">): Promise<CustomModelCost> => {
+        const stored = { ...cost, id: `cmc_${customCosts.length + 1}` }
+        customCosts.push({ projectId, cost: stored })
+        return stored
+      }
+    ),
+    customModelCosts: vi.fn(async (projectId: string): Promise<CustomModelCost[]> => {
+      const latest = new Map<string, CustomModelCost>()
+      for (const { projectId: owner, cost } of customCosts) {
+        if (owner !== projectId) continue
+        const key = `${cost.provider}/${cost.model}`
+        const seen = latest.get(key)
+        if (!seen || cost.effectiveFrom >= seen.effectiveFrom) latest.set(key, cost)
+      }
+      return [...latest.values()].sort((a, b) =>
+        a.provider === b.provider
+          ? a.model.localeCompare(b.model)
+          : a.provider.localeCompare(b.provider)
+      )
     }),
     insertModelCosts: vi.fn(async (proposed: readonly ModelCost[]) => {
       const stored = new Set(
@@ -229,6 +309,39 @@ export function createRateCardsFake() {
       return inserted
     }),
   }
+
+  rateCards.withTransaction.mockReturnValue(rateCards as unknown as RateCardService)
+  rateCards.publishCostPlus.mockImplementation(async (input) => {
+    const preview = await rateCards.previewCostPlus(input.projectId, input.cardId, input.now, {
+      policy: input.policy,
+      featureSlug: input.featureSlug,
+    })
+    if (preview.err) return Err(preview.err)
+    const saved = cards.get(input.cardId)
+    if (
+      (!input.policy || (saved && hasFeaturePolicy(saved.marginPolicy, input.policy))) &&
+      !preview.val.draft.changes.some(writesRow)
+    )
+      return Ok({ inserted: [], closed: [], unchanged: preview.val.draft.changes.length })
+    if (preview.val.draftHash !== input.draftHash)
+      return Err(
+        new UnPriceRateCardError({ code: "DRAFT_STALE", draftHash: preview.val.draftHash })
+      )
+    const changes = preview.val.draft.changes
+    const drafts = changes.filter(writesRow).map((change) => change.proposed)
+    const published = await rateCards.publishRows({ ...input, drafts })
+    if (published.err) return Err(published.err)
+    const card = cards.get(input.cardId)
+    if (input.policy && card)
+      cards.set(card.id, {
+        ...card,
+        marginPolicy: withFeaturePolicy(card.marginPolicy, input.policy),
+      })
+    return Ok({
+      ...published.val,
+      unchanged: published.val.unchanged + changes.length - drafts.length,
+    })
+  })
 
   /** Prices a seeded plan version directly: one default row per feature on its own card. */
   function seedPlanVersionCard(
@@ -266,5 +379,14 @@ export function createRateCardsFake() {
     return card
   }
 
-  return { rateCards, rows, cards, costs, assignments, published, seedPlanVersionCard }
+  return {
+    rateCards,
+    rows,
+    cards,
+    costs,
+    customCosts,
+    assignments,
+    published,
+    seedPlanVersionCard,
+  }
 }

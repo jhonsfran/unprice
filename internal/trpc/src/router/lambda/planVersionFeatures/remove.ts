@@ -25,7 +25,7 @@ export const remove = protectedProjectProcedure
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
     const { err, val } = await removePlanVersionFeature(
-      { services: { plans, rateCards } },
+      { db: opts.ctx.db, services: { plans, rateCards } },
       { projectId: project.id, id, now: Date.now() }
     )
 

@@ -4,7 +4,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { RATE_CHANGE_NOTICE_MS, type RateCard } from "@unprice/db/validators"
 import { MODEL_CATALOG_VERSION } from "@unprice/services/budgets"
 import { Button } from "@unprice/ui/button"
-import { Skeleton } from "@unprice/ui/skeleton"
 import { useState } from "react"
 import { toast } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
@@ -46,9 +45,8 @@ export function CatalogUpdates({
   const [effectiveFrom, setEffectiveFrom] = useState(() =>
     toDateTimeLocal(earliestStart(live, Date.now(), RATE_CHANGE_NOTICE_MS))
   )
-  const { data, isLoading } = useQuery(
-    trpc.rateCards.previewCostPlus.queryOptions({ cardId: card.id })
-  )
+  const input = { cardId: card.id, featureSlug: policy.featureSlug }
+  const { data } = useQuery(trpc.rateCards.previewCostPlus.queryOptions(input))
   const { mutate, isPending } = useMutation(
     trpc.rateCards.publishCostPlus.mutationOptions({
       onSuccess: ({ inserted, closed }) => {
@@ -60,7 +58,7 @@ export function CatalogUpdates({
     })
   )
 
-  if (isLoading) return <Skeleton className="h-8 w-full" />
+  // Nothing to show until the catalog says what changed; a placeholder would only jump.
   if (!data) return null
 
   const matrix = changeMatrixOf(data.draft, policy.featureSlug)
@@ -69,11 +67,8 @@ export function CatalogUpdates({
     (line) => line.status === "added" || line.status === "changed"
   ).length
 
-  if (matrix.lines.length === 0) {
-    return (
-      <p className="text-muted-foreground text-xs">{describeCatalogPolicy(policy)}. Up to date.</p>
-    )
-  }
+  // Up to date: the policy line above the sheet already says what the prices follow.
+  if (matrix.lines.length === 0) return null
 
   return (
     <section className="flex flex-col gap-3 rounded-md border border-warning/40 bg-warning/5 p-3">
@@ -90,7 +85,7 @@ export function CatalogUpdates({
           onSubmit={(event) => {
             event.preventDefault()
             mutate({
-              cardId: card.id,
+              ...input,
               draftHash: data.draftHash ?? "",
               ...(schedule ? { effectiveFrom: new Date(effectiveFrom).getTime() } : {}),
             })

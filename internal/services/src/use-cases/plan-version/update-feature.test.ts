@@ -1,3 +1,4 @@
+import type { Database } from "@unprice/db"
 import {
   type Feature,
   type MeterConfig,
@@ -6,11 +7,12 @@ import {
   planVersionFeatureUpdateBaseSchema,
   ratePriceSchema,
 } from "@unprice/db/validators"
-import { Ok } from "@unprice/error"
+import { Err, Ok } from "@unprice/error"
 import { describe, expect, it, vi } from "vitest"
 import type { ServiceContext } from "../../context"
-import { UnPriceRateCardError } from "../../rate-cards"
+import { UnPriceRateCardError, planFeaturePricing, unionFeaturePricing } from "../../rate-cards"
 import { createRateCardsFake } from "../../rate-cards/memory.fixture"
+import { planPublish } from "../../rate-cards/publish"
 import { updatePlanVersionFeature } from "./update-feature"
 
 function rejectionOf(err: Error | undefined) {
@@ -77,7 +79,18 @@ function createHarness(initial: Stored) {
     features: { listFeaturesByProject: vi.fn(async () => Ok([])) },
     rateCards: cards.rateCards,
   } as unknown as Pick<ServiceContext, "plans" | "features" | "rateCards">
-  return { cards, services, updatePlanVersionFeatureRecord }
+  const db = {
+    transaction: async (write: (tx: unknown) => Promise<unknown>) => {
+      const before = current
+      try {
+        return await write({})
+      } catch (error) {
+        current = before
+        throw error
+      }
+    },
+  } as unknown as Database
+  return { cards, services, updatePlanVersionFeatureRecord, db }
 }
 
 function input(fields: Record<string, unknown>) {
@@ -89,21 +102,21 @@ function input(fields: Record<string, unknown>) {
 }
 
 function priced(
-  services: Pick<ServiceContext, "plans" | "features" | "rateCards">,
+  deps: Pick<ReturnType<typeof createHarness>, "db" | "services">,
   fields: Record<string, unknown>
 ) {
-  return updatePlanVersionFeature({ services }, input(fields))
+  return updatePlanVersionFeature(deps, input(fields))
 }
 
 describe("updatePlanVersionFeature", () => {
   it("prices a flat feature on the version's own card, then unprices it", async () => {
-    const { cards, services } = createHarness(stored({}))
+    const { db, cards, services } = createHarness(stored({}))
 
-    const result = await priced(services, { price: { price: "49" } })
+    const result = await priced({ db, services }, { price: { price: "49" } })
     if (result.val?.state !== "ok") throw result.err ?? new Error(result.val?.state)
     const row = { ...result.val.row }
     const card = [...cards.cards.values()][0]
-    const unpriced = await priced(services, { price: null })
+    const unpriced = await priced({ db, services }, { price: null })
 
     expect(row).toMatchObject({
       featureSlug: "base",
@@ -126,13 +139,13 @@ describe("updatePlanVersionFeature", () => {
       stored({ featureType: "usage", config: { usageMode: "unit" }, meterConfig: tokensMeter })
     )
 
-    const perToken = await priced(unit.services, { price: { price: "0.002" } })
-    const perPack = await priced(pack.services, {
+    const perToken = await priced(unit, { price: { price: "0.002" } })
+    const perPack = await priced(pack, {
       featureType: "usage",
       config: { usageMode: "package", units: 100 },
       price: { price: "5" },
     })
-    const wrongShape = await priced(pack.services, {
+    const wrongShape = await priced(pack, {
       price: { tiers: [{ firstUnit: 1, lastUnit: null, unitPrice: "1" }] },
     })
 
@@ -157,15 +170,15 @@ describe("updatePlanVersionFeature", () => {
   })
 
   it("refuses to repackage or reprice a feature whose card also prices another version", async () => {
-    const { cards, services, updatePlanVersionFeatureRecord } = createHarness(stored({}))
+    const { db, cards, services, updatePlanVersionFeatureRecord } = createHarness(stored({}))
     const card = cards.seedPlanVersionCard("pv_1", "USD", [
       { featureSlug: "base", featureType: "flat", price: "10" },
     ])
     cards.assignments.set("pv_2:USD", card.id)
 
-    const repriced = await priced(services, { price: { price: "49" } })
-    const repackaged = await priced(services, { featureType: "tier" })
-    const relimited = await priced(services, { limit: 10 })
+    const repriced = await priced({ db, services }, { price: { price: "49" } })
+    const repackaged = await priced({ db, services }, { featureType: "tier" })
+    const relimited = await priced({ db, services }, { limit: 10 })
 
     expect(rejectionOf(repriced.err)).toEqual({
       code: "CARD_SHARED",
@@ -186,7 +199,7 @@ describe("updatePlanVersionFeature", () => {
       aggregationMethod: "count",
       groupBy: ["model"],
     }
-    const { cards, services } = createHarness(
+    const { db, cards, services } = createHarness(
       stored({ featureType: "usage", config: { usageMode: "unit" }, meterConfig: perModel })
     )
     const card = cards.seedPlanVersionCard("pv_1", "USD", [
@@ -196,13 +209,16 @@ describe("updatePlanVersionFeature", () => {
     if (!fallback) throw new Error("fixture")
     cards.rows.push({ ...fallback, id: "rr_gpt", match: { model: "gpt-4.1" } })
 
-    const regrouped = await priced(services, {
-      featureType: "usage",
-      config: { usageMode: "unit" },
-      meterConfig: { ...tokensMeter, aggregationMethod: "count" },
-      price: { price: "0.02" },
-    })
-    const unchanged = await priced(services, { limit: 5 })
+    const regrouped = await priced(
+      { db, services },
+      {
+        featureType: "usage",
+        config: { usageMode: "unit" },
+        meterConfig: { ...tokensMeter, aggregationMethod: "count" },
+        price: { price: "0.02" },
+      }
+    )
+    const unchanged = await priced({ db, services }, { limit: 5 })
 
     expect(regrouped.val).toMatchObject({
       state: "ok",
@@ -227,7 +243,7 @@ describe("updatePlanVersionFeature", () => {
       aggregationMethod: "count",
       groupBy: ["model"],
     }
-    const { cards, services } = createHarness(
+    const { db, cards, services } = createHarness(
       stored({ featureType: "usage", config: { usageMode: "unit" }, meterConfig: perModel })
     )
     cards.seedPlanVersionCard("pv_1", "USD", [
@@ -237,11 +253,14 @@ describe("updatePlanVersionFeature", () => {
     if (!fallback) throw new Error("fixture")
     cards.rows.push({ ...fallback, id: "rr_gpt", match: { model: "gpt-4.1" } })
 
-    const result = await priced(services, {
-      featureType: "usage",
-      config: { usageMode: "unit" },
-      meterConfig: { ...tokensMeter, aggregationMethod: "count" },
-    })
+    const result = await priced(
+      { db, services },
+      {
+        featureType: "usage",
+        config: { usageMode: "unit" },
+        meterConfig: { ...tokensMeter, aggregationMethod: "count" },
+      }
+    )
 
     expect(result.val).toMatchObject({ state: "ok", row: { id: fallback.id, effectiveTo: null } })
     expect(cards.rows.map((row) => [row.id, row.effectiveTo])).toEqual([
@@ -251,25 +270,28 @@ describe("updatePlanVersionFeature", () => {
   })
 
   it("ends the old default row at once when the feature is repackaged without a price", async () => {
-    const { cards, services } = createHarness(stored({ featureType: "flat", config: {} }))
+    const { db, cards, services } = createHarness(stored({ featureType: "flat", config: {} }))
     cards.seedPlanVersionCard("pv_1", "USD", [
       { featureSlug: "base", featureType: "flat", price: "1" },
     ])
     const [flatRow] = cards.rows
     if (!flatRow) throw new Error("fixture")
 
-    const metered = await priced(services, {
-      featureType: "usage",
-      config: { usageMode: "unit" },
-      meterConfig: { ...tokensMeter, aggregationMethod: "count", groupBy: ["model"] },
-    })
+    const metered = await priced(
+      { db, services },
+      {
+        featureType: "usage",
+        config: { usageMode: "unit" },
+        meterConfig: { ...tokensMeter, aggregationMethod: "count", groupBy: ["model"] },
+      }
+    )
 
     expect(metered.val).toMatchObject({ state: "ok", row: null })
     expect(cards.rows.map((row) => [row.id, row.effectiveTo])).toEqual([[flatRow.id, NOW]])
   })
 
   it("re-prices the default row on the new property when the meter changes without a price", async () => {
-    const { cards, services } = createHarness(
+    const { db, cards, services } = createHarness(
       stored({ featureType: "usage", config: { usageMode: "unit" }, meterConfig: tokensMeter })
     )
     cards.seedPlanVersionCard("pv_1", "USD", [
@@ -290,11 +312,14 @@ describe("updatePlanVersionFeature", () => {
     }
     cards.rows[0] = summed
 
-    const counted = await priced(services, {
-      featureType: "usage",
-      config: { usageMode: "unit" },
-      meterConfig: { ...tokensMeter, aggregationMethod: "count", aggregationField: undefined },
-    })
+    const counted = await priced(
+      { db, services },
+      {
+        featureType: "usage",
+        config: { usageMode: "unit" },
+        meterConfig: { ...tokensMeter, aggregationMethod: "count", aggregationField: undefined },
+      }
+    )
 
     expect(counted.val).toMatchObject({
       state: "ok",
@@ -317,12 +342,82 @@ describe("updatePlanVersionFeature", () => {
       stored({ planVersion: { ...version, status: "published" } as PlanVersion })
     )
 
-    expect((await priced(missing.services, { price: { price: "1" } })).val).toEqual({
+    expect((await priced(missing, { price: { price: "1" } })).val).toEqual({
       state: "plan_version_feature_not_found",
     })
-    expect((await priced(published.services, { price: { price: "1" } })).val).toEqual({
+    expect((await priced(published, { price: { price: "1" } })).val).toEqual({
       state: "plan_version_published",
     })
     expect(published.updatePlanVersionFeatureRecord).not.toHaveBeenCalled()
+  })
+})
+
+describe("feature pricing regressions", () => {
+  it("does not save a feature when its price does not fit the requested shape", async () => {
+    const { db, cards, services } = createHarness(stored({}))
+    cards.seedPlanVersionCard("pv_1", "USD", [
+      { featureSlug: "base", featureType: "flat", price: "49" },
+    ])
+    const result = await priced(
+      { db, services },
+      {
+        featureType: "usage",
+        config: { usageMode: "unit" },
+        meterConfig: tokensMeter,
+        price: { tiers: [{ firstUnit: 1, lastUnit: null, unitPrice: "1" }] },
+      }
+    )
+    expect(rejectionOf(result.err)).toMatchObject({ code: "PRICE_SHAPE_MISMATCH" })
+    const saved = await services.plans.getPlanVersionFeatureByIdDetailed({
+      id: "fpv_1",
+      projectId: PROJECT,
+    })
+    expect(saved.val?.featureType).toBe("flat")
+    expect(cards.rows[0]?.price.type).toBe("flat")
+  })
+
+  it("prices the first row from the version's meter snapshot instead of the project template", async () => {
+    const { db, cards, services } = createHarness(
+      stored({ featureType: "usage", config: { usageMode: "tier" }, meterConfig: tokensMeter })
+    )
+    services.features.listFeaturesByProject = vi.fn(async () =>
+      Ok([{ slug: "base", meterConfig: { ...tokensMeter, groupBy: ["model"] } }] as Feature[])
+    )
+    services.rateCards.featuresPricingWith = vi.fn(async (_projectId, cardId) => {
+      if (![...cards.assignments.values()].includes(cardId)) return null
+      const saved = await services.plans.getPlanVersionFeatureByIdDetailed({
+        id: "fpv_1",
+        projectId: PROJECT,
+      })
+      if (!saved.val) throw new Error("fixture")
+      return unionFeaturePricing([planFeaturePricing(saved.val)])
+    })
+    cards.rateCards.publishRows.mockImplementation(async (request) => {
+      const card = cards.cards.get(request.cardId)
+      if (!card) throw new Error("fixture")
+      const planned = planPublish({
+        ...request,
+        card,
+        rows: cards.rows,
+        noticeMs: 0,
+        newRowId: () => "rr_regression",
+      })
+      return planned.err
+        ? Err(planned.err)
+        : Ok({
+            inserted: [...planned.val.inserts],
+            closed: [...planned.val.closes],
+            unchanged: planned.val.unchanged,
+          })
+    })
+    const result = await priced(
+      { db, services },
+      {
+        price: { tiers: [{ firstUnit: 1, lastUnit: null, unitPrice: "1" }] },
+      }
+    )
+    expect(result.err).toBeUndefined()
+    expect(result.val?.state).toBe("ok")
+    expect(cards.assignments.size).toBe(1)
   })
 })

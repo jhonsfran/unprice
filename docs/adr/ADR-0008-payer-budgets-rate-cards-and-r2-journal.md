@@ -78,8 +78,8 @@ period's usage was priced in the unit in force when it landed.
   so a row write and a publish serialize. (Amended 2026-11-05.)
 - A plan version owns its card: pricing a feature in the version's editor creates the version's
   own card in its currency when it has none, named `<plan slug> <version id> <currency>`, and
-  duplicating a version forks the card (its policy and the rows in effect now; scheduled
-  successors are not copied). A version may instead be assigned a shared card; its prices are then
+  duplicating a version forks the card's policies and current rows for that version's features;
+  scheduled successors and other versions' features are not copied. A version may instead be assigned a shared card; its prices are then
   edited on the card, never from the editor. (Amended 2026-11-05.)
 - The dimensions a row may match on are the plan feature's meter `groupBy`, read from the plan
   version's snapshot; a card is validated against the plan features of every version assigned to
@@ -94,11 +94,12 @@ period's usage was priced in the unit in force when it landed.
   each consumption line records amount, cost, and `rateRowId`.
 - A card's margin policy is `manual` or `costPlus` with one `{ featureSlug, markup, roundTo,
   dimension, componentMap }` per feature it prices from the catalog, so one version's card can
-  price several model-dimensioned features. Setting a feature's catalog pricing from the version's
-  editor imports the bundled models.dev catalog (effective at the catalog's version date), writes
-  the policy, and answers a draft revision with the price diff. Publishing it is explicit. Catalog
-  pricing is USD only. Models with context tiers are priced at their base tier and flagged in the
-  draft; tier pricing is a follow-up. (Amended 2026-11-05.)
+  price several model-dimensioned features. A preview imports the bundled models.dev catalog
+  (effective at the catalog's version date) and returns one feature's draft without saving its
+  policy. Explicit apply checks the reviewed hash and commits that feature's policy and prices
+  together. Other features' prices stay unchanged. Catalog pricing is USD only. Models with context
+  tiers use their base tier and are flagged in the draft; tier pricing is a follow-up.
+  (Amended 2026-11-06.)
 - Rating never reads `model_costs`.
 
 ### D4. Usage is priced once, at ingestion

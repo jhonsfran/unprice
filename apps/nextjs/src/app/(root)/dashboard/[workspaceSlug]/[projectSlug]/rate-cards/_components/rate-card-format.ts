@@ -90,8 +90,8 @@ export function formatInterval(row: Pick<RateRow, "effectiveFrom" | "effectiveTo
  */
 export function describeCardState(live: boolean): string {
   return live
-    ? "Live: a published version charges these prices. A change you publish starts 10 minutes later, so running budgets pick it up first."
-    : "Draft: no published version charges these prices yet, so a change starts at once."
+    ? "A published version charges these prices. A change you publish starts 10 minutes later, so running budgets pick it up first."
+    : "No customer pays these prices yet, so a change starts at once."
 }
 
 export type MatrixStatus = "current" | "scheduled" | "ended" | "added" | "changed" | "retiring"
@@ -269,6 +269,14 @@ export function groupRowsByFeature(rows: readonly RateRow[], now: number): Featu
 }
 
 /** The rows a publish or close can end: open and not yet scheduled to end. */
+/**
+ * Whether a catalog row was priced from one of the project's own model costs: a catalog row's
+ * `sourceRef` is the id of its cost row, and custom cost ids carry the `cmc` prefix (`newId`).
+ */
+export function isCustomCostRow(row: Pick<RateRow, "source" | "sourceRef">): boolean {
+  return row.source === "catalog" && (row.sourceRef?.startsWith("cmc_") ?? false)
+}
+
 export function openRows(rows: readonly RateRow[]): RateRow[] {
   return rows.filter((row) => row.effectiveTo === null)
 }

@@ -1,3 +1,5 @@
+import type { Database } from "@unprice/db"
+import { marginPolicySchema } from "@unprice/db/validators"
 import { Ok } from "@unprice/error"
 import { describe, expect, it, vi } from "vitest"
 import type { ServiceContext } from "../../context"
@@ -6,6 +8,9 @@ import { removePlanVersionFeature } from "./remove-feature"
 
 const NOW = Date.parse("2026-11-10T12:00:00.000Z")
 const PROJECT = "proj_1"
+const db = {
+  transaction: async (write: (tx: unknown) => Promise<unknown>) => write({}),
+} as unknown as Database
 
 function createHarness(state: "ok" | "not_found" = "ok") {
   const cards = createRateCardsFake()
@@ -37,7 +42,7 @@ describe("removePlanVersionFeature", () => {
     ])
 
     const result = await removePlanVersionFeature(
-      { services },
+      { db, services },
       { projectId: PROJECT, id: "fpv_1", now: NOW }
     )
 
@@ -59,7 +64,7 @@ describe("removePlanVersionFeature", () => {
       cardId: card.id,
     })
 
-    await removePlanVersionFeature({ services }, { projectId: PROJECT, id: "fpv_1", now: NOW })
+    await removePlanVersionFeature({ db, services }, { projectId: PROJECT, id: "fpv_1", now: NOW })
 
     expect(cards.rows.map((row) => row.effectiveTo)).toEqual([null])
     expect(cards.rateCards.closeRows).not.toHaveBeenCalled()
@@ -69,11 +74,35 @@ describe("removePlanVersionFeature", () => {
     const { cards, services } = createHarness("not_found")
 
     const result = await removePlanVersionFeature(
-      { services },
+      { db, services },
       { projectId: PROJECT, id: "fpv_1", now: NOW }
     )
 
     expect(result.val).toEqual({ state: "not_found" })
     expect(cards.rateCards.closeRows).not.toHaveBeenCalled()
+  })
+})
+
+it("removes the detached feature's catalog policy and preserves the remaining policy", async () => {
+  const { cards, services } = createHarness()
+  const seeded = cards.seedPlanVersionCard("pv_1", "USD", [
+    { featureSlug: "calls", featureType: "usage", usageMode: "unit", price: "0.01" },
+    { featureSlug: "seats", featureType: "usage", usageMode: "unit", price: "0.02" },
+  ])
+  const marginPolicy = marginPolicySchema.parse({
+    type: "costPlus",
+    features: ["calls", "seats"].map((featureSlug) => ({
+      featureSlug,
+      dimension: "model",
+      markup: "0.3",
+      roundTo: "0.01",
+      componentMap: { input: "tokens" },
+    })),
+  })
+  cards.cards.set(seeded.id, { ...seeded, marginPolicy })
+  await removePlanVersionFeature({ db, services }, { projectId: PROJECT, id: "fpv_1", now: NOW })
+  expect(cards.cards.get(seeded.id)?.marginPolicy).toMatchObject({
+    type: "costPlus",
+    features: [{ featureSlug: "seats" }],
   })
 })

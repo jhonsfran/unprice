@@ -11,6 +11,8 @@ import {
   versionCard,
   versionCardName,
 } from "../../rate-cards"
+import { retainFeaturePolicies } from "../../rate-cards/catalog"
+import { transactionResult } from "../../utils/transaction-result"
 
 type DuplicatePlanVersionDeps = {
   db: Database
@@ -45,103 +47,103 @@ export async function duplicatePlanVersion(
   })
 
   try {
-    const planVersionData = await deps.db.query.versions.findFirst({
-      where: (version, { and, eq }) => and(eq(version.id, id), eq(version.projectId, projectId)),
-      with: {
-        planFeatures: true,
-        plan: true,
-      },
-    })
-
-    if (!planVersionData?.id) {
-      return Ok({ state: "not_found" })
-    }
-
-    const planVersionId = newId("plan_version")
-    const paymentMethodRequired = planVersionData.plan.defaultPlan
-      ? false
-      : planVersionData.paymentMethodRequired
-
-    const duplicated = await deps.db.transaction(async (tx) => {
-      const countVersionsPlan = await tx
-        .select({ count: sql<number>`count(*)` })
-        .from(schema.versions)
-        .where(
-          and(
-            eq(schema.versions.projectId, projectId),
-            eq(schema.versions.planId, planVersionData.planId)
-          )
-        )
-        .then((rows) => rows[0]?.count ?? 0)
-
-      const version = await tx
-        .insert(schema.versions)
-        .values({
-          ...planVersionData,
-          id: planVersionId,
-          trialUnits: planVersionData.trialUnits,
-          billingConfig: planVersionData.billingConfig,
-          autoRenew: planVersionData.autoRenew,
-          paymentMethodRequired,
-          metadata: {},
-          latest: false,
-          active: true,
-          // A copy is a new draft: it was never published, so its own card is not live and a
-          // price change on it starts at once (ADR-0008 D2).
-          status: "draft",
-          publishedAt: null,
-          publishedBy: null,
-          archived: false,
-          archivedAt: null,
-          archivedBy: null,
-          createdAtM: Date.now(),
-          updatedAtM: Date.now(),
-          version: Number(countVersionsPlan) + 1,
+    return await transactionResult(
+      deps.db,
+      async (tx): Promise<Awaited<ReturnType<typeof duplicatePlanVersion>>> => {
+        await deps.services.rateCards.lockPlanVersionCards(projectId, id, tx)
+        const rateCards = deps.services.rateCards.withTransaction(tx)
+        const scoped = { ...deps, services: { ...deps.services, rateCards } }
+        const planVersionData = await tx.query.versions.findFirst({
+          where: (version, { and, eq }) =>
+            and(eq(version.id, id), eq(version.projectId, projectId)),
+          with: {
+            planFeatures: { with: { feature: true } },
+            plan: true,
+          },
         })
-        .returning()
-        .then((rows) => rows[0] ?? null)
 
-      if (!version?.id) {
-        return null
-      }
+        if (!planVersionData?.id) {
+          return Ok({ state: "not_found" })
+        }
 
-      await Promise.all(
-        planVersionData.planFeatures.map(async (feature) => {
-          await tx.insert(schema.planVersionFeatures).values({
-            ...feature,
-            id: newId("feature_version"),
-            planVersionId,
-            metadata: feature.metadata,
+        const planVersionId = newId("plan_version")
+        const paymentMethodRequired = planVersionData.plan.defaultPlan
+          ? false
+          : planVersionData.paymentMethodRequired
+
+        const countVersionsPlan = await tx
+          .select({ count: sql<number>`count(*)` })
+          .from(schema.versions)
+          .where(
+            and(
+              eq(schema.versions.projectId, projectId),
+              eq(schema.versions.planId, planVersionData.planId)
+            )
+          )
+          .then((rows) => rows[0]?.count ?? 0)
+
+        const duplicated = await tx
+          .insert(schema.versions)
+          .values({
+            ...planVersionData,
+            id: planVersionId,
+            trialUnits: planVersionData.trialUnits,
+            billingConfig: planVersionData.billingConfig,
+            autoRenew: planVersionData.autoRenew,
+            paymentMethodRequired,
+            metadata: {},
+            latest: false,
+            active: true,
+            // A copy is a new draft: it was never published, so its own card is not live and a
+            // price change on it starts at once (ADR-0008 D2).
+            status: "draft",
+            publishedAt: null,
+            publishedBy: null,
+            archived: false,
+            archivedAt: null,
+            archivedBy: null,
             createdAtM: Date.now(),
             updatedAtM: Date.now(),
+            version: Number(countVersionsPlan) + 1,
           })
+          .returning()
+          .then((rows) => rows[0] ?? null)
+
+        if (!duplicated) return Ok({ state: "duplicate_error" })
+
+        await Promise.all(
+          planVersionData.planFeatures.map(async (feature) => {
+            await tx.insert(schema.planVersionFeatures).values({
+              ...feature,
+              id: newId("feature_version"),
+              planVersionId,
+              metadata: feature.metadata,
+              createdAtM: Date.now(),
+              updatedAtM: Date.now(),
+            })
+          })
+        )
+
+        const forked = await forkCard(scoped, {
+          projectId,
+          planSlug: planVersionData.plan.slug,
+          source: planVersionData,
+          copyId: duplicated.id,
+          featureSlugs: new Set(
+            planVersionData.planFeatures.map((feature) => feature.feature.slug)
+          ),
+          now: Date.now(),
         })
-      )
+        if (forked.err) return Err(forked.err)
 
-      return version
-    })
-
-    if (!duplicated) {
-      return Ok({
-        state: "duplicate_error",
-      })
-    }
-
-    const forked = await forkCard(deps, {
-      projectId,
-      planSlug: planVersionData.plan.slug,
-      source: planVersionData,
-      copyId: duplicated.id,
-      now: Date.now(),
-    })
-    if (forked.err) return Err(forked.err)
-
-    return Ok({
-      state: "ok",
-      planVersion: duplicated,
-    })
+        return Ok({
+          state: "ok",
+          planVersion: duplicated,
+        })
+      }
+    )
   } catch (error) {
-    const e = error as Error
+    const e = error instanceof Error ? error : new Error(String(error))
     deps.logger.error(e, {
       context: "error duplicating plan version",
       projectId,
@@ -158,7 +160,7 @@ export async function duplicatePlanVersion(
 }
 
 /**
- * Gives the copy its own card (ADR-0008 D2) once the copy has committed: a card named after the
+ * Gives the copy its own card inside the copy's transaction: a card named after the
  * copy with the source card's margin policy, assigned, then the source's rows in effect now
  * published on it at once (match, cost and provenance kept), so the copy's prices can change
  * without touching the customers on the source. Rows scheduled to start later are not copied: the
@@ -172,6 +174,7 @@ async function forkCard(
     planSlug: string
     source: Pick<PlanVersion, "id" | "currency">
     copyId: string
+    featureSlugs: ReadonlySet<string>
     now: number
   }
 ): Promise<Result<void, UnPriceRateCardError | FetchError>> {
@@ -186,7 +189,9 @@ async function forkCard(
     projectId,
     currency: source.currency,
     cardName: versionCardName(input.planSlug, copyId, source.currency),
-    marginPolicy: found.val.card.marginPolicy,
+    marginPolicy: retainFeaturePolicies(found.val.card.marginPolicy, (policy) =>
+      input.featureSlugs.has(policy.featureSlug)
+    ),
   })
   if (card.err) return Err(card.err)
   const assigned = await rateCards.assignToPlanVersion(projectId, {
@@ -198,7 +203,10 @@ async function forkCard(
 
   const drafts = found.val.rows
     .filter(
-      (row) => row.effectiveFrom <= now && (row.effectiveTo === null || row.effectiveTo > now)
+      (row) =>
+        input.featureSlugs.has(row.featureSlug) &&
+        row.effectiveFrom <= now &&
+        (row.effectiveTo === null || row.effectiveTo > now)
     )
     .map(({ featureSlug, match, price, cost, source: rowSource, sourceRef }) => ({
       featureSlug,

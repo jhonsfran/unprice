@@ -91,6 +91,7 @@ export function LimitFormField({
                 <InputWithAddons
                   {...field}
                   trailing={units}
+                  placeholder="No limit"
                   value={field.value ?? ""}
                   disabled={isDisabled}
                 />
@@ -143,6 +144,7 @@ export function IncludedFormField({
                 <InputWithAddons
                   {...field}
                   trailing={units}
+                  placeholder="None"
                   value={field.value ?? ""}
                   onChange={(event) => field.onChange(event.target.value.trim() || null)}
                   disabled={isDisabled}

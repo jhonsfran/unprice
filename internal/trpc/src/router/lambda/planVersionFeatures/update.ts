@@ -20,7 +20,7 @@ export const update = protectedProjectProcedure
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
     const { err, val } = await updatePlanVersionFeature(
-      { services: { plans, features, rateCards }, logger: opts.ctx.logger },
+      { db: opts.ctx.db, services: { plans, features, rateCards }, logger: opts.ctx.logger },
       { ...opts.input, projectId: project.id, now: Date.now() }
     )
 

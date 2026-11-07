@@ -1,11 +1,19 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { createTRPCClient } from "@trpc/client"
+import { observable } from "@trpc/server/observable"
+import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query"
 import {
   type RateCard,
+  costPlusFeaturePolicySchema,
   rateCostSchema,
   ratePriceSchema,
   rateRowSchema,
 } from "@unprice/db/validators"
+import type { AppRouter } from "@unprice/trpc/routes"
 import { renderToString } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
+import { TRPCProvider } from "~/trpc/client"
+import { CatalogUpdates } from "../../../rate-cards/_components/catalog-updates"
 import { rowsByFeature } from "../../_components/plan-prices"
 import {
   type CatalogPreview,
@@ -13,6 +21,8 @@ import {
   DEFAULT_CATALOG_POLICY,
   catalogPricingInputOf,
   markupRateOf,
+  policyDraftOf,
+  useCatalogPricing,
 } from "./catalog-price-block"
 
 // SuperLink needs a mounted app router; the link target is not what these tests check.
@@ -201,5 +211,141 @@ describe("catalogPricingInputOf", () => {
         undefined
       )
     ).toEqual({ ok: false, message: "Map at least one cost component to an event property." })
+  })
+})
+
+describe("policyDraftOf", () => {
+  it("opens the editor on the markup the card prices with, not the default 30%", () => {
+    const saved = costPlusFeaturePolicySchema.parse({
+      featureSlug: "model_tokens",
+      markup: "0.5",
+      roundTo: "0.0001",
+      dimension: "model",
+      componentMap: { input: "prompt_tokens", output: "completion_tokens" },
+    })
+
+    expect(policyDraftOf(saved)).toEqual({
+      markupPercent: "50",
+      roundTo: "0.0001",
+      components: {
+        input: "prompt_tokens",
+        output: "completion_tokens",
+        cache_read: "",
+        cache_write: "",
+      },
+    })
+  })
+})
+
+function pricingActions() {
+  const requests: { path: string; input: unknown }[] = []
+  const queryClient = new QueryClient()
+  const published = { inserted: [], closed: [], unchanged: 0 }
+  const trpcClient = createTRPCClient<AppRouter>({
+    links: [
+      () =>
+        ({ op }) =>
+          observable((observer) => {
+            requests.push({ path: op.path, input: op.input })
+            observer.next({
+              result: {
+                data:
+                  op.path.endsWith("publishCostPlus") || op.path.endsWith("applyCatalogPricing")
+                    ? published
+                    : preview,
+              },
+            })
+            observer.complete()
+          }),
+    ],
+  })
+  const captured: ReturnType<typeof useCatalogPricing>[] = []
+  function Actions() {
+    captured.push(useCatalogPricing({ planVersionId: "pv_1", featureSlug: "tokens" }))
+    return null
+  }
+  renderToString(
+    <QueryClientProvider client={queryClient}>
+      <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
+        <Actions />
+      </TRPCProvider>
+    </QueryClientProvider>
+  )
+  const [pricing] = captured
+  if (!pricing) throw new Error("Catalog actions did not render")
+  return { pricing, requests, published }
+}
+
+describe("catalog pricing requests", () => {
+  const input = {
+    markup: "0.3",
+    roundTo: "0.000001",
+    dimension: "model",
+    componentMap: { input: "input_tokens", output: "output_tokens" },
+  }
+
+  it("previews the policy through the read-only preview procedure", async () => {
+    const { pricing, requests } = pricingActions()
+
+    await expect(pricing.preview(input)).resolves.toEqual(preview)
+    expect(requests).toEqual([
+      {
+        path: "rateCards.previewCatalogPricing",
+        input: { planVersionId: "pv_1", featureSlug: "tokens", ...input },
+      },
+    ])
+  })
+
+  it("applies once with the reviewed hash, without saving or requesting a new preview", async () => {
+    const { pricing, requests, published } = pricingActions()
+
+    await expect(pricing.apply({ ...input, draftHash: "reviewed_hash" })).resolves.toEqual(
+      published
+    )
+    expect(requests).toEqual([
+      {
+        path: "rateCards.applyCatalogPricing",
+        input: {
+          planVersionId: "pv_1",
+          featureSlug: "tokens",
+          ...input,
+          draftHash: "reviewed_hash",
+        },
+      },
+    ])
+  })
+})
+
+describe("CatalogUpdates", () => {
+  it("reads the preview for the displayed feature, with a separate hash for each feature", () => {
+    const queryClient = new QueryClient()
+    const trpcClient = createTRPCClient<AppRouter>({ links: [] })
+    const trpc = createTRPCOptionsProxy<AppRouter>({ client: trpcClient, queryClient })
+    queryClient.setQueryData(
+      trpc.rateCards.previewCostPlus.queryKey({ cardId: rateCard.id, featureSlug: "tokens" }),
+      { draft: preview.draft, draftHash: "tokens_hash" }
+    )
+    queryClient.setQueryData(
+      trpc.rateCards.previewCostPlus.queryKey({ cardId: rateCard.id, featureSlug: "images" }),
+      { draft: { cardId: rateCard.id, at: NOW, changes: [] }, draftHash: "images_hash" }
+    )
+    const policy = costPlusFeaturePolicySchema.parse({
+      featureSlug: "tokens",
+      markup: "0.3",
+      roundTo: "0.000001",
+      dimension: "model",
+      componentMap: { input: "input_tokens" },
+    })
+    const html = renderToString(
+      <QueryClientProvider client={queryClient}>
+        <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
+          <CatalogUpdates card={rateCard} policy={policy} live={false} unit="tokens" />
+        </TRPCProvider>
+      </QueryClientProvider>
+    ).replace(/<!-- -->/g, "")
+
+    expect(html).toContain("The catalog changed: 1 changed, 1 new.")
+    expect(html).toContain("Apply 2 prices")
+    expect(html).toContain("gpt-4o")
   })
 })

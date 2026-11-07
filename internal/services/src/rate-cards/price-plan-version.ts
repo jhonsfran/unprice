@@ -45,9 +45,9 @@ export function versionCardName(
 
 /**
  * Prices a draft plan version with its own money card (ADR-0008 D2): creates the card when the
- * version has none in `currency`, publishes each feature's default row at the earliest the card
- * allows, and assigns it. A rerun with the same prices writes nothing; a changed price takes the
- * card's notice like any other. Shared by the plan templates, the monetization document,
+ * version has none in `currency`, assigns it, then publishes each feature's default row at the
+ * earliest the card allows. Assignment makes the version's meter snapshots authoritative. A rerun
+ * with the same prices writes nothing; a changed price takes the card's notice like any other. Shared by the plan templates, the monetization document,
  * onboarding and the feature editor.
  *
  * The three writes are separate transactions, so a run can stop after creating the card. The
@@ -68,6 +68,15 @@ export async function pricePlanVersion(
     const card = await versionCard(deps, input)
     if (card.err) return Err(card.err)
     cardId = card.val
+  }
+
+  if (!assigned) {
+    const assignment = await rateCards.assignToPlanVersion(input.projectId, {
+      planVersionId: input.planVersionId,
+      currency: input.currency,
+      cardId,
+    })
+    if (assignment.err) return Err(assignment.err)
   }
 
   if (input.prices.length > 0 || (input.closeRowIds?.length ?? 0) > 0) {
@@ -91,14 +100,6 @@ export async function pricePlanVersion(
     if (published.err) return Err(published.err)
   }
 
-  if (!assigned) {
-    const assignment = await rateCards.assignToPlanVersion(input.projectId, {
-      planVersionId: input.planVersionId,
-      currency: input.currency,
-      cardId,
-    })
-    if (assignment.err) return Err(assignment.err)
-  }
   return Ok({ cardId })
 }
 

@@ -92,16 +92,7 @@ export function PlanWorkspaceRail({
 
       <Separator />
 
-      <section className="flex flex-col gap-3">
-        <SectionTitle>Rate card</SectionTitle>
-        <PlanVersionRateCard
-          planVersionId={planVersion.id}
-          currency={planVersion.currency}
-          isPublished={status === "published"}
-        />
-      </section>
-
-      <Separator />
+      <PlanVersionRateCard planVersionId={planVersion.id} />
 
       <CollapsibleSection
         label="Preview"

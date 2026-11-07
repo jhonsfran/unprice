@@ -1,7 +1,7 @@
 "use client"
 
 import { CalendarClock, EyeOff, MoreVertical, RotateCw, SlidersHorizontal, Zap } from "lucide-react"
-import { type KeyboardEvent, useRef, useState } from "react"
+import { type KeyboardEvent, useReducer, useRef, useState } from "react"
 
 import type { FeatureType } from "@unprice/db/utils"
 import { FEATURE_TYPES_MAPS } from "@unprice/db/utils"
@@ -36,6 +36,7 @@ import {
   priceStateOf,
   scheduledFrom,
 } from "../../_components/plan-prices"
+import { cellCommitOf, cellEditReducer } from "./cell-input-state"
 import { type PriceShape, prefillDraft, priceInputOf, priceShapeOf } from "./price-block"
 import { PricingModelIcon } from "./pricing-model"
 
@@ -316,13 +317,12 @@ function wholeNumberOf(text: string): { ok: true; value: number } | { ok: false;
 /**
  * One cell that reads as text and edits in place. At rest it shows `text`, or the empty word when
  * there is none. Focus swaps in the raw value with the unit after it; Enter or blur commits and
- * Escape restores. `onCommit` answers what stopped the value, which stays under the cell. A value
- * the cell committed reads through `format` until the row carries it.
+ * Escape restores. `onCommit` answers what stopped the value, which stays under the cell.
+ * At rest, the cell always reads saved props.
  */
 export function CellInput({
   value,
   text,
-  format,
   empty,
   prefix,
   suffix,
@@ -338,7 +338,6 @@ export function CellInput({
   value: string
   /** What rest shows for `value`; "" for the empty word. */
   text: string
-  format: (raw: string) => string
   /** The muted word at rest with nothing to show, such as "No limit". */
   empty: string
   /** The currency symbol before the number while editing. */
@@ -355,17 +354,14 @@ export function CellInput({
   commitUnchanged?: boolean
   onCommit: (text: string) => string | null
 }) {
-  const [draft, setDraft] = useState(value)
-  const [editing, setEditing] = useState(false)
-  const [sent, setSent] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  // Escape blurs the input inside its own key event, before React has the restored draft, so the
-  // blur reads this flag instead of the draft it would otherwise commit.
+  const [edit, dispatch] = useReducer(cellEditReducer, null)
+  const editing = edit !== null
+  const [error, setError] = useState<{ value: string; message: string } | null>(null)
+  // Escape calls blur before React applies state updates, so the ref suppresses the blur commit.
   const escaped = useRef(false)
-  const message = error ?? problem
-  const rest = sent === null ? text : format(sent)
-  const shown = editing ? draft : rest
-  const idle = !editing && rest === ""
+  const message = (error?.value === value ? error.message : null) ?? problem
+  const shown = edit ? edit.draft : text
+  const idle = !editing && text === ""
   const ghost = shown || (editing ? placeholder : empty) || ""
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -410,24 +406,23 @@ export function CellInput({
             placeholder={editing ? placeholder : empty}
             value={shown}
             disabled={disabled}
-            onFocus={() => setEditing(true)}
+            onFocus={() => dispatch({ type: "focus", value })}
             onChange={(event) => {
-              setDraft(event.target.value)
+              dispatch({ type: "change", value: event.target.value })
               setError(null)
             }}
             onKeyDown={onKeyDown}
             onBlur={() => {
-              setEditing(false)
+              dispatch({ type: "blur" })
               if (escaped.current) {
                 escaped.current = false
-                setDraft(sent ?? value)
                 setError(null)
                 return
               }
-              if (draft === (sent ?? value) && !problem && !commitUnchanged) return
-              const refused = onCommit(draft)
-              setError(refused)
-              if (!refused) setSent(draft)
+              const changed = cellCommitOf(edit, value, Boolean(problem) || commitUnchanged)
+              if (changed === null) return
+              const refused = onCommit(changed)
+              setError(refused ? { value, message: refused } : null)
             }}
           />
         </span>
@@ -626,10 +621,9 @@ export function PriceCell({
   return (
     <div className="flex flex-col gap-0.5">
       <CellInput
-        key={`${cell.shape}:${cell.amount}`}
+        key={cell.shape}
         value={cell.amount}
         text={cell.priced ? formatCellValue(cell.amount, currency) : ""}
-        format={(raw) => formatCellValue(raw, currency)}
         empty="Set price"
         prefix={currencySymbol(currency)}
         suffix={cell.suffix}
@@ -680,10 +674,8 @@ export function UnitsCell({
 }) {
   return (
     <CellInput
-      key={value}
       value={value}
       text={formatUnits(value)}
-      format={formatUnits}
       empty={empty}
       suffix={suffix}
       inputMode={decimal ? "decimal" : "numeric"}

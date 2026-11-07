@@ -36,6 +36,10 @@ patterns. Keep it cheap to load and useful.
 
 ## Rate Cards And Plan Pricing
 
+- 2026-11-06: Rate-card version writes lock the plan, then the version, then its cards. Publication also updates the previous latest version; a version-first lock can deadlock with a shared-card copy.
+- 2026-11-06: `RateCardService.withTransaction(tx)` omits cache writes. The use case invalidates version prices only after the outer transaction commits.
+- 2026-11-06: Inline table cells read saved props while idle. Capture the saved value at focus and skip blur commits if it changed during the edit.
+- 2026-11-06: `createRateCardsFake` skips `planPublish` and `planClose` validation. For feature-edit and card-copy boundary tests, run the production planners too; the fake accepts rows that the real service rejects.
 - 2026-11-05: A feature's meter exists twice: `features.meter_config` is the project template and
   `plan_versions_features.meter_config` is the snapshot the plan editor writes and the budget reads.
   Validate a card's rows against the plan features of the versions assigned to it
@@ -1093,3 +1097,13 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-11-05: Every raw `<input>` gets a 1px gray border from the global stylesheet. An inline table cell input must set `border-0` itself; a transparent border on the wrapper does not hide it.
 - 2026-11-05: `duplicatePlanVersion` spreads the source row into the copy, so every lifecycle field the copy must not inherit (`publishedAt`, `publishedBy`, `archived*`) is reset explicitly. A copy that kept `publishedAt` made its own card live and every price change on the draft wait for the notice.
 - 2026-11-05: Webpack dev keeps a deleted module in its graph (overlay error "Failed to read source code") until the dev server restarts; the page still renders, the overlay is noise until then.
+- 2026-11-06: An SSR (`renderToString`) test of a component that reads a tRPC query renders its loading branch; seed the cache with `createTRPCOptionsProxy({ client, queryClient })` + `queryClient.setQueryData(trpc.x.y.queryKey(input), data)` to test the loaded UI.
+- 2026-11-06: A feature's price draft must not prefill from a row of another `price.type` (`prefillDraft`): switching Fixed $49 to metered once offered "$49 per unit".
+- 2026-11-06: `plans.listByActiveProject` returns only published versions unless called with `{ published: false }`; a lookup that names cards or versions (drafts included) must pass it.
+- 2026-11-06: The publish-rows form writes one rate; a catalog model row has one per token kind. Replacing a model row from that form drops the other rates, so the dialog warns and points at the catalog markup instead.
+- 2026-11-06: Don't nest a scroll area (`max-h` + `overflow-auto`) inside the dashboard's scrolling page: it traps the wheel and the page stops scrolling. Show the first rows plus "Show all" and let the page grow.
+- 2026-11-06: Dashboard forms use shadcn parts only (`@unprice/ui` Select, Calendar in Popover, Command combobox, Collapsible, Table); no native `type="time"`, `datalist`, `<details>` or `type="search"`.
+- 2026-11-06: A price never changes how a feature is charged: shape (`pricingShape`, now exported) and metered property (`featurePricingOf`) come from the plan feature, as a Stripe price's billing scheme is fixed. "Add a price" shows them read-only.
+- 2026-11-06: `costPlusRevision` diffs every catalog model's latest row, manual ones included, so a markup change overwrites a hand-set model price. Until overrides are protected, the UI prices catalog features only through the markup.
+- 2026-11-06: `model_costs` is global (`pgTableProject` only prefixes the name; no `project_id`); a project's own model costs live in `custom_model_costs` and enter `costPlusPreview` as `"manual"`, so they outrank models.dev for that project only.
+- 2026-11-06: Catalog previews never save policies. `applyPlanVersionCatalogPricing` checks the reviewed feature-scoped hash and commits policy plus rows together; an exact retry writes nothing.

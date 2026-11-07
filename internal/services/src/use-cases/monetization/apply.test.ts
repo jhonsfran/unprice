@@ -870,7 +870,7 @@ describe("applyMonetizationConfig", () => {
     expect(resumed.staleDrafts).toEqual([])
   })
 
-  it("prices a complete draft whose pricing failed, adopting the card the failed run created", async () => {
+  it("prices a complete draft whose first row publication failed, reusing its assigned card", async () => {
     const { deps, store, cards } = createHarness()
 
     // Every feature is written, the card is created, then its rows fail to publish.
@@ -899,7 +899,8 @@ describe("applyMonetizationConfig", () => {
     expect([...cards.cards.values()].map(({ id, name }) => ({ id, name }))).toEqual([
       { id: "rc_1", name: "free plan_version_1 USD" },
     ])
-    expect(cards.rateCards.assignToPlanVersion).not.toHaveBeenCalled()
+    expect(cards.assignments.get("plan_version_1:USD")).toBe("rc_1")
+    expect(cards.rows).toEqual([])
 
     const resumed = expectApplied(
       await applyMonetizationConfig(deps, { projectId: PROJECT_ID, config: baseConfig() })

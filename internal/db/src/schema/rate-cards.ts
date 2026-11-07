@@ -12,7 +12,12 @@ import {
 import { pgTableProject } from "../utils/_table"
 import { cuid } from "../utils/fields"
 import { projectID } from "../utils/sql"
-import type { ModelCostInput, RateCardInput, RateRowInput } from "../validators/rate-cards"
+import type {
+  CustomModelCostInput,
+  ModelCostInput,
+  RateCardInput,
+  RateRowInput,
+} from "../validators/rate-cards"
 import { currencyEnum } from "./enums"
 import { versions } from "./planVersions"
 import { projects } from "./projects"
@@ -128,6 +133,32 @@ export const modelCosts = pgTableProject(
       table.provider,
       table.model,
       table.source,
+      table.effectiveFrom
+    ),
+  })
+)
+
+/**
+ * A project's own model costs (USD per million tokens), beside the global models.dev import in
+ * `model_costs`. Append-only: an edit is a newer row for the same model, so a priced row can
+ * always point at the cost it was priced from.
+ */
+export const customModelCosts = pgTableProject(
+  "custom_model_costs",
+  {
+    ...projectID,
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    components: jsonb("components").$type<CustomModelCostInput["components"]>().notNull(),
+    effectiveFrom: bigint("effective_from", { mode: "number" }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+  },
+  (table) => ({
+    primary: primaryKey({ columns: [table.id, table.projectId], name: "custom_model_costs_pkey" }),
+    modelIdx: index("custom_model_costs_model_idx").on(
+      table.projectId,
+      table.provider,
+      table.model,
       table.effectiveFrom
     ),
   })

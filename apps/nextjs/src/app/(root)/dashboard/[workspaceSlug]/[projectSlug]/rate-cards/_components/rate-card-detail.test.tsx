@@ -1,12 +1,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { createTRPCClient, httpLink } from "@trpc/client"
 import { type RateCard, rateRowSchema } from "@unprice/db/validators"
+import { priceTableOf } from "@unprice/services/pricing"
 import type { AppRouter } from "@unprice/trpc/routes"
 import { transformer } from "@unprice/trpc/transformer"
 import { renderToString } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 import { TRPCProvider } from "~/trpc/client"
+import { PriceMatrix } from "./price-matrix"
 import { PriceList } from "./rate-card-detail"
+import { matrixOf } from "./rate-card-format"
 
 const NOW = Date.parse("2026-11-04T12:00:00.000Z")
 const MILLION = 1_000_000
@@ -89,13 +92,14 @@ describe("PriceList", () => {
     expect(html).toContain("$0.015")
     expect(html).toContain("scheduled")
     expect(html).toContain("1 past price")
-    expect(html).toContain("$0.03")
+    // History starts closed: the past price is one click away, not on the page.
+    expect(html).not.toContain("$0.03")
     // The live row already ends where its successor starts; only the open successor can end.
     expect(html.match(/End…/g)).toHaveLength(1)
     expect(html).toContain("a change starts at once")
   })
 
-  it("lays model prices out as a sheet: a line per model, a column per token kind, per 1M", () => {
+  it("closes a sheet of model prices until asked for, and names how many it holds", () => {
     const html = render([
       modelRow("rr_haiku", "claude-haiku-5-5", "0.13", "0.65"),
       modelRow("rr_opus", "claude-opus-4-5", "6.5", "32.5"),
@@ -103,6 +107,23 @@ describe("PriceList", () => {
 
     expect(html).toContain("LLM tokens")
     expect(html).toContain("2 prices by model")
+    expect(html).toContain("Show 2 model prices")
+    expect(html).not.toContain("claude-haiku-5-5")
+  })
+
+  it("lays model prices out as a sheet: a line per model, a column per token kind, per 1M", () => {
+    const rows = [
+      modelRow("rr_haiku", "claude-haiku-5-5", "0.13", "0.65"),
+      modelRow("rr_opus", "claude-opus-4-5", "6.5", "32.5"),
+    ]
+    const html = renderToString(
+      <PriceMatrix
+        matrix={matrixOf(priceTableOf("llm_tokens", rows, NOW, "USD", "token"))}
+        currency="USD"
+        unit="token"
+      />
+    ).replace(/<!-- -->/g, "")
+
     expect(html).toContain("Input")
     expect(html).toContain("Output")
     expect(html).toContain("per 1M tokens")

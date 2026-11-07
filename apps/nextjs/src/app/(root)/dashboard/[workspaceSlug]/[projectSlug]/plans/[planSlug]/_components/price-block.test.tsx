@@ -130,7 +130,7 @@ describe("PriceBlockView", () => {
     })
 
     expect(html).toContain('value="1000"')
-    expect(html).toContain("1001 and up")
+    expect(html).toContain("1001 and above")
     expect(html).toContain("Add tier")
   })
 
@@ -165,6 +165,13 @@ describe("prefillDraft", () => {
     expect(prefillDraft(twoComponentRow, "unit")).toBeNull()
     expect(prefillDraft(null, "flat")).toEqual({ kind: "amount", amount: "0" })
     expect(prefillDraft(null, "unit")).toEqual({ kind: "amount", amount: "" })
+  })
+
+  it("does not carry a fixed amount over as a unit price when the feature becomes metered", () => {
+    const flatRow = row("rr_4", NOW - HOUR, { type: "flat", amount: "49" })
+    expect(prefillDraft(flatRow, "unit")).toEqual({ kind: "amount", amount: "" })
+    expect(prefillDraft(flatRow, "package")).toEqual({ kind: "amount", amount: "" })
+    expect(prefillDraft(flatRow, "flat")).toEqual({ kind: "amount", amount: "49" })
   })
 
   it("starts tiers as the included units at $0, then an open tier to price", () => {

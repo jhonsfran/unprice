@@ -1,3 +1,4 @@
+import type { Database } from "@unprice/db"
 import {
   type Feature,
   type MeterConfig,
@@ -6,7 +7,7 @@ import {
   type PlanVersionFeature,
   planVersionCatalogPricingInputSchema,
 } from "@unprice/db/validators"
-import { Ok } from "@unprice/error"
+import { Err, Ok } from "@unprice/error"
 import { formatAmount } from "@unprice/money"
 import { describe, expect, it, vi } from "vitest"
 import { MODEL_CATALOG } from "../../budgets/model-catalog"
@@ -17,8 +18,8 @@ import { createRateCardsFake } from "../../rate-cards/memory.fixture"
 function rejectionOf(err: Error | undefined) {
   return err instanceof UnPriceRateCardError ? err.rejection : err
 }
+import { applyPlanVersionCatalogPricing, previewPlanVersionCatalogPricing } from "./catalog-pricing"
 import { catalogEffectiveFrom } from "./import-model-costs"
-import { setPlanVersionCatalogPricing } from "./set-catalog-pricing"
 
 const NOW = Date.parse("2026-11-10T12:00:00.000Z")
 const PROJECT = "proj_1"
@@ -71,7 +72,7 @@ function price(
   services: Pick<ServiceContext, "plans" | "features" | "rateCards">,
   fields: Record<string, unknown> = {}
 ) {
-  return setPlanVersionCatalogPricing(
+  return previewPlanVersionCatalogPricing(
     { services },
     {
       ...planVersionCatalogPricingInputSchema.parse({
@@ -88,8 +89,34 @@ function price(
   )
 }
 
-describe("setPlanVersionCatalogPricing", () => {
-  it("imports the catalog at its version date, prices the feature on the version's card, and drafts every model", async () => {
+async function apply(
+  services: Pick<ServiceContext, "plans" | "features" | "rateCards">,
+  draftHash: string,
+  fields: Record<string, unknown> = {}
+) {
+  const db = {
+    transaction: async (write: (tx: unknown) => Promise<unknown>) => write({}),
+  } as unknown as Database
+  return applyPlanVersionCatalogPricing(
+    { db, services },
+    {
+      ...planVersionCatalogPricingInputSchema.parse({
+        planVersionId: "pv_1",
+        featureSlug: "llm_tokens",
+        markup: "0.3",
+        roundTo: "0.01",
+        componentMap: { input: "input_tokens", output: "output_tokens" },
+        ...fields,
+      }),
+      projectId: PROJECT,
+      now: NOW,
+      draftHash,
+    }
+  )
+}
+
+describe("previewPlanVersionCatalogPricing", () => {
+  it("imports the catalog at its version date and previews every model without saving a policy", async () => {
     const { cards, services } = createHarness()
 
     const result = await price(services)
@@ -102,10 +129,7 @@ describe("setPlanVersionCatalogPricing", () => {
     expect(cards.cards.get(cardId)).toMatchObject({
       name: "starter pv_1 USD",
       unit: "money:USD",
-      marginPolicy: {
-        type: "costPlus",
-        features: [{ featureSlug: "llm_tokens", dimension: "model", markup: BigInt(50_000_000) }],
-      },
+      marginPolicy: { type: "manual" },
     })
     expect(cards.assignments.get("pv_1:USD")).toBe(cardId)
     expect(cards.costs).toHaveLength(MODEL_CATALOG.length)
@@ -126,9 +150,29 @@ describe("setPlanVersionCatalogPricing", () => {
     )
     expect(rerun.val.cardId).toBe(cardId)
     expect(rerun.val.draftHash).not.toBe(draftHash)
-    expect(cards.cards.get(cardId)?.marginPolicy).toMatchObject({
-      features: [{ featureSlug: "llm_tokens", markup: BigInt(50_000_000) }],
+    expect(cards.cards.get(cardId)?.marginPolicy).toEqual({ type: "manual" })
+  })
+
+  it("applies the reviewed markup and leaves a later preview unsaved", async () => {
+    const { cards, services } = createHarness()
+    const saved = await price(services)
+    if (saved.err) throw saved.err
+
+    const applied = await apply(services, saved.val.draftHash)
+    expect(applied.err).toBeUndefined()
+    const dry = await price(services, { markup: "0.5" })
+    if (dry.err) throw dry.err
+    const haiku = dry.val.draft.changes.find(
+      (change) => change.proposed.match.model === "claude-haiku-4-5"
+    )
+
+    expect(cards.cards.get(saved.val.cardId)?.marginPolicy).toMatchObject({
+      features: [{ featureSlug: "llm_tokens", markup: BigInt(30_000_000) }],
     })
+    expect(haiku?.proposed.price.components.map((c) => formatAmount(c.rate))).toEqual([
+      "1.5",
+      "7.5",
+    ])
   })
 
   it("keeps one policy per feature, so a card prices several features from the catalog", async () => {
@@ -137,10 +181,21 @@ describe("setPlanVersionCatalogPricing", () => {
     })
 
     const first = await price(services)
+    if (first.err) throw first.err
+    expect((await apply(services, first.val.draftHash)).err).toBeUndefined()
     const second = await price(services, {
       featureSlug: "images",
       componentMap: { input: "pixels" },
     })
+    if (second.err) throw second.err
+    expect(
+      (
+        await apply(services, second.val.draftHash, {
+          featureSlug: "images",
+          componentMap: { input: "pixels" },
+        })
+      ).err
+    ).toBeUndefined()
     if (first.err || second.err) throw first.err ?? second.err
 
     expect(cards.cards.get(second.val.cardId)?.marginPolicy).toMatchObject({
@@ -148,9 +203,9 @@ describe("setPlanVersionCatalogPricing", () => {
       features: [{ featureSlug: "llm_tokens" }, { featureSlug: "images" }],
     })
     expect(new Set(second.val.draft.changes.map((change) => change.proposed.featureSlug))).toEqual(
-      new Set(["llm_tokens", "images"])
+      new Set(["images"])
     )
-    expect(second.val.draft.changes).toHaveLength(first.val.draft.changes.length * 2)
+    expect(second.val.draft.changes).toHaveLength(first.val.draft.changes.length)
   })
 
   it("refuses a non-USD version, a feature without a model dimension, a shared card, and a published version", async () => {
@@ -186,4 +241,42 @@ describe("setPlanVersionCatalogPricing", () => {
     })
     expect(euros.cards.cards.size).toBe(0)
   })
+})
+
+it("rejects an apply after provider costs change without saving the policy", async () => {
+  const { cards, services } = createHarness()
+  const preview = await price(services)
+  if (preview.err) throw preview.err
+  const imported = cards.costs[0]
+  if (!imported) throw new Error("fixture")
+  cards.costs.push({ ...imported, source: "manual", sourceRef: "negotiated", effectiveFrom: NOW })
+  const result = await apply(services, preview.val.draftHash)
+  expect(rejectionOf(result.err)).toMatchObject({ code: "DRAFT_STALE" })
+  expect(cards.cards.get(preview.val.cardId)?.marginPolicy).toEqual({ type: "manual" })
+  expect(cards.rows).toEqual([])
+})
+
+it("leaves the policy unchanged when the row planner rejects publication", async () => {
+  const { cards, services } = createHarness()
+  const preview = await price(services)
+  if (preview.err) throw preview.err
+  cards.rateCards.publishRows.mockResolvedValueOnce(
+    Err(new UnPriceRateCardError({ code: "INVALID_CARD", violations: [] }))
+  )
+  const result = await apply(services, preview.val.draftHash)
+  expect(rejectionOf(result.err)).toMatchObject({ code: "INVALID_CARD" })
+  expect(cards.cards.get(preview.val.cardId)?.marginPolicy).toEqual({ type: "manual" })
+  expect(cards.rows).toEqual([])
+})
+
+it("accepts an exact apply retry without writing more rows", async () => {
+  const { cards, services } = createHarness()
+  const preview = await price(services)
+  if (preview.err) throw preview.err
+  expect((await apply(services, preview.val.draftHash)).err).toBeUndefined()
+  const count = cards.rows.length
+  const retry = await apply(services, preview.val.draftHash)
+  expect(retry.err).toBeUndefined()
+  expect(retry.val?.inserted).toEqual([])
+  expect(cards.rows).toHaveLength(count)
 })
