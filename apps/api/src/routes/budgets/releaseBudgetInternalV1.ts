@@ -49,7 +49,7 @@ export const registerReleaseBudgetInternalV1 = (app: App) =>
       c,
       key,
       { type: "release", holdId, holdCreatedAt },
-      { projectId }
+      { projectId, defaultCustomerId: null }
     ).catch(withRejection)
     return c.json(releaseToWire(released), HttpStatusCodes.OK)
   })

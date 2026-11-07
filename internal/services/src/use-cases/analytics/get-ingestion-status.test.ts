@@ -101,7 +101,7 @@ describe("getIngestionStatus", () => {
       expect(sql).toContain("kind IN ('charge')")
       expect(sql).toContain("state IN ('rejected')")
     }
-    expect(result.val?.totals).toEqual({ processed: 3, rejected: 1, failed: 0, total: 4 })
+    expect(result.val?.totals).toEqual({ processed: 3, rejected: 1, total: 4 })
     expect(result.val?.successRate).toBe(0.75)
     expect(result.val?.freshness).toEqual({
       generatedAt: now,
@@ -118,20 +118,21 @@ describe("getIngestionStatus", () => {
       {
         rejectionReason: "LIMIT_EXCEEDED",
         eventSlug: "tokens",
-        sourceId: "charge",
         sourceType: "charge",
         eventCount: 1,
         lastSeenAt: Date.parse("2026-11-03T09:30:00.000Z"),
       },
     ])
-    expect(result.val?.recentEvents[1]).toMatchObject({
+    expect(result.val?.recentEvents[1]).toEqual({
       eventId: "evt_1",
-      canonicalAuditId: "r:evt_1",
+      eventSlug: "tokens",
+      operationId: "r:evt_1",
       customerId: "cus_1",
       state: "rejected",
       rejectionReason: "LIMIT_EXCEEDED",
       sourceType: "charge",
-      replayable: false,
+      budgetKey: "unprice:customer:cus_1",
+      handledAt: Date.parse("2026-11-03T09:30:00.000Z"),
       timestamp: Date.parse("2026-11-03T09:30:00.000Z"),
     })
     expect(result.val?.recentEvents[0]?.timestamp).toBe(accepted.occurred_at)
@@ -152,28 +153,30 @@ describe("getIngestionStatus", () => {
     const { analytics, queries } = journalAnalytics(answer({ recent: [accepted, refused] }))
     const result = await getIngestionStatus(
       { analytics, now: () => now },
-      input({ limit: 1, cursor: { handledAt: to, canonicalAuditId: "o:z" } })
+      input({
+        limit: 1,
+        cursor: { handledAt: to, operationId: "o:z", budgetKey: "unprice:customer:cus_1" },
+      })
     )
     expect(queries.find((sql) => sql.endsWith("LIMIT 2"))).toContain(
-      "(timestamp < '2026-11-03T10:00:00.000Z' OR (timestamp = '2026-11-03T10:00:00.000Z' AND operation_id < 'o:z'))"
+      "(timestamp < '2026-11-03T10:00:00.000Z' OR (timestamp = '2026-11-03T10:00:00.000Z' AND (operation_id < 'o:z' OR (operation_id = 'o:z' AND budget_key < 'unprice:customer:cus_1'))))"
     )
     expect(result.val?.recentEvents).toHaveLength(1)
     expect(result.val?.nextCursor).toEqual({
       handledAt: Date.parse("2026-11-03T09:40:00.000Z"),
-      canonicalAuditId: "o:hash_2",
+      operationId: "o:hash_2",
+      budgetKey: "unprice:customer:cus_1",
     })
   })
 
-  it("answers nothing for a failed-only filter without reading the journal", async () => {
-    const { analytics, queries } = journalAnalytics(
-      answer({ totals: [{ state: "processed", events: 2, last_seen_at: null }] })
-    )
+  it("answers an empty journal window", async () => {
+    const { analytics, queries } = journalAnalytics(answer({}))
     const result = await getIngestionStatus(
       { analytics, now: () => now },
-      input({ includeFacets: true, filter: { states: ["failed"] } })
+      input({ includeFacets: true })
     )
-    expect(queries).toEqual([])
-    expect(result.val?.totals).toEqual({ processed: 0, rejected: 0, failed: 0, total: 0 })
+    expect(queries).toHaveLength(5)
+    expect(result.val?.totals).toEqual({ processed: 0, rejected: 0, total: 0 })
     expect(result.val?.live).toEqual([])
     expect(result.val?.rejections).toEqual([])
     expect(result.val?.recentEvents).toEqual([])

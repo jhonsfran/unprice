@@ -14,7 +14,7 @@ export default async function ProjectEventsPage() {
       header={
         <HeaderTab
           title="Events"
-          description="Processed, rejected, failed, and replayable usage events. Refreshes every 30s."
+          description="Accepted and rejected usage events from the budget journal. Refreshes every 30s."
           action={<EventsTimeWindowFilterAction />}
         />
       }

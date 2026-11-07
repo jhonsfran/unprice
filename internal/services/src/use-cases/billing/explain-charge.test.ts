@@ -97,7 +97,16 @@ function pricedEvent(opts: {
 /** Basin's answer: the page for the events query, `total` for the count query. */
 function statementJournal(page: unknown[], total: number | string = page.length) {
   return (sql: string) =>
-    sql.endsWith("SELECT COUNT(*) AS events\nFROM statement") ? [{ events: total }] : page
+    sql.includes("SELECT COUNT(*) AS events,")
+      ? [
+          {
+            events: total,
+            first_event_at: Number(total) > 0 ? 1_700_000_000_000 : null,
+            last_event_at: Number(total) > 0 ? 1_700_086_400_000 : null,
+            multi_component_events: Number(total) > 0 ? 1 : 0,
+          },
+        ]
+      : page
 }
 
 const defaultJournal = [
@@ -132,7 +141,6 @@ describe("explainCharge", () => {
       eventCount: 2,
       totalUsage: 150,
       totalAmount: 425_000_000,
-      latestAmountAfter: 425_000_000,
       costUsd: 120_000_000,
       currency: "USD",
       amountScale: 8,
@@ -141,34 +149,24 @@ describe("explainCharge", () => {
       multiComponentEventCount: 1,
     })
     expect(result.val?.events[1]).toEqual({
-      event_id: "evt_1",
       idempotency_key: "evt_1",
-      customer_entitlement_id: "ce_1",
-      grant_id: "",
-      feature_plan_version_id: "fpv_1",
       feature_slug: "tokens",
       period_key: "tokens:bp_1",
       event_slug: "tokens.used",
-      aggregation_method: "sum",
       timestamp: 1_700_000_000_000,
       created_at: 1_700_000_000_005,
       delta: 100,
-      value_after: 100,
       amount: 250_000_000,
-      amount_after: 250_000_000,
       amount_scale: 8,
       currency: "USD",
-      priced_at: 1_700_000_000_000,
-      tier_index: null,
       pricing_component_count: 1,
-      source_type: "api_key",
-      source_id: "o:hash_evt_1",
+      operation_id: "o:hash_evt_1",
     })
     expect(result.val?.pagination.hasMore).toBe(false)
     expect(result.val?.answer).toContain("$4.25")
     expect(result.val?.evidence).toContainEqual({ type: "ledger_line", id: "entry_1" })
     expect(result.val?.evidence).toContainEqual({ type: "billing_period", id: "bp_1" })
-    expect(result.val?.evidence).toContainEqual({ type: "meter_fact", id: "evt_1" })
+    expect(result.val?.evidence).toContainEqual({ type: "event", id: "o:hash_evt_1" })
   })
 
   it("sums grouped invoice rows into one line", async () => {
@@ -236,28 +234,18 @@ describe("explainCharge", () => {
     expect(result.val?.summary.eventCount).toBe(1)
     expect(result.val?.events).toEqual([
       {
-        event_id: "run_1",
         idempotency_key: "run_1",
-        customer_entitlement_id: "ce_1",
-        grant_id: "",
-        feature_plan_version_id: "fpv_1",
         feature_slug: "tokens",
         period_key: "tokens:bp_1",
         event_slug: "tokens.used",
-        aggregation_method: "sum",
         timestamp: 1_700_050_000_000,
         created_at: 1_700_050_000_000,
         delta: 40,
-        value_after: 40,
         amount: 40_000_000,
-        amount_after: 40_000_000,
         amount_scale: 8,
         currency: "USD",
-        priced_at: 1_700_050_000_000,
-        tier_index: null,
         pricing_component_count: 1,
-        source_type: "api_key",
-        source_id: "h_7",
+        operation_id: "h_7",
       },
     ])
   })
@@ -276,7 +264,7 @@ describe("explainCharge", () => {
       input()
     )
     expect(result.err).toBeUndefined()
-    expect(result.val?.events.map((event) => event.event_id)).toEqual(["evt_2"])
+    expect(result.val?.events.map((event) => event.operation_id)).toEqual(["o:hash_evt_2"])
   })
 
   it("reports more pages from the journal's count", async () => {
@@ -299,7 +287,12 @@ describe("explainCharge", () => {
     )
     expect(queries[0]).toContain("LIMIT 2\nOFFSET 4")
     expect(result.val?.events).toEqual([])
-    expect(result.val?.summary.eventCount).toBe(3)
+    expect(result.val?.summary).toMatchObject({
+      eventCount: 3,
+      firstEventAt: 1_700_000_000_000,
+      lastEventAt: 1_700_086_400_000,
+      multiComponentEventCount: 1,
+    })
     expect(result.val?.pagination).toEqual({ limit: 2, offset: 4, hasMore: false })
   })
 
@@ -344,7 +337,7 @@ describe("explainCharge", () => {
     expect(queries).toEqual([])
     expect(result.val?.scope.periodKey).toBe("billing_period:bp_1")
     expect(result.val?.summary).toMatchObject({ eventCount: 0, totalUsage: 3, costUsd: null })
-    expect(result.val?.answer).toContain("no rated meter facts are expected")
+    expect(result.val?.answer).toContain("no journal events are expected")
   })
 
   it("returns the journal's failure", async () => {

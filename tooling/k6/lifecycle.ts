@@ -112,7 +112,7 @@ export default async function (): Promise<void> {
     }
 
     if (!eventHandled) {
-      hardFail("ingestSync usage event could not be handled by any usage target")
+      hardFail("usage.consume event could not be handled by any usage target")
     }
 
     usageEventsSent.add(1)

@@ -22,9 +22,9 @@ describe("meterSummary", () => {
       "Count of image_jobs · varies by model"
     )
     expect(meterSummary(sumTokens)).toBe("Sum of input_tokens on ai_completion")
-    expect(
-      meterSummary({ ...sumTokens, aggregationMethod: "max", groupBy: ["model", "region"] })
-    ).toBe("Maximum of input_tokens on ai_completion · varies by model, region")
+    expect(meterSummary({ ...sumTokens, groupBy: ["model", "region"] })).toBe(
+      "Sum of input_tokens on ai_completion · varies by model, region"
+    )
   })
 })
 
@@ -43,7 +43,9 @@ describe("meterMatchesTemplate", () => {
 
   it("is custom once any of them differs, and never without both sides", () => {
     expect(meterMatchesTemplate({ ...countJobs, groupBy: ["model"] }, countJobs)).toBe(false)
-    expect(meterMatchesTemplate({ ...sumTokens, aggregationMethod: "max" }, sumTokens)).toBe(false)
+    expect(meterMatchesTemplate({ ...sumTokens, aggregationMethod: "count" }, sumTokens)).toBe(
+      false
+    )
     expect(
       meterMatchesTemplate({ ...sumTokens, aggregationField: "output_tokens" }, sumTokens)
     ).toBe(false)
@@ -57,15 +59,7 @@ describe("measure", () => {
   it("offers Count alone for an event without numbers, then each method per property", () => {
     expect(measureOptions([])).toEqual([{ value: "count", label: "Count of events" }])
     expect(measureOptions(["input_tokens", "output_tokens"]).map((option) => option.label)).toEqual(
-      [
-        "Count of events",
-        "Sum of input_tokens",
-        "Sum of output_tokens",
-        "Maximum of input_tokens",
-        "Maximum of output_tokens",
-        "Latest of input_tokens",
-        "Latest of output_tokens",
-      ]
+      ["Count of events", "Sum of input_tokens", "Sum of output_tokens"]
     )
   })
 

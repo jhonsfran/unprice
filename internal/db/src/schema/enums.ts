@@ -1,7 +1,6 @@
 import { pgEnum } from "drizzle-orm/pg-core"
 
 import {
-  AGGREGATION_METHODS,
   BILLING_INTERVALS,
   BILLING_PERIOD_STATUS,
   BILLING_PERIOD_TYPE,
@@ -39,7 +38,6 @@ export const grantTypeEnum = pgEnum("grant_type", GRANT_TYPES)
 export const subjectTypeEnum = pgEnum("subject_type", SUBJECT_TYPES)
 export const typeFeatureEnum = pgEnum("feature_types", FEATURE_TYPES)
 export const typeFeatureConfigEnum = pgEnum("feature_config_types", FEATURE_CONFIG_TYPES)
-export const aggregationMethodEnum = pgEnum("aggregation_method", AGGREGATION_METHODS)
 export const usageModeEnum = pgEnum("usage_mode", USAGE_MODES)
 export const paymentProviderEnum = pgEnum("payment_providers", PAYMENT_PROVIDERS)
 export const paymentProviderConnectionTypeEnum = pgEnum(

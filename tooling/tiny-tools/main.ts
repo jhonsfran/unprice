@@ -113,10 +113,6 @@ function buildIngestionProperties(
   return { [field]: usage }
 }
 
-async function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
 // ─── Test runner ─────────────────────────────────────────────────────────────
 
 type TestFn = () => Promise<void>
@@ -262,7 +258,7 @@ test("verification: verify all entitlements", async () => {
   }
 })
 
-test("sync-ingestion: ingest and verify usage delta", async () => {
+test("consume-ingestion: applies usage before returning", async () => {
   if (!usageFeature) {
     skip("no usage-based feature found")
   }
@@ -287,12 +283,12 @@ test("sync-ingestion: ingest and verify usage delta", async () => {
   // 2. Build ingestion payload
   const ingestAmount = 5
   const props = buildIngestionProperties(ingestAmount, {
-    aggregationMethod: usageFeature.aggregationMethod as "sum" | "count" | "max" | "latest",
+    aggregationMethod: usageFeature.aggregationMethod,
     aggregationField: usageFeature.aggregationField,
   })
   assert(props !== null, "could not build ingestion properties")
 
-  // 3. Sync ingest
+  // 3. Consume usage
   const ingestResult = await unprice.usage.consume({
     customerId: CUSTOMER_ID,
     eventSlug: usageFeature.eventSlug,
@@ -302,11 +298,11 @@ test("sync-ingestion: ingest and verify usage delta", async () => {
 
   // A denial (a limit or an empty prepaid wallet) is a 402.
   if (ingestResult.error?.code === "BUDGET_EXCEEDED") {
-    ingestionUnavailableReason = `sync ingestion denied: ${ingestResult.error.message}`
+    ingestionUnavailableReason = `usage.consume denied: ${ingestResult.error.message}`
     skip(ingestionUnavailableReason)
   }
-  assert(!ingestResult.error, `ingestSync error: ${ingestResult.error?.message}`)
-  assert(ingestResult.result?.allowed === true, "ingestSync should be allowed")
+  assert(!ingestResult.error, `usage.consume error: ${ingestResult.error?.message}`)
+  assert(ingestResult.result?.allowed === true, "usage.consume should be allowed")
 
   // 4. Verify after ingestion — usage should have changed
   const after = await unprice.access.check({
@@ -326,16 +322,12 @@ test("sync-ingestion: ingest and verify usage delta", async () => {
     )
   } else if (method === "count") {
     assert(usageAfter === usageBefore + 1, `expected count ${usageBefore + 1}, got ${usageAfter}`)
-  } else if (method === "max") {
-    assert(usageAfter >= ingestAmount, `expected max >= ${ingestAmount}, got ${usageAfter}`)
-  } else if (method === "latest") {
-    assert(usageAfter === ingestAmount, `expected latest = ${ingestAmount}, got ${usageAfter}`)
   }
 
   console.info(`    usage: ${usageBefore} → ${usageAfter} (${method}, ingested ${ingestAmount})`)
 })
 
-test("async-ingestion: ingest and poll for eventual consistency", async () => {
+test("record-ingestion: applies reported usage before returning", async () => {
   if (!usageFeature) {
     skip("no usage-based feature found")
   }
@@ -350,14 +342,14 @@ test("async-ingestion: ingest and poll for eventual consistency", async () => {
   })
 
   assert(!before.error, `pre-verify error: ${before.error?.message}`)
-  assert(before.result?.allowed === true, "feature not allowed — cannot test async ingestion")
+  assert(before.result?.allowed === true, "feature not allowed — cannot test usage.record")
 
   const usageBefore = before.result?.usage ?? 0
 
-  // 2. Async ingest
+  // 2. Record usage
   const ingestAmount = 3
   const props = buildIngestionProperties(ingestAmount, {
-    aggregationMethod: usageFeature.aggregationMethod as "sum" | "count" | "max" | "latest",
+    aggregationMethod: usageFeature.aggregationMethod,
     aggregationField: usageFeature.aggregationField,
   })
   assert(props !== null, "could not build ingestion properties")
@@ -374,39 +366,30 @@ test("async-ingestion: ingest and poll for eventual consistency", async () => {
     ],
   })
 
-  assert(!ingestResult.error, `async ingest error: ${ingestResult.error?.message}`)
-  assert(ingestResult.result?.accepted === 1, "async event should be accepted")
+  assert(!ingestResult.error, `usage.record error: ${ingestResult.error?.message}`)
+  assert(ingestResult.result?.accepted === 1, "reported event should be accepted")
 
-  // 3. Poll until usage reflects the change (max 10s)
-  let usageAfter = usageBefore
-  const deadline = Date.now() + 10_000
+  assert(ingestResult.result?.rejected === 0, "reported event should not be rejected")
+
+  // 3. Accepted usage is available to access.check immediately.
+  const after = await unprice.access.check({
+    customerId: CUSTOMER_ID,
+    featureSlug: usageFeature.featureSlug,
+  })
+  assert(!after.error, `post-record access.check error: ${after.error?.message}`)
+  const usageAfter = after.result?.usage ?? 0
   const method = usageFeature.aggregationMethod
-
-  while (Date.now() < deadline) {
-    await sleep(500)
-
-    const check = await unprice.access.check({
-      customerId: CUSTOMER_ID,
-      featureSlug: usageFeature.featureSlug,
-    })
-
-    if (check.error) continue
-    usageAfter = check.result?.usage ?? usageBefore
-
-    // check if usage has changed from the baseline
-    if (usageAfter !== usageBefore) break
-  }
 
   if (method === "sum") {
     assert(
       usageAfter === usageBefore + ingestAmount,
-      `expected usage ${usageBefore + ingestAmount}, got ${usageAfter} (may need more poll time)`
+      `expected usage ${usageBefore + ingestAmount}, got ${usageAfter}`
     )
   } else if (method === "count") {
     assert(usageAfter === usageBefore + 1, `expected count ${usageBefore + 1}, got ${usageAfter}`)
   }
 
-  console.info(`    async usage: ${usageBefore} → ${usageAfter} (polled until consistent)`)
+  console.info(`    recorded usage: ${usageBefore} → ${usageAfter} (${method})`)
 })
 
 test("idempotency: duplicate key is deduplicated", async () => {
@@ -431,7 +414,7 @@ test("idempotency: duplicate key is deduplicated", async () => {
   const idempotencyKey = randomUUID()
 
   const props = buildIngestionProperties(ingestAmount, {
-    aggregationMethod: usageFeature.aggregationMethod as "sum" | "count" | "max" | "latest",
+    aggregationMethod: usageFeature.aggregationMethod,
     aggregationField: usageFeature.aggregationField,
   })
   assert(props !== null, "could not build ingestion properties")
@@ -479,7 +462,7 @@ test("idempotency: duplicate key is deduplicated", async () => {
   console.info(`    usage: ${usageBefore} → ${usageAfter} (same key sent twice, counted once)`)
 })
 
-test("limit-enforcement: sync ingest rejects when limit exceeded", async () => {
+test("limit-enforcement: consume rejects when limit exceeded", async () => {
   if (!usageFeature) {
     skip("no usage-based feature found")
   }
@@ -506,7 +489,7 @@ test("limit-enforcement: sync ingest rejects when limit exceeded", async () => {
   if (!check.result?.allowed) {
     // already at limit, try one more ingest to confirm rejection
     const props = buildIngestionProperties(1, {
-      aggregationMethod: usageFeature.aggregationMethod as "sum" | "count" | "max" | "latest",
+      aggregationMethod: usageFeature.aggregationMethod,
       aggregationField: usageFeature.aggregationField,
     })
 
@@ -540,7 +523,7 @@ test("limit-enforcement: sync ingest rejects when limit exceeded", async () => {
   // Ingest enough to exceed the limit
   const overshoot = remaining + 1
   const props = buildIngestionProperties(overshoot, {
-    aggregationMethod: usageFeature.aggregationMethod as "sum" | "count" | "max" | "latest",
+    aggregationMethod: usageFeature.aggregationMethod,
     aggregationField: usageFeature.aggregationField,
   })
   assert(props !== null, "could not build ingestion properties")

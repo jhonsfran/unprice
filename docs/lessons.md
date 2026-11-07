@@ -36,6 +36,8 @@ patterns. Keep it cheap to load and useful.
 
 ## Rate Cards And Plan Pricing
 
+- 2026-11-07: A journal operation id is unique within its budget. Dashboard row keys and recent-event cursors must include `budget_key`; page by `(timestamp, operation_id, budget_key)` to keep tied events from different payers.
+
 - 2026-11-06: Rate-card version writes lock the plan, then the version, then its cards. Publication also updates the previous latest version; a version-first lock can deadlock with a shared-card copy.
 - 2026-11-06: `RateCardService.withTransaction(tx)` omits cache writes. The use case invalidates version prices only after the outer transaction commits.
 - 2026-11-06: Inline table cells read saved props while idle. Capture the saved value at focus and skip blur commits if it changed during the edit.
@@ -1107,3 +1109,9 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-11-06: `costPlusRevision` diffs every catalog model's latest row, manual ones included, so a markup change overwrites a hand-set model price. Until overrides are protected, the UI prices catalog features only through the markup.
 - 2026-11-06: `model_costs` is global (`pgTableProject` only prefixes the name; no `project_id`); a project's own model costs live in `custom_model_costs` and enter `costPlusPreview` as `"manual"`, so they outrank models.dev for that project only.
 - 2026-11-06: Catalog previews never save policies. `applyPlanVersionCatalogPricing` checks the reviewed feature-scoped hash and commits policy plus rows together; an exact retry writes nothing.
+
+- 2026-11-07: App TypeScript checks do not validate SDK code stored in strings or Markdown. Keep generated snippets and published examples in `sdk-examples-code.test.ts`, which compiles them against the SDK source contracts.
+
+- 2026-11-07: Payer meters support `sum` and `count`. Validate finite usage reset cadences before publishing; annual invoice billing needs an explicit supported reset for those limits.
+- 2026-11-07: `meterConfig.groupBy` sets rate-card price dimensions. Preserve it through monetization get/apply; it is active configuration.
+- 2026-11-07: Journal `data.unit` owns historical amounts. Group by that unit before adding amounts; invoice statement lookups must scan all allowed priced features, independently of dashboard expansion limits.

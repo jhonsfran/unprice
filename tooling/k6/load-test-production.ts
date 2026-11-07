@@ -178,11 +178,11 @@ async function verifyIngestion(
   client: Unprice,
   input: { customerId: string; expectedMinimum: number; fromTimestamp: number }
 ): Promise<void> {
-  const timeoutSeconds = positiveInteger(process.env.INGESTION_TIMEOUT_SECONDS, 120)
+  const timeoutSeconds = positiveInteger(process.env.INGESTION_TIMEOUT_SECONDS, 600)
   const deadline = Date.now() + timeoutSeconds * 1_000
   let latest: Awaited<ReturnType<typeof client.ingestionEvents.status>>["result"]
 
-  console.info(`Waiting for at least ${input.expectedMinimum} asynchronous ingestion results`)
+  console.info(`Waiting for at least ${input.expectedMinimum} usage results in the journal`)
 
   while (Date.now() < deadline) {
     const status = await client.ingestionEvents.status({
@@ -216,12 +216,10 @@ async function verifyIngestion(
   }
   console.info(`INGESTION_SUMMARY_JSON=${JSON.stringify(summary)}`)
 
-  if (latest.totals.failed > 0 || latest.totals.rejected > 0) {
+  if (latest.totals.rejected > 0) {
     const unsuccessfulEvents = latest.recentEvents.filter(({ state }) => state !== "processed")
     console.error(`INGESTION_FAILURES_JSON=${JSON.stringify(unsuccessfulEvents)}`)
-    throw new Error(
-      `Ingestion finished with ${latest.totals.failed} failed and ${latest.totals.rejected} rejected events`
-    )
+    throw new Error(`Ingestion finished with ${latest.totals.rejected} rejected events`)
   }
 }
 

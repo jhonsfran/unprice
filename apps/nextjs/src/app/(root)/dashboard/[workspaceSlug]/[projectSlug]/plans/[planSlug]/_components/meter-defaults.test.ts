@@ -25,9 +25,9 @@ describe("meterDefaultsFor", () => {
     expect(
       meterDefaultsFor(
         { availableProperties: ["input_tokens", "output_tokens"] },
-        { aggregationMethod: "max", aggregationField: "output_tokens" }
+        { aggregationMethod: "sum", aggregationField: "output_tokens" }
       )
-    ).toEqual({ aggregationMethod: "max", aggregationField: "output_tokens" })
+    ).toEqual({ aggregationMethod: "sum", aggregationField: "output_tokens" })
     expect(
       meterDefaultsFor(
         { availableProperties: ["input_tokens"] },
@@ -46,7 +46,7 @@ describe("aggregationFieldFor", () => {
     expect(aggregationFieldFor([], "sum", "a")).toBeUndefined()
     expect(aggregationFieldFor(["a", "b"], "sum", "b")).toBe("b")
     expect(aggregationFieldFor(["a", "b"], "sum", "c")).toBe("a")
-    expect(aggregationFieldFor(["a", "b"], "latest")).toBe("a")
+    expect(aggregationFieldFor(["a", "b"], "sum")).toBe("a")
   })
 })
 

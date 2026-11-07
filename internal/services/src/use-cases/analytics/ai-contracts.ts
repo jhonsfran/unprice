@@ -3,7 +3,6 @@ import { z } from "zod"
 export const aiEvidenceSchema = z.object({
   type: z.enum([
     "event",
-    "meter_fact",
     "ingestion_status",
     "ledger_line",
     "billing_period",

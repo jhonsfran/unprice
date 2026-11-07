@@ -483,7 +483,7 @@ function baseConfig(): MonetizationConfigInput {
               },
               meterConfig: {
                 eventSlug: "storage_snapshot",
-                aggregationMethod: "max",
+                aggregationMethod: "sum",
                 aggregationField: "gigabytes",
               },
               // No `resetConfig` and no `limit`: the reset cadence is stored as a
@@ -678,7 +678,7 @@ describe("getMonetizationConfig", () => {
       },
       meterConfig: {
         eventSlug: "storage_snapshot",
-        aggregationMethod: "max",
+        aggregationMethod: "sum",
         aggregationField: "gigabytes",
       },
       // The billing cadence, spelled out. Hashes the same as omitting it.
@@ -1370,40 +1370,33 @@ describe("getMonetizationConfig", () => {
     })
   })
 
-  it("warns about inert meter fields instead of dropping them silently", async () => {
+  it("preserves active price dimensions through export, apply, and re-export", async () => {
     const harness = createHarness()
     const applied = await seedProject(harness)
-
     const version = versionOf(harness.store, applied.plans[0]?.planVersionId ?? "")
     const metered = version.planFeatures[1]
-    if (!metered) throw new Error("fixture changed")
-    metered.meterConfig = {
-      ...metered.meterConfig,
-      windowSize: "HOUR",
-      groupBy: ["region"],
-    } as unknown as PlanVersionFeature["meterConfig"]
+    if (!metered?.meterConfig) throw new Error("fixture changed")
+    metered.meterConfig = { ...metered.meterConfig, groupBy: ["region"] }
 
     const read = expectRead(await getMonetizationConfig(harness.getDeps, { projectId: PROJECT_ID }))
-
-    // The plan is still emitted: the document is silent about these, not wrong.
-    expect(read.unrepresentablePlans).toEqual([])
     expect(read.config.plans[0]?.version.features[1]?.meterConfig).toEqual({
       eventSlug: "chat_request",
       aggregationMethod: "count",
+      groupBy: ["region"],
     })
-    expect(read.warnings).toEqual([
-      {
-        planSlug: "free",
-        featureSlug: "chat-messages",
-        code: "meter_fields_dropped",
-        message: expect.stringContaining("groupBy, windowSize"),
-      },
-    ])
-    // The message must not tell the reader the warning is safe to skip. Severity
-    // lives in the code, where a caller can act on it, and the fact that nothing
-    // reads these fields today is context for a human in the skill doc, not
-    // permission for an agent to move on.
-    expect(read.warnings[0]?.message).not.toContain("behaviour is unchanged")
+    expect(read.warnings).toEqual([])
+
+    const rewritten = await applyMonetizationConfig(harness.applyDeps, {
+      projectId: PROJECT_ID,
+      config: read.config,
+    })
+    if (rewritten.err || rewritten.val.state !== "ok") throw new Error("round trip failed")
+    const draft = versionOf(harness.store, rewritten.val.plans[0]?.planVersionId ?? "")
+    expect(draft.planFeatures[1]?.meterConfig?.groupBy).toEqual(["region"])
+    const again = expectRead(
+      await getMonetizationConfig(harness.getDeps, { projectId: PROJECT_ID })
+    )
+    expect(again.config.plans[0]?.version.features[1]?.meterConfig?.groupBy).toEqual(["region"])
   })
 
   it("warns about plan version settings the document cannot carry", async () => {

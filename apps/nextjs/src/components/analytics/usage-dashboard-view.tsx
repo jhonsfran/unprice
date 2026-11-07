@@ -349,7 +349,7 @@ function UsageFeatureTable({
                 {nFormatter(feature.usage, { digits: 1 })}
               </Badge>
               <span className="truncate text-right font-mono text-sm tabular-nums">
-                {feature.spending.displayAmount}
+                {formatSpendingSummary(feature.spending)}
               </span>
             </div>
           )
@@ -382,7 +382,7 @@ function TopConsumersTable({
           <Users className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           <div className="min-w-0">
             <p className="font-medium text-sm">Top customers</p>
-            <p className="text-muted-foreground text-xs">Ranked by ledger spend</p>
+            <p className="text-muted-foreground text-xs">Ranked by accepted usage events</p>
           </div>
         </div>
       </div>
@@ -495,7 +495,7 @@ function UsageDashboardEmptyState({
 }
 
 function UsageExampleActions({ exampleParams }: { exampleParams?: SDKExampleParams }) {
-  // one CTA: the sheet itself offers sync (consume) and async (record) methods
+  // one CTA: the sheet offers consume and record methods
   return (
     <CodeApiSheet
       defaultMethod="consumeUsage"
@@ -529,7 +529,7 @@ function buildChartData(
       } as UsageChartPoint)
 
     point[row.featureSlug] = row.usage
-    point.spendingByFeature[row.featureSlug] = row.spending.displayAmount
+    point.spendingByFeature[row.featureSlug] = formatSpendingSummary(row.spending)
     pointsByDate.set(row.date, point)
   }
 

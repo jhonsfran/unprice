@@ -4,7 +4,7 @@ import { journalAnalytics } from "../../analytics/journal.fixture"
 import { getRejectedEventPayload } from "./get-rejected-event-payload"
 
 const handledAt = Date.parse("2026-11-03T10:00:00.000Z")
-const input = { projectId: "proj_1", customerId: "cus_1", canonicalAuditId: "r:evt_1", handledAt }
+const input = { projectId: "proj_1", customerId: "cus_1", operationId: "r:evt_1", handledAt }
 
 describe("getRejectedEventPayload", () => {
   it("reads the refused event and its rejection from the journal", async () => {
@@ -29,7 +29,7 @@ describe("getRejectedEventPayload", () => {
     expect(queries[0]).toContain("AND status = 'rejected'")
     expect(result.val).toEqual({
       eventId: "evt_1",
-      canonicalAuditId: "r:evt_1",
+      operationId: "r:evt_1",
       customerId: "cus_1",
       rejectionReason: "LIMIT_EXCEEDED",
       payloadJson: JSON.stringify(data, null, 2),

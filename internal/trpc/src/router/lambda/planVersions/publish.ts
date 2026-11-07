@@ -64,6 +64,14 @@ export const publish = protectedProjectProcedure
       })
     }
 
+    if (val.state === "invalid_reset_config") {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message:
+          "Finite usage limits need a daily, weekly, monthly, or one-time reset. Set an explicit supported reset before publishing",
+      })
+    }
+
     if (val.state === "unpriced") {
       throw new TRPCError({
         code: "PRECONDITION_FAILED",

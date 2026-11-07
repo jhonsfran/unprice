@@ -555,7 +555,7 @@ export interface paths {
     put?: never
     /**
      * explain charge
-     * @description Explain one invoice line using ledger metadata and rated meter facts.
+     * @description Explain one invoice line using ledger metadata and journal events.
      */
     post: operations["analytics.charges.explain"]
     delete?: never
@@ -5170,17 +5170,12 @@ export interface operations {
                 eventId: string
                 eventSlug: string
                 /**
-                 * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
+                 * @description How to aggregate usage events within the current billing period. 'sum' totals values and 'count' counts events.
                  * @enum {string}
                  */
-                aggregationMethod: "sum" | "count" | "max" | "latest"
+                aggregationMethod: "sum" | "count"
                 aggregationField?: string
-                filters?: {
-                  [key: string]: string | undefined
-                }
                 groupBy?: string[]
-                /** @enum {string} */
-                windowSize?: "MINUTE" | "HOUR" | "DAY"
               } | null
               feature: {
                 id: string
@@ -5197,17 +5192,12 @@ export interface operations {
                   eventId: string
                   eventSlug: string
                   /**
-                   * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
+                   * @description How to aggregate usage events within the current billing period. 'sum' totals values and 'count' counts events.
                    * @enum {string}
                    */
-                  aggregationMethod: "sum" | "count" | "max" | "latest"
+                  aggregationMethod: "sum" | "count"
                   aggregationField?: string
-                  filters?: {
-                    [key: string]: string | undefined
-                  }
                   groupBy?: string[]
-                  /** @enum {string} */
-                  windowSize?: "MINUTE" | "HOUR" | "DAY"
                 } | null
               }
             }
@@ -6026,17 +6016,12 @@ export interface operations {
                 eventId: string
                 eventSlug: string
                 /**
-                 * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
+                 * @description How to aggregate usage events within the current billing period. 'sum' totals values and 'count' counts events.
                  * @enum {string}
                  */
-                aggregationMethod: "sum" | "count" | "max" | "latest"
+                aggregationMethod: "sum" | "count"
                 aggregationField?: string
-                filters?: {
-                  [key: string]: string | undefined
-                }
                 groupBy?: string[]
-                /** @enum {string} */
-                windowSize?: "MINUTE" | "HOUR" | "DAY"
               } | null
             }[]
           }
@@ -6391,11 +6376,12 @@ export interface operations {
                   meterConfig?: {
                     eventSlug: string
                     /**
-                     * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
+                     * @description How to aggregate usage events within the current billing period. 'sum' totals values and 'count' counts events.
                      * @enum {string}
                      */
-                    aggregationMethod: "sum" | "count" | "max" | "latest"
+                    aggregationMethod: "sum" | "count"
                     aggregationField?: string
+                    groupBy?: string[]
                   }
                   /** @description Maximum usage per reset window. Omit for unlimited */
                   limit?: number | string
@@ -6671,11 +6657,12 @@ export interface operations {
                     meterConfig?: {
                       eventSlug: string
                       /**
-                       * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
+                       * @description How to aggregate usage events within the current billing period. 'sum' totals values and 'count' counts events.
                        * @enum {string}
                        */
-                      aggregationMethod: "sum" | "count" | "max" | "latest"
+                      aggregationMethod: "sum" | "count"
                       aggregationField?: string
+                      groupBy?: string[]
                     }
                     /** @description Maximum usage per reset window. Omit for unlimited */
                     limit?: number | string
@@ -6725,7 +6712,6 @@ export interface operations {
                 | "enforcement_settings_dropped"
                 | "version_settings_dropped"
                 | "feature_settings_dropped"
-                | "meter_fields_dropped"
               message: string
             }[]
             /** @description Null when the project has no plans to integrate against */
@@ -7301,17 +7287,12 @@ export interface operations {
                   eventId: string
                   eventSlug: string
                   /**
-                   * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
+                   * @description How to aggregate usage events within the current billing period. 'sum' totals values and 'count' counts events.
                    * @enum {string}
                    */
-                  aggregationMethod: "sum" | "count" | "max" | "latest"
+                  aggregationMethod: "sum" | "count"
                   aggregationField?: string
-                  filters?: {
-                    [key: string]: string | undefined
-                  }
                   groupBy?: string[]
-                  /** @enum {string} */
-                  windowSize?: "MINUTE" | "HOUR" | "DAY"
                 } | null
                 /** @description The text you can use to show the clients */
                 displayFeatureText: string
@@ -7333,17 +7314,12 @@ export interface operations {
                     eventId: string
                     eventSlug: string
                     /**
-                     * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
+                     * @description How to aggregate usage events within the current billing period. 'sum' totals values and 'count' counts events.
                      * @enum {string}
                      */
-                    aggregationMethod: "sum" | "count" | "max" | "latest"
+                    aggregationMethod: "sum" | "count"
                     aggregationField?: string
-                    filters?: {
-                      [key: string]: string | undefined
-                    }
                     groupBy?: string[]
-                    /** @enum {string} */
-                    windowSize?: "MINUTE" | "HOUR" | "DAY"
                   } | null
                 }
               }[]
@@ -7657,17 +7633,12 @@ export interface operations {
                   eventId: string
                   eventSlug: string
                   /**
-                   * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
+                   * @description How to aggregate usage events within the current billing period. 'sum' totals values and 'count' counts events.
                    * @enum {string}
                    */
-                  aggregationMethod: "sum" | "count" | "max" | "latest"
+                  aggregationMethod: "sum" | "count"
                   aggregationField?: string
-                  filters?: {
-                    [key: string]: string | undefined
-                  }
                   groupBy?: string[]
-                  /** @enum {string} */
-                  windowSize?: "MINUTE" | "HOUR" | "DAY"
                 } | null
                 /** @description The text you can use to show the clients */
                 displayFeatureText: string
@@ -7689,17 +7660,12 @@ export interface operations {
                     eventId: string
                     eventSlug: string
                     /**
-                     * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
+                     * @description How to aggregate usage events within the current billing period. 'sum' totals values and 'count' counts events.
                      * @enum {string}
                      */
-                    aggregationMethod: "sum" | "count" | "max" | "latest"
+                    aggregationMethod: "sum" | "count"
                     aggregationField?: string
-                    filters?: {
-                      [key: string]: string | undefined
-                    }
                     groupBy?: string[]
-                    /** @enum {string} */
-                    windowSize?: "MINUTE" | "HOUR" | "DAY"
                   } | null
                 }
               }[]
@@ -8146,7 +8112,6 @@ export interface operations {
               event_count: number
               total_usage: number
               total_amount: number
-              latest_amount_after: number
               currency: string
               amount_scale: number
               first_event_at: number | null
@@ -8164,32 +8129,21 @@ export interface operations {
               }[]
             }
             events: {
-              event_id: string
               idempotency_key: string
-              customer_entitlement_id: string
-              grant_id: string
-              feature_plan_version_id: string | null
               feature_slug: string
               period_key: string
               event_slug: string
-              aggregation_method: string
               /** @description timestamp of the ingested event */
               timestamp: number
-              /** @description timestamp of when the fact row was created */
+              /** @description timestamp of when the budget operation was created */
               created_at: number
               delta: number
-              value_after: number
               amount: number
-              amount_after: number
               /** @enum {number} */
               amount_scale: 8
               currency: string
-              priced_at: number
-              tier_index: number | null
               pricing_component_count: number
-              /** @enum {string} */
-              source_type: "api_key" | "system" | "unknown"
-              source_id: string
+              operation_id: string
             }[]
             answer: string
             /** @enum {string} */
@@ -8203,7 +8157,6 @@ export interface operations {
               /** @enum {string} */
               type:
                 | "event"
-                | "meter_fact"
                 | "ingestion_status"
                 | "ledger_line"
                 | "billing_period"
@@ -8323,11 +8276,12 @@ export interface operations {
           to_ts: number
           cursor?: {
             handledAt: number
-            canonicalAuditId: string
+            operationId: string
+            budgetKey: string
           } | null
           event_slug?: string
           /** @enum {string} */
-          state?: "processed" | "rejected" | "failed"
+          state?: "processed" | "rejected"
           /** @default 50 */
           limit?: number
         }
@@ -8348,7 +8302,6 @@ export interface operations {
             totals: {
               processed: number
               rejected: number
-              failed: number
               total: number
             }
             successRate: number
@@ -8363,47 +8316,32 @@ export interface operations {
               second: string
               processed: number
               rejected: number
-              failed: number
               total: number
             }[]
             rejections: {
               rejectionReason: string | null
               eventSlug: string
-              sourceId: string
               sourceType: string
               eventCount: number
               lastSeenAt: number
             }[]
             recentEvents: {
               eventId: string
-              canonicalAuditId: string
               customerId: string
               eventSlug: string
               sourceType: string
-              sourceId: string
-              /** @enum {string|null} */
-              ingestionMode: "async" | "sync" | "run" | null
-              runId: string | null
-              traceId: string | null
-              parentRunId: string | null
-              /** @enum {string|null} */
-              workloadType: "agent" | "workflow" | "job" | "tool" | "custom" | null
-              workloadId: string | null
               /** @enum {string} */
-              state: "processed" | "rejected" | "failed"
+              state: "processed" | "rejected"
               rejectionReason: string | null
-              failureStage: string | null
-              failureReason: string | null
-              failureMessage: string | null
-              replayable: boolean
               timestamp: number
-              receivedAt: number
               handledAt: number
+              operationId: string
+              budgetKey: string
             }[]
             facets: {
               states: {
                 /** @enum {string} */
-                value: "processed" | "rejected" | "failed"
+                value: "processed" | "rejected"
                 count: number
               }[]
               eventSlugs: {
@@ -8425,7 +8363,8 @@ export interface operations {
             }
             nextCursor: {
               handledAt: number
-              canonicalAuditId: string
+              operationId: string
+              budgetKey: string
             } | null
             answer: string
             /** @enum {string} */
@@ -8434,7 +8373,6 @@ export interface operations {
               /** @enum {string} */
               type:
                 | "event"
-                | "meter_fact"
                 | "ingestion_status"
                 | "ledger_line"
                 | "billing_period"

@@ -477,7 +477,12 @@ export class AnalyticsService {
   public async getStatementEvents(
     opts: StatementScope & { limit: number; offset: number }
   ): Promise<
-    Result<{ events: z.infer<typeof statementEventSqlRowSchema>[]; total: number }, FetchError>
+    Result<
+      { events: z.infer<typeof statementEventSqlRowSchema>[] } & z.infer<
+        typeof statementEventCountSqlRowSchema
+      >,
+      FetchError
+    >
   > {
     const logFields = {
       context: "failed to read statement events from the budget journal",
@@ -490,7 +495,15 @@ export class AnalyticsService {
     ])
     if (events.err) return Err(events.err)
     if (count.err) return Err(count.err)
-    return Ok({ events: events.val, total: count.val[0]?.events ?? 0 })
+    return Ok({
+      events: events.val,
+      ...(count.val[0] ?? {
+        total: 0,
+        firstEventAt: null,
+        lastEventAt: null,
+        multiComponentEventCount: 0,
+      }),
+    })
   }
 
   private async getPageDimensionVisits<D extends PageDimension>({

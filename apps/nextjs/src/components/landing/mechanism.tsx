@@ -55,7 +55,7 @@ export function MechanismSection() {
                 <p className="font-medium text-background-textContrast text-sm">
                   any answer no · denied before it runs
                 </p>
-                <p className="font-mono text-[11px] text-danger-text">LIMIT_EXCEEDED</p>
+                <p className="font-mono text-[11px] text-danger-text">BUDGET_EXCEEDED</p>
               </div>
             </div>
           </div>
@@ -74,9 +74,9 @@ export function MechanismSection() {
             with the usage, so you can explain the invoice later.
           </p>
           <p className="mt-4 max-w-xl text-background-text text-sm leading-6">
-            A deny returns{" "}
+            A consume denial returns HTTP 402 with{" "}
             <code className="rounded-sm bg-background-bg px-1 py-px font-mono text-[11px] text-background-textContrast">
-              LIMIT_EXCEEDED
+              BUDGET_EXCEEDED
             </code>{" "}
             and nothing changes. An allow keeps the record of the check.
           </p>

@@ -168,9 +168,6 @@ importers:
       ua-parser-js:
         specifier: ^2.0.3
         version: 2.0.9
-      ulid:
-        specifier: ^3.0.2
-        version: 3.0.2
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -362,9 +359,6 @@ importers:
       date-fns-tz:
         specifier: ^3.2.0
         version: 3.2.0(date-fns@3.6.0)
-      dinero.js:
-        specifier: 2.0.2
-        version: 2.0.2
       evlog:
         specifier: 2.4.1
         version: 2.4.1(express@5.2.1)(h3@1.15.5)(hono@4.12.27)(next@15.5.28(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@types/node@24.13.2)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(nitropack@2.13.1(@upstash/redis@1.36.2)(@vercel/functions@1.6.0(@aws-sdk/credential-provider-web-identity@3.972.81))(drizzle-orm@0.44.7(@cloudflare/workers-types@5.20260731.1)(@neondatabase/serverless@1.1.0)(@opentelemetry/api@1.9.1)(@types/pg@8.11.6)(@upstash/redis@1.36.2)(gel@2.2.0))(encoding@0.1.13)(xml2js@0.6.2))(ofetch@1.5.1)(react@18.3.1)
@@ -12387,10 +12381,6 @@ packages:
   uint8array-extras@1.5.0:
     resolution: {integrity: sha512-rvKSBiC5zqCCiDZ9kAOszZcDvdAHwwIKJG33Ykj43OKcWsnmcBRL09YTU4nOeHZ8Y2a7l1MgTd08SBe9A8Qj6A==}
     engines: {node: '>=18'}
-
-  ulid@3.0.2:
-    resolution: {integrity: sha512-yu26mwteFYzBAot7KVMqFGCVpsF6g8wXfJzQUHvu1no3+rRRSFcSV2nKeYvNPLD2J4b08jYBDhHUjeH0ygIl9w==}
-    hasBin: true
 
   ultrahtml@1.6.0:
     resolution: {integrity: sha512-R9fBn90VTJrqqLDwyMph+HGne8eqY1iPfYhPzZrvKpIfwkWZbcYlfpsb8B9dTvBfpy1/hqAD7Wi8EKfP9e8zdw==}
@@ -25878,8 +25868,6 @@ snapshots:
     optional: true
 
   uint8array-extras@1.5.0: {}
-
-  ulid@3.0.2: {}
 
   ultrahtml@1.6.0: {}
 

@@ -48,7 +48,6 @@ export const explainChargeApiResponseSchema = z.object({
     event_count: z.number().int(),
     total_usage: z.number(),
     total_amount: z.number().int(),
-    latest_amount_after: z.number().int(),
     currency: z.string(),
     amount_scale: z.number().int(),
     first_event_at: z.number().int().nullable(),
@@ -87,7 +86,7 @@ export const route = createRoute(
       path: "/v1/analytics/charges/explain",
       operationId: "analytics.charges.explain",
       summary: "explain charge",
-      description: "Explain one invoice line using ledger metadata and rated meter facts.",
+      description: "Explain one invoice line using ledger metadata and journal events.",
       method: "post",
       tags,
       request: {
@@ -197,7 +196,6 @@ export const registerExplainChargeV1 = (app: App) =>
         event_count: result.val.summary.eventCount,
         total_usage: result.val.summary.totalUsage,
         total_amount: result.val.summary.totalAmount,
-        latest_amount_after: result.val.summary.latestAmountAfter,
         currency: result.val.summary.currency,
         amount_scale: result.val.summary.amountScale,
         first_event_at: result.val.summary.firstEventAt,
@@ -280,10 +278,13 @@ function buildEvidence(result: ExplainChargeOutput): ExplainChargeApiResponse["e
         ]
       : []),
     ...result.events.map((event) => ({
-      type: "meter_fact" as const,
-      id: [result.scope.projectId, result.scope.customerId, event.period_key, event.source_id].join(
-        ":"
-      ),
+      type: "event" as const,
+      id: [
+        result.scope.projectId,
+        result.scope.customerId,
+        event.period_key,
+        event.operation_id,
+      ].join(":"),
       source: "r2" as const,
       timestamp: event.timestamp,
     })),
@@ -296,13 +297,13 @@ function buildWarnings(result: ExplainChargeOutput): string[] {
   if (result.summary.eventCount === 0) {
     warnings.push(
       isBillingPeriodScopedLine(result)
-        ? "This non-usage line is explained from ledger and billing-period evidence; no rated meter facts are expected."
-        : "No rated meter facts were found for this invoice line."
+        ? "This non-usage line is explained from ledger and billing-period evidence; no journal events are expected."
+        : "No journal events were found for this invoice line."
     )
   }
 
   if (result.pagination.hasMore) {
-    warnings.push("Additional rated meter facts are available on later pages.")
+    warnings.push("Additional journal events are available on later pages.")
   }
 
   return warnings
@@ -318,7 +319,7 @@ function buildNextActions(result: ExplainChargeOutput): string[] {
   }
 
   if (result.pagination.hasMore) {
-    return ["Request the next page to inspect the remaining rated meter facts."]
+    return ["Request the next page to inspect the remaining journal events."]
   }
 
   return []
@@ -338,7 +339,6 @@ function explainChargeErrorToApiError(error: unknown): UnpriceApiError {
         return new UnpriceApiError({ code: "NOT_FOUND", message: error.message })
       case "BILLING_PERIOD_CONTEXT_MISMATCH":
       case "BILLING_PERIOD_METADATA_MISSING":
-      case "PERIOD_KEY_NOT_DERIVED":
         return new UnpriceApiError({ code: "BAD_REQUEST", message: error.message })
     }
   }

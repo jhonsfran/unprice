@@ -1,4 +1,8 @@
+import { readFileSync } from "node:fs"
+import { resolve } from "node:path"
+import { OpenAPIHono } from "@hono/zod-openapi"
 import { describe, expect, it, vi } from "vitest"
+import { z } from "zod"
 import { route as accessUpdateRoute } from "~/routes/access/updateACLV1"
 import { route as analyticsChargesExplainRoute } from "~/routes/analytics/explainChargeV1"
 import { route as analyticsCurrentBillingPeriodUsageRoute } from "~/routes/analytics/getCurrentBillingPeriodUsageV1"
@@ -51,7 +55,7 @@ type RouteUnderTest = {
   "x-unprice"?: EndpointContract
 }
 
-const routes = [
+const routeDefinitions = [
   accessUpdateRoute,
   accessCheckRoute,
   accessEntitlementsListRoute,
@@ -89,7 +93,8 @@ const routes = [
   paymentProviderCallbacksSetupRoute,
   paymentProviderCallbacksWebhookRoute,
   paymentProviderCallbacksStripeConnectWebhookRoute,
-].map((route) => route as RouteUnderTest)
+]
+const routes = routeDefinitions.map((route) => route as RouteUnderTest)
 
 const expectedRoutes = new Map<string, string>([
   ["access.update", "POST /v1/access/update"],
@@ -183,6 +188,30 @@ function routeKey(route: RouteUnderTest): string {
 }
 
 describe("public operation contracts", () => {
+  it("keeps published OpenAPI request and response contracts in sync with the routes", () => {
+    const app = new OpenAPIHono()
+    for (const route of routeDefinitions) {
+      if (!("hide" in route && route.hide === true)) app.openAPIRegistry.registerPath(route)
+    }
+    const generated = app.getOpenAPIDocument({
+      openapi: "3.0.3",
+      info: { title: "Unprice API", version: "1.0.0" },
+    })
+    const published = z
+      .object({ paths: z.record(z.string(), z.unknown()) })
+      .parse(JSON.parse(readFileSync(resolve(__dirname, "../../../docs/openapi.json"), "utf8")))
+    for (const route of routeDefinitions) {
+      const { path } = route
+      if ("hide" in route && route.hide === true) {
+        expect(generated.paths[path], path).toBeUndefined()
+        expect(published.paths[path], path).toBeUndefined()
+        continue
+      }
+      expect(generated.paths[path], path).toBeDefined()
+      expect(JSON.parse(JSON.stringify(generated.paths[path])), path).toEqual(published.paths[path])
+    }
+  })
+
   it("declares x-unprice metadata on every route", () => {
     expect(
       routes.map((route) => ({

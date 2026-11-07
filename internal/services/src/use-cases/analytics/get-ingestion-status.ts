@@ -2,6 +2,7 @@ import { Err, type FetchError, Ok, type Result } from "@unprice/error"
 import { z } from "zod"
 import type { AnalyticsService } from "../../analytics"
 import {
+  JOURNAL_EVENT_STATES,
   type JournalEventFilter,
   type JournalEventScope,
   customerOfKey,
@@ -23,19 +24,14 @@ export const getIngestionStatusWindowSchema = z
     path: ["to"],
   })
 
-/** The last row of a page: when the journal wrote it and its operation id. */
+/** The last row of a page, including the budget that owns the operation. */
 export const getIngestionStatusCursorSchema = z.object({
   handledAt: z.number().int(),
-  canonicalAuditId: z.string(),
+  operationId: z.string(),
+  budgetKey: z.string(),
 })
 
-/**
- * `failed` stays in the contract for the dashboard's tones; the payer budget answers every event
- * synchronously (ADR-0008 D6), so an event that could not be decided is returned to its caller and
- * never journaled: it is always 0.
- */
-const ingestionStates = ["processed", "rejected", "failed"] as const
-const ingestionStateSchema = z.enum(ingestionStates)
+export const ingestionStateSchema = z.enum(JOURNAL_EVENT_STATES)
 const ingestionStatusFilterSchema = z
   .object({
     customerIds: z.array(z.string()).optional(),
@@ -81,7 +77,6 @@ export const getIngestionStatusOutputSchema = z.object({
   totals: z.object({
     processed: z.number().int(),
     rejected: z.number().int(),
-    failed: z.number().int(),
     total: z.number().int(),
   }),
   successRate: z.number(),
@@ -98,7 +93,6 @@ export const getIngestionStatusOutputSchema = z.object({
       second: z.string(),
       processed: z.number().int(),
       rejected: z.number().int(),
-      failed: z.number().int(),
       total: z.number().int(),
     })
   ),
@@ -107,7 +101,6 @@ export const getIngestionStatusOutputSchema = z.object({
       rejectionReason: z.string().nullable(),
       eventSlug: z.string(),
       /** The usage verb, as for `sourceType`. */
-      sourceId: z.string(),
       sourceType: z.string(),
       eventCount: z.number().int(),
       lastSeenAt: z.number().int(),
@@ -118,27 +111,16 @@ export const getIngestionStatusOutputSchema = z.object({
       /** The event's idempotency key. */
       eventId: z.string(),
       /** The journal's operation id: `o:<key hash>`, or `r:<idempotency key>` for a refusal. */
-      canonicalAuditId: z.string(),
+      operationId: z.string(),
       customerId: z.string(),
       eventSlug: z.string(),
       sourceType: z.string(),
       /** The payer budget key. */
-      sourceId: z.string(),
-      ingestionMode: z.enum(["async", "sync", "run"]).nullable(),
-      runId: z.string().nullable(),
-      traceId: z.string().nullable(),
-      parentRunId: z.string().nullable(),
-      workloadType: z.enum(["agent", "workflow", "job", "tool", "custom"]).nullable(),
-      workloadId: z.string().nullable(),
+      budgetKey: z.string(),
       state: ingestionStateSchema,
       rejectionReason: z.string().nullable(),
-      failureStage: z.string().nullable(),
-      failureReason: z.string().nullable(),
-      failureMessage: z.string().nullable(),
-      replayable: z.boolean(),
       /** When the event happened; when it was journaled if it carried no time. */
       timestamp: z.number().int(),
-      receivedAt: z.number().int(),
       handledAt: z.number().int(),
     })
   ),
@@ -181,23 +163,6 @@ export async function getIngestionStatus(
     window: { from: new Date(input.window.from), to: new Date(input.window.to) },
     filter: journalFilter(input.filter),
   }
-  // No event fails in the journal, so a filter on `failed` alone matches nothing: answer without
-  // reading it. Dropping `failed` from the filter would read every state instead.
-  const states = input.filter.states ?? []
-  if (states.length > 0 && states.every((state) => state === "failed")) {
-    return Ok(
-      buildOutput({
-        input,
-        now: deps.now?.() ?? Date.now(),
-        totals: [],
-        timeline: [],
-        rejections: [],
-        recent: [],
-        facets: [],
-      })
-    )
-  }
-
   const [totals, timeline, rejections, recent, facets] = await Promise.all([
     deps.analytics.getEventTotals(scope),
     deps.analytics.getEventTimeline(scope),
@@ -205,9 +170,7 @@ export async function getIngestionStatus(
     deps.analytics.getRecentEvents({
       ...scope,
       limit: input.limit + 1,
-      cursor: input.cursor
-        ? { handledAt: input.cursor.handledAt, operationId: input.cursor.canonicalAuditId }
-        : null,
+      cursor: input.cursor,
     }),
     input.includeFacets
       ? deps.analytics.getEventFacets({ ...scope, limit: FACET_LIMIT })
@@ -261,42 +224,34 @@ function buildOutput({
     }
   }
   const total = counts.processed + counts.rejected
-  const outputTotals = { ...counts, failed: 0, total }
+  const outputTotals = { ...counts, total }
   const successRate = total === 0 ? 0 : counts.processed / total
 
   const recentEvents = recent.slice(0, input.limit).map((row): Output["recentEvents"][number] => ({
     eventId: row.idempotency_key ?? row.operation_id,
-    canonicalAuditId: row.operation_id,
+    operationId: row.operation_id,
     customerId: customerOfKey(row.budget_key) ?? row.budget_key,
     eventSlug: row.event_slug ?? "",
     sourceType: row.kind,
-    sourceId: row.budget_key,
-    ingestionMode: null,
-    runId: null,
-    traceId: null,
-    parentRunId: null,
-    workloadType: null,
-    workloadId: null,
+    budgetKey: row.budget_key,
     state: row.state,
     rejectionReason: row.rejection_reason,
-    failureStage: null,
-    failureReason: null,
-    failureMessage: null,
-    replayable: false,
     timestamp: row.occurred_at ?? row.timestamp.getTime(),
-    receivedAt: row.timestamp.getTime(),
     handledAt: row.timestamp.getTime(),
   }))
   const lastVisible = recent.length > input.limit ? recent[input.limit - 1] : undefined
   const nextCursor = lastVisible
-    ? { handledAt: lastVisible.timestamp.getTime(), canonicalAuditId: lastVisible.operation_id }
+    ? {
+        handledAt: lastVisible.timestamp.getTime(),
+        operationId: lastVisible.operation_id,
+        budgetKey: lastVisible.budget_key,
+      }
     : null
 
   const live = foldTimeline(timeline)
   const outputRejections = rejections.map((row) => ({
     rejectionReason: row.rejection_reason,
     eventSlug: row.event_slug ?? "",
-    sourceId: row.kind,
     sourceType: row.kind,
     eventCount: row.events,
     lastSeenAt: row.last_seen_at.getTime(),
@@ -336,9 +291,7 @@ function buildOutput({
 }
 
 function journalFilter(filter: GetIngestionStatusInput["filter"]): JournalEventFilter {
-  const states = (filter.states ?? []).filter(
-    (state): state is "processed" | "rejected" => state !== "failed"
-  )
+  const states = filter.states ?? []
   return {
     ...(compact(filter.customerIds) && { customerIds: compact(filter.customerIds) }),
     ...(compact(filter.eventSlugs) && { eventSlugs: compact(filter.eventSlugs) }),
@@ -366,7 +319,6 @@ function foldTimeline(
       second: row.bucket.toISOString(),
       processed: 0,
       rejected: 0,
-      failed: 0,
       total: 0,
     }
     entry[row.state] += row.events

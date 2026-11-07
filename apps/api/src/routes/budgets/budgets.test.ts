@@ -185,6 +185,37 @@ describe("budgets API", () => {
     expect(mocks.keyAuth).toHaveBeenCalledWith(expect.anything())
   })
 
+  it("stops a customer-bound key before it reads or mutates another payer budget", async () => {
+    mocks.keyAuth.mockResolvedValue({
+      id: "key_1",
+      projectId: "proj_123",
+      defaultCustomerId: "cus_a",
+    })
+    const responses = await Promise.all([
+      call("/v1/budgets/get?key=unprice:customer:cus_b"),
+      call("/v1/budgets/release", { key: "unprice:customer:cus_b", holdId: "h_1" }),
+    ])
+
+    expect(responses.map((response) => response.status)).toEqual([403, 403])
+    expect(mocks.execute).not.toHaveBeenCalled()
+  })
+
+  it.each(["cus_a", null])(
+    "allows the payer's own or an unbound key (%s)",
+    async (defaultCustomerId) => {
+      mocks.keyAuth.mockResolvedValue({ id: "key_1", projectId: "proj_123", defaultCustomerId })
+      rejectWith({ code: "BUDGET_NOT_FOUND" })
+
+      const response = await call("/v1/budgets/get?key=unprice:customer:cus_a")
+
+      expect(response.status).toBe(404)
+      expect(mocks.execute.mock.calls[0]?.[0]).toEqual({
+        projectId: "proj_123",
+        key: "unprice:customer:cus_a",
+      })
+    }
+  )
+
   it("returns 403 naming the config key when a runtime key loosens a budget", async () => {
     rejectWith({
       code: "LOOSENING_FORBIDDEN",

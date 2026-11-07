@@ -12,6 +12,10 @@ reclamation rules.
 Amended on 2026-10-20. A closed budget deletes its storage 7 days after `closesAt`, not 30. A
 closed budget never reopens or resets, so a month of retention kept nothing anyone needed.
 
+Amended by [ADR-0008](../adr/ADR-0008-payer-budgets-rate-cards-and-r2-journal.md) on
+2026-11-04. Use its payer budget and R2 journal decisions when this document describes the
+removed entitlement processor, run runtime, queue, or Tinybird usage pipeline.
+
 ## Date
 
 2026-10-16

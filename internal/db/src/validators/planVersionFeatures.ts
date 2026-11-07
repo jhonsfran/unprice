@@ -9,8 +9,10 @@ import { FEATURE_TYPES_MAPS, USAGE_MODES_MAP } from "../utils"
 import { featureSelectBaseSchema } from "./features"
 import { featurePriceInputSchema } from "./rate-cards"
 import {
+  USAGE_LIMIT_RESET_MESSAGE,
   billingConfigSchema,
   featureConfigType,
+  isUsageLimitResetSupported,
   meterConfigSchema,
   overageStrategySchema,
   resetConfigSchema,
@@ -333,11 +335,28 @@ const validatePlanVersionFeatureMutation = ({
     meterConfig?: z.infer<typeof meterConfigSchema> | null
     config?: z.infer<typeof configFeatureSchema>
     included?: string | null
+    limit?: number | null
+    billingConfig?: z.infer<typeof billingConfigSchema>
+    resetConfig?: z.infer<typeof resetConfigSchema> | null
   }
   ctx: z.RefinementCtx
   validateConfigWithoutFeatureType?: boolean
   requireMeterConfigForUsage?: boolean
 }) => {
+  if (
+    data.featureType === FEATURE_TYPES_MAPS.usage.code &&
+    typeof data.limit === "number" &&
+    data.limit > 0 &&
+    data.billingConfig &&
+    !isUsageLimitResetSupported(data.billingConfig, data.resetConfig)
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: USAGE_LIMIT_RESET_MESSAGE,
+      path: ["resetConfig"],
+    })
+  }
+
   if (data.featureType && data.featureType !== FEATURE_TYPES_MAPS.usage.code && data.meterConfig) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,

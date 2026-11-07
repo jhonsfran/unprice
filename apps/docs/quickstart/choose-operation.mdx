@@ -21,7 +21,7 @@ feature you are checking, such as `ai-messages`, `ai-generations`, or `ai-tools`
 | --- | --- | --- | --- | --- |
 | Compare Unprice against existing logic | `access.check` | No | No | Shadow mode, preflight UI, entitlement checks |
 | Enforce a known usage amount before work runs | `usage.consume` | Yes | Yes | API calls, exports, known-cost actions |
-| Report usage without blocking the request | `usage.record` | No | Yes, asynchronously | Background metering, invoice evidence, eventual analytics |
+| Report completed usage | `usage.record` | No | Yes | Background metering, invoice evidence, eventual analytics |
 | Hold a maximum for one variable-cost call, or cap multi-step work | `budget(key).authorize` then `hold.settle`, or `budget(key).spend` | Yes | Yes | LLM calls priced on tokens you cannot predict; workflows, jobs, tools, agents |
 | Cap spend on any key, with no plan or customer in Unprice | `budget(key).spend` | Yes | Yes | A hard cap per customer, run, or agent while your billing stays elsewhere; see [Unprice Budgets](/budgets/overview) |
 
@@ -108,7 +108,7 @@ if (error) {
 }
 ```
 
-`usage.record` never blocks over-budget work. Do not use it as a spend gate. One async event can
+`usage.record` never blocks over-budget work. Do not use it as a spend gate. One reported event can
 carry several measured properties; meters decide which property applies to each feature.
 
 ## Budgets: hold a maximum before the work

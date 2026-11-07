@@ -185,13 +185,15 @@ export type BudgetFunding = z.infer<typeof budgetFundingSchema>
  * are all free (a free plan) meters without cards; a priced feature needs them. Internal callers
  * only.
  */
+export const BUDGET_MAX_METERED_FEATURES = 64
+
 export const budgetPricingSchema = z
   .object({
     cards: z
       .object({ base: z.string().min(1), overlay: z.string().min(1).optional() })
       .strict()
       .optional(),
-    features: z.array(budgetMeteredFeatureSchema).max(64),
+    features: z.array(budgetMeteredFeatureSchema).max(BUDGET_MAX_METERED_FEATURES),
     statements: z.enum(["required", "none"]),
     funding: budgetFundingSchema.optional(),
   })

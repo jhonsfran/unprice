@@ -22,12 +22,12 @@ logic. Use `message` to correct the request. Include `requestId` if you contact 
 1. Check the error `code` and `message`.
 2. Correct the request or the project configuration.
 3. Retry only when the operation is safe to retry. Reuse the same idempotency key for a repeated
-   usage or run request.
+   usage or budget request.
 4. If the problem continues, contact [support](mailto:seb@unprice.dev) and include the full error
    response and `requestId`.
 
-## A denial is not an API error
+## Commercial denials
 
-A valid `access.check` or `usage.consume` request can return HTTP `200` with `allowed: false`.
-Inspect `rejectionReason` before starting paid work. HTTP `429` means API rate limiting; your application can choose
-its own HTTP status when it handles a commercial denial.
+A valid `access.check` request can return HTTP `200` with `allowed: false`. Inspect
+`rejectionReason` before starting paid work. `usage.consume` returns HTTP `402` for a commercial
+denial. HTTP `429` means API rate limiting.

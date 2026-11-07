@@ -1,57 +1,20 @@
 import { TRPCError } from "@trpc/server"
 import {
-  getIngestionStatusCursorSchema,
+  getIngestionStatusInputSchema,
   getIngestionStatusOutputSchema,
   getIngestionStatus as getIngestionStatusUseCase,
 } from "@unprice/services/use-cases"
-import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 
 export const getIngestionStatus = protectedProjectProcedure
-  .input(
-    z.object({
-      customerId: z.string().optional(),
-      window: z
-        .object({
-          from: z.number().int(),
-          to: z.number().int(),
-        })
-        .refine((window) => window.from < window.to, {
-          message: "window.to must be greater than window.from",
-          path: ["to"],
-        }),
-      cursor: getIngestionStatusCursorSchema.nullish(),
-      filter: z
-        .object({
-          customerIds: z.array(z.string()).optional(),
-          eventSlugs: z.array(z.string()).optional(),
-          sourceIds: z.array(z.string()).optional(),
-          sourceTypes: z.array(z.string()).optional(),
-          rejectionReasons: z.array(z.string()).optional(),
-          states: z.array(z.enum(["processed", "rejected", "failed"])).optional(),
-          search: z.string().optional(),
-        })
-        .optional()
-        .default({}),
-      includeFacets: z.boolean().optional().default(false),
-      limit: z.number().int().min(1).max(100).optional().default(50),
-    })
-  )
+  .input(getIngestionStatusInputSchema.omit({ projectId: true }))
   .output(getIngestionStatusOutputSchema)
   .query(async (opts) => {
     const result = await getIngestionStatusUseCase(
       {
         analytics: opts.ctx.services.analytics,
       },
-      {
-        projectId: opts.ctx.project.id,
-        customerId: opts.input.customerId,
-        window: opts.input.window,
-        cursor: opts.input.cursor,
-        filter: opts.input.filter,
-        includeFacets: opts.input.includeFacets,
-        limit: opts.input.limit,
-      }
+      { ...opts.input, projectId: opts.ctx.project.id }
     )
 
     if (result.err) {

@@ -11,8 +11,12 @@ import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
 import { z } from "zod"
-import { keyAuth, resolveCustomerIdForApiKeyOrThrow } from "~/auth/key"
-import { UnpriceApiError, toUnpriceApiError } from "~/errors"
+import {
+  keyAuth,
+  resolveCustomerIdForApiKeyOrThrow,
+  validateIsAllowedToAccessProject,
+} from "~/auth/key"
+import { toUnpriceApiError } from "~/errors"
 import { serializeError } from "~/errors/log"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
@@ -91,11 +95,11 @@ export type GetAnalyticsUsageResponse = z.infer<
 
 function formatUsageResponse(
   row: FeatureUsageRow & { feature_slug: string },
-  projectId: string,
-  currency: string
+  projectId: string
 ): z.infer<typeof getUsageResponseSchema> {
   const amount = formatAmount(row.amount)
   const customerId = row.budget_key ? customerOfKey(row.budget_key) : null
+  const currency = row.unit.startsWith("money:") ? row.unit.slice("money:".length) : null
 
   return {
     project_id: projectId,
@@ -104,8 +108,8 @@ function formatUsageResponse(
     usage: Number(formatAmount(row.quantity)),
     spending: {
       amount,
-      currency,
-      display_amount: formatMoney(amount, currency),
+      currency: currency ?? "XXX",
+      display_amount: currency ? formatMoney(amount, currency) : `${amount} ${row.unit}`,
     },
   }
 }
@@ -131,17 +135,10 @@ export const registerGetAnalyticsUsageV1 = (app: App) =>
 
     const { start, end } = prepareInterval(range)
 
-    // main workspace can see all usage
-    const isMain = key.project.workspace.isMain
-    const projectID = isMain ? (projectId ? projectId : key.projectId) : key.projectId
-    const currency = key.project.defaultCurrency
-
-    if (!isMain && projectID !== projectId) {
-      throw new UnpriceApiError({
-        code: "FORBIDDEN",
-        message: "You are not allowed to access this app analytics.",
-      })
-    }
+    const projectID = validateIsAllowedToAccessProject({
+      key,
+      requestedProjectId: projectId ?? key.projectId,
+    })
 
     const cacheKey = `journal:v2:${projectID}:${customerId}:${range}`
 
@@ -173,7 +170,7 @@ export const registerGetAnalyticsUsageV1 = (app: App) =>
           .filter(
             (row): row is FeatureUsageRow & { feature_slug: string } => row.feature_slug !== null
           )
-          .map((row) => formatUsageResponse(row, projectID, currency)),
+          .map((row) => formatUsageResponse(row, projectID)),
         truncated_events: rows.val
           .filter((row) => row.feature_slug === null)
           .reduce((sum, row) => sum + row.events, 0),

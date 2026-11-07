@@ -81,14 +81,13 @@ message; message text is not a contract.
 | `enforcement_settings_dropped` | Commercial change | Stop. Get explicit human approval |
 | `version_settings_dropped` | Commercial change | Stop. Get explicit human approval |
 | `feature_settings_dropped` | Cosmetic or inert today | Report and continue |
-| `meter_fields_dropped` | Cosmetic or inert today | Report and continue |
 
 **This table is the contract for which codes block.** The blocking subset has no SDK representation
 — it is not a named schema in the OpenAPI document, and the server-side constant
 `MONETIZATION_BLOCKING_WARNING_CODES` ships from a package that is never published. Do not go
 looking for an import; take the two blocking values from the table above.
 
-The four code *values* do reach the installed types, so a typo fails to compile instead of silently
+The three code *values* do reach the installed types, so a typo fails to compile instead of silently
 missing a warning. The union is inline, so the reference is the whole path rather than a named
 component:
 
@@ -96,7 +95,7 @@ component:
 type WarningCode =
   operations["monetization.get"]["responses"][200]["content"]["application/json"]["warnings"][number]["code"]
 // "enforcement_settings_dropped" | "version_settings_dropped"
-//   | "feature_settings_dropped" | "meter_fields_dropped"
+//   | "feature_settings_dropped"
 ```
 
 Warnings fire almost exclusively for versions authored in the dashboard. A version `apply` created
@@ -188,3 +187,8 @@ knowable before the work runs, which rules out a guessed `usage.consume` quantit
 
 Do not write runtime integration code against a draft version. Wait for the user to confirm they
 published.
+
+Usage meters support `sum` and `count`. `sum` needs an `aggregationField`; `groupBy` defines active
+price dimensions and must survive configuration export and apply. Finite usage allowances need a
+daily, weekly, monthly, or one-time reset. Use an explicit supported reset on annual or
+multi-interval billing.

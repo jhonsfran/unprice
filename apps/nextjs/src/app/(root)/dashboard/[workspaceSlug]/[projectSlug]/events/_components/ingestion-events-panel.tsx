@@ -9,6 +9,7 @@ import { RequestPathSparkline } from "~/components/analytics/request-path-sparkl
 import { CodeApiSheet } from "~/components/code-api-sheet"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { IngestionEventDetailsSheet } from "./ingestion-event-details-sheet"
+import { ingestionEventKey } from "./ingestion-event-rows"
 import { IngestionEventsSummarySkeleton } from "./ingestion-events-summary-skeleton"
 import { buildIngestionEventsColumns } from "./ingestion-events-table-schema"
 import { useIngestionEventsData } from "./use-ingestion-events-data"
@@ -46,7 +47,7 @@ export function IngestionEventsPanel() {
             status={status}
             isFetching={isRefreshing}
             title="Ingestion health"
-            description={`Events ${windowLabel}. Rejections are business denials; failures need recovery.`}
+            description={`Events ${windowLabel}. The journal shows accepted events and business denials.`}
             presentation="section"
             showNoEventsAction={false}
           />
@@ -73,9 +74,9 @@ export function IngestionEventsPanel() {
           onViewDetails: setDetailsEvent,
         })}
         data={rows}
-        getRowId={(row) => row.canonicalAuditId}
+        getRowId={ingestionEventKey}
         filters={filterOptions}
-        searchPlaceholder="Search events, customers, sources, modes, reasons"
+        searchPlaceholder="Search events, customers, operations, reasons"
         searchValue={searchValue}
         onSearchValueChange={(value) => {
           void setFilters({ page: 1, search: value || null })
@@ -114,15 +115,9 @@ export function IngestionEventsPanel() {
           </EmptyPlaceholder>
         }
         loadingState={TABLE_LOADING_STATE}
-        getRowClassName={(row) =>
-          row.state === "failed"
-            ? "bg-destructive/10"
-            : row.state === "rejected"
-              ? "bg-warning/10"
-              : undefined
-        }
+        getRowClassName={(row) => (row.state === "rejected" ? "bg-warning/10" : undefined)}
         initialColumnVisibility={{
-          sourceId: false,
+          budgetKey: false,
           rejectionReason: false,
           eventId: false,
         }}

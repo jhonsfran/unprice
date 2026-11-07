@@ -6,7 +6,7 @@ export const getRejectedEventPayloadInputSchema = z.object({
   projectId: z.string(),
   customerId: z.string().min(1),
   /** The journal's operation id of the refusal: `r:<idempotency key>`. */
-  canonicalAuditId: z.string().min(1),
+  operationId: z.string().min(1),
   /** When the API journaled the refusal; bounds the scan. */
   handledAt: z.number().int(),
 })
@@ -14,7 +14,7 @@ export const getRejectedEventPayloadInputSchema = z.object({
 export const getRejectedEventPayloadOutputSchema = z
   .object({
     eventId: z.string(),
-    canonicalAuditId: z.string(),
+    operationId: z.string(),
     customerId: z.string(),
     rejectionReason: z.string().nullable(),
     /** The refused event and its rejection as the journal keeps them, pretty-printed. */
@@ -47,7 +47,7 @@ export async function getRejectedEventPayload(
   const row = await deps.analytics.getRejectedEvent({
     projectId: input.projectId,
     customerId: input.customerId,
-    operationId: input.canonicalAuditId,
+    operationId: input.operationId,
     handledAt: input.handledAt,
   })
   if (row.err) return Err(row.err)
@@ -60,7 +60,7 @@ export async function getRejectedEventPayload(
   return Ok(
     getRejectedEventPayloadOutputSchema.parse({
       eventId: (parsed.success && parsed.data.idempotencyKey) || row.val.operation_id,
-      canonicalAuditId: row.val.operation_id,
+      operationId: row.val.operation_id,
       customerId: input.customerId,
       rejectionReason: (parsed.success && parsed.data.rejection?.code) || null,
       payloadJson: JSON.stringify(data, null, 2),

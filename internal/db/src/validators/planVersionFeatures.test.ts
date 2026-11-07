@@ -35,6 +35,43 @@ describe("planVersionFeatureInsertBaseSchema", () => {
     expect(result.data.meterConfig?.aggregationMethod).toBe("count")
   })
 
+  it.each([
+    { billingInterval: "year", billingIntervalCount: 1 },
+    { billingInterval: "month", billingIntervalCount: 2 },
+    { billingInterval: "minute", billingIntervalCount: 1 },
+  ] as const)(
+    "requires a supported reset for finite usage on $billingInterval × $billingIntervalCount billing",
+    (cadence) => {
+      const feature = {
+        featureId: "feature_123",
+        planVersionId: "plan_version_123",
+        featureType: "usage",
+        billingConfig: { ...billingConfig, ...cadence },
+        order: 1024,
+        limit: 20,
+        config: { usageMode: "unit" },
+        meterConfig: { eventId: "event_123", eventSlug: "completion", aggregationMethod: "count" },
+      }
+      const invalid = planVersionFeatureInsertBaseSchema.safeParse(feature)
+      expect(invalid.error?.issues.map((issue) => issue.path)).toContainEqual(["resetConfig"])
+      expect(
+        planVersionFeatureInsertBaseSchema.safeParse({
+          ...feature,
+          resetConfig: {
+            name: "daily",
+            resetInterval: "day",
+            resetIntervalCount: 1,
+            resetAnchor: 1,
+            planType: "recurring",
+          },
+        }).success
+      ).toBe(true)
+      expect(
+        planVersionFeatureInsertBaseSchema.safeParse({ ...feature, limit: undefined }).success
+      ).toBe(true)
+    }
+  )
+
   it("rejects non-usage features carrying meterConfig", () => {
     const result = planVersionFeatureInsertBaseSchema.safeParse({
       featureId: "feature_123",

@@ -8,10 +8,7 @@ import { TriangleAlert } from "lucide-react"
 import type { ReactNode } from "react"
 import { formatDate } from "~/lib/dates"
 import { useTRPC } from "~/trpc/client"
-import {
-  type IngestionEventRow,
-  formatIngestionEventModeLabel,
-} from "./ingestion-events-table-schema"
+import type { IngestionEventRow } from "./ingestion-events-table-schema"
 
 export function IngestionEventDetailsSheet({
   event,
@@ -33,7 +30,7 @@ export function IngestionEventDetailsSheet({
     trpc.analytics.getRejectedEventPayload.queryOptions(
       {
         customerId: event?.customerId ?? "",
-        canonicalAuditId: event?.canonicalAuditId ?? "",
+        operationId: event?.operationId ?? "",
         handledAt: event?.handledAt ?? 0,
       },
       {
@@ -61,9 +58,9 @@ export function IngestionEventDetailsSheet({
             </Badge>
           </div>
           <div className="min-w-0 space-y-1">
-            <FieldLabel>Audit ID</FieldLabel>
+            <FieldLabel>Operation ID</FieldLabel>
             <SheetDescription className="break-all font-mono text-background-text text-xs">
-              {event.canonicalAuditId}
+              {event.operationId}
             </SheetDescription>
           </div>
         </SheetHeader>
@@ -72,19 +69,14 @@ export function IngestionEventDetailsSheet({
           <Section title="Event context">
             <dl className="grid grid-cols-2 gap-x-6 gap-y-4">
               <Field label="Customer">{event.customerId}</Field>
-              <Field label="Source">{event.sourceType}</Field>
-              <Field label="Ingestion mode">{formatIngestionEventModeLabel(event)}</Field>
+              <Field label="Operation">{event.sourceType}</Field>
               <Field label="Event ID">{event.eventId}</Field>
-              <Field label="Source ID">{event.sourceId}</Field>
-              {event.runId ? <Field label="Run ID">{event.runId}</Field> : null}
-              {event.workloadType || event.workloadId ? (
-                <Field label="Workload">{formatWorkload(event)}</Field>
-              ) : null}
+              <Field label="Budget key">{event.budgetKey}</Field>
               <Field label="Handled">
                 {formatDate(event.handledAt, undefined, "yyyy-MM-dd HH:mm:ss")}
               </Field>
-              <Field label="Received">
-                {formatDate(event.receivedAt, undefined, "yyyy-MM-dd HH:mm:ss")}
+              <Field label="Occurred">
+                {formatDate(event.timestamp, undefined, "yyyy-MM-dd HH:mm:ss")}
               </Field>
             </dl>
           </Section>
@@ -103,10 +95,6 @@ export function IngestionEventDetailsSheet({
             ) : null}
             <dl className="grid grid-cols-2 gap-x-6 gap-y-4">
               <Field label="Rejection reason">{event.rejectionReason ?? "none"}</Field>
-              <Field label="Failure stage">{event.failureStage ?? "none"}</Field>
-              <Field label="Failure reason">{event.failureReason ?? "none"}</Field>
-              <Field label="Failure message">{event.failureMessage ?? "none"}</Field>
-              <Field label="Replayable">{event.replayable ? "yes" : "no"}</Field>
             </dl>
           </Section>
 
@@ -155,30 +143,11 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-function formatWorkload(event: IngestionEventRow): string {
-  if (event.workloadType && event.workloadId) {
-    return `${event.workloadType}:${event.workloadId}`
-  }
-
-  return event.workloadType ?? event.workloadId ?? "none"
-}
-
 function getIssueDetails(event: IngestionEventRow): { message: string; title: string } | null {
   if (event.state === "rejected") {
     return {
       title: "Rejected",
       message: event.rejectionReason ?? "No rejection reason was recorded.",
-    }
-  }
-
-  if (event.state === "failed") {
-    return {
-      title: "Pipeline failure",
-      message:
-        event.failureMessage ??
-        event.failureReason ??
-        event.failureStage ??
-        "No failure detail was recorded.",
     }
   }
 
@@ -246,14 +215,12 @@ function MutedPanel({ children }: { children: ReactNode }) {
   )
 }
 
-function statusBadgeVariant(
-  state: IngestionEventRow["state"]
-): "success" | "warning" | "destructive" {
+function statusBadgeVariant(state: IngestionEventRow["state"]): "success" | "warning" {
   if (state === "processed") {
     return "success"
   }
 
-  return state === "failed" ? "destructive" : "warning"
+  return "warning"
 }
 
 function formatJson(rawJson: string): string {

@@ -19,36 +19,20 @@ import { describeRatePrice, describeTiers } from "../../pricing"
 import type { RateCardService } from "../../rate-cards"
 import { statementPeriodId } from "../budgets/compile-payer-budget"
 
-/**
- * One accepted event the line's statement counted, from the budget journal (ADR-0008 D7). The
- * field names keep the public explain contract: `period_key` is the statement's period id, `delta`
- * the event's quantity of the feature, `value_after` the statement's cumulative quantity after it,
- * and `amount` what the payer budget priced it at ingestion (ledger scale). Payer budgets keep no
- * grants, so `grant_id` is empty.
- */
+/** One accepted event counted by the invoice statement, read from the budget journal. */
 export const explainChargeEventSchema = z.object({
-  event_id: z.string(),
   idempotency_key: z.string(),
-  customer_entitlement_id: z.string(),
-  grant_id: z.string(),
-  feature_plan_version_id: z.string().nullable(),
   feature_slug: z.string(),
   period_key: z.string(),
   event_slug: z.string(),
-  aggregation_method: z.string(),
   timestamp: z.number().describe("timestamp of the ingested event"),
-  created_at: z.number().describe("timestamp of when the fact row was created"),
+  created_at: z.number().describe("timestamp of when the budget operation was created"),
   delta: z.number(),
-  value_after: z.number(),
   amount: z.number().int(),
-  amount_after: z.number().int(),
   amount_scale: z.literal(LEDGER_SCALE),
   currency: z.string().length(3),
-  priced_at: z.number().int(),
-  tier_index: z.number().int().nullable(),
   pricing_component_count: z.number().int().nonnegative(),
-  source_type: z.enum(["api_key", "system", "unknown"]),
-  source_id: z.string(),
+  operation_id: z.string(),
 })
 
 export const explainChargeInputSchema = z.object({
@@ -85,7 +69,6 @@ export const explainChargeOutputSchema = z.object({
     eventCount: z.number().int(),
     totalUsage: z.number(),
     totalAmount: z.number().int(),
-    latestAmountAfter: z.number().int(),
     /** Provider cost in USD at the ledger scale, from the invoice line; null when none was priced. */
     costUsd: z.number().int().nullable(),
     currency: z.string(),
@@ -110,7 +93,7 @@ export const explainChargeOutputSchema = z.object({
   answer: z.string(),
   evidence: z.array(
     z.object({
-      type: z.enum(["ledger_line", "billing_period", "meter_fact"]),
+      type: z.enum(["ledger_line", "billing_period", "event"]),
       id: z.string(),
     })
   ),
@@ -145,7 +128,6 @@ export type ExplainChargeErrorCode =
   | "BILLING_PERIOD_NOT_FOUND"
   | "BILLING_PERIOD_CONTEXT_MISMATCH"
   | "FEATURE_NOT_FOUND"
-  | "PERIOD_KEY_NOT_DERIVED"
 
 export class ExplainChargeError extends BaseError<{
   code: ExplainChargeErrorCode
@@ -333,7 +315,6 @@ export async function explainCharge(
     eventCount: 0,
     totalUsage: line.quantity ?? 0,
     totalAmount: lineAmount,
-    latestAmountAfter: lineAmount,
     costUsd: readIntegerMetadata(line.metadata, "cost_usd"),
     currency: line.currency,
     amountScale: LEDGER_SCALE,
@@ -369,18 +350,15 @@ export async function explainCharge(
         operationId: row.operation_id,
         periodId: periodKey,
         currency: line.currency,
-        customerEntitlementId: singleScopedEntitlement?.id ?? "",
-        featurePlanVersionId: featurePlanVersion.id,
       })
       return event ? [event] : []
     })
-    const times = events.map((event) => event.timestamp)
     summary = {
       ...statementSummary,
       eventCount: journal.val.total,
-      firstEventAt: times.length > 0 ? Math.min(...times) : null,
-      lastEventAt: times.length > 0 ? Math.max(...times) : null,
-      multiComponentEventCount: events.filter((event) => event.pricing_component_count > 1).length,
+      firstEventAt: journal.val.firstEventAt,
+      lastEventAt: journal.val.lastEventAt,
+      multiComponentEventCount: journal.val.multiComponentEventCount,
     }
   }
 
@@ -429,7 +407,7 @@ export async function explainCharge(
     evidence: [
       ...ledgerEntryIds.map((entryId) => ({ type: "ledger_line" as const, id: entryId })),
       { type: "billing_period", id: billingPeriodId },
-      ...events.map((event) => ({ type: "meter_fact" as const, id: event.event_id })),
+      ...events.map((event) => ({ type: "event" as const, id: event.operation_id })),
     ],
     pagination: {
       limit: input.limit,
@@ -573,8 +551,6 @@ function toExplainChargeEvent(opts: {
   operationId: string
   periodId: string
   currency: string
-  customerEntitlementId: string
-  featurePlanVersionId: string
 }): ExplainChargeEvent | null {
   const parsed = journalChargeDataSchema.safeParse(parseJson(opts.data))
   const priced = parsed.success ? (parsed.data.priced ?? parsed.data.state?.priced) : undefined
@@ -585,38 +561,21 @@ function toExplainChargeEvent(opts: {
 
   const quantity = parseSignedDecimal(feature.meterQuantity) ?? BigInt(0)
   const amount = Number(parseSignedDecimal(feature.amount) ?? BigInt(0))
-  const after = feature.lines
-    ?.map((line) =>
-      typeof line === "object" && line !== null && "after" in line && typeof line.after === "string"
-        ? parseSignedDecimal(line.after)
-        : null
-    )
-    .find((value): value is bigint => value !== null)
   const units = (value: bigint) => Number(value) / 10 ** LEDGER_SCALE
 
   return {
-    event_id: parsed.data.idempotencyKey,
     idempotency_key: parsed.data.idempotencyKey,
-    customer_entitlement_id: opts.customerEntitlementId,
-    grant_id: "",
-    feature_plan_version_id: opts.featurePlanVersionId,
     feature_slug: feature.featureSlug,
     period_key: feature.periodId,
     event_slug: priced.slug,
-    aggregation_method: "sum",
     timestamp: priced.at,
     created_at: parsed.data.createdAt,
     delta: units(quantity),
-    value_after: units(after ?? quantity),
     amount,
-    amount_after: amount,
     amount_scale: LEDGER_SCALE,
     currency: opts.currency,
-    priced_at: priced.at,
-    tier_index: null,
     pricing_component_count: feature.lines?.length ?? 0,
-    source_type: "api_key",
-    source_id: opts.operationId,
+    operation_id: opts.operationId,
   }
 }
 
@@ -721,15 +680,15 @@ function buildAnswer({
   summary: ExplainChargeOutput["summary"]
 }): string {
   if (!isUsageFeature) {
-    return `${featureSlug} costs ${lineDisplayAmount} for this invoice period. This line is not usage based, so no rated meter facts are expected.`
+    return `${featureSlug} costs ${lineDisplayAmount} for this invoice period. This line is not usage based, so no journal events are expected.`
   }
 
   if (summary.eventCount === 0) {
-    return `${featureSlug} costs ${lineDisplayAmount}. The invoice ledger has usage for this line, but no rated meter facts were found in the billing window.`
+    return `${featureSlug} costs ${lineDisplayAmount}. The invoice ledger has usage for this line, but no journal events were found in the billing window.`
   }
 
   const usage = formatUsage(summary.totalUsage)
-  return `${usage} units of ${featureSlug} were rated for this invoice period. Those rated facts produced ${lineDisplayAmount}.`
+  return `${usage} units of ${featureSlug} were rated for this invoice period. Those journal events produced ${lineDisplayAmount}.`
 }
 
 function formatDineroAmount(amount: Dinero<number>): string {

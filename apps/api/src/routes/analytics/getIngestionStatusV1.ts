@@ -3,6 +3,7 @@ import {
   getIngestionStatus,
   getIngestionStatusCursorSchema,
   getIngestionStatusOutputSchema,
+  ingestionStateSchema,
 } from "@unprice/services/use-cases"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
@@ -22,7 +23,7 @@ export const getIngestionStatusApiRequestSchema = z
     to_ts: z.number().int(),
     cursor: getIngestionStatusCursorSchema.nullish(),
     event_slug: z.string().optional(),
-    state: z.enum(["processed", "rejected", "failed"]).optional(),
+    state: ingestionStateSchema.optional(),
     limit: z.number().int().min(1).max(100).optional().default(50),
   })
   .refine((input) => input.from_ts < input.to_ts, {

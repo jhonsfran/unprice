@@ -10,13 +10,14 @@ happened, which customer it affected, and which plan version and billing period 
 
 - **Usage:** Metered events and period totals for a customer or feature.
 - **Spend:** Priced usage and wallet movement for the same customer money path.
-- **Ingestion state:** Whether an event was processed, rejected, failed, or can be replayed.
+- **Ingestion state:** Whether the payer budget accepted or rejected an event.
 - **Invoice evidence:** The plan, usage, wallet, and billing facts that explain an invoice line.
 
 ## Use evidence before changing pricing
 
 Do not use a revenue chart as the only reason to change a plan. First check the request-path
-decisions, usage pattern, wallet movement, and invoice evidence. Then create a new plan version
-for the change. Existing customers can remain on the version that they bought.
+decisions, usage pattern, wallet movement, and invoice evidence. Change prices on the rate card.
+Create a new plan version when the package changes. Existing customers can remain on the version
+that they bought.
 
 Read [Pricing overview](/concepts/pricing/overview) to see how these objects connect.

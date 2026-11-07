@@ -7,7 +7,7 @@ import type { Metrics } from "./metrics"
  * The five infrastructure dependencies shared by every domain service.
  *
  * Created once per request by each composition root (Hono middleware,
- * tRPC context, queue consumer) and threaded into every service via
+ * tRPC context, scheduled job) and threaded into every service via
  * the factory in `context.ts`.
  *
  * This replaces the ad-hoc `{ db, logger, waitUntil, cache, metrics }`

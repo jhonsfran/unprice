@@ -1,3 +1,4 @@
+import { BUDGET_MAX_METERED_FEATURES } from "@unprice/db/validators"
 import { BUDGET_JOURNAL_TABLE, sqlInteger, sqlString, sqlTimestamp } from "@unprice/lakehouse"
 import { LEDGER_SCALE, type SignedAmount } from "@unprice/money"
 import { z } from "zod"
@@ -33,6 +34,7 @@ export type JournalBucket = "hour" | "day"
 export const FEATURE_SLOTS = 8
 
 const SLOTS = Array.from({ length: FEATURE_SLOTS }, (_, index) => index)
+const STATEMENT_SLOTS = Array.from({ length: BUDGET_MAX_METERED_FEATURES }, (_, index) => index)
 
 /** The features an operation priced: a charge or record keeps them on `priced`, a hold on its settle. */
 const PRICED_FEATURES =
@@ -139,7 +141,7 @@ export function buildFeatureUsageSql(opts: {
   const keys = [...(opts.bucket ? ["bucket"] : []), ...(opts.byCustomer ? ["budget_key"] : [])]
   const slot = (index: number) =>
     [
-      `  SELECT budget_key, bucket, json_get_str(features, ${index}, 'featureSlug') AS feature_slug,`,
+      `  SELECT budget_key, bucket, unit, json_get_str(features, ${index}, 'featureSlug') AS feature_slug,`,
       `    json_get_str(features, ${index}, 'meterQuantity') AS quantity, json_get_str(features, ${index}, 'amount') AS amount`,
       `  FROM consumed WHERE json_length(features) > ${index}`,
     ].join("\n")
@@ -147,28 +149,28 @@ export function buildFeatureUsageSql(opts: {
   return [
     `WITH ${latestCte({ ...opts, kinds: ["charge", "record", "hold"], rejected: "exclude" })},`,
     "consumed AS (",
-    `  SELECT budget_key, ${bucket} AS bucket, ${PRICED_FEATURES} AS features`,
+    `  SELECT budget_key, ${bucket} AS bucket, json_get_str(data, 'unit') AS unit, ${PRICED_FEATURES} AS features`,
     "  FROM latest",
     `  WHERE ${CONSUMED}`,
     "),",
     "lines AS (",
     SLOTS.map(slot).join("\n  UNION ALL\n"),
     "  UNION ALL",
-    "  SELECT budget_key, bucket, NULL AS feature_slug, NULL AS quantity, NULL AS amount",
+    "  SELECT budget_key, bucket, unit, NULL AS feature_slug, NULL AS quantity, NULL AS amount",
     `  FROM consumed WHERE json_length(features) > ${FEATURE_SLOTS}`,
     ")",
     [
       "SELECT",
       opts.bucket ? "bucket," : "",
       opts.byCustomer ? "budget_key," : "",
-      "feature_slug, COUNT(*) AS events,",
+      "feature_slug, unit, COUNT(*) AS events,",
     ]
       .filter(Boolean)
       .join(" "),
     `  ${decimalSum("quantity")} AS quantity, ${decimalSum("amount")} AS amount`,
     "FROM lines",
-    `GROUP BY ${[...keys, "feature_slug"].join(", ")}`,
-    `ORDER BY ${[...(opts.bucket ? ["bucket DESC"] : []), ...(opts.byCustomer ? ["budget_key"] : []), "feature_slug"].join(", ")}`,
+    `GROUP BY ${[...keys, "feature_slug", "unit"].join(", ")}`,
+    `ORDER BY ${[...(opts.bucket ? ["bucket DESC"] : []), ...(opts.byCustomer ? ["budget_key"] : []), "feature_slug", "unit"].join(", ")}`,
     "LIMIT 10000",
   ].join("\n")
 }
@@ -177,6 +179,7 @@ export const featureUsageSqlRowSchema = z.object({
   bucket: z.coerce.date().nullish(),
   budget_key: z.string().nullish(),
   feature_slug: z.string().nullable(),
+  unit: z.string(),
   events: countSchema,
   quantity: decimalSchema,
   amount: decimalSchema,
@@ -198,20 +201,25 @@ export function buildTopPayersSql(opts: {
   return [
     `WITH ${latestCte({ ...opts, kinds: ["charge", "record", "hold"], rejected: "exclude" })},`,
     "totals AS (",
-    `  SELECT budget_key, COUNT(*) AS events, SUM(${amount}) AS amount_total`,
+    `  SELECT budget_key, json_get_str(data, 'unit') AS unit, COUNT(*) AS events, SUM(${amount}) AS amount_total`,
     "  FROM latest",
     `  WHERE ${CONSUMED}`,
-    "  GROUP BY budget_key",
+    "  GROUP BY budget_key, json_get_str(data, 'unit')",
+    "),",
+    "top_payers AS (",
+    "  SELECT budget_key, SUM(events) AS payer_events FROM totals",
+    "  GROUP BY budget_key ORDER BY payer_events DESC, budget_key",
+    `  LIMIT ${sqlInteger(opts.limit)}`,
     ")",
-    "SELECT budget_key, events, CAST(amount_total AS VARCHAR) AS amount",
-    "FROM totals",
-    "ORDER BY amount_total DESC, events DESC, budget_key",
-    `LIMIT ${sqlInteger(opts.limit)}`,
+    "SELECT totals.budget_key, totals.unit, totals.events, CAST(totals.amount_total AS VARCHAR) AS amount",
+    "FROM totals JOIN top_payers ON totals.budget_key = top_payers.budget_key",
+    "ORDER BY top_payers.payer_events DESC, totals.budget_key, totals.unit",
   ].join("\n")
 }
 
 export const topPayersSqlRowSchema = z.object({
   budget_key: z.string(),
+  unit: z.string(),
   events: countSchema,
   amount: decimalSchema,
 })
@@ -342,8 +350,8 @@ export const rejectionsSqlRowSchema = z.object({
   last_seen_at: z.coerce.date(),
 })
 
-/** Where the previous page of recent events ended: its last row's time and operation. */
-export type JournalEventCursor = { handledAt: number; operationId: string }
+/** Operation ids are unique within a budget, so the cursor also includes its budget key. */
+export type JournalEventCursor = { handledAt: number; operationId: string; budgetKey: string }
 
 /** The newest events first, `limit` of them after the cursor. */
 export function buildRecentEventsSql(
@@ -353,7 +361,9 @@ export function buildRecentEventsSql(
     ? [
         `(timestamp < ${sqlTimestamp(new Date(scope.cursor.handledAt))} OR (timestamp = ${sqlTimestamp(
           new Date(scope.cursor.handledAt)
-        )} AND operation_id < ${sqlString(scope.cursor.operationId)}))`,
+        )} AND (operation_id < ${sqlString(scope.cursor.operationId)} OR (operation_id = ${sqlString(
+          scope.cursor.operationId
+        )} AND budget_key < ${sqlString(scope.cursor.budgetKey)}))))`,
       ]
     : []
   return [
@@ -361,7 +371,7 @@ export function buildRecentEventsSql(
     "SELECT budget_key, operation_id, kind, state, timestamp, event_slug, idempotency_key, rejection_reason, occurred_at",
     "FROM events",
     eventsWhere(scope.filter, cursor),
-    "ORDER BY timestamp DESC, operation_id DESC",
+    "ORDER BY timestamp DESC, operation_id DESC, budget_key DESC",
     `LIMIT ${sqlInteger(scope.limit)}`,
   ].join("\n")
 }
@@ -461,9 +471,9 @@ function statementCte(scope: StatementScope): string {
     `  WHERE ${CONSUMED}`,
     "),",
     "statement AS (",
-    "  SELECT operation_id, timestamp, data",
+    "  SELECT operation_id, timestamp, data, features",
     "  FROM consumed",
-    `  WHERE (${SLOTS.map((index) => `json_get_str(features, ${index}, 'periodId') = ${id}`).join("\n    OR ")})`,
+    `  WHERE (${STATEMENT_SLOTS.map((index) => `json_get_str(features, ${index}, 'periodId') = ${id}`).join("\n    OR ")})`,
     ")",
   ].join("\n")
 }
@@ -493,10 +503,34 @@ export const statementEventSqlRowSchema = z.object({
 
 /** How many events the statement counted, whichever page is read. */
 export function buildStatementEventCountSql(scope: StatementScope): string {
-  return [statementCte(scope), "SELECT COUNT(*) AS events", "FROM statement"].join("\n")
+  const occurredAt =
+    "COALESCE(json_get_int(data, 'priced', 'at'), json_get_int(data, 'state', 'priced', 'at'))"
+  const components = `COALESCE(${STATEMENT_SLOTS.map(
+    (index) =>
+      `CASE WHEN json_get_str(features, ${index}, 'periodId') = ${sqlString(scope.periodId)} THEN json_length(json_get_json(features, ${index}, 'lines')) END`
+  ).join(", ")}, 0)`
+  return [
+    statementCte(scope),
+    "SELECT COUNT(*) AS events,",
+    `  MIN(${occurredAt}) AS first_event_at, MAX(${occurredAt}) AS last_event_at,`,
+    `  COALESCE(SUM(CASE WHEN ${components} > 1 THEN 1 ELSE 0 END), 0) AS multi_component_events`,
+    "FROM statement",
+  ].join("\n")
 }
 
-export const statementEventCountSqlRowSchema = z.object({ events: countSchema })
+export const statementEventCountSqlRowSchema = z
+  .object({
+    events: countSchema,
+    first_event_at: z.coerce.number().int().nullable(),
+    last_event_at: z.coerce.number().int().nullable(),
+    multi_component_events: countSchema,
+  })
+  .transform((row) => ({
+    total: row.events,
+    firstEventAt: row.first_event_at,
+    lastEventAt: row.last_event_at,
+    multiComponentEventCount: row.multi_component_events,
+  }))
 
 /** A priced feature of a journaled operation, amounts still as the decimal strings of the export. */
 export const journalPricedFeatureSchema = z.object({

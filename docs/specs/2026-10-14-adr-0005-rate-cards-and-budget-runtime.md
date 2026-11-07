@@ -4,6 +4,10 @@
 
 Accepted (revised 2026-10-16)
 
+Amended by [ADR-0008](../adr/ADR-0008-payer-budgets-rate-cards-and-r2-journal.md) on
+2026-11-04. Use its payer budget and R2 journal decisions when this document describes the
+removed entitlement processor, run runtime, queue, or Tinybird usage pipeline.
+
 ## Date
 
 2026-10-14. Revised 2026-10-16 after an independent review

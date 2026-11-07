@@ -34,8 +34,7 @@ const BLOCKED_FEATURE_COPY: Record<
   },
   [FEATURE_SLUGS.CUSTOMERS.SLUG]: {
     title: "Customers are not available on this workspace plan",
-    description:
-      "Upgrade to track customer subscriptions, wallet credits, invoices, and budgeted runs.",
+    description: "Upgrade to track customer subscriptions, wallet credits, invoices, and budgets.",
   },
   [FEATURE_SLUGS.API_KEYS.SLUG]: {
     title: "API keys are not available on this workspace plan",

@@ -39,25 +39,6 @@ export function PricingModelIcon({
   return <Icon className={cn("size-3.5", className)} />
 }
 
-export function PricingModelBadge({
-  type,
-  className,
-}: {
-  type: FeatureType
-  className?: string
-}) {
-  return (
-    <div
-      className={cn(
-        "flex size-9 shrink-0 items-center justify-center rounded-md border bg-background-bgSubtle text-foreground",
-        className
-      )}
-    >
-      <PricingModelIcon type={type} />
-    </div>
-  )
-}
-
 export function PricingModelPicker({
   value,
   onChange,

@@ -124,6 +124,7 @@ describe("BudgetDO journal", () => {
       expect(seqs[0]).toBeGreaterThanOrEqual(t0 * 1_000)
       expect(seqs[1]).toBe((seqs[0] ?? 0) + 2)
       expect(rows[1]?.data).toMatchObject({
+        unit: "money:USD",
         reserved: { amount: "1" },
         state: { actual: { amount: "0.5" } },
       })

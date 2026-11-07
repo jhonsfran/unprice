@@ -138,10 +138,7 @@ describe("Unprice client", () => {
       string | null
     >()
     expectTypeOf<OperationResponse<"monetization.get">["warnings"][number]["code"]>().toEqualTypeOf<
-      | "enforcement_settings_dropped"
-      | "version_settings_dropped"
-      | "feature_settings_dropped"
-      | "meter_fields_dropped"
+      "enforcement_settings_dropped" | "version_settings_dropped" | "feature_settings_dropped"
     >()
   })
 

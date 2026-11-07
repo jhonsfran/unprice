@@ -1,5 +1,9 @@
 # Run Settlement Endpoint Design
 
+> Superseded by [ADR-0008](../adr/ADR-0008-payer-budgets-rate-cards-and-r2-journal.md).
+> The `runs.*` and `reservations` SDK APIs and run routes were removed. For current contracts,
+> use [budget handles](../../apps/docs/budgets/sdk.mdx) and the generated OpenAPI spec.
+
 ## Goal
 
 Record usage that a provider already incurred and reconcile its funded cost against an existing run

@@ -22,6 +22,12 @@ if [ "${1:-}" = "budget" ]; then
   exec corepack pnpm --filter api db:generate:ingestion:budget "$@"
 fi
 
+if [ "${1:-}" = "db" ]; then
+  nvm use
+  shift
+  exec corepack pnpm --filter @unprice/db generate "$@"
+fi
+
 echo "Starting up"
 
 # lets check first that docker and node are installed

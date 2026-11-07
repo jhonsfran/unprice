@@ -70,8 +70,8 @@ export class Unprice implements GeneratedSdkResources {
    *
    * @throws RangeError when the key has an open local lease with other lease options.
    */
-  budget(key: string, options?: BudgetHandleOptions): BudgetHandle
   budget(key: string, options: LocalBudgetOptions & BudgetHandleOptions): LocalBudgetHandle
+  budget(key: string, options?: BudgetHandleOptions): BudgetHandle
   budget(
     key: string,
     options?: BudgetHandleOptions | (LocalBudgetOptions & BudgetHandleOptions)

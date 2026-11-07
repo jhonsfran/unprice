@@ -71,8 +71,8 @@ Use the [commercial license](https://github.com/jhonsfran/unprice/blob/main/COMM
 
 - **Customer spend authorization.** Check entitlement, budget, wallet credits, and meter rules
   before paid work runs.
-- **Budgeted runs.** Set budget envelopes for agents, workflows, jobs, tools, and custom workloads,
-  with run-level rejection before the work runs.
+- **Budget keys.** Use `budget(key).authorize` to reserve capacity before a job, tool, or agent step.
+  Settle actual usage within the hold. Standalone caps are separate from wallet funding and invoice usage.
 - **Runtime entitlements and metering.** Check access and consume usage in the product request path.
 - **Wallets and credits.** Keep purchased, granted, reserved, and consumed balances separate from
   entitlement grants.

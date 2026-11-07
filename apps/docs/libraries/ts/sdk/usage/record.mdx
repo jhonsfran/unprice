@@ -12,7 +12,7 @@ const { result, error } = await unprice.usage.record({
       idempotencyKey: "evt_01J9Z3",
       eventSlug: "completions",
       customerId: "cus_1234567890",
-      occurredAt: 1_792_000_000_000,
+      occurredAt: Date.now(), // Persist this event time and key for retries.
       properties: {
         inputTokens: 1840,
         outputTokens: 620,

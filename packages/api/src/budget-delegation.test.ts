@@ -1,5 +1,5 @@
 import * as Budgets from "@unprice/budgets"
-import { describe, expect, it } from "vitest"
+import { describe, expect, expectTypeOf, it } from "vitest"
 import { BudgetExceededError, Unprice } from "./index"
 
 // Budgets live in @unprice/budgets; @unprice/api keeps `unprice.budget()` and `unprice.close()`
@@ -34,6 +34,21 @@ const clientWith = (respond: (path: string, body: Record<string, unknown>) => Re
 }
 
 describe("Unprice budgets from @unprice/budgets", () => {
+  it("returns a local handle for a typed local options variable in either client", () => {
+    const options: Budgets.LocalBudgetOptions & Budgets.BudgetHandleOptions = {
+      mode: "local",
+      lease: { amount: "1" },
+    }
+    const { unprice } = clientWith(() => json({}))
+    const budgets = new Budgets.Unprice({ token: "test-token" })
+    const local = unprice.budget("customer:acme", options)
+    const standalone = budgets.budget("customer:acme", options)
+
+    expectTypeOf(local).toEqualTypeOf<Budgets.LocalBudgetHandle>()
+    expectTypeOf(standalone).toEqualTypeOf<Budgets.LocalBudgetHandle>()
+    expect([local.mode, standalone.mode]).toEqual(["local", "local"])
+  })
+
   it("re-exports the budget errors as the same classes", () => {
     expect(BudgetExceededError).toBe(Budgets.BudgetExceededError)
   })

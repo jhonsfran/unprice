@@ -126,14 +126,12 @@ export type CompiledPayerBudget = Readonly<{
 
 export type PayerBudgetIssue =
   | Readonly<{ code: "NO_PHASE"; customerId: string }>
-  | Readonly<{ code: "UNSUPPORTED_AGGREGATION"; featureSlug: string; aggregationMethod: string }>
   | Readonly<{ code: "UNSUPPORTED_RESET"; featureSlug: string; interval: string; count: number }>
   | Readonly<{ code: "PREPAID_NEEDS_MONEY"; unit: string }>
   | Readonly<{ code: "INVALID_BUDGET"; message: string }>
 
 const KIND: Record<PayerBudgetIssue["code"], DomainErrorKind> = {
   NO_PHASE: "not_found",
-  UNSUPPORTED_AGGREGATION: "precondition",
   UNSUPPORTED_RESET: "precondition",
   PREPAID_NEEDS_MONEY: "precondition",
   INVALID_BUDGET: "internal",
@@ -143,8 +141,6 @@ function describe(issue: PayerBudgetIssue): string {
   switch (issue.code) {
     case "NO_PHASE":
       return `Customer ${issue.customerId} has no subscription phase to compile`
-    case "UNSUPPORTED_AGGREGATION":
-      return `${issue.featureSlug} aggregates with ${issue.aggregationMethod}; a budget meters sum and count only`
     case "UNSUPPORTED_RESET":
       return `${issue.featureSlug} resets every ${issue.count} ${issue.interval}; a budget limit resets every day, week, or month`
     case "PREPAID_NEEDS_MONEY":
@@ -285,10 +281,6 @@ function phaseAt(phases: readonly Phase[], now: number): Phase | undefined {
 function meterOf(feature: PayerFeature) {
   const meter = feature.meterConfig
   if (feature.featureType !== "usage" || meter === null) return null
-  const { aggregationMethod } = meter
-  if (aggregationMethod !== "sum" && aggregationMethod !== "count") {
-    return fail({ code: "UNSUPPORTED_AGGREGATION", featureSlug: feature.slug, aggregationMethod })
-  }
   const pricing = planFeaturePricing({
     feature: { slug: feature.slug },
     meterConfig: meter,

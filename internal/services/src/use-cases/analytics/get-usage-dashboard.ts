@@ -1,12 +1,7 @@
 import { inArray } from "@unprice/db"
 import type { Database } from "@unprice/db"
 import { customers } from "@unprice/db/schema"
-import {
-  type Currency,
-  type Interval,
-  analyticsIntervalSchema,
-  prepareInterval,
-} from "@unprice/db/validators"
+import { type Interval, analyticsIntervalSchema, prepareInterval } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import { type SignedAmount, formatAmount, formatMoney } from "@unprice/money"
 import { z } from "zod"
@@ -27,7 +22,7 @@ const usageDashboardMoneySchema = z.object({
 export const usageDashboardFeatureSchema = z.object({
   featureSlug: z.string(),
   usage: z.number(),
-  spending: usageDashboardMoneySchema,
+  spending: z.array(usageDashboardMoneySchema),
 })
 
 /** One feature's usage within one time bucket (not cumulative). */
@@ -35,7 +30,7 @@ export const usageDashboardTimeseriesRowSchema = z.object({
   date: z.number().int(),
   featureSlug: z.string(),
   usage: z.number(),
-  spending: usageDashboardMoneySchema,
+  spending: z.array(usageDashboardMoneySchema),
 })
 
 export const usageDashboardTopConsumerSchema = z.object({
@@ -86,13 +81,13 @@ export type GetUsageDashboardDeps = {
   now?: () => number
 }
 
-type FeatureTotals = { quantity: SignedAmount; amount: SignedAmount }
+type FeatureTotals = { quantity: SignedAmount; amounts: Map<string, SignedAmount> }
 
 /**
  * Usage per feature over a range, read from the budget journal (ADR-0008 D7): what each payer
  * budget accepted, priced at ingestion. History lags the budget by the journal's export (minutes);
- * live numbers come from the payer budget. Amounts are shown in the project's default currency,
- * which is the payer budgets' unit for money plans.
+ * live numbers come from the payer budget. Each amount keeps the unit the budget exported;
+ * amounts of different currencies or credit units are never added together.
  */
 export async function getUsageDashboard(
   deps: GetUsageDashboardDeps,
@@ -107,16 +102,12 @@ export async function getUsageDashboard(
     to: new Date(interval.end),
   }
 
-  const [currency, usage] = await Promise.all([
-    projectCurrency(deps.db, input.projectId),
-    deps.analytics.getFeatureUsage({
-      projectId: input.projectId,
-      customerId: input.customerId,
-      window,
-      bucket,
-    }),
-  ])
-  if (currency.err) return Err(currency.err)
+  const usage = await deps.analytics.getFeatureUsage({
+    projectId: input.projectId,
+    customerId: input.customerId,
+    window,
+    bucket,
+  })
   if (usage.err) return Err(usage.err)
 
   const priced = usage.val.filter(
@@ -127,7 +118,7 @@ export async function getUsageDashboard(
     .filter((row) => row.feature_slug === null)
     .reduce((sum, row) => sum + row.events, 0)
 
-  const features = buildFeatureRows(priced, currency.val)
+  const features = buildFeatureRows(priced)
 
   let topConsumers: UsageDashboardTopConsumer[] = []
   if (!input.customerId) {
@@ -136,7 +127,6 @@ export async function getUsageDashboard(
       projectId: input.projectId,
       window,
       limit: input.topConsumersLimit,
-      currency: currency.val,
     })
     if (top.err) return Err(top.err)
     topConsumers = top.val
@@ -144,9 +134,9 @@ export async function getUsageDashboard(
 
   return Ok(
     getUsageDashboardOutputSchema.parse({
-      summary: buildSummary(features, priced, currency.val),
+      summary: buildSummary(features, priced),
       features,
-      timeseries: buildTimeseries(priced, currency.val),
+      timeseries: buildTimeseries(priced),
       topConsumers,
       freshness: {
         generatedAt,
@@ -172,23 +162,6 @@ function floorUtcDay(timestamp: number): number {
   const date = new Date(timestamp)
   date.setUTCHours(0, 0, 0, 0)
   return date.getTime()
-}
-
-async function projectCurrency(db: Database, projectId: string) {
-  return wrapResult(
-    db.query.projects
-      .findFirst({
-        columns: { defaultCurrency: true },
-        where: (table, { eq }) => eq(table.id, projectId),
-      })
-      .then((project) => (project?.defaultCurrency ?? "USD") as Currency),
-    (error) =>
-      new FetchError({
-        message: error.message,
-        retry: false,
-        context: { url: "db:projects", method: "SELECT", projectId },
-      })
-  )
 }
 
 export function emptyUsageDashboardOutput(
@@ -223,8 +196,7 @@ export function hasUsageDashboardEvidence(output: GetUsageDashboardOutput): bool
 
 /** Every bucket that has usage, each with a row per feature seen in the range (zero when idle). */
 function buildTimeseries(
-  rows: readonly (FeatureUsageRow & { feature_slug: string; bucket: Date })[],
-  currency: Currency
+  rows: readonly (FeatureUsageRow & { feature_slug: string; bucket: Date })[]
 ): UsageDashboardTimeseriesRow[] {
   const byBucket = new Map<number, Map<string, FeatureTotals>>()
   const slugs = new Set<string>()
@@ -247,15 +219,14 @@ function buildTimeseries(
           date,
           featureSlug,
           usage: units(totals.quantity),
-          spending: money(totals.amount, currency),
+          spending: spendingOf(totals.amounts),
         }
       })
     )
 }
 
 function buildFeatureRows(
-  rows: readonly (FeatureUsageRow & { feature_slug: string })[],
-  currency: Currency
+  rows: readonly (FeatureUsageRow & { feature_slug: string })[]
 ): UsageDashboardFeature[] {
   const byFeature = new Map<string, FeatureTotals>()
   for (const row of rows) {
@@ -266,21 +237,21 @@ function buildFeatureRows(
     .map(([featureSlug, totals]) => ({
       featureSlug,
       usage: units(totals.quantity),
-      spending: money(totals.amount, currency),
+      spending: spendingOf(totals.amounts),
     }))
     .sort((a, b) => b.usage - a.usage || a.featureSlug.localeCompare(b.featureSlug))
 }
 
 function buildSummary(
   features: readonly UsageDashboardFeature[],
-  rows: readonly FeatureUsageRow[],
-  currency: Currency
+  rows: readonly FeatureUsageRow[]
 ): GetUsageDashboardOutput["summary"] {
-  const amount = rows.reduce((sum, row) => sum + row.amount, BigInt(0))
+  const amounts = new Map<string, SignedAmount>()
+  for (const row of rows) addAmount(amounts, row.unit, row.amount)
   return {
     featureCount: features.length,
     totalLatestUsage: features.reduce((sum, feature) => sum + feature.usage, 0),
-    spending: rows.length === 0 ? [] : [money(amount, currency)],
+    spending: spendingOf(amounts),
   }
 }
 
@@ -289,13 +260,11 @@ async function loadTopConsumers({
   projectId,
   window,
   limit,
-  currency,
 }: {
   deps: GetUsageDashboardDeps
   projectId: string
   window: { from: Date; to: Date }
   limit: number
-  currency: Currency
 }): Promise<Result<UsageDashboardTopConsumer[], FetchError>> {
   const top = await deps.analytics.getTopPayers({ projectId, window, limit })
   if (top.err) return Err(top.err)
@@ -326,27 +295,46 @@ async function loadTopConsumers({
   if (found.err) return Err(found.err)
 
   const byId = new Map(found.val.map((customer) => [customer.id, customer]))
+  const consumers = new Map<
+    string,
+    { customer: (typeof found.val)[number]; events: number; amounts: Map<string, SignedAmount> }
+  >()
+  for (const row of rows) {
+    const customer = byId.get(row.customerId)
+    if (!customer) continue
+    const consumer = consumers.get(row.customerId) ?? { customer, events: 0, amounts: new Map() }
+    consumer.events += row.events
+    addAmount(consumer.amounts, row.unit, row.amount)
+    consumers.set(row.customerId, consumer)
+  }
   return Ok(
-    rows.flatMap((row) => {
-      const customer = byId.get(row.customerId)
-      if (!customer) return []
-      return [
-        {
-          customerId: row.customerId,
-          email: customer.email,
-          name: customer.name,
-          totalUsage: row.events,
-          displaySpending: money(row.amount, currency).displayAmount,
-        },
-      ]
-    })
+    [...consumers.values()].map(({ customer, events, amounts }) => ({
+      customerId: customer.id,
+      email: customer.email,
+      name: customer.name,
+      totalUsage: events,
+      displaySpending: spendingOf(amounts)
+        .map((amount) => amount.displayAmount)
+        .join(" + "),
+    }))
   )
 }
 
-const zeroTotals = (): FeatureTotals => ({ quantity: BigInt(0), amount: BigInt(0) })
+const zeroTotals = (): FeatureTotals => ({ quantity: BigInt(0), amounts: new Map() })
 
 function add(totals: FeatureTotals, row: FeatureUsageRow): FeatureTotals {
-  return { quantity: totals.quantity + row.quantity, amount: totals.amount + row.amount }
+  addAmount(totals.amounts, row.unit, row.amount)
+  return { quantity: totals.quantity + row.quantity, amounts: totals.amounts }
+}
+
+function addAmount(amounts: Map<string, SignedAmount>, unit: string, amount: SignedAmount): void {
+  amounts.set(unit, (amounts.get(unit) ?? BigInt(0)) + amount)
+}
+
+function spendingOf(amounts: ReadonlyMap<string, SignedAmount>): UsageDashboardMoney[] {
+  return [...amounts]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([unit, amount]) => money(amount, unit))
 }
 
 /** A quantity at the ledger scale as the number of units it counts. */
@@ -354,11 +342,14 @@ function units(quantity: SignedAmount): number {
   return Number(formatAmount(quantity))
 }
 
-function money(amount: SignedAmount, currency: Currency): UsageDashboardMoney {
+function money(amount: SignedAmount, unit: string): UsageDashboardMoney {
   const decimal = formatAmount(amount)
+  const currency = unit.startsWith("money:") ? unit.slice("money:".length) : null
   return {
     amount: decimal,
-    currency,
-    displayAmount: formatMoney(decimal, currency, MONEY_DISPLAY_OPTIONS),
+    currency: currency ?? "XXX",
+    displayAmount: currency
+      ? formatMoney(decimal, currency, MONEY_DISPLAY_OPTIONS)
+      : `${decimal} ${unit}`,
   }
 }

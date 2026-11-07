@@ -21,12 +21,13 @@ import {
   type BudgetVerbRequest,
   type ExecuteBudgetCommandDeps,
   executeBudgetCommand,
+  payerBudgetKey,
   rateCardSource,
   walletFunding,
 } from "@unprice/services/use-cases"
 import type { Context } from "hono"
 import { setMetric } from "hono/timing"
-import { keyAuth } from "~/auth/key"
+import { keyAuth, resolveCustomerIdForApiKeyOrThrow } from "~/auth/key"
 import { UnpriceApiError } from "~/errors"
 import type { HonoEnv } from "~/hono/env"
 import { CloudflareBudgetClient } from "~/ingestion/budget/client"
@@ -48,9 +49,16 @@ export async function runBudgetVerb<R extends BudgetVerbRequest>(
   c: Context<HonoEnv>,
   key: string,
   request: R,
-  apiKey?: Pick<ApiKeyExtended, "projectId">
+  apiKey?: Pick<ApiKeyExtended, "projectId" | "defaultCustomerId">
 ) {
-  const { projectId } = apiKey ?? (await keyAuth(c))
+  const { projectId, defaultCustomerId } = apiKey ?? (await keyAuth(c))
+  const payerPrefix = payerBudgetKey("")
+  if (key.startsWith(payerPrefix)) {
+    resolveCustomerIdForApiKeyOrThrow({
+      explicitCustomerId: key.slice(payerPrefix.length),
+      defaultCustomerId,
+    })
+  }
   const defines = request.type === "upsert" || ("ifMissing" in request && request.ifMissing)
   if (defines && key.startsWith(RESERVED_KEY_PREFIX)) {
     throw new UnpriceApiError({

@@ -247,8 +247,7 @@ export function MeterConfigFormField({
                       <HelpCircle className="size-3.5 text-muted-foreground" />
                     </TooltipTrigger>
                     <TooltipContent side="right" className="max-w-[320px]">
-                      How the events add up to usage: count them, or sum, take the max, or keep the
-                      latest of a number they carry.
+                      How the events add up to usage: count them, or sum a number they carry.
                     </TooltipContent>
                   </Tooltip>
                 </div>

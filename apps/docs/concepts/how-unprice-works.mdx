@@ -15,8 +15,8 @@ denied, or billed.
 
 <Frame caption="The money path: two requests accepted, the third denied.">
   <div className="w-full overflow-x-auto" tabIndex={0} role="region" aria-label="Money path diagram, scroll horizontally on small screens">
-    <img className="block dark:hidden" src="/images/money-path.svg" width="880" height="660" style={{ minWidth: "660px", width: "100%", height: "auto" }} alt="Three $4.10 usage.consume requests share a $10 budget. Two are accepted and produce wallet, ledger, invoice, and Stripe payment evidence. The third is denied with LIMIT_EXCEEDED at $1.80 remaining, with no wallet change, invoice line, or charge." />
-    <img className="hidden dark:block" src="/images/money-path-dark.svg" width="880" height="660" style={{ minWidth: "660px", width: "100%", height: "auto" }} alt="Three $4.10 usage.consume requests share a $10 budget. Two are accepted and produce wallet, ledger, invoice, and Stripe payment evidence. The third is denied with LIMIT_EXCEEDED at $1.80 remaining, with no wallet change, invoice line, or charge." />
+    <img className="block dark:hidden" src="/images/money-path.svg" width="880" height="660" style={{ minWidth: "660px", width: "100%", height: "auto" }} alt="Three $4.10 usage.consume requests share a $10 budget. Two are accepted and produce wallet, ledger, invoice, and Stripe payment evidence. The third is denied with BUDGET_EXCEEDED at $1.80 remaining, with no wallet change, invoice line, or charge." />
+    <img className="hidden dark:block" src="/images/money-path-dark.svg" width="880" height="660" style={{ minWidth: "660px", width: "100%", height: "auto" }} alt="Three $4.10 usage.consume requests share a $10 budget. Two are accepted and produce wallet, ledger, invoice, and Stripe payment evidence. The third is denied with BUDGET_EXCEEDED at $1.80 remaining, with no wallet change, invoice line, or charge." />
   </div>
 </Frame>
 
@@ -57,7 +57,7 @@ units — cents for USD.
 | Paid action | Your app is about to run work that can create cost. | The money decision happens before the cost exists. |
 | Pricing model | Unprice resolves the plan version, feature, meter, and entitlement. | Pricing logic stays out of product branches. |
 | Runtime decision | Unprice checks entitlement, budget, wallet credits, and meter rules. | An allow reserves; a deny stops the request before any provider call. |
-| Evidence trail | Usage facts, wallet movement, ledger entries, and invoice evidence stay connected. | Support, analytics, replay, and invoices use one explanation. |
+| Evidence trail | Usage facts, wallet movement, ledger entries, and invoice evidence stay connected. | Support, analytics, ingestion status, and invoices use one explanation. |
 | Payment capture | Stripe captures payment or Sandbox simulates it. | The payment rail stays separate from pricing logic. |
 
 ## The payment-provider boundary

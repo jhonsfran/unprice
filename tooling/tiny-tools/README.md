@@ -52,8 +52,8 @@ pnpm --filter @unprice/tiny-tools with-env pnpm e2e:local
 # Run only ingestion tests
 CUSTOMER_ID=cus_xxx UNPRICE_TOKEN=xxx ONLY=ingestion pnpm --filter @unprice/tiny-tools e2e:local
 
-# Run sync and idempotency tests
-CUSTOMER_ID=cus_xxx UNPRICE_TOKEN=xxx ONLY=sync,idempotency pnpm --filter @unprice/tiny-tools e2e:local
+# Run consume and idempotency tests
+CUSTOMER_ID=cus_xxx UNPRICE_TOKEN=xxx ONLY=consume,idempotency pnpm --filter @unprice/tiny-tools e2e:local
 ```
 
 ### Plan tests
@@ -73,15 +73,15 @@ the usage feature found during verification.
 | `subscription: is active` | Subscription exists with status `active` or `trialing` |
 | `entitlements: fetches list` | Customer has at least one entitlement |
 | `verification: verify all entitlements` | All features return valid shape; discovers usage-based feature for ingestion tests |
-| `sync-ingestion: ingest and verify usage delta` | `ingestSync` → verify; asserts usage changed correctly per aggregation method |
-| `async-ingestion: ingest and poll` | `ingest` (async) → polls `verify` up to 10s for eventual consistency |
+| `consume-ingestion: applies usage before returning` | `usage.consume` then `access.check`; asserts the usage delta for each aggregation method |
+| `record-ingestion: applies reported usage before returning` | `usage.record` accepts the event, then `access.check` returns the updated usage without polling |
 | `idempotency: duplicate key deduplicated` | Same `idempotencyKey` sent twice; usage increments only once |
-| `limit-enforcement: sync rejects at limit` | Pushes usage over the limit; confirms `LIMIT_EXCEEDED` rejection (skips if no limit or too far from limit) |
-| `analytics: getUsage returns data` | `getUsage` returns records for the last 24h |
-| `verification: non-existent feature` | Fake feature slug returns `feature_missing` or API error |
-| `verification: non-existent customer` | Fake customer ID returns `customer_not_found`, `feature_missing`, or API error |
+| `limit-enforcement: consume rejects when limit exceeded` | Pushes usage over the limit; confirms HTTP 402 `BUDGET_EXCEEDED` (skips if no limit or too far from limit) |
+| `analytics: getUsage returns data` | `usage.get` returns records for the last 24h |
+| `verification: non-existent feature` | Fake feature slug returns `NO_ENTITLEMENT` or API error |
+| `verification: non-existent customer` | Fake customer ID returns `NO_ENTITLEMENT` or API error |
 
-Ingestion tests (`sync-ingestion`, `async-ingestion`, `idempotency`, `limit-enforcement`) are automatically skipped if the customer has no usage-based features or the wallet is not funded for priced usage (`WALLET_EMPTY`).
+Usage tests need a usage-based feature. If `usage.consume` returns `BUDGET_EXCEEDED` because a hard limit or prepaid wallet cannot fund the event, the suite skips the remaining usage tests.
 
 ## Wallet E2E tests
 
@@ -105,7 +105,7 @@ share the budget and assert the exact balance each one leaves.
 | `upsert: the same definition changes nothing` | No changes, version stays 1 |
 | `get: returns the definition and history` | Limits, hold settings, and a history array |
 | `authorize: holds the estimate and replays by key` | Held amount and remaining; the same idempotency key returns the same hold |
-| `settle: consumes the actual, returns the rest, replays` | covered, released, overrun; same amount replays, another amount is a 409 |
+| `settle: consumes the actual, returns the rest, replays` | Actual usage, released capacity, and balance; the same amount replays, another amount is a 409 |
 | `release: returns the whole hold, replays` | Releases the full hold; a second release replays |
 | `charge: consumes once per idempotency key` | Replays by key; the same key with another amount is a 409 |
 | `charge: decimal amounts stay exact` | `0.1 + 0.2` adds to exactly `0.3` |

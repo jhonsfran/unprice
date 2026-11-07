@@ -715,3 +715,96 @@ describe("PlanService plan version billing defaults", () => {
     })
   })
 })
+
+describe("PlanService finite usage reset validation", () => {
+  it("rejects a partial limit update against an annual meter before writing", async () => {
+    const stored = {
+      id: "fpv_123",
+      projectId: "proj_123",
+      planVersionId: "pv_123",
+      featureId: "feature_123",
+      featureType: "usage",
+      limit: null,
+      billingConfig: yearlyBillingConfig,
+      resetConfig: null,
+      metadata: {},
+      feature: { id: "feature_123", unitOfMeasure: "requests" },
+    }
+    const transaction = vi.fn()
+    const db = {
+      query: {
+        planVersionFeatures: { findFirst: vi.fn().mockResolvedValue(stored) },
+        versions: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: "pv_123",
+            projectId: "proj_123",
+            status: "draft",
+            billingConfig: yearlyBillingConfig,
+          }),
+        },
+      },
+      transaction,
+    } as unknown as Database
+    const result = await createPlanService(db).updatePlanVersionFeatureRecord({
+      projectId: "proj_123",
+      id: "fpv_123",
+      planVersionId: "pv_123",
+      limit: 20,
+      hasMeterConfigOverride: false,
+    })
+    expect(result.val).toEqual({ state: "invalid_reset_config" })
+    expect(transaction).not.toHaveBeenCalled()
+  })
+})
+
+describe("PlanService unlimited usage reset validation", () => {
+  it("allows clearing a finite limit on annual billing", async () => {
+    const stored = {
+      id: "fpv_123",
+      projectId: "proj_123",
+      planVersionId: "pv_123",
+      featureId: "feature_123",
+      featureType: "usage",
+      limit: 20,
+      billingConfig: yearlyBillingConfig,
+      resetConfig: null,
+      metadata: {},
+      feature: { id: "feature_123", unitOfMeasure: "requests" },
+    }
+    let written: Record<string, unknown> | undefined
+    const transaction = vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
+      callback({
+        update: () => ({
+          set: (values: Record<string, unknown>) => {
+            written = values
+            return { where: () => ({ returning: async () => [stored] }) }
+          },
+        }),
+        query: { planVersionFeatures: { findFirst: async () => ({ ...stored, limit: null }) } },
+      })
+    )
+    const db = {
+      query: {
+        planVersionFeatures: { findFirst: vi.fn().mockResolvedValue(stored) },
+        versions: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: "pv_123",
+            projectId: "proj_123",
+            status: "draft",
+            billingConfig: yearlyBillingConfig,
+          }),
+        },
+      },
+      transaction,
+    } as unknown as Database
+    const result = await createPlanService(db).updatePlanVersionFeatureRecord({
+      projectId: "proj_123",
+      id: "fpv_123",
+      planVersionId: "pv_123",
+      limit: null,
+      hasMeterConfigOverride: false,
+    })
+    expect(result.val?.state).toBe("ok")
+    expect(written?.limit).toBeNull()
+  })
+})

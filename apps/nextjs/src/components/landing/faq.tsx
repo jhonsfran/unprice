@@ -71,7 +71,7 @@ const faqs: FaqItem[] = [
   {
     question: "What does a deny look like to my user?",
     answer:
-      "Whatever you choose. A deny returns 200 with allowed set to false and a reason such as LIMIT_EXCEEDED, so your app can offer an upgrade.",
+      "Your app chooses the message. usage.consume returns HTTP 402 with BUDGET_EXCEEDED. A budget handle returns allowed: false with the blocking limit. access.check returns HTTP 200 with allowed: false and a rejection reason.",
   },
   {
     question: "How much latency does the check add?",

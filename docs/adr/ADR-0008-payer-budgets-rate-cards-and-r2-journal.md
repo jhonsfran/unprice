@@ -158,6 +158,8 @@ period's usage was priced in the unit in force when it landed.
 - The API worker sends rejected events to the same stream, best effort after the response: `seq`
   0 (the budget never wrote them), operation id `r:<idempotency key>`, status `rejected`, and the
   event with its rejection in `data`. Readers keep them apart from operation rows by status.
+- Each exported operation's `data.unit` retains its budget unit. Historical amounts group by
+  that unit; a project's default currency cannot relabel or combine them.
 - Dashboards read history from R2 with Basin SQL. Live balances and current-period usage read the
   budget.
 - Readers deduplicate on `(budget key, seq)`, because export is at least once. Every write of a

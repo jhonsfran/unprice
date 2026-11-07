@@ -19,7 +19,7 @@ tax/accounting/revenue-recognition, not an "AI agent platform." Payments: Stripe
 Connect to the buyer's own account, or bring-your-own-key) plus the built-in **Sandbox** test
 provider; do not claim Square (unimplemented) or live Paddle/Lemon Squeezy. Hosting: say "run it in
 your own Cloudflare account," not unqualified "self-host" — the runtime requires the buyer's own
-Cloudflare account (Workers, Durable Objects, Queues). Lead competitive copy
+Cloudflare account (Workers, Durable Objects, Pipelines). Lead competitive copy
 against the DIY stack (counter + cron) first, then distinguish Unprice from AI gateways and closed
 usage runtimes. Voice is **calm urgency** — mechanism, not fear.
 
@@ -83,7 +83,7 @@ Primary CTA everywhere: **Start with one paid action**. Consultative/design-part
 
 - Customer spend authorization — before paid work creates cost
 - Plan versions and separated entitlements
-- Reserve up front (`runs`) or enforce live (`usage.consume`)
+- Reserve up front (`budget(key).authorize`) or enforce live (`usage.consume`)
 - Wallet credits and reservations
 - Invoice evidence from the same money path
 - Customer spend control, not provider-cost routing
@@ -130,11 +130,10 @@ Invoice**):
 4. Is this request inside the **customer's budget**, and should **credits** be reserved or captured?
 5. Can this decision **explain the invoice line** later?
 
-Over-budget customer work is denied in the request path, before any cost is created: the call
-returns `200` with `allowed`/`accepted` false and a machine-readable `rejectionReason` —
-`LIMIT_EXCEEDED`. Do not write the denial as a `429`; `429` is `TOO_MANY_REQUESTS` (rate limiting)
-and sends engineers looking for a status code that never arrives (verified against
-`apps/api/src/routes/entitlements/verifyV1.ts` and `.../events/ingestEventsSyncV1.ts`, 2026-07-27).
+`usage.consume` denies over-budget work with HTTP 402 `BUDGET_EXCEEDED`. Its SDK result has an
+`error`, not a successful result with `allowed: false`. `access.check` is read-only and returns
+HTTP 200 with `allowed: false` and a `rejectionReason`. HTTP 429 is reserved for rate limiting.
+See `apps/api/src/routes/usage/consumeUsageV1.ts` and `apps/api/src/routes/entitlements/verifyV1.ts`.
 Accepted usage settles credits and explains the invoice from the same money path.
 
 **Pick the right call (don't conflate them):**
@@ -142,11 +141,11 @@ Accepted usage settles credits and explains the invoice from the same money path
 | Call | What it does |
 | --- | --- |
 | `access.check` | Read-only pre-flight — "commercially allowed?" Mutates nothing (safe to run in shadow). |
-| `usage.record` | **Report** usage asynchronously. Never blocks; usage can exceed funds. For metering + evidence. |
-| `usage.consume` | **Enforce** synchronously. Denies (`LIMIT_EXCEEDED`) the moment funds/limit run out. |
-| `runs.start/consume/end` | **Reserve** a budget envelope before a multi-step workload, so it cannot overspend; release the remainder. |
+| `usage.record` | Report past usage in an `events` batch with `occurredAt`. Each event returns accepted or rejected. Accepted usage applies before the response and can exceed limits. |
+| `usage.consume` | **Enforce** synchronously. Denies with HTTP 402 `BUDGET_EXCEEDED` the moment funds/limit run out. |
+| `budget(key).authorize` / `hold.settle` | Reserve capacity on a standalone budget key before work, then settle actual usage. Your app must enforce the authorized maximum. These keys do not fund a customer wallet or create invoice usage. |
 
-Lead with `access.check` / `usage.consume` / `runs` depending on the action. That is the
+Lead with `access.check` / `usage.consume` / `budget(key).authorize` depending on the action. That is the
 authorize-before-cost wedge.
 
 ---
@@ -167,7 +166,7 @@ current logic in shadow, and prove the path on Sandbox before you enforce anythi
   version (no entitlement tables to hand-roll).
 - Shadow adoption with `access.check` — compare decisions without blocking production traffic.
 - Plan versions that keep existing customers on the pricing they bought while new experiments ship.
-- Budgeted runs that reserve spend up front for jobs, workflows, tools, and agents.
+- Standalone budget keys that reserve capacity up front for jobs, workflows, tools, and agents.
 - Wallet credits and reservations kept distinct from entitlement grants.
 - Invoice evidence that traces every charge to plan version, pricing rule, billing period, rated
   events when present, wallet movement, and ledger captures.
@@ -206,7 +205,7 @@ billing, move money, or trust enforcement on day one. They only have to prove on
 > credits, invoices — on the built-in Sandbox provider. No real processor; watch how billing behaves
 > before a dollar moves.
 >
-> **3. Cut over.** When the decisions convince you, switch enforcement to `usage.consume` / `runs`
+> **3. Cut over.** When the decisions convince you, switch enforcement to `usage.consume` / `budget(key).authorize`
 > and connect your **own** Stripe account (Stripe Connect or your own key). Unprice never sits in
 > your funds flow.
 
@@ -270,13 +269,13 @@ money path while it's small.
 | "Why not an AI gateway?" | Gateways cap provider spend, route models, and manage virtual keys. Unprice governs what your customer is allowed to spend and connects that decision to plan versions, credits, and invoice evidence. |
 | "Why not Stigg?" | Stigg is a strong closed usage runtime. Use Unprice when you want the request-to-invoice money path in open source: inspect it, fork it, run it in your own account, and keep the budget check, credit reservation, and invoice evidence together. |
 | "Why not a Redis counter?" | A counter can drift from spend, credits, and invoice evidence, and races let over-budget work through. Unprice keeps the budget check, credit reservation, and invoice explanation on one path. |
-| "Will switching disrupt my current logic?" | No — adopt it in shadow. `access.check` is read-only and `usage.record` is non-blocking, so you run Unprice's decisions beside your stack and only cut over to enforcement when you trust it. |
+| "Will switching disrupt my current logic?" | No — adopt it in shadow. `access.check` is read-only and `usage.record` reports past usage without a limit gate, so you run Unprice's decisions beside your stack and only cut over to enforcement when you trust it. |
 | "Do I have to move my payments / will you touch my money?" | No. Start on Sandbox (no processor), then connect your **own** Stripe via Connect or your own key. Charges and payouts run on your account; Unprice never sits in your funds flow. |
 | "Do I have to rebuild subscriptions and entitlements?" | No. Define one plan version; `signUp` provisions the customer, subscription, and entitlements (plus grants, billing periods, wallet) in one call. |
 | "Why separate entitlements from subscriptions?" | Because pricing experiments should not silently rewrite what an existing customer bought. Plan versions keep customers attached to their versioned entitlement map. |
-| "Record vs consume vs runs?" | `record` = async report (can exceed funds). `consume` = sync enforce (blocks over limit). `runs` = reserve a budget envelope before the work runs. Lead with the operation that matches the paid action: `access.check`, `consume`, or `runs`. |
+| "Record vs consume vs budgets?" | `usage.record` applies reported usage before it returns, with per-event outcomes. `usage.consume` applies usage only when funded and within limits. `budget(key).authorize` reserves capacity on a standalone cap, and `hold.settle` records actual use within that hold. |
 | "Will this replace my billing stack?" | No. Stripe-first today; Unprice sits between product usage and invoice evidence — not a tax, accounting, or payment-processor replacement. |
-| "Is this an AI agent platform?" | No. Budgeted runs are generic workload labels. Your app owns prompts, tools, jobs, and execution. |
+| "Is this an AI agent platform?" | No. Your app chooses budget keys for its workloads. Your app owns prompts, tools, jobs, and execution. |
 | "Is it safe enough for money logic?" | The money-path core is open source — audit it, run it in shadow, prove it on Sandbox, then enforce. The adoption sequence is the guarantee. |
 
 ---
@@ -303,7 +302,7 @@ Concrete edits to align the live page with this offer (copy only — no structur
    sandbox → own-Stripe sentence to the paragraph.
 3. `money-path.tsx` — caption stays; add plan version as a visible evidence point, and consider a
    one-line note that `Meter` uses `usage.record` (report) while the authorization decision uses
-   `access.check`, `usage.consume`, or `runs` depending on the action.
+   `access.check`, `usage.consume`, or `budget(key).authorize` depending on the action.
 4. **Add a Proof Video section** with the workflow-app demo between the hero/problem and the
    adoption path. It should prove one action in one afternoon, not narrate every product feature.
 5. **Add an Adoption Path section** (the shadow → sandbox → cut-over block) between the money-path
@@ -323,9 +322,10 @@ Concrete edits to align the live page with this offer (copy only — no structur
   Always say Unprice never sits in the buyer's funds flow.
 - Integration: the first integration is "define one plan version + `signUp` + `access.check`," not "one
   `access.check`." Don't imply entitlements exist without a published plan version.
-- Endpoints: don't conflate `record` (async report) / `consume` (sync enforce) / `runs` (reserve) /
-  `access.check` (read-only). Shadow adoption is real because `access.check` is read-only and
-  `usage.record` is non-blocking — don't describe shadow as a separate product mode.
+- Endpoints: don't conflate `usage.record` (report with per-event outcomes) / `usage.consume` (enforce, HTTP 402 on denial) / `budget(key).authorize` (reserve a standalone cap) /
+  `access.check` (read-only). In shadow adoption, your application keeps its existing decision
+  authoritative and compares `access.check` results. `usage.record` changes usage and invoice
+  evidence; it is not a shadow mode.
 - The "authorize before; explain after" wedge is the canonical competitive line but a
   still-unvalidated hypothesis (`positioning-and-messaging.md`). Lead with mechanism; don't oversell
   superlatives.

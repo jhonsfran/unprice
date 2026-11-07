@@ -55,14 +55,6 @@ export const AGGREGATION_METHODS_MAP = {
     label: "Count",
     description: "Number of events reported within the billing period",
   },
-  max: {
-    label: "Maximum",
-    description: "Highest reported value within the billing period",
-  },
-  latest: {
-    label: "Latest",
-    description: "Most recent reported value within the billing period",
-  },
 } as const
 
 export const BILLING_INTERVALS = ["month", "year", "week", "day", "minute", "onetime"] as const
@@ -267,19 +259,6 @@ export const FEATURE_TYPES = Object.keys(FEATURE_TYPES_MAPS) as unknown as reado
   FeatureType,
   ...FeatureType[],
 ]
-
-export type Behavior = "sum" | "max" | "latest"
-
-interface MethodConfig {
-  behavior: Behavior
-}
-
-export const AGGREGATION_CONFIG: Record<AggregationMethod, MethodConfig> = {
-  sum: { behavior: "sum" },
-  count: { behavior: "sum" },
-  max: { behavior: "max" },
-  latest: { behavior: "latest" },
-}
 
 export const OVERAGE_STRATEGIES_MAP: Record<
   OverageStrategy,

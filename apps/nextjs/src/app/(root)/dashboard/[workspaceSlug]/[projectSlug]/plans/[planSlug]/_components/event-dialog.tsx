@@ -245,8 +245,8 @@ export function EventFormDialog({
                 </div>
               ) : (
                 <div className="rounded-md border border-dashed px-3 py-4 text-center text-muted-foreground text-xs">
-                  No numeric properties: each event counts as one. Add a property to sum, max, or
-                  take the latest value instead.
+                  No numeric properties: each event counts as one. Add a numeric property to sum
+                  measured usage instead.
                 </div>
               )}
             </div>

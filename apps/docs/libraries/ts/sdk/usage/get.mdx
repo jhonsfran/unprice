@@ -21,6 +21,7 @@ return result;
 <ResponseExample>
 ```json
 {
+  "truncated_events": 0,
   "usage": [
     {
       "project_id": "project_1234567890",
@@ -53,6 +54,14 @@ return result;
 </ParamField>
 
 ## Response
+
+Each row keeps its payer budget's currency. A customer and feature can have separate rows for
+different currencies in the selected range. Do not add those amounts without a currency conversion.
+Non-money budgets use currency `XXX` and include their unit in `display_amount`.
+
+`truncated_events` counts events that fed more features than the query can expand per event.
+Those events have an incomplete feature breakdown in `usage`. A zero value means every event
+contributed all its features.
 
 <ResponseField name="usage" type="array" required>
     Usage and priced data points for the selected range. Use `access.check` or `usage.consume` for

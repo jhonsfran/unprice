@@ -31,7 +31,6 @@ async function loadObservability() {
       pending: 0,
     })),
     initObservability: vi.fn(),
-    runDoOperation: vi.fn(),
     sharedSamplingConfig: vi.fn(() => ({})),
   }))
 
@@ -81,41 +80,39 @@ describe("createDoLogger", () => {
     const logger = createDoLogger("do_123")
 
     logger.set({
-      business: { operation: "apply_batch" },
-      operation: "apply_batch",
-      request: { path: "/durable-objects/entitlementwindow/apply_batch" },
-      service: "entitlementwindow",
+      business: { operation: "record" },
+      operation: "record",
+      request: { path: "/durable-objects/budget/record" },
+      service: "budget",
     })
-    logger.info("entitlement apply_batch", {
+    logger.info("budget record", {
       customer_id: "cus_123",
-      mode: "optimized",
       project_id: "proj_123",
     })
 
     expect(metricsLogger.info).toHaveBeenCalledWith(
-      "entitlement apply_batch",
+      "budget record",
       expect.objectContaining({
         customer_id: "cus_123",
-        mode: "optimized",
-        operation: "apply_batch",
+        operation: "record",
         project_id: "proj_123",
         requestId: "do_123",
         sample_rate: 0.1,
-        service: "entitlementwindow",
+        service: "budget",
         type: "log",
       })
     )
     expect(metricsLogger.info).toHaveBeenCalledWith(
-      "entitlement apply_batch",
+      "budget record",
       expect.objectContaining({
-        business: { operation: "apply_batch" },
+        business: { operation: "record" },
         cloud: {
           durable_object_id: "do_123",
           platform: "cloudflare",
         },
         request: {
           id: "do_123",
-          path: "/durable-objects/entitlementwindow/apply_batch",
+          path: "/durable-objects/budget/record",
         },
       })
     )
@@ -126,10 +123,10 @@ describe("createDoLogger", () => {
     vi.spyOn(Math, "random").mockReturnValue(0)
     const logger = createDoLogger("do_123")
 
-    logger.debug("entitlement debug", { operation: "apply" })
+    logger.debug("budget debug", { operation: "apply" })
 
     expect(metricsLogger.info).toHaveBeenCalledWith(
-      "entitlement debug",
+      "budget debug",
       expect.objectContaining({
         level: "debug",
         operation: "apply",
@@ -144,8 +141,8 @@ describe("createDoLogger", () => {
     vi.spyOn(Math, "random").mockReturnValue(0.5)
     const logger = createDoLogger("do_123")
 
-    logger.debug("entitlement debug", { outcome: "success" })
-    logger.info("entitlement apply", { allowed: true })
+    logger.debug("budget debug", { outcome: "success" })
+    logger.info("budget apply", { allowed: true })
 
     expect(metricsLogger.info).not.toHaveBeenCalled()
   })
@@ -156,18 +153,18 @@ describe("createDoLogger", () => {
     const logger = createDoLogger("do_123")
 
     logger.set({ denied_reason: "WALLET_EMPTY" })
-    logger.debug("entitlement debug")
-    logger.info("entitlement apply")
+    logger.debug("budget debug")
+    logger.info("budget apply")
 
     expect(metricsLogger.info).toHaveBeenCalledTimes(2)
     expect(metricsLogger.info).toHaveBeenNthCalledWith(
       1,
-      "entitlement debug",
+      "budget debug",
       expect.objectContaining({ denied_reason: "WALLET_EMPTY", level: "debug" })
     )
     expect(metricsLogger.info).toHaveBeenNthCalledWith(
       2,
-      "entitlement apply",
+      "budget apply",
       expect.objectContaining({ denied_reason: "WALLET_EMPTY" })
     )
   })
@@ -178,7 +175,7 @@ describe("createDoLogger", () => {
     const error = new Error("wallet refill failed")
 
     logger.error(error, {
-      operation: "flush_refill",
+      operation: "fund",
       project_id: "proj_123",
     })
 
@@ -190,7 +187,7 @@ describe("createDoLogger", () => {
           name: "Error",
           stack: expect.any(String),
         }),
-        operation: "flush_refill",
+        operation: "fund",
         project_id: "proj_123",
         type: "log",
       })

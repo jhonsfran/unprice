@@ -39,8 +39,10 @@ import {
 import { versionInsertBaseSchema } from "./planVersions"
 import { planInsertBaseSchema } from "./plans"
 import {
+  USAGE_LIMIT_RESET_MESSAGE,
   billingIntervalCountSchema,
   billingIntervalSchema,
+  isUsageLimitResetSupported,
   meterConfigSchema,
   typeFeatureSchema,
 } from "./shared"
@@ -155,10 +157,7 @@ export const monetizationPriceConfigSchema = z
  * `meterConfigSchema` with `eventId` removed: the boundary points at an event by
  * slug and the server resolves it once the events exist.
  *
- * `filters`, `groupBy`, and `windowSize` are removed too. They are marked
- * "TODO: implement this later" in `shared.ts` and nothing reads them, so at the
- * boundary they would be accepted, hashed into a new draft version, and change
- * no behaviour. Add them back here when they do something.
+ * `groupBy` is preserved because it defines the rate card's active price dimensions.
  *
  * `.omit()` drops the shared schema's refinement, but nothing is restated to
  * compensate: `validateAgainstInternalFeature` sends the meter back through
@@ -167,7 +166,7 @@ export const monetizationPriceConfigSchema = z
  */
 export const monetizationMeterConfigSchema = z
   .object(meterConfigSchema.shape)
-  .omit({ eventId: true, filters: true, groupBy: true, windowSize: true })
+  .omit({ eventId: true })
   .strict()
   .describe("How usage is measured from a declared event")
 
@@ -492,6 +491,24 @@ export const monetizationVersionSchema = z
     features: z.array(monetizationVersionFeatureSchema).min(1),
   })
   .strict()
+  .superRefine((version, ctx) => {
+    const billingConfig = {
+      ...INTERNAL_PLACEHOLDER_BILLING_CONFIG,
+      billingInterval: version.billingConfig.interval,
+      billingIntervalCount: version.billingConfig.intervalCount,
+    }
+    for (const [index, feature] of version.features.entries()) {
+      if (feature.featureType !== "usage" || feature.limit === undefined || feature.resetConfig)
+        continue
+      if (!isUsageLimitResetSupported(billingConfig)) {
+        ctx.addIssue({
+          code: "custom",
+          message: USAGE_LIMIT_RESET_MESSAGE,
+          path: ["features", index, "resetConfig"],
+        })
+      }
+    }
+  })
 
 export const monetizationPlanSchema = z
   .object({

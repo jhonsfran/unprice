@@ -55,6 +55,7 @@ export {
   getIngestionStatusCursorSchema,
   getIngestionStatusInputSchema,
   getIngestionStatusOutputSchema,
+  ingestionStateSchema,
 } from "./analytics/get-ingestion-status"
 export type {
   GetIngestionStatusDeps,

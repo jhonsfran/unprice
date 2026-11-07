@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="880" height="660" viewBox="0 0 880 660" fill="none" role="img" aria-labelledby="title desc">
   <title id="title">The money path</title>
-  <desc id="desc">Static version of the landing page money path. Three usage.consume requests share a $10 budget. Each request costs $4.10 for 2,050 tokens at $0.002 on pro@v3. The first two are accepted, leaving $1.80. Accepted usage moves through wallet, ledger, invoice evidence, and payment in your own Stripe account. The third is denied with LIMIT_EXCEEDED, leaving the wallet untouched, with no ledger entry, invoice line, or charge.</desc>
+  <desc id="desc">Static version of the landing page money path. Three usage.consume requests share a $10 budget. Each request costs $4.10 for 2,050 tokens at $0.002 on pro@v3. The first two are accepted, leaving $1.80. Accepted usage moves through wallet, ledger, invoice evidence, and payment in your own Stripe account. The third is denied with BUDGET_EXCEEDED, leaving the wallet untouched, with no ledger entry, invoice line, or charge.</desc>
   <!-- Static companion to apps/nextjs/src/components/landing/money-path.tsx. Keep labels and example amounts aligned. Native SVG only: no filters, foreignObject, or external assets. -->
   <rect width="880" height="660" rx="12" fill="#191918"/>
   <text x="32" y="40" fill="#b5b3ad" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="13">THE MONEY PATH</text>
@@ -62,7 +62,7 @@
   <rect x="460" y="328" width="388" height="72" rx="4" fill="#391714" stroke="#ff977d"/>
   <path d="M 475 345 l 12 12 m 0 -12 l -12 12" stroke="#ff977d" stroke-width="1.5"/>
   <text x="500" y="354" fill="#eeeeec" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="600">deny · over budget</text>
-  <text x="474" y="381" fill="#ff977d" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="12">LIMIT_EXCEEDED</text>
+  <text x="474" y="381" fill="#ff977d" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="12">BUDGET_EXCEEDED</text>
   <text x="834" y="381" fill="#b5b3ad" font-family="SFMono-Regular, Consolas, Liberation Mono, monospace" font-size="12" text-anchor="end">$4.10 &gt; $1.80</text>
   <path d="M 470 400 V 586" stroke="#44443f" stroke-width="1.5" stroke-dasharray="4 4"/>
   <circle cx="470" cy="427" r="4.5" fill="#191918" stroke="#44443f" stroke-width="1.5"/>

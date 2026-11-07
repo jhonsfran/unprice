@@ -18,6 +18,7 @@ import {
   type Subscription,
   getAnchor,
   isResetCadenceAtMostBilling,
+  isUsageLimitResetSupported,
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
@@ -1990,8 +1991,11 @@ export class PlanService {
 
     if (
       featureType === "usage" &&
-      resetConfigCreate &&
-      !isResetCadenceAtMostBilling(resetConfigCreate, billingConfigCreate)
+      ((resetConfigCreate &&
+        !isResetCadenceAtMostBilling(resetConfigCreate, billingConfigCreate)) ||
+        (typeof limit === "number" &&
+          limit > 0 &&
+          !isUsageLimitResetSupported(billingConfigCreate, resetConfigCreate)))
     ) {
       return Ok({
         state: "invalid_reset_config",
@@ -2227,8 +2231,10 @@ export class PlanService {
 
     if (
       featureTypeUpdate === "usage" &&
-      resetConfigUpdate &&
-      !isResetCadenceAtMostBilling(resetConfigUpdate, billingConfigUpdate)
+      ((resetConfigUpdate &&
+        !isResetCadenceAtMostBilling(resetConfigUpdate, billingConfigUpdate)) ||
+        (((limit === undefined ? existingPlanVersionFeature.limit : limit) ?? 0) > 0 &&
+          !isUsageLimitResetSupported(billingConfigUpdate, resetConfigUpdate)))
     ) {
       return Ok({
         state: "invalid_reset_config",

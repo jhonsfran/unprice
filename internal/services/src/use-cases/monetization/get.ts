@@ -127,8 +127,8 @@ export const unrepresentablePlanSchema = z
  *
  * - `enforcement_settings_dropped` and `version_settings_dropped` are
  *   commercial changes. A caller must stop and get a human decision.
- * - `feature_settings_dropped` and `meter_fields_dropped` are cosmetic or inert
- *   today. Report them; do not block on them.
+ * - `feature_settings_dropped` describes cosmetic settings. Report them;
+ *   do not block on them.
  *
  * All of them fire almost exclusively for dashboard-authored versions, which
  * cannot round-trip without a write anyway. `apply` writes the server defaults
@@ -138,7 +138,6 @@ export const monetizationWarningCodeSchema = z.enum([
   "enforcement_settings_dropped",
   "version_settings_dropped",
   "feature_settings_dropped",
-  "meter_fields_dropped",
 ])
 
 export const monetizationWarningSchema = z
@@ -284,9 +283,6 @@ const DEFAULT_OVERAGE_STRATEGY = "none"
 /** The `defaultQuantity` the writer applies when the document does not say. */
 const DEFAULT_QUANTITY = 1
 
-/** Meter keys the boundary drops because nothing reads them yet. */
-const INERT_METER_KEYS = ["filters", "groupBy", "windowSize"] as const
-
 function compareStrings(left: string, right: string): number {
   if (left === right) return 0
   return left < right ? -1 : 1
@@ -356,11 +352,6 @@ function droppedFeatureSettings(planFeature: StoredPlanVersionFeature): string[]
   if (planFeature.type && planFeature.type !== "feature") dropped.push("type")
 
   return dropped
-}
-
-function droppedMeterFields(planFeature: StoredPlanVersionFeature): string[] {
-  const meterConfig = (planFeature.meterConfig ?? {}) as Record<string, unknown>
-  return INERT_METER_KEYS.filter((key) => meterConfig[key] !== undefined)
 }
 
 function unrepresentable(
@@ -500,8 +491,7 @@ function toBoundaryFeature(
 
   // The version's own snapshot, because `meterConfig` is inside
   // `computeConfigHash`: it is priced configuration, not a mutable label. The
-  // inert `filters`/`groupBy`/`windowSize` are dropped, which the caller learns
-  // from `warnings` rather than losing silently.
+  // group-by keys define the rate card's price dimensions and must round-trip.
   const { meterConfig } = planFeature
 
   return {
@@ -513,6 +503,7 @@ function toBoundaryFeature(
           meterConfig: {
             eventSlug: meterConfig.eventSlug,
             aggregationMethod: meterConfig.aggregationMethod,
+            ...(meterConfig.groupBy ? { groupBy: meterConfig.groupBy } : {}),
             ...(meterConfig.aggregationField
               ? { aggregationField: meterConfig.aggregationField }
               : {}),
@@ -622,17 +613,6 @@ function projectPlan(
     features.push(feature)
 
     const featureSlug = planFeature.feature.slug
-    const droppedMeter = droppedMeterFields(planFeature)
-
-    if (droppedMeter.length > 0) {
-      warnings.push({
-        planSlug: plan.slug,
-        featureSlug,
-        code: "meter_fields_dropped",
-        message: `The meter for "${featureSlug}" sets ${droppedMeter.join(", ")}. Applying this document creates a new draft without them. The version you read stays exactly as it is`,
-      })
-    }
-
     const droppedEnforcement = droppedEnforcementSettings(planFeature)
 
     if (droppedEnforcement.length > 0) {

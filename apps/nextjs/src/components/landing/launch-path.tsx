@@ -13,8 +13,9 @@ import { StationHeader } from "./station-header"
 const RESERVATION_SNIPPET = `import { generateText } from "ai"
 import { Unprice } from "@unprice/api"
 
-const unprice = new Unprice({ token: process.env.UNPRICE_TOKEN })
-// The first call creates the customer's cap: $5 a month.
+const unprice = new Unprice({ token: process.env.UNPRICE_TOKEN! })
+// The first call creates a standalone cap: $5 a month.
+// This cap does not move wallet funds or create invoice usage.
 const budget = unprice.budget(\`customer:\${customerId}\`, {
   ifMissing: { unit: "USD", limits: [{ amount: "5", window: "month" }] },
 })
@@ -31,6 +32,9 @@ if (error) {
 }
 if (!authorization.allowed) {
   return new Response("Customer budget unavailable", { status: 402 })
+}
+if (authorization.replayed) {
+  return new Response("Recover the existing request before starting more work", { status: 409 })
 }
 
 // 2. Spend only after the hold succeeds.
@@ -64,7 +68,7 @@ const stages = [
     title: "Reserve",
     body: "Hold the maximum cost before the provider call.",
     facts: [
-      { label: "customer", fact: "funds the work" },
+      { label: "customer", fact: "key for this cap" },
       { label: "held", fact: "$0.10 maximum" },
       { label: "denied", fact: "no provider call" },
     ],
@@ -84,7 +88,7 @@ const stages = [
     facts: [
       { label: "captured", fact: "actual usage" },
       { label: "released", fact: "unused hold" },
-      { label: "evidence", fact: "usage → invoice" },
+      { label: "evidence", fact: "budget journal" },
     ],
   },
 ]

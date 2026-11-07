@@ -82,7 +82,7 @@ describe("getIngestionStatusV1 route", () => {
     const body = await response.json()
     expect(body).toMatchObject({
       window: { from: fromTs, to: toTs },
-      totals: { processed: 2, rejected: 0, failed: 0, total: 2 },
+      totals: { processed: 2, rejected: 0, total: 2 },
       successRate: 1,
       confidence: "high",
     })
@@ -107,7 +107,7 @@ describe("getIngestionStatusV1 route", () => {
 
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toMatchObject({
-      totals: { processed: 0, rejected: 0, failed: 0, total: 0 },
+      totals: { processed: 0, rejected: 0, total: 0 },
       confidence: "low",
     })
     expect(queries[0]).toContain("AND starts_with(budget_key, 'unprice:customer:')")
@@ -118,6 +118,20 @@ describe("getIngestionStatusV1 route", () => {
 
     const response = await app.fetch(
       buildRequest({ customer_id: "cus_invalid", from_ts: toTs, to_ts: fromTs }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(400)
+    expect(authMocks.keyAuth).not.toHaveBeenCalled()
+    expect(queries).toEqual([])
+  })
+
+  it("rejects the removed queue failure state before auth", async () => {
+    const { app, env, executionCtx, queries } = createTestApp(() => [])
+
+    const response = await app.fetch(
+      buildRequest({ from_ts: fromTs, to_ts: toTs, state: "failed" }),
       env,
       executionCtx
     )

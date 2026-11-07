@@ -8026,32 +8026,24 @@
                               },
                               "aggregationMethod": {
                                 "type": "string",
-                                "enum": ["sum", "count", "max", "latest"],
-                                "description": "How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value."
+                                "enum": ["sum", "count"],
+                                "description": "How to aggregate usage events within the current billing period. 'sum' totals values and 'count' counts events."
                               },
                               "aggregationField": {
                                 "type": "string",
                                 "minLength": 1
                               },
-                              "filters": {
-                                "type": "object",
-                                "additionalProperties": {
-                                  "type": "string"
-                                }
-                              },
                               "groupBy": {
                                 "type": "array",
                                 "items": {
-                                  "type": "string"
+                                  "type": "string",
+                                  "minLength": 1
                                 }
-                              },
-                              "windowSize": {
-                                "type": "string",
-                                "enum": ["MINUTE", "HOUR", "DAY"]
                               }
                             },
                             "required": ["eventId", "eventSlug", "aggregationMethod"],
-                            "description": "Snapshotted event-native meter configuration for this plan version feature. When present, it is the authoritative source for how usage should be measured"
+                            "description": "Snapshotted event-native meter configuration for this plan version feature. When present, it is the authoritative source for how usage should be measured",
+                            "additionalProperties": false
                           },
                           "feature": {
                             "type": "object",
@@ -8108,32 +8100,24 @@
                                   },
                                   "aggregationMethod": {
                                     "type": "string",
-                                    "enum": ["sum", "count", "max", "latest"],
-                                    "description": "How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value."
+                                    "enum": ["sum", "count"],
+                                    "description": "How to aggregate usage events within the current billing period. 'sum' totals values and 'count' counts events."
                                   },
                                   "aggregationField": {
                                     "type": "string",
                                     "minLength": 1
                                   },
-                                  "filters": {
-                                    "type": "object",
-                                    "additionalProperties": {
-                                      "type": "string"
-                                    }
-                                  },
                                   "groupBy": {
                                     "type": "array",
                                     "items": {
-                                      "type": "string"
+                                      "type": "string",
+                                      "minLength": 1
                                     }
-                                  },
-                                  "windowSize": {
-                                    "type": "string",
-                                    "enum": ["MINUTE", "HOUR", "DAY"]
                                   }
                                 },
                                 "required": ["eventId", "eventSlug", "aggregationMethod"],
-                                "description": "Default meter template for usage-style features. When present, new plan version feature snapshots can copy this event-native measurement configuration"
+                                "description": "Default meter template for usage-style features. When present, new plan version feature snapshots can copy this event-native measurement configuration",
+                                "additionalProperties": false
                               }
                             },
                             "required": [
@@ -9527,32 +9511,24 @@
                               },
                               "aggregationMethod": {
                                 "type": "string",
-                                "enum": ["sum", "count", "max", "latest"],
-                                "description": "How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value."
+                                "enum": ["sum", "count"],
+                                "description": "How to aggregate usage events within the current billing period. 'sum' totals values and 'count' counts events."
                               },
                               "aggregationField": {
                                 "type": "string",
                                 "minLength": 1
                               },
-                              "filters": {
-                                "type": "object",
-                                "additionalProperties": {
-                                  "type": "string"
-                                }
-                              },
                               "groupBy": {
                                 "type": "array",
                                 "items": {
-                                  "type": "string"
+                                  "type": "string",
+                                  "minLength": 1
                                 }
-                              },
-                              "windowSize": {
-                                "type": "string",
-                                "enum": ["MINUTE", "HOUR", "DAY"]
                               }
                             },
                             "required": ["eventId", "eventSlug", "aggregationMethod"],
-                            "description": "Default meter template for usage-style features. When present, new plan version feature snapshots can copy this event-native measurement configuration"
+                            "description": "Default meter template for usage-style features. When present, new plan version feature snapshots can copy this event-native measurement configuration",
+                            "additionalProperties": false
                           }
                         },
                         "required": [
@@ -10238,12 +10214,19 @@
                                           },
                                           "aggregationMethod": {
                                             "type": "string",
-                                            "enum": ["sum", "count", "max", "latest"],
-                                            "description": "How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value."
+                                            "enum": ["sum", "count"],
+                                            "description": "How to aggregate usage events within the current billing period. 'sum' totals values and 'count' counts events."
                                           },
                                           "aggregationField": {
                                             "type": "string",
                                             "minLength": 1
+                                          },
+                                          "groupBy": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            }
                                           }
                                         },
                                         "required": ["eventSlug", "aggregationMethod"],
@@ -10817,12 +10800,19 @@
                                             },
                                             "aggregationMethod": {
                                               "type": "string",
-                                              "enum": ["sum", "count", "max", "latest"],
-                                              "description": "How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value."
+                                              "enum": ["sum", "count"],
+                                              "description": "How to aggregate usage events within the current billing period. 'sum' totals values and 'count' counts events."
                                             },
                                             "aggregationField": {
                                               "type": "string",
                                               "minLength": 1
+                                            },
+                                            "groupBy": {
+                                              "type": "array",
+                                              "items": {
+                                                "type": "string",
+                                                "minLength": 1
+                                              }
                                             }
                                           },
                                           "required": ["eventSlug", "aggregationMethod"],
@@ -10962,8 +10952,7 @@
                             "enum": [
                               "enforcement_settings_dropped",
                               "version_settings_dropped",
-                              "feature_settings_dropped",
-                              "meter_fields_dropped"
+                              "feature_settings_dropped"
                             ]
                           },
                           "message": {
@@ -12044,32 +12033,24 @@
                                   },
                                   "aggregationMethod": {
                                     "type": "string",
-                                    "enum": ["sum", "count", "max", "latest"],
-                                    "description": "How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value."
+                                    "enum": ["sum", "count"],
+                                    "description": "How to aggregate usage events within the current billing period. 'sum' totals values and 'count' counts events."
                                   },
                                   "aggregationField": {
                                     "type": "string",
                                     "minLength": 1
                                   },
-                                  "filters": {
-                                    "type": "object",
-                                    "additionalProperties": {
-                                      "type": "string"
-                                    }
-                                  },
                                   "groupBy": {
                                     "type": "array",
                                     "items": {
-                                      "type": "string"
+                                      "type": "string",
+                                      "minLength": 1
                                     }
-                                  },
-                                  "windowSize": {
-                                    "type": "string",
-                                    "enum": ["MINUTE", "HOUR", "DAY"]
                                   }
                                 },
                                 "required": ["eventId", "eventSlug", "aggregationMethod"],
-                                "description": "Snapshotted event-native meter configuration for this plan version feature. When present, it is the authoritative source for how usage should be measured"
+                                "description": "Snapshotted event-native meter configuration for this plan version feature. When present, it is the authoritative source for how usage should be measured",
+                                "additionalProperties": false
                               },
                               "displayFeatureText": {
                                 "type": "string",
@@ -12135,32 +12116,24 @@
                                       },
                                       "aggregationMethod": {
                                         "type": "string",
-                                        "enum": ["sum", "count", "max", "latest"],
-                                        "description": "How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value."
+                                        "enum": ["sum", "count"],
+                                        "description": "How to aggregate usage events within the current billing period. 'sum' totals values and 'count' counts events."
                                       },
                                       "aggregationField": {
                                         "type": "string",
                                         "minLength": 1
                                       },
-                                      "filters": {
-                                        "type": "object",
-                                        "additionalProperties": {
-                                          "type": "string"
-                                        }
-                                      },
                                       "groupBy": {
                                         "type": "array",
                                         "items": {
-                                          "type": "string"
+                                          "type": "string",
+                                          "minLength": 1
                                         }
-                                      },
-                                      "windowSize": {
-                                        "type": "string",
-                                        "enum": ["MINUTE", "HOUR", "DAY"]
                                       }
                                     },
                                     "required": ["eventId", "eventSlug", "aggregationMethod"],
-                                    "description": "Default meter template for usage-style features. When present, new plan version feature snapshots can copy this event-native measurement configuration"
+                                    "description": "Default meter template for usage-style features. When present, new plan version feature snapshots can copy this event-native measurement configuration",
+                                    "additionalProperties": false
                                   }
                                 },
                                 "required": [
@@ -12898,32 +12871,24 @@
                                     },
                                     "aggregationMethod": {
                                       "type": "string",
-                                      "enum": ["sum", "count", "max", "latest"],
-                                      "description": "How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value."
+                                      "enum": ["sum", "count"],
+                                      "description": "How to aggregate usage events within the current billing period. 'sum' totals values and 'count' counts events."
                                     },
                                     "aggregationField": {
                                       "type": "string",
                                       "minLength": 1
                                     },
-                                    "filters": {
-                                      "type": "object",
-                                      "additionalProperties": {
-                                        "type": "string"
-                                      }
-                                    },
                                     "groupBy": {
                                       "type": "array",
                                       "items": {
-                                        "type": "string"
+                                        "type": "string",
+                                        "minLength": 1
                                       }
-                                    },
-                                    "windowSize": {
-                                      "type": "string",
-                                      "enum": ["MINUTE", "HOUR", "DAY"]
                                     }
                                   },
                                   "required": ["eventId", "eventSlug", "aggregationMethod"],
-                                  "description": "Snapshotted event-native meter configuration for this plan version feature. When present, it is the authoritative source for how usage should be measured"
+                                  "description": "Snapshotted event-native meter configuration for this plan version feature. When present, it is the authoritative source for how usage should be measured",
+                                  "additionalProperties": false
                                 },
                                 "displayFeatureText": {
                                   "type": "string",
@@ -12989,32 +12954,24 @@
                                         },
                                         "aggregationMethod": {
                                           "type": "string",
-                                          "enum": ["sum", "count", "max", "latest"],
-                                          "description": "How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value."
+                                          "enum": ["sum", "count"],
+                                          "description": "How to aggregate usage events within the current billing period. 'sum' totals values and 'count' counts events."
                                         },
                                         "aggregationField": {
                                           "type": "string",
                                           "minLength": 1
                                         },
-                                        "filters": {
-                                          "type": "object",
-                                          "additionalProperties": {
-                                            "type": "string"
-                                          }
-                                        },
                                         "groupBy": {
                                           "type": "array",
                                           "items": {
-                                            "type": "string"
+                                            "type": "string",
+                                            "minLength": 1
                                           }
-                                        },
-                                        "windowSize": {
-                                          "type": "string",
-                                          "enum": ["MINUTE", "HOUR", "DAY"]
                                         }
                                       },
                                       "required": ["eventId", "eventSlug", "aggregationMethod"],
-                                      "description": "Default meter template for usage-style features. When present, new plan version feature snapshots can copy this event-native measurement configuration"
+                                      "description": "Default meter template for usage-style features. When present, new plan version feature snapshots can copy this event-native measurement configuration",
+                                      "additionalProperties": false
                                     }
                                   },
                                   "required": [
@@ -13900,7 +13857,7 @@
       "post": {
         "operationId": "analytics.charges.explain",
         "summary": "explain charge",
-        "description": "Explain one invoice line using ledger metadata and rated meter facts.",
+        "description": "Explain one invoice line using ledger metadata and journal events.",
         "tags": ["analytics"],
         "x-unprice": {
           "audience": "public",
@@ -14038,9 +13995,6 @@
                         "total_amount": {
                           "type": "integer"
                         },
-                        "latest_amount_after": {
-                          "type": "integer"
-                        },
                         "currency": {
                           "type": "string"
                         },
@@ -14063,7 +14017,6 @@
                         "event_count",
                         "total_usage",
                         "total_amount",
-                        "latest_amount_after",
                         "currency",
                         "amount_scale",
                         "first_event_at",
@@ -14116,21 +14069,8 @@
                       "items": {
                         "type": "object",
                         "properties": {
-                          "event_id": {
-                            "type": "string"
-                          },
                           "idempotency_key": {
                             "type": "string"
-                          },
-                          "customer_entitlement_id": {
-                            "type": "string"
-                          },
-                          "grant_id": {
-                            "type": "string"
-                          },
-                          "feature_plan_version_id": {
-                            "type": "string",
-                            "nullable": true
                           },
                           "feature_slug": {
                             "type": "string"
@@ -14141,27 +14081,18 @@
                           "event_slug": {
                             "type": "string"
                           },
-                          "aggregation_method": {
-                            "type": "string"
-                          },
                           "timestamp": {
                             "type": "number",
                             "description": "timestamp of the ingested event"
                           },
                           "created_at": {
                             "type": "number",
-                            "description": "timestamp of when the fact row was created"
+                            "description": "timestamp of when the budget operation was created"
                           },
                           "delta": {
                             "type": "number"
                           },
-                          "value_after": {
-                            "type": "number"
-                          },
                           "amount": {
-                            "type": "integer"
-                          },
-                          "amount_after": {
                             "type": "integer"
                           },
                           "amount_scale": {
@@ -14173,48 +14104,27 @@
                             "minLength": 3,
                             "maxLength": 3
                           },
-                          "priced_at": {
-                            "type": "integer"
-                          },
-                          "tier_index": {
-                            "type": "integer",
-                            "nullable": true
-                          },
                           "pricing_component_count": {
                             "type": "integer",
                             "minimum": 0
                           },
-                          "source_type": {
-                            "type": "string",
-                            "enum": ["api_key", "system", "unknown"]
-                          },
-                          "source_id": {
+                          "operation_id": {
                             "type": "string"
                           }
                         },
                         "required": [
-                          "event_id",
                           "idempotency_key",
-                          "customer_entitlement_id",
-                          "grant_id",
-                          "feature_plan_version_id",
                           "feature_slug",
                           "period_key",
                           "event_slug",
-                          "aggregation_method",
                           "timestamp",
                           "created_at",
                           "delta",
-                          "value_after",
                           "amount",
-                          "amount_after",
                           "amount_scale",
                           "currency",
-                          "priced_at",
-                          "tier_index",
                           "pricing_component_count",
-                          "source_type",
-                          "source_id"
+                          "operation_id"
                         ]
                       }
                     },
@@ -14251,7 +14161,6 @@
                             "type": "string",
                             "enum": [
                               "event",
-                              "meter_fact",
                               "ingestion_status",
                               "ledger_line",
                               "billing_period",
@@ -14454,18 +14363,21 @@
                       "handledAt": {
                         "type": "integer"
                       },
-                      "canonicalAuditId": {
+                      "operationId": {
+                        "type": "string"
+                      },
+                      "budgetKey": {
                         "type": "string"
                       }
                     },
-                    "required": ["handledAt", "canonicalAuditId"]
+                    "required": ["handledAt", "operationId", "budgetKey"]
                   },
                   "event_slug": {
                     "type": "string"
                   },
                   "state": {
                     "type": "string",
-                    "enum": ["processed", "rejected", "failed"]
+                    "enum": ["processed", "rejected"]
                   },
                   "limit": {
                     "type": "integer",
@@ -14508,14 +14420,11 @@
                         "rejected": {
                           "type": "integer"
                         },
-                        "failed": {
-                          "type": "integer"
-                        },
                         "total": {
                           "type": "integer"
                         }
                       },
-                      "required": ["processed", "rejected", "failed", "total"]
+                      "required": ["processed", "rejected", "total"]
                     },
                     "successRate": {
                       "type": "number"
@@ -14565,14 +14474,11 @@
                           "rejected": {
                             "type": "integer"
                           },
-                          "failed": {
-                            "type": "integer"
-                          },
                           "total": {
                             "type": "integer"
                           }
                         },
-                        "required": ["second", "processed", "rejected", "failed", "total"]
+                        "required": ["second", "processed", "rejected", "total"]
                       }
                     },
                     "rejections": {
@@ -14585,9 +14491,6 @@
                             "nullable": true
                           },
                           "eventSlug": {
-                            "type": "string"
-                          },
-                          "sourceId": {
                             "type": "string"
                           },
                           "sourceType": {
@@ -14603,7 +14506,6 @@
                         "required": [
                           "rejectionReason",
                           "eventSlug",
-                          "sourceId",
                           "sourceType",
                           "eventCount",
                           "lastSeenAt"
@@ -14618,9 +14520,6 @@
                           "eventId": {
                             "type": "string"
                           },
-                          "canonicalAuditId": {
-                            "type": "string"
-                          },
                           "customerId": {
                             "type": "string"
                           },
@@ -14630,89 +14529,37 @@
                           "sourceType": {
                             "type": "string"
                           },
-                          "sourceId": {
-                            "type": "string"
-                          },
-                          "ingestionMode": {
-                            "type": "string",
-                            "nullable": true,
-                            "enum": ["async", "sync", "run", null]
-                          },
-                          "runId": {
-                            "type": "string",
-                            "nullable": true
-                          },
-                          "traceId": {
-                            "type": "string",
-                            "nullable": true
-                          },
-                          "parentRunId": {
-                            "type": "string",
-                            "nullable": true
-                          },
-                          "workloadType": {
-                            "type": "string",
-                            "nullable": true,
-                            "enum": ["agent", "workflow", "job", "tool", "custom", null]
-                          },
-                          "workloadId": {
-                            "type": "string",
-                            "nullable": true
-                          },
                           "state": {
                             "type": "string",
-                            "enum": ["processed", "rejected", "failed"]
+                            "enum": ["processed", "rejected"]
                           },
                           "rejectionReason": {
                             "type": "string",
                             "nullable": true
                           },
-                          "failureStage": {
-                            "type": "string",
-                            "nullable": true
-                          },
-                          "failureReason": {
-                            "type": "string",
-                            "nullable": true
-                          },
-                          "failureMessage": {
-                            "type": "string",
-                            "nullable": true
-                          },
-                          "replayable": {
-                            "type": "boolean"
-                          },
                           "timestamp": {
-                            "type": "integer"
-                          },
-                          "receivedAt": {
                             "type": "integer"
                           },
                           "handledAt": {
                             "type": "integer"
+                          },
+                          "operationId": {
+                            "type": "string"
+                          },
+                          "budgetKey": {
+                            "type": "string"
                           }
                         },
                         "required": [
                           "eventId",
-                          "canonicalAuditId",
+                          "operationId",
                           "customerId",
                           "eventSlug",
                           "sourceType",
-                          "sourceId",
-                          "ingestionMode",
-                          "runId",
-                          "traceId",
-                          "parentRunId",
-                          "workloadType",
-                          "workloadId",
+                          "budgetKey",
                           "state",
                           "rejectionReason",
-                          "failureStage",
-                          "failureReason",
-                          "failureMessage",
-                          "replayable",
                           "timestamp",
-                          "receivedAt",
                           "handledAt"
                         ]
                       }
@@ -14727,7 +14574,7 @@
                             "properties": {
                               "value": {
                                 "type": "string",
-                                "enum": ["processed", "rejected", "failed"]
+                                "enum": ["processed", "rejected"]
                               },
                               "count": {
                                 "type": "integer",
@@ -14817,11 +14664,14 @@
                         "handledAt": {
                           "type": "integer"
                         },
-                        "canonicalAuditId": {
+                        "operationId": {
+                          "type": "string"
+                        },
+                        "budgetKey": {
                           "type": "string"
                         }
                       },
-                      "required": ["handledAt", "canonicalAuditId"]
+                      "required": ["handledAt", "operationId", "budgetKey"]
                     },
                     "answer": {
                       "type": "string"
@@ -14839,7 +14689,6 @@
                             "type": "string",
                             "enum": [
                               "event",
-                              "meter_fact",
                               "ingestion_status",
                               "ledger_line",
                               "billing_period",

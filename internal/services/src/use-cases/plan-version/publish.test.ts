@@ -47,6 +47,53 @@ function baseCard() {
 }
 
 describe("publishPlanVersion", () => {
+  it("refuses an annual finite usage allowance without a supported reset before publication", async () => {
+    const pricingForPlanVersions = vi.fn()
+    const db = {
+      query: {
+        versions: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: "pv_123",
+            status: "draft",
+            planFeatures: [
+              {
+                featureType: "usage",
+                limit: 20,
+                resetConfig: null,
+                billingConfig: {
+                  name: "yearly",
+                  billingInterval: "year",
+                  billingIntervalCount: 1,
+                  billingAnchor: 1,
+                  planType: "recurring",
+                },
+              },
+            ],
+          }),
+        },
+      },
+    } as unknown as Database
+    const result = await publishPlanVersion(
+      {
+        db: transactionalDb(db),
+        logger: createLogger(),
+        userId: "usr_123",
+        services: {
+          rateCards: {
+            lockPlanVersionCards: vi.fn(),
+            withTransaction() {
+              return this
+            },
+            pricingForPlanVersions,
+          },
+        } as unknown as Pick<ServiceContext, "customers" | "rateCards">,
+      },
+      { id: "pv_123", projectId: "proj_123", workspaceUnPriceCustomerId: "cus_123" }
+    )
+    expect(result.val).toEqual({ state: "invalid_reset_config" })
+    expect(pricingForPlanVersions).not.toHaveBeenCalled()
+  })
+
   it("logs payment provider validation failures before returning payment_provider_error", async () => {
     const logger = createLogger()
     const providerError = new UnPriceCustomerError({

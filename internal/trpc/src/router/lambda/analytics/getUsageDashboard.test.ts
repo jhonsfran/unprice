@@ -65,7 +65,7 @@ function evidence(usage: number): GetUsageDashboardOutput {
       {
         featureSlug: "tokens",
         usage,
-        spending: { amount: "0", currency: "USD", displayAmount: "$0.00" },
+        spending: [{ amount: "0", currency: "USD", displayAmount: "$0.00" }],
       },
     ],
   }

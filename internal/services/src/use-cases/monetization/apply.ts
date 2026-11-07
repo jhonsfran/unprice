@@ -318,7 +318,10 @@ async function materializeVersionFeatures(
       const event = await getOrCreateEvent(context, {
         slug: eventSlug,
         name: declared.name,
-        availableProperties: aggregationField ? [aggregationField] : [],
+        availableProperties: [
+          ...(aggregationField ? [aggregationField] : []),
+          ...(versionFeature.meterConfig.groupBy ?? []),
+        ],
       })
       if (event.err) return Err(event.err)
 

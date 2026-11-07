@@ -27,7 +27,7 @@ export type BudgetJournal = {
 export const JOURNAL_BATCH = 500
 
 export function journalRowOf(
-  budget: Readonly<{ key: string; projectId: string }>,
+  budget: Readonly<{ key: string; projectId: string; unit: string }>,
   entry: JournalEntry
 ): BudgetJournalRow {
   const { kind } = entry.operation
@@ -42,7 +42,7 @@ export function journalRowOf(
     timestamp: new Date(entry.writtenAt).toISOString(),
     // Amounts as decimal strings: JSON has no bigint.
     data: JSON.parse(
-      JSON.stringify(entry.operation, (_key, value: unknown) =>
+      JSON.stringify({ ...entry.operation, unit: budget.unit }, (_key, value: unknown) =>
         typeof value === "bigint" ? formatAmount(value) : value
       )
     ),

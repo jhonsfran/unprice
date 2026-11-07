@@ -394,21 +394,7 @@ describe("compilePayerBudget", () => {
     expect(result.err?.issue).toMatchObject({ message: expect.stringContaining("now") })
   })
 
-  it("refuses a meter the budget cannot count, and a customer without phases", () => {
-    const peak = feature("storage", {
-      meterConfig: {
-        eventId: "ev_s",
-        eventSlug: "storage",
-        aggregationMethod: "max",
-        aggregationField: "gb",
-      },
-    })
-
-    expect(compilePayerBudget(source([phase({ items: [item(peak)] })])).err?.issue).toEqual({
-      code: "UNSUPPORTED_AGGREGATION",
-      featureSlug: "storage",
-      aggregationMethod: "max",
-    })
+  it("refuses a customer without phases", () => {
     expect(compilePayerBudget(source([])).err?.issue).toEqual({
       code: "NO_PHASE",
       customerId: "cus_1",

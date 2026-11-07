@@ -8,17 +8,16 @@ import { ANALYTICS_REFRESH_INTERVAL_MS } from "~/components/analytics/ingestion-
 import { useFilterDataTable } from "~/hooks/use-filter-datatable"
 import type { DataTableFilterParams } from "~/lib/searchParams"
 import { useTRPC } from "~/trpc/client"
+import { flattenUniqueEvents, ingestionEventKey } from "./ingestion-event-rows"
 import {
   type IngestionEventRow,
   type IngestionEventsFilterId,
   type IngestionEventsFilterValues,
-  type IngestionStatus,
   buildIngestionEventsFilters,
 } from "./ingestion-events-table-schema"
 import { useRollingWindow } from "./use-rolling-window"
 
 const EVENTS_PAGE_SIZE = 50
-const INGESTION_STATES = ["processed", "rejected", "failed"] as const
 
 export function useIngestionEventsData() {
   const trpc = useTRPC()
@@ -75,7 +74,7 @@ export function useIngestionEventsData() {
     }
 
     return (
-      rows.find((row) => row.canonicalAuditId === detailsEvent.canonicalAuditId) ?? detailsEvent
+      rows.find((row) => ingestionEventKey(row) === ingestionEventKey(detailsEvent)) ?? detailsEvent
     )
   }, [detailsEvent, rows])
   const firstPage = pages?.[0]
@@ -241,23 +240,5 @@ function updateFilterValues(
 function isIngestionState(
   value: string
 ): value is NonNullable<IngestionQueryFilter["states"]>[number] {
-  return INGESTION_STATES.includes(value as (typeof INGESTION_STATES)[number])
-}
-
-function flattenUniqueEvents(pages: IngestionStatus[]): IngestionEventRow[] {
-  const seen = new Set<string>()
-  const events: IngestionEventRow[] = []
-
-  for (const page of pages) {
-    for (const event of page.recentEvents) {
-      if (seen.has(event.canonicalAuditId)) {
-        continue
-      }
-
-      seen.add(event.canonicalAuditId)
-      events.push(event)
-    }
-  }
-
-  return events
+  return value === "processed" || value === "rejected"
 }

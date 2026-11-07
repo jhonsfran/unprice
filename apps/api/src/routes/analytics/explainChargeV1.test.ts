@@ -33,7 +33,7 @@ vi.mock("@unprice/services/use-cases", async (importOriginal) => {
 import { registerExplainChargeV1 } from "./explainChargeV1"
 
 const verifiedKey = {
-  id: "key_123",
+  id: "o:hash_evt_123",
   projectId: "proj_123",
   project: {
     id: "proj_123",
@@ -103,7 +103,6 @@ describe("explainChargeV1 route", () => {
         event_count: 1,
         total_usage: 100,
         total_amount: 425_000_000,
-        latest_amount_after: 425_000_000,
         currency: "USD",
         amount_scale: 8,
         first_event_at: 1_700_000_000_000,
@@ -151,8 +150,8 @@ describe("explainChargeV1 route", () => {
           timestamp: null,
         },
         {
-          type: "meter_fact",
-          id: "proj_123:cus_1:onetime:1700000000000:key_1",
+          type: "event",
+          id: "proj_123:cus_1:onetime:1700000000000:o:hash_evt_1",
           source: "r2",
           timestamp: 1_700_000_000_000,
         },
@@ -239,7 +238,7 @@ describe("explainChargeV1 route", () => {
     })
   })
 
-  it("does not ask for rated meter facts on a non-usage line", async () => {
+  it("does not ask for journal events on a non-usage line", async () => {
     useCaseMocks.explainCharge.mockResolvedValueOnce(Ok(makeNonUsageExplainChargeOutput()))
     const { app, env, executionCtx } = createTestApp()
 
@@ -259,7 +258,7 @@ describe("explainChargeV1 route", () => {
           period_key: "billing_period:bp_1",
         }),
         warnings: [
-          "This non-usage line is explained from ledger and billing-period evidence; no rated meter facts are expected.",
+          "This non-usage line is explained from ledger and billing-period evidence; no journal events are expected.",
         ],
         nextActions: [],
       })
@@ -342,7 +341,6 @@ function makeExplainChargeOutput() {
       eventCount: 1,
       totalUsage: 100,
       totalAmount: 425_000_000,
-      latestAmountAfter: 425_000_000,
       currency: "USD",
       amountScale: 8,
       firstEventAt: 1_700_000_000_000,
@@ -385,7 +383,6 @@ function makeNonUsageExplainChargeOutput() {
       eventCount: 0,
       totalUsage: 3,
       totalAmount: 425_000_000,
-      latestAmountAfter: 425_000_000,
       currency: "USD",
       amountScale: 8,
       firstEventAt: null,
@@ -399,27 +396,17 @@ function makeNonUsageExplainChargeOutput() {
 
 function makeEvent() {
   return {
-    event_id: "evt_1",
     idempotency_key: "idem_1",
-    customer_entitlement_id: "ce_1",
-    grant_id: "grant_1",
-    feature_plan_version_id: "fpv_1",
     feature_slug: "tokens",
     period_key: "onetime:1700000000000",
     event_slug: "tokens.used",
-    aggregation_method: "sum",
     timestamp: 1_700_000_000_000,
     created_at: 1_700_000_000_100,
     delta: 100,
-    value_after: 100,
     amount: 425_000_000,
-    amount_after: 425_000_000,
     amount_scale: 8,
     currency: "USD",
-    priced_at: 1_700_000_000_100,
-    tier_index: 0,
     pricing_component_count: 1,
-    source_type: "api_key",
-    source_id: "key_1",
+    operation_id: "o:hash_evt_1",
   }
 }

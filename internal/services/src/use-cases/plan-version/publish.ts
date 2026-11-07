@@ -1,6 +1,6 @@
 import { type Database, and, eq, inArray } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
-import type { PlanVersion } from "@unprice/db/validators"
+import { type PlanVersion, isUsageLimitResetSupported } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { z } from "zod"
@@ -30,6 +30,7 @@ export type PublishPlanVersionOutput =
         | "no_features"
         | "payment_provider_error"
         | "publish_error"
+        | "invalid_reset_config"
     }
   | z.infer<typeof unpricedPlanVersionSchema>
   /**
@@ -99,6 +100,17 @@ export async function publishPlanVersion(
           return Ok({
             state: "no_features",
           })
+        }
+
+        if (
+          planVersionData.planFeatures.some(
+            (feature) =>
+              feature.featureType === "usage" &&
+              (feature.limit ?? 0) > 0 &&
+              !isUsageLimitResetSupported(feature.billingConfig, feature.resetConfig)
+          )
+        ) {
+          return Ok({ state: "invalid_reset_config" })
         }
 
         // ADR-0008 D2: the version's card in its currency owns every price. A customer needs a payment

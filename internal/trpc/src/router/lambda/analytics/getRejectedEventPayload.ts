@@ -19,7 +19,7 @@ export const getRejectedEventPayload = protectedProjectProcedure
       opts.ctx.logger.error(result.err, {
         context: "getRejectedEventPayload failed",
         project_id: opts.ctx.project.id,
-        canonical_audit_id: opts.input.canonicalAuditId,
+        operation_id: opts.input.operationId,
       })
 
       throw new TRPCError({

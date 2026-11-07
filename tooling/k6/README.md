@@ -33,7 +33,7 @@ Run it only from a trusted local shell that has Docker access and a non-producti
 test token/customer using the required variables from the setup section.
 
 `EVENTS=1000` means at least 1000 `usage.record` calls. If the customer has multiple distinct
-usage event slugs, the run sends `EVENTS * eventSlugCount` async usage events.
+usage event slugs, the run sends `EVENTS * eventSlugCount` reported usage events.
 
 The script also verifies every active entitlement on every iteration. Usage and verification
 requests are sent through SDK methods so API contract drift is caught by TypeScript before k6 runs.
@@ -59,7 +59,7 @@ BUDGETS=1      # optional; adds budgets.authorize then settle, charge, record, a
 ```
 
 With `BUDGETS=1`, setup creates one budget (`k6-latency:<timestamp>`, closing after a day, so it
-deletes itself 30 days later) and times each verb against it after the usage scenarios. A spend
+deletes itself 7 days later) and times each verb against it after the usage scenarios. A spend
 scenario's rate counts authorize-then-settle pairs. The API's `Server-Timing` header carries a
 `budget` mark: the round trip to the budget's Durable Object, apart from key auth and the Worker.
 
@@ -149,8 +149,11 @@ CONFIRM_PRODUCTION_LOAD_TEST=yes
 EVENTS=1000
 RATE=20
 DURATION=60s
-INGESTION_TIMEOUT_SECONDS=120
+INGESTION_TIMEOUT_SECONDS=600
 ```
+
+Journal history can take 3 to 7 minutes to appear. The default reconciliation timeout is
+600 seconds. Live usage checks do not need this wait.
 
 The configuration token creates draft pricing. The runtime token signs up the customer and sends
 usage. The API does not allow one token type to do both jobs.

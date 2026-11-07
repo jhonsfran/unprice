@@ -52,6 +52,7 @@ describe("getUsageV1 route", () => {
       {
         budget_key: "unprice:customer:cus_123",
         feature_slug: "events",
+        unit: "money:EUR",
         events: 3,
         quantity: "10000.00000000",
         amount: "1.50000000",
@@ -59,6 +60,7 @@ describe("getUsageV1 route", () => {
       {
         budget_key: "unprice:customer:cus_123",
         feature_slug: null,
+        unit: "money:EUR",
         events: 1,
         quantity: null,
         amount: null,
@@ -66,6 +68,7 @@ describe("getUsageV1 route", () => {
       {
         budget_key: "unprice:customer:cus_456",
         feature_slug: null,
+        unit: "money:EUR",
         events: "2",
         quantity: null,
         amount: null,
@@ -93,7 +96,102 @@ describe("getUsageV1 route", () => {
     })
     expect(queries[0]).toContain("WHERE project_id = 'proj_123'")
     expect(queries[0]).toContain("AND budget_key = 'unprice:customer:cus_123'")
-    expect(queries[0]).toContain("GROUP BY budget_key, feature_slug")
+    expect(queries[0]).toContain("GROUP BY budget_key, feature_slug, unit")
+  })
+
+  it("keeps each payer unit instead of relabeling amounts with the key project's currency", async () => {
+    const { app, env, executionCtx } = createTestApp(() => [
+      {
+        budget_key: "unprice:customer:cus_123",
+        feature_slug: "events",
+        unit: "money:USD",
+        events: 1,
+        quantity: "10",
+        amount: "1",
+      },
+      {
+        budget_key: "unprice:customer:cus_123",
+        feature_slug: "events",
+        unit: "money:EUR",
+        events: 1,
+        quantity: "20",
+        amount: "2",
+      },
+      {
+        budget_key: "unprice:customer:cus_123",
+        feature_slug: "events",
+        unit: "credits:tokens",
+        events: 1,
+        quantity: "30",
+        amount: "3",
+      },
+    ])
+    const response = await app.fetch(
+      buildRequest({ customer_id: "cus_123", project_id: "proj_123", range: "24h" }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      usage: [
+        { usage: 10, spending: { amount: "1", currency: "USD" } },
+        { usage: 20, spending: { amount: "2", currency: "EUR" } },
+        {
+          usage: 30,
+          spending: { amount: "3", currency: "XXX", display_amount: "3 credits:tokens" },
+        },
+      ],
+    })
+  })
+
+  it("defaults an omitted project_id to the key's project", async () => {
+    const { app, env, executionCtx, queries } = createTestApp(() => [])
+    const response = await app.fetch(buildRequest({ range: "24h" }), env, executionCtx)
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ usage: [], truncated_events: 0 })
+    expect(queries[0]).toContain("WHERE project_id = 'proj_123'")
+  })
+
+  it("rejects another project before querying the journal", async () => {
+    const { app, env, executionCtx, queries } = createTestApp(() => [])
+    const response = await app.fetch(
+      buildRequest({ range: "24h", project_id: "proj_other" }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(403)
+    expect(queries).toEqual([])
+  })
+
+  it("lets a main-project key select another project's history with its own currency", async () => {
+    authMocks.keyAuth.mockResolvedValue({
+      ...verifiedKey,
+      project: { ...verifiedKey.project, isMain: true },
+    })
+    const { app, env, executionCtx, queries } = createTestApp(() => [
+      {
+        budget_key: "unprice:customer:cus_123",
+        feature_slug: "events",
+        unit: "money:USD",
+        events: 1,
+        quantity: "10",
+        amount: "1",
+      },
+    ])
+    const response = await app.fetch(
+      buildRequest({ range: "24h", project_id: "proj_other" }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      usage: [{ project_id: "proj_other", spending: { amount: "1", currency: "USD" } }],
+    })
+    expect(queries[0]).toContain("WHERE project_id = 'proj_other'")
   })
 
   it("logs the journal failure before returning an API error", async () => {

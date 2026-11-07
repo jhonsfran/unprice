@@ -354,39 +354,6 @@ export class EntitlementService {
     }
   }
 
-  public async customerExists(params: {
-    customerId: string
-    projectId: string
-    db?: Database
-  }): Promise<Result<boolean, FetchError>> {
-    const trx = params.db ?? this.db
-
-    try {
-      const row = await trx.query.customers.findFirst({
-        columns: { id: true },
-        where: (customer, { and: andOp, eq: eqOp }) =>
-          andOp(eqOp(customer.id, params.customerId), eqOp(customer.projectId, params.projectId)),
-      })
-
-      return Ok(!!row)
-    } catch (error) {
-      this.logger.error(error, {
-        context: "Error checking customer existence",
-        customerId: params.customerId,
-        projectId: params.projectId,
-      })
-
-      return Err(
-        new FetchError({
-          message: `Failed to check customer existence: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-          retry: true,
-        })
-      )
-    }
-  }
-
   public async expireCustomerEntitlement(params: {
     id: string
     projectId: string

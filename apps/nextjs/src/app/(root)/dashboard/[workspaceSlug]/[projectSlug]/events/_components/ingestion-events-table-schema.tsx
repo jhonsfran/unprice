@@ -13,7 +13,7 @@ import { formatDate } from "~/lib/dates"
 export type IngestionStatus = RouterOutputs["analytics"]["getIngestionStatus"]
 export type IngestionEventRow = IngestionStatus["recentEvents"][number]
 
-const statusOptions = [
+const statusOptions: { label: string; value: IngestionEventRow["state"] }[] = [
   {
     label: "Processed",
     value: "processed",
@@ -22,47 +22,18 @@ const statusOptions = [
     label: "Rejected",
     value: "rejected",
   },
-  {
-    label: "Failed",
-    value: "failed",
-  },
 ]
 
 const sourceTypeOptions = [
   {
-    label: "API key",
-    value: "api_key",
+    label: "Record",
+    value: "record",
   },
   {
-    label: "System",
-    value: "system",
-  },
-  {
-    label: "Unknown",
-    value: "unknown",
+    label: "Charge",
+    value: "charge",
   },
 ]
-
-const ingestionModeOptions = [
-  {
-    label: "Budgeted run",
-    value: "run",
-  },
-  {
-    label: "Sync",
-    value: "sync",
-  },
-  {
-    label: "Async",
-    value: "async",
-  },
-  {
-    label: "Unknown",
-    value: "unknown",
-  },
-] as const
-
-type IngestionEventMode = (typeof ingestionModeOptions)[number]["value"]
 
 export type IngestionEventsFilterId =
   | "state"
@@ -79,27 +50,12 @@ export type IngestionEventsFilterValues = {
   customerIds: string[]
 }
 
-function statusBadgeVariant(
-  state: IngestionEventRow["state"]
-): "success" | "warning" | "destructive" {
+function statusBadgeVariant(state: IngestionEventRow["state"]): "success" | "warning" {
   if (state === "processed") {
     return "success"
   }
 
-  return state === "failed" ? "destructive" : "warning"
-}
-
-export function getIngestionEventMode(row: IngestionEventRow): IngestionEventMode {
-  if (row.runId) {
-    return "run"
-  }
-
-  return row.ingestionMode ?? "unknown"
-}
-
-export function formatIngestionEventModeLabel(row: IngestionEventRow): string {
-  const mode = getIngestionEventMode(row)
-  return ingestionModeOptions.find((option) => option.value === mode)?.label ?? mode
+  return "warning"
 }
 
 export function buildIngestionEventsColumns(params: {
@@ -141,17 +97,6 @@ export function buildIngestionEventsColumns(params: {
       size: 220,
     },
     {
-      id: "ingestionMode",
-      accessorFn: (row) => getIngestionEventMode(row),
-      header: "Ingestion mode",
-      cell: ({ row }) => (
-        <Badge variant={getIngestionEventMode(row.original) === "run" ? "secondary" : "outline"}>
-          {formatIngestionEventModeLabel(row.original)}
-        </Badge>
-      ),
-      size: 160,
-    },
-    {
       accessorKey: "customerId",
       header: "Customer",
       cell: ({ row }) => (
@@ -170,7 +115,7 @@ export function buildIngestionEventsColumns(params: {
     },
     {
       accessorKey: "sourceType",
-      header: "Source",
+      header: "Operation",
       cell: ({ row }) => {
         return (
           <div className="flex items-center gap-2">
@@ -198,10 +143,10 @@ export function buildIngestionEventsColumns(params: {
       size: 170,
     },
     {
-      accessorKey: "sourceId",
-      header: "Source ID",
+      accessorKey: "budgetKey",
+      header: "Budget key",
       cell: ({ row }) => (
-        <span className="whitespace-nowrap font-mono text-xs">{row.original.sourceId}</span>
+        <span className="whitespace-nowrap font-mono text-xs">{row.original.budgetKey}</span>
       ),
       size: 180,
     },
@@ -251,7 +196,7 @@ export function buildIngestionEventsFilters({
       onChange: (nextValues) => onChange("state", nextValues),
       options: statusOptions.map((option) => ({
         ...option,
-        count: statusCounts.get(option.value as IngestionEventRow["state"]) ?? 0,
+        count: statusCounts.get(option.value) ?? 0,
       })),
     },
     {
@@ -268,10 +213,10 @@ export function buildIngestionEventsFilters({
     {
       type: "checkbox",
       id: "sourceType",
-      label: "Source",
+      label: "Operation",
       showCounts: true,
       hideEmptyOptions: true,
-      emptyOptionsLabel: "No sources for the selected filters",
+      emptyOptionsLabel: "No operations for the selected filters",
       value: values.sourceTypes,
       onChange: (nextValues) => onChange("sourceType", nextValues),
       options: toFacetOptions(facets?.sourceTypes, values.sourceTypes, formatSourceTypeLabel),

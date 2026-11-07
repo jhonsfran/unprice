@@ -151,7 +151,7 @@ export async function setup(): Promise<BenchData> {
 }
 
 // One budget for every budget scenario, with a limit no run reaches. It closes
-// after a day, so its Durable Object deletes itself 30 days later.
+// after a day, so its Durable Object deletes itself 7 days later.
 async function createLatencyBudget(): Promise<string> {
   const key = `k6-latency:${Date.now()}`
   const { error } = await getSdk().budgets.upsert({
@@ -204,6 +204,17 @@ export async function usageRecord(data: BenchData): Promise<void> {
   )
 
   recordApiResult("usage.record", result)
+  if (result.result) {
+    check(result.result, {
+      "usage.record accepts every event": (response) => response.rejected === 0,
+    })
+    for (const event of result.result.results) {
+      if (event.status === "rejected") {
+        apiErrors.add(1)
+        console.warn(`[usage.record] ${event.error.reason}: ${event.error.message}`)
+      }
+    }
+  }
 }
 
 export async function usageConsume(data: BenchData): Promise<void> {
@@ -216,12 +227,12 @@ export async function usageConsume(data: BenchData): Promise<void> {
     })
   )
 
-  recordApiResult("usage.consume", result)
-
   // A business denial (limit exhausted) is still a valid request-path
   // answer — its duration counts; it is just tallied separately.
-  if (result.result && !result.result.allowed) {
+  if (result.error?.code === "BUDGET_EXCEEDED") {
     consumeDenied.add(1)
+  } else {
+    recordApiResult("usage.consume", result)
   }
 }
 
@@ -332,7 +343,7 @@ type SummaryData = {
 
 const REPORT_ROWS: Array<{ metric: string; label: string }> = [
   { metric: "check_duration", label: "access.check (warm)" },
-  { metric: "record_duration", label: "usage.record (async)" },
+  { metric: "record_duration", label: "usage.record (batch)" },
   { metric: "consume_duration", label: "usage.consume (sync)" },
   { metric: "budget_authorize_duration", label: "budgets.authorize" },
   { metric: "budget_settle_duration", label: "budgets.settle" },

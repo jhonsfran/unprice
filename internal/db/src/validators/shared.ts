@@ -60,7 +60,7 @@ export const usageModeSchema = z.enum(USAGE_MODES)
 export const aggregationMethodSchema = z
   .enum(AGGREGATION_METHODS)
   .describe(
-    "How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value."
+    "How to aggregate usage events within the current billing period. 'sum' totals values and 'count' counts events."
   )
 
 export const meterConfigSchema = z
@@ -69,11 +69,9 @@ export const meterConfigSchema = z
     eventSlug: z.string().min(1),
     aggregationMethod: aggregationMethodSchema,
     aggregationField: z.string().min(1).optional(),
-    // TODO: implement this later
-    filters: z.record(z.string(), z.string()).optional(),
-    groupBy: z.array(z.string()).optional(),
-    windowSize: z.enum(["MINUTE", "HOUR", "DAY"]).optional(),
+    groupBy: z.array(z.string().min(1)).optional(),
   })
+  .strict()
   .superRefine((data, ctx) => {
     if (data.aggregationMethod !== "count" && !data.aggregationField) {
       ctx.addIssue({
@@ -259,4 +257,22 @@ export function isResetCadenceAtMostBilling(
   billingConfig: BillingConfig
 ): boolean {
   return resetCadenceMinutes(resetConfig) <= billingCadenceMinutes(billingConfig)
+}
+
+export const USAGE_LIMIT_RESET_MESSAGE =
+  "A finite usage limit needs a daily, weekly, monthly, or one-time reset. Set an explicit supported reset when billing uses another cadence"
+
+/** A finite usage allowance must reset on a window the payer budget supports. */
+export function isUsageLimitResetSupported(
+  billingConfig: BillingConfig,
+  resetConfig?: ResetConfig | null
+): boolean {
+  const interval = resetConfig?.resetInterval ?? billingConfig.billingInterval
+  const count = resetConfig?.resetIntervalCount ?? billingConfig.billingIntervalCount
+  const planType = resetConfig?.planType ?? billingConfig.planType
+  return (
+    planType === "onetime" ||
+    interval === "onetime" ||
+    (count === 1 && (interval === "day" || interval === "week" || interval === "month"))
+  )
 }
