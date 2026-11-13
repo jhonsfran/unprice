@@ -125,6 +125,7 @@ class MemoryBudgetStore implements BudgetStore {
     readKeyStatements: () => [],
     readFunding: () => [],
     hasOpenFunding: () => false,
+    hasUnfinishedStatements: () => false,
     readUnfinishedStatements: () => [],
     readHistory: (windowIds, limit) =>
       windowIds.flatMap((id) =>

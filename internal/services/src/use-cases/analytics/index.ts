@@ -38,3 +38,19 @@ export type {
   UsageDashboardTimeseriesRow,
   UsageDashboardTopConsumer,
 } from "./get-usage-dashboard"
+
+export {
+  getFeatureUsage,
+  getFeatureUsageInputSchema,
+  getFeatureUsageOutputSchema,
+  type GetFeatureUsageOutput,
+} from "./get-feature-usage"
+
+export {
+  getIngestionSummary,
+  getIngestionSummaryInputSchema,
+  getIngestionSummaryOutputSchema,
+  listIngestionEvents,
+  listIngestionEventsInputSchema,
+  listIngestionEventsOutputSchema,
+} from "./get-ingestion-status"

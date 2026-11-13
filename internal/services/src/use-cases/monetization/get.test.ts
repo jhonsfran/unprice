@@ -129,13 +129,15 @@ function createLogger(): Logger {
 // ---------------------------------------------------------------------------
 
 function createHarness() {
-  const cards = createRateCardsFake()
   const store = {
     plans: [] as Plan[],
     features: [] as Feature[],
     events: [] as Event[],
     versions: [] as StoredPlanVersion[],
   }
+  const cards = createRateCardsFake(
+    (id) => store.versions.find((version) => version.id === id)?.planFeatures ?? []
+  )
   let planVersionSequence = 0
 
   const insert = vi.fn((table: unknown) => ({
@@ -982,7 +984,7 @@ describe("getMonetizationConfig", () => {
     row.price = ratePriceOf(
       {
         featureType: "tier",
-        tiers: [{ firstUnit: 1, lastUnit: null, unitPrice: "1.00", flatPrice: "0" }],
+        tiers: [{ upTo: null, rate: "1.00", flat: "0" }],
       },
       null
     ) as typeof row.price

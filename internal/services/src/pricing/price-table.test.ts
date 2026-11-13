@@ -2,6 +2,7 @@ import { rateRowSchema } from "@unprice/db/validators"
 import { formatAmount } from "@unprice/money"
 import { describe, expect, it } from "vitest"
 import {
+  changeTableOf,
   columnKey,
   columnLabel,
   describeLine,
@@ -165,4 +166,33 @@ describe("priceTableOf", () => {
 
     expect(featureSlugsOf(rows)).toEqual(["base_fee", "llm_tokens"])
   })
+})
+
+it("orders revision columns like current prices, including columns removed from a row", () => {
+  const current = modelRow("rr_old", "a", {
+    cache_read_tokens: "1",
+    output_tokens: "2",
+    input_tokens: "3",
+  })
+  const next = modelRow("rr_new", "a", { reasoning_tokens: "4", input_tokens: "5" })
+  if (next.price.type !== "unit") throw new Error("fixture")
+  const change = changeTableOf(
+    {
+      cardId: "rc_1",
+      at: NOW,
+      changes: [
+        {
+          type: "changed",
+          current,
+          components: [],
+          proposed: { ...next, price: next.price, cost: { components: [] }, source: "catalog" },
+        },
+      ],
+    },
+    "llm_tokens"
+  )
+  expect(change.columns.map(columnLabel)).toEqual(["Input", "Output", "Cache read", "Reasoning"])
+  expect(
+    change.lines[0]?.cells.get(columnKey({ property: "output_tokens", per: MILLION }))
+  ).toEqual({ after: null, before: BigInt(200_000_000) })
 })

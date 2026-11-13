@@ -15,8 +15,7 @@ type RecordRemoval = NonNullable<
 
 /**
  * Detaches a feature from a draft version and ends its rows on the version's own card, so the
- * card never prices a feature the version no longer carries. Rows on a card another version also
- * prices with are left alone: they are that version's prices.
+ * card never prices a detached feature unless another assigned version still carries it.
  */
 export async function removePlanVersionFeature(
   deps: RemovePlanVersionFeatureDeps,
@@ -55,8 +54,5 @@ export async function removePlanVersionFeature(
       return Ok(removed.val)
     }
   )
-  if (!result.err && result.val.state === "ok") {
-    await rateCards.invalidatePlanVersionPrices([result.val.planVersionFeature.planVersionId])
-  }
   return result
 }

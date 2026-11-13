@@ -5,7 +5,7 @@ import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { z } from "zod"
 import type { ServiceContext } from "../../context"
-import { priceCanCharge } from "../../pricing"
+import { priceCanCharge, versionReadiness } from "../../pricing"
 import { type FeatureViolation, planVersionViolations } from "../../rate-cards"
 import { toErrorContext } from "../../utils/log-context"
 
@@ -120,24 +120,25 @@ export async function publishPlanVersion(
           projectId,
           [planVersionData.id],
           now,
-          Number.MAX_SAFE_INTEGER
+          { scheduled: true }
         )
         const card = pricing
           .get(planVersionData.id)
           ?.find((entry) => entry.currency === planVersionData.currency)
-        if (!card) {
+        const readiness = versionReadiness(planVersionData.planFeatures, card, now)
+        if (!card || !readiness.hasCard) {
           return Ok({ state: "unpriced", reason: "no_card", featureSlugs: [] })
         }
         const { rows } = card
         const featureSlugs = new Set(
           planVersionData.planFeatures.map(({ feature }) => feature.slug)
         )
-        // Every feature type bills through its row, so a feature without one would ship free.
-        const unpriced = [...featureSlugs].filter(
-          (slug) => !rows.some((row) => row.featureSlug === slug)
-        )
-        if (unpriced.length > 0) {
-          return Ok({ state: "unpriced", reason: "missing_rows", featureSlugs: unpriced })
+        if (readiness.unpricedFeatureSlugs.length > 0) {
+          return Ok({
+            state: "unpriced",
+            reason: "missing_rows",
+            featureSlugs: readiness.unpricedFeatureSlugs,
+          })
         }
         const paymentMethodRequired =
           planVersionData.collectionMethod === "charge_automatically" &&

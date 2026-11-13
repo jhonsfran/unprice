@@ -12,5 +12,5 @@ export const get = protectedProjectProcedure
     const { rateCards } = opts.ctx.services
     const result = await rateCards.getCard(opts.ctx.project.id, opts.input.id)
     if (result.err) throw domainErrorToTrpcError(result.err)
-    return { ...result.val, live: await rateCards.isLive(opts.ctx.project.id, opts.input.id) }
+    return result.val
   })

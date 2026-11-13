@@ -1,6 +1,7 @@
 "use client"
 
 import { getTrialUnitLabel } from "@unprice/db/validators"
+import type { FeaturePriceRows } from "@unprice/services/pricing"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Badge } from "@unprice/ui/badge"
 import { Button } from "@unprice/ui/button"
@@ -14,7 +15,6 @@ import {
 } from "@unprice/ui/card"
 import { Separator } from "@unprice/ui/separator"
 import { cn } from "@unprice/ui/utils"
-import type { FeatureLineRows } from "~/components/billing/feature-line"
 import { formatBillingLabel } from "~/components/billing/format-billing-label"
 import { PlanVersionFeatureListItem } from "~/components/billing/plan-version-feature-list"
 
@@ -43,7 +43,7 @@ export function PlanVersionPricingCard({
   className?: string
   renderAction?: (action: PlanVersionPricingCardAction) => React.ReactNode
   /** The version's card rows by feature slug, so each line can say what more of it costs. */
-  priceRows?: ReadonlyMap<string, FeatureLineRows>
+  priceRows?: ReadonlyMap<string, FeaturePriceRows>
 }) {
   if (!planVersion) return null
 

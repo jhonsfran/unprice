@@ -53,7 +53,7 @@ function definition(funding: typeof prepaid | null) {
           priced: true,
         },
       ],
-      statements: "required",
+
       ...(funding && { funding }),
     },
   })
@@ -82,12 +82,6 @@ async function payerOverRpc(funding: typeof prepaid | null, balance: bigint) {
   const address = { projectId: "proj_1", key }
   const h = harness(new CloudflareBudgetClient(env), key, balance)
   const stub = getBudgetStub(env, address)
-  // `cacheCards` stores nothing for a key without a budget, so the first upsert finds its card here.
-  await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
-    const db = drizzle(state.storage, { schema, logger: false })
-    await migrate(db, migrations)
-    new BudgetSqliteStore(db).atomically((tx) => tx.cacheCards([usdCard], Date.now()))
-  })
   const created = await h.execute(definition(funding))
   if (created.err) throw created.err
   const now = Date.now()
@@ -196,12 +190,9 @@ describe("BudgetDO funding at statement seal", () => {
         store: new BudgetSqliteStore(drizzle(state.storage, { schema, logger: false })),
       })
       const budgets: BudgetClient = {
-        async execute(_address, request) {
-          const reply = await processor.execute(request)
+        async execute(_address, request, cards) {
+          const reply = await processor.execute(request, cards)
           return reply.ok ? Ok(reply.outcome) : Err(new UnPriceBudgetError(reply.rejection))
-        },
-        async cacheCards(_address, cards) {
-          processor.cacheCards(cards)
         },
       }
       const { execute, wallet } = harness(budgets, key, BigInt(1_000_000_000))

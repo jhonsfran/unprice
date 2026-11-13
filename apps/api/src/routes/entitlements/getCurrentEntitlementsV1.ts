@@ -14,7 +14,7 @@ import {
 import { toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
-import { CloudflareBudgetClient } from "~/ingestion/budget/client"
+import { requestBudgetCommandDeps } from "~/ingestion/budget/deps"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
@@ -93,7 +93,7 @@ export const registerGetCurrentEntitlementsV1 = (app: App) =>
     const result = await getCustomerCurrentEntitlements(
       {
         entitlements: entitlement,
-        budgets: new CloudflareBudgetClient(c.env),
+        budgets: requestBudgetCommandDeps(c).budgets,
         logger: c.get("logger"),
         now: () => requestStartedAt,
       },

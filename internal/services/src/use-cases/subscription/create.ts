@@ -132,6 +132,20 @@ export async function createSubscription(
         }
       }
 
+      const billingPeriodsResult = await deps.services.billing.generateBillingPeriods({
+        subscriptionId: subscription.id,
+        projectId,
+        now: Date.now(),
+        db: tx,
+      })
+
+      if (billingPeriodsResult.err) {
+        transactionError = new UnPriceSubscriptionError({
+          code: "SUBSCRIPTION_OPERATION_FAILED",
+          message: billingPeriodsResult.err.message,
+        })
+        throw transactionError
+      }
       return subscription
     })
     .then((subscription) => Ok(subscription))
@@ -147,21 +161,6 @@ export async function createSubscription(
 
   if (result.err) {
     return result
-  }
-
-  const billingPeriodsResult = await deps.services.billing.generateBillingPeriods({
-    subscriptionId: result.val.id,
-    projectId,
-    now: Date.now(),
-  })
-
-  if (billingPeriodsResult.err) {
-    return Err(
-      new UnPriceSubscriptionError({
-        code: "SUBSCRIPTION_OPERATION_FAILED",
-        message: billingPeriodsResult.err.message,
-      })
-    )
   }
 
   // Sub-create is a pure DB write up to here. Wallet activation only fires
@@ -184,11 +183,18 @@ export async function createSubscription(
   // status to the DB before we return here. The bouncer / ACL layer denies
   // ingestion while in that state, and the activation sweeper retries grant
   // issuance until it succeeds.
-  await activateWalletIfSubscriptionIsActive(deps, {
+  const activated = await activateWalletIfSubscriptionIsActive(deps, {
     subscriptionId: subscription.id,
     projectId,
     context: "wallet activation failed; subscription parked in pending_activation",
   })
+
+  if (!activated)
+    await deps.services.billing.syncPayerBudget({
+      projectId,
+      customerId: input.customerId,
+      caller: "request",
+    })
 
   return result
 }

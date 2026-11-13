@@ -1,8 +1,11 @@
 "use client"
 
+import { singularUnit } from "@unprice/services/pricing"
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { RATE_CHANGE_NOTICE_MS, type RateCard, type RateRow } from "@unprice/db/validators"
 import { describeRatePrice } from "@unprice/services/pricing"
+import type { PricingShape } from "@unprice/services/pricing"
 import { Button } from "@unprice/ui/button"
 import { Checkbox } from "@unprice/ui/checkbox"
 import {
@@ -33,18 +36,8 @@ import { cn } from "@unprice/ui/utils"
 import { Check, ChevronsUpDown } from "lucide-react"
 import { type ReactNode, useState } from "react"
 import { InputWithAddons } from "~/components/input-addons"
-import { toast } from "~/lib/toast"
-import { useTRPC } from "~/trpc/client"
-import {
-  type TierDraft,
-  TiersEditor,
-  emptyTier,
-} from "../../plans/[planSlug]/_components/price-block"
-import { CollapsibleSection } from "../../plans/[planSlug]/_components/section-label"
-import type { FeatureLabel } from "./rate-card-detail"
 import {
   type PriceFields,
-  type PriceKind,
   buildRatePrice,
   cardCurrency,
   catalogPolicyFor,
@@ -52,13 +45,56 @@ import {
   formatMatch,
   markupPercent,
   openRows,
-  toDateTimeLocal,
-} from "./rate-card-format"
+} from "~/components/pricing/rate-card-format"
+import { CollapsibleSection } from "~/components/pricing/section-label"
+import { TiersEditor } from "~/components/pricing/tiers-editor"
+import { type TierDraft, emptyTier } from "~/components/pricing/tiers-model"
+import { toast } from "~/lib/toast"
+import { useTRPC } from "~/trpc/client"
+import type { FeatureLabel } from "./rate-card-detail"
 import { ScheduleField } from "./schedule-field"
 
 const NOTICE_MINUTES = RATE_CHANGE_NOTICE_MS / 60_000
 
-const PRICE_KINDS: { value: PriceKind; label: string; description: string }[] = [
+type PublishDraft = {
+  open: boolean
+  featureSlug: string
+  dimensionValue: string
+  scope: "every" | "one"
+  kind: PricingShape
+  amount: string
+  per: string
+  property: string
+  tiers: readonly TierDraft[]
+  schedule: boolean
+  effectiveFrom: number | null
+  closeRowIds: string[]
+  isAdvancedOpen: boolean
+  isEndOpen: boolean
+  problem: string | null
+}
+
+function initialDraft(live: boolean): PublishDraft {
+  return {
+    open: false,
+    featureSlug: "",
+    dimensionValue: "",
+    scope: "every",
+    kind: "unit",
+    amount: "",
+    per: "1",
+    property: "",
+    tiers: [emptyTier("tier-0")],
+    schedule: false,
+    effectiveFrom: earliestStart(live, Date.now(), RATE_CHANGE_NOTICE_MS),
+    closeRowIds: [],
+    isAdvancedOpen: false,
+    isEndOpen: false,
+    problem: null,
+  }
+}
+
+const PRICE_KINDS: { value: PricingShape; label: string; description: string }[] = [
   { value: "unit", label: "Per unit", description: "The same price for every unit used." },
   {
     value: "graduated",
@@ -68,19 +104,6 @@ const PRICE_KINDS: { value: PriceKind; label: string; description: string }[] = 
   { value: "package", label: "Per bundle", description: "Units are sold in bundles of a size." },
   { value: "flat", label: "Fixed per cycle", description: "One amount every billing cycle." },
 ]
-
-/** Tiers as `buildRatePrice` reads them: "upTo rate flat" per line, the open last tier "*". */
-export function tiersText(tiers: readonly TierDraft[]): string {
-  return tiers
-    .map((tier, index) =>
-      [
-        index === tiers.length - 1 ? "*" : tier.upTo.trim(),
-        tier.unitPrice.trim() || "0",
-        tier.flatPrice.trim() || "0",
-      ].join(" ")
-    )
-    .join("\n")
-}
 
 /** The properties a feature's rows already vary by, and the values each one has. */
 export function dimensionsOf(rows: readonly RateRow[], featureSlug: string) {
@@ -132,21 +155,26 @@ export function PublishRowsDialog({
   const trpc = useTRPC()
   const queryClient = useQueryClient()
   const currency = cardCurrency(card.unit)
-  const [open, setOpen] = useState(false)
-  const [featureSlug, setFeatureSlug] = useState("")
-  const [dimensionValue, setDimensionValue] = useState("")
-  const [scope, setScope] = useState<"every" | "one">("every")
-  const [kind, setKind] = useState<PriceKind>("unit")
-  const [amount, setAmount] = useState("")
-  const [per, setPer] = useState("1")
-  const [property, setProperty] = useState("")
-  const [tiers, setTiers] = useState<readonly TierDraft[]>([emptyTier("tier-0")])
-  const [schedule, setSchedule] = useState(false)
-  const [effectiveFrom, setEffectiveFrom] = useState("")
-  const [closeRowIds, setCloseRowIds] = useState<string[]>([])
-  const [isAdvancedOpen, setIsAdvancedOpen] = useState(false)
-  const [isEndOpen, setIsEndOpen] = useState(false)
-  const [problem, setProblem] = useState<string | null>(null)
+  const [draft, setDraft] = useState<PublishDraft>(() => initialDraft(live))
+  const {
+    open,
+    featureSlug,
+    dimensionValue,
+    scope,
+    kind,
+    amount,
+    per,
+    property,
+    tiers,
+    schedule,
+    effectiveFrom,
+    closeRowIds,
+    isAdvancedOpen,
+    isEndOpen,
+    problem,
+  } = draft
+  const patchDraft = (patch: Partial<PublishDraft>) =>
+    setDraft((current) => ({ ...current, ...patch }))
 
   const { data: catalog } = useQuery({
     ...trpc.features.listByActiveProject.queryOptions(),
@@ -160,7 +188,7 @@ export function PublishRowsDialog({
         unit: feature.unitOfMeasure ?? "units",
       }))
   const feature = options.find((option) => option.slug === featureSlug)
-  const unit = (feature?.unit ?? "units").replace(/s$/, "")
+  const unit = singularUnit(feature?.unit ?? "units")
   const dimension = featureSlug ? dimensionsOf(rows, featureSlug)[0] : undefined
   // A plan feature fixes how it is charged and what its meter counts, as a Stripe price fixes its
   // billing scheme: a new price only rates it. Changing those is a feature edit, not a price.
@@ -168,7 +196,7 @@ export function PublishRowsDialog({
   // Every model of a catalog-priced feature follows provider cost plus the markup; a markup change
   // rewrites each model's row, so a price set here by hand would not last. The markup is the lever.
   const catalogPolicy = featureSlug ? catalogPolicyFor(card.marginPolicy, featureSlug) : null
-  const priceKind: PriceKind = fixed ? fixed.shape : kind
+  const priceKind: PricingShape = fixed ? fixed.shape : kind
   const priceProperty = fixed ? (fixed.property ?? "") : property
   // Model rates read per million tokens, so a dimensioned feature keeps the "per" field.
   const showPer =
@@ -188,22 +216,7 @@ export function PublishRowsDialog({
       ? replaces.price.components.map((component) => component.property ?? "event")
       : null
 
-  const reset = () => {
-    setFeatureSlug("")
-    setDimensionValue("")
-    setScope("every")
-    setKind("unit")
-    setAmount("")
-    setPer("1")
-    setProperty("")
-    setTiers([emptyTier("tier-0")])
-    setSchedule(false)
-    setEffectiveFrom(toDateTimeLocal(earliestStart(live, Date.now(), RATE_CHANGE_NOTICE_MS)))
-    setCloseRowIds([])
-    setIsAdvancedOpen(false)
-    setIsEndOpen(false)
-    setProblem(null)
-  }
+  const reset = () => setDraft(initialDraft(live))
 
   const { mutate, isPending } = useMutation(
     trpc.rateCards.publishRows.mutationOptions({
@@ -216,36 +229,38 @@ export function PublishRowsDialog({
               ? `Price added, replacing ${closed.length}`
               : "Price added"
         )
-        setOpen(false)
+        patchDraft({ open: false })
         void queryClient.invalidateQueries(trpc.rateCards.get.queryFilter({ id: card.id }))
         void queryClient.invalidateQueries(trpc.rateCards.forPlanVersion.pathFilter())
       },
-      onError: (error) => setProblem(error.message),
+      onError: (error) => patchDraft({ problem: error.message }),
     })
   )
 
   const submit = () => {
-    setProblem(null)
+    patchDraft({ problem: null })
     if (dimension && scope === "one" && !dimensionValue.trim()) {
-      setProblem(`Name the ${dimension.key} this price is for, or pick every ${dimension.key}.`)
+      patchDraft({
+        problem: `Name the ${dimension.key} this price is for, or pick every ${dimension.key}.`,
+      })
       return
     }
     const fields: PriceFields = {
-      kind: priceKind,
+      shape: priceKind,
       amount,
       per: showPer || priceKind === "package" ? pricePer : "1",
       property: priceProperty,
-      tiers: tiersText(tiers),
+      tiers,
     }
     const built = buildRatePrice(fields)
     if (!built.ok) {
-      setProblem(built.message)
+      patchDraft({ problem: built.message })
       return
     }
     mutate({
       cardId: card.id,
       rows: [{ featureSlug, match, price: built.price, cost: null }],
-      ...(schedule ? { effectiveFrom: new Date(effectiveFrom).getTime() } : {}),
+      ...(schedule && effectiveFrom !== null ? { effectiveFrom } : {}),
       ...(closeRowIds.length > 0 ? { closeRowIds } : {}),
     })
   }
@@ -254,8 +269,8 @@ export function PublishRowsDialog({
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        setOpen(next)
         if (next) reset()
+        patchDraft({ open: next })
       }}
     >
       <DialogTrigger asChild>{children}</DialogTrigger>
@@ -280,10 +295,12 @@ export function PublishRowsDialog({
             <Select
               value={featureSlug}
               onValueChange={(slug) => {
-                setFeatureSlug(slug)
-                setScope("every")
-                setDimensionValue("")
-                setCloseRowIds([])
+                patchDraft({
+                  featureSlug: slug,
+                  scope: "every",
+                  dimensionValue: "",
+                  closeRowIds: [],
+                })
               }}
             >
               <SelectTrigger>
@@ -330,7 +347,7 @@ export function PublishRowsDialog({
                   </div>
                   <RadioGroup
                     value={scope}
-                    onValueChange={(value) => setScope(value as "every" | "one")}
+                    onValueChange={(value) => patchDraft({ scope: value as "every" | "one" })}
                     className="grid-cols-2"
                   >
                     {(["every", "one"] as const).map((option) => (
@@ -354,7 +371,7 @@ export function PublishRowsDialog({
                       name={dimension.key}
                       values={dimension.values}
                       value={dimensionValue}
-                      onChange={setDimensionValue}
+                      onChange={(dimensionValue) => patchDraft({ dimensionValue })}
                     />
                   )}
                 </div>
@@ -363,7 +380,10 @@ export function PublishRowsDialog({
               {!fixed && (
                 <div className="flex flex-col gap-1.5">
                   <Label>How it's charged</Label>
-                  <Select value={kind} onValueChange={(value) => setKind(value as PriceKind)}>
+                  <Select
+                    value={kind}
+                    onValueChange={(value) => patchDraft({ kind: value as PricingShape })}
+                  >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
@@ -383,7 +403,12 @@ export function PublishRowsDialog({
               )}
 
               {priceKind === "graduated" ? (
-                <TiersEditor tiers={tiers} currency={currency} unit={unit} onChange={setTiers} />
+                <TiersEditor
+                  tiers={tiers}
+                  currency={currency}
+                  unit={unit}
+                  onChange={(tiers) => patchDraft({ tiers })}
+                />
               ) : (
                 <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3">
                   <div className="flex flex-col gap-1.5">
@@ -403,7 +428,7 @@ export function PublishRowsDialog({
                       leading={currency}
                       trailing={priceKind === "flat" ? "cycle" : undefined}
                       value={amount}
-                      onChange={(event) => setAmount(event.target.value)}
+                      onChange={(event) => patchDraft({ amount: event.target.value })}
                       placeholder={priceKind === "flat" ? "49" : "0.02"}
                       required
                     />
@@ -426,7 +451,7 @@ export function PublishRowsDialog({
                         className="font-mono tabular-nums"
                         trailing={`${unit}s`}
                         value={per}
-                        onChange={(event) => setPer(event.target.value)}
+                        onChange={(event) => patchDraft({ per: event.target.value })}
                       />
                     </div>
                   )}
@@ -470,9 +495,9 @@ export function PublishRowsDialog({
                 id="publish-from"
                 label="Starts on"
                 schedule={schedule}
-                onScheduleChange={setSchedule}
+                onScheduleChange={(schedule) => patchDraft({ schedule })}
                 value={effectiveFrom}
-                onChange={setEffectiveFrom}
+                onChange={(effectiveFrom) => patchDraft({ effectiveFrom })}
               />
 
               {!fixed && priceKind !== "flat" && (
@@ -480,7 +505,7 @@ export function PublishRowsDialog({
                   label="Advanced: count a number from the event"
                   summary={property.trim() ? property.trim() : "one unit per event"}
                   open={isAdvancedOpen}
-                  onOpenChange={setIsAdvancedOpen}
+                  onOpenChange={(isAdvancedOpen) => patchDraft({ isAdvancedOpen })}
                 >
                   <div className="flex flex-col gap-1.5">
                     <div className="flex items-center gap-1">
@@ -494,7 +519,7 @@ export function PublishRowsDialog({
                       id="price-property"
                       className="font-mono text-xs"
                       value={property}
-                      onChange={(event) => setProperty(event.target.value)}
+                      onChange={(event) => patchDraft({ property: event.target.value })}
                       placeholder="input_tokens"
                     />
                   </div>
@@ -506,7 +531,7 @@ export function PublishRowsDialog({
                   label="Advanced: end other prices at the same time"
                   summary={closeRowIds.length > 0 ? `${closeRowIds.length} selected` : "none"}
                   open={isEndOpen}
-                  onOpenChange={setIsEndOpen}
+                  onOpenChange={(isEndOpen) => patchDraft({ isEndOpen })}
                 >
                   <div className="flex flex-col gap-2">
                     <p className="text-muted-foreground text-xs">
@@ -520,11 +545,13 @@ export function PublishRowsDialog({
                             id={`close-${row.id}`}
                             checked={closeRowIds.includes(row.id)}
                             onCheckedChange={(checked) =>
-                              setCloseRowIds((current) =>
-                                checked === true
-                                  ? [...current, row.id]
-                                  : current.filter((rowId) => rowId !== row.id)
-                              )
+                              setDraft((current) => ({
+                                ...current,
+                                closeRowIds:
+                                  checked === true
+                                    ? [...current.closeRowIds, row.id]
+                                    : current.closeRowIds.filter((rowId) => rowId !== row.id),
+                              }))
                             }
                           />
                           <Label htmlFor={`close-${row.id}`} className="font-normal text-xs">
@@ -544,13 +571,16 @@ export function PublishRowsDialog({
 
           {problem && <p className="text-destructive text-sm">{problem}</p>}
           <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
+            <Button type="button" variant="ghost" onClick={() => patchDraft({ open: false })}>
               Cancel
             </Button>
             <Button
               type="submit"
               disabled={
-                isPending || !featureSlug || catalogPolicy !== null || (schedule && !effectiveFrom)
+                isPending ||
+                !featureSlug ||
+                catalogPolicy !== null ||
+                (schedule && effectiveFrom === null)
               }
             >
               Add price

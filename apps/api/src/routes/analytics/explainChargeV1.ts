@@ -1,7 +1,6 @@
 import { createRoute } from "@hono/zod-openapi"
 import {
   ExplainChargeError,
-  type ExplainChargeOutput,
   aiAnswerEnvelopeSchema,
   aiEvidenceSchema,
   explainCharge,
@@ -149,7 +148,7 @@ export const registerExplainChargeV1 = (app: App) =>
       {
         db: c.get("db"),
         ledger,
-        analytics: c.get("services").analytics,
+        budgetJournal: c.get("services").budgetJournal,
         rateCards: c.get("services").rateCards,
       },
       {
@@ -211,18 +210,11 @@ export const registerExplainChargeV1 = (app: App) =>
       },
       events: result.val.events,
       answer: result.val.answer,
-      confidence: buildConfidence({
-        eventCount: result.val.summary.eventCount,
-        eventsReturned: result.val.events.length,
-      }),
-      freshness: {
-        generatedAt: Date.now(),
-        dataFrom: result.val.summary.firstEventAt,
-        dataTo: result.val.summary.lastEventAt,
-      },
-      evidence: buildEvidence(result.val),
-      warnings: buildWarnings(result.val),
-      nextActions: buildNextActions(result.val),
+      confidence: result.val.confidence,
+      freshness: result.val.freshness,
+      evidence: result.val.evidence,
+      warnings: result.val.warnings,
+      nextActions: result.val.nextActions,
       pagination: {
         limit: result.val.pagination.limit,
         offset: result.val.pagination.offset,
@@ -232,102 +224,6 @@ export const registerExplainChargeV1 = (app: App) =>
 
     return c.json(response, HttpStatusCodes.OK)
   })
-
-function buildConfidence({
-  eventCount,
-  eventsReturned,
-}: {
-  eventCount: number
-  eventsReturned: number
-}): ExplainChargeApiResponse["confidence"] {
-  if (eventCount > 0 || eventsReturned > 0) {
-    return "high"
-  }
-
-  return "medium"
-}
-
-function buildEvidence(result: ExplainChargeOutput): ExplainChargeApiResponse["evidence"] {
-  return [
-    {
-      type: "invoice" as const,
-      id: result.invoice.id,
-      source: "postgres" as const,
-      timestamp: null,
-    },
-    {
-      type: "ledger_line" as const,
-      id: result.line.entryId,
-      source: "ledger" as const,
-      timestamp: null,
-    },
-    {
-      type: "billing_period" as const,
-      id: result.line.billingPeriodId,
-      source: "postgres" as const,
-      timestamp: null,
-    },
-    ...(result.scope.featurePlanVersionId
-      ? [
-          {
-            type: "plan_version" as const,
-            id: result.scope.featurePlanVersionId,
-            source: "postgres" as const,
-            timestamp: null,
-          },
-        ]
-      : []),
-    ...result.events.map((event) => ({
-      type: "event" as const,
-      id: [
-        result.scope.projectId,
-        result.scope.customerId,
-        event.period_key,
-        event.operation_id,
-      ].join(":"),
-      source: "r2" as const,
-      timestamp: event.timestamp,
-    })),
-  ]
-}
-
-function buildWarnings(result: ExplainChargeOutput): string[] {
-  const warnings: string[] = []
-
-  if (result.summary.eventCount === 0) {
-    warnings.push(
-      isBillingPeriodScopedLine(result)
-        ? "This non-usage line is explained from ledger and billing-period evidence; no journal events are expected."
-        : "No journal events were found for this invoice line."
-    )
-  }
-
-  if (result.pagination.hasMore) {
-    warnings.push("Additional journal events are available on later pages.")
-  }
-
-  return warnings
-}
-
-function buildNextActions(result: ExplainChargeOutput): string[] {
-  if (result.summary.eventCount === 0) {
-    if (isBillingPeriodScopedLine(result)) {
-      return []
-    }
-
-    return ["Verify the billing period, feature slug, and period key for this invoice line."]
-  }
-
-  if (result.pagination.hasMore) {
-    return ["Request the next page to inspect the remaining journal events."]
-  }
-
-  return []
-}
-
-function isBillingPeriodScopedLine(result: ExplainChargeOutput): boolean {
-  return result.scope.periodKey.startsWith("billing_period:")
-}
 
 function explainChargeErrorToApiError(error: unknown): UnpriceApiError {
   if (error instanceof ExplainChargeError) {

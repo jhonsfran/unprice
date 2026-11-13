@@ -13,10 +13,9 @@ export const previewCostPlus = protectedProjectProcedure
     const result = await opts.ctx.services.rateCards.previewCostPlus(
       opts.ctx.project.id,
       opts.input.cardId,
-      opts.input.at ?? Date.now(),
-      { featureSlug: opts.input.featureSlug }
+      Date.now(),
+      { featureSlug: opts.input.featureSlug, at: opts.input.at }
     )
     if (result.err) throw domainErrorToTrpcError(result.err)
-    const { draft, draftHash } = result.val
-    return { draft, draftHash: opts.input.at === undefined ? draftHash : null }
+    return result.val
   })

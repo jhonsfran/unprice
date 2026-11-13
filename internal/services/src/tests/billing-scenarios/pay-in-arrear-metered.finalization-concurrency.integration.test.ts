@@ -10,7 +10,7 @@ import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
 import type { Metrics } from "../../metrics"
 import type { PaymentProviderService } from "../../payment-provider/service"
-import { RateCardService } from "../../rate-cards/service"
+import { testInvoicing } from "../../test-fixtures/billing-gateway"
 import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
 import { billPeriod } from "../../use-cases/billing/bill-period"
 
@@ -153,7 +153,7 @@ async function createDraftInvoice() {
   expect(ensureAccounts.err).toBeUndefined()
 
   await billPeriod({
-    invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
+    invoicing: testInvoicing({ db, payerBudgets }),
     context: await loadSubscriptionContext(db),
     logger,
     db,
@@ -190,7 +190,7 @@ function createBillingService(
   const ledger = new LedgerGateway({ db: dbForWorker, logger })
 
   return new BillingService({
-    invoicing: { payerBudgets, rateCards: new RateCardService({ db: dbForWorker }) },
+    invoicing: testInvoicing({ db: dbForWorker, payerBudgets }),
     db: dbForWorker,
     logger,
     waitUntil: (promise) => {

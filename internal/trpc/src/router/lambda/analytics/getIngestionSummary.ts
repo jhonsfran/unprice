@@ -1,25 +1,25 @@
 import { TRPCError } from "@trpc/server"
 import {
-  getIngestionStatusInputSchema,
-  getIngestionStatusOutputSchema,
-  getIngestionStatus as getIngestionStatusUseCase,
+  getIngestionSummaryInputSchema,
+  getIngestionSummaryOutputSchema,
+  getIngestionSummary as getIngestionSummaryUseCase,
 } from "@unprice/services/use-cases"
 import { protectedProjectProcedure } from "#trpc"
 
-export const getIngestionStatus = protectedProjectProcedure
-  .input(getIngestionStatusInputSchema.omit({ projectId: true }))
-  .output(getIngestionStatusOutputSchema)
+export const getIngestionSummary = protectedProjectProcedure
+  .input(getIngestionSummaryInputSchema.omit({ projectId: true }))
+  .output(getIngestionSummaryOutputSchema)
   .query(async (opts) => {
-    const result = await getIngestionStatusUseCase(
+    const result = await getIngestionSummaryUseCase(
       {
-        analytics: opts.ctx.services.analytics,
+        budgetJournal: opts.ctx.services.budgetJournal,
       },
       { ...opts.input, projectId: opts.ctx.project.id }
     )
 
     if (result.err) {
       opts.ctx.logger.error(result.err, {
-        context: "getIngestionStatus failed",
+        context: "getIngestionSummary failed",
         project_id: opts.ctx.project.id,
         ...(opts.input.customerId ? { customer_id: opts.input.customerId } : {}),
       })

@@ -6,11 +6,11 @@ import { Settings } from "lucide-react"
 import { useState } from "react"
 import type { UseFormReturn } from "react-hook-form"
 
+import { CollapsibleSection } from "~/components/pricing/section-label"
 import { FeatureDialog } from "../../_components/feature-dialog"
 import type { CreatedFeature } from "../../_components/feature-form"
 import { MeterConfigFormField } from "./meter-config-form-field"
 import { meterMatchesTemplate, meterSummary } from "./meter-template"
-import { CollapsibleSection } from "./section-label"
 
 /**
  * The meter of a metered feature on a version. While the version measures what the feature's

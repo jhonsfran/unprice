@@ -46,7 +46,6 @@ function buildEmptyIngestionStatus(
     },
     live: [],
     rejections: [],
-    recentEvents: [],
     facets: {
       states: [],
       eventSlugs: [],
@@ -54,7 +53,6 @@ function buildEmptyIngestionStatus(
       rejectionReasons: [],
       customers: [],
     },
-    nextCursor: null,
     answer: "",
     confidence: "low",
     evidence: [],
@@ -83,7 +81,7 @@ export function OperationalHealth({ initialNow }: { initialNow: number }) {
   }, [])
 
   const { data, isFetching } = useSuspenseQuery(
-    trpc.analytics.getIngestionStatus.queryOptions(queryInput, {
+    trpc.analytics.getIngestionSummary.queryOptions(queryInput, {
       placeholderData: (previousData) => previousData ?? emptyStatus,
       staleTime: 15 * 1000,
       refetchOnWindowFocus: true,

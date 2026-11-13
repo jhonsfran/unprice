@@ -6,7 +6,6 @@ import {
 } from "@unprice/db/schema"
 import { type MeterConfig, type RateRowDraft, rateRowDraftSchema } from "@unprice/db/validators"
 import { describe, expect, it } from "vitest"
-import { publishRateRows } from "../use-cases/rate-cards"
 import {
   LIVE_VERSION,
   MINUTE,
@@ -22,7 +21,7 @@ import {
 } from "./service.integration.fixture"
 
 describe("RateCardService publication", () => {
-  const { db, rateCards, services, createCard, liveCard, publish, cardRows } =
+  const { db, rateCards, createCard, liveCard, publish, cardRows } =
     createRateCardIntegrationFixture()
 
   it("gives a change the notice only once a published version prices with the card", async () => {
@@ -31,8 +30,9 @@ describe("RateCardService publication", () => {
       .update(versionsTable)
       .set({ publishedAt: null })
       .where(eq(versionsTable.id, LIVE_VERSION))
+    expect((await value(rateCards.getCard(projectId, card.id))).live).toBe(false)
     const unscheduled = (rows: RateRowDraft[], now: number) =>
-      publishRateRows({ services }, { projectId, cardId: card.id, rows, now })
+      rateCards.publishRows({ projectId, cardId: card.id, drafts: rows, now })
     const close = (rowId: string, now: number) =>
       rateCards.closeRows({ projectId, cardId: card.id, rowIds: [rowId], now })
 
@@ -66,11 +66,23 @@ describe("RateCardService publication", () => {
     })
     expect(closeRetry).toEqual({ closed: [], unchanged: 1 })
     expect(await rateCards.isLive(projectId, card.id)).toBe(true)
+    expect((await value(rateCards.getCard(projectId, card.id))).live).toBe(true)
     expect(intervals(await cardRows(card.id)).map(([from, to]) => [from, to])).toEqual([
       [0, MINUTE],
       [MINUTE, 13 * MINUTE],
       [13 * MINUTE, 14 * MINUTE],
     ])
+  })
+
+  it("gives the first row on a live card the full notice", async () => {
+    const card = await liveCard([planFeature("fv_live_tokens", "ft_llm_tokens", TOKENS_METER, 3)])
+    expect(await rejection(publish(card.id, [gpt41("2.00", "8.00")], NOW))).toMatchObject({
+      code: "NOTICE_TOO_SHORT",
+      earliest: NOW + 10 * MINUTE,
+    })
+    expect(await cardRows(card.id)).toEqual([])
+    const result = await value(publish(card.id, [gpt41("2.00", "8.00")], NOW + 10 * MINUTE))
+    expect(result.inserted[0]?.effectiveFrom).toBe(NOW + 10 * MINUTE)
   })
 
   it("checks a card's rows against the plan features of the versions that price with it", async () => {
@@ -82,7 +94,7 @@ describe("RateCardService publication", () => {
     const unassigned = await rejection(publish(unassignedCard.id, [gpt41("2.00", "8.00")], NOW))
     const card = await liveCard([planFeature("fv_live_tokens", "ft_llm_tokens", TOKENS_METER, 3)])
 
-    const assigned = await value(publish(card.id, [gpt41("2.00", "8.00")], NOW))
+    const assigned = await value(publish(card.id, [gpt41("2.00", "8.00")], NOW, NOW - 10 * MINUTE))
     await db
       .update(planVersionFeaturesTable)
       .set({ meterConfig: { ...TOKENS_METER, groupBy: [] } })
@@ -111,7 +123,7 @@ describe("RateCardService publication", () => {
 
   it("refuses a price change inside the notice and closes the old row at a change after it", async () => {
     const card = await liveCard([planFeature("fv_live_tokens", "ft_llm_tokens", TOKENS_METER, 3)])
-    await value(publish(card.id, [gpt41("2.00", "8.00")], NOW))
+    await value(publish(card.id, [gpt41("2.00", "8.00")], NOW, NOW - 10 * MINUTE))
 
     const early = await rejection(publish(card.id, [gpt41("2.00", "6.00")], NOW + 5 * MINUTE))
     const afterEarly = intervals(await cardRows(card.id))
@@ -222,7 +234,8 @@ describe("RateCardService publication", () => {
       planFeature("fv_live_tokens", "ft_llm_tokens", TOKENS_METER, 3),
       planFeature("fv_live_images", "ft_images", imagesMeter, 4),
     ])
-    const [stale] = (await value(publish(card.id, [gpt41("2.00", "8.00")], NOW))).inserted
+    const [stale] = (await value(publish(card.id, [gpt41("2.00", "8.00")], NOW, NOW - 10 * MINUTE)))
+      .inserted
     await db
       .update(planVersionFeaturesTable)
       .set({ meterConfig: { ...TOKENS_METER, groupBy: ["model_id"] } })
@@ -237,17 +250,14 @@ describe("RateCardService publication", () => {
       })
     // Each call stamps its own now, as the tRPC procedures do with Date.now().
     const regroup = (now: number) =>
-      publishRateRows(
-        { services },
-        {
-          projectId,
-          cardId: card.id,
-          rows: [{ ...gpt41("2.00", "8.00"), match: { model_id: "gpt-4.1" } }],
-          closeRowIds: [stale?.id ?? ""],
-          effectiveFrom: NOW + 11 * MINUTE,
-          now,
-        }
-      )
+      rateCards.publishRows({
+        projectId,
+        cardId: card.id,
+        drafts: [{ ...gpt41("2.00", "8.00"), match: { model_id: "gpt-4.1" } }],
+        closeRowIds: [stale?.id ?? ""],
+        effectiveFrom: NOW + 11 * MINUTE,
+        now,
+      })
 
     const images = await value(publish(card.id, [image], NOW + 10 * MINUTE))
     const early = await rejection(close(NOW + 9 * MINUTE, NOW))

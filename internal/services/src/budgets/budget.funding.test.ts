@@ -25,7 +25,7 @@ function rejection(result: ReturnType<MemoryBudgetStore["run"]>) {
   return result.err.rejection
 }
 
-function pricing(funding?: object, statements: "required" | "none" = "required") {
+function pricing(funding?: object) {
   return {
     cards: { base: usdCard.card.id },
     features: [
@@ -46,7 +46,6 @@ function pricing(funding?: object, statements: "required" | "none" = "required")
         priced: true,
       },
     ],
-    statements,
     ...(funding && { funding }),
   }
 }
@@ -97,6 +96,34 @@ const reserved = (granted: number): FundingResult => ({
 })
 
 describe("a prepaid budget lends only what the wallet reserved", () => {
+  it("seeds funding from billed usage when a key also has trial usage", () => {
+    const store = prepaidStore(["images"])
+    ok(
+      store.run(
+        { type: "record", idempotencyKey: "trial", event: image, occurredAt: NOV + hour },
+        NOV + hour
+      )
+    )
+    ok(
+      store.run(
+        { type: "record", idempotencyKey: "billed", event: tokens, occurredAt: NOV + hour },
+        NOV + hour
+      )
+    )
+    const billed = store.statements.get("llm_tokens:nov")
+    if (!billed) throw new Error("missing billed statement")
+    const funded = ok(store.run(fund(100_000_000), NOV + hour))
+    expect(store.funding.get(KEY)?.consumed).toBe(billed.amount)
+    expect(funded.outcome.type).toBe("fund")
+    ok(store.run(apply(1, reserved(200_000_000)), NOV + hour))
+    const sealed = ok(store.run({ type: "sealStatements", statementKey: KEY, at: DEC }, DEC + hour))
+    if (sealed.outcome.type !== "sealStatements") throw new Error("not a seal")
+    expect(sealed.outcome.funding[0]?.intent).toMatchObject({
+      kind: "close",
+      captures: [{ periodId: billed.periodId, amount: billed.amount }],
+    })
+  })
+
   it("admits trial usage without funds, and still asks funds for billed usage", () => {
     const store = prepaidStore(["images"])
 
@@ -317,25 +344,34 @@ describe("a prepaid budget lends only what the wallet reserved", () => {
 })
 
 describe("funding configuration", () => {
-  const parse = (unit: string, statements: "required" | "none") =>
+  const parse = (unit: string) =>
     upsertBudgetInternalInputSchema.safeParse({
       key: "unprice:customer:cus_acme",
       unit,
       limits: [],
-      pricing: pricing({ mode: "prepaid", customerId: "cus_acme" }, statements),
+      pricing: pricing({ mode: "prepaid", customerId: "cus_acme" }),
     })
 
-  it("takes a prepaid budget only in a wallet currency with registered statements", () => {
-    expect(parse("USD", "required").success).toBe(true)
-    expect(parse("credits:ai", "required").error?.issues.map((i) => i.message)).toEqual([
+  it("takes a prepaid budget only in a wallet currency", () => {
+    expect(parse("USD").success).toBe(true)
+    expect(parse("credits:ai").error?.issues.map((i) => i.message)).toEqual([
       "a prepaid budget's unit must be a wallet currency",
-    ])
-    expect(parse("USD", "none").error?.issues.map((i) => i.message)).toEqual([
-      "a prepaid budget needs registered statements",
     ])
   })
 
   it("sizes a reserve as the shortfall plus runway", () => {
+    for (const [required, available, expected] of [
+      [0, 0, 0],
+      [1, 0, 26],
+      [1, -5, 26],
+      [1, 30, 0],
+      [4_000_000, 50_000_000, 54_000_000],
+      [2_000_000_000, 0, 3_000_000_000],
+      [5_000_000_000, -1_000_000, 5_001_000_000],
+      [100_000_000_000, 99_999_999_999, 1],
+    ] as const) {
+      expect(reserveAmount(BigInt(required), BigInt(available))).toBe(BigInt(expected))
+    }
     expect(reserveAmount(BigInt(4_000_000), BigInt(0))).toBe(BigInt(104_000_000))
     expect(reserveAmount(BigInt(4_000_000), BigInt(-1_000_000))).toBe(BigInt(104_000_000))
     expect(reserveAmount(BigInt(5_000_000_000), BigInt(0))).toBe(BigInt(5_000_000_000))

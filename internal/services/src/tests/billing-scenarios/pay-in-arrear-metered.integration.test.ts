@@ -4,7 +4,7 @@ import type { Logger } from "@unprice/logs"
 import { toLedgerMinor } from "@unprice/money"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { LedgerGateway } from "../../ledger"
-import { RateCardService } from "../../rate-cards/service"
+import { testInvoicing } from "../../test-fixtures/billing-gateway"
 import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
 import { billPeriod } from "../../use-cases/billing/bill-period"
 
@@ -93,7 +93,7 @@ describe("P0-A pay_in_arrear metered billing workflow", () => {
 
     const context = await loadSubscriptionContext()
     const firstRun = await billPeriod({
-      invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
+      invoicing: testInvoicing({ db, payerBudgets }),
       context,
       logger,
       db,
@@ -101,7 +101,7 @@ describe("P0-A pay_in_arrear metered billing workflow", () => {
       ledgerService: ledger,
     })
     const secondRun = await billPeriod({
-      invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
+      invoicing: testInvoicing({ db, payerBudgets }),
       context,
       logger,
       db,

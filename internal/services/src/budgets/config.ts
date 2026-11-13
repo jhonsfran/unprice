@@ -75,7 +75,11 @@ export type ConfigChange =
   /** Only billing's compile moves a budget to another unit (ADR-0008 D1). */
   | Readonly<{ change: "unit"; from: string; to: string }>
 
-export function diffConfig(prev: BudgetConfig, next: BudgetConfig): ConfigChange[] {
+export function diffConfig(
+  prev: BudgetConfig,
+  next: BudgetConfig,
+  pricingChanged: boolean
+): ConfigChange[] {
   const changes: ConfigChange[] = []
   const prevById = new Map(prev.limits.map((limit) => [limit.id, limit]))
   const nextIds = new Set(next.limits.map((limit) => limit.id))
@@ -118,7 +122,7 @@ export function diffConfig(prev: BudgetConfig, next: BudgetConfig): ConfigChange
     changes.push({ change: "holds" })
   }
   if (prev.closesAt !== next.closesAt) changes.push({ change: "closesAt" })
-  if (!samePricing(prev.pricing, next.pricing)) changes.push({ change: "pricing" })
+  if (pricingChanged) changes.push({ change: "pricing" })
   return changes
 }
 
@@ -141,7 +145,11 @@ function pricingKey(pricing: BudgetPricing | undefined): string {
  * `next` only keeps or tightens what `prev` enforced.
  * Soft limits and hold TTLs never deny, so changing them loosens nothing.
  */
-export function loosening(prev: BudgetConfig, next: BudgetConfig): ConfigChange | null {
+export function loosening(
+  prev: BudgetConfig,
+  next: BudgetConfig,
+  pricingChanged: boolean
+): ConfigChange | null {
   const nextById = new Map(next.limits.map((limit) => [limit.id, limit]))
   for (const before of prev.limits) {
     if (before.enforce !== "hard") continue
@@ -157,7 +165,7 @@ export function loosening(prev: BudgetConfig, next: BudgetConfig): ConfigChange 
   const postponed =
     prev.closesAt !== null && (next.closesAt === null || next.closesAt > prev.closesAt)
   if (postponed) return { change: "closesAt" }
-  return samePricing(prev.pricing, next.pricing) ? null : { change: "pricing" }
+  return pricingChanged ? { change: "pricing" } : null
 }
 
 /**

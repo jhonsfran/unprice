@@ -1,5 +1,4 @@
 import { createRoute } from "@hono/zod-openapi"
-import { UnPriceBudgetError } from "@unprice/services/budgets"
 import {
   PAYER_ACCESS_DENIALS,
   checkPayerAccess,
@@ -13,10 +12,9 @@ import { keyAuth, resolveContextProjectId, resolveCustomerIdForApiKeyOrThrow } f
 import { toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
-import { CloudflareBudgetClient } from "~/ingestion/budget/client"
+import { requestBudgetCommandDeps } from "~/ingestion/budget/deps"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
-import { budgetApiError } from "../budgets/budget-verb"
 
 const tags = ["access"]
 
@@ -114,7 +112,7 @@ export const registerVerifyV1 = (app: App) =>
     startTime(c, "verify")
     const result = await checkPayerAccess(
       {
-        budgets: new CloudflareBudgetClient(c.env),
+        budgets: requestBudgetCommandDeps(c).budgets,
         entitlements: c.get("services").entitlement,
       },
       { projectId, customerId, featureSlug, now: c.get("requestStartedAt") }
@@ -122,9 +120,7 @@ export const registerVerifyV1 = (app: App) =>
     endTime(c, "verify")
 
     if (result.err) {
-      throw result.err instanceof UnPriceBudgetError
-        ? budgetApiError(c, result.err)
-        : toUnpriceApiError(result.err)
+      throw toUnpriceApiError(result.err)
     }
     return c.json(result.val, HttpStatusCodes.OK)
   })

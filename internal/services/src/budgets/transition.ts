@@ -11,6 +11,8 @@
 import { type BudgetPricing, CARD_REFRESH_MS } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import type { CardRows } from "../pricing"
+import { ownProperty } from "../pricing/resolve"
+import { balanceOf } from "./balance"
 import {
   type BudgetOperations,
   type BudgetRecord,
@@ -19,36 +21,38 @@ import {
   deletableAt,
   isClosed,
 } from "./config"
-import { type Change, balanceOf, decide, holdNumber, repricesBudget, upsertPricing } from "./decide"
+import { type Change, decide } from "./decide"
 import { decideFunding, fundingViolations, prepaidPayer } from "./funding"
+import { holdNumber } from "./holds"
 import { type RowStep, checkTransition } from "./invariants"
-import { alarmAt, consume, dueAt, restartAmounts, rollUsage, trackLimits } from "./ledger"
+import { alarmAt, consume, dueAt, rollUsage } from "./ledger"
 import { cardIdsOf, featuresOf } from "./meter"
-import {
-  type BudgetBalance,
-  type BudgetCommand,
-  type BudgetOutcome,
-  type BudgetReply,
-  type BudgetView,
-  type Funding,
-  type FundingWork,
-  type LeaseOperation,
-  type LeaseView,
-  type Ledger,
-  type Operation,
-  type ReservationOperation,
-  type Statement,
-  type UnPriceBudgetError,
-  type WindowPeriod,
-  reject,
+import type {
+  BudgetBalance,
+  BudgetCommand,
+  BudgetOutcome,
+  BudgetReply,
+  BudgetView,
+  Funding,
+  FundingWork,
+  LeaseOperation,
+  LeaseView,
+  Ledger,
+  Operation,
+  ReservationOperation,
+  Statement,
+  WindowPeriod,
 } from "./model"
+import { type UnPriceBudgetError, reject } from "./rejections"
 import {
   type PositionWrite,
   byPeriodId,
   movedPositions,
+  sealAnswer,
   statementViolations,
   statementsAnswer,
 } from "./statements"
+import { upsertFacts } from "./upsert"
 import { addUsage, subtractUsage } from "./usage"
 import { type WindowId, windowIdOf } from "./windows"
 
@@ -104,12 +108,15 @@ export function loadView(
   const budget = reader.readBudget()
   const now = Math.max(clockMs, ledger.lastAt)
   const target = targetOf(reader, command)
-  const pricing = pricingOf(command, budget)
+  const upsert = command.type === "upsert" ? upsertFacts(command, budget) : null
+  const pricing = command.type === "upsert" ? upsert?.pricing : pricingOf(command, budget)
   const expired =
     command.type === "sweep" && budget ? reader.readExpired(now, EXPIRED_PER_SWEEP) : []
-  const prices = pricing !== undefined && willPrice(command, budget, target, expired, now)
+  const prices =
+    pricing !== undefined &&
+    willPrice(command, budget, target, expired, now, upsert?.reprices ?? false)
   // A pricing or unit change waits for open reservations (ADR-0008 D1).
-  const repriced = command.type === "upsert" && budget !== null && repricesBudget(command, budget)
+  const repriced = budget !== null && (upsert?.reprices ?? false)
   const statements = statementsOf(
     reader,
     command,
@@ -136,6 +143,7 @@ export function loadView(
         ? staleCardsOf(reader, cardIdsOf(pricing), now)
         : [],
     reservationsOpen: repriced && reader.hasOpenReservations(),
+    upsert,
     // Several expiries may read the same statement.
     statements: [...byPeriodId(statements).values()],
   }
@@ -144,7 +152,7 @@ export function loadView(
 function staleCardsOf(reader: BudgetReader, cardIds: readonly string[], now: number): string[] {
   const refreshedAt = reader.cardsRefreshedAt(cardIds)
   return cardIds.filter((cardId) => {
-    const at = Object.hasOwn(refreshedAt, cardId) ? refreshedAt[cardId] : undefined
+    const at = ownProperty(refreshedAt, cardId)
     return at === undefined || now - at >= CARD_REFRESH_MS
   })
 }
@@ -170,7 +178,6 @@ function fundingKeysOf(
 
 /** The pricing the command runs under: an upsert's, else the budget's or the one it creates. */
 function pricingOf(command: BudgetCommand, budget: BudgetRecord | null): BudgetPricing | undefined {
-  if (command.type === "upsert") return upsertPricing(command, budget)
   if (budget) return budget.config.pricing
   return "ifMissing" in command ? command.ifMissing?.config.pricing : undefined
 }
@@ -185,10 +192,11 @@ function willPrice(
   budget: BudgetRecord | null,
   target: Operation | null,
   expired: readonly ReservationOperation[],
-  now: number
+  now: number,
+  reprices: boolean
 ): boolean {
   if (budget === null) return true
-  if (command.type === "upsert") return repricesBudget(command, budget)
+  if (command.type === "upsert") return reprices
   const live = target !== null && !isPastRetention(target, now)
   switch (command.type) {
     case "authorize":
@@ -362,6 +370,7 @@ export function transition(params: {
       cards: view.cards,
       statements: view.statements,
       reservationsOpen: view.reservationsOpen,
+      upsert: view.upsert,
     },
     now
   )
@@ -369,12 +378,7 @@ export function transition(params: {
   const change = decided.val
 
   const budget = change.configured?.budget ?? view.budget
-  // A new unit restarts every amount counter; quantities carry over (ADR-0008 D1).
-  const unitChanged = view.budget !== null && budget !== null && budget.unit !== view.budget.unit
-  const counters = unitChanged ? restartAmounts(rolledLedger.usage) : rolledLedger.usage
-  const usage = change.configured
-    ? trackLimits(counters, change.configured.budget.config.limits, now)
-    : counters
+  const usage = change.configured?.usage ?? rolledLedger.usage
   const ledger: Ledger = {
     lastAt: now,
     holdSeq: change.rows.reduce(
@@ -415,7 +419,7 @@ export function transition(params: {
       resultingLimits: budget?.config.limits ?? [],
       steps,
       periods,
-      unitChanged,
+      unitChanged: change.configured?.unitChanged ?? false,
     }),
     ...statementViolations({
       steps: statements.map((s) => [priorStatements.get(s.periodId), s] as const),
@@ -569,7 +573,7 @@ function outcomeOf(command: BudgetCommand, params: OutcomeParams): BudgetOutcome
     case "sealStatements":
       return {
         type: command.type,
-        statements: statementsAnswer(command, params.statements, now),
+        ...sealAnswer(command, params.statements, now),
         funding: params.work,
       }
     case "fund":

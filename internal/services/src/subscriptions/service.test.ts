@@ -1095,7 +1095,7 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
     expect(result.err).toBeUndefined()
     // An immediate cancel caps the last periods and syncs the budget; the invoicing job bills them.
     expect(generateBillingPeriods).toHaveBeenCalledWith({ projectId, subscriptionId, now })
-    expect(syncPayerBudget).toHaveBeenCalledWith({ projectId, customerId, caller: "request" })
+    expect(syncPayerBudget).not.toHaveBeenCalled()
     expect(invoiceEndedSubscription).not.toHaveBeenCalled()
     if (!result.err) {
       expect(result.val).toEqual(canceledSubscription)
@@ -1167,12 +1167,13 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
       expect(invoiceEndedSubscription).toHaveBeenCalledWith({
         projectId: "proj_123",
         subscriptionId: "sub_123",
+        caller: "request",
         now,
       })
     }
   })
 
-  it("syncs the payer budget after wallet activation generates periods, even when it parks", async () => {
+  it("returns the activation status and delegates payer sync to the machine wrapper", async () => {
     for (const status of ["active", "pending_activation"]) {
       const syncSubscriptionPayerBudget = vi.fn(async () => {})
       const service = new SubscriptionService({
@@ -1198,9 +1199,7 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
       const result = await service.activateWallet({ subscriptionId: "sub_1", projectId: "proj_1" })
 
       expect(result?.err === undefined).toBe(status === "active")
-      expect(syncSubscriptionPayerBudget.mock.calls).toEqual([
-        [{ projectId: "proj_1", subscriptionId: "sub_1", caller: "request" }],
-      ])
+      expect(syncSubscriptionPayerBudget).not.toHaveBeenCalled()
     }
   })
 })

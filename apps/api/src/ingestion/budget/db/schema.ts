@@ -79,7 +79,7 @@ export const budgetWindowHistory = sqliteTable(
 )
 
 /**
- * One billing period of one feature, or a budget's perpetual statement per feature. Totals are a
+ * One billing period of one feature. Totals are a
  * tagged-bigint JSON object (`quantity`, `amount`, `cost`); positions live in `budget_positions`.
  */
 export const budgetStatements = sqliteTable(

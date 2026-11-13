@@ -283,6 +283,7 @@ export default function ConfigItemsFormField<TFieldValues extends FormValues>({
                                         {feature.feature.description ?? ""}
                                       </ResponsiveDialogDescription>
                                       <FeatureConfigForm
+                                        key={feature.id ?? feature.featureId}
                                         defaultValues={feature}
                                         planVersion={selectedPlanVersion!}
                                         className="my-6"

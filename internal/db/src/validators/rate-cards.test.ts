@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest"
+import { featurePriceInputSchema } from "./rate-cards"
 import {
+  CARD_REFRESH_MS,
+  RATE_CHANGE_NOTICE_MS,
   featurePricingSchema,
   publishRateRowsInputSchema,
   rateCardSchema,
@@ -35,6 +38,10 @@ function issues(result: { success: boolean; error?: { issues: { message: string 
 }
 
 describe("rate card validators", () => {
+  it("refreshes card prices before a live change can take effect", () => {
+    expect(CARD_REFRESH_MS).toBeLessThan(RATE_CHANGE_NOTICE_MS)
+  })
+
   it("parses decimals into base units at scale 8", () => {
     expect(rateDecimalSchema.parse("2.5")).toBe(BigInt(250_000_000))
     expect(rateDecimalSchema.parse("0.00000001")).toBe(BigInt(1))
@@ -188,5 +195,29 @@ describe("rate card validators", () => {
       included: "1000",
     })
     expect(feature.included).toBe(BigInt(100_000_000_000))
+  })
+})
+
+describe("feature price tiers", () => {
+  it("refuses inclusive bounds instead of silently discarding a gap", () => {
+    expect(
+      featurePriceInputSchema.safeParse({
+        tiers: [
+          { firstUnit: 1, lastUnit: 10, unitPrice: "1", flatPrice: "0" },
+          { firstUnit: 50, lastUnit: null, unitPrice: "2", flatPrice: "0" },
+        ],
+      }).success
+    ).toBe(false)
+    expect(
+      featurePriceInputSchema.parse({
+        tiers: [
+          { upTo: 10, rate: "1", flat: "0" },
+          { upTo: null, rate: "2", flat: "0" },
+        ],
+      }).tiers
+    ).toEqual([
+      { upTo: 10, rate: "1", flat: "0" },
+      { upTo: null, rate: "2", flat: "0" },
+    ])
   })
 })

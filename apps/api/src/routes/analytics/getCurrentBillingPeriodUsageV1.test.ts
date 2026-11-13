@@ -155,6 +155,7 @@ function createTestApp(
     throw error
   })
   app.use("*", async (c, next) => {
+    c.set("services", {} as HonoEnv["Variables"]["services"])
     c.set("requestId", "req_123")
     c.set("requestStartedAt", now)
     await next()

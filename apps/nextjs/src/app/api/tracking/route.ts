@@ -97,7 +97,9 @@ export const POST = withEvlog(async (req: NextRequest) => {
 
   // don't track HEAD requests to avoid non-user traffic from inflating click count
   if (req.method === "HEAD") {
-    return new Response(JSON.stringify({ error: "Invalid method" }), { status: 400 })
+    const response = new Response(JSON.stringify({ error: "Invalid method" }), { status: 400 })
+    setCorsHeaders(response, req.headers.get("origin"))
+    return response
   }
 
   const contentLength = Number(req.headers.get("content-length") ?? 0)
@@ -111,7 +113,9 @@ export const POST = withEvlog(async (req: NextRequest) => {
   try {
     body = await req.json()
   } catch {
-    return new Response(JSON.stringify({ error: "Invalid JSON body" }), { status: 400 })
+    const response = new Response(JSON.stringify({ error: "Invalid JSON body" }), { status: 400 })
+    setCorsHeaders(response, req.headers.get("origin"))
+    return response
   }
 
   const parsed = parseTrackingRequest(body)

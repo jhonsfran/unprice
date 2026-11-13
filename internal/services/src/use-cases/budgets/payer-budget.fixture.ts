@@ -5,9 +5,9 @@ import type { Logger } from "@unprice/logs"
 import type { BudgetCatalogService } from "../../budget-catalog"
 import { UnPriceBudgetError } from "../../budgets"
 import { MemoryBudgetStore } from "../../budgets/memory-store.fixture"
+import { payerBudgetKey } from "../../budgets/payer-key"
 import { CARD_FROM, usdCard } from "../../pricing/fixtures"
 import type { BudgetAddress, BudgetClient, CardSource } from "./budget-client"
-import { payerBudgetKey } from "./compile-payer-budget"
 import { executeBudgetCommand } from "./execute-budget-command"
 import { FakeWallet } from "./fake-wallet.fixture"
 import type { MeterPayerUsageDeps } from "./meter-payer-usage"
@@ -34,16 +34,14 @@ export function payerHarness() {
     return store
   }
   const calls: { address: BudgetAddress; type: string }[] = []
-  const budgets: BudgetClient = {
-    async execute(address, request) {
+  const budgets: Pick<BudgetClient, "execute"> = {
+    async execute(address, request, cards) {
+      if (cards) storeOf(address).cacheCardsAt(clock.now, ...cards)
       calls.push({ address, type: request.type })
       const result = storeOf(address).run(request, clock.now)
       if (result.err) return result
       if (!result.val.ok) return Err(new UnPriceBudgetError(result.val.rejection))
       return Ok(result.val.outcome)
-    },
-    async cacheCards(address, cards) {
-      storeOf(address).cacheCardsAt(clock.now, ...cards)
     },
   }
   const cards: CardSource = { read: async () => Ok([usdCard]) }
@@ -94,7 +92,7 @@ export function payerHarness() {
             priced: true,
           },
         ],
-        statements: "required",
+
         funding: options.prepaid ? { mode: "prepaid", customerId } : { mode: "postpaid" },
       },
     })
@@ -110,7 +108,7 @@ export function payerHarness() {
         type: "registerStatements",
         statements: [
           {
-            periodId: "images:bp_nov",
+            periodId: "bp_nov",
             statementKey: "inv_nov",
             featureSlug: "images",
             start: NOV,

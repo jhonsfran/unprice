@@ -1,6 +1,7 @@
 import { Err, type FetchError, Ok, type Result } from "@unprice/error"
 import { z } from "zod"
-import type { AnalyticsService } from "../../analytics"
+import { getRejectedEvent } from "../../analytics/budget-journal-reader"
+import type { ServiceContext } from "../../context"
 
 export const getRejectedEventPayloadInputSchema = z.object({
   projectId: z.string(),
@@ -26,14 +27,7 @@ export const getRejectedEventPayloadOutputSchema = z
 export type GetRejectedEventPayloadInput = z.infer<typeof getRejectedEventPayloadInputSchema>
 export type GetRejectedEventPayloadOutput = z.infer<typeof getRejectedEventPayloadOutputSchema>
 
-export type GetRejectedEventPayloadDeps = {
-  analytics: Pick<AnalyticsService, "getRejectedEvent">
-}
-
-const rejectedDataSchema = z.object({
-  idempotencyKey: z.string().optional(),
-  rejection: z.object({ code: z.string() }).partial().optional(),
-})
+export type GetRejectedEventPayloadDeps = Pick<ServiceContext, "budgetJournal">
 
 /**
  * A refused usage event with what refused it, from the budget journal (ADR-0008 D7). Null until the
@@ -44,7 +38,7 @@ export async function getRejectedEventPayload(
   rawInput: GetRejectedEventPayloadInput
 ): Promise<Result<GetRejectedEventPayloadOutput, FetchError>> {
   const input = getRejectedEventPayloadInputSchema.parse(rawInput)
-  const row = await deps.analytics.getRejectedEvent({
+  const row = await getRejectedEvent(deps.budgetJournal, {
     projectId: input.projectId,
     customerId: input.customerId,
     operationId: input.operationId,
@@ -53,26 +47,15 @@ export async function getRejectedEventPayload(
   if (row.err) return Err(row.err)
   if (!row.val) return Ok(null)
 
-  // A row whose export is not valid JSON has no payload to show: not found, not a 500.
-  const data = parseJson(row.val.data)
-  if (data === undefined) return Ok(null)
-  const parsed = rejectedDataSchema.safeParse(data)
+  const data = row.val.data
   return Ok(
     getRejectedEventPayloadOutputSchema.parse({
-      eventId: (parsed.success && parsed.data.idempotencyKey) || row.val.operation_id,
+      eventId: data.idempotencyKey,
       operationId: row.val.operation_id,
       customerId: input.customerId,
-      rejectionReason: (parsed.success && parsed.data.rejection?.code) || null,
+      rejectionReason: data.rejection.code,
       payloadJson: JSON.stringify(data, null, 2),
       handledAt: row.val.timestamp.getTime(),
     })
   )
-}
-
-function parseJson(text: string): unknown {
-  try {
-    return JSON.parse(text)
-  } catch {
-    return undefined
-  }
 }

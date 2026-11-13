@@ -1,7 +1,7 @@
 import { rateRowSchema } from "@unprice/db/validators"
 import { describe, expect, it } from "vitest"
-import { dimensionsOf, tiersText } from "./publish-rows-dialog"
-import { buildRatePrice } from "./rate-card-format"
+import { buildRatePrice } from "~/components/pricing/rate-card-format"
+import { dimensionsOf } from "./publish-rows-dialog"
 
 function row(featureSlug: string, match: Record<string, string>) {
   return rateRowSchema.parse({
@@ -18,17 +18,41 @@ function row(featureSlug: string, match: Record<string, string>) {
   })
 }
 
-describe("tiersText", () => {
+describe("publish tiers", () => {
   it("writes the tier editor's rows as the publish form reads them, the last one open", () => {
-    const text = tiersText([
-      { key: "a", upTo: "1000", unitPrice: "0", flatPrice: "" },
-      { key: "b", upTo: "", unitPrice: "0.01", flatPrice: "0" },
-    ])
-
-    expect(text).toBe("1000 0 0\n* 0.01 0")
+    const tiers = [
+      { key: "a", upTo: "1000", rate: "0", flat: "" },
+      { key: "b", upTo: "", rate: "0.01", flat: "0" },
+    ]
     expect(
-      buildRatePrice({ kind: "graduated", amount: "", per: "1", property: "", tiers: text }).ok
-    ).toBe(true)
+      buildRatePrice({ shape: "graduated", amount: "", per: "1", property: "", tiers })
+    ).toEqual({
+      ok: true,
+      price: {
+        type: "graduated",
+        property: null,
+        per: 1,
+        tiers: [
+          { upTo: 1000, rate: "0", flat: "0" },
+          { upTo: null, rate: "0.01", flat: "0" },
+        ],
+      },
+    })
+  })
+  it("refuses decreasing bounds before publishing a tier price", () => {
+    expect(
+      buildRatePrice({
+        shape: "graduated",
+        amount: "",
+        per: "1",
+        property: "",
+        tiers: [
+          { key: "a", upTo: "100", rate: "0", flat: "0" },
+          { key: "b", upTo: "50", rate: "1", flat: "0" },
+          { key: "c", upTo: "", rate: "2", flat: "0" },
+        ],
+      })
+    ).toEqual({ ok: false, message: "Tier 2 ends at a whole number of at least 101." })
   })
 })
 

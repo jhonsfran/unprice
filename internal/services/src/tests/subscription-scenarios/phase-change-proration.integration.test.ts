@@ -3,13 +3,13 @@ import type { Customer, Subscription } from "@unprice/db/validators"
 import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { toLedgerMinor } from "@unprice/money"
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Cache } from "../../cache"
 import type { ServiceContext } from "../../context"
 import { createServiceContext } from "../../context"
 import { LedgerGateway } from "../../ledger"
 import type { Metrics } from "../../metrics"
-import { RateCardService } from "../../rate-cards/service"
+import { testInvoicing } from "../../test-fixtures/billing-gateway"
 import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
 import { billPeriod } from "../../use-cases/billing/bill-period"
 
@@ -347,7 +347,10 @@ describe("DB-backed subscription phase changes", () => {
     await closeTestDatabaseConnection(db)
   })
 
+  afterEach(() => vi.restoreAllMocks())
+
   beforeEach(async () => {
+    vi.spyOn(Date, "now").mockReturnValue(jan10)
     await truncateTestDatabase(db)
     await seedTestDb({ db, fixtures })
     await addEnterprisePlanVersion()
@@ -401,7 +404,7 @@ describe("DB-backed subscription phase changes", () => {
       events: { quantity: 120, amount: 112_000_000 },
     })
     const billed = await billPeriod({
-      invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
+      invoicing: testInvoicing({ db, payerBudgets }),
       context: await loadSubscriptionContext(),
       logger,
       db,

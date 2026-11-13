@@ -7,6 +7,7 @@ import {
   RECORD_DEDUPE_MS,
 } from "./config"
 import type {
+  Ledger,
   Operation,
   ReservationOperation,
   WindowCounters,
@@ -133,4 +134,27 @@ export function alarmAt(operation: Operation): number {
   const due = dueAt(operation)
   if (due === null) throw new Error(`closed row ${operation.id} has no retention end`)
   return due
+}
+
+export const emptyLedger: Ledger = {
+  lastAt: 0,
+  holdSeq: 0,
+  held: NO_USAGE,
+  usage: {
+    hour: { start: 0, consumed: NO_USAGE },
+    day: { start: 0, consumed: NO_USAGE },
+    week: { start: 0, consumed: NO_USAGE },
+    month: { start: 0, consumed: NO_USAGE },
+    never: { start: 0, consumed: NO_USAGE },
+  },
+  operations: {
+    upsert: 0,
+    authorize: 0,
+    settle: 0,
+    release: 0,
+    charge: 0,
+    record: 0,
+    lease: 0,
+    report: 0,
+  },
 }

@@ -36,12 +36,15 @@ patterns. Keep it cheap to load and useful.
 
 ## Rate Cards And Plan Pricing
 
+- 2026-11-13: When editing feature price tiers, use { upTo, rate, flat }. Inclusive firstUnit and lastUnit belong only at the monetization and plan-template document boundary.
+- 2026-11-13: When previewing catalog pricing, write nothing. Merge bundled, stored, and custom costs in memory and use an unsaved card when needed; apply creates and assigns the card in its transaction. The reviewed hash binds policy and rows, never the new card id.
+
 - 2026-11-07: A journal operation id is unique within its budget. Dashboard row keys and recent-event cursors must include `budget_key`; page by `(timestamp, operation_id, budget_key)` to keep tied events from different payers.
 
 - 2026-11-06: Rate-card version writes lock the plan, then the version, then its cards. Publication also updates the previous latest version; a version-first lock can deadlock with a shared-card copy.
-- 2026-11-06: `RateCardService.withTransaction(tx)` omits cache writes. The use case invalidates version prices only after the outer transaction commits.
+- 2026-11-13: When writing card rows, do not invalidate plan-version caches. Live changes wait at least RATE_CHANGE_NOTICE_MS and cached versions refresh within CARD_REFRESH_MS; internal/db/src/validators/rate-cards.test.ts pins CARD_REFRESH_MS < RATE_CHANGE_NOTICE_MS.
 - 2026-11-06: Inline table cells read saved props while idle. Capture the saved value at focus and skip blur commits if it changed during the edit.
-- 2026-11-06: `createRateCardsFake` skips `planPublish` and `planClose` validation. For feature-edit and card-copy boundary tests, run the production planners too; the fake accepts rows that the real service rejects.
+- 2026-11-13: When using createRateCardsFake, seed assigned versions' feature snapshots. The fake runs production planPublish and planClose planners and reads snapshots through featurePricingOf; do not weaken the fake for incomplete fixtures.
 - 2026-11-05: A feature's meter exists twice: `features.meter_config` is the project template and
   `plan_versions_features.meter_config` is the snapshot the plan editor writes and the budget reads.
   Validate a card's rows against the plan features of the versions assigned to it
@@ -118,11 +121,12 @@ patterns. Keep it cheap to load and useful.
 
 ## Cloudflare, API, And Ingestion
 
+- 2026-11-13: When a closed budget reaches retention age, keep storage while hasUnfinishedStatements finds an open or sealed statement. Billing must still seal and invoice it.
+- 2026-11-13: When pricing usage, route it to registered statements. There is no perpetual statement mode; missing coverage returns NO_STATEMENT.
+- 2026-11-13: When mapping budget refusals to HTTP, use apps/api/src/errors/budget.ts through toUnpriceApiError. Internal payer routes return state conflicts as 409 instead of masked 500 responses.
+- 2026-11-13: When reading the budget journal, pass JournalQuery<T> (SQL, row schema, context) to services.budgetJournal. Journal tests run the QUALIFY dedupe in SQLite with its predicate moved to an outer SELECT.
 
-- 2026-10-19: The API's `c.get("services")` is its own `DomainServiceContext` (`hono/env.ts`), filled
-  in `middleware/init.ts`; a service added to `createServiceContext` must be added there too, and to
-  the route test harnesses (`budgets.test.ts`, `local-mode.fuzz.test.ts`) that set `services` by hand.
-  Exception: `budgetOperator` calls the API itself, so the API's bag leaves it out.
+- 2026-11-13: When exposing a new shared service to API routes, update apps/api/src/hono/env.ts and apps/api/src/middleware/init.ts. Adding it to createServiceContext alone does not expose it. Update route test harnesses that set services by hand; budgetOperator stays outside the API bag because it calls the API itself.
 - 2026-10-19: A gateway to an internal route reads "not found" only from the API's JSON error body
   (`error.code === "NOT_FOUND"`); Hono's default 404 for a missing route is plain text, and
   read-repair that trusted a bare 404 would forget catalog rows during a split deploy.
@@ -342,12 +346,8 @@ patterns. Keep it cheap to load and useful.
 - 2026-11-04: Budget funding (ADR-0008 D10) follows the CARDS_STALE shape: the core refuses with
   FUNDING_REQUIRED and writes nothing; only `fund` and a seal persist wallet intents. Never call the
   wallet before an intent row exists, and never recompute a pending intent: `fund` answers it as stored.
-- 2026-11-04: `BudgetDO.cacheCards` stores nothing for a key without a budget, so a priced upsert over
-  RPC to a fresh key stays CARDS_STALE; workers tests seed the card cache inside `runInDurableObject` first.
-- 2026-11-04: Only `syncPayerBudget` writes `unprice:customer:<id>` (pure `compilePayerBudget`, then
-  `executeBudgetCommand`); the API runs it in process (`InProcessPayerBudgetGateway`), tRPC and jobs via
-  `/v1/internal/payer-budgets/sync`. Call `billing.syncPayerBudget` after the change commits, outside any lock,
-  with `caller: "request"` (one attempt) on request paths; only Trigger jobs pass `"job"` (waits out holds).
+- 2026-11-13: When refreshing BudgetDO cards, pass them to execute(request, cards). The refresh shares the command's transaction; CARDS_STALE after refresh rolls it back. There is no cacheCards RPC or cards-only storage.
+- 2026-11-13: When a withSubscriptionMachine wrapper owns the commit (no db, no dryRun, lock not false), it syncs the payer budget after lock release. Both wrappers include zero-cycle runs and payment or invoice renewals. Callers with their own transaction sync once after commit; jobs pass caller: "job".
 - 2026-11-04: A trial period registers its statement with `free: true` (compile reads the billing
   period's `type`); a prepaid close never captures a free statement, and `resolvePeriodCharge` throws
   when a capped phase's non-trial usage is not captured in full. Recurring proration ends a phase's last
@@ -404,6 +404,9 @@ patterns. Keep it cheap to load and useful.
   need `jurisdiction()` too — use `ingestion/testing/durable-object-namespace-mock.ts`.
 
 ## Next.js And Dashboard
+
+- 2026-11-13: When rendering version pricing, read the server view model from rateCards.forPlanVersion through useVersionPricing (own, hasCard, unpricedFeatureSlugs). Do not parse card names in dashboard code; shared pricing UI lives in apps/nextjs/src/components/pricing/.
+- 2026-11-13: When setting pricing dialog schedules, use epoch milliseconds. Compute markup percentages on the bigint amount before formatting; converting to Number loses precision.
 
 - 2026-10-19: tRPC `infiniteQueryOptions` exists only for inputs with a `cursor` field, and
   `budgets.inspect` pages with `after`; `budget-live.tsx` uses `useInfiniteQuery` with
@@ -506,6 +509,9 @@ patterns. Keep it cheap to load and useful.
   request-time API make that route dynamic and retain explicit `unstable_cache` data caching.
 
 ## Billing, Wallets, And Invoices
+
+- 2026-11-13: When constructing billing, provide a payer-budget gateway. createServiceContext defaults to the HTTP gateway; testInvoicing defaults to a no-op gateway, so pass an explicit gateway to test budget behavior.
+- 2026-11-13: When testing phase changes, control Date.now. Phase changes generate billing periods, so the real clock can add periods outside the scenario.
 
 - 2026-11-04 ([ADR-0008 D2](adr/ADR-0008-payer-budgets-rate-cards-and-r2-journal.md#d2-a-rate-card-owns-every-price-a-plan-version-owns-the-package)): A plan feature's `config` keeps only `usageMode` and `units`; read every price from the version's card with `rateCards.pricingForPlanVersions`/`rowsForVersions`, and format it with `describeRatePrice` (`@unprice/services/pricing`, client-safe). Templates, `monetization.apply`, and onboarding price a draft through `pricePlanVersion`, one card per version.
 - 2026-11-04: Price every draft target after the completeness check, never inside materialization: a run that wrote all features then failed to price leaves a complete draft. `pricePlanVersion` (`services/src/rate-cards`) adopts a card already named `<slug> <pvId> <currency>` when its unit matches.
@@ -1086,12 +1092,12 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-11-04 (ADR-0008 D6, D7): Usage and access routes reach the payer budget through `meterPayerUsage` and `checkPayerAccess` with a `CloudflareBudgetClient`, never `runBudgetVerb`. Refused events go to `budget_journal` with `seq` 0, operation id `r:<idempotency key>`, and status `rejected`.
 - 2026-11-04: `meterPayerUsage` never throws for a transport failure: the failing customer's remaining events answer `unavailable` (wire `UNAVAILABLE`/503, logged, not journaled). Usage routes report the whole batch once through `callBudget` + `batchOutcome` (`budget.outcomes` counts); never call `callBudget` per event, or the wide event keeps only the last one.
 - 2026-11-04: `vi.clearAllMocks()` keeps queued `mockResolvedValueOnce` answers, so a test that fails before the call leaks them into the next test. Route tests that queue answers use `vi.resetAllMocks()` and re-arm the mocks in `beforeEach`.
-- 2026-11-04 (ADR-0008 D7): Usage history reads `budget_journal` through `AnalyticsService` (builders in `services/src/analytics/budget-journal.ts`); every query keeps the latest `seq` per `(budget_key, operation_id)` with `QUALIFY ROW_NUMBER()`. Basin SQL has no UNNEST, so `priced.features[]` is read by index up to `FEATURE_SLOTS`; report the overflow row (null `feature_slug`) instead of dropping it.
-- 2026-11-04: Test journal-backed use cases and routes with `journalAnalytics` (`@unprice/services/analytics/journal-fixture`): a real `AnalyticsService` over a fake Basin port that parses literal rows with the production row schemas.
-- 2026-11-04 (ADR-0008 D8): Tinybird is gone. Dashboard interval, stat-card and usage-row contracts
+- 2026-11-13 (ADR-0008 D7): Usage history reads `budget_journal` through `BudgetJournalReader` (builders in `services/src/analytics/budget-journal.ts`); every query keeps the latest `seq` per `(budget_key, operation_id)` with `QUALIFY ROW_NUMBER()`. Basin SQL has no UNNEST, so `priced.features[]` is read by index up to `FEATURE_SLOTS`; report the overflow row (null `feature_slug`) instead of dropping it.
+- 2026-11-13: Test journal-backed use cases and routes with `journalAnalytics` (`@unprice/services/analytics/journal-fixture`): a real `BudgetJournalReader` over a fake Basin port that parses literal rows with the production row schemas.
+- 2026-11-13 (ADR-0008 D8): Tinybird is gone. Dashboard interval, stat-card and usage-row contracts
   (`prepareInterval`, `analyticsIntervalSchema`, `statsSchema`, `getUsageResponseSchema`) live in
-  `@unprice/db/validators`; `ServiceDeps` has no `analytics` client. Analytics reads go through
-  `AnalyticsService` over Basin SQL only.
+  `@unprice/db/validators`; `ServiceDeps` has no `analytics` client. Web analytics reads go through
+  `AnalyticsService`; journal reads go through `BudgetJournalReader`, both over Basin SQL.
 - 2026-11-04: `generate:openapi` needs only a booting worker: a `.dev.vars` copied from the example with `APP_ENV=development`, placeholder `DATABASE_*_URL`s, and every empty key filled serves `/openapi.json` on 8787 without real secrets.
 - 2026-11-05 (ADR-0008 D2): Prices render as a vendor price sheet (`priceTableOf` in `services/src/pricing/price-table.ts`: a line per dimension value, a column per component, "per 1M tokens" in the header), never as the row's formula string. A catalog revision shows only the lines that change (`changeMatrixOf`), old rate beside new.
 - 2026-11-05: A version's own card has no page of its own: `/rate-cards/<id>` redirects it to the version's Prices tab, and only shared cards keep the card route.

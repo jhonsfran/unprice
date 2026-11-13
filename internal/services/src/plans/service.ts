@@ -1,6 +1,6 @@
 import { type Database, and, desc, eq, getTableColumns, ne, sql } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
-import { nFormatter, newId } from "@unprice/db/utils"
+import { newId } from "@unprice/db/utils"
 import {
   type BillingConfig,
   type BillingInterval,
@@ -25,7 +25,7 @@ import type { Logger } from "@unprice/logs"
 import type { Cache } from "../cache/service"
 import type { DbExecutor } from "../deps"
 import type { Metrics } from "../metrics"
-import { featureRow, planVersionPrices, priceCanCharge } from "../pricing"
+import { describePlanFeatureLine, planVersionPrices, rowsByFeature } from "../pricing"
 import type { RateCardService } from "../rate-cards"
 import { cachedQuery } from "../utils/cached-query"
 import { toErrorContext } from "../utils/log-context"
@@ -194,33 +194,16 @@ export class PlanService {
       rows,
       planVersion.currency
     )
-    const planFeatures = planVersion.planFeatures.map((planFeature) => {
-      const row = featureRow(rows, planFeature.feature.slug)
-      const unit = planFeature.unitOfMeasure ?? "units"
-      const unitText =
-        planFeature.featureType === "usage" && !planFeature.feature.slug.includes(unit)
-          ? ` ${unit}`
-          : ""
-      const included = Number(planFeature.included ?? 0)
-      const free = !row || !priceCanCharge(row.price)
-      const allowance =
-        included > 0
-          ? `${nFormatter(included)}${unitText} included,`
-          : planFeature.limit
-            ? `Up to ${nFormatter(planFeature.limit)}${unitText}`
-            : free
-              ? "Unlimited"
-              : "Starts at 0"
-
-      return {
-        ...planFeature,
-        displayFeatureText:
-          planFeature.featureType === "flat"
-            ? planFeature.feature.title
-            : `${allowance} ${planFeature.feature.title}`,
-        displayPrice: displayPrices.get(planFeature.feature.slug) ?? null,
-      }
-    })
+    const byFeature = rowsByFeature(rows, Date.now())
+    const planFeatures = planVersion.planFeatures.map((planFeature) => ({
+      ...planFeature,
+      displayFeatureText: describePlanFeatureLine(
+        planFeature,
+        byFeature.get(planFeature.feature.slug),
+        planVersion.currency
+      ),
+      displayPrice: displayPrices.get(planFeature.feature.slug) ?? null,
+    }))
 
     return {
       ...planVersion,
@@ -236,6 +219,18 @@ export class PlanService {
     const [first] = versions
     if (!first) return new Map()
     return this.rateCards.rowsForVersions(first.projectId, versions, Date.now())
+  }
+
+  public async getPlanVersionWithPrices(
+    input: Parameters<PlanService["getPlanVersionByIdDetailed"]>[0]
+  ) {
+    const found = await this.getPlanVersionByIdDetailed(input)
+    if (found.err) return Err(found.err)
+    if (!found.val) return Ok(null)
+    const rows = await this.currentRows([found.val])
+    return Ok(
+      this.formatPlanVersion({ planVersion: found.val, rows: rows.get(found.val.id) ?? [] })
+    )
   }
 
   private async getPlanVersionData({

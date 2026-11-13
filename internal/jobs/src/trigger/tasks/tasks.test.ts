@@ -91,6 +91,7 @@ describe("Trigger tasks", () => {
       invoiceId: "inv_123",
       subscriptionId: "sub_123",
       projectId: "proj_123",
+      caller: "job",
       now: 1_800_000_000_000,
     })
   })
@@ -116,6 +117,7 @@ describe("Trigger tasks", () => {
     expect(serviceCalls.invoiceSubscription).toHaveBeenCalledWith({
       subscriptionId: "sub_123",
       projectId: "proj_123",
+      caller: "job",
       now: 1_800_000_000_000,
     })
   })
@@ -151,7 +153,7 @@ describe("Trigger tasks", () => {
     })
   })
 
-  it("periodTask re-syncs the payer budget as a job when no period was created", async () => {
+  it("periodTask delegates the payer sync to period generation even without new periods", async () => {
     const { periodTask: definition } = await import("./period")
     const periodTask = runnableTask<InvoiceTaskPayload>(definition)
     const payload = { subscriptionId: "sub_123", projectId: "proj_123", now: 1_800_000_000_000 }
@@ -162,12 +164,6 @@ describe("Trigger tasks", () => {
     )
     await periodTask.run(payload, { ctx: { task: { id: "task_period_2" } } })
 
-    // Generating periods syncs on its own; a run without new periods syncs here.
-    expect(serviceCalls.syncSubscriptionPayerBudget).toHaveBeenCalledTimes(1)
-    expect(serviceCalls.syncSubscriptionPayerBudget).toHaveBeenCalledWith({
-      subscriptionId: "sub_123",
-      projectId: "proj_123",
-      caller: "job",
-    })
+    expect(serviceCalls.syncSubscriptionPayerBudget).not.toHaveBeenCalled()
   })
 })

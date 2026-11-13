@@ -1,7 +1,7 @@
-import { Err, FetchError, Ok, type Result } from "@unprice/error"
-import type { z } from "zod"
+import type { FetchError, Result } from "@unprice/error"
 import type { UnPriceBudgetError } from "../../budgets"
 import { PAYER_HOLDS, type UnPricePayerBudgetError } from "./compile-payer-budget"
+import { InternalApiClient, type InternalApiOptions } from "./internal-api-client"
 import {
   type CompletePayerStatementsInput,
   type CompletePayerStatementsOutput,
@@ -24,9 +24,6 @@ import {
 const SYNC_PATH = "/v1/internal/payer-budgets/sync"
 const SEAL_PATH = "/v1/internal/payer-budgets/seal"
 const COMPLETE_PATH = "/v1/internal/payer-budgets/complete"
-const DEFAULT_API_BASE_URL = "https://api.unprice.dev"
-/** One call is a compile, an upsert, and a registration, or a seal and its wallet close. */
-const REQUEST_TIMEOUT_MS = 20_000
 
 export type PayerBudgetGatewayError = FetchError | UnPriceBudgetError | UnPricePayerBudgetError
 
@@ -63,88 +60,27 @@ export class InProcessPayerBudgetGateway implements PayerBudgetGateway {
   }
 }
 
-type GatewayFetch = (request: Request) => Promise<Response>
-
 export class HttpPayerBudgetGateway implements PayerBudgetGateway {
-  private readonly baseUrl: string
-  private readonly token: string
-  private readonly fetch: GatewayFetch
+  private readonly api: InternalApiClient
   private readonly timeoutMs: number
-
-  constructor(options: {
-    baseUrl?: string
-    token: string
-    fetch?: GatewayFetch
-    timeoutMs?: number
-  }) {
-    this.baseUrl = (options.baseUrl ?? DEFAULT_API_BASE_URL).replace(/\/+$/, "")
-    this.token = options.token
-    this.fetch = options.fetch ?? fetch
-    this.timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS
+  constructor(options: InternalApiClient | InternalApiOptions) {
+    this.timeoutMs = options instanceof InternalApiClient ? 20_000 : (options.timeoutMs ?? 20_000)
+    this.api = options instanceof InternalApiClient ? options : new InternalApiClient(options)
   }
-
   sync(input: SyncPayerBudgetInput) {
-    return this.post(SYNC_PATH, input, syncPayerBudgetOutputSchema)
+    return this.api.post(SYNC_PATH, input, syncPayerBudgetOutputSchema, {
+      timeoutMs: this.timeoutMs,
+    })
   }
-
   seal(input: SealPayerStatementsInput) {
-    return this.post(SEAL_PATH, input, sealPayerStatementsOutputSchema)
+    return this.api.post(SEAL_PATH, input, sealPayerStatementsOutputSchema, {
+      timeoutMs: this.timeoutMs,
+    })
   }
-
   completeInvoiced(input: CompletePayerStatementsInput) {
-    return this.post(COMPLETE_PATH, input, completePayerStatementsOutputSchema)
-  }
-
-  private async post<T>(
-    path: string,
-    input: unknown,
-    schema: z.ZodType<T>
-  ): Promise<Result<T, FetchError>> {
-    const context = { url: path, method: "POST" }
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs)
-    let response: Response
-    let body: unknown
-    try {
-      response = await this.fetch(
-        new Request(`${this.baseUrl}${path}`, {
-          method: "POST",
-          headers: { authorization: `Bearer ${this.token}`, "content-type": "application/json" },
-          body: JSON.stringify(input),
-          signal: controller.signal,
-        })
-      )
-      body = await response.json().catch(() => null)
-    } catch (error) {
-      const message = controller.signal.aborted
-        ? `${path} timed out after ${this.timeoutMs} ms`
-        : error instanceof Error
-          ? error.message
-          : `${path} failed`
-      return Err(new FetchError({ message, retry: true, context }))
-    } finally {
-      clearTimeout(timer)
-    }
-    if (!response.ok) {
-      return Err(
-        new FetchError({
-          message: `${path} failed with status ${response.status}: ${JSON.stringify(body)}`,
-          retry: response.status >= 500,
-          context: { ...context, status: response.status },
-        })
-      )
-    }
-    const parsed = schema.safeParse(body)
-    if (!parsed.success) {
-      return Err(
-        new FetchError({
-          message: `${path} answered an unexpected body: ${parsed.error.message}`,
-          retry: false,
-          context: { ...context, status: response.status },
-        })
-      )
-    }
-    return Ok(parsed.data)
+    return this.api.post(COMPLETE_PATH, input, completePayerStatementsOutputSchema, {
+      timeoutMs: this.timeoutMs,
+    })
   }
 }
 

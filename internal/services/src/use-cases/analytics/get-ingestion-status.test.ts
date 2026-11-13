@@ -2,7 +2,12 @@ import { FetchError } from "@unprice/error"
 import { describe, expect, it } from "vitest"
 import { ZodError } from "zod"
 import { journalAnalytics } from "../../analytics/journal.fixture"
-import { type GetIngestionStatusInput, getIngestionStatus } from "./get-ingestion-status"
+import {
+  type GetIngestionStatusInput,
+  getIngestionStatus,
+  getIngestionSummary,
+  listIngestionEvents,
+} from "./get-ingestion-status"
 
 const from = Date.parse("2026-11-03T09:00:00.000Z")
 const to = Date.parse("2026-11-03T10:00:00.000Z")
@@ -51,16 +56,40 @@ const refused = {
 }
 
 describe("getIngestionStatus", () => {
+  it("reads the summary without scanning recent events", async () => {
+    const { budgetJournal, queries } = journalAnalytics(answer({}))
+    const result = await getIngestionSummary({ budgetJournal, now: () => now }, input())
+    expect(result.err).toBeUndefined()
+    expect(queries).toHaveLength(4)
+    expect(
+      queries.some((sql) => sql.includes("SELECT budget_key, operation_id, kind, state"))
+    ).toBe(false)
+    expect(result.val).not.toHaveProperty("recentEvents")
+  })
+  it("reads only events for each page", async () => {
+    const { budgetJournal, queries } = journalAnalytics(answer({ recent: [accepted, refused] }))
+    const first = await listIngestionEvents({ budgetJournal }, { scope: input(), limit: 1 })
+    expect(first.val?.recentEvents).toHaveLength(1)
+    const next = await listIngestionEvents(
+      { budgetJournal },
+      { scope: input(), limit: 1, cursor: first.val?.nextCursor }
+    )
+    expect(next.err).toBeUndefined()
+    expect(queries).toHaveLength(2)
+    expect(
+      queries.every((sql) => sql.includes("SELECT budget_key, operation_id, kind, state"))
+    ).toBe(true)
+  })
   it("rejects invalid windows before reading the journal", async () => {
-    const { analytics, queries } = journalAnalytics(answer({}))
+    const { budgetJournal, queries } = journalAnalytics(answer({}))
     await expect(
-      getIngestionStatus({ analytics }, { ...input(), window: { from: to, to: from } })
+      getIngestionStatus({ budgetJournal }, { ...input(), window: { from: to, to: from } })
     ).rejects.toBeInstanceOf(ZodError)
     expect(queries).toEqual([])
   })
 
   it("reads totals, timeline, rejections, events, and facets from the journal", async () => {
-    const { analytics, queries } = journalAnalytics(
+    const { budgetJournal, queries } = journalAnalytics(
       answer({
         totals: [
           { state: "processed", events: "3", last_seen_at: "2026-11-03T09:40:00.000Z" },
@@ -90,8 +119,8 @@ describe("getIngestionStatus", () => {
     )
 
     const result = await getIngestionStatus(
-      { analytics, now: () => now },
-      input({ includeFacets: true, filter: { sourceTypes: ["charge"], states: ["rejected"] } })
+      { budgetJournal, now: () => now },
+      input({ filter: { sourceTypes: ["charge"], states: ["rejected"] } })
     )
 
     expect(queries).toHaveLength(5)
@@ -150,9 +179,9 @@ describe("getIngestionStatus", () => {
   })
 
   it("pages with the last visible row as the cursor", async () => {
-    const { analytics, queries } = journalAnalytics(answer({ recent: [accepted, refused] }))
+    const { budgetJournal, queries } = journalAnalytics(answer({ recent: [accepted, refused] }))
     const result = await getIngestionStatus(
-      { analytics, now: () => now },
+      { budgetJournal, now: () => now },
       input({
         limit: 1,
         cursor: { handledAt: to, operationId: "o:z", budgetKey: "unprice:customer:cus_1" },
@@ -170,11 +199,8 @@ describe("getIngestionStatus", () => {
   })
 
   it("answers an empty journal window", async () => {
-    const { analytics, queries } = journalAnalytics(answer({}))
-    const result = await getIngestionStatus(
-      { analytics, now: () => now },
-      input({ includeFacets: true })
-    )
+    const { budgetJournal, queries } = journalAnalytics(answer({}))
+    const result = await getIngestionStatus({ budgetJournal, now: () => now }, input())
     expect(queries).toHaveLength(5)
     expect(result.val?.totals).toEqual({ processed: 0, rejected: 0, total: 0 })
     expect(result.val?.live).toEqual([])
@@ -199,8 +225,8 @@ describe("getIngestionStatus", () => {
   })
 
   it("returns a journal failure as a fetch error", async () => {
-    const { analytics } = journalAnalytics(() => new Error("basin down"))
-    const result = await getIngestionStatus({ analytics, now: () => now }, input())
+    const { budgetJournal } = journalAnalytics(() => new Error("basin down"))
+    const result = await getIngestionStatus({ budgetJournal, now: () => now }, input())
     expect(result.err).toBeInstanceOf(FetchError)
     expect(result.err?.message).toContain("basin down")
   })
@@ -211,7 +237,6 @@ function input(overrides: Partial<GetIngestionStatusInput> = {}): GetIngestionSt
     projectId: "proj_1",
     window: { from, to },
     filter: {},
-    includeFacets: false,
     limit: 50,
     ...overrides,
   }

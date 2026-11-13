@@ -48,15 +48,8 @@ export function durableObjectJurisdiction(appEnv: string): DurableObjectJurisdic
   return isJurisdictionSupported(appEnv) ? DO_JURISDICTION : undefined
 }
 
-/** The budget namespace, unscoped on purpose: budgets use automatic placement (see above). */
-export function budgetNamespace(env: Pick<Env, "budget">): Env["budget"] {
-  return env.budget
-}
-
-export type BudgetStub = ReturnType<Env["budget"]["getByName"]>
-
 /** The key is the tail, so a key containing ":" or "/" cannot collide with another address. */
-export function buildBudgetName(params: {
+function buildBudgetName(params: {
   appEnv: string
   projectId: string
   key: string
@@ -71,8 +64,8 @@ export function buildBudgetName(params: {
 export function getBudgetStub(
   env: Pick<Env, "APP_ENV" | "budget">,
   params: { projectId: string; key: string }
-): BudgetStub {
-  return budgetNamespace(env).getByName(
+) {
+  return env.budget.getByName(
     buildBudgetName({ appEnv: env.APP_ENV, projectId: params.projectId, key: params.key })
   )
 }

@@ -741,7 +741,13 @@ describe("applyPlanTemplate", () => {
     const features = new Map<string, Feature>()
     const events: Event[] = []
     const versions: Array<PlanVersion & { planFeatures: PlanVersionFeature[] }> = []
-    const cards = createRateCardsFake()
+    const cards = createRateCardsFake((id) =>
+      (versions.find((version) => version.id === id)?.planFeatures ?? []).map((planFeature) => {
+        const feature = [...features.values()].find(({ id }) => id === planFeature.featureId)
+        if (!feature) throw new Error("fixture: plan feature has no project feature")
+        return { ...planFeature, feature }
+      })
+    )
     const services = {
       plans: {
         getPlanBySlug: vi.fn(async () =>

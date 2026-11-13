@@ -5,17 +5,17 @@
 
 import { Ok, type Result } from "@unprice/error"
 import type { Amount } from "@unprice/money"
+import { ownProperty } from "../pricing/resolve"
 import type { RowStep } from "./invariants"
-import { emptyStatement, isPerpetual, sumCosts } from "./meter"
-import {
-  type BudgetCommand,
-  type PricedEvent,
-  type Statement,
-  type StatementCommandType,
-  type StatementRegistration,
-  type UnPriceBudgetError,
-  reject,
+import { emptyStatement, sumCosts } from "./meter"
+import type {
+  BudgetCommand,
+  PricedEvent,
+  Statement,
+  StatementCommandType,
+  StatementRegistration,
 } from "./model"
+import { type UnPriceBudgetError, reject } from "./rejections"
 
 const ZERO = BigInt(0)
 
@@ -127,16 +127,9 @@ export function decideRegister(
       created.push(shortened)
       continue
     }
-    // "#" names the budget's own perpetual statements; billing never registers into them.
-    if (periodId.startsWith("#") || registration.statementKey.startsWith("#")) {
-      return reject({ code: "STATEMENT_CONFLICT", periodId })
-    }
     const overlapping = [...byId.values()].filter(
       (other) =>
-        other.featureSlug === registration.featureSlug &&
-        !isPerpetual(other) &&
-        other.start < end &&
-        start < other.end
+        other.featureSlug === registration.featureSlug && other.start < end && start < other.end
     )
     const tail = tailBefore(registration, overlapping)
     const [overlap] = overlapping
@@ -164,7 +157,7 @@ export function byPeriodId(statements: readonly Statement[]): Map<string, Statem
  * The seal's cutoff: statements ending by it seal. `at`, but never past the budget's clock, so a
  * period that has not ended cannot be sealed early.
  */
-export function sealCutoff(command: SealCommand, now: number): number {
+function sealCutoff(command: SealCommand, now: number): number {
   return Math.min(command.at, now)
 }
 
@@ -184,9 +177,7 @@ export function decideSeal(
 
 function isSealable(statement: Statement, command: SealCommand, now: number): boolean {
   return (
-    statement.statementKey === command.statementKey &&
-    statement.end <= sealCutoff(command, now) &&
-    !isPerpetual(statement)
+    statement.statementKey === command.statementKey && statement.end <= sealCutoff(command, now)
   )
 }
 
@@ -242,7 +233,7 @@ export function movedPositions(
 ): PositionWrite[] {
   const before = prior?.positions ?? {}
   return Object.entries(statement.positions).flatMap(([positionKey, value]) =>
-    Object.hasOwn(before, positionKey) && before[positionKey] === value
+    ownProperty(before, positionKey) === value
       ? []
       : [{ periodId: statement.periodId, positionKey, value }]
   )
@@ -357,4 +348,16 @@ function sameIdentity(a: Statement, b: Statement): boolean {
 function samePositions(a: Readonly<Record<string, Amount>>, b: Readonly<Record<string, Amount>>) {
   const keys = new Set([...Object.keys(a), ...Object.keys(b)])
   return [...keys].every((key) => (a[key] ?? ZERO) === (b[key] ?? ZERO))
+}
+
+/** The key was already read for the seal; report its remaining open periods with the sealed rows. */
+export function sealAnswer(command: SealCommand, statements: readonly Statement[], now: number) {
+  return {
+    statements: statementsAnswer(command, statements, now),
+    openPeriodIds: statements
+      .filter(
+        (statement) => statement.statementKey === command.statementKey && statement.state === "open"
+      )
+      .map((statement) => statement.periodId),
+  }
 }

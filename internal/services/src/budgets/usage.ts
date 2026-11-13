@@ -5,6 +5,7 @@
 
 import type { BudgetMeasure } from "@unprice/db/validators"
 import type { Amount, SignedAmount } from "@unprice/money"
+import { ownProperty } from "../pricing/resolve"
 
 export type { BudgetMeasure }
 
@@ -30,7 +31,7 @@ export function amountUsage(amount: Amount): Usage {
  * slug like `constructor` reads 0, not Object's.
  */
 function quantityIn(quantities: Readonly<Record<string, Amount>>, feature: string): Amount {
-  return Object.hasOwn(quantities, feature) ? (quantities[feature] as Amount) : ZERO
+  return ownProperty(quantities, feature) ?? ZERO
 }
 
 /** The canonical vector: zero quantities dropped, features in key order. */

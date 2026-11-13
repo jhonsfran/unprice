@@ -6,7 +6,6 @@ import {
   RATE_CHANGE_NOTICE_MS,
   featurePricingOf,
   planClose,
-  planFeaturePricing,
   planPublish,
   planVersionViolations,
   unionFeaturePricing,
@@ -190,7 +189,7 @@ describe("planPublish", () => {
     ])
   })
 
-  it("gives a new row the notice once the card has any row, even an ended one", () => {
+  it("gives every row on a live card the notice, including its first row", () => {
     const fallback = usdCardWithFallback.rows.filter((row) => row.id === "row_tokens_default")
     const gpt5 = { ...draft("6"), match: { model: "gpt-5" } }
     const publish = (rows: typeof fallback, effectiveFrom: number) =>
@@ -212,7 +211,10 @@ describe("planPublish", () => {
       earliest: NOW + NOTICE,
     })
     expect(publish(fallback, NOW + NOTICE).val?.inserts.length).toBe(1)
-    expect(publish([], NOW).val?.inserts.map((row) => row.effectiveFrom)).toEqual([NOW])
+    expect(publish([], NOW).err?.code).toBe("NOTICE_TOO_SHORT")
+    expect(publish([], NOW + NOTICE).val?.inserts.map((row) => row.effectiveFrom)).toEqual([
+      NOW + NOTICE,
+    ])
     expect(publish(ended, NOW).err?.rejection).toEqual({
       code: "NOTICE_TOO_SHORT",
       featureSlug: "llm_tokens",
@@ -479,7 +481,7 @@ describe("featurePricingOf", () => {
   })
 })
 
-describe("planFeaturePricing", () => {
+describe("featurePricingOf", () => {
   const meterConfig = {
     eventId: "evt_1",
     eventSlug: "calls",
@@ -488,27 +490,28 @@ describe("planFeaturePricing", () => {
   }
 
   it("reads the plan feature's own meter snapshot and included units", () => {
-    expect(
-      planFeaturePricing({ feature: { slug: "api_calls" }, meterConfig, included: "1000" })
-    ).toEqual({ ok: true, pricing: features.apiCallsIncluded })
-    expect(planFeaturePricing({ feature: { slug: "base_fee" }, meterConfig: null })).toEqual({
+    expect(featurePricingOf({ slug: "api_calls", meterConfig, included: "1000" })).toEqual({
+      ok: true,
+      pricing: features.apiCallsIncluded,
+    })
+    expect(featurePricingOf({ slug: "base_fee", meterConfig: null })).toEqual({
       ok: true,
       pricing: features.baseFee,
     })
   })
 
   it("unions the versions assigned to a card and refuses a feature they describe differently", () => {
-    const v1 = planFeaturePricing({
-      feature: { slug: "llm_tokens" },
+    const v1 = featurePricingOf({
+      slug: "llm_tokens",
       meterConfig: { ...meterConfig, aggregationMethod: "count", groupBy: ["model"] },
     })
-    const v2 = planFeaturePricing({
-      feature: { slug: "llm_tokens" },
+    const v2 = featurePricingOf({
+      slug: "llm_tokens",
       meterConfig: { ...meterConfig, aggregationMethod: "count" },
     })
-    const calls = planFeaturePricing({ feature: { slug: "api_calls" }, meterConfig })
-    const callsIncluded = planFeaturePricing({
-      feature: { slug: "api_calls" },
+    const calls = featurePricingOf({ slug: "api_calls", meterConfig })
+    const callsIncluded = featurePricingOf({
+      slug: "api_calls",
       meterConfig,
       included: "1000",
     })
@@ -524,8 +527,8 @@ describe("planFeaturePricing", () => {
     expect(
       unionFeaturePricing([
         calls,
-        planFeaturePricing({
-          feature: { slug: "api_calls" },
+        featurePricingOf({
+          slug: "api_calls",
           meterConfig: { ...meterConfig, aggregationField: "requests" },
         }),
       ]).unpriceable

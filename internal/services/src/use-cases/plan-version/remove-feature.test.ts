@@ -53,7 +53,7 @@ describe("removePlanVersionFeature", () => {
     ])
   })
 
-  it("leaves the rows of a card another version also prices with", async () => {
+  it("leaves rows when another assigned version still carries the feature", async () => {
     const { cards, services } = createHarness()
     const card = cards.seedPlanVersionCard("pv_1", "USD", [
       { featureSlug: "calls", featureType: "usage", usageMode: "unit", price: "0.01" },
@@ -62,6 +62,11 @@ describe("removePlanVersionFeature", () => {
       planVersionId: "pv_2",
       currency: "USD",
       cardId: card.id,
+    })
+
+    cards.rateCards.featuresPricingWith.mockResolvedValue({
+      features: [{ slug: "calls", dimensions: [], meterProperty: null, included: null }],
+      unpriceable: [],
     })
 
     await removePlanVersionFeature({ db, services }, { projectId: PROJECT, id: "fpv_1", now: NOW })

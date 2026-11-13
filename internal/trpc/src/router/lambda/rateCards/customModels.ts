@@ -1,19 +1,9 @@
 import { customModelCostInputSchema } from "@unprice/db/validators"
-import {
-  addCustomModelCost as addCustomModelCostUseCase,
-  listCustomModelCosts as listCustomModelCostsUseCase,
-} from "@unprice/services/use-cases"
 import { protectedProjectProcedure } from "#trpc"
 
 /** The project's own models in its cost catalog, each at its newest cost. */
 export const listCustomModels = protectedProjectProcedure.query(async (opts) => {
-  const { rateCards } = opts.ctx.services
-  return {
-    costs: await listCustomModelCostsUseCase(
-      { services: { rateCards } },
-      { projectId: opts.ctx.project.id }
-    ),
-  }
+  return { costs: await opts.ctx.services.modelCosts.listCustom(opts.ctx.project.id) }
 })
 
 /**
@@ -24,10 +14,10 @@ export const addCustomModel = protectedProjectProcedure
   .input(customModelCostInputSchema)
   .mutation(async (opts) => {
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
-    const { rateCards } = opts.ctx.services
-    const cost = await addCustomModelCostUseCase(
-      { services: { rateCards } },
-      { ...opts.input, projectId: opts.ctx.project.id, now: Date.now() }
+    const cost = await opts.ctx.services.modelCosts.addCustom(
+      opts.ctx.project.id,
+      opts.input,
+      Date.now()
     )
     return { cost }
   })

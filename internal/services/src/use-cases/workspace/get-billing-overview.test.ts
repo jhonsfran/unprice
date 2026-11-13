@@ -141,7 +141,7 @@ function createDeps(overrides?: { customer?: Customer | null }) {
     services: {
       customers: { getCustomerByIdAcrossProjects },
       wallet: {},
-      analytics: {},
+      budgetJournal: {},
     },
     db: {},
     currentEntitlements: vi.fn(),
@@ -199,11 +199,18 @@ describe("getWorkspaceBillingOverview", () => {
       projectId: "proj_billing",
       customerId: "cus_workspace",
     })
-    expect(getUsageDashboardMock).toHaveBeenCalledWith(expect.anything(), {
-      projectId: "proj_billing",
-      customerId: "cus_workspace",
-      range: "30d",
-    })
+    expect(getUsageDashboardMock).toHaveBeenCalledWith(
+      {
+        budgetJournal: deps.services.budgetJournal,
+        customers: deps.services.customers,
+        now: deps.now,
+      },
+      {
+        projectId: "proj_billing",
+        customerId: "cus_workspace",
+        range: "30d",
+      }
+    )
   })
 
   it("rejects when the workspace has no billing customer id", async () => {

@@ -13,3 +13,5 @@ export * from "./invoice-payer-statements"
 export * from "./payer-budget-gateway"
 export * from "./meter-payer-usage"
 export * from "./payer-access"
+
+export { payerBudgetKey } from "../../budgets/payer-key"

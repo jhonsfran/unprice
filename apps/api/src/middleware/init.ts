@@ -10,6 +10,7 @@ import { LogdrainMetrics, NoopMetrics } from "@unprice/services/metrics"
 import { InProcessPayerBudgetGateway } from "@unprice/services/use-cases"
 import type { MiddlewareHandler } from "hono"
 import type { HonoEnv } from "~/hono/env"
+import { requestBudgetCommandDeps } from "~/ingestion/budget/deps"
 import { apiMetricsLogger, createApiLogger } from "~/observability"
 
 import { payerBudgetSyncDeps } from "~/ingestion/budget/payer-budget-sync"
@@ -175,7 +176,14 @@ export function init(): MiddlewareHandler<HonoEnv> {
       cache,
       metrics,
       payerBudgets: new InProcessPayerBudgetGateway(() =>
-        payerBudgetSyncDeps({ env: c.env, db, services: svcCtx, logger, waitUntil })
+        payerBudgetSyncDeps({
+          env: c.env,
+          db,
+          services: svcCtx,
+          logger,
+          waitUntil,
+          budgets: requestBudgetCommandDeps(c).budgets,
+        })
       ),
       basinSql: createBasinSql({
         accountId: c.env.BASIN_SQL_ACCOUNT_ID,
@@ -209,6 +217,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
 
     c.set("services", {
       analytics: svcCtx.analytics,
+      budgetJournal: svcCtx.budgetJournal,
       budgetCatalog: svcCtx.budgetCatalog,
       subscription: svcCtx.subscriptions,
       entitlement: svcCtx.entitlements,
@@ -225,6 +234,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
       pages: svcCtx.pages,
     })
 
+    requestBudgetCommandDeps(c)
     await next()
   }
 }

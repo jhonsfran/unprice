@@ -113,6 +113,7 @@ function call(body: unknown) {
   const app = new OpenAPIHono<HonoEnv>({ defaultHook: handleZodError })
   app.onError(handleError)
   app.use("*", async (c, next) => {
+    c.set("services", {} as HonoEnv["Variables"]["services"])
     c.set("requestId", "req_test")
     c.set("logger", { set: mocks.log } as unknown as HonoEnv["Variables"]["logger"])
     await next()

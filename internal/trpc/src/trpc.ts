@@ -325,6 +325,13 @@ export const t = initTRPC.context<typeof createTRPCContext>().create({
         ...shape.data,
         code: error.code,
         cause: internalError ? undefined : error.cause,
+        domainCode:
+          !internalError &&
+          error.cause &&
+          "code" in error.cause &&
+          typeof error.cause.code === "string"
+            ? error.cause.code
+            : null,
         requestId: ctx?.requestId,
         zodError:
           !internalError && error.code === "BAD_REQUEST" && error.cause instanceof ZodError

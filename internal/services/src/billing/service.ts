@@ -29,7 +29,7 @@ import {
 import type { SubscriptionMachine } from "../subscriptions/machine"
 import { DrizzleSubscriptionRepository } from "../subscriptions/repository.drizzle"
 import { LockLostError, withLockedMachine } from "../subscriptions/withLockedMachine"
-import { type InvoicingPorts, billPeriod } from "../use-cases/billing/bill-period"
+import { billPeriod } from "../use-cases/billing/bill-period"
 import { settlePrepaidInvoiceToWallet } from "../use-cases/billing/settle-invoice"
 import {
   type PayerBudgetSyncCaller,
@@ -37,6 +37,7 @@ import {
 } from "../use-cases/budgets/payer-budget-gateway"
 import type { WalletService } from "../wallet"
 import { UnPriceBillingError } from "./errors"
+import type { InvoicingPorts } from "./invoicing-ports"
 import type { UpdateInvoiceInput } from "./repository"
 import { DrizzleBillingRepository } from "./repository.drizzle"
 import { billingStrategyFor } from "./strategy"
@@ -399,7 +400,6 @@ export class BillingService {
     caller: PayerBudgetSyncCaller
   }): Promise<void> {
     const { payerBudgets } = this.invoicing
-    if (!payerBudgets) return
     const { caller, ...target } = input
     const synced = await syncPayerBudgetWithRetry(payerBudgets, target, { caller })
     if (synced.err) {
@@ -420,7 +420,6 @@ export class BillingService {
     subscriptionId: string
     caller: PayerBudgetSyncCaller
   }): Promise<void> {
-    if (!this.invoicing.payerBudgets) return
     const { projectId, subscriptionId, caller } = input
     const subscription = await this.db.query.subscriptions.findFirst({
       columns: { customerId: true },
@@ -446,6 +445,7 @@ export class BillingService {
     subscriptionId: string
     projectId: string
     now: number
+    caller: PayerBudgetSyncCaller
     lock?: boolean
     ttlMs?: number
     db?: Database
@@ -455,7 +455,7 @@ export class BillingService {
     const trx = args.db ?? this.db
 
     try {
-      return await withLockedMachine({
+      const result = await withLockedMachine({
         ...args,
         db: trx,
         repo: new DrizzleSubscriptionRepository(trx),
@@ -468,6 +468,14 @@ export class BillingService {
         setLockContext: (ctx: Parameters<typeof this.setLockContext>[0]) =>
           this.setLockContext(ctx),
       })
+      if (!args.db && !args.dryRun && args.lock !== false) {
+        await this.syncSubscriptionPayerBudget({
+          projectId: args.projectId,
+          subscriptionId: args.subscriptionId,
+          caller: args.caller,
+        })
+      }
+      return result
     } catch (e) {
       if (e instanceof Error && e.message === "SUBSCRIPTION_BUSY") {
         throw new UnPriceBillingError({
@@ -505,6 +513,7 @@ export class BillingService {
   }): Promise<Result<{ cyclesCreated: number; phasesProcessed: number }, UnPriceBillingError>> {
     try {
       const status = await this.withSubscriptionMachine({
+        caller,
         subscriptionId,
         projectId,
         now,
@@ -524,11 +533,6 @@ export class BillingService {
           return s1.val
         },
       })
-      // New periods are new statements. Inside a caller's transaction or lock the caller syncs
-      // once it committed, so the API reads what it wrote and no lock waits on the budget.
-      if (!db && !dryRun && lock !== false && status.cyclesCreated > 0) {
-        await this.syncSubscriptionPayerBudget({ projectId, subscriptionId, caller })
-      }
       return Ok({ cyclesCreated: status.cyclesCreated, phasesProcessed: status.phasesProcessed })
     } catch (e) {
       return Err(e as UnPriceBillingError)
@@ -545,10 +549,12 @@ export class BillingService {
     projectId: string
     subscriptionId: string
     now: number
+    caller?: PayerBudgetSyncCaller
   }): Promise<Result<{ phasesProcessed: number }, UnPriceBillingError>> {
-    const { projectId, subscriptionId, now } = input
+    const { projectId, subscriptionId, now, caller = "request" } = input
     try {
       const phasesProcessed = await this.withSubscriptionMachine({
+        caller,
         subscriptionId,
         projectId,
         now,
@@ -573,16 +579,7 @@ export class BillingService {
           }
           const { customer, ...row } = subscription
           const billed = await billPeriod({
-            context: {
-              now,
-              subscriptionId,
-              projectId,
-              subscription: row,
-              customer,
-              paymentMethodId: null,
-              requiredPaymentMethod: false,
-              currentPhase: null,
-            },
+            context: { now, subscription: row, customer },
             logger: this.logger,
             db: this.db,
             repo: new DrizzleSubscriptionRepository(this.db),
@@ -609,11 +606,13 @@ export class BillingService {
     subscriptionId,
     invoiceId,
     now = Date.now(),
+    caller = "request",
   }: {
     projectId: string
     subscriptionId: string
     invoiceId: string
     now?: number
+    caller?: PayerBudgetSyncCaller
   }): Promise<
     Result<
       {
@@ -625,6 +624,7 @@ export class BillingService {
   > {
     try {
       const res = await this.withSubscriptionMachine({
+        caller,
         subscriptionId,
         projectId,
         now,
@@ -659,11 +659,13 @@ export class BillingService {
     subscriptionId,
     invoiceId,
     now = Date.now(),
+    caller = "request",
   }: {
     projectId: string
     subscriptionId: string
     invoiceId: string
     now?: number
+    caller?: PayerBudgetSyncCaller
   }): Promise<
     Result<
       {
@@ -676,6 +678,7 @@ export class BillingService {
   > {
     try {
       const res = await this.withSubscriptionMachine({
+        caller,
         subscriptionId,
         projectId,
         now,
@@ -1391,11 +1394,13 @@ export class BillingService {
     subscriptionId,
     invoiceId,
     now = Date.now(),
+    caller = "request",
   }: {
     projectId: string
     subscriptionId: string
     invoiceId: string
     now?: number
+    caller?: PayerBudgetSyncCaller
   }): Promise<
     Result<
       {
@@ -1432,6 +1437,7 @@ export class BillingService {
       }
 
       const res = await this.withSubscriptionMachine({
+        caller,
         subscriptionId,
         projectId,
         now,

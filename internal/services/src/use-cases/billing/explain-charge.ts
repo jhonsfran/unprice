@@ -11,13 +11,14 @@ import {
   toLedgerMinor,
 } from "@unprice/money"
 import { z } from "zod"
-import type { AnalyticsService } from "../../analytics"
-import { journalChargeDataSchema, parseSignedDecimal } from "../../analytics/budget-journal"
+import { type journalChargeDataSchema, parseSignedDecimal } from "../../analytics/budget-journal"
+import { getStatementEvents } from "../../analytics/budget-journal-reader"
+import type { ServiceContext } from "../../context"
 import type { UnPriceLedgerError } from "../../ledger"
 import type { InvoiceLine, LedgerGateway } from "../../ledger"
 import { describeRatePrice, describeTiers } from "../../pricing"
 import type { RateCardService } from "../../rate-cards"
-import { statementPeriodId } from "../budgets/compile-payer-budget"
+import { aiAnswerEnvelopeSchema } from "../analytics/ai-contracts"
 
 /** One accepted event counted by the invoice statement, read from the budget journal. */
 export const explainChargeEventSchema = z.object({
@@ -43,80 +44,79 @@ export const explainChargeInputSchema = z.object({
   offset: z.number().int().min(0).default(0),
 })
 
-export const explainChargeOutputSchema = z.object({
-  invoice: z.object({
-    id: z.string(),
-    statementKey: z.string(),
-    customerId: z.string(),
-    currency: z.string(),
-  }),
-  line: z.object({
-    entryId: z.string(),
-    billingPeriodId: z.string(),
-    kind: z.string(),
-    amount: z.number().int(),
-    currency: z.string(),
-  }),
-  scope: z.object({
-    projectId: z.string(),
-    customerId: z.string(),
-    featureSlug: z.string(),
-    periodKey: z.string(),
-    customerEntitlementId: z.string().nullable(),
-    featurePlanVersionId: z.string().nullable(),
-  }),
-  summary: z.object({
-    eventCount: z.number().int(),
-    totalUsage: z.number(),
-    totalAmount: z.number().int(),
-    /** Provider cost in USD at the ledger scale, from the invoice line; null when none was priced. */
-    costUsd: z.number().int().nullable(),
-    currency: z.string(),
-    amountScale: z.number().int(),
-    firstEventAt: z.number().int().nullable(),
-    lastEventAt: z.number().int().nullable(),
-    multiComponentEventCount: z.number().int(),
-  }),
-  pricing: z.object({
-    featureType: z.string(),
-    usageMode: z.string().nullable(),
-    unitOfMeasure: z.string(),
-    description: z.string(),
-    rows: z.array(
-      z.object({
-        label: z.string(),
-        value: z.string(),
-      })
-    ),
-  }),
-  events: z.array(explainChargeEventSchema),
-  answer: z.string(),
-  evidence: z.array(
-    z.object({
-      type: z.enum(["ledger_line", "billing_period", "event"]),
+export const explainChargeOutputSchema = z
+  .object({
+    invoice: z.object({
       id: z.string(),
-    })
-  ),
-  pagination: z.object({
-    limit: z.number().int(),
-    offset: z.number().int(),
-    hasMore: z.boolean(),
-  }),
-})
+      statementKey: z.string(),
+      customerId: z.string(),
+      currency: z.string(),
+    }),
+    line: z.object({
+      entryId: z.string(),
+      billingPeriodId: z.string(),
+      kind: z.string(),
+      amount: z.number().int(),
+      currency: z.string(),
+    }),
+    scope: z.object({
+      projectId: z.string(),
+      customerId: z.string(),
+      featureSlug: z.string(),
+      periodKey: z.string(),
+      customerEntitlementId: z.string().nullable(),
+      featurePlanVersionId: z.string().nullable(),
+    }),
+    summary: z.object({
+      eventCount: z.number().int(),
+      totalUsage: z.number(),
+      totalAmount: z.number().int(),
+      /** Provider cost in USD at the ledger scale, from the invoice line; null when none was priced. */
+      costUsd: z.number().int().nullable(),
+      currency: z.string(),
+      amountScale: z.number().int(),
+      firstEventAt: z.number().int().nullable(),
+      lastEventAt: z.number().int().nullable(),
+      multiComponentEventCount: z.number().int(),
+    }),
+    pricing: z.object({
+      featureType: z.string(),
+      usageMode: z.string().nullable(),
+      unitOfMeasure: z.string(),
+      description: z.string(),
+      rows: z.array(
+        z.object({
+          label: z.string(),
+          value: z.string(),
+        })
+      ),
+    }),
+    events: z.array(explainChargeEventSchema),
+    answer: z.string(),
+    pagination: z.object({
+      limit: z.number().int(),
+      offset: z.number().int(),
+      hasMore: z.boolean(),
+    }),
+  })
+  .extend(aiAnswerEnvelopeSchema.shape)
 
 export type ExplainChargeInput = z.infer<typeof explainChargeInputSchema>
 export type ExplainChargeOutput = z.infer<typeof explainChargeOutputSchema>
+type ExplainChargeDetails = Omit<
+  ExplainChargeOutput,
+  "confidence" | "freshness" | "evidence" | "warnings" | "nextActions"
+>
 type ExplainChargeSummary = ExplainChargeOutput["summary"]
 type ExplainChargeEvent = ExplainChargeOutput["events"][number]
 type ResolvedInvoiceLine = {
   line: InvoiceLine
-  ledgerEntryIds: string[]
 }
 
 export type ExplainChargeDeps = {
   db: Database
   ledger: LedgerGateway
-  analytics: Pick<AnalyticsService, "getStatementEvents">
+  budgetJournal: ServiceContext["budgetJournal"]
   rateCards: Pick<RateCardService, "pricingForPlanVersions">
   now?: () => number
 }
@@ -253,7 +253,6 @@ export async function explainCharge(
       entryId: input.entryId,
       statementKey: invoice.statementKey,
     })
-  const ledgerEntryIds = resolvedLine?.ledgerEntryIds ?? [line.entryId]
   const featurePlanVersion = billingPeriod.subscriptionItem?.featurePlanVersion ?? null
   const featureSlug = featurePlanVersion?.feature?.slug ?? null
   if (!featurePlanVersion || !featureSlug) {
@@ -305,10 +304,8 @@ export async function explainCharge(
     scopedEntitlements.length === 1 ? scopedEntitlements[0] : undefined
 
   const isUsageFeature = featurePlanVersion.featureType === "usage"
-  // A metered line bills one payer statement, `<featureSlug>:<billingPeriodId>` (ADR-0008 D4).
-  const periodKey = isUsageFeature
-    ? statementPeriodId(featureSlug, billingPeriod.id)
-    : `billing_period:${billingPeriod.id}`
+  // A metered line bills one payer statement, identified by its billing period (ADR-0008 D4).
+  const periodKey = isUsageFeature ? billingPeriod.id : `billing_period:${billingPeriod.id}`
   const lineAmount = toLedgerMinor(line.amount)
   // The statement as billed: amount and quantity on the line, cost in its metadata.
   const statementSummary: ExplainChargeSummary = {
@@ -326,7 +323,7 @@ export async function explainCharge(
   let events: ExplainChargeEvent[] = []
 
   if (isUsageFeature) {
-    const journal = await deps.analytics.getStatementEvents({
+    const journal = await getStatementEvents(deps.budgetJournal, {
       projectId: input.projectId,
       customerId: invoice.customerId,
       periodId: periodKey,
@@ -362,7 +359,7 @@ export async function explainCharge(
     }
   }
 
-  const output: ExplainChargeOutput = {
+  const output: ExplainChargeDetails = {
     invoice: {
       id: invoice.id,
       statementKey: invoice.statementKey,
@@ -404,11 +401,6 @@ export async function explainCharge(
       isUsageFeature,
       summary,
     }),
-    evidence: [
-      ...ledgerEntryIds.map((entryId) => ({ type: "ledger_line" as const, id: entryId })),
-      { type: "billing_period", id: billingPeriodId },
-      ...events.map((event) => ({ type: "event" as const, id: event.operation_id })),
-    ],
     pagination: {
       limit: input.limit,
       offset: input.offset,
@@ -416,7 +408,23 @@ export async function explainCharge(
     },
   }
 
-  return Ok(explainChargeOutputSchema.parse(output))
+  return Ok(
+    explainChargeOutputSchema.parse({
+      ...output,
+      confidence: buildConfidence({
+        eventCount: summary.eventCount,
+        eventsReturned: events.length,
+      }),
+      freshness: {
+        generatedAt: deps.now?.() ?? Date.now(),
+        dataFrom: summary.firstEventAt,
+        dataTo: summary.lastEventAt,
+      },
+      evidence: buildEvidence(output),
+      warnings: buildWarnings(output),
+      nextActions: buildNextActions(output),
+    })
+  )
 }
 
 function readStringMetadata(metadata: Record<string, unknown> | null, key: string): string | null {
@@ -436,7 +444,7 @@ function resolveRequestedInvoiceLine(
 ): ResolvedInvoiceLine | null {
   const exact = lines.find((candidate) => candidate.entryId === entryId)
   if (exact) {
-    return { line: exact, ledgerEntryIds: [exact.entryId] }
+    return { line: exact }
   }
 
   const groupPrefix = "group:"
@@ -471,7 +479,6 @@ function resolveRequestedInvoiceLine(
         firstLine.createdAt
       ),
     },
-    ledgerEntryIds: groupLines.map((line) => line.entryId),
   }
 }
 
@@ -547,15 +554,15 @@ function readIntegerMetadata(metadata: Record<string, unknown> | null, key: stri
  * feature missing).
  */
 function toExplainChargeEvent(opts: {
-  data: string
+  data: z.infer<typeof journalChargeDataSchema>
   operationId: string
   periodId: string
   currency: string
 }): ExplainChargeEvent | null {
-  const parsed = journalChargeDataSchema.safeParse(parseJson(opts.data))
-  const priced = parsed.success ? (parsed.data.priced ?? parsed.data.state?.priced) : undefined
+  const data = opts.data
+  const priced = data.priced ?? data.state?.priced
   const feature = priced?.features.find((entry) => entry.periodId === opts.periodId)
-  if (!parsed.success || !priced || !feature) {
+  if (!priced || !feature) {
     return null
   }
 
@@ -564,27 +571,18 @@ function toExplainChargeEvent(opts: {
   const units = (value: bigint) => Number(value) / 10 ** LEDGER_SCALE
 
   return {
-    idempotency_key: parsed.data.idempotencyKey,
+    idempotency_key: data.idempotencyKey,
     feature_slug: feature.featureSlug,
     period_key: feature.periodId,
     event_slug: priced.slug,
     timestamp: priced.at,
-    created_at: parsed.data.createdAt,
+    created_at: data.createdAt,
     delta: units(quantity),
     amount,
     amount_scale: LEDGER_SCALE,
     currency: opts.currency,
     pricing_component_count: feature.lines?.length ?? 0,
     operation_id: opts.operationId,
-  }
-}
-
-/** A journal `data` column as JSON; undefined when the export is not valid JSON. */
-function parseJson(text: string): unknown {
-  try {
-    return JSON.parse(text)
-  } catch {
-    return undefined
   }
 }
 
@@ -699,4 +697,100 @@ function formatUsage(value: number): string {
   return new Intl.NumberFormat("en", {
     maximumFractionDigits: 4,
   }).format(value)
+}
+
+function buildConfidence({
+  eventCount,
+  eventsReturned,
+}: {
+  eventCount: number
+  eventsReturned: number
+}): ExplainChargeOutput["confidence"] {
+  if (eventCount > 0 || eventsReturned > 0) {
+    return "high"
+  }
+
+  return "medium"
+}
+
+function buildEvidence(result: ExplainChargeDetails): ExplainChargeOutput["evidence"] {
+  return [
+    {
+      type: "invoice" as const,
+      id: result.invoice.id,
+      source: "postgres" as const,
+      timestamp: null,
+    },
+    {
+      type: "ledger_line" as const,
+      id: result.line.entryId,
+      source: "ledger" as const,
+      timestamp: null,
+    },
+    {
+      type: "billing_period" as const,
+      id: result.line.billingPeriodId,
+      source: "postgres" as const,
+      timestamp: null,
+    },
+    ...(result.scope.featurePlanVersionId
+      ? [
+          {
+            type: "plan_version" as const,
+            id: result.scope.featurePlanVersionId,
+            source: "postgres" as const,
+            timestamp: null,
+          },
+        ]
+      : []),
+    ...result.events.map((event) => ({
+      type: "event" as const,
+      id: [
+        result.scope.projectId,
+        result.scope.customerId,
+        event.period_key,
+        event.operation_id,
+      ].join(":"),
+      source: "r2" as const,
+      timestamp: event.timestamp,
+    })),
+  ]
+}
+
+function buildWarnings(result: ExplainChargeDetails): string[] {
+  const warnings: string[] = []
+
+  if (result.summary.eventCount === 0) {
+    warnings.push(
+      isBillingPeriodScopedLine(result)
+        ? "This non-usage line is explained from ledger and billing-period evidence; no journal events are expected."
+        : "No journal events were found for this invoice line."
+    )
+  }
+
+  if (result.pagination.hasMore) {
+    warnings.push("Additional journal events are available on later pages.")
+  }
+
+  return warnings
+}
+
+function buildNextActions(result: ExplainChargeDetails): string[] {
+  if (result.summary.eventCount === 0) {
+    if (isBillingPeriodScopedLine(result)) {
+      return []
+    }
+
+    return ["Verify the billing period, feature slug, and period key for this invoice line."]
+  }
+
+  if (result.pagination.hasMore) {
+    return ["Request the next page to inspect the remaining journal events."]
+  }
+
+  return []
+}
+
+function isBillingPeriodScopedLine(result: ExplainChargeDetails): boolean {
+  return result.scope.periodKey.startsWith("billing_period:")
 }

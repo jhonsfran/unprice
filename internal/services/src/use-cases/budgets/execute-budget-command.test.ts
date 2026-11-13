@@ -26,15 +26,13 @@ const t0 = Date.parse("2026-10-14T10:00:00.000Z")
 function harness(record?: (facts: BudgetCatalogFacts) => Promise<void>) {
   const store = new MemoryBudgetStore()
   const clock = { now: t0 }
-  const budgets: BudgetClient = {
-    async execute(_address, request) {
+  const budgets: Pick<BudgetClient, "execute"> = {
+    async execute(_address, request, cards) {
+      if (cards) store.cacheCardsAt(clock.now, ...cards)
       const result = store.run(request, clock.now)
       if (result.err) return result
       if (!result.val.ok) return Err(new UnPriceBudgetError(result.val.rejection))
       return Ok(result.val.outcome)
-    },
-    async cacheCards(_address, cards) {
-      store.cacheCardsAt(clock.now, ...cards)
     },
   }
   const reads: string[][] = []
@@ -105,7 +103,6 @@ describe("executeBudgetCommand with rate cards", () => {
             priced: true,
           },
         ],
-        statements: "none",
       },
     })
   const image = { slug: "image.generated", properties: { size: "1024" } }
@@ -118,6 +115,18 @@ describe("executeBudgetCommand with rate cards", () => {
 
     const created = await execute({ type: "upsert", unit, config, mayLoosen: true })
     expect(created.err).toBeUndefined()
+    await execute({
+      type: "registerStatements",
+      statements: [
+        {
+          periodId: "images:nov",
+          statementKey: "nov",
+          featureSlug: "images",
+          start: CARD_FROM,
+          end: Date.parse("2026-12-01T00:00:00.000Z"),
+        },
+      ],
+    })
     clock.now = start + 4 * 60_000
     const fresh = await execute({ type: "charge", idempotencyKey: "c1", event: image })
     clock.now = start + 5 * 60_000
@@ -168,7 +177,7 @@ describe("executeBudgetCommand funds a prepaid budget from the wallet", () => {
             priced: true,
           },
         ],
-        statements: "required",
+
         ...(funding && { funding }),
       },
     })
@@ -558,7 +567,6 @@ describe("executeBudgetCommand", () => {
       async execute() {
         return upserted
       },
-      async cacheCards() {},
     }
 
     await expect(execute(firstUseRequest("authorize"))).rejects.toThrow(

@@ -54,6 +54,22 @@ export class CustomerService {
     this.paymentProviderResolver = paymentProviderResolver
   }
 
+  public async findManyByIds({ projectId, ids }: { projectId: string; ids: readonly string[] }) {
+    if (ids.length === 0) return Ok([])
+    return wrapResult(
+      this.db
+        .select({ id: customers.id, email: customers.email, name: customers.name })
+        .from(customers)
+        .where(and(eq(customers.projectId, projectId), inArray(customers.id, [...ids]))),
+      (error) =>
+        new FetchError({
+          message: error.message,
+          retry: false,
+          context: { url: "db:customers", method: "SELECT", projectId },
+        })
+    )
+  }
+
   /**
    * Gets the active subscription data from the database
    * @param customerId - Customer id

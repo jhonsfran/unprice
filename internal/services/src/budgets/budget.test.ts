@@ -1846,6 +1846,7 @@ describe("history does not slow the hot path", () => {
       cards: {},
       staleCards: [],
       reservationsOpen: false,
+      upsert: null,
       statements: [],
       funding: [],
     }

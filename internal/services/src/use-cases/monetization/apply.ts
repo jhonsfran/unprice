@@ -173,7 +173,11 @@ function featurePrices(plan: MonetizationPlanConfig): PlanFeaturePrice[] {
         usageMode: feature.config.usageMode,
         units: feature.config.units,
         price: feature.config.price,
-        tiers: feature.config.tiers,
+        tiers: feature.config.tiers?.map((tier) => ({
+          upTo: tier.lastUnit,
+          rate: tier.unitPrice,
+          flat: tier.flatPrice,
+        })),
       },
       feature.meterConfig?.aggregationField ?? null
     )

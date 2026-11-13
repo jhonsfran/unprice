@@ -101,10 +101,14 @@ export const statsSchema = z.record(
 
 export type Stats = z.infer<typeof statsSchema>
 
-export const usageSpendingResponseSchema = z.object({
+export const unitSpendingSchema = z.object({
   amount: z.string(),
   currency: z.string().length(3),
-  display_amount: z.string(),
+  displayAmount: z.string(),
+})
+
+export const usageSpendingResponseSchema = unitSpendingSchema.omit({ displayAmount: true }).extend({
+  display_amount: unitSpendingSchema.shape.displayAmount,
 })
 
 export const getUsageResponseSchema = z.object({

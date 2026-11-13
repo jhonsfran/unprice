@@ -1,10 +1,10 @@
 import type { RouterInputs, RouterOutputs } from "@unprice/trpc/routes"
 
-export type IngestionStatus = RouterOutputs["analytics"]["getIngestionStatus"]
+export type IngestionStatus = RouterOutputs["analytics"]["getIngestionSummary"]
 export type IngestionRejection = IngestionStatus["rejections"][number]
 
 export type IngestionQueryFilter = NonNullable<
-  RouterInputs["analytics"]["getIngestionStatus"]["filter"]
+  RouterInputs["analytics"]["getIngestionSummary"]["filter"]
 >
 
 export type IngestionTone = "default" | "success" | "warning"

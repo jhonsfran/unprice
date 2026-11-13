@@ -1,6 +1,6 @@
 "use client"
 
-import { useInfiniteQuery } from "@tanstack/react-query"
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
 import { useParams } from "next/navigation"
 import { useCallback, useMemo, useState } from "react"
 import type { IngestionQueryFilter } from "~/components/analytics/ingestion-health-model"
@@ -41,6 +41,26 @@ export function useIngestionEventsData() {
   )
 
   const {
+    data: status,
+    isLoading: isSummaryLoading,
+    isFetching: isSummaryFetching,
+    error: summaryError,
+  } = useQuery(
+    trpc.analytics.getIngestionSummary.queryOptions(
+      {
+        window: queryWindow,
+        filter: ingestionQueryFilter,
+        limit: EVENTS_PAGE_SIZE,
+      },
+      {
+        placeholderData: (previousData) => previousData,
+        refetchInterval: hasExplicitDateRange ? ANALYTICS_REFRESH_INTERVAL_MS : false,
+        refetchOnWindowFocus: true,
+      }
+    )
+  )
+
+  const {
     data: queryData,
     isLoading,
     isFetching,
@@ -49,11 +69,9 @@ export function useIngestionEventsData() {
     hasNextPage,
     isFetchingNextPage,
   } = useInfiniteQuery(
-    trpc.analytics.getIngestionStatus.infiniteQueryOptions(
+    trpc.analytics.listIngestionEvents.infiniteQueryOptions(
       {
-        window: queryWindow,
-        filter: ingestionQueryFilter,
-        includeFacets: true,
+        scope: { window: queryWindow, filter: ingestionQueryFilter },
         limit: EVENTS_PAGE_SIZE,
       },
       {
@@ -77,7 +95,6 @@ export function useIngestionEventsData() {
       rows.find((row) => ingestionEventKey(row) === ingestionEventKey(detailsEvent)) ?? detailsEvent
     )
   }, [detailsEvent, rows])
-  const firstPage = pages?.[0]
   const handleLoadMore = useCallback(() => {
     if (!hasNextPage || isFetchingNextPage) {
       return Promise.resolve()
@@ -131,28 +148,28 @@ export function useIngestionEventsData() {
   const filterOptions = useMemo(
     () =>
       buildIngestionEventsFilters({
-        facets: firstPage?.facets,
+        facets: status?.facets,
         values: filterValues,
         onChange: handleFilterChange,
       }),
-    [filterValues, firstPage?.facets, handleFilterChange]
+    [filterValues, status?.facets, handleFilterChange]
   )
 
-  const isInitialLoading = isLoading && rows.length === 0
-  const isRefreshing = isFetching && !isInitialLoading && !isFetchingNextPage
+  const isInitialLoading = (isLoading || isSummaryLoading) && rows.length === 0
+  const isRefreshing = (isFetching || isSummaryFetching) && !isInitialLoading && !isFetchingNextPage
 
   return {
     workspaceSlug,
     projectSlug,
     isRefreshing,
-    status: firstPage,
+    status,
     windowLabel,
     rows,
     filterOptions,
     handleRejectionFilterSelect,
     searchValue: filters.search ?? "",
     setFilters,
-    queryError,
+    queryError: queryError ?? summaryError,
     isInitialLoading,
     isFetchingNextPage,
     hasNextPage,

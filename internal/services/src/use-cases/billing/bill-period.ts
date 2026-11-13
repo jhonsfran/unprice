@@ -8,29 +8,16 @@ import { toZonedTime } from "date-fns-tz"
 import { format } from "date-fns/format"
 import { isNegative } from "dinero.js"
 import { summarizeInvoiceSettlementAmounts } from "../../billing/invoice-settlement"
+import type { InvoicingPorts } from "../../billing/invoicing-ports"
 import { DrizzleBillingRepository } from "../../billing/repository.drizzle"
 import { billingStrategyForInterval } from "../../billing/strategy"
 import { LATE_EVENT_GRACE_MS } from "../../entitlements"
 import { type InvoiceLine, type LedgerGateway, customerAccountKeys } from "../../ledger"
-import type { RateCardService } from "../../rate-cards/service"
 import type { SubscriptionRepository } from "../../subscriptions/repository"
 import type { SubscriptionContext } from "../../subscriptions/types"
-import { billingPeriodIdOf } from "../budgets/compile-payer-budget"
 import type { PayerStatementLine } from "../budgets/invoice-payer-statements"
 import type { PayerBudgetGateway } from "../budgets/payer-budget-gateway"
 import { resolvePeriodCharge } from "./period-charge"
-
-/**
- * What invoicing reads besides the database (ADR-0008 D4): the payer budget, whose sealed
- * statements carry the usage it priced at ingestion, and the plan version's rate card, which
- * prices recurring items.
- */
-export type InvoicingPorts = {
-  /** Null where billing reaches no payer budget; a statement with metered periods then fails. */
-  payerBudgets: PayerBudgetGateway | null
-  /** Also prices the credit line a period's activation derives from the plan's usage limits. */
-  rateCards: Pick<RateCardService, "cardForPlanVersion" | "getEffectiveRows" | "rowsForVersions">
-}
 
 export async function billPeriod({
   context,
@@ -39,21 +26,14 @@ export async function billPeriod({
   repo,
   ledgerService,
   invoicing,
-  lateEventGraceMs = LATE_EVENT_GRACE_MS,
 }: {
-  context: SubscriptionContext
+  context: Pick<SubscriptionContext, "subscription" | "customer" | "now">
   logger: Logger
   db: Database
   repo: SubscriptionRepository
   ledgerService: LedgerGateway
   invoicing: InvoicingPorts
-  /** How long usage of an ended period may still arrive; a cancel invoices at once with 0. */
-  lateEventGraceMs?: number
-}): Promise<
-  Partial<SubscriptionContext> & {
-    phasesProcessed: number
-  }
-> {
+}): Promise<{ phasesProcessed: number }> {
   const { subscription, now } = context
   const billingRepo = new DrizzleBillingRepository(db)
   const { payerBudgets } = invoicing
@@ -61,7 +41,6 @@ export async function billPeriod({
   // failed after an earlier commit. Best effort: an invoice never waits on it, and the next run
   // repairs what this one left.
   const completeStatements = async () => {
-    if (!payerBudgets) return
     const fields = {
       context: "completing invoiced payer statements failed; the next invoicing run repairs it",
       projectId: subscription.projectId,
@@ -82,7 +61,7 @@ export async function billPeriod({
   let metered = false
 
   const periodItemsGroups = await billingRepo.listPendingPeriodGroups({
-    lateEventGraceMs,
+    lateEventGraceMs: LATE_EVENT_GRACE_MS,
     projectId: subscription.projectId,
     subscriptionId: subscription.id,
     now,
@@ -109,7 +88,6 @@ export async function billPeriod({
       if (nextPending.invoiceAt <= now) {
         return {
           phasesProcessed: 0,
-          subscription,
         }
       }
 
@@ -132,7 +110,6 @@ export async function billPeriod({
     if (lastInvoiced) {
       return {
         phasesProcessed: 0,
-        subscription,
       }
     }
 
@@ -477,7 +454,6 @@ export async function billPeriod({
 
   return {
     phasesProcessed: periodItemsGroups.length,
-    subscription,
   }
 }
 
@@ -517,7 +493,7 @@ async function pendingMeteredPeriods(input: {
  * seals nothing.
  */
 async function sealStatements(input: {
-  payerBudgets: PayerBudgetGateway | null
+  payerBudgets: PayerBudgetGateway
   projectId: string
   customerId: string
   group: PeriodGroup
@@ -526,9 +502,6 @@ async function sealStatements(input: {
 }): Promise<Map<string, PayerStatementLine>> {
   const { group, metered } = input
   if (metered.length === 0) return new Map()
-  if (!input.payerBudgets) {
-    throw new Error(`Statement ${group.statementKey} has metered periods but no payer budget`)
-  }
   // A phase's last statement ends 1 ms past the phase's inclusive end, where its period ends.
   const at = Math.max(input.now, ...metered.map((period) => period.cycleEndAt + 1))
   const sealed = await input.payerBudgets.seal({
@@ -538,13 +511,13 @@ async function sealStatements(input: {
     at,
   })
   if (sealed.err) throw sealed.err
-  const open = sealed.val.open.map(billingPeriodIdOf)
+  const open = sealed.val.open
   const unsealed = metered.filter((period) => open.includes(period.id))
   if (unsealed.length > 0) {
     const ids = unsealed.map((period) => period.id).join(", ")
     throw new Error(`Statement ${group.statementKey} still has open usage for ${ids}; retry later`)
   }
-  return new Map(sealed.val.sealed.map((line) => [line.billingPeriodId, line]))
+  return new Map(sealed.val.sealed.map((line) => [line.periodId, line]))
 }
 
 /** The rows of the phase's plan card in its currency; empty when the plan prices nothing. */

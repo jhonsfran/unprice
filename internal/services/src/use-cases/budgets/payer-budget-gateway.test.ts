@@ -101,8 +101,8 @@ describe("HttpPayerBudgetGateway", () => {
     const answer = {
       sealed: [
         {
-          periodId: "events:bp_1",
-          billingPeriodId: "bp_1",
+          periodId: "bp_1",
+
           statementKey: "stmt_1",
           featureSlug: "events",
           start: 0,

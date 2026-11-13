@@ -5,7 +5,7 @@ import { toLedgerMinor } from "@unprice/money"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { LATE_EVENT_GRACE_MS } from "../../entitlements"
 import { LedgerGateway } from "../../ledger"
-import { RateCardService } from "../../rate-cards/service"
+import { testInvoicing } from "../../test-fixtures/billing-gateway"
 import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
 import { billPeriod } from "../../use-cases/billing/bill-period"
 
@@ -95,7 +95,7 @@ describe("P0-C pay_in_advance metered billing workflow", () => {
     expect(ensureAccounts.err).toBeUndefined()
 
     const startRun = await billPeriod({
-      invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
+      invoicing: testInvoicing({ db, payerBudgets }),
       context: await loadSubscriptionContext(jan1),
       logger,
       db,
@@ -120,7 +120,7 @@ describe("P0-C pay_in_advance metered billing workflow", () => {
     ])
 
     const usageRun = await billPeriod({
-      invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
+      invoicing: testInvoicing({ db, payerBudgets }),
       context: await loadSubscriptionContext(feb1 + LATE_EVENT_GRACE_MS + 1),
       logger,
       db,
@@ -128,7 +128,7 @@ describe("P0-C pay_in_advance metered billing workflow", () => {
       ledgerService: ledger,
     })
     const rerun = await billPeriod({
-      invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
+      invoicing: testInvoicing({ db, payerBudgets }),
       context: await loadSubscriptionContext(feb1 + LATE_EVENT_GRACE_MS + 1),
       logger,
       db,

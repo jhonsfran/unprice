@@ -4,8 +4,8 @@ import { customModelCostSchema } from "@unprice/db/validators"
 import { formatAmount } from "@unprice/money"
 import { describe, expect, it } from "vitest"
 import { MODEL_CATALOG } from "../budgets/model-catalog"
+import { catalogEffectiveFrom } from "../model-costs/service"
 import { modelCosts, usdCard } from "../pricing/fixtures"
-import { catalogEffectiveFrom, importModelCosts, publishCostPlus } from "../use-cases/rate-cards"
 import {
   MINUTE,
   NOW,
@@ -17,9 +17,18 @@ import {
   value,
 } from "./service.integration.fixture"
 
+const fixtureModels = new Set(["claude-sonnet-4", "gpt-4.1"])
+
 describe("RateCardService catalog costs", () => {
-  const { db, rateCards, services, createCard, publish, cardRows } =
-    createRateCardIntegrationFixture()
+  const {
+    db,
+    rateCards,
+    modelCosts: modelCostService,
+    insertCosts,
+    createCard,
+    publish,
+    cardRows,
+  } = createRateCardIntegrationFixture()
 
   it("refuses a cost-plus draft whose open row was replaced after the preview", async () => {
     const card = await createCard({
@@ -35,22 +44,24 @@ describe("RateCardService catalog costs", () => {
       ],
     })
     await value(publish(card.id, [gpt41("2.00", "8.00")], NOW))
-    await rateCards.insertModelCosts([modelCosts.gpt41])
+    await insertCosts([modelCosts.gpt41])
     const preview = await value(rateCards.previewCostPlus(projectId, card.id, NOW))
+    const hypothetical = await value(
+      rateCards.previewCostPlus(projectId, card.id, NOW, { at: NOW })
+    )
+    expect(hypothetical.draftHash).toBeNull()
+    if (!preview.draftHash) throw new Error("expected a publishable preview")
     await value(publish(card.id, [gpt41("9.00", "9.00")], NOW + 10 * MINUTE))
     const before = intervals(await cardRows(card.id))
 
     const stale = await rejection(
-      publishCostPlus(
-        { services },
-        {
-          projectId,
-          cardId: card.id,
-          effectiveFrom: NOW + 60 * MINUTE,
-          draftHash: preview.draftHash,
-          now: NOW + MINUTE,
-        }
-      )
+      rateCards.publishCostPlus({
+        projectId,
+        cardId: card.id,
+        effectiveFrom: NOW + 60 * MINUTE,
+        draftHash: preview.draftHash,
+        now: NOW + MINUTE,
+      })
     )
 
     expect(stale).toMatchObject({ code: "DRAFT_STALE" })
@@ -86,32 +97,39 @@ describe("RateCardService catalog costs", () => {
         now: NOW,
       })
     )
-    await rateCards.insertModelCosts([modelCosts.gpt41, modelCosts.claudeSonnet4])
-
-    const preview = await value(rateCards.previewCostPlus(projectId, card.id, NOW + MINUTE))
-    const published = await value(
-      publishCostPlus(
-        { services },
-        {
-          projectId,
-          cardId: card.id,
-          effectiveFrom: NOW + 20 * MINUTE,
-          draftHash: preview.draftHash,
-          now: NOW + MINUTE,
-        }
-      )
+    await insertCosts(
+      [modelCosts.gpt41, modelCosts.claudeSonnet4].map((cost) => ({ ...cost, effectiveFrom: NOW }))
     )
 
-    expect(preview.draft.changes.map((change) => [change.type, change.proposed.match])).toEqual([
+    const preview = await value(rateCards.previewCostPlus(projectId, card.id, NOW + MINUTE))
+    if (!preview.draftHash) throw new Error("expected a publishable preview")
+    const published = await value(
+      rateCards.publishCostPlus({
+        projectId,
+        cardId: card.id,
+        effectiveFrom: NOW + 20 * MINUTE,
+        draftHash: preview.draftHash,
+        now: NOW + MINUTE,
+      })
+    )
+
+    expect(
+      preview.draft.changes
+        .filter((change) => fixtureModels.has(change.proposed.match.model ?? ""))
+        .map((change) => [change.type, change.proposed.match])
+    ).toEqual([
       ["changed", { model: "claude-sonnet-4" }],
       ["retiring", { model: "gpt-4.1" }],
     ])
-    expect([published.inserted.map((row) => row.match), published.unchanged]).toEqual([
-      [{ model: "claude-sonnet-4" }],
-      1,
-    ])
+    expect([
+      published.inserted
+        .filter((row) => fixtureModels.has(row.match.model ?? ""))
+        .map((row) => row.match),
+      published.unchanged,
+    ]).toEqual([[{ model: "claude-sonnet-4" }], 1])
     expect(
       (await cardRows(card.id))
+        .filter((row) => fixtureModels.has(row.match.model ?? ""))
         .map((row) => [
           row.match.model,
           row.effectiveFrom - NOW,
@@ -148,8 +166,8 @@ describe("RateCardService catalog costs", () => {
       },
     ])
 
-    const first = await importModelCosts({ services }, { effectiveFrom: NOW })
-    const second = await importModelCosts({ services }, { effectiveFrom: NOW + day })
+    const first = await modelCostService.importBundled(NOW)
+    const second = await modelCostService.importBundled(NOW + day)
     const haiku = await db
       .select()
       .from(modelCostsTable)
@@ -171,8 +189,8 @@ describe("RateCardService catalog costs", () => {
     const effectiveFrom = catalogEffectiveFrom()
 
     const [first, second] = await Promise.all([
-      importModelCosts({ services }, { effectiveFrom }),
-      importModelCosts({ services }, { effectiveFrom }),
+      modelCostService.importBundled(effectiveFrom),
+      modelCostService.importBundled(effectiveFrom),
     ])
     const stored = await db.select().from(modelCostsTable)
 
@@ -196,17 +214,17 @@ describe("RateCardService catalog costs", () => {
         },
       ],
     })
-    await rateCards.insertModelCosts([modelCosts.gpt41])
+    await insertCosts([modelCosts.gpt41])
     const custom = (model: string, input: string, effectiveFrom: number) =>
-      rateCards.insertCustomModelCost(
+      modelCostService.addCustom(
         projectId,
-        customModelCostSchema.parse({
+        customModelCostSchema.omit({ id: true, effectiveFrom: true }).parse({
           id: "unused",
           provider: "acme",
           model,
           components: { input, output: "2" },
-          effectiveFrom,
-        })
+        }),
+        effectiveFrom
       )
     const llama = await custom("acme-llama-70b", "1", NOW - MINUTE)
     // A negotiated gpt-4.1 cost outranks the models.dev one; a later one waits for its start.
@@ -214,11 +232,12 @@ describe("RateCardService catalog costs", () => {
     await custom("gpt-4.1", "20", NOW + MINUTE)
 
     const preview = await value(rateCards.previewCostPlus(projectId, card.id, NOW))
+    if (!preview.draftHash) throw new Error("expected a publishable preview")
     const rates = (model: string) =>
       preview.draft.changes
         .find((change) => change.proposed.match.model === model)
         ?.proposed.price.components.map((c) => `${c.property}=${formatAmount(c.rate)}`)
-    const listed = await rateCards.customModelCosts(projectId)
+    const listed = await modelCostService.listCustom(projectId)
 
     expect(llama.id).toMatch(/^cmc_/)
     expect(rates("acme-llama-70b")).toEqual(["input_tokens=1.3", "output_tokens=2.6"])
@@ -255,37 +274,42 @@ describe("RateCardService catalog costs", () => {
     })
     const tokenRows = usdCard.rows.filter((row) => row.featureSlug === "llm_tokens")
     await value(publish(card.id, tokenRows, NOW))
-    await rateCards.insertModelCosts([modelCosts.gpt41, modelCosts.claudeSonnet4])
+    await insertCosts(
+      [modelCosts.gpt41, modelCosts.claudeSonnet4].map((cost) => ({ ...cost, effectiveFrom: NOW }))
+    )
     const costIds = Object.fromEntries(
       (await db.select().from(modelCostsTable)).map((row) => [row.model, row.id])
     )
 
     const preview = await value(rateCards.previewCostPlus(projectId, card.id, NOW))
+    if (!preview.draftHash) throw new Error("expected a publishable preview")
     const stale = await rejection(
-      publishCostPlus(
-        { services },
-        { projectId, cardId: card.id, effectiveFrom: NOW + 10 * MINUTE, draftHash: "f00", now: NOW }
-      )
+      rateCards.publishCostPlus({
+        projectId,
+        cardId: card.id,
+        effectiveFrom: NOW + 10 * MINUTE,
+        draftHash: "f00",
+        now: NOW,
+      })
     )
     const published = await value(
-      publishCostPlus(
-        { services },
-        {
-          projectId,
-          cardId: card.id,
-          effectiveFrom: NOW + 11 * MINUTE,
-          draftHash: preview.draftHash,
-          now: NOW + MINUTE,
-        }
-      )
+      rateCards.publishCostPlus({
+        projectId,
+        cardId: card.id,
+        effectiveFrom: NOW + 11 * MINUTE,
+        draftHash: preview.draftHash,
+        now: NOW + MINUTE,
+      })
     )
 
     expect(
-      preview.draft.changes.map((change) => [
-        change.type,
-        change.proposed.match,
-        change.proposed.price.components.map((c) => `${c.property}=${formatAmount(c.rate)}`),
-      ])
+      preview.draft.changes
+        .filter((change) => fixtureModels.has(change.proposed.match.model ?? ""))
+        .map((change) => [
+          change.type,
+          change.proposed.match,
+          change.proposed.price.components.map((c) => `${c.property}=${formatAmount(c.rate)}`),
+        ])
     ).toEqual([
       [
         "changed",
@@ -304,38 +328,48 @@ describe("RateCardService catalog costs", () => {
       ],
     ])
     const retried = await value(
-      publishCostPlus(
-        { services },
-        {
-          projectId,
-          cardId: card.id,
-          effectiveFrom: NOW + 12 * MINUTE,
-          draftHash: preview.draftHash,
-          now: NOW + 2 * MINUTE,
-        }
-      )
+      rateCards.publishCostPlus({
+        projectId,
+        cardId: card.id,
+        effectiveFrom: NOW + 12 * MINUTE,
+        draftHash: preview.draftHash,
+        now: NOW + 2 * MINUTE,
+      })
     )
 
     expect(stale).toEqual({ code: "DRAFT_STALE", draftHash: preview.draftHash })
-    expect(published.inserted.map((row) => [row.match.model, row.source, row.sourceRef])).toEqual([
+    expect(
+      published.inserted
+        .filter((row) => fixtureModels.has(row.match.model ?? ""))
+        .map((row) => [row.match.model, row.source, row.sourceRef])
+    ).toEqual([
       ["claude-sonnet-4", "catalog", costIds["claude-sonnet-4"]],
       ["gpt-4.1", "catalog", costIds["gpt-4.1"]],
     ])
-    expect(published.closed.length).toBe(2)
-    expect(retried).toEqual({ inserted: [], closed: [], unchanged: 2 })
+    expect(published.closed.length).toBe(3)
+    expect(retried).toEqual({ inserted: [], closed: [], unchanged: preview.draft.changes.length })
     expect(
-      (await cardRows(card.id)).map((row) => [
-        row.match.model,
-        row.source,
-        row.effectiveFrom - NOW,
-        row.effectiveTo === null ? null : row.effectiveTo - NOW,
-      ])
+      (await cardRows(card.id))
+        .filter((row) => fixtureModels.has(row.match.model ?? ""))
+        .map((row) => [
+          row.match.model,
+          row.source,
+          row.effectiveFrom - NOW,
+          row.effectiveTo === null ? null : row.effectiveTo - NOW,
+        ])
     ).toEqual([
       ["gpt-4.1", "manual", 0, 11 * MINUTE],
-      ["gpt-4.1-mini", "manual", 0, null],
       ["claude-sonnet-4", "manual", 0, 11 * MINUTE],
       ["claude-sonnet-4", "catalog", 11 * MINUTE, null],
       ["gpt-4.1", "catalog", 11 * MINUTE, null],
+    ])
+    expect(
+      (await cardRows(card.id))
+        .filter((row) => row.match.model === "gpt-4.1-mini")
+        .map((row) => [row.source, row.effectiveTo])
+    ).toEqual([
+      ["manual", NOW + 11 * MINUTE],
+      ["catalog", null],
     ])
   })
 })

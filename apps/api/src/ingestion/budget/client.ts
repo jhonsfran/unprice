@@ -16,14 +16,11 @@ export class CloudflareBudgetClient implements BudgetClient {
 
   async execute(
     address: BudgetAddress,
-    request: BudgetRequest
+    request: BudgetRequest,
+    cards?: readonly CardRows[]
   ): Promise<Result<BudgetOutcome, UnPriceBudgetError>> {
-    const reply = await getBudgetStub(this.env, address).execute(request)
+    const reply = await getBudgetStub(this.env, address).execute(request, cards)
     return reply.ok ? Ok(reply.outcome) : Err(new UnPriceBudgetError(reply.rejection))
-  }
-
-  async cacheCards(address: BudgetAddress, cards: readonly CardRows[]): Promise<void> {
-    await getBudgetStub(this.env, address).cacheCards([...cards])
   }
 
   async inspect(

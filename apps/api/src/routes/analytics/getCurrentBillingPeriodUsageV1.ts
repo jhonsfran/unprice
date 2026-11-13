@@ -1,5 +1,5 @@
 import { createRoute } from "@hono/zod-openapi"
-import { formatMoney } from "@unprice/money"
+import { parseAmount, spendingOf } from "@unprice/money"
 import {
   type GetCurrentBillingPeriodUsageOutput,
   getCurrentBillingPeriodUsage,
@@ -14,7 +14,7 @@ import {
 } from "~/auth/key"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
-import { CloudflareBudgetClient } from "~/ingestion/budget/client"
+import { requestBudgetCommandDeps } from "~/ingestion/budget/deps"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 import { budgetApiError } from "../budgets/budget-verb"
@@ -87,20 +87,19 @@ export type GetCurrentBillingPeriodUsageResponse = z.infer<
   (typeof route.responses)[200]["content"]["application/json"]["schema"]
 >
 
-/** ISO 4217 "no currency": the amount is in credits or units, not money. */
-const NO_CURRENCY = "XXX"
-
 function formatUsage(
   row: GetCurrentBillingPeriodUsageOutput["billingPeriods"][number]["usage"][number]
 ) {
-  const currency = row.unit.startsWith("money:") ? row.unit.slice("money:".length) : null
+  const parsed = parseAmount(row.amount)
+  if (!parsed.ok) throw new Error(`invalid budget amount: ${row.amount}`)
+  const spending = spendingOf(parsed.amount, row.unit)
   return {
     feature_slug: row.featureSlug,
     usage: row.usage,
     spending: {
-      amount: row.amount,
-      currency: currency ?? NO_CURRENCY,
-      display_amount: currency ? formatMoney(row.amount, currency) : `${row.amount} ${row.unit}`,
+      amount: spending.amount,
+      currency: spending.currency,
+      display_amount: spending.displayAmount,
     },
   }
 }
@@ -123,7 +122,7 @@ export const registerGetCurrentBillingPeriodUsageV1 = (app: App) =>
 
     // Live from the payer budget (ADR-0008 D7): its open statements, priced at ingestion.
     const result = await getCurrentBillingPeriodUsage(
-      { budgets: new CloudflareBudgetClient(c.env), now: () => now },
+      { budgets: requestBudgetCommandDeps(c).budgets, now: () => now },
       { projectId, customerId }
     )
 

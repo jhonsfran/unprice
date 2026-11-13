@@ -17,7 +17,7 @@ import {
   EXPIRED_PER_SWEEP,
   amountUsage,
 } from "@unprice/services/budgets"
-import { CARD_FROM, usdCard } from "@unprice/services/pricing/fixtures"
+import { CARD_FROM, enterpriseOverlay, usdCard } from "@unprice/services/pricing/fixtures"
 import type { BudgetReply, BudgetRequest } from "@unprice/services/use-cases"
 import { and, asc, eq, lte, min, sql } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/durable-sqlite"
@@ -29,7 +29,12 @@ import { BudgetSqliteStore } from "./budget-store"
 import * as schema from "./db/schema"
 import migrations from "./drizzle/migrations"
 import { discardJournal } from "./journal"
-import { ALARM_CONTINUE_MS, BudgetProcessor, JOURNAL_EXPORT_DELAY_MS } from "./processor"
+import {
+  ALARM_CONTINUE_MS,
+  BudgetProcessor,
+  JOURNAL_EXPORT_DELAY_MS,
+  UNFINISHED_BILLING_RECHECK_MS,
+} from "./processor"
 
 const UNIT = BigInt(100_000_000)
 const units = (value: number) => BigInt(Math.round(value * 100)) * (UNIT / BigInt(100))
@@ -672,7 +677,10 @@ describe("BudgetDO verbs", () => {
         idempotencyKey: "k1",
         usage: amountUsage(units(5)),
       } as const
-      await expect(processor.execute(request)).rejects.toThrow("fail after ledger write")
+      await expect(processor.execute(request, [usdCard])).rejects.toThrow("fail after ledger write")
+      expect(state.storage.sql.exec("SELECT count(*) AS n FROM budget_cards").one()).toEqual({
+        n: 0,
+      })
 
       expect(state.storage.sql.exec("SELECT hold_seq, held FROM budget_ledger").one()).toEqual({
         hold_seq: 0,
@@ -710,7 +718,6 @@ describe("BudgetDO statements", () => {
             priced: true,
           },
         ],
-        statements: "required",
       },
     })
     return { type: "upsert", projectId: "proj_1", ...parsed, mayLoosen: true }
@@ -723,8 +730,7 @@ describe("BudgetDO statements", () => {
     await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
       await migrate(drizzle(state.storage), migrations)
       const processor = realStorageProcessor(state, () => now)
-      processor.cacheCards([usdCard])
-      outcome(await processor.execute(pricedUpsert(key)), "upsert")
+      outcome(await processor.execute(pricedUpsert(key), [usdCard]), "upsert")
       const period = {
         periodId: "api_calls:inv_2026-11",
         statementKey: "inv_2026-11",
@@ -794,7 +800,7 @@ describe("BudgetDO statements", () => {
 })
 
 describe("BudgetDO card cache", () => {
-  it("creates a priced budget once its cards are cached, and drops cards no create follows", async () => {
+  it("creates a priced budget with fresh cards and deletes a refused first call", async () => {
     const parsedFor = (key: string) =>
       upsertBudgetInternalInputSchema.parse({
         key,
@@ -812,7 +818,6 @@ describe("BudgetDO card cache", () => {
               priced: true,
             },
           ],
-          statements: "none",
         },
       })
     const created = stubFor("customer:priced-create")
@@ -826,18 +831,27 @@ describe("BudgetDO card cache", () => {
       code: "CARDS_STALE",
       cardIds: [usdCard.card.id],
     })
-    await created.cacheCards([usdCard])
-    expect(outcome(await created.execute(create), "upsert").budget.version).toBe(1)
-
-    const abandoned = stubFor("customer:cards-only")
-    await abandoned.cacheCards([usdCard])
-    expect(await runDurableObjectAlarm(abandoned)).toBe(true)
-    await runInDurableObject(abandoned, (_instance: BudgetDO, state) => {
+    await runInDurableObject(created, (_instance: BudgetDO, state) => {
       expect(
         state.storage.sql
-          .exec("SELECT count(*) AS n FROM sqlite_master WHERE name = 'budget_cards'")
-          .one()
-      ).toEqual({ n: 0 })
+          .exec("SELECT name FROM sqlite_master WHERE name = 'budget_cards'")
+          .toArray()
+      ).toEqual([])
+    })
+    expect(outcome(await created.execute(create, [usdCard]), "upsert").budget.version).toBe(1)
+
+    const refused = stubFor("customer:refused-create")
+    const badCreate = { ...create, unit: "credits:ai" }
+    expect(rejection(await refused.execute(badCreate, [usdCard]))).toMatchObject({
+      code: "UNIT_MISMATCH",
+    })
+    await runInDurableObject(refused, async (_instance: BudgetDO, state) => {
+      expect(
+        state.storage.sql
+          .exec("SELECT name FROM sqlite_master WHERE name = 'budget_cards'")
+          .toArray()
+      ).toEqual([])
+      await expect(state.storage.getAlarm()).resolves.toBeNull()
     })
   })
 
@@ -849,13 +863,12 @@ describe("BudgetDO card cache", () => {
     await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
       await migrate(drizzle(state.storage), migrations)
       const processor = realStorageProcessor(state, () => now)
-      processor.cacheCards([usdCard])
       const parsed = upsertBudgetInternalInputSchema.parse({
         key,
         unit: "USD",
         limits: [],
         pricing: {
-          cards: { base: usdCard.card.id },
+          cards: { base: usdCard.card.id, overlay: enterpriseOverlay.card.id },
           features: [
             {
               slug: "images",
@@ -866,26 +879,50 @@ describe("BudgetDO card cache", () => {
               priced: true,
             },
           ],
-          statements: "none",
         },
       })
       outcome(
-        await processor.execute({
-          type: "upsert",
-          projectId: "proj_1",
-          ...parsed,
-          mayLoosen: true,
-        }),
+        await processor.execute(
+          {
+            type: "upsert",
+            projectId: "proj_1",
+            ...parsed,
+            mayLoosen: true,
+          },
+          [usdCard, enterpriseOverlay]
+        ),
         "upsert"
       )
+      await processor.execute({
+        type: "registerStatements",
+        statements: [
+          {
+            periodId: "images:nov",
+            statementKey: "nov",
+            featureSlug: "images",
+            start: CARD_FROM,
+            end: Date.parse("2026-12-01T00:00:00.000Z"),
+          },
+        ],
+      })
       const image = { slug: "image.generated", properties: { size: "1024" } }
       now = t0 + 5 * MINUTE
       expect(
         rejection(await processor.execute({ type: "charge", idempotencyKey: "c1", event: image }))
-      ).toEqual({ code: "CARDS_STALE", cardIds: [usdCard.card.id] })
-      processor.cacheCards([usdCard])
+      ).toEqual({ code: "CARDS_STALE", cardIds: [usdCard.card.id, enterpriseOverlay.card.id] })
+      expect(
+        rejection(
+          await processor.execute({ type: "charge", idempotencyKey: "c1", event: image }, [usdCard])
+        )
+      ).toEqual({ code: "CARDS_STALE", cardIds: [enterpriseOverlay.card.id] })
+      expect(
+        state.storage.sql.exec("SELECT refreshed_at FROM budget_cards ORDER BY card_id").toArray()
+      ).toEqual([{ refreshed_at: t0 }, { refreshed_at: t0 }])
       const charged = outcome(
-        await processor.execute({ type: "charge", idempotencyKey: "c1", event: image }),
+        await processor.execute({ type: "charge", idempotencyKey: "c1", event: image }, [
+          usdCard,
+          enterpriseOverlay,
+        ]),
         "charge"
       )
       expect(charged.usage.amount).toBe(units(0.04))
@@ -1197,6 +1234,57 @@ describe("BudgetDO alarm", () => {
     await evictDurableObject(stub)
     expect(rejection(await stub.execute({ type: "get" }))).toEqual({ code: "BUDGET_NOT_FOUND" })
   })
+
+  it.each(["open", "sealed"] as const)(
+    "keeps a closed budget with an unfinished %s statement until completion",
+    async (statementState) => {
+      const key = `customer:unfinished-${statementState}`
+      const stub = stubFor(key)
+      const start = midMonthAhead()
+      const end = start + HOUR
+      const deletable = end + CLOSED_BUDGET_RETENTION_MS
+      const destroyed: number[] = []
+      let now = start
+      await runInDurableObject(stub, async (_instance: BudgetDO, state) => {
+        await migrate(drizzle(state.storage), migrations)
+        const processor = realStorageProcessor(state, () => now, [], destroyed)
+        outcome(await processor.execute(upsert(key, { ...fiftyPerMonth, closesAt: end })), "upsert")
+        const period = {
+          periodId: "period",
+          statementKey: "invoice",
+          featureSlug: "api_calls",
+          start,
+          end,
+        }
+        outcome(
+          await processor.execute({ type: "registerStatements", statements: [period] }),
+          "registerStatements"
+        )
+        now = deletable
+        if (statementState === "sealed") {
+          outcome(
+            await processor.execute({ type: "sealStatements", statementKey: "invoice", at: end }),
+            "sealStatements"
+          )
+        }
+        await processor.alarm()
+        expect(destroyed).toEqual([])
+        await expect(state.storage.getAlarm()).resolves.toBe(now + UNFINISHED_BILLING_RECHECK_MS)
+        outcome(
+          await processor.execute({ type: "sealStatements", statementKey: "invoice", at: end }),
+          "sealStatements"
+        )
+        outcome(
+          await processor.execute({ type: "completeStatements", periodIds: [period.periodId] }),
+          "completeStatements"
+        )
+        now += UNFINISHED_BILLING_RECHECK_MS
+        await processor.alarm()
+        expect(destroyed).toEqual([now])
+        await expect(state.storage.getAlarm()).resolves.toBeNull()
+      })
+    }
+  )
 
   it("answers a deleted budget as never created, and an upsert starts it over", async () => {
     const key = "customer:closed-long-ago"

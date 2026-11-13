@@ -110,7 +110,7 @@ type SnippetValue =
   // idempotency key: crypto.randomUUID() in code, a literal in cURL.
   | { t: "idem"; curl: string }
   | { t: "now" }
-  | { t: "array"; items: SnippetValue[] }
+  | { t: "array"; items: SnippetValue[]; inline?: boolean }
   | { t: "obj"; fields: SnippetField[] }
 type SnippetField = { key: string; value: SnippetValue }
 
@@ -119,7 +119,11 @@ const str = (v: string): SnippetValue => ({ t: "str", v })
 const num = (v: number): SnippetValue => ({ t: "num", v })
 const idem = (curl: string): SnippetValue => ({ t: "idem", curl })
 const obj = (fields: SnippetField[]): SnippetValue => ({ t: "obj", fields })
-const array = (items: SnippetValue[]): SnippetValue => ({ t: "array", items })
+const array = (items: SnippetValue[], inline = false): SnippetValue => ({
+  t: "array",
+  items,
+  inline,
+})
 
 // JS object literal (SDK call args + the object inside fetch's JSON.stringify):
 // bare keys, trailing commas.
@@ -145,6 +149,7 @@ function jsValue(value: SnippetValue, indent: string): string {
     case "now":
       return "Date.now()"
     case "array":
+      if (value.inline) return `[${value.items.map((item) => jsValue(item, indent)).join(", ")}]`
       return `[\n${value.items.map((item) => `${indent}  ${jsValue(item, `${indent}  `)},`).join("\n")}\n${indent}]`
     case "obj":
       return jsObject(value.fields, indent)
@@ -174,6 +179,7 @@ function jsonValue(value: SnippetValue, indent: string): string {
     case "now":
       return "'\"$(date +%s)000\"'"
     case "array":
+      if (value.inline) return `[${value.items.map((item) => jsonValue(item, indent)).join(", ")}]`
       return `[\n${value.items.map((item) => `${indent}  ${jsonValue(item, `${indent}  `)}`).join(",\n")}\n${indent}]`
     case "obj":
       return jsonObject(value.fields, indent)
@@ -187,12 +193,8 @@ function queryString(fields: SnippetField[]): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Spec table — one entry per method. `listPlanVersions` is irregular (a
-// param-driven body with a follow-up), so it renders through a dedicated builder
-// below.
+// Spec table — one entry per method.
 // ─────────────────────────────────────────────────────────────────────────────
-
-type RegularMethod = Exclude<method, "listPlanVersions">
 
 type Spec = {
   sdkCall: string
@@ -205,7 +207,8 @@ type Spec = {
   // Skip the `if (error) { … }` block (a couple of list calls omit it).
   showError?: boolean
   // Success handling shared by SDK and fetch examples.
-  successCode?: (params?: SDKExampleParams) => string
+  successCode?: (params: SDKExampleParams | undefined, resultName: string) => string
+  fetchResult?: string
 }
 
 function usageBody(params: SDKExampleParams | undefined): SnippetField[] {
@@ -223,7 +226,7 @@ function usageBody(params: SDKExampleParams | undefined): SnippetField[] {
   return fields
 }
 
-const SPECS: Record<RegularMethod, Spec> = {
+const SPECS: Record<method, Spec> = {
   checkAccess: {
     sdkCall: "access.check",
     httpVerb: "POST",
@@ -322,6 +325,31 @@ const SPECS: Record<RegularMethod, Spec> = {
       field("cancelUrl", str("http://your-app.com/failed")),
     ],
   },
+  listPlanVersions: {
+    sdkCall: "planVersions.list",
+    httpVerb: "POST",
+    path: "/v1/plan-versions/list",
+    fetchResult: "data",
+    body: (params) => {
+      const list = params?.listPlanVersions ?? {}
+      const fields: SnippetField[] = []
+      if (list.planVersionIds?.length) {
+        fields.push(field("planVersionIds", array(list.planVersionIds.map(str), true)))
+      }
+      if (list.billingInterval) fields.push(field("billingInterval", str(list.billingInterval)))
+      if (list.currency) fields.push(field("currency", str(list.currency)))
+      return fields.length
+        ? fields
+        : [field("billingInterval", str("month")), field("currency", str("USD"))]
+    },
+    successCode: (
+      params,
+      resultName
+    ) => `${planVersionsContextComment(params?.listPlanVersions ?? {})}const [planVersion] = ${resultName}.planVersions
+const featureSlugs =
+  planVersion?.planFeatures.map((planFeature) => planFeature.feature.slug) ?? []
+`,
+  },
   explainCharge: {
     sdkCall: "analytics.charges.explain",
     httpVerb: "POST",
@@ -361,7 +389,7 @@ function renderSdk(spec: Spec, params?: SDKExampleParams): string {
     lines.push("", "if (error) {", "  console.error(error.message)", "  return", "}")
   }
   let code = `${lines.join("\n")}\n`
-  if (spec.successCode) code += spec.successCode(params)
+  if (spec.successCode) code += spec.successCode(params, "result")
   return code
 }
 
@@ -390,8 +418,8 @@ if (!response.ok) {
   throw new Error(await response.text())
 }
 
-const result = await response.json()
-${spec.successCode?.(params) ?? ""}`
+const ${spec.fetchResult ?? "result"} = await response.json()
+${spec.successCode?.(params, spec.fetchResult ?? "result") ?? ""}`
 }
 
 function curlPost(path: string, body: string, params?: SDKExampleParams) {
@@ -416,28 +444,6 @@ function renderCurl(spec: Spec, params?: SDKExampleParams): string {
   return curlPost(pathWithParam, jsonObject(spec.body(params), ""), params)
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Irregular methods
-// ─────────────────────────────────────────────────────────────────────────────
-
-function planVersionsRequestLines(params: ListPlanVersionsExampleParams, indent = "  ") {
-  const lines: string[] = []
-  if (params.planVersionIds && params.planVersionIds.length > 0) {
-    lines.push(
-      `${indent}planVersionIds: [${params.planVersionIds.map((v) => JSON.stringify(v)).join(", ")}],`
-    )
-  }
-  if (params.billingInterval) {
-    lines.push(`${indent}billingInterval: ${JSON.stringify(params.billingInterval)},`)
-  }
-  if (params.currency) {
-    lines.push(`${indent}currency: ${JSON.stringify(params.currency)},`)
-  }
-  return lines.length > 0
-    ? lines.join("\n")
-    : `${indent}billingInterval: "month",\n${indent}currency: "USD",`
-}
-
 function planVersionsContextComment(params: ListPlanVersionsExampleParams) {
   const context: string[] = []
   if (params.version !== undefined) context.push(`v${params.version}`)
@@ -447,81 +453,11 @@ function planVersionsContextComment(params: ListPlanVersionsExampleParams) {
   return context.length > 0 ? `\n// Dashboard context: ${context.join("; ")}\n` : "\n"
 }
 
-function planVersionsJsonBody(params: ListPlanVersionsExampleParams) {
-  const lines: string[] = []
-  if (params.planVersionIds && params.planVersionIds.length > 0) {
-    lines.push(
-      `  "planVersionIds": [${params.planVersionIds.map((v) => JSON.stringify(v)).join(", ")}]`
-    )
-  }
-  if (params.billingInterval)
-    lines.push(`  "billingInterval": ${JSON.stringify(params.billingInterval)}`)
-  if (params.currency) lines.push(`  "currency": ${JSON.stringify(params.currency)}`)
-  const bodyLines =
-    lines.length > 0 ? lines : ['  "billingInterval": "month"', '  "currency": "USD"']
-  return `{\n${bodyLines.join(",\n")}\n}`
-}
-
-function renderListPlanVersions(framework: Framework, params?: SDKExampleParams): string {
-  const listParams = params?.listPlanVersions ?? {}
-
-  if (framework === "curl") {
-    return curlPost("/v1/plan-versions/list", planVersionsJsonBody(listParams), params)
-  }
-
-  if (framework === "sdk") {
-    return `import { Unprice } from "@unprice/api"
-
-const unprice = new Unprice({
-  token: ${sdkToken(params)},
-  baseUrl: ${JSON.stringify(API_BASE_URL)},
-})
-
-const { result, error } = await unprice.planVersions.list({
-${planVersionsRequestLines(listParams)}
-})
-
-if (error) {
-  console.error(error.message)
-  return
-}
-${planVersionsContextComment(listParams)}const [planVersion] = result.planVersions
-const featureSlugs =
-  planVersion?.planFeatures.map((planFeature) => planFeature.feature.slug) ?? []
-`
-  }
-
-  return `${fetchPreamble(params)}
-
-const response = await fetch(baseUrl + "/v1/plan-versions/list", {
-  method: "POST",
-  headers: {
-    Authorization: ${fetchAuthorization(params)},
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify({
-${planVersionsRequestLines(listParams, "    ")}
-  }),
-})
-
-if (!response.ok) {
-  throw new Error(await response.text())
-}
-
-const data = await response.json()
-${planVersionsContextComment(listParams)}const [planVersion] = data.planVersions
-const featureSlugs =
-  planVersion?.planFeatures.map((planFeature) => planFeature.feature.slug) ?? []
-`
-}
-
 export function getCodeExample(
   framework: Framework,
   currentMethod: method,
   params?: SDKExampleParams
 ) {
-  if (currentMethod === "listPlanVersions") return renderListPlanVersions(framework, params)
-
   const spec = SPECS[currentMethod]
   if (framework === "sdk") return renderSdk(spec, params)
   if (framework === "fetch") return renderFetch(spec, params)

@@ -7,19 +7,20 @@ import {
   type PlanVersionFeature,
   planVersionCatalogPricingInputSchema,
 } from "@unprice/db/validators"
-import { Err, Ok } from "@unprice/error"
+import { Ok } from "@unprice/error"
 import { formatAmount } from "@unprice/money"
 import { describe, expect, it, vi } from "vitest"
 import { MODEL_CATALOG } from "../../budgets/model-catalog"
 import type { ServiceContext } from "../../context"
 import { UnPriceRateCardError } from "../../rate-cards"
+import { featurePricingOf, unionFeaturePricing } from "../../rate-cards"
 import { createRateCardsFake } from "../../rate-cards/memory.fixture"
 
 function rejectionOf(err: Error | undefined) {
   return err instanceof UnPriceRateCardError ? err.rejection : err
 }
+import { BUNDLED_COSTS, catalogEffectiveFrom } from "../../model-costs/service"
 import { applyPlanVersionCatalogPricing, previewPlanVersionCatalogPricing } from "./catalog-pricing"
-import { catalogEffectiveFrom } from "./import-model-costs"
 
 const NOW = Date.parse("2026-11-10T12:00:00.000Z")
 const PROJECT = "proj_1"
@@ -60,16 +61,23 @@ function createHarness(overrides: Partial<Detailed> = {}) {
     planFeatures: [planFeature("llm_tokens", tokensMeter)],
     ...overrides,
   } as unknown as Detailed
+  cards.rateCards.featuresPricingWith.mockImplementation(async () =>
+    unionFeaturePricing(
+      version.planFeatures.map((feature) =>
+        featurePricingOf({ ...feature, slug: feature.feature.slug })
+      )
+    )
+  )
   const services = {
     plans: { getPlanVersionByIdDetailed: vi.fn(async () => Ok(version)) },
-    features: { listFeaturesByProject: vi.fn(async () => Ok([])) },
     rateCards: cards.rateCards,
-  } as unknown as Pick<ServiceContext, "plans" | "features" | "rateCards">
+    modelCosts: cards.modelCosts,
+  } as unknown as Pick<ServiceContext, "plans" | "rateCards" | "modelCosts">
   return { cards, services }
 }
 
 function price(
-  services: Pick<ServiceContext, "plans" | "features" | "rateCards">,
+  services: Pick<ServiceContext, "plans" | "rateCards" | "modelCosts">,
   fields: Record<string, unknown> = {}
 ) {
   return previewPlanVersionCatalogPricing(
@@ -90,7 +98,7 @@ function price(
 }
 
 async function apply(
-  services: Pick<ServiceContext, "plans" | "features" | "rateCards">,
+  services: Pick<ServiceContext, "plans" | "rateCards" | "modelCosts">,
   draftHash: string,
   fields: Record<string, unknown> = {}
 ) {
@@ -116,7 +124,7 @@ async function apply(
 }
 
 describe("previewPlanVersionCatalogPricing", () => {
-  it("imports the catalog at its version date and previews every model without saving a policy", async () => {
+  it("previews every model without creating a card, assignment, or cost row", async () => {
     const { cards, services } = createHarness()
 
     const result = await price(services)
@@ -126,16 +134,11 @@ describe("previewPlanVersionCatalogPricing", () => {
     const rerun = await price(services, { markup: "0.5" })
     if (rerun.err) throw rerun.err
 
-    expect(cards.cards.get(cardId)).toMatchObject({
-      name: "starter pv_1 USD",
-      unit: "money:USD",
-      marginPolicy: { type: "manual" },
-    })
-    expect(cards.assignments.get("pv_1:USD")).toBe(cardId)
-    expect(cards.costs).toHaveLength(MODEL_CATALOG.length)
-    expect(new Set(cards.costs.map((cost) => cost.effectiveFrom))).toEqual(
-      new Set([Date.parse("2026-10-20T00:00:00.000Z")])
-    )
+    expect(cardId).toBeNull()
+    expect(cards.cards.size).toBe(0)
+    expect(cards.assignments.size).toBe(0)
+    expect(cards.costs).toEqual([])
+    expect(cards.modelCosts.importBundled).not.toHaveBeenCalled()
     expect(catalogEffectiveFrom("2026-10-20")).toBe(Date.parse("2026-10-20T00:00:00.000Z"))
     expect(draft.changes).toHaveLength(new Set(MODEL_CATALOG.map((row) => row.model)).size)
     expect(
@@ -150,7 +153,16 @@ describe("previewPlanVersionCatalogPricing", () => {
     )
     expect(rerun.val.cardId).toBe(cardId)
     expect(rerun.val.draftHash).not.toBe(draftHash)
-    expect(cards.cards.get(cardId)?.marginPolicy).toEqual({ type: "manual" })
+    expect(cards.cards.size).toBe(0)
+  })
+
+  it("hashes the policy even when rounding produces the same rows", async () => {
+    const { services } = createHarness()
+    const first = await price(services, { roundTo: "1000000", markup: "0.3" })
+    const second = await price(services, { roundTo: "1000000", markup: "0.5" })
+    if (first.err || second.err) throw first.err ?? second.err
+    expect(first.val.draft.changes).toEqual(second.val.draft.changes)
+    expect(first.val.draftHash).not.toBe(second.val.draftHash)
   })
 
   it("applies the reviewed markup and leaves a later preview unsaved", async () => {
@@ -166,7 +178,7 @@ describe("previewPlanVersionCatalogPricing", () => {
       (change) => change.proposed.match.model === "claude-haiku-4-5"
     )
 
-    expect(cards.cards.get(saved.val.cardId)?.marginPolicy).toMatchObject({
+    expect(cards.cards.get(cards.assignments.get("pv_1:USD") ?? "")?.marginPolicy).toMatchObject({
       features: [{ featureSlug: "llm_tokens", markup: BigInt(30_000_000) }],
     })
     expect(haiku?.proposed.price.components.map((c) => formatAmount(c.rate))).toEqual([
@@ -198,7 +210,7 @@ describe("previewPlanVersionCatalogPricing", () => {
     ).toBeUndefined()
     if (first.err || second.err) throw first.err ?? second.err
 
-    expect(cards.cards.get(second.val.cardId)?.marginPolicy).toMatchObject({
+    expect(cards.cards.get(second.val.cardId ?? "")?.marginPolicy).toMatchObject({
       type: "costPlus",
       features: [{ featureSlug: "llm_tokens" }, { featureSlug: "images" }],
     })
@@ -245,27 +257,32 @@ describe("previewPlanVersionCatalogPricing", () => {
 
 it("rejects an apply after provider costs change without saving the policy", async () => {
   const { cards, services } = createHarness()
+  cards.seedPlanVersionCard("pv_1", "USD", [])
   const preview = await price(services)
   if (preview.err) throw preview.err
-  const imported = cards.costs[0]
+  const imported = BUNDLED_COSTS[0]
   if (!imported) throw new Error("fixture")
   cards.costs.push({ ...imported, source: "manual", sourceRef: "negotiated", effectiveFrom: NOW })
   const result = await apply(services, preview.val.draftHash)
   expect(rejectionOf(result.err)).toMatchObject({ code: "DRAFT_STALE" })
-  expect(cards.cards.get(preview.val.cardId)?.marginPolicy).toEqual({ type: "manual" })
+  expect(cards.cards.get(preview.val.cardId ?? "")?.marginPolicy).toEqual({ type: "manual" })
   expect(cards.rows).toEqual([])
 })
 
 it("leaves the policy unchanged when the row planner rejects publication", async () => {
   const { cards, services } = createHarness()
+  cards.seedPlanVersionCard("pv_1", "USD", [])
   const preview = await price(services)
   if (preview.err) throw preview.err
-  cards.rateCards.publishRows.mockResolvedValueOnce(
-    Err(new UnPriceRateCardError({ code: "INVALID_CARD", violations: [] }))
-  )
+  cards.rateCards.featuresPricingWith.mockResolvedValueOnce({
+    features: [
+      { slug: "llm_tokens", dimensions: [], meterProperty: "input_tokens", included: null },
+    ],
+    unpriceable: [],
+  })
   const result = await apply(services, preview.val.draftHash)
   expect(rejectionOf(result.err)).toMatchObject({ code: "INVALID_CARD" })
-  expect(cards.cards.get(preview.val.cardId)?.marginPolicy).toEqual({ type: "manual" })
+  expect(cards.cards.get(preview.val.cardId ?? "")?.marginPolicy).toEqual({ type: "manual" })
   expect(cards.rows).toEqual([])
 })
 

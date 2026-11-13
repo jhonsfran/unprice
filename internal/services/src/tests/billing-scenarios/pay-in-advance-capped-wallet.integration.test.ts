@@ -6,7 +6,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ServiceContext } from "../../context"
 import { LATE_EVENT_GRACE_MS } from "../../entitlements"
 import { LedgerGateway } from "../../ledger"
-import { RateCardService } from "../../rate-cards/service"
+import { testInvoicing } from "../../test-fixtures/billing-gateway"
 import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
 import { billPeriod } from "../../use-cases/billing/bill-period"
 
@@ -108,7 +108,7 @@ describe("P0-D pay_in_advance capped wallet workflow", () => {
     } as unknown as Pick<ServiceContext, "wallet" | "ledger" | "subscriptions">
 
     const activationInputs = await deriveActivationInputsFromPlan(
-      { db, rateCards: new RateCardService({ db }) },
+      { db, rateCards: testInvoicing({ db }).rateCards },
       { projectId, subscriptionId }
     )
     expect(activationInputs).toEqual({
@@ -139,7 +139,7 @@ describe("P0-D pay_in_advance capped wallet workflow", () => {
     })
 
     const startRun = await billPeriod({
-      invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
+      invoicing: testInvoicing({ db, payerBudgets }),
       context: await loadSubscriptionContext(jan1),
       logger,
       db,
@@ -221,7 +221,7 @@ describe("P0-D pay_in_advance capped wallet workflow", () => {
     })
 
     const usageRun = await billPeriod({
-      invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
+      invoicing: testInvoicing({ db, payerBudgets }),
       context: await loadSubscriptionContext(feb1 + LATE_EVENT_GRACE_MS + 1),
       logger,
       db,
@@ -229,7 +229,7 @@ describe("P0-D pay_in_advance capped wallet workflow", () => {
       ledgerService: ledger,
     })
     const rerun = await billPeriod({
-      invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
+      invoicing: testInvoicing({ db, payerBudgets }),
       context: await loadSubscriptionContext(feb1 + LATE_EVENT_GRACE_MS + 1),
       logger,
       db,

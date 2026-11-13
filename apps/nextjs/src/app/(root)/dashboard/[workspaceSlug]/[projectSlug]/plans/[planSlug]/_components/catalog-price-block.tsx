@@ -1,134 +1,36 @@
 "use client"
 
-import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { AMOUNT_PATTERN, formatAmount } from "@unprice/money"
+import { COST_COMPONENT_NAMES } from "@unprice/db/validators"
 import { MODEL_CATALOG_VERSION } from "@unprice/services/budgets"
 import { priceTableOf } from "@unprice/services/pricing"
-import type { RouterInputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
 import { Input } from "@unprice/ui/input"
 import { Label } from "@unprice/ui/label"
 import { CreditCard } from "lucide-react"
 import { useParams } from "next/navigation"
 import { useState } from "react"
-import { SuperLink } from "~/components/super-link"
-import { toast } from "~/lib/toast"
-import { useTRPC } from "~/trpc/client"
-import { PriceMatrix } from "../../../rate-cards/_components/price-matrix"
 import {
-  type CostPlusDraftWire,
-  type CostPlusFeaturePolicy,
+  COMPONENT_LABEL,
+  type CatalogPolicyDraft,
+  type CatalogPreview,
+  DEFAULT_CATALOG_POLICY,
+  catalogPricingInputOf,
+  describePolicyDraft,
+  policyDraftOf,
+} from "~/components/pricing/catalog-policy"
+import type { FeaturePriceRows } from "~/components/pricing/plan-prices"
+import { PriceMatrix } from "~/components/pricing/price-matrix"
+import {
   catalogPolicyFor,
-  changeMatrixOf,
-  countWrites,
   describeChanges,
   markupPercent,
   matrixOf,
-} from "../../../rate-cards/_components/rate-card-format"
-import type { FeaturePriceRows } from "../../_components/plan-prices"
-import type { PlanVersionCard } from "./price-block"
-import { CollapsibleSection } from "./section-label"
-
-/** The cost components the catalog carries, each priced from one event property. */
-export const COST_COMPONENTS = ["input", "output", "cache_read", "cache_write"] as const
-export type CostComponent = (typeof COST_COMPONENTS)[number]
-
-const COMPONENT_LABEL: Record<CostComponent, string> = {
-  input: "Input",
-  output: "Output",
-  cache_read: "Cache read",
-  cache_write: "Cache write",
-}
-
-/** What the operator types; `catalogPricingInputOf` turns it into the procedure's input. */
-export type CatalogPolicyDraft = Readonly<{
-  markupPercent: string
-  roundTo: string
-  components: Readonly<Record<CostComponent, string>>
-}>
-
-export const DEFAULT_CATALOG_POLICY: CatalogPolicyDraft = {
-  markupPercent: "30",
-  roundTo: "0.000001",
-  components: {
-    input: "input_tokens",
-    output: "output_tokens",
-    cache_read: "cache_read_tokens",
-    cache_write: "cache_write_tokens",
-  },
-}
-
-/**
- * The typed policy a saved one reads as, so the editor opens on the markup the card prices with,
- * not on the default: "where did 30% come from" has an answer on screen.
- */
-export function policyDraftOf(policy: CostPlusFeaturePolicy): CatalogPolicyDraft {
-  return {
-    markupPercent: markupPercent(policy.markup),
-    roundTo: formatAmount(policy.roundTo),
-    components: {
-      input: policy.componentMap.input ?? "",
-      output: policy.componentMap.output ?? "",
-      cache_read: policy.componentMap.cache_read ?? "",
-      cache_write: policy.componentMap.cache_write ?? "",
-    },
-  }
-}
-
-/** The reviewed preview that `applyCatalogPricing` publishes under `draftHash`. */
-export type CatalogPreview = Readonly<{
-  cardId: string
-  draft: CostPlusDraftWire
-  draftHash: string | null
-  /** Models the catalog prices by context length; the preview prices their base tier. */
-  tieredModels: readonly string[]
-}>
-
-type CatalogPricingInput = RouterInputs["rateCards"]["previewCatalogPricing"]
-type CatalogApplyInput = RouterInputs["rateCards"]["applyCatalogPricing"]
-
-/** "30" as the policy's markup "0.3"; null when it is not a non-negative number. */
-export function markupRateOf(percent: string): string | null {
-  const text = percent.trim()
-  const value = Number(text)
-  if (text === "" || !Number.isFinite(value) || value < 0) return null
-  return (value / 100).toFixed(8).replace(/\.?0+$/, "")
-}
-
-/** The procedure's input from the typed policy, or what stops it. */
-export function catalogPricingInputOf(
-  draft: CatalogPolicyDraft,
-  dimension: string | undefined
-):
-  | { ok: true; input: Omit<CatalogPricingInput, "planVersionId" | "featureSlug"> }
-  | { ok: false; message: string } {
-  const markup = markupRateOf(draft.markupPercent)
-  if (markup === null) return { ok: false, message: "Markup is a percentage, like 30." }
-  const roundTo = draft.roundTo.trim()
-  if (!AMOUNT_PATTERN.test(roundTo) || Number(roundTo) <= 0) {
-    return { ok: false, message: "Round to is a positive decimal, like 0.000001." }
-  }
-  const componentMap: Record<string, string> = {}
-  for (const component of COST_COMPONENTS) {
-    const property = draft.components[component].trim()
-    if (property) componentMap[component] = property
-  }
-  if (Object.keys(componentMap).length === 0) {
-    return { ok: false, message: "Map at least one cost component to an event property." }
-  }
-  return {
-    ok: true,
-    input: { markup, roundTo, componentMap, ...(dimension ? { dimension } : {}) },
-  }
-}
-
-/** "input_tokens, output_tokens, cache_read_tokens, cache_write_tokens · rounded to 0.000001". */
-export function describePolicyDraft(draft: CatalogPolicyDraft): string {
-  const properties = COST_COMPONENTS.map((component) => draft.components[component].trim()).filter(
-    Boolean
-  )
-  return `${properties.join(", ") || "no property"} · rounded to ${draft.roundTo.trim() || "?"}`
-}
+} from "~/components/pricing/rate-card-format"
+import { CollapsibleSection } from "~/components/pricing/section-label"
+import { catalogPreviewOf, useCatalogPricing } from "~/components/pricing/use-catalog-pricing"
+import type { PlanVersionCard } from "~/components/pricing/use-version-pricing"
+import { SuperLink } from "~/components/super-link"
+import { toast } from "~/lib/toast"
 
 /**
  * Prices a feature's models from the cost catalog on the version's own card: one markup over the
@@ -143,6 +45,7 @@ export function CatalogPriceBlock({
   rows,
   editable,
   pendingSave,
+  now,
 }: {
   planVersionId: string
   featureSlug: string
@@ -154,19 +57,20 @@ export function CatalogPriceBlock({
   editable: boolean
   /** The dimension is typed but not saved yet: the catalog prices the saved meter. */
   pendingSave?: boolean
+  now: number
 }) {
   // null until edited: the saved policy, or the default for a feature not priced from the catalog.
   const [edited, setPolicy] = useState<CatalogPolicyDraft | null>(null)
   const saved = card ? catalogPolicyFor(card.card.marginPolicy, featureSlug) : null
   const policy = edited ?? (saved ? policyDraftOf(saved) : DEFAULT_CATALOG_POLICY)
-  const [preview, setPreview] = useState<CatalogPreview | null>(null)
-  const [problem, setProblem] = useState<string | null>(null)
-
-  const pricing = useCatalogPricing({ planVersionId, featureSlug })
+  const input = catalogPricingInputOf(policy, dimension)
+  const pricing = useCatalogPricing({ planVersionId, featureSlug }, input)
+  const { preview, problem } = pricing
 
   return (
     <CatalogPriceBlockView
       featureSlug={featureSlug}
+      now={now}
       card={card}
       rows={rows}
       currency={currency}
@@ -175,78 +79,27 @@ export function CatalogPriceBlock({
       policy={policy}
       onPolicyChange={(next) => {
         setPolicy(next)
-        setPreview(null)
+        pricing.reset()
       }}
       preview={preview}
       problem={problem}
       isPreviewing={pricing.isPreviewing}
       isPublishing={pricing.isApplying}
       onPreview={() => {
-        const built = catalogPricingInputOf(policy, dimension)
-        if (!built.ok) {
-          setProblem(built.message)
-          return
-        }
-        setProblem(null)
-        pricing.preview(built.input).then(
-          (result) => setPreview(result),
-          (error: Error) => setProblem(error.message)
-        )
+        void pricing.runPreview(input)
       }}
       onPublish={() => {
-        const built = catalogPricingInputOf(policy, dimension)
-        if (!built.ok || !preview?.draftHash) return
-        pricing.apply({ ...built.input, draftHash: preview.draftHash }).then(
-          ({ inserted, closed }) => {
-            toast.success(`Published ${inserted.length} model prices, ended ${closed.length}`)
-            setPreview(null)
-            // The card now holds the policy; read it from there again.
-            setPolicy(null)
-          },
-          (error: Error) => setProblem(error.message)
-        )
+        if (!input.ok) return
+        void pricing.apply(input.input).then((published) => {
+          if (!published) return
+          toast.success(
+            `Published ${published.inserted.length} model prices, ended ${published.closed.length}`
+          )
+          setPolicy(null)
+        })
       }}
     />
   )
-}
-
-type CatalogPolicyInput = Omit<CatalogPricingInput, "planVersionId" | "featureSlug">
-
-/**
- * Catalog pricing for one feature: `preview` drafts the policy without saving it (a closed
- * preview changes nothing), `apply` saves it and publishes the reviewed revision.
- */
-export function useCatalogPricing({
-  planVersionId,
-  featureSlug,
-}: {
-  planVersionId: string
-  featureSlug: string
-}) {
-  const trpc = useTRPC()
-  const queryClient = useQueryClient()
-  const options = { meta: { suppressGlobalError: true } }
-  const previewPricing = useMutation(trpc.rateCards.previewCatalogPricing.mutationOptions(options))
-  const applyPricing = useMutation(trpc.rateCards.applyCatalogPricing.mutationOptions(options))
-
-  const preview = (input: CatalogPolicyInput): Promise<CatalogPreview> =>
-    previewPricing.mutateAsync({ planVersionId, featureSlug, ...input })
-
-  const apply = async (input: Omit<CatalogApplyInput, "planVersionId" | "featureSlug">) => {
-    const published = await applyPricing.mutateAsync({ planVersionId, featureSlug, ...input })
-    void queryClient.invalidateQueries(trpc.rateCards.forPlanVersion.pathFilter())
-    void queryClient.invalidateQueries(trpc.rateCards.get.pathFilter())
-    void queryClient.invalidateQueries(trpc.rateCards.previewCostPlus.pathFilter())
-    void queryClient.invalidateQueries({ queryKey: trpc.planVersions.getById.queryKey() })
-    return published
-  }
-
-  return {
-    preview,
-    apply,
-    isPreviewing: previewPricing.isPending,
-    isApplying: applyPricing.isPending,
-  }
 }
 
 const SHOWN_MODELS = 6
@@ -267,7 +120,7 @@ export function CatalogPriceBlockView({
   isPublishing,
   onPreview,
   onPublish,
-  now = Date.now(),
+  now,
 }: {
   featureSlug: string
   card: PlanVersionCard | undefined
@@ -283,7 +136,7 @@ export function CatalogPriceBlockView({
   isPublishing?: boolean
   onPreview: () => void
   onPublish: () => void
-  now?: number
+  now: number
 }) {
   const params = useParams<{
     workspaceSlug: string
@@ -301,8 +154,7 @@ export function CatalogPriceBlockView({
   const priced = rows?.byDimension ?? []
   const table = priceTableOf(featureSlug, priced, now, currency, "unit")
   const activePolicy = card ? catalogPolicyFor(card.card.marginPolicy, featureSlug) : null
-  const changes = preview ? changeMatrixOf(preview.draft, featureSlug) : null
-  const writes = preview ? countWrites(preview.draft) : 0
+  const { changes, writes } = catalogPreviewOf(preview, featureSlug)
 
   if (currency !== "USD") {
     return (
@@ -408,7 +260,7 @@ export function CatalogPriceBlockView({
             onOpenChange={setIsMappingOpen}
           >
             <div className="grid grid-cols-2 gap-3">
-              {COST_COMPONENTS.map((component) => (
+              {COST_COMPONENT_NAMES.map((component) => (
                 <div key={component} className="flex flex-col gap-1.5">
                   <Label htmlFor={`catalog-${component}`} className="text-xs">
                     {COMPONENT_LABEL[component]} property

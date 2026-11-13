@@ -15,11 +15,11 @@ import {
 
 import { UnPriceMachineError } from "./errors"
 
+import type { InvoicingPorts } from "../billing/invoicing-ports"
 import type { BillingService } from "../billing/service"
 import type { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
 import type { LedgerGateway } from "../ledger"
-import type { InvoicingPorts } from "../use-cases/billing/bill-period"
 import { deriveActivationInputsFromPlan } from "../use-cases/billing/derive-provision-inputs"
 import {
   type ActivateSubscriptionDeps,
@@ -565,19 +565,7 @@ export class SubscriptionMachine {
             }),
             onDone: {
               target: "activating",
-              actions: [
-                assign({
-                  subscription: ({ event, context }) => {
-                    if (event.output.subscription) {
-                      return event.output.subscription
-                    }
-
-                    return context.subscription
-                  },
-                }),
-                "logStateTransition",
-                "notifyCustomer",
-              ],
+              actions: ["logStateTransition", "notifyCustomer"],
             },
             onError: {
               target: "error",

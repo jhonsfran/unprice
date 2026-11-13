@@ -1,20 +1,25 @@
 import { Err, type FetchError, Ok, type Result } from "@unprice/error"
 import { z } from "zod"
-import type { AnalyticsService } from "../../analytics"
 import {
   JOURNAL_EVENT_STATES,
   type JournalEventFilter,
   type JournalEventScope,
   customerOfKey,
   type eventFacetSqlRowSchema,
+  eventFacetsQuery,
+  eventTimelineQuery,
   type eventTimelineSqlRowSchema,
+  eventTotalsQuery,
   type eventTotalsSqlRowSchema,
   type recentEventSqlRowSchema,
+  recentEventsQuery,
+  rejectionsQuery,
   type rejectionsSqlRowSchema,
 } from "../../analytics/budget-journal"
+import type { ServiceContext } from "../../context"
 import { aiEvidenceSchema } from "./ai-contracts"
 
-export const getIngestionStatusWindowSchema = z
+const getIngestionStatusWindowSchema = z
   .object({
     from: z.number().int(),
     to: z.number().int(),
@@ -68,7 +73,6 @@ export const getIngestionStatusInputSchema = z.object({
   window: getIngestionStatusWindowSchema,
   cursor: getIngestionStatusCursorSchema.nullish(),
   filter: ingestionStatusFilterSchema,
-  includeFacets: z.boolean().default(false),
   limit: z.number().int().min(1).max(100).default(50),
 })
 
@@ -137,13 +141,7 @@ export type GetIngestionStatusInput = z.infer<typeof getIngestionStatusInputSche
 export type GetIngestionStatusOutput = z.infer<typeof getIngestionStatusOutputSchema>
 type Output = GetIngestionStatusOutput
 
-export type GetIngestionStatusDeps = {
-  analytics: Pick<
-    AnalyticsService,
-    "getEventTotals" | "getEventTimeline" | "getRejections" | "getRecentEvents" | "getEventFacets"
-  >
-  now?: () => number
-}
+export type GetIngestionStatusDeps = Pick<ServiceContext, "budgetJournal"> & { now?: () => number }
 
 const FACET_LIMIT = 50
 
@@ -157,63 +155,158 @@ export async function getIngestionStatus(
   rawInput: GetIngestionStatusInput
 ): Promise<Result<GetIngestionStatusOutput, FetchError>> {
   const input = getIngestionStatusInputSchema.parse(rawInput)
-  const scope: JournalEventScope = {
+  const scope = scopeOf(input)
+  const [summary, page] = await Promise.all([
+    readIngestionSummary(deps, input, scope),
+    readIngestionEvents(deps, input, scope),
+  ])
+  if (summary.err) return Err(summary.err)
+  if (page.err) return Err(page.err)
+  return Ok({
+    ...summary.val,
+    ...page.val,
+    evidence: [
+      ...summary.val.evidence,
+      ...page.val.recentEvents.map((event) => ({
+        type: "event" as const,
+        id: event.eventId,
+        source: "r2" as const,
+        timestamp: event.handledAt,
+      })),
+    ],
+  })
+}
+
+export const getIngestionSummaryInputSchema = getIngestionStatusInputSchema.omit({ cursor: true })
+export const getIngestionSummaryOutputSchema = getIngestionStatusOutputSchema.omit({
+  recentEvents: true,
+  nextCursor: true,
+})
+export const listIngestionEventsInputSchema = z.object({
+  scope: getIngestionStatusInputSchema.pick({
+    projectId: true,
+    customerId: true,
+    window: true,
+    filter: true,
+  }),
+  cursor: getIngestionStatusCursorSchema.nullish(),
+  limit: getIngestionStatusInputSchema.shape.limit,
+})
+export const listIngestionEventsOutputSchema = getIngestionStatusOutputSchema.pick({
+  recentEvents: true,
+  nextCursor: true,
+})
+
+function scopeOf(
+  input: z.infer<typeof listIngestionEventsInputSchema>["scope"]
+): JournalEventScope {
+  return {
     projectId: input.projectId,
-    ...(input.customerId ? { customerId: input.customerId } : {}),
+    customerId: input.customerId,
     window: { from: new Date(input.window.from), to: new Date(input.window.to) },
     filter: journalFilter(input.filter),
   }
-  const [totals, timeline, rejections, recent, facets] = await Promise.all([
-    deps.analytics.getEventTotals(scope),
-    deps.analytics.getEventTimeline(scope),
-    deps.analytics.getRejections({ ...scope, limit: input.limit }),
-    deps.analytics.getRecentEvents({
-      ...scope,
-      limit: input.limit + 1,
-      cursor: input.cursor,
-    }),
-    input.includeFacets
-      ? deps.analytics.getEventFacets({ ...scope, limit: FACET_LIMIT })
-      : Promise.resolve(Ok([])),
-  ])
-  for (const result of [totals, timeline, rejections, recent, facets]) {
-    if (result.err) return Err(result.err)
-  }
-  if (!totals.val || !timeline.val || !rejections.val || !recent.val || !facets.val) {
-    throw new Error("unreachable: every journal read succeeded")
-  }
+}
 
-  return Ok(
-    buildOutput({
-      input,
-      now: deps.now?.() ?? Date.now(),
-      totals: totals.val,
-      timeline: timeline.val,
-      rejections: rejections.val,
-      recent: recent.val,
-      facets: facets.val,
-    })
+export async function getIngestionSummary(
+  deps: GetIngestionStatusDeps,
+  rawInput: z.input<typeof getIngestionSummaryInputSchema>
+) {
+  const input = getIngestionSummaryInputSchema.parse(rawInput)
+  return readIngestionSummary(deps, input, scopeOf(input))
+}
+
+export async function listIngestionEvents(
+  deps: GetIngestionStatusDeps,
+  rawInput: z.input<typeof listIngestionEventsInputSchema>
+) {
+  const input = listIngestionEventsInputSchema.parse(rawInput)
+  return readIngestionEvents(deps, input, scopeOf(input.scope))
+}
+
+async function readIngestionSummary(
+  deps: GetIngestionStatusDeps,
+  input: z.infer<typeof getIngestionSummaryInputSchema>,
+  scope: JournalEventScope
+) {
+  const [totals, timeline, rejections, facets] = await Promise.all([
+    deps.budgetJournal.read(eventTotalsQuery(scope)),
+    deps.budgetJournal.read(eventTimelineQuery(scope)),
+    deps.budgetJournal.read(rejectionsQuery({ ...scope, limit: input.limit })),
+    deps.budgetJournal.read(eventFacetsQuery({ ...scope, limit: FACET_LIMIT })),
+  ])
+  if (totals.err) return Err(totals.err)
+  if (timeline.err) return Err(timeline.err)
+  if (rejections.err) return Err(rejections.err)
+  if (facets.err) return Err(facets.err)
+  const output = buildSummary({
+    input,
+    now: deps.now?.() ?? Date.now(),
+    totals: totals.val,
+    timeline: timeline.val,
+    rejections: rejections.val,
+    facets: facets.val,
+  })
+  return Ok(getIngestionSummaryOutputSchema.parse(output))
+}
+
+async function readIngestionEvents(
+  deps: GetIngestionStatusDeps,
+  input: { limit: number; cursor?: z.infer<typeof getIngestionStatusCursorSchema> | null },
+  scope: JournalEventScope
+) {
+  const recent = await deps.budgetJournal.read(
+    recentEventsQuery({ ...scope, limit: input.limit + 1, cursor: input.cursor })
   )
+  if (recent.err) return Err(recent.err)
+  return Ok(pageOfEvents(recent.val, input.limit))
+}
+
+function pageOfEvents(
+  recent: readonly z.infer<typeof recentEventSqlRowSchema>[],
+  limit: number
+): z.infer<typeof listIngestionEventsOutputSchema> {
+  const recentEvents = recent.slice(0, limit).map((row): Output["recentEvents"][number] => ({
+    eventId: row.idempotency_key ?? row.operation_id,
+    operationId: row.operation_id,
+    customerId: customerOfKey(row.budget_key) ?? row.budget_key,
+    eventSlug: row.event_slug ?? "",
+    sourceType: row.kind,
+    budgetKey: row.budget_key,
+    state: row.state,
+    rejectionReason: row.rejection_reason,
+    timestamp: row.occurred_at ?? row.timestamp.getTime(),
+    handledAt: row.timestamp.getTime(),
+  }))
+  const lastVisible = recent.length > limit ? recent[limit - 1] : undefined
+  return {
+    recentEvents,
+    nextCursor: lastVisible
+      ? {
+          handledAt: lastVisible.timestamp.getTime(),
+          operationId: lastVisible.operation_id,
+          budgetKey: lastVisible.budget_key,
+        }
+      : null,
+  }
 }
 
 /** The output from the journal's rows; every list empty answers an empty window. */
-function buildOutput({
+function buildSummary({
   input,
   now,
   totals,
   timeline,
   rejections,
-  recent,
   facets,
 }: {
-  input: GetIngestionStatusInput
+  input: z.infer<typeof getIngestionSummaryInputSchema>
   now: number
   totals: readonly z.infer<typeof eventTotalsSqlRowSchema>[]
   timeline: readonly z.infer<typeof eventTimelineSqlRowSchema>[]
   rejections: readonly z.infer<typeof rejectionsSqlRowSchema>[]
-  recent: readonly z.infer<typeof recentEventSqlRowSchema>[]
   facets: readonly z.infer<typeof eventFacetSqlRowSchema>[]
-}): GetIngestionStatusOutput {
+}): z.infer<typeof getIngestionSummaryOutputSchema> {
   const counts = { processed: 0, rejected: 0 }
   let latestHandledAt: number | null = null
   for (const row of totals) {
@@ -227,27 +320,6 @@ function buildOutput({
   const outputTotals = { ...counts, total }
   const successRate = total === 0 ? 0 : counts.processed / total
 
-  const recentEvents = recent.slice(0, input.limit).map((row): Output["recentEvents"][number] => ({
-    eventId: row.idempotency_key ?? row.operation_id,
-    operationId: row.operation_id,
-    customerId: customerOfKey(row.budget_key) ?? row.budget_key,
-    eventSlug: row.event_slug ?? "",
-    sourceType: row.kind,
-    budgetKey: row.budget_key,
-    state: row.state,
-    rejectionReason: row.rejection_reason,
-    timestamp: row.occurred_at ?? row.timestamp.getTime(),
-    handledAt: row.timestamp.getTime(),
-  }))
-  const lastVisible = recent.length > input.limit ? recent[input.limit - 1] : undefined
-  const nextCursor = lastVisible
-    ? {
-        handledAt: lastVisible.timestamp.getTime(),
-        operationId: lastVisible.operation_id,
-        budgetKey: lastVisible.budget_key,
-      }
-    : null
-
   const live = foldTimeline(timeline)
   const outputRejections = rejections.map((row) => ({
     rejectionReason: row.rejection_reason,
@@ -257,7 +329,7 @@ function buildOutput({
     lastSeenAt: row.last_seen_at.getTime(),
   }))
 
-  const output: GetIngestionStatusOutput = {
+  const output: z.infer<typeof getIngestionSummaryOutputSchema> = {
     window: input.window,
     totals: outputTotals,
     successRate,
@@ -271,9 +343,7 @@ function buildOutput({
     },
     live,
     rejections: outputRejections,
-    recentEvents,
     facets: foldFacets(facets, outputTotals),
-    nextCursor,
     answer: buildAnswer({
       projectId: input.projectId,
       customerId: input.customerId,
@@ -282,12 +352,12 @@ function buildOutput({
       successRate,
     }),
     confidence: total > 0 ? "high" : "low",
-    evidence: buildEvidence({ input, latestHandledAt, rejections: outputRejections, recentEvents }),
+    evidence: buildEvidence({ input, latestHandledAt, rejections: outputRejections }),
     warnings: buildWarnings(outputTotals),
     nextActions: buildNextActions(outputTotals, outputRejections),
   }
 
-  return getIngestionStatusOutputSchema.parse(output)
+  return getIngestionSummaryOutputSchema.parse(output)
 }
 
 function journalFilter(filter: GetIngestionStatusInput["filter"]): JournalEventFilter {
@@ -359,12 +429,10 @@ function buildEvidence({
   input,
   latestHandledAt,
   rejections,
-  recentEvents,
 }: {
   input: GetIngestionStatusInput
   latestHandledAt: number | null
   rejections: Output["rejections"]
-  recentEvents: Output["recentEvents"]
 }): Output["evidence"] {
   return [
     {
@@ -378,12 +446,6 @@ function buildEvidence({
       id: `rejection:${row.sourceType}:${row.eventSlug}:${row.rejectionReason ?? "unknown"}:${row.lastSeenAt}`,
       source: "r2" as const,
       timestamp: row.lastSeenAt,
-    })),
-    ...recentEvents.map((event) => ({
-      type: "event" as const,
-      id: event.eventId,
-      source: "r2" as const,
-      timestamp: event.handledAt,
     })),
   ]
 }

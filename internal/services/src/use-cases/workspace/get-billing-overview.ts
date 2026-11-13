@@ -107,7 +107,7 @@ export class GetWorkspaceBillingOverviewError extends DomainError<{
 }
 
 export type GetWorkspaceBillingOverviewDeps = {
-  services: Pick<ServiceContext, "customers" | "wallet" | "analytics">
+  services: Pick<ServiceContext, "customers" | "wallet" | "budgetJournal">
   db: Database
   /** Live metered usage from the payer budget, reached through the API. */
   currentEntitlements: CurrentEntitlementsReader
@@ -216,8 +216,8 @@ export async function getWorkspaceBillingOverview(
     ),
     getUsageDashboard(
       {
-        analytics: deps.services.analytics,
-        db: deps.db,
+        budgetJournal: deps.services.budgetJournal,
+        customers: deps.services.customers,
         now: deps.now,
       },
       {

@@ -7,38 +7,23 @@ import type { BudgetPricing } from "@unprice/db/validators"
 import { Ok, type Result } from "@unprice/error"
 import type { Amount } from "@unprice/money"
 import { type CardRows, type RateCards, estimateUsage, priceUsage, quantityOf } from "../pricing"
+import { ownProperty } from "../pricing/resolve"
 import { canonicalJson } from "../rate-cards/wire"
 import type { BudgetRecord } from "./config"
-import {
-  type BudgetEvent,
-  type PricedEvent,
-  type PricedFeature,
-  type Statement,
-  type StatementRegistration,
-  type UnPriceBudgetError,
-  reject,
+import type {
+  BudgetEvent,
+  PricedEvent,
+  PricedFeature,
+  Statement,
+  StatementRegistration,
 } from "./model"
+import { type UnPriceBudgetError, reject } from "./rejections"
 import { type Usage, usageOf } from "./usage"
 
 const ZERO = BigInt(0)
 
 /** The most an event's properties may take, serialized; the operation row keeps them. */
 const MAX_EVENT_PROPERTIES_BYTES = 4096
-
-/**
- * A budget whose pricing needs no statements keeps one perpetual statement per feature, never
- * sealed, so positions and totals live in the same row shape as a billing period's.
- */
-export const PERPETUAL_STATEMENT_KEY = "#budget"
-const PERPETUAL_STATEMENT_END = Number.MAX_SAFE_INTEGER
-
-function perpetualPeriodId(featureSlug: string): string {
-  return `${PERPETUAL_STATEMENT_KEY}:${featureSlug}`
-}
-
-export function isPerpetual(statement: Statement): boolean {
-  return statement.statementKey === PERPETUAL_STATEMENT_KEY
-}
 
 export type Metered = Readonly<{
   usage: Usage
@@ -55,8 +40,6 @@ type MeterInput = Readonly<{
   event: BudgetEvent
   /** When the event prices and which statement it counts in. */
   at: number
-  /** The clamped clock: when a perpetual statement is first written. */
-  now: number
   /**
    * An estimate prices the most the event can cost from any position and moves nothing (a hold);
    * otherwise the event is consumed at the positions and moves them.
@@ -95,7 +78,7 @@ export function meterEvent(input: MeterInput): Result<Metered, UnPriceBudgetErro
   let amount = ZERO
   const quantities: (readonly [string, Amount])[] = []
   for (const feature of features) {
-    const routed = statementFor(pricing, feature.slug, input.statements, at, input.now)
+    const routed = statementFor(feature.slug, input.statements, at)
     if (routed.err) return routed
     const { statement, late } = routed.val
     const route = { featureSlug: feature.slug, periodId: statement.periodId, late }
@@ -112,7 +95,7 @@ export function meterEvent(input: MeterInput): Result<Metered, UnPriceBudgetErro
         feature,
         properties: event.properties,
         at,
-        positionOf: (key) => (Object.hasOwn(positions, key) ? (positions[key] as Amount) : ZERO),
+        positionOf: (key) => ownProperty(positions, key) ?? ZERO,
       })
       if (result.err) return reject(result.err.rejection)
       const { cardId, rowId, lines, meterQuantity, amount, cost } = result.val
@@ -156,7 +139,7 @@ export function cardsOf(
   if (pricing.cards === undefined) throw new Error("a pricing without cards prices nothing")
   for (const cardId of cardIdsOf(pricing)) {
     // Card ids are caller data: `constructor` is a missing card, not Object's.
-    const card = Object.hasOwn(cached, cardId) ? cached[cardId] : undefined
+    const card = ownProperty(cached, cardId)
     if (!card) return reject({ code: "CARD_NOT_FOUND", cardId })
     if (card.card.unit !== unit) {
       return reject({ code: "UNIT_MISMATCH", cardId, unit, cardUnit: card.card.unit })
@@ -170,22 +153,14 @@ export function cardsOf(
 /**
  * ADR-0008 D6: the statement covering `at` when open; when it is sealed or completed, the earliest
  * open one of the feature that starts at or after its end, marked late, else PERIOD_CLOSED. No
- * statement covering `at` is NO_STATEMENT. Without required statements, the feature's perpetual
- * statement.
+ * statement covering `at` is NO_STATEMENT.
  */
 function statementFor(
-  pricing: BudgetPricing,
   featureSlug: string,
   statements: readonly Statement[],
-  at: number,
-  now: number
+  at: number
 ): Result<{ statement: Statement; late: boolean }, UnPriceBudgetError> {
-  if (pricing.statements === "none") {
-    const periodId = perpetualPeriodId(featureSlug)
-    const statement = statements.find((s) => s.periodId === periodId)
-    return Ok({ statement: statement ?? perpetualStatement(featureSlug, now), late: false })
-  }
-  const own = statements.filter((s) => s.featureSlug === featureSlug && !isPerpetual(s))
+  const own = statements.filter((s) => s.featureSlug === featureSlug)
   const covering = own.find((s) => s.start <= at && at < s.end)
   if (!covering) return reject({ code: "NO_STATEMENT", featureSlug, at })
   if (covering.state === "open") return Ok({ statement: covering, late: false })
@@ -194,15 +169,6 @@ function statementFor(
     .sort((a, b) => a.start - b.start)[0]
   if (next) return Ok({ statement: next, late: true })
   return reject({ code: "PERIOD_CLOSED", featureSlug, at, periodId: covering.periodId })
-}
-
-function perpetualStatement(featureSlug: string, now: number): Statement {
-  const periodId = perpetualPeriodId(featureSlug)
-  const statementKey = PERPETUAL_STATEMENT_KEY
-  return emptyStatement(
-    { periodId, statementKey, featureSlug, start: 0, end: PERPETUAL_STATEMENT_END },
-    now
-  )
 }
 
 /** A registered statement before any usage: open, at zero. */

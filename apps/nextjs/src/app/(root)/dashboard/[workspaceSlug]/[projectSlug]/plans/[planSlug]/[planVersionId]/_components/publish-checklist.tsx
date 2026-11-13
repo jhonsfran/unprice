@@ -1,13 +1,12 @@
 "use client"
 
-import { useQuery } from "@tanstack/react-query"
 import type { RateRow } from "@unprice/db/validators"
 import { Skeleton } from "@unprice/ui/skeleton"
 import { cn } from "@unprice/ui/utils"
+import { type PriceState, rowsByFeature } from "~/components/pricing/plan-prices"
+import { useVersionPricing } from "~/components/pricing/use-version-pricing"
 import { usePlanFeaturesList } from "~/hooks/use-features"
 import { type StatusTone, statusToneClasses } from "~/lib/status-tones"
-import { useTRPC } from "~/trpc/client"
-import { type PriceState, priceStateOf, rowsByFeature } from "../../../_components/plan-prices"
 
 /** What publishing checks, read from the editor's feature list and the version's card. */
 export function PublishChecklist({
@@ -17,23 +16,18 @@ export function PublishChecklist({
   planVersionId: string
   currency: string
 }) {
-  const trpc = useTRPC()
   const [features] = usePlanFeaturesList()
-  const { data, dataUpdatedAt, isLoading } = useQuery(
-    trpc.rateCards.forPlanVersion.queryOptions({ planVersionId })
-  )
-
-  if (isLoading) return <Skeleton className="h-20 w-full" />
-
-  const card = data?.cards.find((entry) => entry.currency === currency)
+  const { card, now, readiness, isLoading } = useVersionPricing(planVersionId, currency)
+  if (isLoading) return <Skeleton className="h-24 w-full" />
 
   return (
     <PublishChecklistView
       features={features.map((entry) => ({ slug: entry.feature.slug, title: entry.feature.title }))}
       rows={card?.rows ?? []}
-      hasCard={Boolean(card)}
+      hasCard={readiness.hasCard}
+      unpricedFeatureSlugs={readiness.unpricedFeatureSlugs}
       currency={currency}
-      now={dataUpdatedAt}
+      now={now}
     />
   )
 }
@@ -49,21 +43,29 @@ export function PublishChecklistView({
   features,
   rows,
   hasCard,
+  unpricedFeatureSlugs,
   currency,
   now,
 }: {
   features: readonly { slug: string; title: string }[]
   rows: readonly RateRow[]
   hasCard: boolean
+  unpricedFeatureSlugs: readonly string[]
   currency: string
   now: number
 }) {
   const byFeature = rowsByFeature(rows, now)
   const lines = features.map((feature) => ({
     ...feature,
-    state: priceStateOf(byFeature.get(feature.slug)),
+    state: unpricedFeatureSlugs.includes(feature.slug)
+      ? ("unpriced" as const)
+      : byFeature.get(feature.slug)?.scheduled &&
+          !byFeature.get(feature.slug)?.current &&
+          !byFeature.get(feature.slug)?.byDimension.length
+        ? ("scheduled" as const)
+        : ("priced" as const),
   }))
-  const unpriced = lines.filter((line) => line.state === "unpriced").length
+  const unpriced = unpricedFeatureSlugs.length
 
   return (
     <div className="rounded-md border bg-card text-xs">

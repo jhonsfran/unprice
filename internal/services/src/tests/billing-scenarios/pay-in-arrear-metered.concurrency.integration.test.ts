@@ -4,7 +4,7 @@ import type { Logger } from "@unprice/logs"
 import { toLedgerMinor } from "@unprice/money"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { LedgerGateway } from "../../ledger"
-import { RateCardService } from "../../rate-cards/service"
+import { testInvoicing } from "../../test-fixtures/billing-gateway"
 import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
 import { billPeriod } from "../../use-cases/billing/bill-period"
 
@@ -82,7 +82,7 @@ async function runBillPeriodWorker(dbForWorker: Database) {
   expect(ensureAccounts.err).toBeUndefined()
 
   return billPeriod({
-    invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
+    invoicing: testInvoicing({ db, payerBudgets }),
     context: await loadSubscriptionContext(dbForWorker),
     logger,
     db: dbForWorker,

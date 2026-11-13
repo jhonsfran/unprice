@@ -17,7 +17,12 @@ import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { ServiceContext } from "../../context"
 import { type DecimalFeaturePrice, ratePriceOf } from "../../pricing"
-import { type UnPriceRateCardError, pricePlanVersion, versionCardName } from "../../rate-cards"
+import {
+  type UnPriceRateCardError,
+  featurePricingOf,
+  pricePlanVersion,
+  versionCardName,
+} from "../../rate-cards"
 import { createPlan } from "../plan/create"
 import {
   BASE_FEE_FEATURE,
@@ -445,6 +450,14 @@ async function materializeFeature(
   const result = await getOrCreatePlanVersionFeature(context, input)
   if (result.err) return Err(result.err)
   if (result.val.state === "ok") {
+    const pricing = featurePricingOf({ slug: input.feature.slug, meterConfig: input.meterConfig })
+    if (!pricing.ok)
+      return Err(
+        new FetchError({
+          message: `Feature ${pricing.unpriceable.slug} cannot be priced: ${pricing.unpriceable.reason}`,
+          retry: false,
+        })
+      )
     const ratePrice = ratePriceOf(
       {
         ...price,
@@ -452,7 +465,7 @@ async function materializeFeature(
         usageMode: input.config.usageMode,
         units: input.config.units,
       },
-      input.meterConfig?.aggregationField ?? null
+      pricing.pricing.meterProperty
     )
     if (ratePrice) prices.push({ featureSlug: input.feature.slug, price: ratePrice })
   }
@@ -572,10 +585,9 @@ export async function materializeTemplatePlanFeatures(
         ? { price: template.usage.config.price }
         : {
             tiers: template.usage.config.tiers.map((tier) => ({
-              firstUnit: tier.firstUnit,
-              lastUnit: tier.lastUnit,
-              unitPrice: tier.unitPrice,
-              flatPrice: "0",
+              upTo: tier.lastUnit,
+              rate: tier.unitPrice,
+              flat: "0",
             })),
           },
     order: 6144,
@@ -599,9 +611,9 @@ export async function materializeTemplatePlanFeatures(
     config: { usageMode: "tier" },
     price: {
       tiers: [
-        { firstUnit: 1, lastUnit: 1000, unitPrice: "0.01", flatPrice: "0" },
-        { firstUnit: 1001, lastUnit: 10000, unitPrice: "0.0075", flatPrice: "0" },
-        { firstUnit: 10001, lastUnit: null, unitPrice: "0.005", flatPrice: "0" },
+        { upTo: 1000, rate: "0.01", flat: "0" },
+        { upTo: 10000, rate: "0.0075", flat: "0" },
+        { upTo: null, rate: "0.005", flat: "0" },
       ],
     },
     order: 7168,

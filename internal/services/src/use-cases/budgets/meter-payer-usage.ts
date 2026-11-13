@@ -1,14 +1,10 @@
 import { consumeUsageInputSchema, recordUsageEventSchema } from "@unprice/db/validators"
 import type { Result } from "@unprice/error"
-import {
-  BUDGET_JOURNAL_SCHEMA_VERSION,
-  type BudgetJournalRow,
-  type LakehouseJsonValue,
-} from "@unprice/lakehouse"
-import { formatAmount } from "@unprice/money"
+import { rejectedJournalDataSchema } from "@unprice/lakehouse"
+import type { BudgetJournalRow } from "@unprice/lakehouse"
 import { z } from "zod"
-import type { OutcomeOf, UnPriceBudgetError } from "../../budgets"
-import { payerBudgetKey } from "./compile-payer-budget"
+import { type OutcomeOf, type UnPriceBudgetError, buildBudgetJournalRow } from "../../budgets"
+import { payerBudgetKey } from "../../budgets/payer-key"
 import { type ExecuteBudgetCommandDeps, executeBudgetCommand } from "./execute-budget-command"
 
 /** The ids an adapter resolves for each event: the key's project and the event's customer. */
@@ -180,26 +176,21 @@ export function rejectedUsageRow(
   event: PayerUsageEvent,
   error: UnPriceBudgetError
 ): BudgetJournalRow {
-  const data = {
+  const data = rejectedJournalDataSchema.parse({
     customerId: event.customerId,
     idempotencyKey: event.idempotencyKey,
     event: { slug: event.eventSlug, properties: event.properties },
     ...("occurredAt" in event && { occurredAt: event.occurredAt }),
     rejection: error.rejection,
-  }
-  return {
-    schema_version: BUDGET_JOURNAL_SCHEMA_VERSION,
+  })
+  return buildBudgetJournalRow({
     project_id: event.projectId,
     budget_key: payerBudgetKey(event.customerId),
     seq: 0,
     operation_id: `r:${event.idempotencyKey}`,
     kind: input.verb,
     status: "rejected",
-    timestamp: new Date(input.receivedAt).toISOString(),
-    data: JSON.parse(
-      JSON.stringify(data, (_key, value: unknown) =>
-        typeof value === "bigint" ? formatAmount(value) : value
-      )
-    ) as LakehouseJsonValue,
-  }
+    writtenAt: input.receivedAt,
+    data,
+  })
 }

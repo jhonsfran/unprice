@@ -11,7 +11,7 @@ export const getRejectedEventPayload = protectedProjectProcedure
   .output(getRejectedEventPayloadOutputSchema)
   .query(async (opts) => {
     const result = await getRejectedEventPayloadUseCase(
-      { analytics: opts.ctx.services.analytics },
+      { budgetJournal: opts.ctx.services.budgetJournal },
       { ...opts.input, projectId: opts.ctx.project.id }
     )
 

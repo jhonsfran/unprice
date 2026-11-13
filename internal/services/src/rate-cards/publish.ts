@@ -1,13 +1,22 @@
 import type {
+  CostPlusFeaturePolicy,
   FeaturePricing,
+  MarginPolicy,
   MeterConfig,
+  ModelCost,
   RateCard,
   RateRow,
   RateRowDraft,
 } from "@unprice/db/validators"
 import { RATE_CHANGE_NOTICE_MS, featurePricingSchema } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
-import { type CardViolation, matchKey, validateCard } from "../pricing"
+import { type CardViolation, matchKey, validateCard, writesRow } from "../pricing"
+import {
+  costPlusPreview,
+  hasFeaturePolicy,
+  retainFeaturePolicies,
+  withFeaturePolicy,
+} from "./catalog"
 import { UnPriceRateCardError, type UnpriceableFeature } from "./errors"
 import { canonicalJson } from "./wire"
 
@@ -40,7 +49,7 @@ export type PlanPublishInput = Readonly<{
   /** When the rows start; absent means the earliest the card allows. */
   effectiveFrom?: number
   now: number
-  /** How far ahead a change must start once the card has a row: the D2 notice, or 0. */
+  /** How far ahead a change must start on a live card: the D2 notice, or 0. */
   noticeMs: number
   features: readonly FeaturePricing[]
   /** Project features the pricing core cannot read; a draft for one names the reason. */
@@ -56,24 +65,18 @@ function samePricing(a: Pick<RateRow, "price" | "cost">, b: Pick<RateRow, "price
   return canonicalJson([a.price, a.cost]) === canonicalJson([b.price, b.cost])
 }
 
-/**
- * The earliest a row may start or end on a card (ADR-0008 D2): once the card has any row, even an
- * ended one, `noticeMs` after `now`, because a budget may still price with the card as it was.
- * Only a card's first rows may start at once. A card no published version prices with has no
- * budget reading it, so its caller passes a notice of 0.
- */
-export function earliestChangeAt(rows: readonly RateRow[], now: number, noticeMs: number) {
-  return rows.length > 0 ? now + noticeMs : now
+/** Every start or end takes the live-card notice. Non-live cards pass a notice of zero. */
+export function earliestChangeAt(now: number, noticeMs: number) {
+  return now + noticeMs
 }
 
 function noticeRejection(
-  rows: readonly RateRow[],
   at: number,
   now: number,
   noticeMs: number,
   featureSlug: string
 ): UnPriceRateCardError | null {
-  const earliest = earliestChangeAt(rows, now, noticeMs)
+  const earliest = earliestChangeAt(now, noticeMs)
   if (at >= earliest) return null
   return new UnPriceRateCardError({ code: "NOTICE_TOO_SHORT", featureSlug, earliest })
 }
@@ -130,14 +133,14 @@ function rowsToEnd(
 /**
  * The writes that publish `drafts` on a card, and end the rows of `closeRowIds` where they start,
  * all in one plan, so a regrouped feature's new rows follow its old ones without a gap. Every
- * start and end takes the notice once the card has a row. A draft with an open row of the same
+ * start and end on a live card takes the notice. A draft with an open row of the same
  * feature and match is a price change: it starts after the open row's start and closes that row
  * where it starts. The inserted rows must pass `validateCard` against the features they price,
  * together with the live rows of those features.
  */
 export function planPublish(input: PlanPublishInput): Result<PublishPlan, UnPriceRateCardError> {
   const { card, rows, drafts, now, noticeMs, features } = input
-  const effectiveFrom = input.effectiveFrom ?? earliestChangeAt(rows, now, noticeMs)
+  const effectiveFrom = input.effectiveFrom ?? earliestChangeAt(now, noticeMs)
   const named = rowsToEnd(
     rows,
     input.closeRowIds ?? [],
@@ -171,7 +174,7 @@ export function planPublish(input: PlanPublishInput): Result<PublishPlan, UnPric
     return Err(new UnPriceRateCardError({ code: "UNKNOWN_FEATURE", features: unknown }))
   }
 
-  const late = noticeRejection(rows, effectiveFrom, now, noticeMs, firstSlug)
+  const late = noticeRejection(effectiveFrom, now, noticeMs, firstSlug)
   if (late) return Err(late)
 
   const closes: RowClose[] = []
@@ -245,16 +248,96 @@ export function planClose(
   }>
 ): Result<ClosePlan, UnPriceRateCardError> {
   const { rows, now, noticeMs } = input
-  const effectiveTo = input.effectiveTo ?? earliestChangeAt(rows, now, noticeMs)
+  const effectiveTo = input.effectiveTo ?? earliestChangeAt(now, noticeMs)
   const ended = rowsToEnd(rows, input.rowIds, effectiveTo, input.effectiveTo !== undefined)
   if (ended.err) return Err(ended.err)
   const [first] = ended.val.ending
-  const late = first ? noticeRejection(rows, effectiveTo, now, noticeMs, first.featureSlug) : null
+  const late = first ? noticeRejection(effectiveTo, now, noticeMs, first.featureSlug) : null
   if (late) return Err(late)
   return Ok({
     effectiveTo,
     closes: ended.val.ending.map((row) => ({ rowId: row.id, effectiveTo })),
     unchanged: ended.val.unchanged,
+  })
+}
+
+/** Plans one feature's removal after its assignment snapshots were read under the card lock. */
+export function planRemoveFeature(
+  input: Readonly<{
+    card: RateCard
+    rows: readonly RateRow[]
+    assigned: FeaturePricingSet | null
+    featureSlug: string
+    now: number
+    noticeMs: number
+  }>
+): Result<(ClosePlan & { marginPolicy: MarginPolicy }) | null, UnPriceRateCardError> {
+  const { card, rows, assigned, featureSlug, now, noticeMs } = input
+  if (
+    assigned?.features.some((feature) => feature.slug === featureSlug) ||
+    assigned?.unpriceable.some((feature) => feature.slug === featureSlug)
+  )
+    return Ok(null)
+  const closed = planClose({
+    rows,
+    rowIds: rows
+      .filter(
+        (row) =>
+          row.rateCardId === card.id && row.featureSlug === featureSlug && row.effectiveTo === null
+      )
+      .map((row) => row.id),
+    now,
+    noticeMs,
+  })
+  if (closed.err) return Err(closed.err)
+  return Ok({
+    ...closed.val,
+    marginPolicy: retainFeaturePolicies(
+      card.marginPolicy,
+      (policy) => policy.featureSlug !== featureSlug
+    ),
+  })
+}
+
+/** Plans the reviewed cost-plus rows and policy together; retries with no changes write no rows. */
+export function planCostPlusPublish(
+  input: Omit<PlanPublishInput, "drafts" | "closeRowIds"> & {
+    costs: readonly ModelCost[]
+    policy?: CostPlusFeaturePolicy
+    featureSlug?: string
+    draftHash: string
+  }
+): Result<PublishPlan & { marginPolicy: MarginPolicy }, UnPriceRateCardError> {
+  const card = input.policy
+    ? { ...input.card, marginPolicy: withFeaturePolicy(input.card.marginPolicy, input.policy) }
+    : input.card
+  const preview = costPlusPreview(card, input.rows, input.costs, input.now, input.featureSlug)
+  if (preview.err) return Err(preview.err)
+  const changes = preview.val.draft.changes
+  const drafts = changes
+    .filter(writesRow)
+    .map((change) => ({ ...change.proposed, match: { ...change.proposed.match } }))
+  const skipped = changes.length - drafts.length
+  if (
+    drafts.length === 0 &&
+    (!input.policy || hasFeaturePolicy(input.card.marginPolicy, input.policy))
+  ) {
+    return Ok({
+      effectiveFrom: input.effectiveFrom ?? earliestChangeAt(input.now, input.noticeMs),
+      inserts: [],
+      closes: [],
+      unchanged: skipped,
+      marginPolicy: input.card.marginPolicy,
+    })
+  }
+  if (preview.val.draftHash !== input.draftHash)
+    return Err(new UnPriceRateCardError({ code: "DRAFT_STALE", draftHash: preview.val.draftHash }))
+  const plan = planPublish({ ...input, card, drafts })
+  if (plan.err) return Err(plan.err)
+  return Ok({
+    ...plan.val,
+    unchanged: plan.val.unchanged + skipped,
+    marginPolicy: card.marginPolicy,
   })
 }
 
@@ -300,19 +383,6 @@ export type PlanFeaturePricingInput = {
   feature: { slug: string }
   meterConfig?: MeterConfig | null
   included?: string | null
-}
-
-/**
- * The one derivation of what a plan feature prices as, shared by card publishing, plan version
- * publishing and the payer budget compile: the version's own meter snapshot, never the project
- * feature's, and the plan feature's included units.
- */
-export function planFeaturePricing(planFeature: PlanFeaturePricingInput): FeaturePricingParse {
-  return featurePricingOf({
-    slug: planFeature.feature.slug,
-    meterConfig: planFeature.meterConfig,
-    included: planFeature.included,
-  })
 }
 
 export type FeaturePricingSet = Readonly<{
@@ -379,7 +449,7 @@ export function planVersionViolations(
   planFeatures: readonly PlanFeaturePricingInput[]
 ): FeatureViolation[] {
   const features = planFeatures.flatMap((planFeature) => {
-    const parsed = planFeaturePricing(planFeature)
+    const parsed = featurePricingOf({ ...planFeature, slug: planFeature.feature.slug })
     return parsed.ok ? [parsed.pricing] : []
   })
   const slugs = new Set(features.map((feature) => feature.slug))

@@ -82,7 +82,9 @@ function makeBillingService(provider: Partial<PaymentProviderService>) {
 
   const billing = new BillingService({
     invoicing: createInvoicingStub(),
-    db: {} as Database,
+    db: {
+      query: { subscriptions: { findFirst: vi.fn(async () => ({ customerId: "cust_1" })) } },
+    } as unknown as Database,
     logger,
     waitUntil: (p) => p,
     cache: {} as Cache,

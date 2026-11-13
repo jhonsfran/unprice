@@ -13,12 +13,10 @@ export {
   type RowDraft,
   earliestChangeAt,
   featurePricingOf,
-  planFeaturePricing,
   planVersionViolations,
   unionFeaturePricing,
 } from "./publish"
 export {
-  type CostPlusPreview,
   type PlanVersionPricing,
   type PublishRowsInput,
   type PublishRowsResult,
@@ -31,5 +29,6 @@ export {
   pricePlanVersionInputSchema,
   versionCard,
   versionCardName,
+  isVersionCard,
 } from "./price-plan-version"
-export { cardFeaturePricing, projectFeaturePricing } from "./project-features"
+export type { CostPlusPreview } from "./catalog"

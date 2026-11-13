@@ -49,7 +49,7 @@ describe("checkPayerAccess", () => {
       limit: 3,
       quotaWindow: { periodKey: "images:month", startAt: NOV, endAt: DEC },
     })
-    expect(getCustomerEntitlementsForCustomer).not.toHaveBeenCalled()
+    expect(getCustomerEntitlementsForCustomer).toHaveBeenCalledOnce()
   })
 
   it("denies a metered feature whose hard limit has no room", async () => {

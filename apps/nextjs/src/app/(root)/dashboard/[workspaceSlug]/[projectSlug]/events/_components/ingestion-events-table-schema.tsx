@@ -10,7 +10,7 @@ import { FileSearch } from "lucide-react"
 import { SuperLink } from "~/components/super-link"
 import { formatDate } from "~/lib/dates"
 
-export type IngestionStatus = RouterOutputs["analytics"]["getIngestionStatus"]
+export type IngestionStatus = RouterOutputs["analytics"]["listIngestionEvents"]
 export type IngestionEventRow = IngestionStatus["recentEvents"][number]
 
 const statusOptions: { label: string; value: IngestionEventRow["state"] }[] = [
@@ -179,7 +179,7 @@ export function buildIngestionEventsFilters({
   values,
   onChange,
 }: {
-  facets: IngestionStatus["facets"] | undefined
+  facets: RouterOutputs["analytics"]["getIngestionSummary"]["facets"] | undefined
   values: IngestionEventsFilterValues
   onChange: (id: IngestionEventsFilterId, values: string[]) => void
 }): FilterDataTableFilter[] {

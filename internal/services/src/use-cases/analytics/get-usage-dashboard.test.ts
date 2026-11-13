@@ -1,5 +1,4 @@
-import type { Database } from "@unprice/db"
-import { FetchError } from "@unprice/error"
+import { FetchError, Ok } from "@unprice/error"
 import { describe, expect, it, vi } from "vitest"
 import { journalAnalytics } from "../../analytics/journal.fixture"
 import {
@@ -25,7 +24,7 @@ describe("getUsageDashboard", () => {
   })
 
   it("folds journal rows into feature totals, per-bucket series, and a summary", async () => {
-    const { analytics, queries } = journalAnalytics(() => [
+    const { budgetJournal, queries } = journalAnalytics(() => [
       {
         bucket: "2026-06-13T07:00:00Z",
         feature_slug: "tokens",
@@ -53,7 +52,7 @@ describe("getUsageDashboard", () => {
     ])
 
     const result = await getUsageDashboard(
-      { analytics, db: fakeDb(), now: () => now },
+      { budgetJournal, customers: fakeCustomers(), now: () => now },
       input({ customerId: "cus_1" })
     )
 
@@ -96,7 +95,7 @@ describe("getUsageDashboard", () => {
   })
 
   it("warns when events fed more features than the query reads", async () => {
-    const { analytics } = journalAnalytics(() => [
+    const { budgetJournal } = journalAnalytics(() => [
       {
         bucket: "2026-06-13T07:00:00Z",
         feature_slug: null,
@@ -107,7 +106,7 @@ describe("getUsageDashboard", () => {
       },
     ])
     const result = await getUsageDashboard(
-      { analytics, db: fakeDb(), now: () => now },
+      { budgetJournal, customers: fakeCustomers(), now: () => now },
       input({ customerId: "cus_1" })
     )
     expect(result.val?.features).toEqual([])
@@ -117,7 +116,7 @@ describe("getUsageDashboard", () => {
   })
 
   it("keeps currencies separate for one feature in summaries and time buckets", async () => {
-    const { analytics } = journalAnalytics(() => [
+    const { budgetJournal } = journalAnalytics(() => [
       {
         bucket: "2026-06-13T07:00:00Z",
         feature_slug: "tokens",
@@ -143,7 +142,10 @@ describe("getUsageDashboard", () => {
         amount: "3",
       },
     ])
-    const result = await getUsageDashboard({ analytics, db: fakeDb(), now: () => now }, input())
+    const result = await getUsageDashboard(
+      { budgetJournal, customers: fakeCustomers(), now: () => now },
+      input()
+    )
 
     expect(result.err).toBeUndefined()
     expect(result.val?.features).toMatchObject([
@@ -177,7 +179,7 @@ describe("getUsageDashboard", () => {
   })
 
   it("keeps every currency when a top consumer used different payer units", async () => {
-    const { analytics } = journalAnalytics((sql) =>
+    const { budgetJournal } = journalAnalytics((sql) =>
       sql.includes("amount_total")
         ? [
             { budget_key: "unprice:customer:cus_1", unit: "money:USD", events: 5, amount: "7" },
@@ -187,8 +189,8 @@ describe("getUsageDashboard", () => {
     )
     const result = await getUsageDashboard(
       {
-        analytics,
-        db: fakeDb([{ id: "cus_1", email: "a@example.com", name: "A" }]),
+        budgetJournal,
+        customers: fakeCustomers([{ id: "cus_1", email: "a@example.com", name: "A" }]),
         now: () => now,
       },
       input({ customerId: undefined })
@@ -201,7 +203,7 @@ describe("getUsageDashboard", () => {
   })
 
   it("ranks the project's top payers and resolves them to customers", async () => {
-    const { analytics, queries } = journalAnalytics((sql) =>
+    const { budgetJournal, queries } = journalAnalytics((sql) =>
       sql.includes("amount_total")
         ? [
             {
@@ -221,8 +223,8 @@ describe("getUsageDashboard", () => {
     )
     const result = await getUsageDashboard(
       {
-        analytics,
-        db: fakeDb([{ id: "cus_2", email: "b@example.com", name: "B" }]),
+        budgetJournal,
+        customers: fakeCustomers([{ id: "cus_2", email: "b@example.com", name: "B" }]),
         now: () => now,
       },
       input({ customerId: undefined, range: "30d" })
@@ -243,9 +245,9 @@ describe("getUsageDashboard", () => {
   })
 
   it("returns the journal's failure", async () => {
-    const { analytics } = journalAnalytics(() => new Error("basin down"))
+    const { budgetJournal } = journalAnalytics(() => new Error("basin down"))
     const result = await getUsageDashboard(
-      { analytics, db: fakeDb(), now: () => now },
+      { budgetJournal, customers: fakeCustomers(), now: () => now },
       input({ customerId: "cus_1" })
     )
     expect(result.err).toBeInstanceOf(FetchError)
@@ -263,8 +265,6 @@ function input(overrides: Partial<GetUsageDashboardInput> = {}): GetUsageDashboa
   }
 }
 
-function fakeDb(customerRows: Array<{ id: string; email: string; name: string }> = []): Database {
-  return {
-    select: vi.fn(() => ({ from: vi.fn(() => ({ where: vi.fn(async () => customerRows) })) })),
-  } as unknown as Database
+function fakeCustomers(customerRows: Array<{ id: string; email: string; name: string }> = []) {
+  return { findManyByIds: vi.fn(async () => Ok(customerRows)) }
 }

@@ -213,7 +213,7 @@ describe("getUsageV1 route", () => {
 
 function createTestApp(answer: (sql: string) => unknown[] | Error) {
   const app = new OpenAPIHono<HonoEnv>()
-  const { analytics, queries } = journalAnalytics(answer)
+  const { budgetJournal, queries } = journalAnalytics(answer)
   const loggerError = vi.fn()
   const swr = vi.fn(async (_key: string, loader: () => Promise<unknown>) => {
     try {
@@ -234,7 +234,7 @@ function createTestApp(answer: (sql: string) => unknown[] | Error) {
   })
 
   app.use("*", async (c, next) => {
-    c.set("services", { analytics } as unknown as HonoEnv["Variables"]["services"])
+    c.set("services", { budgetJournal } as unknown as HonoEnv["Variables"]["services"])
     c.set("cache", { getUsage: { swr } } as unknown as HonoEnv["Variables"]["cache"])
     c.set("logger", {
       set: vi.fn(),

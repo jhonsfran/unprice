@@ -1,15 +1,16 @@
 "use client"
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import type { RouterOutputs } from "@unprice/trpc/routes"
+
 import { Info, Lock, Settings } from "lucide-react"
-import { useRouter } from "next/navigation"
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
+import { useUpdatePlanFeature } from "~/components/pricing/use-update-plan-feature"
+import { useVersionPricing } from "~/components/pricing/use-version-pricing"
 
 import { DOCS_DOMAIN } from "@unprice/config"
-import { OVERAGE_STRATEGIES_MAP, USAGE_MODES, USAGE_MODES_MAP } from "@unprice/db/utils"
+import { OVERAGE_STRATEGIES_MAP } from "@unprice/db/utils"
 import type { FeatureType } from "@unprice/db/utils"
 import type {
-  Feature,
   PlanVersion,
   PlanVersionFeature,
   PlanVersionFeatureDragDrop,
@@ -22,132 +23,58 @@ import {
 import { Button } from "@unprice/ui/button"
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@unprice/ui/form"
 import { HelpCircle } from "@unprice/ui/icons"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@unprice/ui/select"
 import { Switch } from "@unprice/ui/switch"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { cn } from "@unprice/ui/utils"
 
 import { SubmitButton } from "~/components/submit-button"
 import { SuperLink } from "~/components/super-link"
-import { useActiveFeature, useIsOnboarding, usePlanFeaturesList } from "~/hooks/use-features"
 import { toastAction } from "~/lib/toast"
 import { useZodForm } from "~/lib/zod-form"
-import { useTRPC } from "~/trpc/client"
 
+import { priceStateOf } from "~/components/pricing/plan-prices"
+import { CollapsibleSection, NumberedStep } from "~/components/pricing/section-label"
 import { FeatureDialog } from "../../_components/feature-dialog"
 import type { CreatedFeature } from "../../_components/feature-form"
-import {
-  type FeaturePriceRows,
-  priceStateOf,
-  rowsByFeature,
-  withDefaultRow,
-} from "../../_components/plan-prices"
-import { CatalogPriceBlock } from "./catalog-price-block"
-import {
-  BillingConfigFeatureFormField,
-  IncludedFormField,
-  LimitFormField,
-  OverageStrategyFormField,
-  QuantityFormField,
-  ResetConfigFeatureFormField,
-  UnitsFormField,
-} from "./fields-form"
-import { MeterSection } from "./meter-section"
-import {
-  type PlanVersionCard,
-  PriceBlockView,
-  type PriceDraft,
-  emptyDraft,
-  priceInputOf,
-  priceShapeOf,
-} from "./price-block"
+import { ConfigureFields } from "./feature-config-fields"
+import { BillingConfigFeatureFormField, OverageStrategyFormField } from "./fields-form"
+import { type PriceDraft, emptyDraft, priceInputOf } from "./price-block"
 import { PricingModelPicker, getConfigureSubtitle } from "./pricing-model"
-import { CollapsibleSection, NumberedStep } from "./section-label"
-
-// Plain-English overrides for the usageMode picker. Falls back to USAGE_MODES_MAP[m].label.
-const USAGE_MODE_FRIENDLY_LABEL: Record<string, string> = {
-  unit: "Per unit",
-  tier: "Tiered",
-  package: "Per bundle",
-}
 
 export function FeatureConfigForm({
   setDialogOpen,
   defaultValues,
   planVersion,
-  planFeatures,
+  onSaved,
+  onFeatureUpdated,
   className,
 }: {
   defaultValues: PlanVersionFeatureInsert | PlanVersionFeature | PlanVersionFeatureDragDrop
   planVersion: PlanVersion | null
-  // When provided (e.g. the customer entitlement sheet), the form runs standalone and does
-  // NOT mutate the shared plan-editor atoms. Left undefined on the plans page, where the atoms
-  // remain the source of truth for the inline editor's feature list.
-  planFeatures?: PlanVersionFeatureDragDrop[]
+  onSaved?: (feature: RouterOutputs["planVersionFeatures"]["update"]["planVersionFeature"]) => void
+  onFeatureUpdated?: (feature: CreatedFeature) => void
   setDialogOpen?: (open: boolean) => void
   className?: string
 }) {
-  const router = useRouter()
-  const [, setPlanFeatureList] = usePlanFeaturesList()
-  const [isOnboarding] = useIsOnboarding()
-  const [activeFeature, setActiveFeature] = useActiveFeature()
-  const isStandalone = planFeatures !== undefined
-  const trpc = useTRPC()
-  const queryClient = useQueryClient()
-
   const editMode = !!defaultValues.id
   const isPublished = planVersion?.status === "published"
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false)
   const [isDisplayOpen, setIsDisplayOpen] = useState(false)
-  // null until the user touches the price, so an untouched save leaves the card alone.
-  // Keyed by the feature, so expanding another card starts from its own untouched price.
-  const [priceState, setPriceState] = useState<{
-    id: string | undefined
-    draft: PriceDraft | null
-    problem: string | null
-  }>({ id: defaultValues.id, draft: null, problem: null })
-  const priceDraft = priceState.id === defaultValues.id ? priceState.draft : null
-  const priceProblem = priceState.id === defaultValues.id ? priceState.problem : null
-  const setPriceDraft = (draft: PriceDraft | null) =>
-    setPriceState({ id: defaultValues.id, draft, problem: null })
-  const setPriceProblem = (problem: string | null) =>
-    setPriceState((current) => ({
-      id: defaultValues.id,
-      draft: current.id === defaultValues.id ? current.draft : null,
-      problem,
-    }))
+  const [priceDraft, setPriceDraft] = useState<PriceDraft | null>(null)
+  const [priceProblem, setPriceProblem] = useState<string | null>(null)
   const feature = "feature" in defaultValues ? defaultValues.feature : undefined
   const featureMeterTemplate = feature?.meterConfig
 
-  // The feature edited from the sheet: its row in the table and the open sheet read the new one.
-  const onFeatureUpdated = (updated: CreatedFeature) => {
-    if (isStandalone) return
-    setPlanFeatureList((features) =>
-      features.map((entry) =>
-        entry.featureId === updated.id
-          ? { ...entry, feature: { ...entry.feature, ...updated } }
-          : entry
-      )
-    )
-    setActiveFeature((current) =>
-      current && current.featureId === updated.id
-        ? { ...current, feature: { ...current.feature, ...updated } }
-        : current
-    )
-  }
-  const featureSlug = feature?.slug ?? activeFeature?.feature.slug ?? ""
+  const featureSlug = feature?.slug ?? ""
 
   // ADR-0008 D2: the price is a row on the version's card, read beside the package it prices.
   const {
-    data: pricing,
+    card,
+    rows,
     isLoading: isPricingLoading,
-    dataUpdatedAt,
-  } = useQuery({
-    ...trpc.rateCards.forPlanVersion.queryOptions({ planVersionId: planVersion?.id ?? "" }),
-    enabled: Boolean(planVersion),
-  })
-  const card = pricing?.cards.find((entry) => entry.currency === planVersion?.currency)
-  const priceRows = rowsByFeature(card?.rows ?? [], dataUpdatedAt).get(featureSlug)
+    now: pricingNow,
+  } = useVersionPricing(planVersion?.id, planVersion?.currency)
+  const priceRows = rows.get(featureSlug)
 
   // Pre-populate every nested field so react-hook-form has a defined value to register against.
   const controlledDefaultValues = {
@@ -204,63 +131,26 @@ export function FeatureConfigForm({
     defaultValues: controlledDefaultValues as PlanVersionFeatureInsert,
   })
 
-  const updatePlanVersionFeatures = useMutation(
-    trpc.planVersionFeatures.update.mutationOptions({
-      meta: { suppressGlobalError: true },
-      onSuccess: ({ planVersionFeature, row }, variables) => {
-        // Only the plans-page editor tracks the shared feature list; the standalone sheet
-        // must not clobber another page's plan-editor state.
-        if (!isStandalone) {
-          // A new array, so the table's row and the checklist re-render with the saved feature.
-          setPlanFeatureList((features) =>
-            features.map((feat) =>
-              feat.featureId === planVersionFeature.featureId
-                ? { ...feat, ...planVersionFeature }
-                : feat
-            )
-          )
-        }
-
-        form.reset(planVersionFeature)
-        setPriceDraft(null)
-        setPriceProblem(null)
-        toastAction("saved")
-        setDialogOpen?.(false)
-        router.refresh()
-
-        if (variables.price !== undefined && planVersion) {
-          // The answered row goes into the pricing cache first, so the header and the block show
-          // the new price before the refetch lands.
-          queryClient.setQueryData(
-            trpc.rateCards.forPlanVersion.queryKey({ planVersionId: planVersion.id }),
-            (cached) =>
-              cached
-                ? {
-                    cards: withDefaultRow(cached.cards, planVersion.currency, featureSlug, row),
-                  }
-                : cached
-          )
-          void queryClient.invalidateQueries(trpc.rateCards.forPlanVersion.pathFilter())
-        }
-        if (!isOnboarding) {
-          void queryClient.invalidateQueries({
-            queryKey: trpc.planVersions.getById.queryKey(),
-          })
-        }
-      },
-      // A refusal that names the version's card (another version prices with it) belongs beside
-      // the price, next to the card link; every other failure keeps the global toast's form.
-      onError: (error, variables) => {
-        const cardNamed =
-          card && (error.message.includes(card.card.id) || error.message.includes(card.card.name))
-        if (variables.price !== undefined && cardNamed) {
-          setPriceProblem(error.message)
-          return
-        }
-        toastAction("error", error.message, { requestId: error.data?.requestId })
-      },
-    })
-  )
+  const updatePlanVersionFeatures = useUpdatePlanFeature({
+    currency: planVersion?.currency,
+    onSaved: (planVersionFeature) => {
+      onSaved?.(planVersionFeature)
+      form.reset(planVersionFeature)
+      setPriceDraft(null)
+      setPriceProblem(null)
+      toastAction("saved")
+      setDialogOpen?.(false)
+    },
+  })
+  const updateOptions = {
+    onError: (error, variables) => {
+      if (variables.price !== undefined && error.data?.domainCode === "CARD_SHARED") {
+        setPriceProblem(error.message)
+        return
+      }
+      toastAction("error", error.message, { requestId: error.data?.requestId })
+    },
+  } satisfies Parameters<typeof updatePlanVersionFeatures.mutate>[1]
 
   // When client-side validation fails, auto-open the collapsible that contains the offending
   // field so the inline FormMessage is visible. We do NOT toast — zod's per-field error already
@@ -278,13 +168,6 @@ export function FeatureConfigForm({
     }
   }
 
-  // Reset form when the active feature changes (different card expanded).
-  useEffect(() => {
-    form.reset(controlledDefaultValues)
-    // intentionally narrow deps — see existing behavior
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [defaultValues.id])
-
   const featureType = form.watch("featureType") as FeatureType | undefined
   const usageMode = form.watch("config.usageMode")
   const billingConfigName = form.watch("billingConfig.name")
@@ -301,7 +184,7 @@ export function FeatureConfigForm({
   const impliedDraft =
     featureType === "flat" &&
     !isPublished &&
-    pricing !== undefined &&
+    pricingNow > 0 &&
     priceStateOf(priceRows) === "unpriced"
       ? emptyDraft("flat")
       : null
@@ -315,11 +198,14 @@ export function FeatureConfigForm({
       return
     }
     setPriceProblem(null)
-    await updatePlanVersionFeatures.mutateAsync({
-      ...data,
-      id: defaultValues.id,
-      ...(built ? { price: built.price } : {}),
-    })
+    await updatePlanVersionFeatures.mutateAsync(
+      {
+        ...data,
+        id: defaultValues.id,
+        ...(built ? { price: built.price } : {}),
+      },
+      updateOptions
+    )
   }
 
   const handleFormSubmit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -425,7 +311,7 @@ export function FeatureConfigForm({
             form={form}
             planVersion={planVersion}
             featureSlug={featureSlug}
-            unitOfMeasure={defaultValues.unitOfMeasure ?? activeFeature?.unitOfMeasure ?? "units"}
+            unitOfMeasure={defaultValues.unitOfMeasure ?? "units"}
             isDisabled={isPublished}
             featureType={featureType}
             usageMode={usageMode}
@@ -434,6 +320,7 @@ export function FeatureConfigForm({
             card={card}
             priceRows={priceRows}
             isPricingLoading={isPricingLoading}
+            pricingNow={pricingNow}
             priceDraft={priceDraft}
             onPriceDraftChange={(draft) => {
               setPriceDraft(draft)
@@ -535,223 +422,5 @@ export function FeatureConfigForm({
         )}
       </form>
     </Form>
-  )
-}
-
-// ─── contextual configure fields per pricing model ───────────────────────
-// Prices live on the plan version's rate card (ADR-0008 D2): each model edits the card's row next
-// to what the package owns (quantities, limits, the meter, included units), and one Save writes both.
-function ConfigureFields({
-  form,
-  planVersion,
-  featureSlug,
-  unitOfMeasure,
-  isDisabled,
-  featureType,
-  usageMode,
-  feature,
-  onFeatureUpdated,
-  card,
-  priceRows,
-  isPricingLoading,
-  priceDraft,
-  onPriceDraftChange,
-  priceProblem,
-  savedDimensions,
-  includedUnits,
-}: {
-  // biome-ignore lint/suspicious/noExplicitAny: react-hook-form's UseFormReturn type doesn't narrow well across schema unions
-  form: any
-  planVersion: PlanVersion
-  featureSlug: string
-  unitOfMeasure: string
-  isDisabled?: boolean
-  featureType: FeatureType | undefined
-  usageMode: string | undefined
-  /** The catalog feature, whose meter template the version follows unless customized. */
-  feature: Feature | undefined
-  onFeatureUpdated: (feature: CreatedFeature) => void
-  card: PlanVersionCard | undefined
-  priceRows: FeaturePriceRows | undefined
-  isPricingLoading: boolean
-  priceDraft: PriceDraft | null
-  onPriceDraftChange: (draft: PriceDraft | null) => void
-  priceProblem: string | null
-  /** The meter's dimensions as stored; the catalog prices those, not unsaved chips. */
-  savedDimensions: readonly string[]
-  /** The units a new tiers draft gives away at $0. */
-  includedUnits: number
-}) {
-  if (!featureType) {
-    return (
-      <p className="text-muted-foreground text-sm italic">Pick a pricing model above to start.</p>
-    )
-  }
-
-  const dimensions: string[] = form.watch("meterConfig.groupBy") ?? []
-  const savedDimensionSet = new Set(savedDimensions)
-  const hasDimensions = featureType === "usage" && dimensions.length > 0
-  const price = hasDimensions ? (
-    <CatalogPriceBlock
-      planVersionId={planVersion.id}
-      featureSlug={featureSlug}
-      currency={planVersion.currency}
-      dimension={dimensions.length === 1 ? dimensions[0] : undefined}
-      card={card}
-      rows={priceRows}
-      editable={!isDisabled}
-      pendingSave={!dimensions.every((dimension) => savedDimensionSet.has(dimension))}
-    />
-  ) : (
-    <PriceBlockView
-      card={card}
-      rows={priceRows}
-      currency={planVersion.currency}
-      unit={unitOfMeasure.replace(/s$/, "")}
-      shape={priceShapeOf(featureType, usageMode)}
-      editable={!isDisabled}
-      isLoading={isPricingLoading}
-      draft={priceDraft}
-      onDraftChange={onPriceDraftChange}
-      problem={priceProblem}
-      includedUnits={includedUnits}
-    />
-  )
-
-  if (featureType === "flat") return price
-
-  if (featureType === "package") {
-    return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <UnitsFormField form={form} isDisabled={isDisabled} />
-          <QuantityFormField form={form} isDisabled={isDisabled} />
-        </div>
-        {price}
-      </div>
-    )
-  }
-
-  if (featureType === "tier") {
-    return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <QuantityFormField form={form} isDisabled={isDisabled} />
-          <LimitFormField form={form} isDisabled={isDisabled} units={unitOfMeasure} />
-        </div>
-        {price}
-      </div>
-    )
-  }
-
-  // usage
-  return (
-    <div className="space-y-5">
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <ModeSelect
-          form={form}
-          name="config.usageMode"
-          label="Charge customers"
-          tooltip="How consumed usage maps to a price. Set the price below."
-          isDisabled={isDisabled}
-          options={USAGE_MODES.filter((m) => !hasDimensions || m === "unit").map((m) => ({
-            value: m,
-            label: USAGE_MODE_FRIENDLY_LABEL[m] ?? USAGE_MODES_MAP[m].label,
-            description: USAGE_MODES_MAP[m].description,
-          }))}
-          note={
-            hasDimensions
-              ? `Per unit only while the price varies by ${dimensions.join(", ")}.`
-              : undefined
-          }
-        />
-        {usageMode === "package" && <UnitsFormField form={form} isDisabled={isDisabled} />}
-      </div>
-
-      <MeterSection
-        form={form}
-        feature={feature}
-        isDisabled={isDisabled}
-        onFeatureUpdated={onFeatureUpdated}
-      />
-
-      {/* The reset cadence sits with the limit it refreshes, not under Advanced. */}
-      <div
-        className={cn(
-          "grid grid-cols-1 gap-4",
-          hasDimensions ? "md:grid-cols-2" : "md:grid-cols-3"
-        )}
-      >
-        <LimitFormField form={form} isDisabled={isDisabled} units={unitOfMeasure} />
-        {/* Included units and dimension rows are exclusive (ADR-0008 D5). */}
-        {!hasDimensions && (
-          <IncludedFormField form={form} isDisabled={isDisabled} units={unitOfMeasure} />
-        )}
-        <ResetConfigFeatureFormField form={form} isDisabled={isDisabled} />
-      </div>
-
-      {price}
-    </div>
-  )
-}
-
-// ─── small inline mode select used for usageMode ──────────────
-function ModeSelect({
-  form,
-  name,
-  label,
-  tooltip,
-  options,
-  isDisabled,
-  note,
-}: {
-  // biome-ignore lint/suspicious/noExplicitAny: shared FormField shape
-  form: any
-  name: string
-  label: string
-  tooltip?: string
-  options: Array<{ value: string; label: string; description?: string }>
-  isDisabled?: boolean
-  /** Why the options are what they are, when the package restricts them. */
-  note?: string
-}) {
-  return (
-    <FormField
-      control={form.control}
-      name={name}
-      render={({ field }: { field: { value: string; onChange: (v: string) => void } }) => (
-        <FormItem className="space-y-1">
-          <div className="flex items-center gap-1.5">
-            <FormLabel className="text-xs">{label}</FormLabel>
-            {tooltip && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <HelpCircle className="size-3 text-muted-foreground" />
-                </TooltipTrigger>
-                <TooltipContent side="right" className="max-w-[260px]">
-                  {tooltip}
-                </TooltipContent>
-              </Tooltip>
-            )}
-          </div>
-          <Select onValueChange={field.onChange} value={field.value ?? ""} disabled={isDisabled}>
-            <FormControl>
-              <SelectTrigger className="h-8" disabled={isDisabled}>
-                <SelectValue placeholder="Select" />
-              </SelectTrigger>
-            </FormControl>
-            <SelectContent className="text-xs">
-              {options.map((opt) => (
-                <SelectItem value={opt.value} key={opt.value} description={opt.description}>
-                  {opt.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {note && <p className="text-muted-foreground text-xs">{note}</p>}
-          <FormMessage />
-        </FormItem>
-      )}
-    />
   )
 }

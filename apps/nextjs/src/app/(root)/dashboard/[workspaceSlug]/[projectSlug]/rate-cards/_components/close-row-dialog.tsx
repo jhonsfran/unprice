@@ -13,9 +13,9 @@ import {
   DialogTrigger,
 } from "@unprice/ui/dialog"
 import { useState } from "react"
+import { earliestStart, formatMatch } from "~/components/pricing/rate-card-format"
 import { toast } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
-import { earliestStart, formatMatch, toDateTimeLocal } from "./rate-card-format"
 import { ScheduleField } from "./schedule-field"
 
 const NOTICE_MINUTES = RATE_CHANGE_NOTICE_MS / 60_000
@@ -35,7 +35,7 @@ export function CloseRowDialog({
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
   const [schedule, setSchedule] = useState(false)
-  const [effectiveTo, setEffectiveTo] = useState("")
+  const [effectiveTo, setEffectiveTo] = useState<number | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
   const { mutate, isPending } = useMutation(
     trpc.rateCards.closeRows.mutationOptions({
@@ -57,7 +57,7 @@ export function CloseRowDialog({
         setProblem(null)
         if (next) {
           setSchedule(false)
-          setEffectiveTo(toDateTimeLocal(earliestStart(live, Date.now(), RATE_CHANGE_NOTICE_MS)))
+          setEffectiveTo(earliestStart(live, Date.now(), RATE_CHANGE_NOTICE_MS))
         }
       }}
     >
@@ -87,7 +87,7 @@ export function CloseRowDialog({
             mutate({
               cardId,
               rowIds: [row.id],
-              ...(schedule ? { effectiveTo: new Date(effectiveTo).getTime() } : {}),
+              ...(schedule && effectiveTo !== null ? { effectiveTo } : {}),
             })
           }}
         >
@@ -105,7 +105,7 @@ export function CloseRowDialog({
             <Button
               type="submit"
               variant="destructive"
-              disabled={isPending || (schedule && !effectiveTo)}
+              disabled={isPending || (schedule && effectiveTo === null)}
             >
               End price
             </Button>

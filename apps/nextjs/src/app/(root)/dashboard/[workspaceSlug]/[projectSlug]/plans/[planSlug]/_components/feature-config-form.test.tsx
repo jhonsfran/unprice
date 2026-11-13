@@ -93,14 +93,18 @@ function render(defaultValues: PlanVersionFeatureDragDrop) {
   const trpc = createTRPCOptionsProxy<AppRouter>({ client: trpcClient, queryClient })
   queryClient.setQueryData(
     trpc.rateCards.forPlanVersion.queryKey({ planVersionId: planVersion.id }),
-    { cards: [] }
+    { cards: [], hasCard: false, unpricedFeatureSlugs: [] }
   )
 
   return renderToString(
     <QueryClientProvider client={queryClient}>
       <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
         <TooltipProvider>
-          <FeatureConfigForm defaultValues={defaultValues} planVersion={planVersion} />
+          <FeatureConfigForm
+            key={defaultValues.id ?? defaultValues.featureId}
+            defaultValues={defaultValues}
+            planVersion={planVersion}
+          />
         </TooltipProvider>
       </TRPCProvider>
     </QueryClientProvider>

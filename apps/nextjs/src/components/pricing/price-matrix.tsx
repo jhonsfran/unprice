@@ -13,7 +13,7 @@ import {
   type MatrixLine,
   type MatrixStatus,
   isCustomCostRow,
-} from "./rate-card-format"
+} from "~/components/pricing/rate-card-format"
 
 const STATUS_BADGE: Partial<
   Record<MatrixStatus, { label: string; variant: "info" | "success" | "warning" | "secondary" }>

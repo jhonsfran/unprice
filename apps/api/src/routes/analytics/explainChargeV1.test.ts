@@ -168,7 +168,7 @@ describe("explainChargeV1 route", () => {
       expect.objectContaining({
         db: expect.anything(),
         ledger: expect.anything(),
-        analytics: expect.anything(),
+        budgetJournal: expect.anything(),
       }),
       {
         projectId: "proj_123",
@@ -283,7 +283,7 @@ function createTestApp() {
     c.set("db", {})
     c.set("services", {
       ledger: {},
-      analytics: {},
+      budgetJournal: {},
     })
 
     await next()
@@ -356,10 +356,22 @@ function makeExplainChargeOutput() {
     },
     events: [makeEvent()],
     answer: "deterministic answer",
+    confidence: "high",
+    freshness: { generatedAt: now, dataFrom: 1_700_000_000_000, dataTo: 1_700_000_000_000 },
     evidence: [
-      { type: "ledger_line" as const, id: "entry_1" },
-      { type: "billing_period" as const, id: "bp_1" },
+      { type: "invoice", id: "inv_1", source: "postgres", timestamp: null },
+      { type: "ledger_line", id: "entry_1", source: "ledger", timestamp: null },
+      { type: "billing_period", id: "bp_1", source: "postgres", timestamp: null },
+      { type: "plan_version", id: "fpv_1", source: "postgres", timestamp: null },
+      {
+        type: "event",
+        id: "proj_123:cus_1:onetime:1700000000000:o:hash_evt_1",
+        source: "r2",
+        timestamp: 1_700_000_000_000,
+      },
     ],
+    warnings: [],
+    nextActions: [],
     pagination: {
       limit: 50,
       offset: 10,
@@ -391,6 +403,13 @@ function makeNonUsageExplainChargeOutput() {
     },
     events: [],
     answer: "deterministic non-usage answer",
+    confidence: "medium",
+    freshness: { generatedAt: now, dataFrom: null, dataTo: null },
+    evidence: makeExplainChargeOutput().evidence.filter((row) => row.type !== "event"),
+    warnings: [
+      "This non-usage line is explained from ledger and billing-period evidence; no journal events are expected.",
+    ],
+    nextActions: [],
   }
 }
 

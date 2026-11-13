@@ -1,13 +1,16 @@
 "use client"
 
+import { type PricingShape, pricingShape } from "@unprice/services/pricing"
+
+import { singularUnit } from "@unprice/services/pricing"
+
 import { CalendarClock, EyeOff, MoreVertical, RotateCw, SlidersHorizontal, Zap } from "lucide-react"
 import { type KeyboardEvent, useReducer, useRef, useState } from "react"
 
 import type { FeatureType } from "@unprice/db/utils"
 import { FEATURE_TYPES_MAPS } from "@unprice/db/utils"
-import type { PlanVersionFeatureDragDrop, RatePrice, RateRow } from "@unprice/db/validators"
+import type { PlanVersionFeatureDragDrop, RateRow } from "@unprice/db/validators"
 import { AMOUNT_PATTERN, formatMoney } from "@unprice/money"
-import { describeTiers } from "@unprice/services/pricing"
 import type { RouterInputs } from "@unprice/trpc/routes"
 import {
   AlertDialog,
@@ -35,9 +38,9 @@ import {
   describeFeaturePrice,
   priceStateOf,
   scheduledFrom,
-} from "../../_components/plan-prices"
+} from "~/components/pricing/plan-prices"
 import { cellCommitOf, cellEditReducer } from "./cell-input-state"
-import { type PriceShape, prefillDraft, priceInputOf, priceShapeOf } from "./price-block"
+import { prefillDraft, priceInputOf } from "./price-block"
 import { PricingModelIcon } from "./pricing-model"
 
 /** The fields a cell sends with `planVersionFeatures.update`; each cell sends its own. */
@@ -170,7 +173,7 @@ export function currencySymbol(currency: string): string {
 
 /** The unit for a count; a feature stores it in either number ("call", "images"). */
 function unitWord(unit: string, count: number): string {
-  const singular = unit.replace(/s$/, "")
+  const singular = singularUnit(unit)
   return count === 1 ? singular : `${singular}s`
 }
 
@@ -188,30 +191,8 @@ export function unitSuffixOf(
   return reset && reset !== planBillingName ? `${unit} / ${cycleWord(reset)}` : unit
 }
 
-type GraduatedPrice = Extract<RatePrice, { type: "graduated" }>
-
-/**
- * Tiers in one line: "3 included, then $10 / seat" for a free tier followed by one rate; every
- * tier's range and price otherwise.
- */
-export function tierSummary(price: GraduatedPrice, currency: string, unit: string): string {
-  const lines = describeTiers(price, currency, unit)
-  const [free, rest] = price.tiers
-  const zero = BigInt(0)
-  if (
-    price.tiers.length === 2 &&
-    free &&
-    rest &&
-    free.upTo !== null &&
-    free.rate === zero &&
-    free.flat === zero &&
-    rest.flat === zero &&
-    lines[1]
-  ) {
-    return `${number.format(free.upTo)} included, then ${lines[1].value}`
-  }
-  return lines.map((line) => `${line.label} at ${line.value}`).join(", ")
-}
+export { tierSummary } from "@unprice/services/pricing"
+import { tierSummary } from "@unprice/services/pricing"
 
 /** Prices by dimension in one line: "79 models from the catalog". */
 export function dimensionSummary(byDimension: readonly RateRow[]): string {
@@ -225,7 +206,7 @@ export type SummaryAction = "tiers" | "catalog" | "card"
 export type PriceCell =
   | Readonly<{
       kind: "amount"
-      shape: Exclude<PriceShape, "graduated">
+      shape: Exclude<PricingShape, "graduated">
       amount: string
       /** What follows the amount: "/ call", "/ month", "/ 100 calls". */
       suffix: string
@@ -241,7 +222,7 @@ export type PriceCell =
     }>
 
 function amountSuffixOf(
-  shape: Exclude<PriceShape, "graduated">,
+  shape: Exclude<PricingShape, "graduated">,
   row: PlanVersionFeatureDragDrop,
   planBillingName: string | undefined
 ): string {
@@ -267,9 +248,10 @@ export function priceCellOf(
   row: PlanVersionFeatureDragDrop,
   rows: FeaturePriceRows | undefined,
   currency: string,
-  planBillingName: string | undefined
+  planBillingName: string | undefined,
+  catalogPriced = false
 ): PriceCell {
-  const unit = (row.unitOfMeasure ?? "units").replace(/s$/, "")
+  const unit = singularUnit(row.unitOfMeasure ?? "units")
   const priced = priceStateOf(rows) !== "unpriced"
   const summary = (
     action: SummaryAction,
@@ -280,10 +262,10 @@ export function priceCellOf(
   if (hasDimensions) {
     return summary(
       "catalog",
-      rows?.byDimension.length ? dimensionSummary(rows.byDimension) : undefined
+      rows?.byDimension.length && catalogPriced ? dimensionSummary(rows.byDimension) : undefined
     )
   }
-  const shape = priceShapeOf(row.featureType, row.config?.usageMode)
+  const shape = pricingShape({ featureType: row.featureType, usageMode: row.config?.usageMode })
   if (shape === "graduated") {
     const current = rows?.current?.price
     return summary(

@@ -2,7 +2,7 @@ import type { Database } from "@unprice/db"
 import { Err, Ok, type Result } from "@unprice/error"
 import { z } from "zod"
 import type { Statement, UnPriceBudgetError } from "../../budgets"
-import { billingPeriodIdOf, payerBudgetKey } from "./compile-payer-budget"
+import { payerBudgetKey } from "../../budgets/payer-key"
 import { type ExecuteBudgetCommandDeps, executeBudgetCommand } from "./execute-budget-command"
 
 /** An integer at the ledger scale (8 places), as a string: JSON carries no bigint. */
@@ -19,7 +19,6 @@ export const sealPayerStatementsInputSchema = z.object({
 /** One billing period of a metered feature as the payer budget priced it at ingestion. */
 export const payerStatementLineSchema = z.object({
   periodId: z.string(),
-  billingPeriodId: z.string(),
   statementKey: z.string(),
   featureSlug: z.string(),
   start: z.number().int(),
@@ -61,7 +60,6 @@ export type InvoicePayerStatementsDeps = ExecuteBudgetCommandDeps & { db: Databa
 function toLine(statement: Statement): PayerStatementLine {
   return {
     periodId: statement.periodId,
-    billingPeriodId: billingPeriodIdOf(statement.periodId),
     statementKey: statement.statementKey,
     featureSlug: statement.featureSlug,
     start: statement.start,
@@ -71,11 +69,6 @@ function toLine(statement: Statement): PayerStatementLine {
     cost: statement.cost === null ? null : statement.cost.toString(),
     events: statement.events,
   }
-}
-
-/** Statements billing registered: the budget's own perpetual ones start with "#". */
-function isBilled(statement: Statement): boolean {
-  return !statement.periodId.startsWith("#")
 }
 
 /**
@@ -97,20 +90,7 @@ export async function sealPayerStatements(
   if (sealed.err?.rejection.code === "BUDGET_NOT_FOUND") return Ok({ sealed: [], open: [] })
   if (sealed.err) return Err(sealed.err)
 
-  const listed = await executeBudgetCommand(deps, {
-    projectId,
-    key,
-    request: { type: "statements" },
-  })
-  if (listed.err) return Err(listed.err)
-  const open = listed.val.statements.filter(
-    (statement) =>
-      isBilled(statement) && statement.statementKey === statementKey && statement.state === "open"
-  )
-  return Ok({
-    sealed: sealed.val.statements.filter(isBilled).map(toLine),
-    open: open.map((statement) => statement.periodId),
-  })
+  return Ok({ sealed: sealed.val.statements.map(toLine), open: [...sealed.val.openPeriodIds] })
 }
 
 /**
@@ -134,8 +114,8 @@ export async function completeInvoicedPayerStatements(
 
   const sealed = new Map(
     listed.val.statements
-      .filter((statement) => isBilled(statement) && statement.state === "sealed")
-      .map((statement) => [billingPeriodIdOf(statement.periodId), statement.periodId])
+      .filter((statement) => statement.state === "sealed")
+      .map((statement) => [statement.periodId, statement.periodId])
   )
   if (sealed.size === 0) return Ok({ completed: [] })
 

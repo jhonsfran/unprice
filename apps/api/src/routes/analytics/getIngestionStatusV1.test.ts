@@ -159,7 +159,7 @@ describe("getIngestionStatusV1 route", () => {
 
 function createTestApp(answer: (sql: string) => unknown[] | Error) {
   const app = new OpenAPIHono<HonoEnv>()
-  const { analytics, queries } = journalAnalytics(answer)
+  const { budgetJournal, queries } = journalAnalytics(answer)
 
   app.use(timing())
 
@@ -172,7 +172,7 @@ function createTestApp(answer: (sql: string) => unknown[] | Error) {
   })
 
   app.use("*", async (c, next) => {
-    c.set("services", { analytics } as unknown as HonoEnv["Variables"]["services"])
+    c.set("services", { budgetJournal } as unknown as HonoEnv["Variables"]["services"])
     await next()
   })
 

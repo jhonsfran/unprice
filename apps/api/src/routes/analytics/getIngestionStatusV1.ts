@@ -96,7 +96,7 @@ export const registerGetIngestionStatusV1 = (app: App) =>
 
     const result = await getIngestionStatus(
       {
-        analytics: c.get("services").analytics,
+        budgetJournal: c.get("services").budgetJournal,
       },
       {
         projectId: key.projectId,
@@ -110,7 +110,6 @@ export const registerGetIngestionStatusV1 = (app: App) =>
           ...(eventSlug ? { eventSlugs: [eventSlug] } : {}),
           ...(state ? { states: [state] } : {}),
         },
-        includeFacets: true,
         limit,
       }
     )

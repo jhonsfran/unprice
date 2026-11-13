@@ -1,6 +1,5 @@
 import type { Dinero } from "@unprice/db/utils"
 import {
-  type CreditLinePolicy,
   type Currency,
   type RateRow,
   billingConfigSchema,
@@ -36,7 +35,6 @@ type ChargeInput = {
     startAt: number
     endAt: number | null
     billingAnchor: number
-    creditLinePolicy?: CreditLinePolicy
   }
   /**
    * The sealed statement of a metered period, or null when the payer budget never registered it:

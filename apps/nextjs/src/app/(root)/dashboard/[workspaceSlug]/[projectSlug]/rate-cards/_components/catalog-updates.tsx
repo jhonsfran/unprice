@@ -1,22 +1,18 @@
 "use client"
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { RATE_CHANGE_NOTICE_MS, type RateCard } from "@unprice/db/validators"
 import { MODEL_CATALOG_VERSION } from "@unprice/services/budgets"
 import { Button } from "@unprice/ui/button"
 import { useState } from "react"
-import { toast } from "~/lib/toast"
-import { useTRPC } from "~/trpc/client"
-import { PriceMatrix } from "./price-matrix"
+import { PriceMatrix } from "~/components/pricing/price-matrix"
 import {
   type CostPlusFeaturePolicy,
   cardCurrency,
-  changeMatrixOf,
-  describeChanges,
   earliestStart,
   markupPercent,
-  toDateTimeLocal,
-} from "./rate-card-format"
+} from "~/components/pricing/rate-card-format"
+import { useCatalogPricing } from "~/components/pricing/use-catalog-pricing"
+import { toast } from "~/lib/toast"
 import { ScheduleField } from "./schedule-field"
 
 /** "Follows models.dev 2026-10-20 at cost + 30%". */
@@ -39,33 +35,13 @@ export function CatalogUpdates({
   live: boolean
   unit: string
 }) {
-  const trpc = useTRPC()
-  const queryClient = useQueryClient()
   const [schedule, setSchedule] = useState(false)
-  const [effectiveFrom, setEffectiveFrom] = useState(() =>
-    toDateTimeLocal(earliestStart(live, Date.now(), RATE_CHANGE_NOTICE_MS))
+  const [effectiveFrom, setEffectiveFrom] = useState<number | null>(() =>
+    earliestStart(live, Date.now(), RATE_CHANGE_NOTICE_MS)
   )
-  const input = { cardId: card.id, featureSlug: policy.featureSlug }
-  const { data } = useQuery(trpc.rateCards.previewCostPlus.queryOptions(input))
-  const { mutate, isPending } = useMutation(
-    trpc.rateCards.publishCostPlus.mutationOptions({
-      onSuccess: ({ inserted, closed }) => {
-        toast.success(`Published ${inserted.length} prices, ended ${closed.length}`)
-        void queryClient.invalidateQueries(trpc.rateCards.get.queryFilter({ id: card.id }))
-        void queryClient.invalidateQueries(trpc.rateCards.previewCostPlus.pathFilter())
-        void queryClient.invalidateQueries(trpc.rateCards.forPlanVersion.pathFilter())
-      },
-    })
-  )
-
-  // Nothing to show until the catalog says what changed; a placeholder would only jump.
-  if (!data) return null
-
-  const matrix = changeMatrixOf(data.draft, policy.featureSlug)
-  const summary = describeChanges(matrix)
-  const writes = matrix.lines.filter(
-    (line) => line.status === "added" || line.status === "changed"
-  ).length
+  const pricing = useCatalogPricing({ cardId: card.id, featureSlug: policy.featureSlug })
+  const { preview: data, changes: matrix, summary, writes, isApplying: isPending } = pricing
+  if (!data || !matrix) return null
 
   // Up to date: the policy line above the sheet already says what the prices follow.
   if (matrix.lines.length === 0) return null
@@ -84,11 +60,14 @@ export function CatalogUpdates({
           className="flex flex-wrap items-end justify-between gap-3"
           onSubmit={(event) => {
             event.preventDefault()
-            mutate({
-              ...input,
-              draftHash: data.draftHash ?? "",
-              ...(schedule ? { effectiveFrom: new Date(effectiveFrom).getTime() } : {}),
-            })
+            void pricing
+              .apply(schedule && effectiveFrom !== null ? { effectiveFrom } : {})
+              .then((published) => {
+                if (published)
+                  toast.success(
+                    `Published ${published.inserted.length} prices, ended ${published.closed.length}`
+                  )
+              })
           }}
         >
           <ScheduleField
@@ -99,7 +78,11 @@ export function CatalogUpdates({
             value={effectiveFrom}
             onChange={setEffectiveFrom}
           />
-          <Button type="submit" size="sm" disabled={isPending || (schedule && !effectiveFrom)}>
+          <Button
+            type="submit"
+            size="sm"
+            disabled={isPending || (schedule && effectiveFrom === null)}
+          >
             Apply {writes} {writes === 1 ? "price" : "prices"}
             {live && !schedule ? " in 10 min" : ""}
           </Button>

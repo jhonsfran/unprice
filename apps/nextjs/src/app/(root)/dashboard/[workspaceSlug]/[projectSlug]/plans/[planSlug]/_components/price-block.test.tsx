@@ -1,7 +1,7 @@
 import { type RateCard, rateRowSchema } from "@unprice/db/validators"
 import { renderToString } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
-import { rowsByFeature } from "../../_components/plan-prices"
+import { rowsByFeature } from "~/components/pricing/plan-prices"
 import { PriceBlockView, prefillDraft, priceInputOf } from "./price-block"
 
 // SuperLink needs a mounted app router; the link target is not what these tests check.
@@ -59,7 +59,7 @@ function render(
   rows: ReturnType<typeof row>[],
   props: Partial<Parameters<typeof PriceBlockView>[0]> = {}
 ) {
-  const card = { currency: "USD" as const, card: rateCard, rows }
+  const card = { own: false, currency: "USD" as const, card: rateCard, rows }
   return renderToString(
     <PriceBlockView
       card={card}
@@ -123,8 +123,8 @@ describe("PriceBlockView", () => {
       draft: {
         kind: "tiers",
         tiers: [
-          { key: "a", upTo: "1000", unitPrice: "0", flatPrice: "0" },
-          { key: "b", upTo: "", unitPrice: "0.01", flatPrice: "5" },
+          { key: "a", upTo: "1000", rate: "0", flat: "0" },
+          { key: "b", upTo: "", rate: "0.01", flat: "5" },
         ],
       },
     })
@@ -160,7 +160,7 @@ describe("prefillDraft", () => {
     expect(prefillDraft(packageRow, "package")).toEqual({ kind: "amount", amount: "5" })
     expect(prefillDraft(packageRow, "graduated")).toEqual({
       kind: "tiers",
-      tiers: [{ key: "tier-1", upTo: "", unitPrice: "", flatPrice: "0" }],
+      tiers: [{ key: "tier-1", upTo: "", rate: "", flat: "0" }],
     })
     expect(prefillDraft(twoComponentRow, "unit")).toBeNull()
     expect(prefillDraft(null, "flat")).toEqual({ kind: "amount", amount: "0" })
@@ -178,24 +178,24 @@ describe("prefillDraft", () => {
     expect(prefillDraft(null, "graduated", 3)).toEqual({
       kind: "tiers",
       tiers: [
-        { key: "tier-0", upTo: "3", unitPrice: "0", flatPrice: "0" },
-        { key: "tier-1", upTo: "", unitPrice: "", flatPrice: "0" },
+        { key: "tier-0", upTo: "3", rate: "0", flat: "0" },
+        { key: "tier-1", upTo: "", rate: "", flat: "0" },
       ],
     })
     expect(
       priceInputOf({
         kind: "tiers",
         tiers: [
-          { key: "tier-0", upTo: "3", unitPrice: "0", flatPrice: "0" },
-          { key: "tier-1", upTo: "", unitPrice: "10", flatPrice: "0" },
+          { key: "tier-0", upTo: "3", rate: "0", flat: "0" },
+          { key: "tier-1", upTo: "", rate: "10", flat: "0" },
         ],
       })
     ).toEqual({
       ok: true,
       price: {
         tiers: [
-          { firstUnit: 1, lastUnit: 3, unitPrice: "0", flatPrice: "0" },
-          { firstUnit: 4, lastUnit: null, unitPrice: "10", flatPrice: "0" },
+          { upTo: 3, rate: "0", flat: "0" },
+          { upTo: null, rate: "10", flat: "0" },
         ],
       },
     })
@@ -213,16 +213,16 @@ describe("priceInputOf", () => {
       priceInputOf({
         kind: "tiers",
         tiers: [
-          { key: "a", upTo: "1000", unitPrice: "0", flatPrice: "" },
-          { key: "b", upTo: "", unitPrice: "0.01", flatPrice: "5" },
+          { key: "a", upTo: "1000", rate: "0", flat: "" },
+          { key: "b", upTo: "", rate: "0.01", flat: "5" },
         ],
       })
     ).toEqual({
       ok: true,
       price: {
         tiers: [
-          { firstUnit: 1, lastUnit: 1000, unitPrice: "0", flatPrice: "0" },
-          { firstUnit: 1001, lastUnit: null, unitPrice: "0.01", flatPrice: "5" },
+          { upTo: 1000, rate: "0", flat: "0" },
+          { upTo: null, rate: "0.01", flat: "5" },
         ],
       },
     })
@@ -238,9 +238,9 @@ describe("priceInputOf", () => {
       priceInputOf({
         kind: "tiers",
         tiers: [
-          { key: "a", upTo: "10", unitPrice: "1", flatPrice: "0" },
-          { key: "b", upTo: "5", unitPrice: "1", flatPrice: "0" },
-          { key: "c", upTo: "", unitPrice: "1", flatPrice: "0" },
+          { key: "a", upTo: "10", rate: "1", flat: "0" },
+          { key: "b", upTo: "5", rate: "1", flat: "0" },
+          { key: "c", upTo: "", rate: "1", flat: "0" },
         ],
       })
     ).toEqual({ ok: false, message: "Tier 2 ends at a whole number of at least 11." })

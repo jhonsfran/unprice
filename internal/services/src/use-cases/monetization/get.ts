@@ -58,7 +58,7 @@ import {
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import * as z from "zod"
-import { decimalPriceOf } from "../../pricing"
+import { decimalPriceOf, tierRanges } from "../../pricing"
 import type { RateCardService } from "../../rate-cards"
 
 export type GetMonetizationConfigDeps = {
@@ -468,7 +468,16 @@ function toBoundaryFeature(
   const boundaryConfig: MonetizationPriceConfig = {
     ...normalized.data.config,
     ...(decimal.price === undefined ? {} : { price: decimal.price }),
-    ...(decimal.tiers === undefined ? {} : { tiers: decimal.tiers }),
+    ...(decimal.tiers === undefined
+      ? {}
+      : {
+          tiers: tierRanges(decimal.tiers).map((tier) => ({
+            firstUnit: tier.from,
+            lastUnit: tier.upTo,
+            unitPrice: tier.rate,
+            flatPrice: tier.flat,
+          })),
+        }),
   }
 
   // Only the cadence crosses the boundary; the anchor, plan type, and display

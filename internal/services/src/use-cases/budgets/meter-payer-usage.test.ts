@@ -58,9 +58,7 @@ describe("meterPayerUsage", () => {
       type: "record",
     })
     expect(
-      h
-        .storeOf({ projectId: PROJECT_ID, key: "unprice:customer:cus_a" })
-        .statements.get("images:bp_nov")
+      h.storeOf({ projectId: PROJECT_ID, key: "unprice:customer:cus_a" }).statements.get("bp_nov")
     ).toMatchObject({ amount: BigInt(4_000_000), events: 1 })
   })
 
@@ -81,9 +79,7 @@ describe("meterPayerUsage", () => {
       replayed: true,
     })
     expect(
-      h
-        .storeOf({ projectId: PROJECT_ID, key: "unprice:customer:cus_a" })
-        .statements.get("images:bp_nov")
+      h.storeOf({ projectId: PROJECT_ID, key: "unprice:customer:cus_a" }).statements.get("bp_nov")
     ).toMatchObject({ amount: BigInt(1_800_000), events: 1 })
   })
 
@@ -222,7 +218,7 @@ describe("meterPayerUsage", () => {
       expect(
         h
           .storeOf({ projectId: PROJECT_ID, key: `unprice:customer:${customer}` })
-          .statements.get("images:bp_nov")
+          .statements.get("bp_nov")
       ).toMatchObject({ events: 45, amount: BigInt(45 * 1_800_000) })
     }
   })
@@ -300,9 +296,7 @@ describe("meterPayerUsage", () => {
       },
     ])
     expect(
-      h
-        .storeOf({ projectId: PROJECT_ID, key: "unprice:customer:cus_b" })
-        .statements.get("images:bp_nov")
+      h.storeOf({ projectId: PROJECT_ID, key: "unprice:customer:cus_b" }).statements.get("bp_nov")
     ).toMatchObject({ amount: BigInt(1_800_000), events: 1 })
   })
 })

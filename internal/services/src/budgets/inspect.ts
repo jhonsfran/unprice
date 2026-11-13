@@ -5,8 +5,8 @@
  */
 
 import type { Amount } from "@unprice/money"
+import { admissionRejection } from "./balance"
 import { LEASE_REFUSAL_RETENTION_MS, OPERATION_RETENTION_MS, RECORD_DEDUPE_MS } from "./config"
-import { admissionRejection } from "./decide"
 import { exposureOf } from "./ledger"
 import type {
   BudgetRejection,

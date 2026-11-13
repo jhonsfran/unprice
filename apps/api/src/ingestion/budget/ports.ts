@@ -39,6 +39,8 @@ export type BudgetStoreTx = BudgetReader & {
   cacheCards(cards: readonly CardRows[], at: number): void
   /** Whether a wallet reservation is still open: the storage must outlive it. */
   hasOpenFunding(): boolean
+  /** Whether billing still needs an open or sealed statement. */
+  hasUnfinishedStatements(): boolean
   /** Deletes up to `limit` exported closed rows whose retention ended by `now`. */
   purgeOperations(now: number, limit: number): void
   /**

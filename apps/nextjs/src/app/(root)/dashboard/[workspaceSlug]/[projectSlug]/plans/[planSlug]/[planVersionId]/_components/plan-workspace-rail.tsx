@@ -12,9 +12,9 @@ import { Separator } from "@unprice/ui/separator"
 import { cn } from "@unprice/ui/utils"
 
 import { PricingCard } from "~/components/forms/pricing-card"
+import { CollapsibleSection } from "~/components/pricing/section-label"
 import { getStatusTone, statusToneClasses } from "~/lib/status-tones"
 import { PlanVersionDialog } from "../../_components/plan-version-dialog"
-import { CollapsibleSection } from "../../_components/section-label"
 import { PlanVersionRateCard } from "./plan-version-rate-card"
 import { PublishChecklist } from "./publish-checklist"
 
@@ -92,7 +92,7 @@ export function PlanWorkspaceRail({
 
       <Separator />
 
-      <PlanVersionRateCard planVersionId={planVersion.id} />
+      <PlanVersionRateCard planVersionId={planVersion.id} currency={planVersion.currency} />
 
       <CollapsibleSection
         label="Preview"

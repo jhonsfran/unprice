@@ -99,11 +99,13 @@ describe("completeProviderSignUp", () => {
     expect(txUpdate).toHaveBeenCalledTimes(1)
     expect(subscriptions.createSubscription).not.toHaveBeenCalled()
     expect(subscriptions.createPhase).not.toHaveBeenCalled()
-    expect(generateBillingPeriods).toHaveBeenCalledWith({
-      subscriptionId: "sub_existing",
-      projectId: "proj_1",
-      now: expect.any(Number),
-    })
+    expect(generateBillingPeriods).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subscriptionId: "sub_existing",
+        projectId: "proj_1",
+        now: expect.any(Number),
+      })
+    )
     expect(subscriptions.activateWallet).toHaveBeenCalledWith(
       expect.objectContaining({
         subscriptionId: "sub_existing",

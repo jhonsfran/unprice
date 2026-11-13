@@ -1,5 +1,9 @@
 "use client"
 
+import { COMPONENT_LABEL } from "~/components/pricing/catalog-policy"
+
+import { useVersionPricing } from "~/components/pricing/use-version-pricing"
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { COST_COMPONENT_NAMES, type Currency } from "@unprice/db/validators"
 import { formatAmount } from "@unprice/money"
@@ -20,21 +24,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { Plus } from "lucide-react"
 import { useState } from "react"
 import { InputWithAddons } from "~/components/input-addons"
+import { catalogPolicyFor, markupPercent } from "~/components/pricing/rate-card-format"
 import { toast } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
-import {
-  catalogPolicyFor,
-  markupPercent,
-} from "../../../../rate-cards/_components/rate-card-format"
 
 type Component = (typeof COST_COMPONENT_NAMES)[number]
-
-const COMPONENT_LABEL: Record<Component, string> = {
-  input: "Input",
-  output: "Output",
-  cache_read: "Cache read",
-  cache_write: "Cache write",
-}
 
 const EMPTY: Record<Component, string> = { input: "", output: "", cache_read: "", cache_write: "" }
 
@@ -70,12 +64,11 @@ export function CustomModelDialog({
   const [costs, setCosts] = useState<Record<Component, string>>(EMPTY)
   const [problem, setProblem] = useState<string | null>(null)
 
-  const { data: pricing } = useQuery(trpc.rateCards.forPlanVersion.queryOptions({ planVersionId }))
+  const { card } = useVersionPricing(planVersionId, currency)
   const { data: custom } = useQuery({
     ...trpc.rateCards.listCustomModels.queryOptions(),
     enabled: open,
   })
-  const card = pricing?.cards.find((entry) => entry.currency === currency)
   const policy = card ? catalogPolicyFor(card.card.marginPolicy, featureSlug) : null
   const percent = policy ? markupPercent(policy.markup) : "0"
   // Only the token kinds the feature's events carry can be priced; the others would sit unused.

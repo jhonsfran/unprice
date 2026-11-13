@@ -1,6 +1,7 @@
 import type { Database } from "@unprice/db"
 import {
   type PlanVersionCatalogPricingInput,
+  type RateCard,
   type applyPlanVersionCatalogPricingInputSchema,
   currencySchema,
 } from "@unprice/db/validators"
@@ -9,18 +10,12 @@ import type { z } from "zod"
 import { MODEL_CATALOG } from "../../budgets/model-catalog"
 import type { ServiceContext } from "../../context"
 import type { Transaction } from "../../deps"
-import {
-  UnPriceRateCardError,
-  cardFeaturePricing,
-  planFeaturePricing,
-  pricePlanVersion,
-  versionCardName,
-} from "../../rate-cards"
+import { UnPriceRateCardError, featurePricingOf, versionCardName } from "../../rate-cards"
 import type { PublishRowsResult } from "../../rate-cards"
+import { costPlusPreview, withFeaturePolicy } from "../../rate-cards/catalog"
 import { transactionResult } from "../../utils/transaction-result"
-import { catalogEffectiveFrom, importModelCosts } from "./import-model-costs"
 
-type CatalogPricingDeps = { services: Pick<ServiceContext, "plans" | "features" | "rateCards"> }
+type CatalogPricingDeps = { services: Pick<ServiceContext, "plans" | "rateCards" | "modelCosts"> }
 type CatalogPricingInput = PlanVersionCatalogPricingInput & { projectId: string; now: number }
 const USD = currencySchema.parse("USD")
 
@@ -30,7 +25,7 @@ async function prepareCatalogPricing(
   tx?: Transaction
 ) {
   const { plans, rateCards } = deps.services
-  const { projectId, planVersionId, featureSlug, now } = input
+  const { projectId, planVersionId, featureSlug } = input
 
   const found = await plans.getPlanVersionByIdDetailed({ planVersionId, projectId }, tx)
   if (found.err) return Err(found.err)
@@ -52,7 +47,7 @@ async function prepareCatalogPricing(
   if (!planFeature) {
     return Err(new UnPriceRateCardError({ code: "UNKNOWN_FEATURE", features: [featureSlug] }))
   }
-  const parsed = planFeaturePricing(planFeature)
+  const parsed = featurePricingOf({ ...planFeature, slug: planFeature.feature.slug })
   const dimensions =
     planFeature.featureType === "usage" && parsed.ok ? parsed.pricing.dimensions : []
   const dimension = input.dimension ?? (dimensions.length === 1 ? dimensions[0] : undefined)
@@ -75,20 +70,16 @@ async function prepareCatalogPricing(
       )
     }
   }
-  const card = assigned
-    ? Ok({ cardId: assigned.cardId })
-    : await pricePlanVersion(deps, {
-        projectId,
-        planVersionId,
-        currency: USD,
-        cardName: versionCardName(version.plan.slug, planVersionId, USD),
-        prices: [],
-        now,
-      })
-  if (card.err) return Err(card.err)
-  const { cardId } = card.val
-
-  await importModelCosts(deps, { effectiveFrom: catalogEffectiveFrom() })
+  const foundCard = assigned ? await rateCards.getCard(projectId, assigned.cardId) : null
+  if (foundCard?.err) return Err(foundCard.err)
+  const card: RateCard = foundCard?.val?.card ?? {
+    id: "unsaved",
+    projectId,
+    name: versionCardName(version.plan.slug, planVersionId, USD),
+    unit: "money:USD",
+    marginPolicy: { type: "manual" },
+  }
+  const rows = foundCard?.val?.rows ?? []
   const featurePolicy = {
     featureSlug,
     markup: input.markup,
@@ -96,7 +87,7 @@ async function prepareCatalogPricing(
     dimension,
     componentMap: input.componentMap,
   }
-  return Ok({ cardId, featurePolicy, dimension })
+  return Ok({ cardId: assigned?.cardId ?? null, card, rows, featurePolicy, dimension })
 }
 
 /** Previews one feature's policy without saving it. */
@@ -106,12 +97,13 @@ export async function previewPlanVersionCatalogPricing(
 ) {
   const prepared = await prepareCatalogPricing(deps, input)
   if (prepared.err) return Err(prepared.err)
-  const { cardId, featurePolicy, dimension } = prepared.val
-  const preview = await deps.services.rateCards.previewCostPlus(
-    input.projectId,
-    cardId,
+  const { cardId, card, rows, featurePolicy, dimension } = prepared.val
+  const preview = costPlusPreview(
+    { ...card, marginPolicy: withFeaturePolicy(card.marginPolicy, featurePolicy) },
+    rows,
+    await deps.services.modelCosts.costsAt(input.projectId, input.now),
     input.now,
-    { policy: featurePolicy, featureSlug: input.featureSlug }
+    input.featureSlug
   )
   if (preview.err) return Err(preview.err)
   const drafted = new Set(
@@ -139,19 +131,31 @@ export async function applyPlanVersionCatalogPricing(
       const services = { ...deps.services, rateCards }
       const prepared = await prepareCatalogPricing({ services }, input, tx)
       if (prepared.err) return Err(prepared.err)
-      const features = await cardFeaturePricing(services, input.projectId, prepared.val.cardId)
-      if (features.err) return Err(features.err)
+      let cardId = prepared.val.cardId
+      if (cardId === null) {
+        const created = await rateCards.createCard(input.projectId, {
+          name: prepared.val.card.name,
+          unit: prepared.val.card.unit,
+          marginPolicy: { type: "manual" },
+        })
+        if (created.err) return Err(created.err)
+        cardId = created.val.id
+        const assigned = await rateCards.assignToPlanVersion(input.projectId, {
+          planVersionId: input.planVersionId,
+          currency: USD,
+          cardId,
+        })
+        if (assigned.err) return Err(assigned.err)
+      }
       return rateCards.publishCostPlus({
         projectId: input.projectId,
-        cardId: prepared.val.cardId,
+        cardId,
         now: input.now,
         draftHash: input.draftHash,
         featureSlug: input.featureSlug,
         policy: prepared.val.featurePolicy,
-        ...features.val,
       })
     }
   )
-  if (!result.err) await deps.services.rateCards.invalidatePlanVersionPrices([input.planVersionId])
   return result
 }

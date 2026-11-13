@@ -16,7 +16,6 @@ import {
   applyPlanVersionCatalogPricing,
   previewPlanVersionCatalogPricing,
 } from "../use-cases/rate-cards/catalog-pricing"
-import { publishRateRows } from "../use-cases/rate-cards/publish-rows"
 import { UnPriceRateCardError } from "./errors"
 import {
   LIVE_VERSION,
@@ -64,7 +63,7 @@ describe("feature pricing transactions", () => {
       featureType: "usage",
       config: { usageMode: "unit" },
       meterConfig: { ...TOKENS_METER, groupBy: undefined },
-      price: { tiers: [{ firstUnit: 1, lastUnit: null, unitPrice: "1" }] },
+      price: { tiers: [{ upTo: null, rate: "1", flat: "0" }] },
     })
     expect(result.err).toMatchObject({ code: "PRICE_SHAPE_MISMATCH" })
     expect(
@@ -84,13 +83,18 @@ describe("feature pricing transactions", () => {
       config: {},
       price: {
         tiers: [
-          { firstUnit: 1, lastUnit: 10, unitPrice: "1" },
-          { firstUnit: 11, lastUnit: 5, unitPrice: "2" },
-          { firstUnit: 6, lastUnit: null, unitPrice: "3" },
+          { upTo: 10, rate: "1", flat: "0" },
+          { upTo: 5, rate: "2", flat: "0" },
+          { upTo: null, rate: "3", flat: "0" },
         ],
       },
     })
-    expect(result.err).toMatchObject({ code: "INVALID_CARD" })
+    expect(result.err).toMatchObject({
+      code: "INVALID_CARD",
+      rejection: {
+        violations: expect.arrayContaining([{ code: "TIERS_INVALID", rowId: expect.any(String) }]),
+      },
+    })
     expect(
       (
         await db.query.planVersionFeatures.findFirst({
@@ -114,7 +118,7 @@ describe("feature pricing transactions", () => {
       ...planVersionFeatureUpdateBaseSchema.parse({
         id: "fv_test_arrear_events",
         planVersionId: LIVE_VERSION,
-        price: { tiers: [{ firstUnit: 1, lastUnit: null, unitPrice: "0.1" }] },
+        price: { tiers: [{ upTo: null, rate: "0.1", flat: "0" }] },
       }),
       projectId,
       now: NOW,
@@ -182,25 +186,22 @@ describe("feature pricing transactions", () => {
       })
     )
     await value(
-      publishRateRows(
-        { services },
-        {
-          projectId,
-          cardId: originalCard,
-          rows: [
-            rateRowDraftSchema.parse({
-              featureSlug: "llm_tokens",
-              match: { model: "acme" },
-              price: {
-                type: "unit",
-                components: [{ property: "input_tokens", rate: "1", per: 1 }],
-              },
-              cost: null,
-            }),
-          ],
-          now: NOW,
-        }
-      )
+      rateCards.publishRows({
+        projectId,
+        cardId: originalCard,
+        drafts: [
+          rateRowDraftSchema.parse({
+            featureSlug: "llm_tokens",
+            match: { model: "acme" },
+            price: {
+              type: "unit",
+              components: [{ property: "input_tokens", rate: "1", per: 1 }],
+            },
+            cost: null,
+          }),
+        ],
+        now: NOW,
+      })
     )
     const result = await value(duplicatePlanVersion(deps, { id: LIVE_VERSION, projectId }))
     if (result.state !== "ok") throw new Error(result.state)
@@ -272,6 +273,7 @@ describe("feature pricing transactions", () => {
         .every((row) => row.effectiveTo === NOW + 1)
     ).toBe(true)
     const next = await value(rateCards.previewCostPlus(projectId, card.card.id, NOW + 1))
+    if (!next.draftHash) throw new Error("expected a publishable preview")
     expect(new Set(next.draft.changes.map((change) => change.proposed.featureSlug))).toEqual(
       new Set(["events"])
     )

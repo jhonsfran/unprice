@@ -142,13 +142,15 @@ function detach<T>(row: T): T {
 // ---------------------------------------------------------------------------
 
 function createHarness() {
-  const cards = createRateCardsFake()
   const store = {
     plans: [] as Plan[],
     features: [] as Feature[],
     events: [] as Event[],
     versions: [] as StoredPlanVersion[],
   }
+  const cards = createRateCardsFake(
+    (id) => store.versions.find((version) => version.id === id)?.planFeatures ?? []
+  )
   /** Lets a test crash one write without restating the whole fake. */
   const control = {
     failFeatureWrite: null as null | ((input: CreatePlanVersionFeatureInput) => FetchError | null),

@@ -3,7 +3,7 @@ import { toLedgerMinor } from "@unprice/money"
 import { afterAll, beforeEach, describe, expect, it } from "vitest"
 import type { Cache } from "../../cache"
 import { createServiceContext } from "../../context"
-import { RateCardService } from "../../rate-cards/service"
+import { testInvoicing } from "../../test-fixtures/billing-gateway"
 import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
 import { billPeriod } from "../../use-cases/billing/bill-period"
 
@@ -228,7 +228,7 @@ describe("DB-backed billing golden cases", () => {
     const ensureAccounts = await ledger.ensureCustomerAccounts(customerId, "EUR")
     expect(ensureAccounts.err).toBeUndefined()
     const billed = await billPeriod({
-      invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
+      invoicing: testInvoicing({ db, payerBudgets }),
       context: await loadSubscriptionContext(),
       logger,
       db,
@@ -353,7 +353,7 @@ describe("DB-backed billing golden cases", () => {
     }
 
     const tooEarly = await billPeriod({
-      invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
+      invoicing: testInvoicing({ db, payerBudgets }),
       ...common,
       context: await loadSubscriptionContext(feb1 + LATE_EVENT_GRACE_MS - 1),
     })
@@ -372,7 +372,7 @@ describe("DB-backed billing golden cases", () => {
     ])
 
     const ready = await billPeriod({
-      invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
+      invoicing: testInvoicing({ db, payerBudgets }),
       ...common,
       context: await loadSubscriptionContext(feb1 + LATE_EVENT_GRACE_MS),
     })
@@ -404,7 +404,7 @@ describe("DB-backed billing golden cases", () => {
     await makeArrearSubscriptionAnnual()
 
     const billed = await billPeriod({
-      invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
+      invoicing: testInvoicing({ db, payerBudgets }),
       context: await loadSubscriptionContext(nextYear + LATE_EVENT_GRACE_MS),
       logger,
       db,

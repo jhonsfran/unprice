@@ -3,14 +3,8 @@ import { currencySchema } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import type { Amount } from "@unprice/money"
 import type { FundingResult } from "../../budgets"
-import {
-  DEFAULT_RESERVATION_POLICY,
-  type ReservationOwner,
-  UnPriceWalletError,
-  type WalletService,
-} from "../../wallet"
+import { type ReservationOwner, UnPriceWalletError, type WalletService } from "../../wallet"
 import type { BudgetAddress, BudgetWallet } from "./budget-client"
-import { billingPeriodIdOf } from "./compile-payer-budget"
 
 type WalletOps = Pick<
   WalletService,
@@ -73,7 +67,7 @@ export function walletFunding(wallet: WalletOps): BudgetWallet {
             entitlementId: null,
             owner,
             requestedAmount,
-            refillThresholdBps: DEFAULT_RESERVATION_POLICY.refillThresholdBps,
+            refillThresholdBps: 2000,
             refillChunkAmount: 0,
             periodStartAt: new Date(intent.periodStart),
             periodEndAt: new Date(intent.periodEnd),
@@ -116,7 +110,7 @@ export function walletFunding(wallet: WalletOps): BudgetWallet {
           amount,
           statementKey,
           // The invoice matches a capture to its billing period, not to the statement's id.
-          billingPeriodId: billingPeriodIdOf(capture.periodId),
+          billingPeriodId: capture.periodId,
           kind: "usage",
           metadata: { ...metadata, statement_period_id: capture.periodId },
         })

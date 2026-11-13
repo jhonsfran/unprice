@@ -1,5 +1,4 @@
 import { publishCostPlusInputSchema } from "@unprice/db/validators"
-import { publishCostPlus as publishCostPlusUseCase } from "@unprice/services/use-cases"
 import { domainErrorToTrpcError } from "#domain-error"
 import { protectedProjectProcedure } from "#trpc"
 
@@ -8,11 +7,11 @@ export const publishCostPlus = protectedProjectProcedure
   .input(publishCostPlusInputSchema)
   .mutation(async (opts) => {
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
-    const { features, rateCards } = opts.ctx.services
-    const result = await publishCostPlusUseCase(
-      { services: { features, rateCards } },
-      { projectId: opts.ctx.project.id, ...opts.input, now: Date.now() }
-    )
+    const result = await opts.ctx.services.rateCards.publishCostPlus({
+      projectId: opts.ctx.project.id,
+      ...opts.input,
+      now: Date.now(),
+    })
     if (result.err) throw domainErrorToTrpcError(result.err)
     return result.val
   })

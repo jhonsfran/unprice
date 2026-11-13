@@ -37,7 +37,7 @@ export type BudgetVerbRequest =
   | Addressed<Exclude<BudgetRequest, { type: "upsert" }>>
 
 export type ExecuteBudgetCommandDeps = {
-  budgets: BudgetClient
+  budgets: Pick<BudgetClient, "execute">
   cards: CardSource
   /** Called only for a prepaid budget's funding; a postpaid budget never reaches it. */
   wallet: BudgetWallet
@@ -82,8 +82,10 @@ export async function executeBudgetCommand<R extends BudgetVerbRequest>(
       refreshed = true
       const cards = await deps.cards.read(projectId, rejection.cardIds)
       if (cards.err) return cards
-      await deps.budgets.cacheCards(address, cards.val)
-    } else if (rejection?.code === "FUNDING_REQUIRED" && !funded) {
+      result = await deps.budgets.execute(address, command, cards.val)
+      continue
+    }
+    if (rejection?.code === "FUNDING_REQUIRED" && !funded) {
       funded = true
       const reserved = await fund(deps, address, rejection.needs)
       if (reserved.err) return reserved

@@ -436,7 +436,7 @@ describe("billPeriod", () => {
         },
       },
     })
-    const invoicing = makeInvoicing({ open: ["api-calls:bp_1"] })
+    const invoicing = makeInvoicing({ open: ["bp_1"] })
 
     await expect(
       billPeriod({

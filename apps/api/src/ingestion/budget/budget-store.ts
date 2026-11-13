@@ -205,8 +205,19 @@ type StatementTotals = Pick<Statement, "quantity" | "amount" | "cost">
 const jsonList = (values: readonly string[]) =>
   sql`(SELECT value FROM json_each(${JSON.stringify(values)}))`
 
-function bind(db: SqliteTx, configs: { last: ConfigCache }): BudgetStoreTx {
-  const operations = schema.budgetOperations
+type StoreCommit = Parameters<BudgetStoreTx["commit"]>[0]
+
+/** Statement reads and writes bound to the same storage transaction. */
+function bindStatements(db: SqliteTx): Pick<
+  BudgetStoreTx,
+  | "readStatements"
+  | "readFeatureStatements"
+  | "readKeyStatements"
+  | "readUnfinishedStatements"
+  | "hasUnfinishedStatements"
+> & {
+  commitStatements(written: StoreCommit["statements"], moved: StoreCommit["positions"]): void
+} {
   const statements = schema.budgetStatements
   const positions = schema.budgetPositions
   /** The statements `where` selects, each with its positions. */
@@ -232,8 +243,227 @@ function bind(db: SqliteTx, configs: { last: ConfigCache }): BudgetStoreTx {
     }))
   }
 
+  return {
+    readStatements: (periodIds) =>
+      periodIds.length === 0
+        ? []
+        : readStatementsWhere(sql`${statements.periodId} IN ${jsonList(periodIds)}`),
+
+    readFeatureStatements: (features, from, to) =>
+      features.length === 0
+        ? []
+        : readStatementsWhere(
+            and(
+              sql`${statements.featureSlug} IN ${jsonList(features)}`,
+              or(
+                eq(statements.state, "open"),
+                and(sql`${statements.start} < ${to}`, gt(statements.end, from))
+              )
+            )
+          ),
+
+    readKeyStatements: (statementKey) =>
+      readStatementsWhere(eq(statements.statementKey, statementKey)),
+
+    hasUnfinishedStatements: () =>
+      db
+        .select({ periodId: statements.periodId })
+        .from(statements)
+        .where(sql`${statements.state} IN ('open', 'sealed')`)
+        .limit(1)
+        .all().length > 0,
+
+    readUnfinishedStatements: () =>
+      readStatementsWhere(sql`${statements.state} IN ('open', 'sealed')`),
+
+    commitStatements(written, moved) {
+      for (const { positions: _positions, quantity, amount, cost, ...statement } of written) {
+        const row = { ...statement, totalsJson: encode({ quantity, amount, cost }) }
+        db.insert(statements)
+          .values(row)
+          .onConflictDoUpdate({ target: statements.periodId, set: row })
+          .run()
+      }
+      for (const { periodId, positionKey, value } of moved) {
+        db.insert(positions)
+          .values({ periodId, positionKey, value: value.toString() })
+          .onConflictDoUpdate({
+            target: [positions.periodId, positions.positionKey],
+            set: { value: value.toString() },
+          })
+          .run()
+      }
+    },
+  }
+}
+
+/** Wallet funding reads and writes bound to the storage transaction. */
+function bindFunding(db: SqliteTx): Pick<BudgetStoreTx, "readFunding" | "hasOpenFunding"> & {
+  commitFunding(rows: StoreCommit["funding"]): void
+} {
+  return {
+    readFunding(statementKeys) {
+      if (statementKeys.length === 0) return []
+      const funding = schema.budgetFunding
+      return db
+        .select({ dataJson: funding.dataJson })
+        .from(funding)
+        .where(sql`${funding.statementKey} IN ${jsonList(statementKeys)}`)
+        .all()
+        .map((row) => decode<Funding>(row.dataJson))
+    },
+
+    hasOpenFunding() {
+      const funding = schema.budgetFunding
+      return (
+        db
+          .select({ statementKey: funding.statementKey })
+          .from(funding)
+          .where(eq(funding.state, "open"))
+          .limit(1)
+          .all().length > 0
+      )
+    },
+
+    commitFunding(rows) {
+      for (const row of rows) {
+        const values = { state: row.state, dataJson: encode(row) }
+        db.insert(schema.budgetFunding)
+          .values({ statementKey: row.statementKey, ...values })
+          .onConflictDoUpdate({ target: schema.budgetFunding.statementKey, set: values })
+          .run()
+      }
+    },
+  }
+}
+
+/** Journal export, retention, and operation writes bound to the storage transaction. */
+function bindJournal(db: SqliteTx): Pick<
+  BudgetStoreTx,
+  "readUnexported" | "markExported" | "purgeOperations" | "nextDueAt"
+> & {
+  commitOperations(
+    purged: StoreCommit["purged"],
+    changed: StoreCommit["operations"],
+    now: number,
+    seq: number
+  ): void
+} {
+  const operations = schema.budgetOperations
   const terminal = sql`${operations.status} IN ('done', 'settled', 'released')`
   const exportedSeq = sql`(SELECT ${schema.budgetLedger.exportedSeq} FROM ${schema.budgetLedger} WHERE ${schema.budgetLedger.id} = ${SINGLETON_ID})`
+  return {
+    readUnexported(limit) {
+      const live = db
+        .select({
+          id: operations.id,
+          kind: operations.kind,
+          status: operations.status,
+          dataJson: operations.dataJson,
+          seq: operations.seq,
+          writtenAt: operations.writtenAt,
+        })
+        .from(operations)
+        .where(gt(operations.seq, exportedSeq))
+        .orderBy(asc(operations.seq))
+        .limit(limit)
+        .all()
+      const backlog = schema.budgetJournalBacklog
+      const deleted = db
+        .select({
+          id: backlog.storedId,
+          kind: backlog.kind,
+          status: backlog.status,
+          dataJson: backlog.dataJson,
+          seq: backlog.seq,
+          writtenAt: backlog.writtenAt,
+        })
+        .from(backlog)
+        .where(gt(backlog.seq, exportedSeq))
+        .orderBy(asc(backlog.seq))
+        .limit(limit)
+        .all()
+      return [...live, ...deleted]
+        .sort((a, b) => a.seq - b.seq)
+        .slice(0, limit)
+        .map((row) => ({
+          seq: row.seq,
+          writtenAt: row.writtenAt,
+          storedId: row.id,
+          status: row.status,
+          operation: decodeOperation(row),
+        }))
+    },
+
+    markExported(seq) {
+      db.update(schema.budgetLedger)
+        .set({ exportedSeq: sql`max(${schema.budgetLedger.exportedSeq}, ${seq})` })
+        .where(eq(schema.budgetLedger.id, SINGLETON_ID))
+        .run()
+      const backlog = schema.budgetJournalBacklog
+      db.delete(backlog).where(lte(backlog.seq, seq)).run()
+    },
+
+    purgeOperations(now, limit) {
+      const expired = db
+        .select({ id: operations.id })
+        .from(operations)
+        .where(and(terminal, lte(operations.dueAt, now), lte(operations.seq, exportedSeq)))
+        .orderBy(asc(operations.dueAt))
+        .limit(limit)
+      db.delete(operations).where(inArray(operations.id, expired)).run()
+    },
+
+    nextDueAt() {
+      return (
+        db
+          .select({ at: min(operations.dueAt) })
+          .from(operations)
+          .where(or(eq(operations.status, "open"), lte(operations.seq, exportedSeq)))
+          .get()?.at ?? null
+      )
+    },
+    commitOperations(purged, changed, now, initialSeq) {
+      let seq = initialSeq
+      // Before the upserts: a row past its retention frees its key for the row that reuses it.
+      const backlog = schema.budgetJournalBacklog
+      for (const operation of purged) {
+        const id = storedId(operation)
+        // The journal still needs the row when its last write was not exported: keep that write.
+        db.run(
+          sql`INSERT INTO ${backlog} (${sql.raw("seq, stored_id, kind, status, data_json, written_at")})
+            SELECT ${operations.seq}, ${operations.id}, ${operations.kind}, ${operations.status}, ${operations.dataJson}, ${operations.writtenAt}
+            FROM ${operations} WHERE ${operations.id} = ${id} AND ${operations.seq} > ${exportedSeq}`
+        )
+        db.delete(operations).where(eq(operations.id, id)).run()
+      }
+      for (const operation of changed) {
+        seq += 1
+        const row = {
+          status: statusOf(operation),
+          dueAt: alarmAt(operation),
+          dataJson: encodeOperation(operation),
+          seq,
+          writtenAt: now,
+        }
+        const insert = db
+          .insert(operations)
+          .values({ id: storedId(operation), kind: operation.kind, ...row })
+        if (operation.kind === "hold" || operation.kind === "lease") {
+          insert.onConflictDoUpdate({ target: operations.id, set: row }).run()
+        } else {
+          insert.run()
+        }
+      }
+    },
+  }
+}
+
+function bind(db: SqliteTx, configs: { last: ConfigCache }): BudgetStoreTx {
+  const operations = schema.budgetOperations
+  const { commitStatements, ...statementReads } = bindStatements(db)
+  const { commitFunding, ...fundingReads } = bindFunding(db)
+  const { commitOperations, ...journalReads } = bindJournal(db)
   const readOperationWhere = (where: SQL) => {
     const row = db
       .select({ id: operations.id, kind: operations.kind, dataJson: operations.dataJson })
@@ -251,6 +481,9 @@ function bind(db: SqliteTx, configs: { last: ConfigCache }): BudgetStoreTx {
   }
 
   return {
+    ...statementReads,
+    ...fundingReads,
+    ...journalReads,
     readBudget() {
       const row = db
         .select()
@@ -351,53 +584,6 @@ function bind(db: SqliteTx, configs: { last: ConfigCache }): BudgetStoreTx {
       return Object.fromEntries(rows.map((row) => [row.cardId, decode<CardRows>(row.cardJson)]))
     },
 
-    readStatements: (periodIds) =>
-      periodIds.length === 0
-        ? []
-        : readStatementsWhere(sql`${statements.periodId} IN ${jsonList(periodIds)}`),
-
-    readFeatureStatements: (features, from, to) =>
-      features.length === 0
-        ? []
-        : readStatementsWhere(
-            and(
-              sql`${statements.featureSlug} IN ${jsonList(features)}`,
-              or(
-                eq(statements.state, "open"),
-                and(sql`${statements.start} < ${to}`, gt(statements.end, from))
-              )
-            )
-          ),
-
-    readKeyStatements: (statementKey) =>
-      readStatementsWhere(eq(statements.statementKey, statementKey)),
-
-    readFunding(statementKeys) {
-      if (statementKeys.length === 0) return []
-      const funding = schema.budgetFunding
-      return db
-        .select({ dataJson: funding.dataJson })
-        .from(funding)
-        .where(sql`${funding.statementKey} IN ${jsonList(statementKeys)}`)
-        .all()
-        .map((row) => decode<Funding>(row.dataJson))
-    },
-
-    hasOpenFunding() {
-      const funding = schema.budgetFunding
-      return (
-        db
-          .select({ statementKey: funding.statementKey })
-          .from(funding)
-          .where(eq(funding.state, "open"))
-          .limit(1)
-          .all().length > 0
-      )
-    },
-
-    readUnfinishedStatements: () =>
-      readStatementsWhere(sql`${statements.state} IN ('open', 'sealed')`),
-
     cacheCards(cards, at) {
       const table = schema.budgetCards
       for (const card of cards) {
@@ -439,29 +625,8 @@ function bind(db: SqliteTx, configs: { last: ConfigCache }): BudgetStoreTx {
       funding,
       now,
     }) {
-      for (const row of funding) {
-        const values = { state: row.state, dataJson: encode(row) }
-        db.insert(schema.budgetFunding)
-          .values({ statementKey: row.statementKey, ...values })
-          .onConflictDoUpdate({ target: schema.budgetFunding.statementKey, set: values })
-          .run()
-      }
-      for (const { positions: _positions, quantity, amount, cost, ...statement } of written) {
-        const row = { ...statement, totalsJson: encode({ quantity, amount, cost }) }
-        db.insert(statements)
-          .values(row)
-          .onConflictDoUpdate({ target: statements.periodId, set: row })
-          .run()
-      }
-      for (const { periodId, positionKey, value } of moved) {
-        db.insert(positions)
-          .values({ periodId, positionKey, value: value.toString() })
-          .onConflictDoUpdate({
-            target: [positions.periodId, positions.positionKey],
-            set: { value: value.toString() },
-          })
-          .run()
-      }
+      commitFunding(funding)
+      commitStatements(written, moved)
       if (budget) {
         const record = {
           key: budget.key,
@@ -498,7 +663,7 @@ function bind(db: SqliteTx, configs: { last: ConfigCache }): BudgetStoreTx {
         .returning({ journalSeq: ledgerTable.journalSeq })
         .get()
       if (!reserved) throw new Error("the ledger write returned no row")
-      let seq = reserved.journalSeq - reservedSeqs
+      const seq = reserved.journalSeq - reservedSeqs
 
       // One statement per row: DO SQLite caps bound parameters at 100 per statement.
       const history = schema.budgetWindowHistory
@@ -526,107 +691,7 @@ function bind(db: SqliteTx, configs: { last: ConfigCache }): BudgetStoreTx {
           .run()
       }
 
-      // Before the upserts: a row past its retention frees its key for the row that reuses it.
-      const backlog = schema.budgetJournalBacklog
-      for (const operation of purged) {
-        const id = storedId(operation)
-        // The journal still needs the row when its last write was not exported: keep that write.
-        db.run(
-          sql`INSERT INTO ${backlog} (${sql.raw("seq, stored_id, kind, status, data_json, written_at")})
-            SELECT ${operations.seq}, ${operations.id}, ${operations.kind}, ${operations.status}, ${operations.dataJson}, ${operations.writtenAt}
-            FROM ${operations} WHERE ${operations.id} = ${id} AND ${operations.seq} > ${exportedSeq}`
-        )
-        db.delete(operations).where(eq(operations.id, id)).run()
-      }
-      for (const operation of changed) {
-        seq += 1
-        const row = {
-          status: statusOf(operation),
-          dueAt: alarmAt(operation),
-          dataJson: encodeOperation(operation),
-          seq,
-          writtenAt: now,
-        }
-        const insert = db
-          .insert(operations)
-          .values({ id: storedId(operation), kind: operation.kind, ...row })
-        if (operation.kind === "hold" || operation.kind === "lease") {
-          insert.onConflictDoUpdate({ target: operations.id, set: row }).run()
-        } else {
-          insert.run()
-        }
-      }
-    },
-
-    readUnexported(limit) {
-      const live = db
-        .select({
-          id: operations.id,
-          kind: operations.kind,
-          status: operations.status,
-          dataJson: operations.dataJson,
-          seq: operations.seq,
-          writtenAt: operations.writtenAt,
-        })
-        .from(operations)
-        .where(gt(operations.seq, exportedSeq))
-        .orderBy(asc(operations.seq))
-        .limit(limit)
-        .all()
-      const backlog = schema.budgetJournalBacklog
-      const deleted = db
-        .select({
-          id: backlog.storedId,
-          kind: backlog.kind,
-          status: backlog.status,
-          dataJson: backlog.dataJson,
-          seq: backlog.seq,
-          writtenAt: backlog.writtenAt,
-        })
-        .from(backlog)
-        .where(gt(backlog.seq, exportedSeq))
-        .orderBy(asc(backlog.seq))
-        .limit(limit)
-        .all()
-      return [...live, ...deleted]
-        .sort((a, b) => a.seq - b.seq)
-        .slice(0, limit)
-        .map((row) => ({
-          seq: row.seq,
-          writtenAt: row.writtenAt,
-          storedId: row.id,
-          status: row.status,
-          operation: decodeOperation(row),
-        }))
-    },
-
-    markExported(seq) {
-      db.update(schema.budgetLedger)
-        .set({ exportedSeq: sql`max(${schema.budgetLedger.exportedSeq}, ${seq})` })
-        .where(eq(schema.budgetLedger.id, SINGLETON_ID))
-        .run()
-      const backlog = schema.budgetJournalBacklog
-      db.delete(backlog).where(lte(backlog.seq, seq)).run()
-    },
-
-    purgeOperations(now, limit) {
-      const expired = db
-        .select({ id: operations.id })
-        .from(operations)
-        .where(and(terminal, lte(operations.dueAt, now), lte(operations.seq, exportedSeq)))
-        .orderBy(asc(operations.dueAt))
-        .limit(limit)
-      db.delete(operations).where(inArray(operations.id, expired)).run()
-    },
-
-    nextDueAt() {
-      return (
-        db
-          .select({ at: min(operations.dueAt) })
-          .from(operations)
-          .where(or(eq(operations.status, "open"), lte(operations.seq, exportedSeq)))
-          .get()?.at ?? null
-      )
+      commitOperations(purged, changed, now, seq)
     },
   }
 }

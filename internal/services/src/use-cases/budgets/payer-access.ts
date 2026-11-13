@@ -1,3 +1,4 @@
+import type { CustomerEntitlementExtended } from "@unprice/db/validators"
 import { Err, type FetchError, Ok, type Result } from "@unprice/error"
 import { type Amount, type SignedAmount, formatAmount } from "@unprice/money"
 import { z } from "zod"
@@ -6,12 +7,11 @@ import {
   type LimitBalance,
   type Statement,
   type UnPriceBudgetError,
-  isOutcomeOf,
   windowBounds,
 } from "../../budgets"
 import { type EntitlementService, resolveEntitlementLimit } from "../../entitlements"
 import type { BudgetClient } from "./budget-client"
-import { payerBudgetKey } from "./compile-payer-budget"
+import { readPayerBudget } from "./read-payer-budget"
 
 /** Why a feature is not usable right now. */
 export const PAYER_ACCESS_DENIALS = ["NO_ENTITLEMENT", "LIMIT_EXCEEDED", "BUDGET_CLOSED"] as const
@@ -50,7 +50,7 @@ export type CheckPayerAccessInput = z.infer<typeof checkPayerAccessInputSchema>
 export type CheckPayerAccessOutput = z.infer<typeof checkPayerAccessOutputSchema>
 
 export type CheckPayerAccessDeps = {
-  budgets: BudgetClient
+  budgets: Pick<BudgetClient, "execute">
   entitlements: Pick<EntitlementService, "getCustomerEntitlementsForCustomer">
 }
 
@@ -74,21 +74,16 @@ export async function checkPayerAccess(
   input: CheckPayerAccessInput
 ): Promise<Result<CheckPayerAccessOutput, UnPriceBudgetError | FetchError>> {
   const { projectId, customerId, featureSlug, now } = input
-  const got = await deps.budgets.execute(
-    { projectId, key: payerBudgetKey(customerId) },
-    { type: "get" }
-  )
-  if (got.err && got.err.rejection.code !== "BUDGET_NOT_FOUND") return Err(got.err)
-  if (got.val && isOutcomeOf(got.val, "get")) {
+  const [got, entitlements] = await Promise.all([
+    readPayerBudget(deps.budgets, { projectId, customerId }, { statements: false }),
+    deps.entitlements.getCustomerEntitlementsForCustomer({ customerId, projectId, now }),
+  ])
+  if (got.err) return Err(got.err)
+  if (got.val) {
     const metered = meteredAccessOf(got.val.budget, featureSlug)
     if (metered) return Ok({ featureSlug, metered: true, ...metered })
   }
 
-  const entitlements = await deps.entitlements.getCustomerEntitlementsForCustomer({
-    customerId,
-    projectId,
-    now,
-  })
   if (entitlements.err) return Err(entitlements.err)
   const entitlement = entitlements.val.find(
     (candidate) =>
@@ -105,17 +100,7 @@ export async function checkPayerAccess(
       quotaWindow: null,
     })
   }
-  return Ok({
-    featureSlug,
-    allowed: true,
-    metered: false,
-    limit: resolveEntitlementLimit({
-      configuredLimit: entitlement.featurePlanVersion.limit ?? null,
-      featureType: entitlement.featurePlanVersion.featureType,
-      grants: entitlement.grants ?? [],
-    }),
-    quotaWindow: null,
-  })
+  return Ok({ featureSlug, metered: false, ...staticAccess(entitlement), quotaWindow: null })
 }
 
 /**
@@ -178,4 +163,16 @@ function limitWindow(budget: BudgetSnapshot, limit: LimitBalance): PayerQuotaWin
     budget.balance.asOf
   )
   return { periodKey: limit.id, startAt: bounds.start, endAt: bounds.end }
+}
+
+/** Flat, seat, and package access comes from the entitlement and its grants. */
+export function staticAccess(entitlement: CustomerEntitlementExtended) {
+  return {
+    allowed: true as const,
+    limit: resolveEntitlementLimit({
+      configuredLimit: entitlement.featurePlanVersion.limit ?? null,
+      featureType: entitlement.featurePlanVersion.featureType,
+      grants: entitlement.grants ?? [],
+    }),
+  }
 }

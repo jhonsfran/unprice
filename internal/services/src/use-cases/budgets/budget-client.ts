@@ -1,6 +1,8 @@
 import type { Result } from "@unprice/error"
 import type {
   BudgetCommand,
+  BudgetInspectQuery,
+  BudgetInspection,
   BudgetOutcome,
   BudgetReply,
   FundingResult,
@@ -18,12 +20,15 @@ export type BudgetRequest = Exclude<BudgetCommand, { type: "sweep" }>
 export type { BudgetReply }
 
 export interface BudgetClient {
+  inspect(
+    address: BudgetAddress,
+    query: BudgetInspectQuery
+  ): Promise<Result<BudgetInspection, UnPriceBudgetError>>
   execute(
     address: BudgetAddress,
-    request: BudgetRequest
+    request: BudgetRequest,
+    cards?: readonly CardRows[]
   ): Promise<Result<BudgetOutcome, UnPriceBudgetError>>
-  /** Replaces the budget's cached copy of each card; the next command prices with it. */
-  cacheCards(address: BudgetAddress, cards: readonly CardRows[]): Promise<void>
 }
 
 /** Where budgets read rate cards: a project's cards, each with every row, ended or not. */

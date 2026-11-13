@@ -1,9 +1,11 @@
-import type { MarginPolicy, RateComponent, RateRow, ratePriceSchema } from "@unprice/db/validators"
+import type { MarginPolicy, RateRow, ratePriceSchema } from "@unprice/db/validators"
 import { type Amount, formatAmount } from "@unprice/money"
+import type { PricingShape } from "@unprice/services/pricing"
 import type { PriceColumn, PriceTable } from "@unprice/services/pricing"
-import { columnKey, lineLabel } from "@unprice/services/pricing"
+import { changeTableOf, lineLabel } from "@unprice/services/pricing"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import type { z } from "zod"
+import { type TierDraft, tiersOf } from "./tiers-model"
 
 /** A row price as the publish procedure takes it: decimals as strings. */
 export type RatePriceWire = z.input<typeof ratePriceSchema>
@@ -42,7 +44,7 @@ export function cardCurrency(unit: string): string {
 
 /** "0.3" as "30". */
 export function markupPercent(markup: Amount): string {
-  return String(Number(formatAmount(markup)) * 100)
+  return formatAmount(markup * BigInt(100))
 }
 
 export function formatMarginPolicy(policy: MarginPolicy): string {
@@ -75,13 +77,6 @@ export function formatInstant(ms: number): string {
 
 export function formatDay(ms: number): string {
   return DAY.format(new Date(ms))
-}
-
-/** When a row applies: "since X", "X → Y", or "from X" for one that has not started. */
-export function formatInterval(row: Pick<RateRow, "effectiveFrom" | "effectiveTo">, now: number) {
-  const from = formatInstant(row.effectiveFrom)
-  if (row.effectiveTo !== null) return `${from} → ${formatInstant(row.effectiveTo)}`
-  return row.effectiveFrom > now ? `from ${from}` : `since ${from}`
 }
 
 /**
@@ -163,67 +158,24 @@ export function matrixOf(table: PriceTable, which: "lines" | "ended" = "lines"):
   }
 }
 
-function cellsOf(
-  after: readonly RateComponent[],
-  before: readonly RateComponent[]
-): Map<string, MatrixCell> {
-  const cells = new Map<string, MatrixCell>()
-  for (const component of after) {
-    const key = columnKey({ property: component.property, per: component.per })
-    const was = before.find((c) => c.property === component.property && c.per === component.per)
-    cells.set(key, { after: component.rate, before: was?.rate ?? null })
-  }
-  for (const component of before) {
-    const key = columnKey({ property: component.property, per: component.per })
-    if (!cells.has(key)) cells.set(key, { after: null, before: component.rate })
-  }
-  return cells
-}
-
-/**
- * What a catalog revision changes for one feature, as a matrix of only the lines that change:
- * new models, models whose rates moved (the old rate beside the new), and rows left to end.
- */
+/** A catalog change table with UI date labels. */
 export function changeMatrixOf(draft: CostPlusDraftWire, featureSlug: string): Matrix {
-  const changes = draft.changes.filter(
-    (change): change is Exclude<typeof change, { type: "unchanged" }> =>
-      change.proposed.featureSlug === featureSlug && change.type !== "unchanged"
-  )
-  const columns = new Map<string, PriceColumn>()
-  const dimensions = new Set<string>()
-  for (const change of changes) {
-    for (const key of Object.keys(change.proposed.match)) dimensions.add(key)
-    const current =
-      "current" in change && change.current.price.type === "unit"
-        ? change.current.price.components
-        : []
-    for (const component of [...change.proposed.price.components, ...current]) {
-      const column = { property: component.property, per: component.per }
-      columns.set(columnKey(column), column)
-    }
-  }
-  const sortedDimensions = [...dimensions].sort()
+  const table = changeTableOf(draft, featureSlug)
   return {
-    dimensions: sortedDimensions,
-    columns: [...columns.values()],
-    lines: changes.map((change) => {
-      const current = "current" in change ? change.current : null
-      return {
-        key: formatMatch(change.proposed.match),
-        label: lineLabel({ match: change.proposed.match }, sortedDimensions),
-        status: change.type,
-        cells: cellsOf(
-          change.proposed.price.components,
-          current?.price.type === "unit" ? current.price.components : []
-        ),
-        text: null,
-        applies:
-          change.type === "retiring" && current?.effectiveTo
-            ? `ends ${formatInstant(current.effectiveTo)}`
-            : "",
-        row: current,
-      }
-    }),
+    dimensions: table.dimensions,
+    columns: table.columns,
+    lines: table.lines.map(({ change, current, cells }) => ({
+      key: formatMatch(change.proposed.match),
+      label: lineLabel({ match: change.proposed.match }, table.dimensions),
+      status: change.type,
+      cells,
+      text: null,
+      applies:
+        change.type === "retiring" && current?.effectiveTo
+          ? `ends ${formatInstant(current.effectiveTo)}`
+          : "",
+      row: current,
+    })),
   }
 }
 
@@ -242,33 +194,6 @@ export function describeChanges(matrix: Matrix): string {
   return parts.join(", ")
 }
 
-export type FeatureRows = { featureSlug: string; current: RateRow[]; ended: RateRow[] }
-
-/**
- * A card's rows grouped by feature, in feature order: the rows that apply now or later, and the
- * rows that have ended (newest first).
- */
-export function groupRowsByFeature(rows: readonly RateRow[], now: number): FeatureRows[] {
-  const groups = new Map<string, FeatureRows>()
-  for (const row of rows) {
-    const group = groups.get(row.featureSlug) ?? {
-      featureSlug: row.featureSlug,
-      current: [],
-      ended: [],
-    }
-    if (row.effectiveTo !== null && row.effectiveTo <= now) group.ended.push(row)
-    else group.current.push(row)
-    groups.set(row.featureSlug, group)
-  }
-  for (const group of groups.values()) {
-    group.ended.sort((left, right) => (right.effectiveTo ?? 0) - (left.effectiveTo ?? 0))
-  }
-  return [...groups.values()].sort((left, right) =>
-    left.featureSlug.localeCompare(right.featureSlug)
-  )
-}
-
-/** The rows a publish or close can end: open and not yet scheduled to end. */
 /**
  * Whether a catalog row was priced from one of the project's own model costs: a catalog row's
  * `sourceRef` is the id of its cost row, and custom cost ids carry the `cmc` prefix (`newId`).
@@ -289,62 +214,17 @@ export function earliestStart(live: boolean, now: number, noticeMs: number): num
   return live ? now + noticeMs + 60_000 : now
 }
 
-/** A `datetime-local` input value for an instant, in the browser's time zone. */
-export function toDateTimeLocal(ms: number): string {
-  const date = new Date(ms)
-  const pad = (value: number) => String(value).padStart(2, "0")
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
-    date.getHours()
-  )}:${pad(date.getMinutes())}`
-}
-
-/** "key=value, key=value" back into a match; null when a pair has no key. */
-export function parseMatch(text: string): Record<string, string> | null {
-  const match: Record<string, string> = {}
-  for (const pair of text.split(",")) {
-    const trimmed = pair.trim()
-    if (!trimmed) continue
-    const [key, ...rest] = trimmed.split("=")
-    const name = key?.trim()
-    if (!name || rest.length === 0) return null
-    match[name] = rest.join("=").trim()
-  }
-  return match
-}
-
-/**
- * Graduated tiers from one line per tier, "upTo rate flat", where the last tier's upTo is "*".
- * Null when a line does not parse.
- */
-export function parseTiers(
-  text: string
-): { upTo: number | null; rate: string; flat: string }[] | null {
-  const tiers: { upTo: number | null; rate: string; flat: string }[] = []
-  for (const line of text.split("\n")) {
-    const parts = line.trim().split(/\s+/).filter(Boolean)
-    if (parts.length === 0) continue
-    const [upTo, rate, flat = "0"] = parts
-    if (!upTo || !rate) return null
-    const bound = upTo === "*" ? null : Number(upTo)
-    if (bound !== null && !Number.isInteger(bound)) return null
-    tiers.push({ upTo: bound, rate, flat })
-  }
-  return tiers.length > 0 ? tiers : null
-}
-
-export type PriceKind = "unit" | "flat" | "package" | "graduated"
-
 /** The publish form's price fields, as typed. */
 export type PriceFields = {
-  kind: PriceKind
+  shape: PricingShape
   /** unit and package rate, flat amount */
   amount: string
   /** unit `per`, package `size` */
   per: string
   /** The event property a usage row counts; empty for one unit per event. */
   property: string
-  /** graduated tiers, one "upTo rate flat" line per tier */
-  tiers: string
+  /** The tier editor values. */
+  tiers: readonly TierDraft[]
 }
 
 /** A row price in its wire form, ready for `rateCards.publishRows`; a message when it is incomplete. */
@@ -356,7 +236,7 @@ export function buildRatePrice(
   if (!Number.isInteger(count) || count < 1) {
     return { ok: false, message: "Per and size are whole numbers of at least 1" }
   }
-  switch (fields.kind) {
+  switch (fields.shape) {
     case "flat":
       return { ok: true, price: { type: "flat", amount: fields.amount.trim() } }
     case "unit":
@@ -373,11 +253,10 @@ export function buildRatePrice(
         price: { type: "package", property, size: count, rate: fields.amount.trim() },
       }
     case "graduated": {
-      const tiers = parseTiers(fields.tiers)
-      if (!tiers) {
-        return { ok: false, message: 'Write one tier per line: "upTo rate flat", last upTo "*"' }
-      }
-      return { ok: true, price: { type: "graduated", property, per: 1, tiers } }
+      const built = tiersOf(fields.tiers)
+      return built.ok
+        ? { ok: true, price: { type: "graduated", property, per: 1, tiers: built.tiers } }
+        : built
     }
   }
 }

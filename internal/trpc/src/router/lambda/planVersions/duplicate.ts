@@ -21,7 +21,7 @@ export const duplicate = protectedProjectProcedure
   .mutation(async (opts) => {
     const { id } = opts.input
     const project = opts.ctx.project
-    const { features, rateCards } = opts.ctx.services
+    const { rateCards } = opts.ctx.services
 
     // only owner and admin can duplicate a plan version
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
@@ -30,7 +30,7 @@ export const duplicate = protectedProjectProcedure
       {
         db: opts.ctx.db,
         logger: opts.ctx.logger,
-        services: { features, rateCards },
+        services: { rateCards },
       },
       {
         id,

@@ -14,13 +14,13 @@ export const update = protectedProjectProcedure
   .input(planVersionFeatureUpdateBaseSchema)
   .mutation(async (opts) => {
     const project = opts.ctx.project
-    const { plans, features, rateCards } = opts.ctx.services
+    const { plans, rateCards } = opts.ctx.services
 
     // only owner and admin can update a feature
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
     const { err, val } = await updatePlanVersionFeature(
-      { db: opts.ctx.db, services: { plans, features, rateCards }, logger: opts.ctx.logger },
+      { db: opts.ctx.db, services: { plans, rateCards }, logger: opts.ctx.logger },
       { ...opts.input, projectId: project.id, now: Date.now() }
     )
 

@@ -1,10 +1,8 @@
 import type { Database } from "@unprice/db"
-import { Err, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { describe, expect, it, vi } from "vitest"
 import type { ServiceContext } from "../../context"
 import { createRateCardsFake } from "../../rate-cards/memory.fixture"
-import { planPublish } from "../../rate-cards/publish"
 import { duplicatePlanVersion } from "./duplicate"
 
 type InsertedValues = Record<string, unknown>
@@ -127,9 +125,8 @@ function createDbMocks(planVersionData: InsertedValues | null) {
 function createDeps(db: Database) {
   const cards = createRateCardsFake()
   const services = {
-    features: { listFeaturesByProject: vi.fn(async () => Ok([])) },
     rateCards: cards.rateCards,
-  } as unknown as Pick<ServiceContext, "features" | "rateCards">
+  } as unknown as Pick<ServiceContext, "rateCards">
   return { cards, deps: { db, logger: createLogger(), services } }
 }
 
@@ -144,7 +141,7 @@ describe("duplicatePlanVersion", () => {
         {
           featureSlug: "seats",
           featureType: "tier",
-          tiers: [{ firstUnit: 1, lastUnit: null, unitPrice: "8", flatPrice: "0" }],
+          tiers: [{ upTo: null, rate: "8", flat: "0" }],
         },
       ])
       const [base, seats] = cards.rows
@@ -285,24 +282,7 @@ it("copies only the features carried by the source version from a shared card", 
     features: [{ slug: "base", dimensions: [], meterProperty: null, included: null }],
     unpriceable: [],
   }))
-  cards.rateCards.publishRows.mockImplementation(async (request) => {
-    const card = cards.cards.get(request.cardId)
-    if (!card) throw new Error("fixture")
-    const planned = planPublish({
-      ...request,
-      card,
-      rows: [],
-      noticeMs: 0,
-      newRowId: () => "rr_regression",
-    })
-    return planned.err
-      ? Err(planned.err)
-      : Ok({
-          inserted: [...planned.val.inserts],
-          closed: [...planned.val.closes],
-          unchanged: planned.val.unchanged,
-        })
-  })
+
   const result = await duplicatePlanVersion(deps, { id: "pv_source", projectId: "proj_123" })
   expect(result.err).toBeUndefined()
   expect(result.val?.state).toBe("ok")

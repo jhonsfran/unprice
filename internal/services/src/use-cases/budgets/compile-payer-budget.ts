@@ -1,3 +1,4 @@
+import { unitCurrency } from "@unprice/money"
 /**
  * Compiles a customer's subscription into its payer budget (ADR-0008 D1): the budget config billing
  * upserts at `unprice:customer:<customerId>`, and the statements it registers. Pure: the sync use
@@ -23,24 +24,9 @@ import {
 } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import { z } from "zod"
-import { windowIdOf, windowSpecOf } from "../../budgets"
+import { payerBudgetKey, windowIdOf, windowSpecOf } from "../../budgets"
 import { DomainError, type DomainErrorKind } from "../../domain-error-kind"
-import { planFeaturePricing } from "../../rate-cards/publish"
-
-/** The budget key billing writes for a customer; a public call may never define one. */
-export function payerBudgetKey(customerId: string): string {
-  return `unprice:customer:${customerId}`
-}
-
-/** The statement of one billing period of a metered feature: `<featureSlug>:<billingPeriodId>`. */
-export function statementPeriodId(featureSlug: string, billingPeriodId: string): string {
-  return `${featureSlug}:${billingPeriodId}`
-}
-
-/** The billing period a payer statement belongs to; a feature slug never holds ":". */
-export function billingPeriodIdOf(periodId: string): string {
-  return periodId.slice(periodId.indexOf(":") + 1)
-}
+import { featurePricingOf } from "../../rate-cards/publish"
 
 /**
  * Hold timing of every payer budget. A pricing change waits for open holds to close, so the max
@@ -197,7 +183,7 @@ export function compilePayerBudget(
 
   const unit = phase.card?.unit ?? `money:${phase.currency}`
   const prepaid = phase.creditLinePolicy === "capped"
-  if (prepaid && !unit.startsWith("money:")) return fail({ code: "PREPAID_NEEDS_MONEY", unit })
+  if (prepaid && unitCurrency(unit) === null) return fail({ code: "PREPAID_NEEDS_MONEY", unit })
 
   const features = []
   const limits = []
@@ -240,7 +226,6 @@ export function compilePayerBudget(
     pricing: {
       ...(phase.card && { cards: { base: phase.card.id } }),
       features,
-      statements: "required",
       funding: prepaid ? { mode: "prepaid", customerId } : { mode: "postpaid" },
     },
   })
@@ -275,14 +260,14 @@ function phaseAt(phases: readonly Phase[], now: number): Phase | undefined {
 
 /**
  * How a usage feature's meter reads an event; null for a feature without one. The property and
- * dimensions are the pricing core's reading of the plan feature (`planFeaturePricing`), the same
+ * dimensions are the pricing core's reading of the plan feature (`featurePricingOf`), the same
  * one its card's rows were checked against.
  */
 function meterOf(feature: PayerFeature) {
   const meter = feature.meterConfig
   if (feature.featureType !== "usage" || meter === null) return null
-  const pricing = planFeaturePricing({
-    feature: { slug: feature.slug },
+  const pricing = featurePricingOf({
+    slug: feature.slug,
     meterConfig: meter,
     included: feature.included,
   })
@@ -388,7 +373,7 @@ function statementsOf(phases: readonly Phase[], now: number) {
         const end = phase.endAt !== null && period.end >= phase.endAt ? phase.endAt + 1 : period.end
         if (end <= now - RECORD_ACCEPT_WINDOW_MS || end <= period.start) continue
         const parsed = budgetStatementRegistrationSchema.safeParse({
-          periodId: statementPeriodId(feature.slug, period.id),
+          periodId: period.id,
           statementKey: period.statementKey,
           featureSlug: feature.slug,
           start: period.start,

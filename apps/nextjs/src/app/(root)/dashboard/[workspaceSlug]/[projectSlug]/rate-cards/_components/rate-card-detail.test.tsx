@@ -6,10 +6,10 @@ import type { AppRouter } from "@unprice/trpc/routes"
 import { transformer } from "@unprice/trpc/transformer"
 import { renderToString } from "react-dom/server"
 import { describe, expect, it } from "vitest"
+import { PriceMatrix } from "~/components/pricing/price-matrix"
+import { matrixOf } from "~/components/pricing/rate-card-format"
 import { TRPCProvider } from "~/trpc/client"
-import { PriceMatrix } from "./price-matrix"
 import { PriceList } from "./rate-card-detail"
-import { matrixOf } from "./rate-card-format"
 
 const NOW = Date.parse("2026-11-04T12:00:00.000Z")
 const MILLION = 1_000_000

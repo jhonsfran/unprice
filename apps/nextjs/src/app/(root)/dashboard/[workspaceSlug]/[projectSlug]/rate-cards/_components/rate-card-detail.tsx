@@ -1,5 +1,7 @@
 "use client"
 
+import { singularUnit } from "@unprice/services/pricing"
+
 import { useQuery } from "@tanstack/react-query"
 import { formatAmount } from "@unprice/money"
 import { MODEL_CATALOG_VERSION } from "@unprice/services/budgets"
@@ -12,12 +14,12 @@ import { Typography } from "@unprice/ui/typography"
 import { Plus, RefreshCw, Rows3 } from "lucide-react"
 import { type ReactNode, useState } from "react"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
-import { useTRPC } from "~/trpc/client"
-import { CollapsibleSection } from "../../plans/[planSlug]/_components/section-label"
-import { CatalogUpdates } from "./catalog-updates"
-import { CloseRowDialog } from "./close-row-dialog"
-import { LinePrice, PriceMatrix, StatusBadge, visibleApplies } from "./price-matrix"
-import { PublishRowsDialog } from "./publish-rows-dialog"
+import {
+  LinePrice,
+  PriceMatrix,
+  StatusBadge,
+  visibleApplies,
+} from "~/components/pricing/price-matrix"
 import {
   type MatrixLine,
   cardCurrency,
@@ -25,7 +27,12 @@ import {
   describeCardState,
   markupPercent,
   matrixOf,
-} from "./rate-card-format"
+} from "~/components/pricing/rate-card-format"
+import { CollapsibleSection } from "~/components/pricing/section-label"
+import { useTRPC } from "~/trpc/client"
+import { CatalogUpdates } from "./catalog-updates"
+import { CloseRowDialog } from "./close-row-dialog"
+import { PublishRowsDialog } from "./publish-rows-dialog"
 
 type RateCardData = RouterOutputs["rateCards"]["get"]
 
@@ -126,7 +133,7 @@ export function PriceList({
   const currency = cardCurrency(card.unit)
   const tables: FeatureTable[] = featureSlugsOf(rows).map((slug) => {
     const feature = labelFor(features, slug)
-    const unit = feature.unit.replace(/s$/, "")
+    const unit = singularUnit(feature.unit)
     return { feature, unit, table: priceTableOf(slug, rows, now, currency, unit) }
   })
   // A feature with one price per cycle reads best beside the others; a sheet of model rates is

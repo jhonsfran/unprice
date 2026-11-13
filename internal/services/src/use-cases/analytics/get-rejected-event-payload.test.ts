@@ -14,7 +14,7 @@ describe("getRejectedEventPayload", () => {
       event: { slug: "tokens", properties: { input: 10 } },
       rejection: { code: "LIMIT_EXCEEDED" },
     }
-    const { analytics, queries } = journalAnalytics(() => [
+    const { budgetJournal, queries } = journalAnalytics(() => [
       {
         budget_key: "unprice:customer:cus_1",
         operation_id: "r:evt_1",
@@ -23,7 +23,7 @@ describe("getRejectedEventPayload", () => {
       },
     ])
 
-    const result = await getRejectedEventPayload({ analytics }, input)
+    const result = await getRejectedEventPayload({ budgetJournal }, input)
 
     expect(queries[0]).toContain("AND operation_id = 'r:evt_1'")
     expect(queries[0]).toContain("AND status = 'rejected'")
@@ -38,12 +38,12 @@ describe("getRejectedEventPayload", () => {
   })
 
   it("answers null until the journal has the row", async () => {
-    const { analytics } = journalAnalytics(() => [])
-    expect((await getRejectedEventPayload({ analytics }, input)).val).toBeNull()
+    const { budgetJournal } = journalAnalytics(() => [])
+    expect((await getRejectedEventPayload({ budgetJournal }, input)).val).toBeNull()
   })
 
-  it("answers null for a row whose data is not valid JSON", async () => {
-    const { analytics } = journalAnalytics(() => [
+  it("returns a typed failure for a row whose data is not valid JSON", async () => {
+    const { budgetJournal } = journalAnalytics(() => [
       {
         budget_key: "unprice:customer:cus_1",
         operation_id: "r:evt_1",
@@ -51,13 +51,24 @@ describe("getRejectedEventPayload", () => {
         data: "{not json",
       },
     ])
-    const result = await getRejectedEventPayload({ analytics }, input)
-    expect(result.err).toBeUndefined()
-    expect(result.val).toBeNull()
+    const result = await getRejectedEventPayload({ budgetJournal }, input)
+    expect(result.err).toBeInstanceOf(FetchError)
+    expect(result.val).toBeUndefined()
   })
 
+  it("refuses an incomplete rejected data contract", async () => {
+    const { budgetJournal } = journalAnalytics(() => [
+      {
+        budget_key: "unprice:customer:cus_1",
+        operation_id: "r:evt_1",
+        timestamp: new Date(handledAt).toISOString(),
+        data: JSON.stringify({ event: { slug: "tokens" } }),
+      },
+    ])
+    expect((await getRejectedEventPayload({ budgetJournal }, input)).err).toBeInstanceOf(FetchError)
+  })
   it("returns a journal failure", async () => {
-    const { analytics } = journalAnalytics(() => new Error("basin down"))
-    expect((await getRejectedEventPayload({ analytics }, input)).err).toBeInstanceOf(FetchError)
+    const { budgetJournal } = journalAnalytics(() => new Error("basin down"))
+    expect((await getRejectedEventPayload({ budgetJournal }, input)).err).toBeInstanceOf(FetchError)
   })
 })

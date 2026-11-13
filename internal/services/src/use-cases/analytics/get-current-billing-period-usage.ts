@@ -1,10 +1,10 @@
 import { Err, Ok, type Result } from "@unprice/error"
 import { formatAmount } from "@unprice/money"
 import { z } from "zod"
-import { type UnPriceBudgetError, isOutcomeOf } from "../../budgets"
+import type { UnPriceBudgetError } from "../../budgets"
 import type { BudgetClient } from "../budgets/budget-client"
-import { billingPeriodIdOf, payerBudgetKey } from "../budgets/compile-payer-budget"
 import { quantity } from "../budgets/payer-access"
+import { readPayerBudget } from "../budgets/read-payer-budget"
 
 export const getCurrentBillingPeriodUsageInputSchema = z.object({
   customerId: z.string(),
@@ -41,7 +41,7 @@ export type GetCurrentBillingPeriodUsageOutput = z.infer<
 >
 
 export type GetCurrentBillingPeriodUsageDeps = {
-  budgets: BudgetClient
+  budgets: Pick<BudgetClient, "execute">
   now?: () => number
 }
 
@@ -56,32 +56,15 @@ export async function getCurrentBillingPeriodUsage(
 ): Promise<Result<GetCurrentBillingPeriodUsageOutput, UnPriceBudgetError>> {
   const input = getCurrentBillingPeriodUsageInputSchema.parse(rawInput)
   const now = deps.now?.() ?? Date.now()
-  const address = { projectId: input.projectId, key: payerBudgetKey(input.customerId) }
-
-  const [got, statements] = await Promise.all([
-    deps.budgets.execute(address, { type: "get" }),
-    deps.budgets.execute(address, { type: "statements" }),
-  ])
-  const failure = got.err ?? statements.err
-  if (failure) {
-    return failure.rejection.code === "BUDGET_NOT_FOUND" ? Ok({ billingPeriods: [] }) : Err(failure)
-  }
-  if (
-    !got.val ||
-    !statements.val ||
-    !isOutcomeOf(got.val, "get") ||
-    !isOutcomeOf(statements.val, "statements")
-  ) {
-    throw new Error("payer budget answered another verb")
-  }
-
-  const unit = got.val.budget.unit
+  const payer = await readPayerBudget(deps.budgets, input, { statements: true })
+  if (payer.err) return Err(payer.err)
+  if (!payer.val) return Ok({ billingPeriods: [] })
+  const unit = payer.val.budget.unit
   const periods = new Map<string, z.infer<typeof currentBillingPeriodUsageSchema>>()
-  for (const statement of statements.val.statements) {
-    // The budget's own perpetual statements start with "#": billing registered none of them.
+  for (const statement of payer.val.statements) {
     const current = statement.state === "open" && statement.start <= now && now < statement.end
-    if (!current || statement.periodId.startsWith("#")) continue
-    const id = billingPeriodIdOf(statement.periodId)
+    if (!current) continue
+    const id = statement.periodId
     const period = periods.get(id) ?? {
       id,
       cycleStartAt: statement.start,

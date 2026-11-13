@@ -1,11 +1,6 @@
 import type { Pipeline } from "cloudflare:pipelines"
-import {
-  BUDGET_JOURNAL_SCHEMA_VERSION,
-  type BudgetJournalRow,
-  budgetJournalRowSchema,
-} from "@unprice/lakehouse"
-import { formatAmount } from "@unprice/money"
-import type { Operation } from "@unprice/services/budgets"
+import { type BudgetJournalRow, budgetJournalRowSchema } from "@unprice/lakehouse"
+import { type Operation, buildBudgetJournalRow } from "@unprice/services/budgets"
 import type { Env } from "~/env"
 
 /** One written version of an operation row, as the journal exports it. */
@@ -31,22 +26,16 @@ export function journalRowOf(
   entry: JournalEntry
 ): BudgetJournalRow {
   const { kind } = entry.operation
-  return {
-    schema_version: BUDGET_JOURNAL_SCHEMA_VERSION,
+  return buildBudgetJournalRow({
     project_id: budget.projectId,
     budget_key: budget.key,
     seq: entry.seq,
     operation_id: entry.storedId,
     kind,
     status: entry.status,
-    timestamp: new Date(entry.writtenAt).toISOString(),
-    // Amounts as decimal strings: JSON has no bigint.
-    data: JSON.parse(
-      JSON.stringify({ ...entry.operation, unit: budget.unit }, (_key, value: unknown) =>
-        typeof value === "bigint" ? formatAmount(value) : value
-      )
-    ),
-  }
+    writtenAt: entry.writtenAt,
+    data: { ...entry.operation, unit: budget.unit },
+  })
 }
 
 /**

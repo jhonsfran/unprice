@@ -1,8 +1,4 @@
-import {
-  type BudgetConfigInput,
-  budgetStatementRegistrationSchema,
-  upsertBudgetInternalInputSchema,
-} from "@unprice/db/validators"
+import { type BudgetConfigInput, upsertBudgetInternalInputSchema } from "@unprice/db/validators"
 import { formatAmount } from "@unprice/money"
 import { describe, expect, it } from "vitest"
 import {
@@ -64,7 +60,6 @@ type PricedBudget = Readonly<{
   cards?: readonly CardRows[]
   overlay?: string
   features: readonly FeatureInput[]
-  statements?: "required" | "none"
   limits?: BudgetConfigInput["limits"]
 }>
 
@@ -83,7 +78,6 @@ function pricedUpsert(budget: PricedBudget): BudgetCommand {
         priced: true,
         ...feature,
       })),
-      statements: budget.statements ?? "required",
     },
   })
   return { type: "upsert", projectId: "proj_1", mayLoosen: true, setsPricing: true, ...parsed }
@@ -592,7 +586,6 @@ describe("a payer budget prices usage events at ingestion", () => {
       limits: [{ feature: "api_calls", amount: "100", window: "month" }],
       pricing: {
         features: [{ ...apiCalls, dimensions: [], included: null, priced: false }],
-        statements: "required",
       },
     })
     const store = new MemoryBudgetStore()
@@ -616,7 +609,6 @@ describe("a payer budget prices usage events at ingestion", () => {
         limits: [],
         pricing: {
           features: [{ ...apiCalls, dimensions: [], included: null, priced: true }],
-          statements: "required",
         },
       })
     ).toThrow("a priced feature needs a rate card")
@@ -699,20 +691,6 @@ describe("a payer budget prices usage events at ingestion", () => {
         )
       )
     ).toEqual({ code: "IDEMPOTENCY_CONFLICT", idempotencyKey: "r1" })
-  })
-
-  it("keeps positions in a perpetual statement when the budget needs no statements", () => {
-    const store = pricedStore({ features: [apiCalls], statements: "none" })
-    ok(store.run(charge("c1", apiBatch(6_000)), NOV + 2 * hour))
-    ok(store.run(charge("c2", apiBatch(10_000)), DEC + 2 * hour))
-
-    expect(totals(store.statements.get("#budget:api_calls"))).toEqual({
-      state: "open",
-      amount: "10",
-      cost: null,
-      quantity: "16000",
-      events: 2,
-    })
   })
 
   it("rejects an event no feature takes and properties over 4 KB", () => {
@@ -869,26 +847,16 @@ describe("a payer budget prices usage events at ingestion", () => {
     )
     ok(store.run(charge("c1", image("1024")), NOV + 21 * day))
 
-    expect(early.outcome).toEqual({ type: "sealStatements", statements: [], funding: [] })
+    expect(early.outcome).toEqual({
+      type: "sealStatements",
+      statements: [],
+      openPeriodIds: ["images:inv_2026-11"],
+      funding: [],
+    })
     expect(totals(store.statements.get("images:inv_2026-11"))).toMatchObject({
       state: "open",
       amount: "0.04",
     })
-  })
-
-  it("refuses period ids and statement keys that start with #", () => {
-    const issues = (fields: Partial<StatementRegistration>) => {
-      const parsed = budgetStatementRegistrationSchema.safeParse({
-        ...month("images", NOV, DEC),
-        ...fields,
-      })
-      return parsed.success ? [] : parsed.error.issues.map((issue) => issue.path.join("."))
-    }
-    expect([
-      issues({}),
-      issues({ periodId: "#budget:images" }),
-      issues({ statementKey: "#budget" }),
-    ]).toEqual([[], ["periodId"], ["statementKey"]])
   })
 })
 
@@ -964,11 +932,10 @@ describe("a payer budget keeps every amount it consumes on a statement", () => {
     })
     const changed: BudgetCommand[] = [
       pricedUpsert({ features: [images] }),
-      pricedUpsert({ features: [images, tokens], statements: "none" }),
       { type: "upsert", projectId: "proj_1", mayLoosen: true, setsPricing: true, ...unpriced },
     ]
     expect(changed.map((command) => rejection(store.run(command, at)))).toEqual(
-      Array(3).fill({ code: "RESERVATIONS_OPEN" })
+      Array(2).fill({ code: "RESERVATIONS_OPEN" })
     )
     ok(store.run(pricedUpsert({ features: [tokens, images] }), at))
     ok(store.run({ type: "settle", holdId: hold.outcome.holdId, event: image("1024") }, at))
@@ -1063,7 +1030,8 @@ describe("a payer budget keeps every amount it consumes on a statement", () => {
     const store = new MemoryBudgetStore()
     const at = NOV + hour
     store.cacheCardsAt(at, usdCard)
-    ok(store.run(pricedUpsert({ features: [images], statements: "none" }), at))
+    ok(store.run(pricedUpsert({ features: [images] }), at))
+    ok(store.run(register(month("images", NOV, DEC)), at))
     ok(
       store.run(
         { type: "authorize", idempotencyKey: "a1", event: image("1024"), ttlMs: 2 * minute },
@@ -1079,7 +1047,8 @@ describe("a payer budget keeps every amount it consumes on a statement", () => {
     const store = new MemoryBudgetStore()
     const at = NOV + hour
     store.cacheCardsAt(at, usdCard)
-    ok(store.run(pricedUpsert({ features: [images], statements: "none" }), at))
+    ok(store.run(pricedUpsert({ features: [images] }), at))
+    ok(store.run(register(month("images", NOV, DEC)), at))
     const charge = (key: string) =>
       store.run({ type: "charge", idempotencyKey: key, event: image("1024") }, at + 5 * minute)
     ok(
@@ -1207,10 +1176,10 @@ describe("a payer budget keeps every amount it consumes on a statement", () => {
     expect(estimate?.features[0]?.lines).toEqual([])
   })
 
-  it("creates a priced budget from a keyed verb's ifMissing, which reads its cards", () => {
+  it("refuses an event on a priced ifMissing without a registered statement", () => {
     const store = new MemoryBudgetStore()
     store.cacheCards(usdCard)
-    const upsert = pricedUpsert({ features: [images], statements: "none" })
+    const upsert = pricedUpsert({ features: [images] })
     if (upsert.type !== "upsert") throw new Error("not an upsert")
     const { key, projectId, unit, config } = upsert
     const ifMissing = { key, projectId, unit, config }
@@ -1219,19 +1188,11 @@ describe("a payer budget keeps every amount it consumes on a statement", () => {
         store.run({ type: "lease", leaseKey: "l1", amount: ONE, ttlMs: hour, ifMissing }, NOV)
       )
     ).toEqual({ code: "EVENT_REQUIRED" })
-    const charged = ok(
-      store.run({ type: "charge", idempotencyKey: "c1", event: image("1024"), ifMissing }, NOV)
-    )
-    expect(charged.outcome).toMatchObject({ type: "charge", created: { key } })
-    expect(lifetime(store)).toEqual({ amount: "0.04", quantities: { images: "1" } })
-  })
-
-  it("refuses to register a period into the budget's own perpetual statements", () => {
-    const store = pricedStore({ features: [images], statements: "none" })
-    const perpetual = { ...month("images", NOV, DEC), periodId: "#budget:images" }
-    expect(rejection(store.run(register(perpetual), NOV + hour))).toEqual({
-      code: "STATEMENT_CONFLICT",
-      periodId: "#budget:images",
-    })
+    expect(
+      rejection(
+        store.run({ type: "charge", idempotencyKey: "c1", event: image("1024"), ifMissing }, NOV)
+      )
+    ).toEqual({ code: "NO_STATEMENT", featureSlug: "images", at: NOV })
+    expect(store.budget).toBeNull()
   })
 })

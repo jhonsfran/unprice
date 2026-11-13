@@ -1,20 +1,24 @@
 "use client"
 
+import { catalogPolicyFor } from "~/components/pricing/rate-card-format"
+
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
 
-import type { Feature, PlanVersionFeatureDragDrop } from "@unprice/db/validators"
+import type { Feature, MarginPolicy, PlanVersionFeatureDragDrop } from "@unprice/db/validators"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@unprice/ui/table"
 import { cn } from "@unprice/ui/utils"
 
+import type { FeaturePriceRows } from "~/components/pricing/plan-prices"
+import { useUpdatePlanFeature } from "~/components/pricing/use-update-plan-feature"
+import { useVersionPricing } from "~/components/pricing/use-version-pricing"
 import { useActiveFeature, useActivePlanVersion, usePlanFeaturesList } from "~/hooks/use-features"
 import { toastAction } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
 import { DroppableContainer } from "../../_components/droppable"
 import { FeatureDialog } from "../../_components/feature-dialog"
-import { type FeaturePriceRows, rowsByFeature, withDefaultRow } from "../../_components/plan-prices"
 import { SortableFeatureRow } from "../../_components/sortable-feature"
 import {
   type CellField,
@@ -64,49 +68,19 @@ export function FeatureTable() {
   })
 
   // ADR-0008 D2: every price is a row on the version's card, read beside the package it prices.
-  const { data: pricing, dataUpdatedAt } = useQuery({
-    ...trpc.rateCards.forPlanVersion.queryOptions({ planVersionId: planVersion?.id ?? "" }),
-    enabled: Boolean(planVersion),
-  })
+  const { card, rows } = useVersionPricing(planVersion?.id, planVersion?.currency)
   const currency = planVersion?.currency ?? "USD"
-  const card = pricing?.cards.find((entry) => entry.currency === currency)
-  const rows = rowsByFeature(card?.rows ?? [], dataUpdatedAt)
-
-  const update = useMutation(
-    trpc.planVersionFeatures.update.mutationOptions({
-      meta: { suppressGlobalError: true },
-      onSuccess: ({ planVersionFeature, row }, variables) => {
-        setFeatures((list) =>
-          list.map((entry) =>
-            entry.featureId === planVersionFeature.featureId
-              ? { ...entry, ...planVersionFeature }
-              : entry
-          )
+  const update = useUpdatePlanFeature({
+    currency,
+    onSaved: (planVersionFeature) =>
+      setFeatures((list) =>
+        list.map((entry) =>
+          entry.featureId === planVersionFeature.featureId
+            ? { ...entry, ...planVersionFeature }
+            : entry
         )
-        if (variables.price !== undefined && planVersion) {
-          // The answered row goes into the pricing cache first, so the cell and the checklist
-          // show the new price before the refetch lands.
-          queryClient.setQueryData(
-            trpc.rateCards.forPlanVersion.queryKey({ planVersionId: planVersion.id }),
-            (cached) =>
-              cached
-                ? {
-                    cards: withDefaultRow(
-                      cached.cards,
-                      planVersion.currency,
-                      planVersionFeature.feature.slug,
-                      row
-                    ),
-                  }
-                : cached
-          )
-        }
-        void queryClient.invalidateQueries(trpc.rateCards.forPlanVersion.pathFilter())
-        void queryClient.invalidateQueries({ queryKey: trpc.planVersions.getById.queryKey() })
-        router.refresh()
-      },
-    })
-  )
+      ),
+  })
 
   const remove = useMutation(
     trpc.planVersionFeatures.remove.mutationOptions({
@@ -143,6 +117,7 @@ export function FeatureTable() {
         features={features}
         rows={rows}
         currency={currency}
+        marginPolicy={card?.card.marginPolicy}
         planBillingName={planVersion.billingConfig.name}
         editable={planVersion.status !== "published"}
         pendingIds={pendingIds}
@@ -186,6 +161,7 @@ export function FeatureTableView({
   features,
   rows,
   currency,
+  marginPolicy,
   planBillingName,
   editable,
   pendingIds,
@@ -197,6 +173,7 @@ export function FeatureTableView({
 }: {
   features: readonly PlanVersionFeatureDragDrop[]
   rows: ReadonlyMap<string, FeaturePriceRows>
+  marginPolicy?: MarginPolicy
   currency: string
   planBillingName: string | undefined
   editable: boolean
@@ -213,6 +190,9 @@ export function FeatureTableView({
       <FeatureRowCells
         row={row}
         priceRows={rows.get(row.feature.slug)}
+        catalogPriced={
+          marginPolicy ? catalogPolicyFor(marginPolicy, row.feature.slug) !== null : false
+        }
         currency={currency}
         planBillingName={planBillingName}
         editable={editable}
@@ -282,6 +262,7 @@ export function FeatureTableView({
 function FeatureRowCells({
   row,
   priceRows,
+  catalogPriced,
   currency,
   planBillingName,
   editable,
@@ -295,6 +276,7 @@ function FeatureRowCells({
 }: {
   row: PlanVersionFeatureDragDrop
   priceRows: FeaturePriceRows | undefined
+  catalogPriced: boolean
   currency: string
   planBillingName: string | undefined
   editable: boolean
@@ -308,7 +290,7 @@ function FeatureRowCells({
 }) {
   const limit = limitCellOf(row)
   const included = includedCellOf(row)
-  const price = priceCellOf(row, priceRows, currency, planBillingName)
+  const price = priceCellOf(row, priceRows, currency, planBillingName, catalogPriced)
   const problemFor = (field: CellField) => (problem?.field === field ? problem.message : null)
   const disabled = !editable || saving
   const units = (value: string) => unitSuffixOf(row, planBillingName, value)

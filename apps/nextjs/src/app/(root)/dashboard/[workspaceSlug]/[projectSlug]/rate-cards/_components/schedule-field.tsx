@@ -11,18 +11,10 @@ import { Popover, PopoverContent, PopoverTrigger } from "@unprice/ui/popover"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@unprice/ui/select"
 import { Switch } from "@unprice/ui/switch"
 
-import { toDateTimeLocal } from "./rate-card-format"
-
-/** "2026-11-06T18:07" as a Date in the browser's time zone; null while incomplete. */
-function parseLocal(value: string): Date | null {
-  const date = new Date(value)
-  return value && !Number.isNaN(date.getTime()) ? date : null
-}
-
 /**
  * When a row change takes effect: now by default (the server picks the earliest the card allows),
  * or a chosen day and time behind a "Schedule for later" toggle. The day comes from the same
- * Calendar popover the rest of the dashboard uses; the value stays a `datetime-local` string.
+ * Calendar popover the rest of the dashboard uses; the value is an instant in milliseconds.
  */
 export function ScheduleField({
   id,
@@ -39,22 +31,22 @@ export function ScheduleField({
   nowText?: string
   schedule: boolean
   onScheduleChange: (schedule: boolean) => void
-  value: string
-  onChange: (value: string) => void
+  value: number | null
+  onChange: (value: number | null) => void
 }) {
   const [isOpen, setIsOpen] = useState(false)
-  const date = parseLocal(value)
+  const date = value === null ? null : new Date(value)
   const time = date ? format(date, "HH:mm") : "00:00"
 
   // A new day keeps the chosen time; a new time keeps the chosen day.
   const setDay = (day: Date) => {
     const [hours = 0, minutes = 0] = time.split(":").map(Number)
-    onChange(toDateTimeLocal(add(startOfDay(day), { hours, minutes }).getTime()))
+    onChange(add(startOfDay(day), { hours, minutes }).getTime())
   }
   const setTime = (next: string) => {
     const [hours, minutes] = next.split(":").map(Number)
     if (hours === undefined || minutes === undefined || Number.isNaN(hours)) return
-    onChange(toDateTimeLocal(add(startOfDay(date ?? new Date()), { hours, minutes }).getTime()))
+    onChange(add(startOfDay(date ?? new Date()), { hours, minutes }).getTime())
   }
 
   return (

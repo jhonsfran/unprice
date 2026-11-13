@@ -12,18 +12,18 @@ import {
 import type { AppRouter } from "@unprice/trpc/routes"
 import { renderToString } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
-import { TRPCProvider } from "~/trpc/client"
-import { CatalogUpdates } from "../../../rate-cards/_components/catalog-updates"
-import { rowsByFeature } from "../../_components/plan-prices"
 import {
   type CatalogPreview,
-  CatalogPriceBlockView,
   DEFAULT_CATALOG_POLICY,
   catalogPricingInputOf,
   markupRateOf,
   policyDraftOf,
-  useCatalogPricing,
-} from "./catalog-price-block"
+} from "~/components/pricing/catalog-policy"
+import { rowsByFeature } from "~/components/pricing/plan-prices"
+import { useCatalogPricing } from "~/components/pricing/use-catalog-pricing"
+import { TRPCProvider } from "~/trpc/client"
+import { CatalogUpdates } from "../../../rate-cards/_components/catalog-updates"
+import { CatalogPriceBlockView } from "./catalog-price-block"
 
 // SuperLink needs a mounted app router; the link target is not what these tests check.
 vi.mock("~/components/super-link", () => ({
@@ -99,7 +99,7 @@ function render(props: Partial<Parameters<typeof CatalogPriceBlockView>[0]> = {}
     <CatalogPriceBlockView
       featureSlug="tokens"
       now={NOW}
-      card={{ currency: "USD", card: rateCard, rows }}
+      card={{ own: true, currency: "USD", card: rateCard, rows }}
       rows={rowsByFeature(rows, NOW).get("tokens")}
       currency="USD"
       editable
@@ -237,8 +237,16 @@ describe("policyDraftOf", () => {
   })
 })
 
-function pricingActions() {
-  const requests: { path: string; input: unknown }[] = []
+const policyInput = {
+  markup: "0.3",
+  roundTo: "0.000001",
+  dimension: "model",
+  componentMap: { input: "input_tokens", output: "output_tokens" },
+}
+
+function pricingActions(deferPreview = false) {
+  let answerPreview = () => {}
+  const requests: { path: string; input: unknown; type: string }[] = []
   const queryClient = new QueryClient()
   const published = { inserted: [], closed: [], unchanged: 0 }
   const trpcClient = createTRPCClient<AppRouter>({
@@ -246,22 +254,31 @@ function pricingActions() {
       () =>
         ({ op }) =>
           observable((observer) => {
-            requests.push({ path: op.path, input: op.input })
-            observer.next({
-              result: {
-                data:
-                  op.path.endsWith("publishCostPlus") || op.path.endsWith("applyCatalogPricing")
-                    ? published
-                    : preview,
-              },
-            })
-            observer.complete()
+            requests.push({ path: op.path, input: op.input, type: op.type })
+            const answer = () => {
+              observer.next({
+                result: {
+                  data:
+                    op.path.endsWith("publishCostPlus") || op.path.endsWith("applyCatalogPricing")
+                      ? published
+                      : preview,
+                },
+              })
+              observer.complete()
+            }
+            if (deferPreview && op.path.endsWith("previewCatalogPricing")) answerPreview = answer
+            else answer()
           }),
     ],
   })
   const captured: ReturnType<typeof useCatalogPricing>[] = []
   function Actions() {
-    captured.push(useCatalogPricing({ planVersionId: "pv_1", featureSlug: "tokens" }))
+    captured.push(
+      useCatalogPricing(
+        { planVersionId: "pv_1", featureSlug: "tokens" },
+        { ok: true, input: policyInput }
+      )
+    )
     return null
   }
   renderToString(
@@ -273,7 +290,7 @@ function pricingActions() {
   )
   const [pricing] = captured
   if (!pricing) throw new Error("Catalog actions did not render")
-  return { pricing, requests, published }
+  return { pricing, requests, published, answerPreview: () => answerPreview() }
 }
 
 describe("catalog pricing requests", () => {
@@ -287,10 +304,11 @@ describe("catalog pricing requests", () => {
   it("previews the policy through the read-only preview procedure", async () => {
     const { pricing, requests } = pricingActions()
 
-    await expect(pricing.preview(input)).resolves.toEqual(preview)
+    await expect(pricing.runPreview({ ok: true, input })).resolves.toBeUndefined()
     expect(requests).toEqual([
       {
         path: "rateCards.previewCatalogPricing",
+        type: "query",
         input: { planVersionId: "pv_1", featureSlug: "tokens", ...input },
       },
     ])
@@ -299,20 +317,38 @@ describe("catalog pricing requests", () => {
   it("applies once with the reviewed hash, without saving or requesting a new preview", async () => {
     const { pricing, requests, published } = pricingActions()
 
-    await expect(pricing.apply({ ...input, draftHash: "reviewed_hash" })).resolves.toEqual(
-      published
-    )
+    await pricing.runPreview({ ok: true, input })
+    requests.length = 0
+    await expect(pricing.apply(input)).resolves.toEqual(published)
     expect(requests).toEqual([
       {
         path: "rateCards.applyCatalogPricing",
+        type: "mutation",
         input: {
           planVersionId: "pv_1",
           featureSlug: "tokens",
           ...input,
-          draftHash: "reviewed_hash",
+          draftHash: "hash_1",
         },
       },
     ])
+  })
+  it("ignores a preview that finishes after the policy editor resets", async () => {
+    const { pricing, requests, answerPreview } = pricingActions(true)
+    const pending = pricing.runPreview({ ok: true, input })
+    await vi.waitFor(() => expect(requests).toHaveLength(1))
+    pricing.reset()
+    answerPreview()
+    await pending
+    await expect(pricing.apply(input)).resolves.toBeUndefined()
+    expect(requests.map((request) => request.path)).toEqual(["rateCards.previewCatalogPricing"])
+  })
+
+  it("refuses a policy that differs from the reviewed input", async () => {
+    const { pricing, requests } = pricingActions()
+    await pricing.runPreview({ ok: true, input })
+    await expect(pricing.apply({ ...input, markup: "0.5" })).resolves.toBeUndefined()
+    expect(requests.map((request) => request.path)).toEqual(["rateCards.previewCatalogPricing"])
   })
 })
 

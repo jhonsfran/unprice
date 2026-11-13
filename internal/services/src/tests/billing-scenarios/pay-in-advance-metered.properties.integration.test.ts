@@ -6,7 +6,7 @@ import * as fc from "fast-check"
 import { afterAll, describe, expect, it, vi } from "vitest"
 import { LATE_EVENT_GRACE_MS } from "../../entitlements"
 import { LedgerGateway } from "../../ledger"
-import { RateCardService } from "../../rate-cards/service"
+import { testInvoicing } from "../../test-fixtures/billing-gateway"
 import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
 import { billPeriod } from "../../use-cases/billing/bill-period"
 
@@ -109,7 +109,7 @@ async function runAdvanceMeteredPropertyCase(usage: number) {
   expect(ensureAccounts.err).toBeUndefined()
 
   const startRun = await billPeriod({
-    invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
+    invoicing: testInvoicing({ db, payerBudgets }),
     context: await loadSubscriptionContext(jan1),
     logger,
     db,
@@ -133,7 +133,7 @@ async function runAdvanceMeteredPropertyCase(usage: number) {
   await expectInvoiceLineAmounts(ledger, startStatementKey, [flatAccessAmount])
 
   const usageRun = await billPeriod({
-    invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
+    invoicing: testInvoicing({ db, payerBudgets }),
     context: await loadSubscriptionContext(feb1 + LATE_EVENT_GRACE_MS),
     logger,
     db,
@@ -141,7 +141,7 @@ async function runAdvanceMeteredPropertyCase(usage: number) {
     ledgerService: ledger,
   })
   const rerun = await billPeriod({
-    invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
+    invoicing: testInvoicing({ db, payerBudgets }),
     context: await loadSubscriptionContext(feb1 + LATE_EVENT_GRACE_MS),
     logger,
     db,

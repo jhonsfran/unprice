@@ -87,7 +87,7 @@ function compiled(input: PayerBudgetSource) {
 }
 
 const statement = (slug: string, id: string, key: string, start: number, end: number) => ({
-  periodId: `${slug}:${id}`,
+  periodId: id,
   statementKey: key,
   featureSlug: slug,
   start,
@@ -133,7 +133,6 @@ describe("compilePayerBudget", () => {
                 priced: false,
               },
             ],
-            statements: "required",
             funding: { mode: "postpaid" },
           },
         },
@@ -176,7 +175,6 @@ describe("compilePayerBudget", () => {
               priced: true,
             },
           ],
-          statements: "required",
           funding: { mode: "postpaid" },
         },
       },
@@ -249,7 +247,6 @@ describe("compilePayerBudget", () => {
           priced: true,
         },
       ],
-      statements: "required",
       funding: { mode: "prepaid", customerId: "cus_1" },
     })
   })

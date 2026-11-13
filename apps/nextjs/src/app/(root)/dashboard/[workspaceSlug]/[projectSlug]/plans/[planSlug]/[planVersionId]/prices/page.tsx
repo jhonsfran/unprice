@@ -1,11 +1,10 @@
-import { pricingShape } from "@unprice/services/pricing"
+import { describePlanFeatureCharge, pricingShape } from "@unprice/services/pricing"
 import { featurePricingOf } from "@unprice/services/rate-cards"
 import { Typography } from "@unprice/ui/typography"
 import { Rows3 } from "lucide-react"
 import { notFound } from "next/navigation"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { HydrateClient, api, prefetch, trpc } from "~/trpc/server"
-import { cardLabel } from "../../../_components/plan-prices"
 import { SharedCardPicker } from "../_components/plan-version-rate-card"
 import { VersionPrices } from "../_components/version-prices"
 
@@ -17,40 +16,6 @@ function meterPropertyOf(
 ): string | null {
   const parsed = featurePricingOf({ slug, meterConfig })
   return parsed.ok ? parsed.pricing.meterProperty : null
-}
-
-type PlanFeature = NonNullable<
-  Awaited<ReturnType<typeof api.planVersions.getById>>["planVersion"]
->["planFeatures"][number]
-
-/**
- * How a feature is charged, in words beside its price, so "$49" reads as "Fixed, monthly".
- * The price sheet knows rates; the package (fixed, tiered, metered, a bundle) knows what they mean.
- */
-function describeCharge(planFeature: PlanFeature, units: string): string {
-  const cycle = planFeature.billingConfig.name
-  const unit = units.replace(/s$/, "")
-  switch (planFeature.featureType) {
-    case "flat":
-      return `Fixed, ${cycle}`
-    case "tier":
-      return `Per ${unit} picked at signup, ${cycle}`
-    case "package":
-      return `Bundles of ${planFeature.config?.units ?? 1} ${units}, ${cycle}`
-    case "usage": {
-      const included = Number(planFeature.included ?? 0)
-      const mode = planFeature.config?.usageMode
-      const how =
-        mode === "tier"
-          ? `Metered per ${unit}, tiered`
-          : mode === "package"
-            ? `Metered in bundles of ${planFeature.config?.units ?? 1}`
-            : `Metered per ${unit}`
-      return included > 0 ? `${how}, first ${included.toLocaleString("en")} free` : how
-    }
-    default:
-      return cycle
-  }
 }
 
 /**
@@ -96,18 +61,13 @@ export default async function PlanVersionPricesPage(props: {
     prefetch(trpc.rateCards.get.queryOptions({ id: entry.card.id })),
     prefetch(trpc.rateCards.forPlanVersion.queryOptions({ planVersionId: params.planVersionId })),
   ])
-  const label = cardLabel(entry.card.name, {
-    planSlug: params.planSlug,
-    planVersionId: params.planVersionId,
-    currency: planVersion.currency,
-  })
   const features = planVersion.planFeatures.map((planFeature) => {
     const unit = planFeature.unitOfMeasure ?? planFeature.feature.unitOfMeasure ?? "units"
     return {
       slug: planFeature.feature.slug,
       title: planFeature.feature.title,
       unit,
-      charge: describeCharge(planFeature, unit),
+      charge: describePlanFeatureCharge(planFeature, unit),
       pricing: {
         shape: pricingShape({
           featureType: planFeature.featureType,
@@ -125,7 +85,7 @@ export default async function PlanVersionPricesPage(props: {
 
   return (
     <div className="hide-scrollbar flex min-h-0 flex-col gap-4 overscroll-contain pb-8 lg:flex-1 lg:overflow-y-auto">
-      {!label.isOwn && (
+      {!entry.own && (
         <Typography
           variant="p"
           affects="removePaddingMargin"

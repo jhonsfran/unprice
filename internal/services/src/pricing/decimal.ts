@@ -29,10 +29,6 @@ export function ceilDiv(n: bigint, d: bigint): bigint {
   return (n + d - BigInt(1)) / d
 }
 
-export function minAmount(a: Amount, b: Amount): Amount {
-  return a < b ? a : b
-}
-
 export function maxAmount(a: Amount, b: Amount): Amount {
   return a > b ? a : b
 }

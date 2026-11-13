@@ -246,3 +246,32 @@ describe("published SDK examples", () => {
     expect(checkExamples(examples)).toEqual([])
   }, 30_000)
 })
+
+describe("listPlanVersions snippet text", () => {
+  for (const framework of ["sdk", "fetch", "curl"] as const) {
+    it(`${framework} keeps the exact default request and follow-up`, () => {
+      expect(getCodeExample(framework, "listPlanVersions")).toMatchSnapshot()
+    })
+    it(`${framework} keeps the exact filtered request and dashboard context`, () => {
+      expect(
+        getCodeExample(framework, "listPlanVersions", {
+          apiToken: "example",
+          listPlanVersions: {
+            planVersionIds: ["pv_first", "pv_second"],
+            billingInterval: "year",
+            currency: "EUR",
+            version: 3,
+            featureSlugs: ["tokens", "requests"],
+          },
+        })
+      ).toMatchSnapshot()
+    })
+    it(`${framework} uses defaults when the request filters are empty`, () => {
+      expect(
+        getCodeExample(framework, "listPlanVersions", {
+          listPlanVersions: { planVersionIds: [], version: 0, featureSlugs: ["tokens"] },
+        })
+      ).toMatchSnapshot()
+    })
+  }
+})

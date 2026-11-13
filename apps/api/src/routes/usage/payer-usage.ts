@@ -8,15 +8,11 @@ import {
 import type { Context } from "hono"
 import { bodyLimit } from "hono/body-limit"
 import { UnpriceApiError } from "~/errors"
+import { budgetRejectionError } from "~/errors/budget"
 import type { HonoEnv } from "~/hono/env"
 import { journalOf } from "~/ingestion/budget/journal"
-import {
-  amountToWire,
-  batchOutcome,
-  budgetCommandDeps,
-  budgetRejectionError,
-  callBudget,
-} from "../budgets/budget-verb"
+import { batchOutcome, budgetCommandDeps, callBudget } from "../budgets/budget-verb"
+import { amountToWire } from "../budgets/wire"
 
 /** A batch event whose budget could not be reached: never decided, so a retry with its key is safe. */
 export const USAGE_UNAVAILABLE = {

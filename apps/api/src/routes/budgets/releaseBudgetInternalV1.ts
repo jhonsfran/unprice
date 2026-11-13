@@ -11,7 +11,8 @@ import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
-import { releaseToWire, runBudgetVerb } from "./budget-verb"
+import { runBudgetVerb } from "./budget-verb"
+import { releaseToWire } from "./wire"
 
 export const route = createRoute(
   defineEndpointContract(

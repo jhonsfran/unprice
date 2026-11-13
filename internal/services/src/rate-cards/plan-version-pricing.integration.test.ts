@@ -1,7 +1,6 @@
 import { eq } from "@unprice/db"
 import { versions as versionsTable } from "@unprice/db/schema"
 import { createRateCardInputSchema, ratePriceSchema } from "@unprice/db/validators"
-import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Cache } from "../cache/service"
@@ -9,10 +8,7 @@ import { NoopMetrics } from "../metrics/noop"
 import { PlanService } from "../plans/service"
 import { seedTestDb } from "../test-fixtures/seed-db"
 import { pricePlanVersion } from "./price-plan-version"
-import { projectFeaturePricing } from "./project-features"
-import { RateCardService } from "./service"
 import {
-  MINUTE,
   NOW,
   createRateCardIntegrationFixture,
   projectId,
@@ -21,14 +17,14 @@ import {
 } from "./service.integration.fixture"
 
 describe("RateCardService", () => {
-  const { db, rateCards, features, services, cardRows } = createRateCardIntegrationFixture()
+  const { db, rateCards, services, cardRows } = createRateCardIntegrationFixture()
 
   it("refuses a credits card on a plan version, since its invoices are in money", async () => {
     await seedTestDb({ db, fixtures: ["plan-monthly-arrear.sql"] })
     const planVersionId = "pv_test_monthly_arrear"
     await db
       .update(versionsTable)
-      .set({ status: "draft" })
+      .set({ status: "draft", publishedAt: null })
       .where(eq(versionsTable.id, planVersionId))
     const credits = await value(
       rateCards.createCard(
@@ -86,78 +82,38 @@ describe("RateCardService", () => {
       await seedTestDb({ db, fixtures: ["plan-monthly-arrear.sql"] })
       await db
         .update(versionsTable)
-        .set({ status: "draft" })
+        .set({ status: "draft", publishedAt: null })
         .where(eq(versionsTable.id, planVersionId))
     })
 
-    it("clears the cached plan versions of a card when it is assigned or its rows change", async () => {
-      const remove = vi.fn(async (_keys: string | string[]) => Ok(undefined))
-      const cached = new RateCardService({
-        db,
-        cache: { planVersion: { remove } } as unknown as Pick<Cache, "planVersion">,
-      })
-      const pricing = await value(projectFeaturePricing(features, projectId))
-      const draft = (featureSlug: string, amount: string) => ({
-        featureSlug,
-        match: {},
-        price: flat(amount),
-        cost: null,
-        source: "manual" as const,
-        sourceRef: null,
-      })
+    it("assembles the version's prices and customer-facing lines in the plan service", async () => {
+      const version = await value(
+        services.plans.getPlanVersionWithPrices({ projectId, planVersionId })
+      )
+      expect(version?.flatPrice).toBe("99\u00a0€")
+      expect(
+        version?.planFeatures.find((feature) => feature.feature.slug === "access-pro")
+      ).toMatchObject({ displayPrice: "99\u00a0€", displayFeatureText: "Access Pro" })
+      expect(
+        version?.planFeatures.find((feature) => feature.feature.slug === "events")
+          ?.displayFeatureText
+      ).toContain("0,001\u00a0€ per event")
+    })
 
-      const refused = await rejection(
-        cached.publishRows({
-          projectId,
-          cardId: "card_test_arrear",
-          drafts: [draft("access-pro", "120")],
-          effectiveFrom: NOW,
-          now: NOW,
-          ...pricing,
-        })
-      )
-      expect(refused).toMatchObject({ code: "NOTICE_TOO_SHORT" })
-      expect(remove).not.toHaveBeenCalled()
-
-      const published = await value(
-        cached.publishRows({
-          projectId,
-          cardId: "card_test_arrear",
-          drafts: [draft("access-pro", "120")],
-          effectiveFrom: NOW + 10 * MINUTE,
-          now: NOW,
-          ...pricing,
-        })
-      )
-      await value(
-        cached.closeRows({
-          projectId,
-          cardId: "card_test_arrear",
-          rowIds: ["row_test_arrear_events"],
-          effectiveTo: NOW + 10 * MINUTE,
-          now: NOW,
-        })
-      )
-      const replacement = await value(
-        cached.createCard(
-          projectId,
-          createRateCardInputSchema.parse({
-            name: "Replacement EUR",
-            unit: "money:EUR",
-            marginPolicy: { type: "manual" },
+    it("refuses to change a published version's card", async () => {
+      await db
+        .update(versionsTable)
+        .set({ status: "published" })
+        .where(eq(versionsTable.id, planVersionId))
+      expect(
+        await rejection(
+          rateCards.assignToPlanVersion(projectId, {
+            planVersionId,
+            currency: "EUR",
+            cardId: "card_test_arrear",
           })
         )
-      )
-      await value(
-        cached.assignToPlanVersion(projectId, {
-          planVersionId,
-          currency: "EUR",
-          cardId: replacement.id,
-        })
-      )
-
-      expect(published.inserted.map((row) => row.featureSlug)).toEqual(["access-pro"])
-      expect(remove.mock.calls).toEqual([[[planVersionId]], [[planVersionId]], [[planVersionId]]])
+      ).toEqual({ code: "PLAN_VERSION_PUBLISHED", planVersionId })
     })
 
     it("adopts the card an interrupted run created under the version's name, then writes nothing", async () => {
@@ -203,10 +159,13 @@ describe("RateCardService", () => {
         { featureSlug: "access-pro", price: flat("49"), effectiveFrom: NOW, effectiveTo: null },
       ])
       expect(await cardRows(orphan.id)).toEqual(rowsAfterFirst)
-      expect((await rateCards.listCards(projectId)).map(({ name }) => name)).toEqual([
-        "PRO Arrears EUR",
-        cardName,
-      ])
+      const listed = await rateCards.listCards(projectId)
+      expect(listed.map(({ name }) => name)).toEqual(["PRO Arrears EUR", cardName])
+      expect(listed.find((card) => card.id === orphan.id)?.version).toMatchObject({
+        planSlug: "pro",
+        planVersionId,
+        currency: "USD",
+      })
     })
 
     it("refuses to adopt a card under the version's name that prices another unit", async () => {

@@ -1,7 +1,7 @@
 import { Skeleton } from "@unprice/ui/skeleton"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
-import { RATE_CARDS_DESCRIPTION } from "../_components/rate-card-format"
+import { RATE_CARDS_DESCRIPTION } from "~/components/pricing/rate-card-format"
 
 export default function Loading() {
   return (

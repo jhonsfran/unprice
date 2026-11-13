@@ -8,7 +8,7 @@ import {
 } from "@unprice/db/schema"
 import { Err, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { UnPriceBudgetError } from "../../budgets"
 import { MemoryBudgetStore } from "../../budgets/memory-store.fixture"
 import type { Cache } from "../../cache"
@@ -74,15 +74,13 @@ function createHarness() {
   const clock = { now: jan10 }
   const sleeps: number[] = []
   const logger = createLogger()
-  const budgets: BudgetClient = {
-    async execute(_address, request) {
+  const budgets: Pick<BudgetClient, "execute"> = {
+    async execute(_address, request, cards) {
+      if (cards) store.cacheCardsAt(clock.now, ...cards)
       const result = store.run(request, clock.now)
       if (result.err) return result
       if (!result.val.ok) return Err(new UnPriceBudgetError(result.val.rejection))
       return Ok(result.val.outcome)
-    },
-    async cacheCards(_address, cards) {
-      store.cacheCardsAt(clock.now, ...cards)
     },
   }
   let deps: SyncPayerBudgetDeps | null = null
@@ -270,7 +268,10 @@ describe("payer budget sync over Postgres", () => {
     await closeTestDatabaseConnection(db)
   })
 
+  afterEach(() => vi.restoreAllMocks())
+
   beforeEach(async () => {
+    vi.spyOn(Date, "now").mockReturnValue(jan10)
     await truncateTestDatabase(db)
     await seedTestDb({
       db,
@@ -345,7 +346,7 @@ describe("payer budget sync over Postgres", () => {
     // Contiguous: the starter phase's last millisecond (jan16) is in its statement.
     expect(statementsOf(store)).toEqual([
       {
-        periodId: "events:bp_test_arrear_events_jan",
+        periodId: "bp_test_arrear_events_jan",
         start: jan1,
         end: jan16 + 1,
         state: "open",
@@ -353,7 +354,7 @@ describe("payer budget sync over Postgres", () => {
         amount: scaled("0.3"),
       },
       {
-        periodId: `events:${scalePeriodId}`,
+        periodId: `${scalePeriodId}`,
         start: jan16 + 1,
         end: feb1,
         state: "open",
@@ -362,6 +363,56 @@ describe("payer budget sync over Postgres", () => {
         amount: scaled("0.05"),
       },
     ])
+  })
+
+  it("syncs the new phase card after an advance-billing PAYMENT_SUCCESS renewal", async () => {
+    await addScaleVersion()
+    await priceWithCard("pv_test_scale", "rc_test_scale", "0.0005")
+    await db.execute(
+      sql`UPDATE unprice_plan_versions SET when_to_bill = 'pay_in_advance' WHERE project_id = ${projectId}`
+    )
+    const { store, clock, services, logger } = createHarness()
+    await services.billing.syncPayerBudget({ projectId, customerId, caller: "request" })
+    expect(eventsLimit(store, clock.now).budget.pricing?.cards).toEqual({ base: "rc_test_starter" })
+
+    await db.transaction(async (tx) => {
+      const ended = await services.subscriptions.updatePhase({
+        input: {
+          id: starterPhaseId,
+          projectId,
+          subscriptionId,
+          startAt: jan1,
+          endAt: feb1 - 1,
+          items: [],
+        },
+        projectId,
+        subscriptionId,
+        db: tx,
+        now: jan10,
+      } as never)
+      if (ended.err) throw ended.err
+      const scheduled = await services.subscriptions.createPhase({
+        input: { subscriptionId, planVersionId: "pv_test_scale", startAt: feb1 },
+        projectId,
+        db: tx,
+        now: jan10,
+      } as never)
+      if (scheduled.err) throw scheduled.err
+    })
+    clock.now = feb1
+    const sync = vi.spyOn(services.billing, "syncSubscriptionPayerBudget")
+    const renewed = await services.subscriptions.reconcilePaymentOutcome({
+      projectId,
+      subscriptionId,
+      invoiceId: "inv_renewal",
+      outcome: "success",
+      now: feb1,
+    })
+    expect(renewed.err).toBeUndefined()
+    expect(renewed.val).toEqual({ status: "active" })
+    expect(eventsLimit(store, clock.now).budget.pricing?.cards).toEqual({ base: "rc_test_scale" })
+    expect(sync).toHaveBeenCalledExactlyOnceWith({ projectId, subscriptionId, caller: "request" })
+    expect(logger.error).not.toHaveBeenCalled()
   })
 
   it("closes the budget where a canceled subscription ends and cuts its statement there", async () => {
@@ -388,7 +439,7 @@ describe("payer budget sync over Postgres", () => {
     expect(logger.error).not.toHaveBeenCalled()
     expect(statementsOf(store)).toEqual([
       {
-        periodId: "events:bp_test_arrear_events_jan",
+        periodId: "bp_test_arrear_events_jan",
         start: jan1,
         end: jan20 + 1,
         state: "open",

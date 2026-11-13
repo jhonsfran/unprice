@@ -1,13 +1,11 @@
 import { rateRowSchema } from "@unprice/db/validators"
 import { describe, expect, it } from "vitest"
 import {
-  cardLabel,
   describeFeaturePrice,
   priceStateOf,
   rowsByFeature,
-  unpricedFeatureTitles,
   withDefaultRow,
-} from "./plan-prices"
+} from "~/components/pricing/plan-prices"
 
 const NOW = Date.parse("2026-11-04T12:00:00.000Z")
 const HOUR = 3_600_000
@@ -78,20 +76,6 @@ describe("describeFeaturePrice", () => {
   })
 })
 
-describe("unpricedFeatureTitles", () => {
-  it("names only the features the card has no current, scheduled, or dimension row for", () => {
-    const features = [
-      { feature: { slug: "calls", title: "API calls" } },
-      { feature: { slug: "tokens", title: "Tokens" } },
-      { feature: { slug: "seats", title: "Seats" } },
-      { feature: { slug: "support", title: "Support" } },
-      { feature: { slug: "storage", title: "Storage" } },
-    ]
-
-    expect(unpricedFeatureTitles(features, rows, NOW)).toEqual(["Support", "Storage"])
-  })
-})
-
 describe("priceStateOf", () => {
   it("is priced now, priced from later, or unpriced", () => {
     const byFeature = rowsByFeature(rows, NOW)
@@ -100,20 +84,6 @@ describe("priceStateOf", () => {
     expect(priceStateOf(byFeature.get("tokens"))).toBe("priced")
     expect(priceStateOf(byFeature.get("seats"))).toBe("scheduled")
     expect(priceStateOf(undefined)).toBe("unpriced")
-  })
-})
-
-describe("cardLabel", () => {
-  const version = { planSlug: "pro_ai", planVersionId: "pv_1", currency: "USD" }
-
-  it("names the version's own card by its role and any other card by its name", () => {
-    expect(cardLabel("pro_ai pv_1 USD", version)).toEqual({
-      text: "This version's card",
-      isOwn: true,
-    })
-    expect(cardLabel("pro_ai pv_2 USD", version)).toEqual({ text: "pro_ai pv_2 USD", isOwn: false })
-    expect(cardLabel("Shared USD", version)).toEqual({ text: "Shared USD", isOwn: false })
-    expect(cardLabel("pro_ai pv_1 USD", null)).toEqual({ text: "pro_ai pv_1 USD", isOwn: false })
   })
 })
 

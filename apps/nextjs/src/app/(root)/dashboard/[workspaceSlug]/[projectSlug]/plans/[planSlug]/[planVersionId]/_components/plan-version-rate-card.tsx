@@ -1,5 +1,7 @@
 "use client"
 
+import { useVersionPricing } from "~/components/pricing/use-version-pricing"
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { Currency } from "@unprice/db/validators"
 import { Button } from "@unprice/ui/button"
@@ -7,35 +9,26 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@unprice/ui/skeleton"
 import { useParams, useRouter } from "next/navigation"
 import { useState } from "react"
+import { CollapsibleSection } from "~/components/pricing/section-label"
 import { SuperLink } from "~/components/super-link"
 import { toast } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
 import { RateCardDetail } from "../../../../rate-cards/_components/rate-card-detail"
-import { cardLabel } from "../../../_components/plan-prices"
-import { CollapsibleSection } from "../../_components/section-label"
 
 /**
  * Where a plan version's prices come from, for the rail: nothing to say while the version prices
  * with its own card (the Prices tab shows it), the card's name when it shares one (ADR-0008 D2).
  */
-export function PlanVersionRateCard({ planVersionId }: { planVersionId: string }) {
-  const trpc = useTRPC()
+export function PlanVersionRateCard({
+  planVersionId,
+  currency,
+}: { planVersionId: string; currency: Currency }) {
   const params = useParams<{ workspaceSlug: string; projectSlug: string; planSlug: string }>()
-  const { data: assigned, isLoading } = useQuery(
-    trpc.rateCards.forPlanVersion.queryOptions({ planVersionId })
-  )
+  const { card, isLoading } = useVersionPricing(planVersionId, currency)
 
   if (isLoading) return <Skeleton className="h-10 w-full" />
 
-  const shared = (assigned?.cards ?? []).filter(
-    (entry) =>
-      !cardLabel(
-        entry.card.name,
-        params?.planSlug
-          ? { planSlug: params.planSlug, planVersionId, currency: entry.currency }
-          : null
-      ).isOwn
-  )
+  const shared = card && !card.own ? [card] : []
   if (shared.length === 0) return null
 
   return (
@@ -75,22 +68,6 @@ export function SharedCardPicker({
   const [isOpen, setIsOpen] = useState(false)
 
   const { data: listed } = useQuery({ ...trpc.rateCards.list.queryOptions(), enabled: isOpen })
-  const { data: plans } = useQuery({
-    // Drafts too: their prices can be shared as well, and the default lists published only.
-    ...trpc.plans.listByActiveProject.queryOptions({ published: false }),
-    enabled: isOpen,
-  })
-  // A version's own card is named "<plan> <version id> <currency>"; name it as people know it.
-  const versions = new Map(
-    (plans?.plans ?? []).flatMap((plan) =>
-      plan.versions.map((version) => [version.id, `${plan.title} · v${version.version}`] as const)
-    )
-  )
-  const labelOf = (name: string) => {
-    const versionId = name.split(" ")[1]
-    const version = versionId ? versions.get(versionId) : undefined
-    return version ? `${version} prices` : name
-  }
   const { mutate, isPending } = useMutation(
     trpc.rateCards.assignToPlanVersion.mutationOptions({
       onSuccess: ({ assignment }) => {
@@ -108,8 +85,15 @@ export function SharedCardPicker({
 
   // Its own card is what it prices with now, so it is not a card to switch to.
   const candidates = (listed?.cards ?? [])
-    .filter((card) => card.unit === `money:${currency}` && !card.name.includes(planVersionId))
-    .map((card) => ({ ...card, label: labelOf(card.name) }))
+    .filter(
+      (card) => card.unit === `money:${currency}` && card.version?.planVersionId !== planVersionId
+    )
+    .map((card) => ({
+      ...card,
+      label: card.version
+        ? `${card.version.planTitle} · v${card.version.version} prices`
+        : card.name,
+    }))
     .sort((a, b) => a.label.localeCompare(b.label))
   const pickedCard = candidates.find((card) => card.id === picked?.cardId)
   const cardId =

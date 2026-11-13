@@ -24,9 +24,17 @@ describe("rateCards.previewCostPlus", () => {
       project: { id: "proj_1" },
       services: {
         rateCards: {
-          previewCostPlus: async (...args: unknown[]) => {
-            calls.push(args)
-            return Ok({ draft: { cardId: "rc_1", at: args[2], changes: [] }, draftHash: "h" })
+          previewCostPlus: async (
+            projectId: string,
+            cardId: string,
+            now: number,
+            options: { at?: number; featureSlug?: string }
+          ) => {
+            calls.push([projectId, cardId, now, options])
+            return Ok({
+              draft: { cardId, at: options.at ?? now, changes: [] },
+              draftHash: options.at === undefined ? "h" : null,
+            })
           },
         },
       },
@@ -39,8 +47,8 @@ describe("rateCards.previewCostPlus", () => {
     const current = await router.createCaller(ctx).previewCostPlus({ cardId: "rc_1" })
 
     expect(calls).toEqual([
-      ["proj_1", "rc_1", NOW + 3_600_000, { featureSlug: "ai" }],
-      ["proj_1", "rc_1", NOW, { featureSlug: undefined }],
+      ["proj_1", "rc_1", NOW, { featureSlug: "ai", at: NOW + 3_600_000 }],
+      ["proj_1", "rc_1", NOW, { featureSlug: undefined, at: undefined }],
     ])
     expect(whatIf).toEqual({
       draft: { cardId: "rc_1", at: NOW + 3_600_000, changes: [] },

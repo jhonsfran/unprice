@@ -7,12 +7,11 @@ import {
   planVersionFeatureUpdateBaseSchema,
   ratePriceSchema,
 } from "@unprice/db/validators"
-import { Err, Ok } from "@unprice/error"
+import { Ok } from "@unprice/error"
 import { describe, expect, it, vi } from "vitest"
 import type { ServiceContext } from "../../context"
-import { UnPriceRateCardError, planFeaturePricing, unionFeaturePricing } from "../../rate-cards"
+import { UnPriceRateCardError, featurePricingOf, unionFeaturePricing } from "../../rate-cards"
 import { createRateCardsFake } from "../../rate-cards/memory.fixture"
-import { planPublish } from "../../rate-cards/publish"
 import { updatePlanVersionFeature } from "./update-feature"
 
 function rejectionOf(err: Error | undefined) {
@@ -60,6 +59,9 @@ function stored(overrides: Partial<Stored>): Stored {
 function createHarness(initial: Stored) {
   const cards = createRateCardsFake()
   let current = initial
+  cards.rateCards.featuresPricingWith.mockImplementation(async () =>
+    unionFeaturePricing([featurePricingOf({ ...current, slug: current.feature.slug })])
+  )
   const updatePlanVersionFeatureRecord = vi.fn(async (input: RecordUpdate) => {
     current = {
       ...current,
@@ -76,9 +78,8 @@ function createHarness(initial: Stored) {
       updatePlanVersionFeatureRecord,
       getPlanByIdRecord: vi.fn(async () => Ok({ id: "plan_1", slug: "starter" })),
     },
-    features: { listFeaturesByProject: vi.fn(async () => Ok([])) },
     rateCards: cards.rateCards,
-  } as unknown as Pick<ServiceContext, "plans" | "features" | "rateCards">
+  } as unknown as Pick<ServiceContext, "plans" | "rateCards">
   const db = {
     transaction: async (write: (tx: unknown) => Promise<unknown>) => {
       const before = current
@@ -116,7 +117,10 @@ describe("updatePlanVersionFeature", () => {
     if (result.val?.state !== "ok") throw result.err ?? new Error(result.val?.state)
     const row = { ...result.val.row }
     const card = [...cards.cards.values()][0]
-    const unpriced = await priced({ db, services }, { price: null })
+    const unpriced = await updatePlanVersionFeature(
+      { db, services },
+      { ...input({ price: null }), now: NOW + 1 }
+    )
 
     expect(row).toMatchObject({
       featureSlug: "base",
@@ -128,7 +132,7 @@ describe("updatePlanVersionFeature", () => {
     expect(card).toMatchObject({ name: "starter pv_1 USD", unit: "money:USD" })
     expect(cards.assignments.get("pv_1:USD")).toBe(card?.id)
     expect(unpriced.val).toMatchObject({ state: "ok", row: null })
-    expect(cards.rows.map((row) => row.effectiveTo)).toEqual([NOW])
+    expect(cards.rows.map((row) => row.effectiveTo)).toEqual([NOW + 1])
   })
 
   it("prices unit usage on the meter's property and a package by the package size", async () => {
@@ -146,7 +150,7 @@ describe("updatePlanVersionFeature", () => {
       price: { price: "5" },
     })
     const wrongShape = await priced(pack, {
-      price: { tiers: [{ firstUnit: 1, lastUnit: null, unitPrice: "1" }] },
+      price: { tiers: [{ upTo: null, rate: "1", flat: "0" }] },
     })
 
     expect(perToken.val).toMatchObject({
@@ -354,7 +358,7 @@ describe("updatePlanVersionFeature", () => {
 
 describe("feature pricing regressions", () => {
   it("does not save a feature when its price does not fit the requested shape", async () => {
-    const { db, cards, services } = createHarness(stored({}))
+    const { db, cards, services, updatePlanVersionFeatureRecord } = createHarness(stored({}))
     cards.seedPlanVersionCard("pv_1", "USD", [
       { featureSlug: "base", featureType: "flat", price: "49" },
     ])
@@ -364,10 +368,11 @@ describe("feature pricing regressions", () => {
         featureType: "usage",
         config: { usageMode: "unit" },
         meterConfig: tokensMeter,
-        price: { tiers: [{ firstUnit: 1, lastUnit: null, unitPrice: "1" }] },
+        price: { tiers: [{ upTo: null, rate: "1", flat: "0" }] },
       }
     )
     expect(rejectionOf(result.err)).toMatchObject({ code: "PRICE_SHAPE_MISMATCH" })
+    expect(updatePlanVersionFeatureRecord).not.toHaveBeenCalled()
     const saved = await services.plans.getPlanVersionFeatureByIdDetailed({
       id: "fpv_1",
       projectId: PROJECT,
@@ -380,9 +385,12 @@ describe("feature pricing regressions", () => {
     const { db, cards, services } = createHarness(
       stored({ featureType: "usage", config: { usageMode: "tier" }, meterConfig: tokensMeter })
     )
-    services.features.listFeaturesByProject = vi.fn(async () =>
-      Ok([{ slug: "base", meterConfig: { ...tokensMeter, groupBy: ["model"] } }] as Feature[])
-    )
+    cards.projectFeatures.set("base", {
+      slug: "base",
+      dimensions: ["model"],
+      meterProperty: "input_tokens",
+      included: null,
+    })
     services.rateCards.featuresPricingWith = vi.fn(async (_projectId, cardId) => {
       if (![...cards.assignments.values()].includes(cardId)) return null
       const saved = await services.plans.getPlanVersionFeatureByIdDetailed({
@@ -390,30 +398,13 @@ describe("feature pricing regressions", () => {
         projectId: PROJECT,
       })
       if (!saved.val) throw new Error("fixture")
-      return unionFeaturePricing([planFeaturePricing(saved.val)])
+      return unionFeaturePricing([featurePricingOf({ ...saved.val, slug: saved.val.feature.slug })])
     })
-    cards.rateCards.publishRows.mockImplementation(async (request) => {
-      const card = cards.cards.get(request.cardId)
-      if (!card) throw new Error("fixture")
-      const planned = planPublish({
-        ...request,
-        card,
-        rows: cards.rows,
-        noticeMs: 0,
-        newRowId: () => "rr_regression",
-      })
-      return planned.err
-        ? Err(planned.err)
-        : Ok({
-            inserted: [...planned.val.inserts],
-            closed: [...planned.val.closes],
-            unchanged: planned.val.unchanged,
-          })
-    })
+
     const result = await priced(
       { db, services },
       {
-        price: { tiers: [{ firstUnit: 1, lastUnit: null, unitPrice: "1" }] },
+        price: { tiers: [{ upTo: null, rate: "1", flat: "0" }] },
       }
     )
     expect(result.err).toBeUndefined()

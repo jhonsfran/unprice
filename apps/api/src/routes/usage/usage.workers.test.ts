@@ -52,7 +52,7 @@ async function payer() {
     waitUntil: (promise) => void pending.push(promise),
     journal: { send: async (rows) => void journaled.push(...rows) },
   }
-  // `cacheCards` stores nothing for a key without a budget, so the first upsert finds its card here.
+  // Seed the card cache for the direct upsert below.
   await runInDurableObject(
     getBudgetStub(env, { projectId: PROJECT_ID, key }),
     async (_instance: BudgetDO, state) => {
@@ -77,7 +77,6 @@ async function payer() {
           priced: true,
         },
       ],
-      statements: "required",
       funding: { mode: "postpaid" },
     },
   })

@@ -32,8 +32,8 @@ describe("recorded usage fixture", () => {
 
     expect(first.val?.sealed).toEqual([
       expect.objectContaining({
-        periodId: "events:bp_fixture",
-        billingPeriodId: "bp_fixture",
+        periodId: "bp_fixture",
+
         amount: "1000000000",
         quantity: "1000000000",
       }),

@@ -1,6 +1,5 @@
 "use client"
 
-import { useQuery } from "@tanstack/react-query"
 import type { Currency } from "@unprice/db/validators"
 import { Button } from "@unprice/ui/button"
 import { Input } from "@unprice/ui/input"
@@ -8,25 +7,15 @@ import { Label } from "@unprice/ui/label"
 import { Popover, PopoverContent, PopoverTrigger } from "@unprice/ui/popover"
 import { Pencil } from "lucide-react"
 import { useState } from "react"
+import { catalogPricingInputOf, policyDraftOf } from "~/components/pricing/catalog-policy"
+import { catalogPolicyFor, markupPercent } from "~/components/pricing/rate-card-format"
+import { useCatalogPricing } from "~/components/pricing/use-catalog-pricing"
+import { useVersionPricing } from "~/components/pricing/use-version-pricing"
 import { toast } from "~/lib/toast"
-import { useTRPC } from "~/trpc/client"
 import {
   type FeatureLabel,
   RateCardDetail,
 } from "../../../../rate-cards/_components/rate-card-detail"
-import {
-  catalogPolicyFor,
-  changeMatrixOf,
-  countWrites,
-  describeChanges,
-  markupPercent,
-} from "../../../../rate-cards/_components/rate-card-format"
-import {
-  type CatalogPreview,
-  catalogPricingInputOf,
-  policyDraftOf,
-  useCatalogPricing,
-} from "../../_components/catalog-price-block"
 import { CustomModelDialog } from "./custom-model-dialog"
 
 /**
@@ -75,51 +64,35 @@ function MarkupPopover({
   currency: Currency
   featureSlug: string
 }) {
-  const trpc = useTRPC()
   const [open, setOpen] = useState(false)
   const [percent, setPercent] = useState<string | null>(null)
-  const [preview, setPreview] = useState<CatalogPreview | null>(null)
-  const [problem, setProblem] = useState<string | null>(null)
 
-  const { data } = useQuery(trpc.rateCards.forPlanVersion.queryOptions({ planVersionId }))
-  const card = data?.cards.find((entry) => entry.currency === currency)
+  const { card } = useVersionPricing(planVersionId, currency)
   const policy = card ? catalogPolicyFor(card.card.marginPolicy, featureSlug) : null
   const saved = policy ? markupPercent(policy.markup) : null
   const typed = percent ?? saved ?? ""
 
-  const pricing = useCatalogPricing({ planVersionId, featureSlug })
-
+  const input = policy
+    ? catalogPricingInputOf({ ...policyDraftOf(policy), markupPercent: typed }, policy.dimension)
+    : undefined
+  const pricing = useCatalogPricing({ planVersionId, featureSlug }, input)
+  const { preview, problem, writes, changes, summary } = pricing
   if (!policy || saved === null) return null
 
-  const writes = preview ? countWrites(preview.draft) : 0
-  const changes = preview ? changeMatrixOf(preview.draft, featureSlug) : null
-
-  const policyInput = () =>
-    catalogPricingInputOf({ ...policyDraftOf(policy), markupPercent: typed }, policy.dimension)
-
-  // A dry run: nothing is saved until "Reprice", so closing the popover changes nothing.
   const runPreview = () => {
-    const built = policyInput()
-    if (!built.ok) return setProblem(built.message)
-    setProblem(null)
-    pricing.preview(built.input).then(setPreview, (error: Error) => setProblem(error.message))
+    if (input) void pricing.runPreview(input)
   }
-
   const reprice = () => {
-    const built = policyInput()
-    if (!built.ok) return setProblem(built.message)
-    if (!preview?.draftHash) return
-    pricing.apply({ ...built.input, draftHash: preview.draftHash }).then(
-      ({ inserted }) => {
-        toast.success(
-          inserted.length > 0
-            ? `Repriced ${inserted.length} models at cost + ${typed}%`
-            : `Markup saved at ${typed}%`
-        )
-        setOpen(false)
-      },
-      (error: Error) => setProblem(error.message)
-    )
+    if (!input?.ok) return
+    void pricing.apply(input.input).then((published) => {
+      if (!published) return
+      toast.success(
+        published.inserted.length > 0
+          ? `Repriced ${published.inserted.length} models at cost + ${typed}%`
+          : `Markup saved at ${typed}%`
+      )
+      setOpen(false)
+    })
   }
 
   return (
@@ -129,8 +102,7 @@ function MarkupPopover({
         setOpen(next)
         if (next) {
           setPercent(null)
-          setPreview(null)
-          setProblem(null)
+          pricing.reset()
         }
       }}
     >
@@ -164,7 +136,7 @@ function MarkupPopover({
                 value={typed}
                 onChange={(event) => {
                   setPercent(event.target.value)
-                  setPreview(null)
+                  pricing.reset()
                 }}
               />
               <span className="text-muted-foreground text-sm">%</span>
@@ -184,7 +156,7 @@ function MarkupPopover({
               <p>
                 {writes === 0
                   ? "The prices already match this markup."
-                  : `Model prices: ${describeChanges(changes)}.`}
+                  : `Model prices: ${summary}.`}
               </p>
               {writes > 0 && preview.draftHash ? (
                 <Button type="button" size="sm" disabled={pricing.isApplying} onClick={reprice}>

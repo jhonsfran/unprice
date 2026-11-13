@@ -1,6 +1,9 @@
 import { rateRowSchema } from "@unprice/db/validators"
+import {
+  type FeaturePriceRows,
+  describePlanFeatureLine as describeFeatureLine,
+} from "@unprice/services/pricing"
 import { describe, expect, it } from "vitest"
-import { type FeatureLineRows, describeFeatureLine } from "./feature-line"
 
 const NOW = Date.parse("2026-11-05T12:00:00.000Z")
 
@@ -20,7 +23,7 @@ function row(featureSlug: string, price: Record<string, unknown>, match = {}) {
 }
 
 function rows(current: ReturnType<typeof row> | null, byDimension: ReturnType<typeof row>[] = []) {
-  return { current, scheduled: null, byDimension } satisfies FeatureLineRows
+  return { current, scheduled: null, byDimension } satisfies FeaturePriceRows
 }
 
 const daily = {

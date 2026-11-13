@@ -1,6 +1,5 @@
 import type { Database } from "@unprice/db"
 import { Ok } from "@unprice/error"
-import { statementPeriodId } from "../use-cases/budgets/compile-payer-budget"
 import type { PayerStatementLine } from "../use-cases/budgets/invoice-payer-statements"
 import type { PayerBudgetGateway } from "../use-cases/budgets/payer-budget-gateway"
 
@@ -42,8 +41,7 @@ export function createRecordedUsageFixture(db: Database, acceptedUsage: Accepted
         const featureSlug = period.subscriptionItem.featurePlanVersion.feature.slug
         const accepted = acceptedUsage[featureSlug] ?? { amount: 0, quantity: 0 }
         sealed.set(period.id, {
-          periodId: statementPeriodId(featureSlug, period.id),
-          billingPeriodId: period.id,
+          periodId: period.id,
           statementKey: period.statementKey,
           featureSlug,
           start: period.cycleStartAt,

@@ -3,17 +3,17 @@ import { type FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { formatAmount } from "@unprice/money"
 import { z } from "zod"
-import { type BudgetSnapshot, type Statement, isOutcomeOf } from "../../budgets"
-import { type EntitlementService, resolveEntitlementLimit } from "../../entitlements"
+import type { EntitlementService } from "../../entitlements"
 import type { BudgetClient } from "../budgets/budget-client"
-import { payerBudgetKey } from "../budgets/compile-payer-budget"
 import {
   meteredAccessOf,
   payerQuotaWindowSchema,
   quantity,
   statementAt,
   statementWindow,
+  staticAccess,
 } from "../budgets/payer-access"
+import { type PayerBudgetView, readPayerBudget } from "../budgets/read-payer-budget"
 
 const currentEntitlementBaseShape = {
   id: z.string(),
@@ -73,13 +73,10 @@ export type GetCustomerCurrentEntitlementsOutput = z.infer<
 
 export type GetCustomerCurrentEntitlementsDeps = {
   entitlements: Pick<EntitlementService, "getCustomerEntitlementsForCustomer">
-  budgets: BudgetClient
+  budgets: Pick<BudgetClient, "execute">
   logger: Pick<Logger, "error">
   now?: () => number
 }
-
-/** The payer budget and its statements, read once for every metered entitlement. */
-type PayerBudgetView = Readonly<{ budget: BudgetSnapshot; statements: readonly Statement[] }>
 
 /**
  * The customer's entitlements in force, each metered one with its live state from the payer budget
@@ -93,20 +90,15 @@ export async function getCustomerCurrentEntitlements(
 ): Promise<Result<GetCustomerCurrentEntitlementsOutput, FetchError>> {
   const input = getCustomerCurrentEntitlementsInputSchema.parse(rawInput)
   const generatedAt = deps.now?.() ?? Date.now()
-  const entitlementsResult = await deps.entitlements.getCustomerEntitlementsForCustomer({
-    customerId: input.customerId,
-    projectId: input.projectId,
-    now: generatedAt,
-  })
-
-  if (entitlementsResult.err) {
-    return entitlementsResult
-  }
-
-  const metered = entitlementsResult.val.some(
-    (entitlement) => entitlement.featurePlanVersion.featureType === "usage"
-  )
-  const payer = metered ? await readPayerBudget(deps, input) : null
+  const [entitlementsResult, payer] = await Promise.all([
+    deps.entitlements.getCustomerEntitlementsForCustomer({
+      customerId: input.customerId,
+      projectId: input.projectId,
+      now: generatedAt,
+    }),
+    readPayerBudgetOrUnavailable(deps, input),
+  ])
+  if (entitlementsResult.err) return entitlementsResult
   const rows = entitlementsResult.val.map((entitlement) =>
     resolveCurrentEntitlement({ entitlement, generatedAt, payer })
   )
@@ -121,30 +113,22 @@ export async function getCustomerCurrentEntitlements(
 }
 
 /** Null when the customer has no payer budget yet, or it could not be read. */
-async function readPayerBudget(
+async function readPayerBudgetOrUnavailable(
   deps: GetCustomerCurrentEntitlementsDeps,
   input: GetCustomerCurrentEntitlementsInput
 ): Promise<PayerBudgetView | null> {
-  const address = { projectId: input.projectId, key: payerBudgetKey(input.customerId) }
   const context = {
     context: "payer budget read failed",
     customer_id: input.customerId,
     project_id: input.projectId,
   }
   try {
-    const [got, statements] = await Promise.all([
-      deps.budgets.execute(address, { type: "get" }),
-      deps.budgets.execute(address, { type: "statements" }),
-    ])
-    if (got.err || statements.err) {
-      const error = got.err ?? statements.err
-      if (error && error.rejection.code !== "BUDGET_NOT_FOUND") deps.logger.error(error, context)
+    const result = await readPayerBudget(deps.budgets, input, { statements: true })
+    if (result.err) {
+      deps.logger.error(result.err, context)
       return null
     }
-    if (!isOutcomeOf(got.val, "get") || !isOutcomeOf(statements.val, "statements")) {
-      throw new Error("payer budget answered another verb")
-    }
-    return { budget: got.val.budget, statements: statements.val.statements }
+    return result.val
   } catch (error) {
     deps.logger.error(error instanceof Error ? error : new Error(String(error)), context)
     return null
@@ -170,12 +154,7 @@ function resolveCurrentEntitlement(params: {
     return {
       ...base,
       status: "available",
-      allowed: true,
-      limit: resolveEntitlementLimit({
-        configuredLimit: entitlement.featurePlanVersion.limit ?? null,
-        featureType: entitlement.featurePlanVersion.featureType,
-        grants: entitlement.grants ?? [],
-      }),
+      ...staticAccess(entitlement),
     }
   }
 

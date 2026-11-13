@@ -1,6 +1,6 @@
 import type { RouterOutputs } from "@unprice/trpc/routes"
 
-type IngestionStatus = RouterOutputs["analytics"]["getIngestionStatus"]
+type IngestionStatus = RouterOutputs["analytics"]["listIngestionEvents"]
 type IngestionEventRow = IngestionStatus["recentEvents"][number]
 
 export function ingestionEventKey(event: Pick<IngestionEventRow, "budgetKey" | "operationId">) {

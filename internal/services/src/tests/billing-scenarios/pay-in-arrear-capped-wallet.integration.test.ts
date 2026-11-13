@@ -6,7 +6,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { classifyInvoiceLineSettlement } from "../../billing/invoice-settlement"
 import type { ServiceContext } from "../../context"
 import { LedgerGateway } from "../../ledger"
-import { RateCardService } from "../../rate-cards/service"
+import { testInvoicing } from "../../test-fixtures/billing-gateway"
 import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
 import { billPeriod } from "../../use-cases/billing/bill-period"
 
@@ -104,7 +104,7 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
     const repo = new DrizzleSubscriptionRepository(db)
 
     const activationInputs = await deriveActivationInputsFromPlan(
-      { db, rateCards: new RateCardService({ db }) },
+      { db, rateCards: testInvoicing({ db }).rateCards },
       { projectId, subscriptionId }
     )
     expect(activationInputs).toEqual({
@@ -235,7 +235,7 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
 
     const context = await loadSubscriptionContext()
     const firstRun = await billPeriod({
-      invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
+      invoicing: testInvoicing({ db, payerBudgets }),
       context,
       logger,
       db,
@@ -243,7 +243,7 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
       ledgerService: ledger,
     })
     const secondRun = await billPeriod({
-      invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
+      invoicing: testInvoicing({ db, payerBudgets }),
       context,
       logger,
       db,
@@ -355,7 +355,7 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
 
     const context = await loadSubscriptionContext()
     const firstRun = await billPeriod({
-      invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
+      invoicing: testInvoicing({ db, payerBudgets }),
       context,
       logger,
       db,
@@ -363,7 +363,7 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
       ledgerService: ledger,
     })
     const secondRun = await billPeriod({
-      invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
+      invoicing: testInvoicing({ db, payerBudgets }),
       context,
       logger,
       db,
@@ -412,7 +412,7 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
     // Derivation reads the plan config: included credits first, then the
     // credit-line runway derived from finite usage limits.
     const activationInputs = await deriveActivationInputsFromPlan(
-      { db, rateCards: new RateCardService({ db }) },
+      { db, rateCards: testInvoicing({ db }).rateCards },
       { projectId, subscriptionId }
     )
     expect(activationInputs).toEqual({
@@ -514,7 +514,7 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
 
     const context = await loadSubscriptionContext()
     const firstRun = await billPeriod({
-      invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
+      invoicing: testInvoicing({ db, payerBudgets }),
       context,
       logger,
       db,
@@ -560,7 +560,7 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
 
     // The next period re-issues the plan's included credit fresh.
     const renewalInputs = await deriveActivationInputsFromPlan(
-      { db, rateCards: new RateCardService({ db }) },
+      { db, rateCards: testInvoicing({ db }).rateCards },
       { projectId, subscriptionId }
     )
     const renewal = await activateSubscription(
@@ -663,7 +663,7 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
 
     const context = await loadSubscriptionContext()
     const result = await billPeriod({
-      invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
+      invoicing: testInvoicing({ db, payerBudgets }),
       context,
       logger,
       db,

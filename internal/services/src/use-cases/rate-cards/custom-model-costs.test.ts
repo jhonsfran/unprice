@@ -11,9 +11,9 @@ import { Ok } from "@unprice/error"
 import { formatAmount } from "@unprice/money"
 import { describe, expect, it, vi } from "vitest"
 import type { ServiceContext } from "../../context"
+import { featurePricingOf, unionFeaturePricing } from "../../rate-cards"
 import { createRateCardsFake } from "../../rate-cards/memory.fixture"
 import { previewPlanVersionCatalogPricing } from "./catalog-pricing"
-import { addCustomModelCost, listCustomModelCosts } from "./custom-model-costs"
 
 const NOW = Date.parse("2026-11-10T12:00:00.000Z")
 const PROJECT = "proj_1"
@@ -45,29 +45,37 @@ function createHarness() {
         feature: { id: "ft_llm_tokens", slug: "llm_tokens" } as Feature,
       } as unknown as PlanVersionFeature & { feature: Feature },
     ],
-  } as unknown as PlanVersion
+  } as unknown as PlanVersion & { planFeatures: Array<PlanVersionFeature & { feature: Feature }> }
+  cards.rateCards.featuresPricingWith.mockImplementation(async () =>
+    unionFeaturePricing(
+      version.planFeatures.map((feature) =>
+        featurePricingOf({ ...feature, slug: feature.feature.slug })
+      )
+    )
+  )
   const services = {
     plans: { getPlanVersionByIdDetailed: vi.fn(async () => Ok(version)) },
-    features: { listFeaturesByProject: vi.fn(async () => Ok([])) },
     rateCards: cards.rateCards,
-  } as unknown as Pick<ServiceContext, "plans" | "features" | "rateCards">
+    modelCosts: cards.modelCosts,
+  } as unknown as Pick<ServiceContext, "plans" | "rateCards" | "modelCosts">
   return { cards, services }
 }
 
 function add(
-  services: Pick<ServiceContext, "rateCards">,
+  services: Pick<ServiceContext, "modelCosts">,
   cost: Record<string, unknown>,
   at = NOW - 60_000,
   projectId = PROJECT
 ) {
-  return addCustomModelCost(
-    { services },
-    { ...customModelCostInputSchema.parse({ provider: "acme", ...cost }), projectId, now: at }
+  return services.modelCosts.addCustom(
+    projectId,
+    customModelCostInputSchema.parse({ provider: "acme", ...cost }),
+    at
   )
 }
 
 async function draftAtThirtyPercent(
-  services: Pick<ServiceContext, "plans" | "features" | "rateCards">
+  services: Pick<ServiceContext, "plans" | "rateCards" | "modelCosts">
 ) {
   const result = await previewPlanVersionCatalogPricing(
     { services },
@@ -136,7 +144,7 @@ describe("custom model costs", () => {
     await add(services, { model: "acme-mini", components: { output: "0.5" } }, NOW - 60_000)
 
     const draft = await draftAtThirtyPercent(services)
-    const listed = await listCustomModelCosts({ services }, { projectId: PROJECT })
+    const listed = await services.modelCosts.listCustom(PROJECT)
 
     expect(ratesOf(draft, "acme-llama-70b")).toEqual(["input_tokens=2.6"])
     expect(

@@ -38,6 +38,7 @@ function render(props: Partial<Parameters<typeof PublishChecklistView>[0]> = {})
         row("rr_gpt", "tokens", NOW - HOUR, { model: "gpt-4o" }),
       ]}
       hasCard
+      unpricedFeatureSlugs={["images"]}
       currency="USD"
       now={NOW}
       {...props}
@@ -59,14 +60,17 @@ describe("PublishChecklistView", () => {
   })
 
   it("says every feature is priced when none is missing a row", () => {
-    const html = render({ rows: features.map((f) => row(`rr_${f.slug}`, f.slug, NOW - HOUR)) })
+    const html = render({
+      rows: features.map((f) => row(`rr_${f.slug}`, f.slug, NOW - HOUR)),
+      unpricedFeatureSlugs: [],
+    })
 
     expect(html).toContain("Every feature is priced.")
     expect(html).not.toContain("unpriced")
   })
 
   it("names the missing card and the empty feature list", () => {
-    const html = render({ features: [], rows: [], hasCard: false })
+    const html = render({ features: [], rows: [], hasCard: false, unpricedFeatureSlugs: [] })
 
     expect(html).toContain("none yet")
     expect(html).toContain("Attach a feature to start.")

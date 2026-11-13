@@ -6,7 +6,7 @@ import { toLedgerMinor } from "@unprice/money"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { LedgerGateway } from "../../ledger"
 import { UnPriceLedgerError } from "../../ledger/errors"
-import { RateCardService } from "../../rate-cards/service"
+import { testInvoicing } from "../../test-fixtures/billing-gateway"
 import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
 import { billPeriod } from "../../use-cases/billing/bill-period"
 
@@ -122,7 +122,7 @@ describe("P0-A pay_in_arrear metered billing failure injection", () => {
 
     await expect(
       billPeriod({
-        invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
+        invoicing: testInvoicing({ db, payerBudgets }),
         context: await loadSubscriptionContext(),
         logger,
         db,
@@ -135,7 +135,7 @@ describe("P0-A pay_in_arrear metered billing failure injection", () => {
 
     const ledger = new LedgerGateway({ db, logger })
     const retry = await billPeriod({
-      invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
+      invoicing: testInvoicing({ db, payerBudgets }),
       context: await loadSubscriptionContext(),
       logger,
       db,
@@ -143,7 +143,7 @@ describe("P0-A pay_in_arrear metered billing failure injection", () => {
       ledgerService: ledger,
     })
     const rerun = await billPeriod({
-      invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
+      invoicing: testInvoicing({ db, payerBudgets }),
       context: await loadSubscriptionContext(),
       logger,
       db,

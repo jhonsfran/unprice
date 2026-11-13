@@ -39,6 +39,7 @@ export const invoiceTask = task({
 
     try {
       const invoiceResult = await context.services.subscriptions.invoiceSubscription({
+        caller: "job",
         subscriptionId,
         projectId,
         now,

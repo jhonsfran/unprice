@@ -605,7 +605,7 @@ async function handleDirectProvisioningFlow(
       },
     })
 
-    await activateWalletIfSubscriptionIsActive(deps, {
+    const activated = await activateWalletIfSubscriptionIsActive(deps, {
       subscriptionId: subscription.id,
       projectId,
       context:
@@ -613,7 +613,8 @@ async function handleDirectProvisioningFlow(
     })
 
     // The periods generated inside the transaction register as the payer budget's statements.
-    await deps.services.billing.syncPayerBudget({ projectId, customerId, caller: "request" })
+    if (!activated)
+      await deps.services.billing.syncPayerBudget({ projectId, customerId, caller: "request" })
 
     deps.waitUntil(
       recordWebEvents(deps, [

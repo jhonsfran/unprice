@@ -108,16 +108,15 @@ describe("getCustomerCurrentEntitlements", () => {
         limit: null,
         usage: 1,
         usagePercent: null,
-        quotaWindow: { periodKey: "images:bp_nov", startAt: NOV, endAt: DEC },
+        quotaWindow: { periodKey: "bp_nov", startAt: NOV, endAt: DEC },
       }),
     ])
   })
 
   it("marks metered rows unavailable when the payer budget read fails", async () => {
     const logger: Pick<Logger, "error"> = { error: vi.fn() }
-    const budgets: BudgetClient = {
+    const budgets: Pick<BudgetClient, "execute"> = {
       execute: vi.fn().mockRejectedValue(new Error("DO unavailable")),
-      cacheCards: vi.fn(),
     }
     const deps = makeDeps({
       entitlements: [
@@ -171,7 +170,7 @@ describe("getCustomerCurrentEntitlements", () => {
     expect(deps.logger.error).not.toHaveBeenCalled()
   })
 
-  it("reads no budget when no entitlement is metered", async () => {
+  it("reads entitlements and the payer budget independently", async () => {
     const execute = vi.fn()
     const deps = makeDeps({
       entitlements: [
@@ -183,12 +182,12 @@ describe("getCustomerCurrentEntitlements", () => {
           meterConfig: null,
         }),
       ],
-      budgets: { execute, cacheCards: vi.fn() },
+      budgets: { execute },
     })
 
     await getCustomerCurrentEntitlements(deps, { customerId, projectId })
 
-    expect(execute).not.toHaveBeenCalled()
+    expect(execute).toHaveBeenCalledTimes(2)
   })
 
   it("returns the entitlement query failure", async () => {
@@ -205,7 +204,7 @@ function makeDeps(
   options: {
     entitlements?: CustomerEntitlementExtended[]
     entitlementResult?: { err: FetchError }
-    budgets?: BudgetClient
+    budgets?: Pick<BudgetClient, "execute">
     logger?: Pick<Logger, "error">
   } = {}
 ): GetCustomerCurrentEntitlementsDeps {

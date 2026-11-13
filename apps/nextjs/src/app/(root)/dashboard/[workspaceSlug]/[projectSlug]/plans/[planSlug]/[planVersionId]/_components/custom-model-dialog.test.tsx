@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { isCustomCostRow } from "../../../../rate-cards/_components/rate-card-format"
+import { isCustomCostRow } from "~/components/pricing/rate-card-format"
 import { pricedAt } from "./custom-model-dialog"
 
 describe("pricedAt", () => {

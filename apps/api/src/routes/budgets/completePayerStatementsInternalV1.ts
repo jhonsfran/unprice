@@ -8,6 +8,7 @@ import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import { requestBudgetCommandDeps } from "~/ingestion/budget/deps"
 import { payerBudgetSyncDeps } from "~/ingestion/budget/payer-budget-sync"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
@@ -51,6 +52,7 @@ export const registerCompletePayerStatementsInternalV1 = (app: App) =>
     // `internalKeyAuth` admits only main and internal keys, so the project comes from the body.
     const input = c.req.valid("json")
     const deps = payerBudgetSyncDeps({
+      budgets: requestBudgetCommandDeps(c).budgets,
       env: c.env,
       db: c.get("db"),
       services: c.get("services"),

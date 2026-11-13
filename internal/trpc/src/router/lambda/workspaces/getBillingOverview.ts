@@ -40,7 +40,7 @@ export const getBillingOverview = protectedWorkspaceProcedure
         services: {
           customers: opts.ctx.services.customers,
           wallet: opts.ctx.services.wallet,
-          analytics: opts.ctx.services.analytics,
+          budgetJournal: opts.ctx.services.budgetJournal,
         },
         db: opts.ctx.db,
         currentEntitlements,

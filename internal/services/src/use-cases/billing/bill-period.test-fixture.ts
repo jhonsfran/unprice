@@ -6,11 +6,11 @@ import type { Logger } from "@unprice/logs"
 import { dinero } from "dinero.js"
 import * as dineroCurrencies from "dinero.js/currencies"
 import { beforeEach, vi } from "vitest"
+import type { InvoicingPorts } from "../../billing/invoicing-ports"
 import type { LedgerGateway } from "../../ledger"
 import type { SubscriptionRepository } from "../../subscriptions/repository"
 import type { SubscriptionContext } from "../../subscriptions/types"
 import type { PayerStatementLine } from "../budgets/invoice-payer-statements"
-import type { InvoicingPorts } from "./bill-period"
 
 type RepoInstance = {
   listPendingPeriodGroups: ReturnType<typeof vi.fn>
@@ -199,8 +199,7 @@ export function makeFlatRow(overrides: Partial<RateRow> = {}): RateRow {
 /** A sealed statement of `bp_1` that priced `amount` at ingestion. */
 export function makeStatementLine(overrides: Partial<PayerStatementLine> = {}): PayerStatementLine {
   return {
-    periodId: "api-calls:bp_1",
-    billingPeriodId: "bp_1",
+    periodId: "bp_1",
     statementKey: "stmt_2026_04",
     featureSlug: "api-calls",
     start: 1_700_000_000_000,

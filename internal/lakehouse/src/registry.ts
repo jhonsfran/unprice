@@ -1,23 +1,6 @@
 import type { LakehouseSource } from "./source"
 
-export const LAKEHOUSE_PARTITION_COLUMNS = [] as const
-
-export type LakehouseFieldType =
-  | "string"
-  | "int64"
-  | "int32"
-  | "float64"
-  | "float32"
-  | "f64"
-  | "f32"
-  | "boolean"
-  | "bool"
-  | "json"
-  | "datetime"
-  | "timestamp"
-  | "bytes"
-  | "list"
-  | "struct"
+export type LakehouseFieldType = "string" | "int64" | "int32" | "bool" | "json" | "timestamp"
 export type LakehouseFieldDefaultValue =
   | string
   | number
@@ -44,26 +27,12 @@ export interface LakehouseSourceSchemaDefinition {
   streamName: string
   schemaFile: string
   sinkTable: string
-  frontendTable: string
-  tableAliases: readonly string[]
-  partitionColumns: readonly string[]
   fields: readonly LakehouseFieldDefinition[]
 }
 
 type SourceSchemaMap = Record<LakehouseSource, LakehouseSourceSchemaDefinition>
 
-export type CloudflarePipelineFieldType =
-  | "list"
-  | "struct"
-  | "bytes"
-  | "json"
-  | "timestamp"
-  | "f64"
-  | "f32"
-  | "int64"
-  | "int32"
-  | "bool"
-  | "string"
+export type CloudflarePipelineFieldType = LakehouseFieldType
 
 export const lakehouseSourceSchemaRegistry = {
   web_events: {
@@ -73,9 +42,6 @@ export const lakehouseSourceSchemaRegistry = {
     streamName: "lakehouse_web_events_stream",
     schemaFile: "web_events.json",
     sinkTable: "web_events",
-    frontendTable: "web_events",
-    tableAliases: ["web_events"],
-    partitionColumns: LAKEHOUSE_PARTITION_COLUMNS,
     fields: [
       {
         name: "schema_version",
@@ -336,9 +302,6 @@ export const lakehouseSourceSchemaRegistry = {
     streamName: "lakehouse_budget_journal_stream",
     schemaFile: "budget_journal.json",
     sinkTable: "budget_journal",
-    frontendTable: "budget_journal",
-    tableAliases: ["budget_journal"],
-    partitionColumns: LAKEHOUSE_PARTITION_COLUMNS,
     fields: [
       {
         name: "schema_version",
@@ -420,18 +383,6 @@ export const lakehouseSourceSchemaRegistry = {
   },
 } as const satisfies SourceSchemaMap
 
-const tableAliasToSource = new Map<string, LakehouseSource>()
-for (const source of Object.keys(lakehouseSourceSchemaRegistry) as LakehouseSource[]) {
-  const entry = lakehouseSourceSchemaRegistry[source]
-  for (const alias of entry.tableAliases) {
-    tableAliasToSource.set(alias, source)
-  }
-}
-
-export function getLakehouseSourceRegistry(): Readonly<SourceSchemaMap> {
-  return lakehouseSourceSchemaRegistry
-}
-
 export function getLakehouseSourceSchema(source: LakehouseSource): LakehouseSourceSchemaDefinition {
   return lakehouseSourceSchemaRegistry[source]
 }
@@ -468,39 +419,6 @@ export function listLakehouseSourceSchemas(): LakehouseSourceSchemaDefinition[] 
   return Object.values(lakehouseSourceSchemaRegistry)
 }
 
-export function getLakehouseFieldNames(source: LakehouseSource, schemaVersion?: number): string[] {
-  if (schemaVersion === undefined) {
-    return getLakehouseSourceSchema(source).fields.map((field) => field.name)
-  }
-
-  return getLakehouseSourceFieldsForVersion(source, schemaVersion).map((field) => field.name)
-}
-
-export function getLakehouseFieldDefinition(
-  source: LakehouseSource,
-  fieldName: string,
-  schemaVersion?: number
-): LakehouseFieldDefinition | undefined {
-  const fields =
-    schemaVersion === undefined
-      ? getLakehouseSourceSchema(source).fields
-      : getLakehouseSourceFieldsForVersion(source, schemaVersion)
-
-  return fields.find((field) => field.name === fieldName)
-}
-
-export function resolveLakehouseSourceFromTable(tableName: string): LakehouseSource | undefined {
-  return tableAliasToSource.get(tableName)
-}
-
-export function isLakehouseField(
-  source: LakehouseSource,
-  fieldName: string,
-  schemaVersion?: number
-): boolean {
-  return !!getLakehouseFieldDefinition(source, fieldName, schemaVersion)
-}
-
 export function toCloudflarePipelineSchema(source: LakehouseSource): {
   fields: Array<{
     name: string
@@ -508,41 +426,10 @@ export function toCloudflarePipelineSchema(source: LakehouseSource): {
     required: boolean
   }>
 } {
-  const toCloudflareType = (fieldType: LakehouseFieldType): CloudflarePipelineFieldType => {
-    switch (fieldType) {
-      case "string":
-      case "list":
-      case "struct":
-      case "bytes":
-      case "json":
-      case "int64":
-      case "int32":
-      case "f64":
-      case "f32":
-      case "timestamp":
-        return fieldType
-      case "float64":
-        return "f64"
-      case "float32":
-        return "f32"
-      case "boolean":
-      case "bool":
-        // Cloudflare stream schema type is `bool` (not `boolean`).
-        return "bool"
-      case "datetime":
-        // Cloudflare does not expose `datetime`; normalize to `timestamp`.
-        return "timestamp"
-      default: {
-        const _never: never = fieldType
-        throw new Error(`Unsupported lakehouse field type for Cloudflare schema: ${String(_never)}`)
-      }
-    }
-  }
-
   return {
     fields: getLakehouseSourceSchema(source).fields.map((field) => ({
       name: field.name,
-      type: toCloudflareType(field.type),
+      type: field.type,
       required: field.required,
     })),
   }
@@ -561,11 +448,7 @@ export function buildCloudflareLakehousePipelineDefinitions(
   prefix = "lakehouse"
 ): CloudflareLakehousePipelineDefinition[] {
   return listLakehouseSourceSchemas().map((entry) => {
-    const suffixBySource: Record<LakehouseSource, string> = {
-      web_events: "web_events",
-      budget_journal: "budget_journal",
-    }
-    const suffix = suffixBySource[entry.source]
+    const suffix = entry.source
 
     return {
       source: entry.source,
@@ -588,23 +471,15 @@ export type LakehouseJsonValue =
 
 type LakehouseFieldValueByType<T extends LakehouseFieldType> = T extends "string"
   ? string
-  : T extends "int64" | "int32" | "float64" | "float32" | "f64" | "f32"
+  : T extends "int64" | "int32"
     ? number
-    : T extends "boolean" | "bool"
+    : T extends "bool"
       ? boolean
       : T extends "json"
         ? LakehouseJsonValue
         : T extends "timestamp"
           ? string | number | Date
-          : T extends "datetime"
-            ? string | Date
-            : T extends "bytes"
-              ? string | Uint8Array
-              : T extends "list"
-                ? unknown[]
-                : T extends "struct"
-                  ? Record<string, unknown>
-                  : never
+          : never
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {}
 type UnionToIntersection<T> = (T extends unknown ? (input: T) => void : never) extends (
@@ -635,7 +510,7 @@ type BudgetJournalEventFromRegistry = LakehouseEventFromFields<
   (typeof lakehouseSourceSchemaRegistry)["budget_journal"]["fields"]
 >
 
-export type LakehouseEventBySource = {
+type LakehouseEventBySource = {
   web_events: WebEventsEventFromRegistry
   budget_journal: BudgetJournalEventFromRegistry
 }
@@ -665,14 +540,6 @@ for (const source of Object.keys(lakehouseSourceSchemaRegistry) as LakehouseSour
     ) {
       throw new Error(
         `Field '${field.name}' on source '${source}' has invalid addedInVersion=${field.addedInVersion}`
-      )
-    }
-  }
-
-  for (const partitionField of schema.partitionColumns) {
-    if (!fieldNames.has(partitionField)) {
-      throw new Error(
-        `Partition field '${partitionField}' is missing from source '${source}' schema fields`
       )
     }
   }

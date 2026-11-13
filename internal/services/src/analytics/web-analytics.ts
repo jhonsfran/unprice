@@ -15,8 +15,7 @@ const DAY_MS = 24 * HOUR_MS
 export type WebAnalyticsWindow = { from: Date; to: Date }
 
 /**
- * From the start of the UTC day `intervalDays` days ago until `now`
- * (`date >= toStartOfDay(today() - interval_days)`).
+ * From the start of the UTC day `intervalDays` days ago until `now`.
  */
 export function webAnalyticsWindow(now: number, intervalDays: number): WebAnalyticsWindow {
   const startOfToday = Math.floor(now / DAY_MS) * DAY_MS
@@ -51,7 +50,7 @@ function webEventsWhere(opts: {
 
 const count = z.coerce.number()
 
-// ---- top countries / top browsers (v1_get_top_countries, v1_get_top_browsers) ----
+// ---- visits by country or browser ----
 
 export const pageCountryVisitSchema = z.object({
   page_id: z.string(),
@@ -69,7 +68,7 @@ export const pageBrowserVisitSchema = z.object({
 })
 export type PageBrowserVisits = z.infer<typeof pageBrowserVisitSchema>[]
 
-export const PAGE_DIMENSIONS = ["country", "browser"] as const
+const PAGE_DIMENSIONS = ["country", "browser"] as const
 export type PageDimension = (typeof PAGE_DIMENSIONS)[number]
 
 /**
@@ -116,7 +115,7 @@ export function pageDimensionRowSchema<D extends PageDimension>(dimension: D) {
   >
 }
 
-// ---- pages overview (v1_get_pages_overview) ----
+// ---- page overview from Basin SQL ----
 
 export const pageOverviewSchema = z.object({
   date: z.date(),
@@ -234,7 +233,7 @@ function zeroOverview(date: Date, pageId: string): z.infer<typeof pageOverviewSc
   }
 }
 
-// ---- plans conversion (v1_get_plans_conversion) ----
+// ---- plan conversion from Basin SQL ----
 
 export const planConversionSchema = z.object({
   page_id: z.string(),
@@ -281,7 +280,7 @@ export const plansConversionSqlRowSchema = z.object({
   plan_signups: count,
 })
 
-/** Keeps plan versions that were viewed (the pipe left-joined from views) and the top 100. */
+/** Keeps the 100 viewed plan versions with the highest conversion rates. */
 export function foldPlansConversion(
   rows: readonly z.infer<typeof plansConversionSqlRowSchema>[]
 ): PlansConversion {
@@ -318,8 +317,7 @@ export type SignupWebEventStatus = "signup_success" | "waiting_payment_provider_
 export function signupWebEventRow(opts: {
   projectId: string
   customerId: string
-  /** `planId` is absent only on a customer session stored before sessions carried it. */
-  planVersion: { id: string; planId?: string }
+  planVersion: { id: string; planId: string }
   pageId?: string | null
   status: SignupWebEventStatus
 }): WebEventRow {

@@ -4,8 +4,8 @@ import {
   getUsageResponseSchema,
   prepareInterval,
 } from "@unprice/db/validators"
-import { formatAmount, formatMoney } from "@unprice/money"
-import { FEATURE_SLOTS, type FeatureUsageRow, customerOfKey } from "@unprice/services/analytics"
+import { FEATURE_SLOTS } from "@unprice/services/analytics"
+import { getFeatureUsage } from "@unprice/services/use-cases"
 import { endTime, startTime } from "hono/timing"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import * as HttpStatusCodes from "~/util/http-status-codes"
@@ -93,31 +93,10 @@ export type GetAnalyticsUsageResponse = z.infer<
   (typeof route.responses)[200]["content"]["application/json"]["schema"]
 >
 
-function formatUsageResponse(
-  row: FeatureUsageRow & { feature_slug: string },
-  projectId: string
-): z.infer<typeof getUsageResponseSchema> {
-  const amount = formatAmount(row.amount)
-  const customerId = row.budget_key ? customerOfKey(row.budget_key) : null
-  const currency = row.unit.startsWith("money:") ? row.unit.slice("money:".length) : null
-
-  return {
-    project_id: projectId,
-    ...(customerId ? { customer_id: customerId } : {}),
-    feature_slug: row.feature_slug,
-    usage: Number(formatAmount(row.quantity)),
-    spending: {
-      amount,
-      currency: currency ?? "XXX",
-      display_amount: currency ? formatMoney(amount, currency) : `${amount} ${row.unit}`,
-    },
-  }
-}
-
 export const registerGetAnalyticsUsageV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { customer_id: inputCustomerId, range, project_id: projectId } = c.req.valid("json")
-    const { analytics } = c.get("services")
+    const { budgetJournal } = c.get("services")
     const cache = c.get("cache")
     const logger = c.get("logger")
 
@@ -140,16 +119,19 @@ export const registerGetAnalyticsUsageV1 = (app: App) =>
       requestedProjectId: projectId ?? key.projectId,
     })
 
-    const cacheKey = `journal:v2:${projectID}:${customerId}:${range}`
+    const cacheKey = `journal:${projectID}:${customerId}:${range}`
 
     // Usage history from the budget journal (ADR-0008 D7), one row per customer and feature.
     const { err, val: data } = await cache.getUsage.swr(cacheKey, async () => {
-      const rows = await analytics.getFeatureUsage({
-        projectId: projectID,
-        customerId,
-        window: { from: new Date(start), to: new Date(end) },
-        byCustomer: true,
-      })
+      const rows = await getFeatureUsage(
+        { budgetJournal },
+        {
+          projectId: projectID,
+          customerId,
+          window: { from: new Date(start), to: new Date(end) },
+          byCustomer: true,
+        }
+      )
 
       if (rows.err) {
         const serializedError = serializeError(rows.err)
@@ -164,16 +146,17 @@ export const registerGetAnalyticsUsageV1 = (app: App) =>
         throw rows.err
       }
 
-      // A null feature slug counts the events that fed more than FEATURE_SLOTS features.
       return {
-        usage: rows.val
-          .filter(
-            (row): row is FeatureUsageRow & { feature_slug: string } => row.feature_slug !== null
-          )
-          .map((row) => formatUsageResponse(row, projectID)),
-        truncated_events: rows.val
-          .filter((row) => row.feature_slug === null)
-          .reduce((sum, row) => sum + row.events, 0),
+        usage: rows.val.rows.map(
+          ({ customerId, featureSlug, usage, spending: { displayAmount, ...spending } }) => ({
+            project_id: projectID,
+            ...(customerId ? { customer_id: customerId } : {}),
+            feature_slug: featureSlug,
+            usage,
+            spending: { ...spending, display_amount: displayAmount },
+          })
+        ),
+        truncated_events: rows.val.truncatedEvents,
       }
     })
 

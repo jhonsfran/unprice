@@ -37,6 +37,7 @@ export const finilizeTask = task({
 
     try {
       const finalizeInvoiceResult = await context.services.billing.finalizeInvoice({
+        caller: "job",
         projectId,
         subscriptionId,
         invoiceId,

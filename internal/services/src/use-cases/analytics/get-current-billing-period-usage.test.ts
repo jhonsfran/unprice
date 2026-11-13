@@ -62,7 +62,7 @@ describe("getCurrentBillingPeriodUsage", () => {
     const failure = new UnPriceBudgetError({ code: "BUDGET_CLOSED", closedAt: 1 })
     const result = await getCurrentBillingPeriodUsage(
       {
-        budgets: { execute: async () => Err(failure), cacheCards: async () => {} },
+        budgets: { execute: async () => Err(failure) },
         now: () => NOV,
       },
       { projectId, customerId }

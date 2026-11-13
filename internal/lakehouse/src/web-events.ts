@@ -7,7 +7,7 @@ import { buildLakehouseEventZodSchema } from "./zod"
 export const WEB_EVENT_KINDS = ["page_hit", "plan_view", "plan_click", "signup"] as const
 export type WebEventKind = (typeof WEB_EVENT_KINDS)[number]
 
-export const WEB_EVENTS_SCHEMA_VERSION = getLakehouseSourceSchema("web_events").currentVersion
+const WEB_EVENTS_SCHEMA_VERSION = getLakehouseSourceSchema("web_events").currentVersion
 
 /** Fully qualified Basin Catalog table: `<namespace>.<sink table>`, as provisioned by configure-lakehouse-pipelines.sh. */
 export const WEB_EVENTS_TABLE = `lakehouse.${getLakehouseSourceSchema("web_events").sinkTable}`
@@ -179,7 +179,7 @@ export function createWebEventsWriter(
 }
 
 /** The two logger methods `recordWebEvents` uses; `@unprice/logs` loggers satisfy it. */
-export type WebEventsLogger = {
+type WebEventsLogger = {
   warn(message: string, fields?: Record<string, unknown>): void
   error(message: unknown, fields?: Record<string, unknown>): void
 }

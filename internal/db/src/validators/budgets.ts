@@ -1,3 +1,4 @@
+import { unitCurrency } from "@unprice/money"
 import { formatAmount } from "@unprice/money"
 import { z } from "zod"
 import {
@@ -32,7 +33,7 @@ import {
 } from "./budget-shared"
 import { eventSlugSchema } from "./events"
 import { featurePricingSchema } from "./rate-cards"
-import { currencySchema, featureSlugSchema } from "./shared"
+import { featureSlugSchema } from "./shared"
 
 export {
   BUDGET_WINDOWS,
@@ -180,8 +181,8 @@ export type BudgetFunding = z.infer<typeof budgetFundingSchema>
 
 /**
  * How a budget meters and prices usage events: the rate cards by id (their unit must be the
- * budget's), the metered features, whether usage needs a registered billing statement
- * (ADR-0007: payer budgets require one), and how priced usage is funded. A budget whose features
+ * budget's), the metered features, and how priced usage is funded. Usage always needs a
+ * registered billing statement (ADR-0007). A budget whose features
  * are all free (a free plan) meters without cards; a priced feature needs them. Internal callers
  * only.
  */
@@ -194,7 +195,6 @@ export const budgetPricingSchema = z
       .strict()
       .optional(),
     features: z.array(budgetMeteredFeatureSchema).max(BUDGET_MAX_METERED_FEATURES),
-    statements: z.enum(["required", "none"]),
     funding: budgetFundingSchema.optional(),
   })
   .strict()
@@ -203,8 +203,8 @@ export const budgetPricingSchema = z
     message: "a priced feature needs a rate card",
   })
 
-/** A period id or statement key; "#" starts the budget's own perpetual statements. */
-const statementIdSchema = z.string().min(1).max(128).regex(/^[^#]/, "must not start with #")
+/** A billing period id or statement key. */
+const statementIdSchema = z.string().min(1).max(128)
 
 /** One billing period of one feature, as billing registers it with the payer budget. */
 export const budgetStatementRegistrationSchema = z
@@ -269,19 +269,12 @@ function withValidLimits(
 ): void {
   // A wallet holds money in one currency, and its reservation closes when a statement seals.
   if (config.pricing?.funding?.mode === "prepaid") {
-    const currency = unit.startsWith("money:") ? unit.slice("money:".length) : null
-    if (currency === null || !currencySchema.safeParse(currency).success) {
+    const currency = unitCurrency(unit)
+    if (currency === null) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["pricing", "funding"],
         message: "a prepaid budget's unit must be a wallet currency",
-      })
-    }
-    if (config.pricing.statements !== "required") {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["pricing", "funding"],
-        message: "a prepaid budget needs registered statements",
       })
     }
   }

@@ -6,9 +6,9 @@ import type { Cache } from "../../cache"
 import type { ServiceContext } from "../../context"
 import { createServiceContext } from "../../context"
 import type { Metrics } from "../../metrics"
-import { RateCardService } from "../../rate-cards/service"
 import { DrizzleSubscriptionRepository } from "../../subscriptions/repository.drizzle"
 import { SubscriptionService } from "../../subscriptions/service"
+import { testInvoicing } from "../../test-fixtures/billing-gateway"
 import {
   closeTestDatabaseConnection,
   createTestDatabaseConnection,
@@ -89,7 +89,7 @@ function createSubscriptionServiceWithWallet(input: {
   wallet: WalletService
 }) {
   return new SubscriptionService({
-    invoicing: { payerBudgets: input.payerBudgets, rateCards: new RateCardService({ db }) },
+    invoicing: testInvoicing({ db, payerBudgets: input.payerBudgets }),
     db,
     repo: new DrizzleSubscriptionRepository(db),
     logger: input.logger,

@@ -2,12 +2,14 @@ import { createRoute } from "@hono/zod-openapi"
 import { consumeUsageInputSchema, consumeUsageResponseSchema } from "@unprice/db/validators"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { keyAuth, resolveContextProjectId, resolveCustomerIdForApiKeyOrThrow } from "~/auth/key"
+import { toUnpriceApiError } from "~/errors"
 import { openApiBudgetErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import { bouncer } from "~/util/bouncer"
 import * as HttpStatusCodes from "~/util/http-status-codes"
-import { budgetApiError, consumedToWire, setBudgetRemaining } from "../budgets/budget-verb"
+import { budgetApiError, setBudgetRemaining } from "../budgets/budget-verb"
+import { consumedToWire } from "../budgets/wire"
 import { meterPayerUsageReported, usageBodyLimit } from "./payer-usage"
 
 export const USAGE_CONSUME_PATH = "/v1/usage/consume"
@@ -61,7 +63,7 @@ export const registerConsumeUsageV1 = (app: App) => {
 
     if (!consumed) throw new Error("usage consume answered no result")
     // The budget was never reached: answer the transport failure as an internal error.
-    if ("unavailable" in consumed) throw consumed.unavailable
+    if ("unavailable" in consumed) throw toUnpriceApiError(consumed.unavailable)
     if (consumed.result.err) throw budgetApiError(c, consumed.result.err)
     const { type: _, created: __, ...charged } = consumed.result.val
     setBudgetRemaining(c, charged)

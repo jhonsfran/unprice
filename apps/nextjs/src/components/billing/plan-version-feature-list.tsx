@@ -2,11 +2,14 @@
 
 import { FEATURE_TYPES_MAPS, USAGE_MODES_MAP } from "@unprice/db/utils"
 import type { PlanVersionExtended } from "@unprice/db/validators"
+import {
+  type FeaturePriceRows,
+  describePlanFeatureLine as describeFeatureLine,
+} from "@unprice/services/pricing"
 import { CheckIcon, HelpCircle } from "@unprice/ui/icons"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { Typography } from "@unprice/ui/typography"
 import { cn } from "@unprice/ui/utils"
-import { type FeatureLineRows, describeFeatureLine } from "./feature-line"
 
 export type PlanVersionFeatureListItemDisplayOptions = {
   showQuantity?: boolean
@@ -26,8 +29,11 @@ export function PlanVersionFeatureListItem({
   displayOptions,
   className,
 }: {
-  feature: PlanVersionExtended["planFeatures"][number] & { displayPrice?: string | null }
-  priceRows?: FeatureLineRows
+  feature: PlanVersionExtended["planFeatures"][number] & {
+    displayPrice?: string | null
+    displayFeatureText?: string
+  }
+  priceRows?: FeaturePriceRows
   currency?: string
   displayOptions?: PlanVersionFeatureListItemDisplayOptions
   className?: string
@@ -35,7 +41,7 @@ export function PlanVersionFeatureListItem({
   const { showQuantity = false, showCheckIcon = true, showTitle = true } = displayOptions ?? {}
 
   const displayFeature = showQuantity
-    ? describeFeatureLine(feature, priceRows, currency ?? "USD")
+    ? (feature.displayFeatureText ?? describeFeatureLine(feature, priceRows, currency ?? "USD"))
     : feature.feature.title
 
   return (

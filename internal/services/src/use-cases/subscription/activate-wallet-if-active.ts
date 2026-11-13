@@ -18,14 +18,14 @@ export async function activateWalletIfSubscriptionIsActive(
     projectId: string
     context: string
   }
-): Promise<void> {
+): Promise<boolean> {
   const refreshed = await deps.services.subscriptions.getSubscriptionData({
     subscriptionId,
     projectId,
   })
 
   if (refreshed?.status !== "active") {
-    return
+    return false
   }
 
   const activateResult = await deps.services.subscriptions.activateWallet({
@@ -41,4 +41,5 @@ export async function activateWalletIfSubscriptionIsActive(
       context,
     })
   }
+  return activateResult !== null
 }

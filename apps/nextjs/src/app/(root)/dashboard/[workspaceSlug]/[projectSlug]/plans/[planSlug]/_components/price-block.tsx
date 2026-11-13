@@ -1,44 +1,24 @@
 "use client"
-
-import type { FeatureType } from "@unprice/db/utils"
 import { type RateRow, featurePriceInputSchema } from "@unprice/db/validators"
-import {
-  type DecimalFeaturePrice,
-  type PricingShape,
-  decimalPriceOf,
-  describeRatePrice,
-  pricingShape,
-} from "@unprice/services/pricing"
-import type { RouterInputs, RouterOutputs } from "@unprice/trpc/routes"
+import { type PricingShape, decimalPriceOf, describeRatePrice } from "@unprice/services/pricing"
+import type { RouterInputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
 import { Label } from "@unprice/ui/label"
 import { Skeleton } from "@unprice/ui/skeleton"
 import { cn } from "@unprice/ui/utils"
-import { CreditCard, Plus, X } from "lucide-react"
+import { CreditCard } from "lucide-react"
 import { useParams } from "next/navigation"
 import { InputWithAddons } from "~/components/input-addons"
+import { type FeaturePriceRows, scheduledFrom } from "~/components/pricing/plan-prices"
 import { SuperLink } from "~/components/super-link"
-import { type FeaturePriceRows, cardLabel, scheduledFrom } from "../../_components/plan-prices"
 
-export type PlanVersionCard = RouterOutputs["rateCards"]["forPlanVersion"]["cards"][number]
+import { TiersEditor } from "~/components/pricing/tiers-editor"
+import { type TierDraft, emptyTier, tiersOf } from "~/components/pricing/tiers-model"
+
+import type { PlanVersionCard } from "~/components/pricing/use-version-pricing"
 
 /** The `price` a feature update carries: absent leaves it, null unprices, a value sets it. */
 export type FeaturePriceInput = NonNullable<RouterInputs["planVersionFeatures"]["update"]["price"]>
-
-/** The row shape a plan feature's package allows (`pricingShape` owns the rule). */
-export type PriceShape = PricingShape
-
-export function priceShapeOf(featureType: FeatureType, usageMode: string | undefined): PriceShape {
-  return pricingShape({ featureType, usageMode: usageMode as DecimalFeaturePrice["usageMode"] })
-}
-
-/** One editable tier; `key` identifies the row while it is edited and never reaches the server. */
-export type TierDraft = Readonly<{
-  key: string
-  upTo: string
-  unitPrice: string
-  flatPrice: string
-}>
 
 /** What the block edits; the parent keeps null while the user has not touched the price. */
 export type PriceDraft =
@@ -46,25 +26,18 @@ export type PriceDraft =
   | Readonly<{ kind: "amount"; amount: string }>
   | Readonly<{ kind: "tiers"; tiers: readonly TierDraft[] }>
 
-export function emptyTier(key: string): TierDraft {
-  return { key, upTo: "", unitPrice: "", flatPrice: "0" }
-}
-
 /**
  * A fixed feature starts included at $0, so one Save prices it; every other shape asks for a
  * number. Tiers start as "N included, then a price": a $0 tier up to `includedUnits` (the default
  * quantity, or the included units) and an open-ended tier to price, when there are units to give.
  */
-export function emptyDraft(shape: PriceShape, includedUnits = 0): PriceDraft {
+export function emptyDraft(shape: PricingShape, includedUnits = 0): PriceDraft {
   if (shape === "graduated") {
     const open = emptyTier("tier-1")
     return includedUnits > 0
       ? {
           kind: "tiers",
-          tiers: [
-            { key: "tier-0", upTo: String(includedUnits), unitPrice: "0", flatPrice: "0" },
-            open,
-          ],
+          tiers: [{ key: "tier-0", upTo: String(includedUnits), rate: "0", flat: "0" }, open],
         }
       : { kind: "tiers", tiers: [open] }
   }
@@ -78,7 +51,7 @@ export function emptyDraft(shape: PriceShape, includedUnits = 0): PriceDraft {
  */
 export function prefillDraft(
   row: RateRow | null,
-  shape: PriceShape,
+  shape: PricingShape,
   includedUnits = 0
 ): PriceDraft | null {
   // A row of another shape is not this feature's price any more: $49 a cycle is not $49 a unit.
@@ -91,9 +64,9 @@ export function prefillDraft(
           kind: "tiers",
           tiers: decimal.tiers.map((tier, index) => ({
             key: `tier-${index}`,
-            upTo: tier.lastUnit === null ? "" : String(tier.lastUnit),
-            unitPrice: tier.unitPrice,
-            flatPrice: tier.flatPrice,
+            upTo: tier.upTo === null ? "" : String(tier.upTo),
+            rate: tier.rate,
+            flat: tier.flat,
           })),
         }
       : emptyDraft(shape, includedUnits)
@@ -115,40 +88,11 @@ export function priceInputOf(
       ? { ok: true, price: { price: amount } }
       : { ok: false, message: "A price is a non-negative decimal, like 0.02." }
   }
-  const tiers: {
-    firstUnit: number
-    lastUnit: number | null
-    unitPrice: string
-    flatPrice: string
-  }[] = []
-  let firstUnit = 1
-  for (const [index, tier] of draft.tiers.entries()) {
-    const last = index === draft.tiers.length - 1
-    const lastUnit = last ? null : Number(tier.upTo.trim())
-    if (lastUnit !== null && (!Number.isInteger(lastUnit) || lastUnit < firstUnit)) {
-      return {
-        ok: false,
-        message: `Tier ${index + 1} ends at a whole number of at least ${firstUnit}.`,
-      }
-    }
-    tiers.push({
-      firstUnit,
-      lastUnit,
-      unitPrice: tier.unitPrice.trim(),
-      flatPrice: tier.flatPrice.trim() || "0",
-    })
-    firstUnit = (lastUnit ?? 0) + 1
-  }
-  const parsed = featurePriceInputSchema.safeParse({ tiers })
-  return parsed.success
-    ? { ok: true, price: { tiers } }
-    : {
-        ok: false,
-        message: "Each tier needs a unit price and a flat fee as non-negative decimals.",
-      }
+  const built = tiersOf(draft.tiers)
+  return built.ok ? { ok: true, price: { tiers: built.tiers } } : built
 }
 
-const AMOUNT_LABEL: Record<Exclude<PriceShape, "graduated">, string> = {
+const AMOUNT_LABEL: Record<Exclude<PricingShape, "graduated">, string> = {
   flat: "Amount per cycle",
   unit: "Price per unit",
   package: "Price per package",
@@ -175,7 +119,7 @@ export function PriceBlockView({
   rows: FeaturePriceRows | undefined
   currency: string
   unit: string
-  shape: PriceShape
+  shape: PricingShape
   editable: boolean
   isLoading?: boolean
   /** null while the user has not touched the price: the inputs show the current row. */
@@ -201,12 +145,7 @@ export function PriceBlockView({
       ? `/${params.workspaceSlug}/${params.projectSlug}/plans/${params.planSlug}/${params.planVersionId}/prices`
       : null
   const label = card
-    ? cardLabel(
-        card.card.name,
-        params?.planSlug && params?.planVersionId
-          ? { planSlug: params.planSlug, planVersionId: params.planVersionId, currency }
-          : null
-      )
+    ? { text: card.own ? "This version's card" : card.card.name, isOwn: card.own }
     : null
   const current = rows?.current ?? null
   const scheduled = rows?.scheduled ?? null
@@ -347,108 +286,6 @@ export function PriceBlockView({
           )}
         </p>
       )}
-    </div>
-  )
-}
-
-function title(text: string): string {
-  return text.charAt(0).toUpperCase() + text.slice(1)
-}
-
-/** Graduated tiers: each row ends at "up to" units; the last row is open-ended. */
-export function TiersEditor({
-  tiers,
-  currency,
-  unit,
-  onChange,
-}: {
-  tiers: readonly TierDraft[]
-  currency: string
-  unit: string
-  onChange: (tiers: readonly TierDraft[]) => void
-}) {
-  const update = (index: number, patch: Partial<TierDraft>) =>
-    onChange(tiers.map((tier, at) => (at === index ? { ...tier, ...patch } : tier)))
-  let firstUnit = 1
-
-  return (
-    <div className="space-y-1.5">
-      <p className="text-muted-foreground text-xs">
-        Each tier prices only the {unit}s inside it. Add a tier to charge differently past a
-        threshold.
-      </p>
-      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_28px] gap-2 text-muted-foreground text-xs">
-        <span>{title(unit)}s</span>
-        <span>Price per {unit}</span>
-        <span>Plus a flat fee</span>
-        <span />
-      </div>
-      {tiers.map((tier, index) => {
-        const last = index === tiers.length - 1
-        const from = firstUnit
-        firstUnit = (Number(tier.upTo) || 0) + 1
-        return (
-          <div
-            key={tier.key}
-            className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_28px] items-center gap-2"
-          >
-            {last ? (
-              <span className="flex h-9 items-center rounded-md border border-dashed px-3 font-mono text-muted-foreground text-xs tabular-nums">
-                {from} and above
-              </span>
-            ) : (
-              <InputWithAddons
-                inputMode="numeric"
-                aria-label={`Tier ${index + 1} ends at`}
-                className="font-mono text-xs tabular-nums"
-                leading={`${from} to`}
-                value={tier.upTo}
-                onChange={(event) => update(index, { upTo: event.target.value })}
-              />
-            )}
-            <InputWithAddons
-              inputMode="decimal"
-              aria-label={`Tier ${index + 1} unit price`}
-              className="font-mono text-xs tabular-nums"
-              leading={currency}
-              placeholder="0.02"
-              value={tier.unitPrice}
-              onChange={(event) => update(index, { unitPrice: event.target.value })}
-            />
-            <InputWithAddons
-              inputMode="decimal"
-              aria-label={`Tier ${index + 1} flat fee`}
-              className="font-mono text-xs tabular-nums"
-              leading={currency}
-              value={tier.flatPrice}
-              onChange={(event) => update(index, { flatPrice: event.target.value })}
-            />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="size-7"
-              disabled={tiers.length === 1}
-              onClick={() => onChange(tiers.filter((_, at) => at !== index))}
-            >
-              <X className="size-3.5" />
-              <span className="sr-only">Remove tier {index + 1}</span>
-            </Button>
-          </div>
-        )
-      })}
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="h-7 px-2 text-xs"
-        onClick={() =>
-          onChange([...tiers.slice(0, -1), emptyTier(`tier-${Date.now()}`), ...tiers.slice(-1)])
-        }
-      >
-        <Plus className="mr-1 size-3" />
-        Add tier
-      </Button>
     </div>
   )
 }

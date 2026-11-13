@@ -74,7 +74,7 @@ function pricedEvent(opts: {
     features: [
       {
         featureSlug: "tokens",
-        periodId: opts.periodId ?? "tokens:bp_1",
+        periodId: opts.periodId ?? "bp_1",
         late: false,
         cardId: "card_1",
         rowId: "row_1",
@@ -117,10 +117,10 @@ const defaultJournal = [
 describe("explainCharge", () => {
   it("explains a metered line from its billed statement and the journal's events", async () => {
     const { db, ledger } = makeDeps({ lineMetadata: { ...usageMetadata(), cost_usd: 120_000_000 } })
-    const { analytics, queries } = journalAnalytics(statementJournal(defaultJournal))
+    const { budgetJournal, queries } = journalAnalytics(statementJournal(defaultJournal))
 
     const result = await explainCharge(
-      { db, ledger, analytics, rateCards, now: () => now },
+      { db, ledger, budgetJournal, rateCards, now: () => now },
       input()
     )
 
@@ -128,13 +128,13 @@ describe("explainCharge", () => {
     for (const sql of queries) {
       expect(sql).toContain("AND budget_key = 'unprice:customer:cus_1'")
       expect(sql).toContain("AND kind IN ('charge', 'record', 'hold')")
-      expect(sql).toContain("json_get_str(features, 0, 'periodId') = 'tokens:bp_1'")
+      expect(sql).toContain("json_get_str(features, 0, 'periodId') = 'bp_1'")
       expect(sql).toContain("AND timestamp >= '2023-11-14T22:13:20.000Z'")
     }
     expect(result.err).toBeUndefined()
     expect(result.val?.scope).toMatchObject({
       featureSlug: "tokens",
-      periodKey: "tokens:bp_1",
+      periodKey: "bp_1",
       customerEntitlementId: "ce_1",
     })
     expect(result.val?.summary).toEqual({
@@ -151,7 +151,7 @@ describe("explainCharge", () => {
     expect(result.val?.events[1]).toEqual({
       idempotency_key: "evt_1",
       feature_slug: "tokens",
-      period_key: "tokens:bp_1",
+      period_key: "bp_1",
       event_slug: "tokens.used",
       timestamp: 1_700_000_000_000,
       created_at: 1_700_000_000_005,
@@ -164,9 +164,24 @@ describe("explainCharge", () => {
     })
     expect(result.val?.pagination.hasMore).toBe(false)
     expect(result.val?.answer).toContain("$4.25")
-    expect(result.val?.evidence).toContainEqual({ type: "ledger_line", id: "entry_1" })
-    expect(result.val?.evidence).toContainEqual({ type: "billing_period", id: "bp_1" })
-    expect(result.val?.evidence).toContainEqual({ type: "event", id: "o:hash_evt_1" })
+    expect(result.val?.evidence).toContainEqual({
+      type: "ledger_line",
+      id: "entry_1",
+      source: "ledger",
+      timestamp: null,
+    })
+    expect(result.val?.evidence).toContainEqual({
+      type: "billing_period",
+      id: "bp_1",
+      source: "postgres",
+      timestamp: null,
+    })
+    expect(result.val?.evidence).toContainEqual({
+      type: "event",
+      id: "proj_1:cus_1:bp_1:o:hash_evt_1",
+      source: "r2",
+      timestamp: 1_700_000_000_000,
+    })
   })
 
   it("sums grouped invoice rows into one line", async () => {
@@ -188,33 +203,38 @@ describe("explainCharge", () => {
         }),
       ],
     })
-    const { analytics } = journalAnalytics(statementJournal(defaultJournal))
+    const { budgetJournal } = journalAnalytics(statementJournal(defaultJournal))
 
     const result = await explainCharge(
-      { db, ledger, analytics, rateCards, now: () => now },
+      { db, ledger, budgetJournal, rateCards, now: () => now },
       input({ entryId: groupEntryId })
     )
 
     expect(result.val?.line.amount).toBe(425_000_000)
     expect(result.val?.summary.totalUsage).toBe(150)
-    expect(result.val?.evidence).toContainEqual({ type: "ledger_line", id: "entry_2" })
+    expect(result.val?.evidence).toContainEqual({
+      type: "ledger_line",
+      id: groupEntryId,
+      source: "ledger",
+      timestamp: null,
+    })
   })
 
   it("skips journal rows that do not carry the statement's feature", async () => {
     const { db, ledger } = makeDeps()
-    const { analytics } = journalAnalytics(
+    const { budgetJournal } = journalAnalytics(
       statementJournal([
         journalRow({
           key: "evt_x",
           at: 1,
           quantity: "1",
           amount: "1",
-          periodId: "tokens:bp_other",
+          periodId: "bp_other",
         }),
       ])
     )
     const result = await explainCharge(
-      { db, ledger, analytics, rateCards, now: () => now },
+      { db, ledger, budgetJournal, rateCards, now: () => now },
       input()
     )
     expect(result.val?.events).toEqual([])
@@ -222,13 +242,13 @@ describe("explainCharge", () => {
 
   it("explains a settled hold from the priced event on its state", async () => {
     const { db, ledger } = makeDeps()
-    const { analytics } = journalAnalytics(
+    const { budgetJournal } = journalAnalytics(
       statementJournal([
         settledHoldRow({ key: "run_1", at: 1_700_050_000_000, quantity: "40", amount: "0.4" }),
       ])
     )
     const result = await explainCharge(
-      { db, ledger, analytics, rateCards, now: () => now },
+      { db, ledger, budgetJournal, rateCards, now: () => now },
       input()
     )
     expect(result.val?.summary.eventCount).toBe(1)
@@ -236,7 +256,7 @@ describe("explainCharge", () => {
       {
         idempotency_key: "run_1",
         feature_slug: "tokens",
-        period_key: "tokens:bp_1",
+        period_key: "bp_1",
         event_slug: "tokens.used",
         timestamp: 1_700_050_000_000,
         created_at: 1_700_050_000_000,
@@ -250,28 +270,28 @@ describe("explainCharge", () => {
     ])
   })
 
-  it("skips a journal row whose data is not valid JSON", async () => {
+  it("returns a typed failure when journal data is not valid JSON", async () => {
     const { db, ledger } = makeDeps()
     const [good] = defaultJournal
-    const { analytics } = journalAnalytics(
+    const { budgetJournal } = journalAnalytics(
       statementJournal(
         [{ operation_id: "o:broken", timestamp: good?.timestamp, data: "{not json" }, good],
         2
       )
     )
     const result = await explainCharge(
-      { db, ledger, analytics, rateCards, now: () => now },
+      { db, ledger, budgetJournal, rateCards, now: () => now },
       input()
     )
-    expect(result.err).toBeUndefined()
-    expect(result.val?.events.map((event) => event.operation_id)).toEqual(["o:hash_evt_2"])
+    expect(result.err).toBeInstanceOf(FetchError)
+    expect(result.val).toBeUndefined()
   })
 
   it("reports more pages from the journal's count", async () => {
     const { db, ledger } = makeDeps()
-    const { analytics } = journalAnalytics(statementJournal(defaultJournal, "3"))
+    const { budgetJournal } = journalAnalytics(statementJournal(defaultJournal, "3"))
     const result = await explainCharge(
-      { db, ledger, analytics, rateCards, now: () => now },
+      { db, ledger, budgetJournal, rateCards, now: () => now },
       input({ limit: 2 })
     )
     expect(result.val?.summary.eventCount).toBe(3)
@@ -280,9 +300,9 @@ describe("explainCharge", () => {
 
   it("keeps the count on a page past the last event", async () => {
     const { db, ledger } = makeDeps()
-    const { analytics, queries } = journalAnalytics(statementJournal([], 3))
+    const { budgetJournal, queries } = journalAnalytics(statementJournal([], 3))
     const result = await explainCharge(
-      { db, ledger, analytics, rateCards, now: () => now },
+      { db, ledger, budgetJournal, rateCards, now: () => now },
       input({ limit: 2, offset: 4 })
     )
     expect(queries[0]).toContain("LIMIT 2\nOFFSET 4")
@@ -298,9 +318,9 @@ describe("explainCharge", () => {
 
   it("summarizes the feature's price from the plan version's rate card", async () => {
     const { db, ledger } = makeDeps()
-    const { analytics } = journalAnalytics(statementJournal(defaultJournal))
+    const { budgetJournal } = journalAnalytics(statementJournal(defaultJournal))
     const result = await explainCharge(
-      { db, ledger, analytics, rateCards, now: () => now },
+      { db, ledger, budgetJournal, rateCards, now: () => now },
       input()
     )
     expect(result.val?.pricing).toEqual({
@@ -327,10 +347,10 @@ describe("explainCharge", () => {
       }),
       lines: [line({ quantity: 3 })],
     })
-    const { analytics, queries } = journalAnalytics(() => [])
+    const { budgetJournal, queries } = journalAnalytics(() => [])
 
     const result = await explainCharge(
-      { db, ledger, analytics, rateCards, now: () => now },
+      { db, ledger, budgetJournal, rateCards, now: () => now },
       input()
     )
 
@@ -342,9 +362,9 @@ describe("explainCharge", () => {
 
   it("returns the journal's failure", async () => {
     const { db, ledger } = makeDeps()
-    const { analytics } = journalAnalytics(() => new Error("basin down"))
+    const { budgetJournal } = journalAnalytics(() => new Error("basin down"))
     const result = await explainCharge(
-      { db, ledger, analytics, rateCards, now: () => now },
+      { db, ledger, budgetJournal, rateCards, now: () => now },
       input()
     )
     expect(result.err).toBeInstanceOf(FetchError)
@@ -361,9 +381,9 @@ describe("explainCharge", () => {
     ],
   ] as const)("returns %o as %s before reading the journal", async (overrides, code) => {
     const { db, ledger } = makeDeps(overrides)
-    const { analytics, queries } = journalAnalytics(() => [])
+    const { budgetJournal, queries } = journalAnalytics(() => [])
     const result = await explainCharge(
-      { db, ledger, analytics, rateCards, now: () => now },
+      { db, ledger, budgetJournal, rateCards, now: () => now },
       input()
     )
     expect(result.err).toBeInstanceOf(ExplainChargeError)

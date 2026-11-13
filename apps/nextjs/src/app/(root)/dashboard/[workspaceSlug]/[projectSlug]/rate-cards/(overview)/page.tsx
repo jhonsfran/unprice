@@ -4,14 +4,14 @@ import { CreditCard } from "lucide-react"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
-import { SuperLink } from "~/components/super-link"
-import { api } from "~/trpc/server"
-import { NewRateCardDialog } from "../_components/new-rate-card-dialog"
 import {
   RATE_CARDS_DESCRIPTION,
   formatCardUnit,
   formatMarginPolicy,
-} from "../_components/rate-card-format"
+} from "~/components/pricing/rate-card-format"
+import { SuperLink } from "~/components/super-link"
+import { api } from "~/trpc/server"
+import { NewRateCardDialog } from "../_components/new-rate-card-dialog"
 
 export const dynamic = "force-dynamic"
 

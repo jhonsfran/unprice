@@ -9,7 +9,7 @@ import { currencySchema, featureSlugSchema } from "./shared"
 // keys, tiers, cost properties) live in `validateCard`, which reports every violation at once.
 
 /**
- * How far ahead a price change must start once a card has any row (ADR-0008 D2). A budget
+ * How far ahead a price change must start on a live card (ADR-0008 D2). A budget
  * refreshes its card at least every 5 minutes, so a change published with this notice never meets
  * a budget pricing with a card that predates it.
  */
@@ -19,6 +19,7 @@ export const RATE_CHANGE_NOTICE_MS = 10 * 60 * 1000
  * How long a cached card prices before it must be read again (ADR-0008 D2): shorter than the
  * notice a row change gives, so no budget prices with a row that has ended or misses a new one.
  * Caches that hold prices read from a card expire within it too.
+ * Keep CARD_REFRESH_MS < RATE_CHANGE_NOTICE_MS; card writes need no cache invalidation.
  */
 export const CARD_REFRESH_MS = 5 * 60_000
 
@@ -301,14 +302,6 @@ export const publishCostPlusInputSchema = z.object({
 /** A non-negative decimal string, the wire form of a price before it is parsed into base units. */
 const decimalStringSchema = z.string().regex(AMOUNT_PATTERN, "a non-negative decimal string")
 
-/** One graduated tier as the plan editor and the monetization document write it. */
-export const decimalTierSchema = z.object({
-  firstUnit: z.number().int().positive(),
-  lastUnit: z.number().int().positive().nullable(),
-  unitPrice: decimalStringSchema,
-  flatPrice: decimalStringSchema.default("0"),
-})
-
 /**
  * A plan feature's price in decimal form: one price, or graduated tiers. The server derives the
  * row's shape from the plan feature's type, usage mode, package size and meter, so a client cannot
@@ -317,7 +310,13 @@ export const decimalTierSchema = z.object({
 export const featurePriceInputSchema = z
   .object({
     price: decimalStringSchema.optional(),
-    tiers: z.array(decimalTierSchema).min(1).max(100).optional(),
+    tiers: z
+      .array(
+        rateTierSchema.extend({ rate: decimalStringSchema, flat: decimalStringSchema }).strict()
+      )
+      .min(1)
+      .max(100)
+      .optional(),
   })
   .refine((input) => input.price !== undefined || input.tiers !== undefined, {
     message: "a price or tiers",
@@ -327,16 +326,9 @@ export const featurePriceInputSchema = z
  * Prices one plan feature's models from the cost catalog on the version's own card: the policy
  * the card keeps for that feature. `dimension` defaults to the feature's only dimension.
  */
-export const planVersionCatalogPricingInputSchema = z.object({
-  planVersionId: z.string().min(1),
-  featureSlug: featureSlugSchema,
-  markup: rateDecimalSchema,
-  roundTo: positiveDecimalSchema,
-  dimension: propertyNameSchema.optional(),
-  componentMap: z
-    .record(z.string().min(1), propertyNameSchema)
-    .refine((map) => Object.keys(map).length > 0, { message: "map at least one component" }),
-})
+export const planVersionCatalogPricingInputSchema = costPlusFeaturePolicySchema
+  .partial({ dimension: true })
+  .extend({ planVersionId: z.string().min(1) })
 
 export const applyPlanVersionCatalogPricingInputSchema =
   planVersionCatalogPricingInputSchema.extend({
@@ -366,7 +358,6 @@ export type RateRow = z.infer<typeof rateRowSchema>
 export type RateRowInput = z.input<typeof rateRowSchema>
 export type MarginPolicy = z.infer<typeof marginPolicySchema>
 export type CostPlusFeaturePolicy = z.infer<typeof costPlusFeaturePolicySchema>
-export type DecimalTierInput = z.infer<typeof decimalTierSchema>
 export type FeaturePriceInput = z.infer<typeof featurePriceInputSchema>
 export type PlanVersionCatalogPricingInput = z.infer<typeof planVersionCatalogPricingInputSchema>
 export type RateCard = z.infer<typeof rateCardSchema>

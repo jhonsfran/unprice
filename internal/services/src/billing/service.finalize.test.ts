@@ -246,7 +246,10 @@ function makeBillingService(opts: {
   invoicesFindFirst.mockResolvedValue(opts.invoice)
   const db = {
     transaction,
-    query: { invoices: { findFirst: invoicesFindFirst } },
+    query: {
+      invoices: { findFirst: invoicesFindFirst },
+      subscriptions: { findFirst: vi.fn(async () => ({ customerId: "cust_1" })) },
+    },
   } as unknown as Database
 
   const logger = {

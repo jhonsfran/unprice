@@ -5,10 +5,10 @@ import { CreditCard } from "lucide-react"
 import { redirect } from "next/navigation"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
+import { formatCardUnit } from "~/components/pricing/rate-card-format"
 import { SuperLink } from "~/components/super-link"
 import { HydrateClient, api, prefetch, trpc } from "~/trpc/server"
 import { RateCardDetail } from "../_components/rate-card-detail"
-import { cardCurrency, formatCardUnit } from "../_components/rate-card-format"
 
 export const dynamic = "force-dynamic"
 
@@ -43,15 +43,11 @@ export default async function RateCardPage(props: {
     )
   }
 
-  // A version's own card is named `<plan slug> <version id> <currency>` (pricePlanVersion). Its
-  // prices live on the version's Prices tab, so this route only serves shared cards.
-  const [planSlug, planVersionId, namedCurrency] = found.card.name.split(" ")
-  if (
-    planSlug &&
-    planVersionId?.startsWith("pv_") &&
-    namedCurrency === cardCurrency(found.card.unit)
-  ) {
-    redirect(`/${workspaceSlug}/${projectSlug}/plans/${planSlug}/${planVersionId}/prices`)
+  const owner = (await api.rateCards.list()).cards.find((card) => card.id === cardId)?.version
+  if (owner) {
+    redirect(
+      `/${workspaceSlug}/${projectSlug}/plans/${owner.planSlug}/${owner.planVersionId}/prices`
+    )
   }
 
   await Promise.all([

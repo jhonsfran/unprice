@@ -52,7 +52,6 @@ function payerBudget(consumed: number, closed = false) {
     limits: [{ id: "images:month", window: "month", enforce: "hard", amount: limit.amount }],
     pricing: {
       features: [{ slug: "images", eventSlug: "image.generated", priced: true }],
-      statements: "required",
     },
     balance: { remaining: null, held: { amount: BigInt(0) }, limits: [limit], asOf: NOW },
   } as unknown as BudgetSnapshot
@@ -117,7 +116,7 @@ describe("POST /v1/access/check", () => {
       { projectId: "proj_123", key: "unprice:customer:cus_a" },
       { type: "get" }
     )
-    expect(mocks.getCustomerEntitlementsForCustomer).not.toHaveBeenCalled()
+    expect(mocks.getCustomerEntitlementsForCustomer).toHaveBeenCalledOnce()
   })
 
   it("denies a metered feature whose hard limit is used up", async () => {

@@ -1,8 +1,15 @@
 import { BUDGET_MAX_METERED_FEATURES } from "@unprice/db/validators"
-import { BUDGET_JOURNAL_TABLE, sqlInteger, sqlString, sqlTimestamp } from "@unprice/lakehouse"
+import {
+  BUDGET_JOURNAL_TABLE,
+  rejectedJournalDataSchema,
+  sqlInteger,
+  sqlString,
+  sqlTimestamp,
+} from "@unprice/lakehouse"
 import { LEDGER_SCALE, type SignedAmount } from "@unprice/money"
 import { z } from "zod"
-import { payerBudgetKey } from "../use-cases/budgets/compile-payer-budget"
+import { payerBudgetKey } from "../budgets/payer-key"
+export { customerOfKey } from "../budgets/payer-key"
 
 /**
  * Usage history read from the budget journal (ADR-0008 D7): every BudgetDO operation row, and every
@@ -15,16 +22,11 @@ import { payerBudgetKey } from "../use-cases/budgets/compile-payer-budget"
 /** Every Unprice customer's budget lives under this prefix: `unprice:customer:<customerId>`. */
 export const PAYER_BUDGET_KEY_PREFIX = payerBudgetKey("")
 
-/** The customer of a payer budget key, or null for any other budget. */
-export function customerOfKey(budgetKey: string): string | null {
-  return budgetKey.startsWith(PAYER_BUDGET_KEY_PREFIX)
-    ? budgetKey.slice(PAYER_BUDGET_KEY_PREFIX.length)
-    : null
-}
+export type JournalQuery<T> = { sql: string; row: z.ZodType<T>; context: string }
 
 export type JournalWindow = { from: Date; to: Date }
 
-export type JournalBucket = "hour" | "day"
+type JournalBucket = "hour" | "day"
 
 /**
  * An event feeds every feature its slug meters, so `priced.features` is an array. Basin SQL has no
@@ -36,9 +38,16 @@ export const FEATURE_SLOTS = 8
 const SLOTS = Array.from({ length: FEATURE_SLOTS }, (_, index) => index)
 const STATEMENT_SLOTS = Array.from({ length: BUDGET_MAX_METERED_FEATURES }, (_, index) => index)
 
-/** The features an operation priced: a charge or record keeps them on `priced`, a hold on its settle. */
-const PRICED_FEATURES =
-  "COALESCE(json_get_json(data, 'priced', 'features'), json_get_json(data, 'state', 'priced', 'features'))"
+/** Both operation layouts use this path for every priced field. */
+function pricedPath(
+  fn: "json_get_json" | "json_get_str" | "json_get_int",
+  ...rest: string[]
+): string {
+  const path = rest.map(sqlString).join(", ")
+  return `COALESCE(${fn}(data, 'priced', ${path}), ${fn}(data, 'state', 'priced', ${path}))`
+}
+
+const PRICED_FEATURES = pricedPath("json_get_json", "features")
 
 /** Usage that consumed: a charge or record (always `done`) and a settled hold. */
 const CONSUMED =
@@ -115,10 +124,48 @@ const decimalSchema = z
 
 const countSchema = z.coerce.number().int().nonnegative()
 
-/** A JSON column: Basin SQL returns it as text, a test fake may hand back the object. */
-const jsonTextSchema = z
-  .union([z.string(), z.record(z.string(), z.unknown())])
-  .transform((value) => (typeof value === "string" ? value : JSON.stringify(value)))
+/** A priced feature of a journaled operation, amounts still as the decimal strings of the export. */
+const journalPricedFeatureSchema = z.object({
+  featureSlug: z.string(),
+  periodId: z.string(),
+  late: z.boolean().optional(),
+  meterQuantity: z.string(),
+  amount: z.string(),
+  cost: z.string().nullable().optional(),
+  lines: z.array(z.unknown()).optional(),
+})
+
+const journalPricedEventSchema = z.object({
+  slug: z.string(),
+  at: z.number(),
+  features: z.array(journalPricedFeatureSchema),
+})
+
+/**
+ * The fields of a journaled charge, record, or settled hold that history reads. A charge or record
+ * keeps its priced event on `priced`, a settled hold on `state.priced`.
+ */
+export const journalChargeDataSchema = z.object({
+  idempotencyKey: z.string(),
+  createdAt: z.number(),
+  priced: journalPricedEventSchema.optional(),
+  state: z.object({ priced: journalPricedEventSchema.optional() }).optional(),
+})
+
+/** Basin returns JSON columns as text. Invalid JSON is a row validation error. */
+function jsonColumn<T>(schema: z.ZodType<T>) {
+  return z
+    .string()
+    .transform((text, ctx): unknown => {
+      try {
+        return JSON.parse(text)
+      } catch {
+        ctx.addIssue({ code: "custom", message: "journal data is not valid JSON" })
+        return z.NEVER
+      }
+    })
+    .pipe(schema)
+}
 
 const decimalSum = (column: string) => `CAST(SUM(CAST(${column} AS DECIMAL(38, 8))) AS VARCHAR)`
 
@@ -130,13 +177,13 @@ const decimalSum = (column: string) => `CAST(SUM(CAST(${column} AS DECIMAL(38, 8
  * budget's unit (ADR-0008 D4, priced at ingestion). A row with a null `feature_slug` counts the
  * events that fed more than FEATURE_SLOTS features; their extra features are not in the totals.
  */
-export function buildFeatureUsageSql(opts: {
+export function featureUsageQuery(opts: {
   projectId: string
   customerId?: string
   window: JournalWindow
   bucket?: JournalBucket
   byCustomer?: boolean
-}): string {
+}): JournalQuery<z.infer<typeof featureUsageSqlRowSchema>> {
   const bucket = opts.bucket ? `date_trunc(${sqlString(opts.bucket)}, timestamp)` : "NULL"
   const keys = [...(opts.bucket ? ["bucket"] : []), ...(opts.byCustomer ? ["budget_key"] : [])]
   const slot = (index: number) =>
@@ -146,33 +193,37 @@ export function buildFeatureUsageSql(opts: {
       `  FROM consumed WHERE json_length(features) > ${index}`,
     ].join("\n")
 
-  return [
-    `WITH ${latestCte({ ...opts, kinds: ["charge", "record", "hold"], rejected: "exclude" })},`,
-    "consumed AS (",
-    `  SELECT budget_key, ${bucket} AS bucket, json_get_str(data, 'unit') AS unit, ${PRICED_FEATURES} AS features`,
-    "  FROM latest",
-    `  WHERE ${CONSUMED}`,
-    "),",
-    "lines AS (",
-    SLOTS.map(slot).join("\n  UNION ALL\n"),
-    "  UNION ALL",
-    "  SELECT budget_key, bucket, unit, NULL AS feature_slug, NULL AS quantity, NULL AS amount",
-    `  FROM consumed WHERE json_length(features) > ${FEATURE_SLOTS}`,
-    ")",
-    [
-      "SELECT",
-      opts.bucket ? "bucket," : "",
-      opts.byCustomer ? "budget_key," : "",
-      "feature_slug, unit, COUNT(*) AS events,",
-    ]
-      .filter(Boolean)
-      .join(" "),
-    `  ${decimalSum("quantity")} AS quantity, ${decimalSum("amount")} AS amount`,
-    "FROM lines",
-    `GROUP BY ${[...keys, "feature_slug", "unit"].join(", ")}`,
-    `ORDER BY ${[...(opts.bucket ? ["bucket DESC"] : []), ...(opts.byCustomer ? ["budget_key"] : []), "feature_slug", "unit"].join(", ")}`,
-    "LIMIT 10000",
-  ].join("\n")
+  return {
+    sql: [
+      `WITH ${latestCte({ ...opts, kinds: ["charge", "record", "hold"], rejected: "exclude" })},`,
+      "consumed AS (",
+      `  SELECT budget_key, ${bucket} AS bucket, json_get_str(data, 'unit') AS unit, ${PRICED_FEATURES} AS features`,
+      "  FROM latest",
+      `  WHERE ${CONSUMED}`,
+      "),",
+      "lines AS (",
+      SLOTS.map(slot).join("\n  UNION ALL\n"),
+      "  UNION ALL",
+      "  SELECT budget_key, bucket, unit, NULL AS feature_slug, NULL AS quantity, NULL AS amount",
+      `  FROM consumed WHERE json_length(features) > ${FEATURE_SLOTS}`,
+      ")",
+      [
+        "SELECT",
+        opts.bucket ? "bucket," : "",
+        opts.byCustomer ? "budget_key," : "",
+        "feature_slug, unit, COUNT(*) AS events,",
+      ]
+        .filter(Boolean)
+        .join(" "),
+      `  ${decimalSum("quantity")} AS quantity, ${decimalSum("amount")} AS amount`,
+      "FROM lines",
+      `GROUP BY ${[...keys, "feature_slug", "unit"].join(", ")}`,
+      `ORDER BY ${[...(opts.bucket ? ["bucket DESC"] : []), ...(opts.byCustomer ? ["budget_key"] : []), "feature_slug", "unit"].join(", ")}`,
+      "LIMIT 10000",
+    ].join("\n"),
+    row: featureUsageSqlRowSchema,
+    context: "failed to read feature usage from the budget journal",
+  }
 }
 
 export const featureUsageSqlRowSchema = z.object({
@@ -187,34 +238,49 @@ export const featureUsageSqlRowSchema = z.object({
 
 export type FeatureUsageRow = z.infer<typeof featureUsageSqlRowSchema>
 
+/** Separate the overflow count from feature rows once for all usage readers. */
+export function splitOverflow(rows: readonly FeatureUsageRow[]) {
+  const features: (FeatureUsageRow & { feature_slug: string })[] = []
+  let truncatedEvents = 0
+  for (const row of rows) {
+    if (row.feature_slug === null) truncatedEvents += row.events
+    else features.push({ ...row, feature_slug: row.feature_slug })
+  }
+  return { rows: features, truncatedEvents }
+}
+
 /**
  * The customers whose payer budgets consumed the most in the window: events and the amount they
  * cost, in each budget's unit.
  */
-export function buildTopPayersSql(opts: {
+export function topPayersQuery(opts: {
   projectId: string
   window: JournalWindow
   limit: number
-}): string {
+}): JournalQuery<z.infer<typeof topPayersSqlRowSchema>> {
   const amount =
     "CAST(COALESCE(json_get_str(data, 'usage', 'amount'), json_get_str(data, 'state', 'actual', 'amount')) AS DECIMAL(38, 8))"
-  return [
-    `WITH ${latestCte({ ...opts, kinds: ["charge", "record", "hold"], rejected: "exclude" })},`,
-    "totals AS (",
-    `  SELECT budget_key, json_get_str(data, 'unit') AS unit, COUNT(*) AS events, SUM(${amount}) AS amount_total`,
-    "  FROM latest",
-    `  WHERE ${CONSUMED}`,
-    "  GROUP BY budget_key, json_get_str(data, 'unit')",
-    "),",
-    "top_payers AS (",
-    "  SELECT budget_key, SUM(events) AS payer_events FROM totals",
-    "  GROUP BY budget_key ORDER BY payer_events DESC, budget_key",
-    `  LIMIT ${sqlInteger(opts.limit)}`,
-    ")",
-    "SELECT totals.budget_key, totals.unit, totals.events, CAST(totals.amount_total AS VARCHAR) AS amount",
-    "FROM totals JOIN top_payers ON totals.budget_key = top_payers.budget_key",
-    "ORDER BY top_payers.payer_events DESC, totals.budget_key, totals.unit",
-  ].join("\n")
+  return {
+    sql: [
+      `WITH ${latestCte({ ...opts, kinds: ["charge", "record", "hold"], rejected: "exclude" })},`,
+      "totals AS (",
+      `  SELECT budget_key, json_get_str(data, 'unit') AS unit, COUNT(*) AS events, SUM(${amount}) AS amount_total`,
+      "  FROM latest",
+      `  WHERE ${CONSUMED}`,
+      "  GROUP BY budget_key, json_get_str(data, 'unit')",
+      "),",
+      "top_payers AS (",
+      "  SELECT budget_key, SUM(events) AS payer_events FROM totals",
+      "  GROUP BY budget_key ORDER BY payer_events DESC, budget_key",
+      `  LIMIT ${sqlInteger(opts.limit)}`,
+      ")",
+      "SELECT totals.budget_key, totals.unit, totals.events, CAST(totals.amount_total AS VARCHAR) AS amount",
+      "FROM totals JOIN top_payers ON totals.budget_key = top_payers.budget_key",
+      "ORDER BY top_payers.payer_events DESC, totals.budget_key, totals.unit",
+    ].join("\n"),
+    row: topPayersSqlRowSchema,
+    context: "failed to read top payers from the budget journal",
+  }
 }
 
 export const topPayersSqlRowSchema = z.object({
@@ -227,7 +293,7 @@ export const topPayersSqlRowSchema = z.object({
 // ---- usage events (ingestion status, explain-charge, rejected payloads) ----
 
 export const JOURNAL_EVENT_STATES = ["processed", "rejected"] as const
-export type JournalEventState = (typeof JOURNAL_EVENT_STATES)[number]
+type JournalEventState = (typeof JOURNAL_EVENT_STATES)[number]
 
 export type JournalEventFilter = {
   customerIds?: readonly string[]
@@ -256,10 +322,10 @@ function eventsCte(scope: JournalEventScope): string {
     "events AS (",
     "  SELECT budget_key, operation_id, kind, timestamp,",
     "    CASE WHEN status = 'rejected' THEN 'rejected' ELSE 'processed' END AS state,",
-    "    COALESCE(json_get_str(data, 'priced', 'slug'), json_get_str(data, 'event', 'slug')) AS event_slug,",
+    `    COALESCE(${pricedPath("json_get_str", "slug")}, json_get_str(data, 'event', 'slug')) AS event_slug,`,
     "    json_get_str(data, 'idempotencyKey') AS idempotency_key,",
     "    json_get_str(data, 'rejection', 'code') AS rejection_reason,",
-    "    COALESCE(json_get_int(data, 'priced', 'at'), json_get_int(data, 'occurredAt')) AS occurred_at",
+    `    COALESCE(${pricedPath("json_get_int", "at")}, json_get_int(data, 'occurredAt')) AS occurred_at`,
     "  FROM latest",
     ")",
   ].join("\n")
@@ -294,14 +360,20 @@ function eventsWhere(filter: JournalEventFilter = {}, extra: readonly string[] =
 }
 
 /** Events per state: exact totals for the window and filter. */
-export function buildEventTotalsSql(scope: JournalEventScope): string {
-  return [
-    eventsCte(scope),
-    "SELECT state, COUNT(*) AS events, MAX(timestamp) AS last_seen_at",
-    "FROM events",
-    eventsWhere(scope.filter),
-    "GROUP BY state",
-  ].join("\n")
+export function eventTotalsQuery(
+  scope: JournalEventScope
+): JournalQuery<z.infer<typeof eventTotalsSqlRowSchema>> {
+  return {
+    sql: [
+      eventsCte(scope),
+      "SELECT state, COUNT(*) AS events, MAX(timestamp) AS last_seen_at",
+      "FROM events",
+      eventsWhere(scope.filter),
+      "GROUP BY state",
+    ].join("\n"),
+    row: eventTotalsSqlRowSchema,
+    context: "failed to read event totals from the budget journal",
+  }
 }
 
 export const eventTotalsSqlRowSchema = z.object({
@@ -311,16 +383,22 @@ export const eventTotalsSqlRowSchema = z.object({
 })
 
 /** Events per minute and state, newest first. */
-export function buildEventTimelineSql(scope: JournalEventScope): string {
-  return [
-    eventsCte(scope),
-    "SELECT date_trunc('minute', timestamp) AS bucket, state, COUNT(*) AS events",
-    "FROM events",
-    eventsWhere(scope.filter),
-    "GROUP BY date_trunc('minute', timestamp), state",
-    "ORDER BY bucket DESC",
-    "LIMIT 2880",
-  ].join("\n")
+export function eventTimelineQuery(
+  scope: JournalEventScope
+): JournalQuery<z.infer<typeof eventTimelineSqlRowSchema>> {
+  return {
+    sql: [
+      eventsCte(scope),
+      "SELECT date_trunc('minute', timestamp) AS bucket, state, COUNT(*) AS events",
+      "FROM events",
+      eventsWhere(scope.filter),
+      "GROUP BY date_trunc('minute', timestamp), state",
+      "ORDER BY bucket DESC",
+      "LIMIT 2880",
+    ].join("\n"),
+    row: eventTimelineSqlRowSchema,
+    context: "failed to read the event timeline from the budget journal",
+  }
 }
 
 export const eventTimelineSqlRowSchema = z.object({
@@ -330,16 +408,22 @@ export const eventTimelineSqlRowSchema = z.object({
 })
 
 /** Refused events grouped by why and by event slug, the most frequent first. */
-export function buildRejectionsSql(scope: JournalEventScope & { limit: number }): string {
-  return [
-    eventsCte(scope),
-    "SELECT rejection_reason, event_slug, kind, COUNT(*) AS events, MAX(timestamp) AS last_seen_at",
-    "FROM events",
-    eventsWhere(scope.filter, ["state = 'rejected'"]),
-    "GROUP BY rejection_reason, event_slug, kind",
-    "ORDER BY events DESC, last_seen_at DESC",
-    `LIMIT ${sqlInteger(scope.limit)}`,
-  ].join("\n")
+export function rejectionsQuery(
+  scope: JournalEventScope & { limit: number }
+): JournalQuery<z.infer<typeof rejectionsSqlRowSchema>> {
+  return {
+    sql: [
+      eventsCte(scope),
+      "SELECT rejection_reason, event_slug, kind, COUNT(*) AS events, MAX(timestamp) AS last_seen_at",
+      "FROM events",
+      eventsWhere(scope.filter, ["state = 'rejected'"]),
+      "GROUP BY rejection_reason, event_slug, kind",
+      "ORDER BY events DESC, last_seen_at DESC",
+      `LIMIT ${sqlInteger(scope.limit)}`,
+    ].join("\n"),
+    row: rejectionsSqlRowSchema,
+    context: "failed to read rejections from the budget journal",
+  }
 }
 
 export const rejectionsSqlRowSchema = z.object({
@@ -354,9 +438,9 @@ export const rejectionsSqlRowSchema = z.object({
 export type JournalEventCursor = { handledAt: number; operationId: string; budgetKey: string }
 
 /** The newest events first, `limit` of them after the cursor. */
-export function buildRecentEventsSql(
+export function recentEventsQuery(
   scope: JournalEventScope & { limit: number; cursor?: JournalEventCursor | null }
-): string {
+): JournalQuery<z.infer<typeof recentEventSqlRowSchema>> {
   const cursor = scope.cursor
     ? [
         `(timestamp < ${sqlTimestamp(new Date(scope.cursor.handledAt))} OR (timestamp = ${sqlTimestamp(
@@ -366,14 +450,18 @@ export function buildRecentEventsSql(
         )} AND budget_key < ${sqlString(scope.cursor.budgetKey)}))))`,
       ]
     : []
-  return [
-    eventsCte(scope),
-    "SELECT budget_key, operation_id, kind, state, timestamp, event_slug, idempotency_key, rejection_reason, occurred_at",
-    "FROM events",
-    eventsWhere(scope.filter, cursor),
-    "ORDER BY timestamp DESC, operation_id DESC, budget_key DESC",
-    `LIMIT ${sqlInteger(scope.limit)}`,
-  ].join("\n")
+  return {
+    sql: [
+      eventsCte(scope),
+      "SELECT budget_key, operation_id, kind, state, timestamp, event_slug, idempotency_key, rejection_reason, occurred_at",
+      "FROM events",
+      eventsWhere(scope.filter, cursor),
+      "ORDER BY timestamp DESC, operation_id DESC, budget_key DESC",
+      `LIMIT ${sqlInteger(scope.limit)}`,
+    ].join("\n"),
+    row: recentEventSqlRowSchema,
+    context: "failed to read recent events from the budget journal",
+  }
 }
 
 export const recentEventSqlRowSchema = z.object({
@@ -389,10 +477,12 @@ export const recentEventSqlRowSchema = z.object({
 })
 
 export const EVENT_FACETS = ["event_slug", "rejection_reason", "budget_key", "kind"] as const
-export type EventFacet = (typeof EVENT_FACETS)[number]
+type EventFacet = (typeof EVENT_FACETS)[number]
 
 /** The most frequent values of each facet, `limit` per facet. */
-export function buildEventFacetsSql(scope: JournalEventScope & { limit: number }): string {
+export function eventFacetsQuery(
+  scope: JournalEventScope & { limit: number }
+): JournalQuery<z.infer<typeof eventFacetSqlRowSchema>> {
   const facet = (column: EventFacet) =>
     [
       `  SELECT ${sqlString(column)} AS facet, ${column} AS value, COUNT(*) AS events`,
@@ -400,16 +490,20 @@ export function buildEventFacetsSql(scope: JournalEventScope & { limit: number }
       `  ${eventsWhere(scope.filter, [`${column} IS NOT NULL`]).replaceAll("\n", "\n  ")}`,
       `  GROUP BY ${column}`,
     ].join("\n")
-  return [
-    `${eventsCte(scope)},`,
-    "facets AS (",
-    EVENT_FACETS.map(facet).join("\n  UNION ALL\n"),
-    ")",
-    "SELECT facet, value, events",
-    "FROM facets",
-    `QUALIFY ROW_NUMBER() OVER (PARTITION BY facet ORDER BY events DESC, value) <= ${sqlInteger(scope.limit)}`,
-    "ORDER BY facet, events DESC, value",
-  ].join("\n")
+  return {
+    sql: [
+      `${eventsCte(scope)},`,
+      "facets AS (",
+      EVENT_FACETS.map(facet).join("\n  UNION ALL\n"),
+      ")",
+      "SELECT facet, value, events",
+      "FROM facets",
+      `QUALIFY ROW_NUMBER() OVER (PARTITION BY facet ORDER BY events DESC, value) <= ${sqlInteger(scope.limit)}`,
+      "ORDER BY facet, events DESC, value",
+    ].join("\n"),
+    row: eventFacetSqlRowSchema,
+    context: "failed to read event facets from the budget journal",
+  }
 }
 
 export const eventFacetSqlRowSchema = z.object({
@@ -422,31 +516,35 @@ export const eventFacetSqlRowSchema = z.object({
  * One refused event, by its operation id (`r:<idempotency key>`) and the time the API journaled it,
  * which bounds the scan to the files ingested since.
  */
-export function buildRejectedEventSql(opts: {
+export function rejectedEventQuery(opts: {
   projectId: string
   customerId: string
   operationId: string
   handledAt: number
-}): string {
+}): JournalQuery<z.infer<typeof rejectedEventSqlRowSchema>> {
   const at = sqlTimestamp(new Date(opts.handledAt))
-  return [
-    "SELECT budget_key, operation_id, timestamp, data",
-    `FROM ${BUDGET_JOURNAL_TABLE}`,
-    `WHERE project_id = ${sqlString(opts.projectId)}`,
-    `  AND budget_key = ${sqlString(payerBudgetKey(opts.customerId))}`,
-    `  AND operation_id = ${sqlString(opts.operationId)}`,
-    "  AND status = 'rejected'",
-    `  AND __ingest_ts >= ${at}`,
-    `  AND timestamp = ${at}`,
-    "LIMIT 1",
-  ].join("\n")
+  return {
+    sql: [
+      "SELECT budget_key, operation_id, timestamp, data",
+      `FROM ${BUDGET_JOURNAL_TABLE}`,
+      `WHERE project_id = ${sqlString(opts.projectId)}`,
+      `  AND budget_key = ${sqlString(payerBudgetKey(opts.customerId))}`,
+      `  AND operation_id = ${sqlString(opts.operationId)}`,
+      "  AND status = 'rejected'",
+      `  AND __ingest_ts >= ${at}`,
+      `  AND timestamp = ${at}`,
+      "LIMIT 1",
+    ].join("\n"),
+    row: rejectedEventSqlRowSchema,
+    context: "failed to read a rejected event from the budget journal",
+  }
 }
 
 export const rejectedEventSqlRowSchema = z.object({
   budget_key: z.string(),
   operation_id: z.string(),
   timestamp: z.coerce.date(),
-  data: jsonTextSchema,
+  data: jsonColumn(rejectedJournalDataSchema),
 })
 
 export type StatementScope = {
@@ -482,40 +580,49 @@ function statementCte(scope: StatementScope): string {
  * A page of the statement's events, newest first, with the whole operation so the caller reads the
  * statement's own feature entry.
  */
-export function buildStatementEventsSql(
+export function statementEventsQuery(
   opts: StatementScope & { limit: number; offset: number }
-): string {
-  return [
-    statementCte(opts),
-    "SELECT operation_id, timestamp, data",
-    "FROM statement",
-    "ORDER BY timestamp DESC, operation_id DESC",
-    `LIMIT ${sqlInteger(opts.limit)}`,
-    `OFFSET ${sqlInteger(opts.offset)}`,
-  ].join("\n")
+): JournalQuery<z.infer<typeof statementEventSqlRowSchema>> {
+  return {
+    sql: [
+      statementCte(opts),
+      "SELECT operation_id, timestamp, data",
+      "FROM statement",
+      "ORDER BY timestamp DESC, operation_id DESC",
+      `LIMIT ${sqlInteger(opts.limit)}`,
+      `OFFSET ${sqlInteger(opts.offset)}`,
+    ].join("\n"),
+    row: statementEventSqlRowSchema,
+    context: "failed to read statement events from the budget journal",
+  }
 }
 
 export const statementEventSqlRowSchema = z.object({
   operation_id: z.string(),
   timestamp: z.coerce.date(),
-  data: jsonTextSchema,
+  data: jsonColumn(journalChargeDataSchema),
 })
 
 /** How many events the statement counted, whichever page is read. */
-export function buildStatementEventCountSql(scope: StatementScope): string {
-  const occurredAt =
-    "COALESCE(json_get_int(data, 'priced', 'at'), json_get_int(data, 'state', 'priced', 'at'))"
+export function statementEventCountQuery(
+  scope: StatementScope
+): JournalQuery<z.infer<typeof statementEventCountSqlRowSchema>> {
+  const occurredAt = pricedPath("json_get_int", "at")
   const components = `COALESCE(${STATEMENT_SLOTS.map(
     (index) =>
       `CASE WHEN json_get_str(features, ${index}, 'periodId') = ${sqlString(scope.periodId)} THEN json_length(json_get_json(features, ${index}, 'lines')) END`
   ).join(", ")}, 0)`
-  return [
-    statementCte(scope),
-    "SELECT COUNT(*) AS events,",
-    `  MIN(${occurredAt}) AS first_event_at, MAX(${occurredAt}) AS last_event_at,`,
-    `  COALESCE(SUM(CASE WHEN ${components} > 1 THEN 1 ELSE 0 END), 0) AS multi_component_events`,
-    "FROM statement",
-  ].join("\n")
+  return {
+    sql: [
+      statementCte(scope),
+      "SELECT COUNT(*) AS events,",
+      `  MIN(${occurredAt}) AS first_event_at, MAX(${occurredAt}) AS last_event_at,`,
+      `  COALESCE(SUM(CASE WHEN ${components} > 1 THEN 1 ELSE 0 END), 0) AS multi_component_events`,
+      "FROM statement",
+    ].join("\n"),
+    row: statementEventCountSqlRowSchema,
+    context: "failed to read statement event count from the budget journal",
+  }
 }
 
 export const statementEventCountSqlRowSchema = z
@@ -531,31 +638,3 @@ export const statementEventCountSqlRowSchema = z
     lastEventAt: row.last_event_at,
     multiComponentEventCount: row.multi_component_events,
   }))
-
-/** A priced feature of a journaled operation, amounts still as the decimal strings of the export. */
-export const journalPricedFeatureSchema = z.object({
-  featureSlug: z.string(),
-  periodId: z.string(),
-  late: z.boolean().optional(),
-  meterQuantity: z.string(),
-  amount: z.string(),
-  cost: z.string().nullable().optional(),
-  lines: z.array(z.unknown()).optional(),
-})
-
-const journalPricedEventSchema = z.object({
-  slug: z.string(),
-  at: z.number(),
-  features: z.array(journalPricedFeatureSchema),
-})
-
-/**
- * The fields of a journaled charge, record, or settled hold that history reads. A charge or record
- * keeps its priced event on `priced`, a settled hold on `state.priced`.
- */
-export const journalChargeDataSchema = z.object({
-  idempotencyKey: z.string(),
-  createdAt: z.number(),
-  priced: journalPricedEventSchema.optional(),
-  state: z.object({ priced: journalPricedEventSchema.optional() }).optional(),
-})

@@ -3,7 +3,7 @@
 import { ScrollArea } from "@unprice/ui/scroll-area"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@unprice/ui/sheet"
 
-import { useActiveFeature, useActivePlanVersion } from "~/hooks/use-features"
+import { useActiveFeature, useActivePlanVersion, usePlanFeaturesList } from "~/hooks/use-features"
 import { FeatureConfigForm } from "./feature-config-form"
 
 /**
@@ -13,6 +13,7 @@ import { FeatureConfigForm } from "./feature-config-form"
  */
 export function FeatureSheet() {
   const [activeFeature, setActiveFeature] = useActiveFeature()
+  const [, setPlanFeatureList] = usePlanFeaturesList()
   const [planVersion] = useActivePlanVersion()
   const open = Boolean(activeFeature && planVersion)
 
@@ -35,6 +36,28 @@ export function FeatureSheet() {
               </SheetHeader>
               <div className="mt-6 pb-6">
                 <FeatureConfigForm
+                  key={activeFeature.id ?? activeFeature.featureId}
+                  onSaved={(saved) =>
+                    setPlanFeatureList((features) =>
+                      features.map((entry) =>
+                        entry.featureId === saved.featureId ? { ...entry, ...saved } : entry
+                      )
+                    )
+                  }
+                  onFeatureUpdated={(updated) => {
+                    setPlanFeatureList((features) =>
+                      features.map((entry) =>
+                        entry.featureId === updated.id
+                          ? { ...entry, feature: { ...entry.feature, ...updated } }
+                          : entry
+                      )
+                    )
+                    setActiveFeature((current) =>
+                      current && current.featureId === updated.id
+                        ? { ...current, feature: { ...current.feature, ...updated } }
+                        : current
+                    )
+                  }}
                   defaultValues={activeFeature}
                   planVersion={planVersion}
                   setDialogOpen={(next) => {

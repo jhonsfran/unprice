@@ -4,6 +4,8 @@ import {
   planVersionFeatures as planVersionFeaturesTable,
   versions as versionsTable,
 } from "@unprice/db/schema"
+import { modelCosts as modelCostsTable } from "@unprice/db/schema"
+import { newId } from "@unprice/db/utils"
 import {
   type MeterConfig,
   type RateRow,
@@ -11,12 +13,13 @@ import {
   createRateCardInputSchema,
   rateRowDraftSchema,
 } from "@unprice/db/validators"
+import type { ModelCost } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logs"
 import { formatAmount } from "@unprice/money"
 import { afterAll, beforeEach, vi } from "vitest"
 import type { Cache } from "../cache/service"
-import { FeatureService } from "../features/service"
 import { NoopMetrics } from "../metrics/noop"
+import { ModelCostService } from "../model-costs/service"
 import { PlanService } from "../plans/service"
 import {
   closeTestDatabaseConnection,
@@ -24,8 +27,8 @@ import {
   truncateTestDatabase,
 } from "../test-fixtures/database"
 import { seedTestDb } from "../test-fixtures/seed-db"
-import { publishRateRows } from "../use-cases/rate-cards"
 import { RateCardService } from "./service"
+import { toWire } from "./wire"
 
 export const projectId = "proj_test"
 export const NOW = Date.parse("2026-11-10T12:00:00.000Z")
@@ -106,8 +109,8 @@ export function planFeature(
 
 export function createRateCardIntegrationFixture() {
   const db = createTestDatabaseConnection()
-  const rateCards = new RateCardService({ db })
-  const features = new FeatureService({ db, logger: { error: vi.fn() } as unknown as Logger })
+  const modelCosts = new ModelCostService({ db })
+  const rateCards = new RateCardService({ db, modelCosts })
   const logger = {
     set: vi.fn(),
     error: vi.fn(),
@@ -123,7 +126,22 @@ export function createRateCardIntegrationFixture() {
     cache: {} as Cache,
     metrics: new NoopMetrics(),
   })
-  const services = { rateCards, features, plans }
+  const services = { rateCards, plans, modelCosts }
+
+  async function insertCosts(costs: readonly ModelCost[]) {
+    const inserted = await db
+      .insert(modelCostsTable)
+      .values(
+        costs.map((cost) => ({
+          ...cost,
+          id: newId("model_cost"),
+          components: toWire<typeof modelCostsTable.$inferSelect.components>(cost.components),
+        }))
+      )
+      .onConflictDoNothing()
+      .returning()
+    return inserted.length
+  }
 
   async function createCard(marginPolicy: object = { type: "manual" }, name = "Standard") {
     const input = createRateCardInputSchema.parse({
@@ -158,7 +176,7 @@ export function createRateCardIntegrationFixture() {
   }
 
   function publish(cardId: string, rows: RateRowDraft[], effectiveFrom: number, now = NOW) {
-    return publishRateRows({ services }, { projectId, cardId, rows, effectiveFrom, now })
+    return rateCards.publishRows({ projectId, cardId, drafts: rows, effectiveFrom, now })
   }
 
   async function cardRows(cardId: string) {
@@ -190,7 +208,8 @@ export function createRateCardIntegrationFixture() {
   return {
     db,
     rateCards,
-    features,
+    modelCosts,
+    insertCosts,
     plans,
     logger,
     services,

@@ -1,7 +1,8 @@
 import type { RateComponent, RatePrice, RateRow } from "@unprice/db/validators"
 import type { Amount } from "@unprice/money"
+import type { CostPlusDraft } from "./cost-plus"
 import { matchKey } from "./model"
-import { describeRatePrice, describeTiers } from "./plan-prices"
+import { describeRatePrice, describeTiers, tierRanges } from "./plan-prices"
 
 // A feature's rows as a price table: the way every LLM vendor publishes model prices (a row per
 // model, a column per token kind, "$ per 1M tokens" in the header). A unit row contributes one
@@ -102,17 +103,16 @@ function statusAt(row: Pick<RateRow, "effectiveFrom" | "effectiveTo">, now: numb
  */
 export function describeLine(price: RatePrice, currency: string, unit: string): string {
   if (price.type === "graduated") {
-    let first = 1
-    return price.tiers
+    const descriptions = describeTiers(price, currency, unit)
+    return tierRanges(price.tiers)
       .map((tier, index) => {
         const range =
           tier.upTo === null
-            ? `${first}+ ${plural(unit)}`
-            : tier.upTo === first
-              ? `${first} ${unit}`
-              : `${first}-${tier.upTo} ${plural(unit)}`
-        first = (tier.upTo ?? 0) + 1
-        return `${range}: ${describeTiers(price, currency, unit)[index]?.value ?? ""}`
+            ? `${tier.from}+ ${plural(unit)}`
+            : tier.upTo === tier.from
+              ? `${tier.from} ${unit}`
+              : `${tier.from}-${tier.upTo} ${plural(unit)}`
+        return `${range}: ${descriptions[index]?.value ?? ""}`
       })
       .join(" · ")
   }
@@ -183,4 +183,41 @@ export function featureSlugsOf(rows: readonly RateRow[]): string[] {
 export function lineLabel(line: Pick<PriceLine, "match">, dimensions: readonly string[]): string {
   if (dimensions.length === 0 || Object.keys(line.match).length === 0) return "Default"
   return dimensions.map((key) => line.match[key] ?? "any").join(" · ")
+}
+
+/** A catalog revision with the same column order as the current-price table. */
+export function changeTableOf(draft: CostPlusDraft, featureSlug: string) {
+  const changes = draft.changes.filter(
+    (change): change is Exclude<typeof change, { type: "unchanged" }> =>
+      change.proposed.featureSlug === featureSlug && change.type !== "unchanged"
+  )
+  const columns = new Map<string, PriceColumn>()
+  const dimensions = new Set<string>()
+  const lines = changes.map((change) => {
+    const current = "current" in change ? change.current : null
+    const before = current?.price.type === "unit" ? current.price.components : []
+    const after = change.proposed.price.components
+    for (const key of Object.keys(change.proposed.match)) dimensions.add(key)
+    const cells = new Map<string, { after: Amount | null; before: Amount | null }>()
+    for (const component of [...after, ...before]) {
+      const column = { property: component.property, per: component.per }
+      const key = columnKey(column)
+      columns.set(key, column)
+      if (!cells.has(key))
+        cells.set(key, {
+          after:
+            after.find((item) => item.property === column.property && item.per === column.per)
+              ?.rate ?? null,
+          before:
+            before.find((item) => item.property === column.property && item.per === column.per)
+              ?.rate ?? null,
+        })
+    }
+    return { change, current, cells }
+  })
+  return {
+    dimensions: [...dimensions].sort(),
+    columns: [...columns.values()].sort(compareColumns),
+    lines,
+  }
 }

@@ -9,10 +9,9 @@ import { Err, type FetchError, Ok, type Result } from "@unprice/error"
 import { z } from "zod"
 import type { ServiceContext } from "../context"
 import { UnPriceRateCardError } from "./errors"
-import { cardFeaturePricing } from "./project-features"
 
 export type PricePlanVersionDeps = {
-  services: Pick<ServiceContext, "features" | "rateCards">
+  services: Pick<ServiceContext, "rateCards">
 }
 
 export const pricePlanVersionInputSchema = z.object({
@@ -41,6 +40,14 @@ export function versionCardName(
   currency: PlanVersionCard["currency"]
 ): string {
   return `${planSlug} ${planVersionId} ${currency}`
+}
+
+/** The name convention is interpreted only on the server. */
+export function isVersionCard(
+  card: { name: string },
+  version: { planSlug: string; planVersionId: string; currency: PlanVersionCard["currency"] }
+): boolean {
+  return card.name === versionCardName(version.planSlug, version.planVersionId, version.currency)
 }
 
 /**
@@ -80,8 +87,6 @@ export async function pricePlanVersion(
   }
 
   if (input.prices.length > 0 || (input.closeRowIds?.length ?? 0) > 0) {
-    const features = await cardFeaturePricing(deps.services, input.projectId, cardId)
-    if (features.err) return Err(features.err)
     const published = await rateCards.publishRows({
       projectId: input.projectId,
       cardId,
@@ -95,7 +100,6 @@ export async function pricePlanVersion(
       })),
       closeRowIds: input.closeRowIds,
       now: input.now,
-      ...features.val,
     })
     if (published.err) return Err(published.err)
   }

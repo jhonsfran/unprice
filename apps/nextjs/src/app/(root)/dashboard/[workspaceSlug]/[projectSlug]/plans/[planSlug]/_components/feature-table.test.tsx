@@ -1,9 +1,9 @@
 import { DndContext } from "@dnd-kit/core"
-import type { PlanVersionFeatureDragDrop, RatePrice } from "@unprice/db/validators"
+import type { MarginPolicy, PlanVersionFeatureDragDrop, RatePrice } from "@unprice/db/validators"
 import { rateRowSchema } from "@unprice/db/validators"
 import { renderToString } from "react-dom/server"
 import { describe, expect, it } from "vitest"
-import { rowsByFeature } from "../../_components/plan-prices"
+import { rowsByFeature } from "~/components/pricing/plan-prices"
 import { FeatureTableView } from "./feature-table"
 import {
   currencySymbol,
@@ -176,7 +176,11 @@ const rows = [
 
 function render(
   features: PlanVersionFeatureDragDrop[],
-  { editable = true, withRows = rows }: { editable?: boolean; withRows?: typeof rows } = {}
+  {
+    editable = true,
+    withRows = rows,
+    marginPolicy,
+  }: { editable?: boolean; withRows?: typeof rows; marginPolicy?: MarginPolicy } = {}
 ) {
   return renderToString(
     <DndContext>
@@ -184,6 +188,7 @@ function render(
         features={features}
         rows={rowsByFeature(withRows, NOW)}
         currency="USD"
+        marginPolicy={marginPolicy}
         planBillingName="monthly"
         editable={editable}
         pendingIds={[]}
@@ -204,6 +209,31 @@ function inputValue(html: string, label: string): string | null {
 }
 
 describe("FeatureTableView", () => {
+  it("labels model prices as catalog prices only when the card policy prices that feature", () => {
+    const policy: MarginPolicy = {
+      type: "costPlus",
+      features: [
+        {
+          featureSlug: "tokens",
+          markup: BigInt(7000000),
+          roundTo: BigInt(100),
+          dimension: "model",
+          componentMap: { input: "input_tokens" },
+        },
+      ],
+    }
+    expect(render([tokens], { marginPolicy: policy })).toContain("2 models from the catalog")
+    expect(render([tokens], { marginPolicy: { type: "manual" } })).toContain("2 prices by model")
+    expect(
+      render([tokens], {
+        marginPolicy: {
+          ...policy,
+          features: policy.features.map((feature) => ({ ...feature, featureSlug: "other" })),
+        },
+      })
+    ).toContain("2 prices by model")
+  })
+
   it("prices a fixed feature in its cell per billing cycle, with no limit or included cell", () => {
     const html = render([baseFee])
 
@@ -258,7 +288,7 @@ describe("FeatureTableView", () => {
   it("counts the prices by dimension and hides included units for them", () => {
     const html = render([tokens])
 
-    expect(html).toContain("2 models from the catalog")
+    expect(html).toContain("2 prices by model")
     expect(html).toContain("Price models")
     expect(inputValue(html, "Included")).toBeNull()
   })
@@ -342,7 +372,7 @@ describe("cells", () => {
     expect(priceCellOf(tokens, byFeature.get("tokens"), "USD", "monthly")).toMatchObject({
       kind: "summary",
       action: "catalog",
-      text: "2 models from the catalog",
+      text: "2 prices by model",
     })
   })
 })

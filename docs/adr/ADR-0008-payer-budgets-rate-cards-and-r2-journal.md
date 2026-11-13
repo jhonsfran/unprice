@@ -50,6 +50,11 @@ activation) syncs once and leaves a change refused with `RESERVATIONS_OPEN` to t
 billing job (renewal, period generation) retries it for up to the max hold TTL, since a hold lives
 at most its TTL.
 
+A locked subscription run syncs the payer budget once after its commit and lock release. This
+includes period generation, renewal, activation, invoicing, and payment reconciliation, even when
+no cycle was generated. A caller that owns the transaction syncs once after its own commit.
+(Amended 2026-11-13.)
+
 The unit is immutable except to billing's compile: an upsert that sets pricing may move the budget
 to another unit (another currency, or credits instead of money) while no hold or lease is open, and
 is refused with `RESERVATIONS_OPEN` otherwise. Every other caller gets `UNIT_IMMUTABLE`. On a unit
@@ -94,12 +99,13 @@ period's usage was priced in the unit in force when it landed.
   each consumption line records amount, cost, and `rateRowId`.
 - A card's margin policy is `manual` or `costPlus` with one `{ featureSlug, markup, roundTo,
   dimension, componentMap }` per feature it prices from the catalog, so one version's card can
-  price several model-dimensioned features. A preview imports the bundled models.dev catalog
-  (effective at the catalog's version date) and returns one feature's draft without saving its
-  policy. Explicit apply checks the reviewed hash and commits that feature's policy and prices
-  together. Other features' prices stay unchanged. Catalog pricing is USD only. Models with context
-  tiers use their base tier and are flagged in the draft; tier pricing is a follow-up.
-  (Amended 2026-11-06.)
+  price several model-dimensioned features. A preview prices one feature's draft from the bundled
+  models.dev catalog merged in memory with stored and custom costs. It writes nothing; a version
+  without a card previews against an unsaved card. Apply checks the reviewed hash of policy and
+  rows, which excludes the new card id. When the version has no card, apply creates and assigns
+  one in its transaction, then commits that feature's policy and prices together. Other features'
+  prices stay unchanged. Catalog pricing is USD only. Models with context tiers use their base
+  tier and are flagged in the draft; tier pricing is a follow-up. (Amended 2026-11-13.)
 - Rating never reads `model_costs`.
 
 ### D4. Usage is priced once, at ingestion
@@ -197,7 +203,9 @@ budget is addressed, so a jurisdiction or a location hint can be added there lat
   allocation stays on the statement as a receivable.
 - When a seal leaves a statement key with nothing open, the key's reservation gets a close intent:
   capture each statement's amount up to the allocation, then release the rest. A retried seal
-  replays a close that failed. A closed budget keeps its storage while a reservation is open.
+  replays a close that failed. A closed budget keeps its storage while a reservation is open or a
+  statement is open or sealed, regardless of retention age, so billing can still seal and invoice
+  it. (Amended 2026-11-13.)
 - Trial usage is free. Billing registers a trial period's statement as `free`: its usage counts,
   the close never captures it, and the invoice bills it at zero.
 

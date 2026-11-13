@@ -34,7 +34,6 @@
     "./rate-cards": "./src/rate-cards/index.ts",
     "./entitlements": "./src/entitlements/index.ts",
     "./wallet": "./src/wallet/index.ts",
-    "./wallet/reservation-sizing": "./src/wallet/reservation-sizing.ts",
     "./use-cases": "./src/use-cases/index.ts",
     "./env": "./env.ts"
   },

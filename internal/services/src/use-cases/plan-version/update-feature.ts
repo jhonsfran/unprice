@@ -4,19 +4,18 @@ import { Err, type FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { ServiceContext } from "../../context"
 import type { Transaction } from "../../deps"
-import { decimalPriceOf, pricedProperties, ratePriceOf } from "../../pricing"
+import { decimalPriceOf, featureRow, pricingShape, ratePriceOf, rowFits } from "../../pricing"
 import {
   UnPriceRateCardError,
-  planFeaturePricing,
+  featurePricingOf,
   pricePlanVersion,
   versionCardName,
 } from "../../rate-cards"
-import { canonicalJson } from "../../rate-cards/wire"
 import { transactionResult } from "../../utils/transaction-result"
 
 export type UpdatePlanVersionFeatureDeps = {
   db: Database
-  services: Pick<ServiceContext, "plans" | "features" | "rateCards">
+  services: Pick<ServiceContext, "plans" | "rateCards">
   logger?: Logger
 }
 
@@ -63,7 +62,6 @@ export async function updatePlanVersionFeature(
       tx
     )
   })
-  if (!result.err) await deps.services.rateCards.invalidatePlanVersionPrices([input.planVersionId])
   return result
 }
 
@@ -84,29 +82,34 @@ async function updateFeature(
   if (version.id !== input.planVersionId) return Ok({ state: "plan_version_not_found" })
   if (version.status === "published") return Ok({ state: "plan_version_published" })
 
-  // A reshaped feature changes what its default row prices (a flat amount, a package of a size);
-  // a regrouped one changes which dimension rows fit. Either repackages what the card prices.
-  const reshaped =
-    (input.featureType !== undefined && input.featureType !== stored.val.featureType) ||
-    (input.config?.usageMode !== undefined &&
-      input.config.usageMode !== stored.val.config.usageMode) ||
-    (input.config?.units !== undefined && input.config.units !== stored.val.config.units)
-  const regrouped =
-    hasMeterConfigOverride &&
-    canonicalJson(input.meterConfig?.groupBy ?? []) !==
-      canonicalJson(stored.val.meterConfig?.groupBy ?? [])
-  const oldPricing = planFeaturePricing(stored.val)
-  const nextPricing = planFeaturePricing({
+  const featureSlug = stored.val.feature.slug
+  const merged = {
     ...stored.val,
-    ...(hasMeterConfigOverride ? { meterConfig: input.meterConfig } : {}),
+    featureType: input.featureType ?? stored.val.featureType,
+    config: input.config ?? stored.val.config,
+    meterConfig: hasMeterConfigOverride ? input.meterConfig : stored.val.meterConfig,
+    included: input.included === undefined ? stored.val.included : input.included,
+  }
+  const next = featurePricingOf({ ...merged, slug: featureSlug })
+  if (!next.ok) {
+    return Err(
+      new UnPriceRateCardError({ code: "FEATURE_NOT_PRICEABLE", features: [next.unpriceable] })
+    )
+  }
+  const shape = pricingShape({
+    featureType: merged.featureType,
+    usageMode: merged.config.usageMode,
   })
-  const remetered =
-    oldPricing.ok &&
-    nextPricing.ok &&
-    oldPricing.pricing.meterProperty !== nextPricing.pricing.meterProperty
-  const repackaged = reshaped || regrouped || remetered
   const card = await rateCards.cardForPlanVersion(projectId, version.id, version.currency)
-  if (card && (repackaged || pricing)) {
+  const found = card ? await rateCards.getCard(projectId, card.cardId) : null
+  if (found?.err) return Err(found.err)
+  const openRows =
+    found?.val?.rows.filter((row) => row.featureSlug === featureSlug && row.effectiveTo === null) ??
+    []
+  const stale = openRows.filter((row) => !rowFits(row, next.pricing, shape, merged.config.units))
+  const current = featureRow(openRows, featureSlug)
+
+  if (card && (pricing || stale.length > 0)) {
     const other = (await rateCards.versionsPricingWith(projectId, card.cardId)).find(
       (assigned) => assigned.planVersionId !== version.id
     )
@@ -121,53 +124,27 @@ async function updateFeature(
     }
   }
 
-  const updated = await plans.updatePlanVersionFeatureRecord(
-    {
-      projectId,
-      ...update,
-      hasMeterConfigOverride,
-    },
-    tx
-  )
-  if (updated.err) return Err(updated.err)
-  if (updated.val.state !== "ok") return Ok(updated.val)
-  const { planVersionFeature } = updated.val
-  const featureSlug = planVersionFeature.feature.slug
-  const parsed = planFeaturePricing(planVersionFeature)
-  const dimensions = parsed.ok ? parsed.pricing.dimensions : []
-
-  const openRows = card
-    ? await featureOpenRows(deps, projectId, card.cardId, featureSlug)
-    : Ok<RateRow[]>([])
-  if (openRows.err) return Err(openRows.err)
-  const stale = openRows.val.filter((row) => {
-    const keys = Object.keys(row.match)
-    if (keys.length === 0) return reshaped
-    return !keys.every((key) => dimensions.includes(key))
-  })
-  const kept = openRows.val.filter((row) => !stale.includes(row))
-
-  const current = defaultRow(kept)
-  const meterProperty = parsed.ok ? parsed.pricing.meterProperty : null
-  const remetering =
+  // Preserve a price on a changed meter only when its shape and package size still fit.
+  const decimal =
     price === undefined &&
-    current !== null &&
-    !reshaped &&
-    (pricedProperties(current)[0] ?? null) !== meterProperty
-  const decimal = price ?? (remetering && current ? decimalPriceOf(current.price) : null)
-  const ratePrice = decimal
+    current &&
+    stale.includes(current) &&
+    current.price.type === shape &&
+    (current.price.type !== "package" || current.price.size === merged.config.units)
+      ? decimalPriceOf(current.price)
+      : price
+  const desired = decimal
     ? ratePriceOf(
         {
-          featureType: planVersionFeature.featureType,
-          usageMode: planVersionFeature.config.usageMode,
-          units: planVersionFeature.config.units,
-          price: decimal.price,
-          tiers: decimal.tiers,
+          ...decimal,
+          featureType: merged.featureType,
+          usageMode: merged.config.usageMode,
+          units: merged.config.units,
         },
-        meterProperty
+        next.pricing.meterProperty
       )
     : null
-  if (price && !ratePrice) {
+  if (price && !desired) {
     return Err(
       new UnPriceRateCardError({
         code: "PRICE_SHAPE_MISMATCH",
@@ -177,53 +154,40 @@ async function updateFeature(
     )
   }
 
-  const closing = price === null ? openRows.val : [...stale]
-  if (remetering && !ratePrice && current) closing.push(current)
-  const closeRowIds = [...new Set(closing.map((row) => row.id))]
-
-  if (ratePrice) {
+  const updated = await plans.updatePlanVersionFeatureRecord(
+    { projectId, ...update, hasMeterConfigOverride },
+    tx
+  )
+  if (updated.err) return Err(updated.err)
+  if (updated.val.state !== "ok") return Ok(updated.val)
+  const { planVersionFeature } = updated.val
+  const closeRowIds = (price === null ? openRows : stale).map((row) => row.id)
+  let cardId = card?.cardId
+  if (!cardId && desired) {
     const plan = await plans.getPlanByIdRecord({ planId: version.planId, projectId })
     if (plan.err) return Err(plan.err)
-    const priced = await pricePlanVersion(deps, {
+    const assigned = await pricePlanVersion(deps, {
       projectId,
       planVersionId: version.id,
       currency: version.currency,
       cardName: versionCardName(plan.val?.slug ?? version.planId, version.id, version.currency),
-      prices: [{ featureSlug, price: ratePrice }],
-      closeRowIds,
+      prices: [],
       now,
     })
-    if (priced.err) return Err(priced.err)
-    const rows = await featureOpenRows(deps, projectId, priced.val.cardId, featureSlug)
-    if (rows.err) return Err(rows.err)
-    return Ok({ state: "ok", planVersionFeature, row: defaultRow(rows.val) })
+    if (assigned.err) return Err(assigned.err)
+    cardId = assigned.val.cardId
   }
-  if (card && closeRowIds.length > 0) {
-    const closed = await rateCards.closeRows({
+  let row = current && !closeRowIds.includes(current.id) ? current : null
+  if (cardId && (desired || closeRowIds.length > 0)) {
+    const published = await rateCards.publishRows({
       projectId,
-      cardId: card.cardId,
-      rowIds: closeRowIds,
+      cardId,
       now,
+      closeRowIds,
+      drafts: desired ? [{ featureSlug, match: {}, price: desired, cost: null }] : [],
     })
-    if (closed.err) return Err(closed.err)
+    if (published.err) return Err(published.err)
+    row = featureRow(published.val.inserted, featureSlug) ?? row
   }
-  return Ok({ state: "ok", planVersionFeature, row: price === null || remetering ? null : current })
-}
-
-/** The feature's rows on the card that have not ended. */
-async function featureOpenRows(
-  { services: { rateCards } }: UpdatePlanVersionFeatureDeps,
-  projectId: string,
-  cardId: string,
-  featureSlug: string
-): Promise<Result<RateRow[], UnPriceRateCardError>> {
-  const found = await rateCards.getCard(projectId, cardId)
-  if (found.err) return Err(found.err)
-  return Ok(
-    found.val.rows.filter((row) => row.featureSlug === featureSlug && row.effectiveTo === null)
-  )
-}
-
-function defaultRow(rows: readonly RateRow[]): RateRow | null {
-  return rows.find((row) => Object.keys(row.match).length === 0) ?? null
+  return Ok({ state: "ok", planVersionFeature, row })
 }

@@ -1,5 +1,7 @@
 "use client"
 
+import { PlanVersionPublish } from "~/components/pricing/plan-version-publish"
+
 import { ChevronDown } from "lucide-react"
 
 import { Button } from "@unprice/ui/button"
@@ -17,7 +19,6 @@ import {
   PlanVersionDeactivate,
   PlanVersionDelete,
   PlanVersionDuplicate,
-  PlanVersionPublish,
 } from "../../../_components/plan-version-actions"
 
 const ITEM_CLASSES =

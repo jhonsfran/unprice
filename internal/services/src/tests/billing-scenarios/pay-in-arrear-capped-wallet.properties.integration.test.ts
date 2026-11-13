@@ -6,7 +6,7 @@ import * as fc from "fast-check"
 import { afterAll, describe, expect, it, vi } from "vitest"
 import type { ServiceContext } from "../../context"
 import { LedgerGateway } from "../../ledger"
-import { RateCardService } from "../../rate-cards/service"
+import { testInvoicing } from "../../test-fixtures/billing-gateway"
 import { createRecordedUsageFixture } from "../../test-fixtures/recorded-usage"
 import { billPeriod } from "../../use-cases/billing/bill-period"
 
@@ -120,7 +120,7 @@ async function runCappedWalletPropertyCase(usage: number) {
   } as unknown as Pick<ServiceContext, "wallet" | "ledger" | "subscriptions">
 
   const activationInputs = await deriveActivationInputsFromPlan(
-    { db, rateCards: new RateCardService({ db }) },
+    { db, rateCards: testInvoicing({ db }).rateCards },
     { projectId, subscriptionId }
   )
   expect(activationInputs).toEqual({
@@ -204,7 +204,7 @@ async function runCappedWalletPropertyCase(usage: number) {
   })
 
   const firstRun = await billPeriod({
-    invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
+    invoicing: testInvoicing({ db, payerBudgets }),
     context: await loadSubscriptionContext(),
     logger,
     db,
@@ -212,7 +212,7 @@ async function runCappedWalletPropertyCase(usage: number) {
     ledgerService: ledger,
   })
   const secondRun = await billPeriod({
-    invoicing: { payerBudgets, rateCards: new RateCardService({ db }) },
+    invoicing: testInvoicing({ db, payerBudgets }),
     context: await loadSubscriptionContext(),
     logger,
     db,

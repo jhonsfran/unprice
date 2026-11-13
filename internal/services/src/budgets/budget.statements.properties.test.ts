@@ -51,7 +51,6 @@ const configOf = (features: readonly (typeof FEATURES)[number][]) =>
     pricing: {
       cards: { base: usdCard.card.id },
       features: features.map((feature) => ({ included: null, ...feature })),
-      statements: "required",
     },
   }).config
 const config = configOf(FEATURES)

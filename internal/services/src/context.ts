@@ -1,5 +1,6 @@
 import { type BasinSql, createBasinSql } from "@unprice/lakehouse"
 import { env } from "../env"
+import { BudgetJournalReader } from "./analytics/budget-journal-reader"
 import { AnalyticsService } from "./analytics/service"
 import { ApiKeysService } from "./apikey/service"
 import { BillingService } from "./billing/service"
@@ -13,6 +14,7 @@ import { EntitlementService } from "./entitlements/service"
 import { EventService } from "./events/service"
 import { FeatureService } from "./features/service"
 import { CustomerLedgerService, LedgerGateway } from "./ledger"
+import { ModelCostService } from "./model-costs/service"
 import { PageService } from "./pages/service"
 import { PaymentProviderResolver } from "./payment-provider/resolver"
 import { PlanService } from "./plans/service"
@@ -20,6 +22,7 @@ import { ProjectService } from "./projects/service"
 import { RateCardService } from "./rate-cards/service"
 import { DrizzleSubscriptionRepository } from "./subscriptions/repository.drizzle"
 import { SubscriptionService } from "./subscriptions/service"
+import { InternalApiClient } from "./use-cases/budgets/internal-api-client"
 import {
   type BudgetOperatorGateway,
   HttpBudgetOperatorGateway,
@@ -43,6 +46,7 @@ export interface ServiceContext {
   /** The dashboard's operator calls on budgets, through the API's internal routes. */
   budgetOperator: BudgetOperatorGateway
   analytics: AnalyticsService
+  budgetJournal: BudgetJournalReader
   apikeys: ApiKeysService
   customers: CustomerService
   domains: DomainService
@@ -53,6 +57,7 @@ export interface ServiceContext {
   workspaces: WorkspaceService
   grantsManager: GrantsManager
   paymentProviderResolver: PaymentProviderResolver
+  modelCosts: ModelCostService
   rateCards: RateCardService
   ledger: LedgerGateway
   customerLedger: CustomerLedgerService
@@ -73,10 +78,9 @@ export interface ServiceContext {
 export function createServiceContext(
   deps: ServiceDeps & {
     /**
-     * Payer budget sync and invoicing; null turns it off. Defaults to the API's internal routes,
-     * off in tests.
+     * Payer budget sync and invoicing. Defaults to the API's internal routes.
      */
-    payerBudgets?: PayerBudgetGateway | null
+    payerBudgets?: PayerBudgetGateway
     /**
      * Basin SQL: web analytics and the budget journal's usage history. Roots that never read them
      * omit it and get NOT_CONFIGURED.
@@ -111,6 +115,10 @@ export function createServiceContext(
     basinSql: deps.basinSql ?? createBasinSql({}),
     ledgerGateway: ledger,
   })
+  const budgetJournal = new BudgetJournalReader({
+    logger: deps.logger,
+    basinSql: deps.basinSql ?? createBasinSql({}),
+  })
 
   const paymentProviderResolver = new PaymentProviderResolver({
     db: deps.db,
@@ -140,7 +148,8 @@ export function createServiceContext(
     hashCache: new Map<string, string>(),
   })
 
-  const rateCards = new RateCardService({ db: deps.db, cache: deps.cache })
+  const modelCosts = new ModelCostService({ db: deps.db })
+  const rateCards = new RateCardService({ db: deps.db, modelCosts })
 
   const plans = new PlanService({
     db: deps.db,
@@ -191,12 +200,11 @@ export function createServiceContext(
     ledgerGateway: ledger,
   })
 
-  const payerBudgets =
-    deps.payerBudgets !== undefined
-      ? deps.payerBudgets
-      : env.NODE_ENV === "test"
-        ? null
-        : new HttpPayerBudgetGateway({ baseUrl: env.UNPRICE_API_URL, token: env.UNPRICE_API_KEY })
+  const internalApi = new InternalApiClient({
+    baseUrl: env.UNPRICE_API_URL,
+    token: env.UNPRICE_API_KEY,
+  })
+  const payerBudgets = deps.payerBudgets ?? new HttpPayerBudgetGateway(internalApi)
   const invoicing = { payerBudgets, rateCards }
 
   const billing = new BillingService({
@@ -238,16 +246,14 @@ export function createServiceContext(
     invoicing,
   })
 
-  const budgetOperator = new HttpBudgetOperatorGateway({
-    baseUrl: env.UNPRICE_API_URL,
-    token: env.UNPRICE_API_KEY,
-  })
+  const budgetOperator = new HttpBudgetOperatorGateway(internalApi)
 
   return {
     budgetCatalog,
     budgetAudit,
     budgetOperator,
     analytics,
+    budgetJournal,
     apikeys,
     customers,
     domains,
@@ -258,6 +264,7 @@ export function createServiceContext(
     workspaces,
     grantsManager,
     paymentProviderResolver,
+    modelCosts,
     rateCards,
     ledger,
     customerLedger,

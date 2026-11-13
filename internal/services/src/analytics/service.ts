@@ -7,39 +7,13 @@ import {
   type statsSchema,
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
-import type { BasinSql, BasinSqlError } from "@unprice/lakehouse"
+import type { BasinSql } from "@unprice/lakehouse"
 import type { Logger } from "@unprice/logs"
 import { currencySymbol } from "@unprice/money"
 import { toDecimal } from "dinero.js"
 import type { z } from "zod"
 import type { LedgerGateway } from "../ledger"
-import {
-  type FeatureUsageRow,
-  type JournalEventCursor,
-  type JournalEventScope,
-  type JournalWindow,
-  type StatementScope,
-  buildEventFacetsSql,
-  buildEventTimelineSql,
-  buildEventTotalsSql,
-  buildFeatureUsageSql,
-  buildRecentEventsSql,
-  buildRejectedEventSql,
-  buildRejectionsSql,
-  buildStatementEventCountSql,
-  buildStatementEventsSql,
-  buildTopPayersSql,
-  eventFacetSqlRowSchema,
-  eventTimelineSqlRowSchema,
-  eventTotalsSqlRowSchema,
-  featureUsageSqlRowSchema,
-  recentEventSqlRowSchema,
-  rejectedEventSqlRowSchema,
-  rejectionsSqlRowSchema,
-  statementEventCountSqlRowSchema,
-  statementEventSqlRowSchema,
-  topPayersSqlRowSchema,
-} from "./budget-journal"
+import { warnBasinSqlNotConfigured } from "./basin-sql-warning"
 import {
   type PageBrowserVisits,
   type PageCountryVisits,
@@ -64,12 +38,6 @@ type VisitsPayload<T> = {
   data: T
   error?: string
 }
-
-/**
- * Basin SQL without credentials is a deployment state, not a failure: the dashboard polls the
- * analytics cards, so it is logged once per process at warn instead of at error on every poll.
- */
-let warnedBasinSqlNotConfigured = false
 
 export class AnalyticsService {
   private readonly db: Database
@@ -390,122 +358,6 @@ export class AnalyticsService {
     return Ok({ data: foldPlansConversion(rows.val) })
   }
 
-  // ---- usage history: the budget journal (ADR-0008 D7) ----
-
-  /** Quantity and amount per feature the project's payer budgets consumed in the window. */
-  public async getFeatureUsage(opts: {
-    projectId: string
-    customerId?: string
-    window: JournalWindow
-    bucket?: "hour" | "day"
-    byCustomer?: boolean
-  }): Promise<Result<FeatureUsageRow[], FetchError>> {
-    return this.query(buildFeatureUsageSql(opts), featureUsageSqlRowSchema, {
-      context: "failed to read feature usage from the budget journal",
-      projectId: opts.projectId,
-      customerId: opts.customerId,
-    })
-  }
-
-  /** The payer budgets that consumed the most in the window. */
-  public async getTopPayers(opts: { projectId: string; window: JournalWindow; limit: number }) {
-    return this.query(buildTopPayersSql(opts), topPayersSqlRowSchema, {
-      context: "failed to read top payers from the budget journal",
-      projectId: opts.projectId,
-    })
-  }
-
-  public async getEventTotals(scope: JournalEventScope) {
-    return this.query(buildEventTotalsSql(scope), eventTotalsSqlRowSchema, {
-      context: "failed to read event totals from the budget journal",
-      projectId: scope.projectId,
-    })
-  }
-
-  public async getEventTimeline(scope: JournalEventScope) {
-    return this.query(buildEventTimelineSql(scope), eventTimelineSqlRowSchema, {
-      context: "failed to read the event timeline from the budget journal",
-      projectId: scope.projectId,
-    })
-  }
-
-  public async getRejections(scope: JournalEventScope & { limit: number }) {
-    return this.query(buildRejectionsSql(scope), rejectionsSqlRowSchema, {
-      context: "failed to read rejections from the budget journal",
-      projectId: scope.projectId,
-    })
-  }
-
-  public async getRecentEvents(
-    scope: JournalEventScope & { limit: number; cursor?: JournalEventCursor | null }
-  ) {
-    return this.query(buildRecentEventsSql(scope), recentEventSqlRowSchema, {
-      context: "failed to read recent events from the budget journal",
-      projectId: scope.projectId,
-    })
-  }
-
-  public async getEventFacets(scope: JournalEventScope & { limit: number }) {
-    return this.query(buildEventFacetsSql(scope), eventFacetSqlRowSchema, {
-      context: "failed to read event facets from the budget journal",
-      projectId: scope.projectId,
-    })
-  }
-
-  /** One refused event as the API journaled it; null when the journal has no such row yet. */
-  public async getRejectedEvent(opts: {
-    projectId: string
-    customerId: string
-    operationId: string
-    handledAt: number
-  }) {
-    const rows = await this.query(buildRejectedEventSql(opts), rejectedEventSqlRowSchema, {
-      context: "failed to read a rejected event from the budget journal",
-      projectId: opts.projectId,
-      operationId: opts.operationId,
-    })
-    if (rows.err) {
-      return rows
-    }
-    return Ok(rows.val[0] ?? null)
-  }
-
-  /**
-   * A page of the events one statement counted, newest first, and how many it counted in all: a
-   * separate count, so a page past the last event still reports the total.
-   */
-  public async getStatementEvents(
-    opts: StatementScope & { limit: number; offset: number }
-  ): Promise<
-    Result<
-      { events: z.infer<typeof statementEventSqlRowSchema>[] } & z.infer<
-        typeof statementEventCountSqlRowSchema
-      >,
-      FetchError
-    >
-  > {
-    const logFields = {
-      context: "failed to read statement events from the budget journal",
-      projectId: opts.projectId,
-      periodId: opts.periodId,
-    }
-    const [events, count] = await Promise.all([
-      this.query(buildStatementEventsSql(opts), statementEventSqlRowSchema, logFields),
-      this.query(buildStatementEventCountSql(opts), statementEventCountSqlRowSchema, logFields),
-    ])
-    if (events.err) return Err(events.err)
-    if (count.err) return Err(count.err)
-    return Ok({
-      events: events.val,
-      ...(count.val[0] ?? {
-        total: 0,
-        firstEventAt: null,
-        lastEventAt: null,
-        multiComponentEventCount: 0,
-      }),
-    })
-  }
-
   private async getPageDimensionVisits<D extends PageDimension>({
     projectId,
     pageId,
@@ -587,7 +439,11 @@ export class AnalyticsService {
   ): Promise<Result<T[], FetchError>> {
     const result = await this.basinSql.query(sql, row)
     if (result.err) {
-      this.logReadFailure(result.err, logFields)
+      if (result.err.code !== "NOT_CONFIGURED") {
+        this.logger.error(result.err, { context: logFields.context })
+      } else {
+        warnBasinSqlNotConfigured(this.logger, result.err.message, logFields.context)
+      }
       return Err(
         new FetchError({
           message: `${logFields.context}: ${result.err.message}`,
@@ -596,19 +452,5 @@ export class AnalyticsService {
       )
     }
     return Ok(result.val)
-  }
-
-  private logReadFailure(
-    error: BasinSqlError,
-    logFields: { context: string } & Record<string, unknown>
-  ): void {
-    if (error.code !== "NOT_CONFIGURED") {
-      this.logger.error(error, logFields)
-      return
-    }
-    if (!warnedBasinSqlNotConfigured) {
-      warnedBasinSqlNotConfigured = true
-      this.logger.warn(`Basin SQL reads are disabled: ${error.message}`, logFields)
-    }
   }
 }

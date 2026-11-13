@@ -10,7 +10,6 @@ import {
   applyPlanVersionCatalogPricing,
   previewPlanVersionCatalogPricing,
 } from "../use-cases/rate-cards/catalog-pricing"
-import { publishCostPlus } from "../use-cases/rate-cards/publish-cost-plus"
 import {
   LIVE_VERSION,
   NOW,
@@ -22,7 +21,7 @@ import {
 } from "./service.integration.fixture"
 
 describe("catalog application", () => {
-  const { db, rateCards, services, cardRows } = createRateCardIntegrationFixture()
+  const { db, rateCards, modelCosts, services, cardRows } = createRateCardIntegrationFixture()
   const deps = { db, services }
   beforeEach(async () => {
     await seedTestDb({ db, fixtures: ["plan-monthly-arrear.sql"] })
@@ -55,15 +54,36 @@ describe("catalog application", () => {
     }
   }
   async function changedCost() {
-    await rateCards.insertCustomModelCost(projectId, {
-      ...customModelCostInputSchema.parse({
-        provider: "openai",
-        model: "gpt-4.1",
-        components: { input: "9", output: "10" },
-      }),
-      effectiveFrom: NOW,
-    })
+    await modelCosts.addCustom(
+      projectId,
+      {
+        ...customModelCostInputSchema.parse({
+          provider: "openai",
+          model: "gpt-4.1",
+          components: { input: "9", output: "10" },
+        }),
+      },
+      NOW
+    )
   }
+
+  it("keeps an abandoned preview read-only and creates its card only during apply", async () => {
+    const input = policy()
+    const cardsBefore = await rateCards.listCards(projectId)
+    const preview = await value(previewPlanVersionCatalogPricing({ services }, input))
+    expect(preview.cardId).toBeNull()
+    expect(await rateCards.listCards(projectId)).toEqual(cardsBefore)
+    expect(await rateCards.cardForPlanVersion(projectId, LIVE_VERSION, "USD")).toBeNull()
+    expect(await db.select().from(schema.modelCosts)).toEqual([])
+    const result = await applyPlanVersionCatalogPricing(deps, {
+      ...input,
+      draftHash: preview.draftHash,
+    })
+    expect(result.err).toBeUndefined()
+    expect(result.val?.inserted.length).toBeGreaterThan(0)
+    expect(await rateCards.cardForPlanVersion(projectId, LIVE_VERSION, "USD")).not.toBeNull()
+    expect(await db.select().from(schema.modelCosts)).toEqual([])
+  })
 
   it("rejects a stale reviewed hash without saving policy or prices", async () => {
     const input = policy()
@@ -74,10 +94,12 @@ describe("catalog application", () => {
       draftHash: preview.draftHash,
     })
     expect(result.err).toMatchObject({ code: "DRAFT_STALE" })
-    expect((await value(rateCards.getCard(projectId, preview.cardId))).card.marginPolicy).toEqual({
-      type: "manual",
-    })
-    expect(await cardRows(preview.cardId)).toEqual([])
+    expect(preview.cardId).toBeNull()
+    expect(await rateCards.cardForPlanVersion(projectId, LIVE_VERSION, "USD")).toBeNull()
+    expect((await rateCards.listCards(projectId)).map((card) => card.id)).toEqual([
+      "card_test_arrear",
+    ])
+    expect(await db.select().from(schema.modelCosts)).toEqual([])
   })
 
   it("does not save a policy whose reviewed rows fail validation", async () => {
@@ -88,10 +110,12 @@ describe("catalog application", () => {
       draftHash: preview.draftHash,
     })
     expect(result.err).toMatchObject({ code: "INVALID_CARD" })
-    expect((await value(rateCards.getCard(projectId, preview.cardId))).card.marginPolicy).toEqual({
-      type: "manual",
-    })
-    expect(await cardRows(preview.cardId)).toEqual([])
+    expect(preview.cardId).toBeNull()
+    expect(await rateCards.cardForPlanVersion(projectId, LIVE_VERSION, "USD")).toBeNull()
+    expect((await rateCards.listCards(projectId)).map((card) => card.id)).toEqual([
+      "card_test_arrear",
+    ])
+    expect(await db.select().from(schema.modelCosts)).toEqual([])
   })
 
   it("publishes only the feature shown in the scoped preview", async () => {
@@ -107,14 +131,18 @@ describe("catalog application", () => {
     const preview = await value(
       rateCards.previewCostPlus(projectId, cardId, NOW + 1, { featureSlug: "llm_tokens" })
     )
+    if (!preview.draftHash) throw new Error("expected a publishable preview")
     expect(new Set(preview.draft.changes.map((change) => change.proposed.featureSlug))).toEqual(
       new Set(["llm_tokens"])
     )
     const published = await value(
-      publishCostPlus(
-        { services },
-        { projectId, cardId, featureSlug: "llm_tokens", draftHash: preview.draftHash, now: NOW + 1 }
-      )
+      rateCards.publishCostPlus({
+        projectId,
+        cardId,
+        featureSlug: "llm_tokens",
+        draftHash: preview.draftHash,
+        now: NOW + 1,
+      })
     )
     expect(published.inserted.length).toBeGreaterThan(0)
     expect(published.inserted.every((row) => row.featureSlug === "llm_tokens")).toBe(true)

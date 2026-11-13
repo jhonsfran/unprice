@@ -1,3 +1,4 @@
+import { unitCurrency } from "@unprice/money"
 /**
  * Funding (ADR-0008 D10). A postpaid budget never touches the wallet: its sealed statements become
  * receivables at billing. A prepaid budget admits a priced charge or hold only while the wallet
@@ -10,29 +11,24 @@
 
 import { Ok, type Result } from "@unprice/error"
 import type { Amount, SignedAmount } from "@unprice/money"
-import {
-  DEFAULT_MAX_OUTSTANDING_AMOUNT,
-  computeInitialReservation,
-  computeSyncGrowRefillAmount,
-} from "../wallet/reservation-sizing"
 import type { BudgetRecord } from "./config"
 import type { Change } from "./decide"
-import { isPerpetual } from "./meter"
-import {
-  type BudgetCommand,
-  type BudgetView,
-  type Funding,
-  type FundingCapture,
-  type FundingNeed,
-  type FundingWork,
-  type Statement,
-  type UnPriceBudgetError,
-  reject,
+import type {
+  BudgetCommand,
+  BudgetView,
+  Funding,
+  FundingCapture,
+  FundingNeed,
+  FundingWork,
+  Statement,
 } from "./model"
+import { type UnPriceBudgetError, reject } from "./rejections"
 import { byPeriodId } from "./statements"
 
 const ZERO = BigInt(0)
-const MONEY_PREFIX = "money:"
+/** Reserve at most $1 cold, with at most $30 outstanding, at the ledger scale. */
+const COLD_RESERVE_ONE_DOLLAR = BigInt(100_000_000)
+const OUTSTANDING_THIRTY_DOLLARS = BigInt(3_000_000_000)
 
 /** The payer whose wallet funds the budget's priced usage; null for a postpaid budget. */
 export function prepaidPayer(budget: BudgetRecord | null): string | null {
@@ -41,7 +37,7 @@ export function prepaidPayer(budget: BudgetRecord | null): string | null {
 }
 
 /** What a command does to the wallet reservations it read. */
-export type FundingStep = Readonly<{
+type FundingStep = Readonly<{
   /** Reservations created or changed; the store upserts exactly these. */
   rows: readonly Funding[]
   /** Intents pending after the command, for a funding command or a seal to answer with. */
@@ -193,7 +189,7 @@ function decideFund(
     customerId: payer,
     reservationId: null,
     allocated: ZERO,
-    consumed: own.reduce((sum, statement) => (statement.free ? sum : sum + statement.amount), ZERO),
+    consumed: billedAmount(own),
     seq: 0,
     pending: null,
     state: "open" as const,
@@ -277,9 +273,9 @@ function closing(row: Funding, own: readonly Statement[], now: number): Funding 
   }
   let left = row.allocated
   const captures: FundingCapture[] = []
-  const billed = own.filter((statement) => !statement.free)
-  for (const statement of billed.sort((a, b) => (a.periodId < b.periodId ? -1 : 1))) {
-    const amount = statement.amount < left ? statement.amount : left
+  for (const statement of [...own].sort((a, b) => (a.periodId < b.periodId ? -1 : 1))) {
+    const billed = billedAmount([statement])
+    const amount = billed < left ? billed : left
     if (amount <= ZERO) continue
     captures.push({ periodId: statement.periodId, amount })
     left -= amount
@@ -287,45 +283,44 @@ function closing(row: Funding, own: readonly Statement[], now: number): Funding 
   return { ...row, pending: { kind: "close", seq: row.seq + 1, captures } }
 }
 
+/** Trial statements count usage but contribute no amount to wallet funding. */
+function billedAmount(statements: readonly Statement[]): Amount {
+  return statements.reduce(
+    (sum, statement) => sum + (statement.free ? ZERO : statement.amount),
+    ZERO
+  )
+}
+
 /** The billing statements with this key. */
 function keyStatements(statements: readonly Statement[], statementKey: string): Statement[] {
-  return statements.filter((s) => s.statementKey === statementKey && !isPerpetual(s))
+  return statements.filter((s) => s.statementKey === statementKey)
 }
 
 function workOf(row: Funding, unit: string): FundingWork {
   if (!row.pending) throw new Error(`statement ${row.statementKey} has no pending intent`)
-  if (!unit.startsWith(MONEY_PREFIX)) throw new Error(`a prepaid budget priced in ${unit}`)
+  const currency = unitCurrency(unit)
+  if (currency === null) throw new Error(`a prepaid budget priced in ${unit}`)
   return {
     statementKey: row.statementKey,
     customerId: row.customerId,
-    currency: unit.slice(MONEY_PREFIX.length),
+    currency,
     reservationId: row.reservationId,
     intent: row.pending,
   }
 }
 
-/**
- * What a reserve asks the wallet for: the shortfall, grown to the runway an entitlement window
- * would reserve for this cost (`reservation-sizing`), so a busy payer refills about once per ten
- * minutes rather than once per event.
- */
+/** The shortfall plus up to 25 events of runway, capped at $1 initially and $30 outstanding. */
 export function reserveAmount(required: Amount, available: SignedAmount): Amount {
+  const byEvents = required * BigInt(25)
+  const preferred = byEvents < COLD_RESERVE_ONE_DOLLAR ? byEvents : COLD_RESERVE_ONE_DOLLAR
+  const initial = required > preferred ? required : preferred
+  const target = initial < OUTSTANDING_THIRTY_DOLLARS ? initial : OUTSTANDING_THIRTY_DOLLARS
+  const remaining = available > ZERO ? available : ZERO
+  const desired = required + target - remaining
+  const room = OUTSTANDING_THIRTY_DOLLARS - remaining
+  const capped = desired < room ? desired : room
+  const grown = capped > ZERO ? capped : ZERO
   const shortfall = required - available
-  const safe = BigInt(Number.MAX_SAFE_INTEGER)
-  if (required > safe || shortfall > safe) return shortfall
-  const cost = Number(required)
-  const { targetReservationAmount } = computeInitialReservation({
-    pricePerEventAmount: cost,
-    currentEventCostAmount: cost,
-  })
-  const grown = BigInt(
-    computeSyncGrowRefillAmount({
-      remainingAmount: available > ZERO ? Number(available) : 0,
-      currentEventCostAmount: cost,
-      targetReservationAmount,
-      maxOutstandingAmount: DEFAULT_MAX_OUTSTANDING_AMOUNT,
-    })
-  )
   return grown > shortfall ? grown : shortfall
 }
 
@@ -364,15 +359,13 @@ export function fundingViolations(params: {
     const own = keyStatements(input.view.statements, row.statementKey)
     const expected = before
       ? before.consumed + (deltas.get(row.statementKey) ?? ZERO)
-      : own.reduce((sum, statement) => sum + statement.amount, ZERO)
+      : billedAmount(own)
     if (row.consumed !== expected) {
       violations.push(`${at} consumed ${row.consumed}, expected ${expected}`)
     }
     if (row.pending?.kind === "close") {
       const captured = row.pending.captures.reduce((sum, capture) => sum + capture.amount, ZERO)
-      const billed = own
-        .filter((statement) => !statement.free)
-        .reduce((sum, statement) => sum + statement.amount, ZERO)
+      const billed = billedAmount(own)
       const free = new Set(own.filter((s) => s.free).map((s) => s.periodId))
       if (row.pending.captures.some((capture) => free.has(capture.periodId))) {
         violations.push(`${at} captures a free statement`)
